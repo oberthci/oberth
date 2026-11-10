@@ -234,9 +234,11 @@ per-workflow and unaffected.
   `oberth`, `abandon_reason`, `held_since`, `failed_attempt`,
   `failed_exit_code`) and audited as `run.assist.abandon` with `reason`,
   `step`, `pod`, `held_since` and `abandoned_at`. It does not mark the run
-  assisted. The reason line reads `assisted: step test failed at attempt 0
-  (exit 1); hold abandoned unserviced after 20m0s (ttl); not evidence`
-  ("unserviced" is dropped when the held Pod saw an exec or patch), and the
+  assisted. The reason line reads `step test failed at attempt 0 (exit 1);
+  hold abandoned unserviced after 20m0s (ttl)`: nobody acted, so the run is
+  not assisted and its attempt-0 failure is real. When an agent did act on
+  the run, the clause joins its `assisted: …; not evidence` line, and
+  "unserviced" is dropped when the held Pod saw an exec or patch. The
   failed step's generic deadline wording is not added: the held Pod's
   deadline and runtime describe the hold, not the step. The server logs
   `assist: hold started run=… step=… pod=…` when it first sees a hold.

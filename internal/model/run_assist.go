@@ -129,7 +129,10 @@ func (record RunAssistRecord) Touched(step string) bool {
 //
 // A hold the server sweep abandoned reads "step test failed at attempt 0
 // (exit 1); hold abandoned unserviced after 20m0s (ttl)", without
-// "unserviced" when its Pod saw an exec or patch first.
+// "unserviced" when its Pod saw an exec or patch first. A record with only
+// sweep abandons (no agent exec, patch, continue or abandon) belongs to a run
+// that was never assisted: its attempt-0 failure is real, so the line is the
+// sweep clauses alone, without "assisted:" or "not evidence".
 func (record RunAssistRecord) Reason() string {
 	var order []string
 	actors := map[string]string{}
@@ -169,10 +172,10 @@ func (record RunAssistRecord) Reason() string {
 		}
 		parts = append(parts, fmt.Sprintf("step %s %s by %s", step, detail, actors[step]))
 	}
-	parts = append(parts, swept...)
-	if len(parts) == 0 {
-		return ""
+	if len(order) == 0 {
+		return strings.Join(swept, "; ")
 	}
+	parts = append(parts, swept...)
 	return "assisted: " + strings.Join(parts, "; ") + "; not evidence"
 }
 

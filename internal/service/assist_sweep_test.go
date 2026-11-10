@@ -71,7 +71,7 @@ func TestAbandonedHoldReasonLineIsNotADeadline(t *testing.T) {
 		HeldSince: held, AbandonedAt: held.Add(90 * time.Second), FailedExitCode: &exit}.Event()}}
 	run := model.Run{ID: "1886f0010bd88cf198044015e23e463a", Status: model.RunFailed, FailedStage: "ci", FailedStep: "test", AssistRequested: true, Assist: &record,
 		Error: model.ExecutionDeadlineMessage + " Step ci/test: deadline limit 2733s; observed runtime 46m0s; sampled memory peak unknown (lower bound). Inspect oberth run resources --run 1886f0010bd88cf198044015e23e463a --include-failed; change deadlines in git."}
-	want := "assisted: step test failed at attempt 0 (exit 1); hold abandoned unserviced after 1m30s (cap); not evidence"
+	want := "step test failed at attempt 0 (exit 1); hold abandoned unserviced after 1m30s (cap)"
 	if got := presentationRun(run).DisplayReason; got != want {
 		t.Fatalf("display reason = %q, want %q", got, want)
 	}

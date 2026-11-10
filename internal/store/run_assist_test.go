@@ -186,7 +186,7 @@ func TestSweepAbandonIsRecordedAndAudited(t *testing.T) {
 	if !updated.Assist.SweepAbandoned("test") || updated.Assist.SweepAbandoned("lint") {
 		t.Fatalf("sweep abandon not attributed to its step: %+v", updated.Assist)
 	}
-	want := "assisted: step test failed at attempt 0 (exit 1); hold abandoned unserviced after 20m0s (ttl); not evidence"
+	want := "step test failed at attempt 0 (exit 1); hold abandoned unserviced after 20m0s (ttl)"
 	if reason := updated.Assist.Reason(); reason != want {
 		t.Fatalf("reason = %q, want %q", reason, want)
 	}
