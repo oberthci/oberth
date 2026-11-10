@@ -65,6 +65,10 @@ func main() {
 		diagnose(ctx, path)
 		return
 	}
+	if os.Args[1] == "runs" {
+		runs(ctx, path)
+		return
+	}
 	if os.Args[1] == "refill" {
 		refill(ctx, path)
 		return
@@ -251,4 +255,24 @@ func diagnose(ctx context.Context, path string) {
 		must(json.NewEncoder(os.Stdout).Encode(map[string]string{"id": id, "status": status, "phase": phase, "error": message}))
 	}
 	must(rows.Err())
+}
+
+// runs prints every run (terminal ones too) with the reason line, so a
+// rollback rehearsal can show that restored work was not dispatched again.
+func runs(ctx context.Context, path string) {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	must(err)
+	defer func() { must(db.Close()) }()
+	rows, err := db.QueryContext(ctx, "SELECT id,status,phase,job_name,reason,error FROM runs ORDER BY queue_sequence")
+	must(err)
+	defer func() { must(rows.Close()) }()
+	for rows.Next() {
+		var id, status, phase, job, reason, message string
+		must(rows.Scan(&id, &status, &phase, &job, &reason, &message))
+		must(json.NewEncoder(os.Stdout).Encode(map[string]string{"id": id, "status": status, "phase": phase, "job": job, "reason": reason, "error": message}))
+	}
+	must(rows.Err())
+	var version int
+	must(db.QueryRowContext(ctx, "SELECT max(version) FROM schema_migrations").Scan(&version))
+	must(json.NewEncoder(os.Stdout).Encode(map[string]int{"schema": version}))
 }

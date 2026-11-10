@@ -4,11 +4,13 @@ set -euo pipefail
 umask 077
 from=${FROM_VERSION:-}
 read -r -a candidates <<< "${CANDIDATES:-}"
+rehearse=${REHEARSE_ROLLBACK:-false}
 while (($#)); do
   case $1 in
+    --rehearse-rollback) rehearse=true; shift ;;
     --from) from=${2:?--from requires a version}; shift 2 ;;
     --candidate) candidates+=("${2:?--candidate requires a ref}"); shift 2 ;;
-    --help) echo 'Usage: run.sh --from VERSION --candidate REF [--candidate REF ...]'; exit 0 ;;
+    --help) echo 'Usage: run.sh --from VERSION --candidate REF [--candidate REF ...] [--rehearse-rollback]'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -16,7 +18,11 @@ from=${from#v}
 [[ $from =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && ${#candidates[@]} -gt 0 ]] || {
   echo 'Supply --from VERSION and at least one --candidate REF' >&2; exit 2;
 }
-export FROM_VERSION=$from CANDIDATES="${candidates[*]}"
+[[ $rehearse == true || $rehearse == false ]] || { echo 'REHEARSE_ROLLBACK must be true or false' >&2; exit 2; }
+if $rehearse && ((${#candidates[@]} != 1)); then
+  echo '--rehearse-rollback takes exactly one --candidate' >&2; exit 2
+fi
+export FROM_VERSION=$from CANDIDATES="${candidates[*]}" REHEARSE_ROLLBACK=$rehearse
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=${E2E_REPO:-}
 if [[ -z $repo ]]; then
@@ -32,6 +38,7 @@ if [[ -n ${E2E_WRAPPER:-} ]]; then
 fi
 helm=${E2E_HELM:-helm}
 for tool in k3d kubectl "$helm" docker go jq cosign curl sha256sum git rg; do command -v "$tool" >/dev/null; done
+! $rehearse || command -v openssl >/dev/null
 private=$(mktemp -d /tmp/oberth-upgrade-e2e.XXXXXXXX)
 cluster="ob-upgrade-$$"
 created=false
@@ -97,6 +104,14 @@ for i in "${!candidates[@]}"; do
   candidate_shas[$version]=$(git -C "$repo" rev-parse --verify "${candidates[$i]}^{commit}")
   printf '%s=%s\n' "$version" "${candidate_shas[$version]}" >>"$evidence/sources.txt"
 done
+if $rehearse; then
+  # The same candidate once more, plus one throwaway migration that exists
+  # only in this rehearsal build: `oberth upgrade` then crosses a real schema
+  # migration, and the rollback must restore the pre-upgrade backup.
+  versions+=(rehearsal)
+  candidate_shas[rehearsal]=${candidate_shas[candidate-1]}
+  printf 'rehearsal=%s+rehearsal-migration\n' "${candidate_shas[rehearsal]}" >>"$evidence/sources.txt"
+fi
 source_tree() {
   mkdir -p "$private/source-$1"
   git -C "$repo" archive "$2" | tar -x -C "$private/source-$1"
@@ -104,21 +119,33 @@ source_tree() {
 }
 source_tree baseline "$base"
 for version in "${versions[@]}"; do source_tree "$version" "${candidate_shas[$version]}"; done
+if $rehearse; then
+  # shellcheck source=hack/upgrade-e2e/rehearse-rollback.sh
+  source "$here/rehearse-rollback.sh"
+  rehearsal_sources
+fi
 # Red must be a behavioral assertion, never a compilation/tooling failure.
-if (cd "$private/source-baseline" && go test -p=2 -parallel=2 -count=1 ./internal/service -run '^TestUpgradeE2EMeasuredBackfillBehindHighest$' -timeout 2m) >"$evidence/backfill-red-baseline.log" 2>&1; then
+# The rollback rehearsal qualifies the upgrade path, not that fix: skip it.
+if ! $rehearse && (cd "$private/source-baseline" && go test -p=2 -parallel=2 -count=1 ./internal/service -run '^TestUpgradeE2EMeasuredBackfillBehindHighest$' -timeout 2m) >"$evidence/backfill-red-baseline.log" 2>&1; then
   echo "v$from unexpectedly accepted the regression test" >&2; exit 1
 fi
-rg -F 'measured short run must backfill without delaying the highest-priority head' "$evidence/backfill-red-baseline.log" >/dev/null
+$rehearse || rg -F 'measured short run must backfill without delaying the highest-priority head' "$evidence/backfill-red-baseline.log" >/dev/null
 for version in "${versions[@]}"; do
-  (cd "$private/source-$version" && go test -p=2 -parallel=2 -count=1 ./internal/service -run '^TestUpgradeE2EMeasuredBackfillBehindHighest$' -timeout 2m) >"$evidence/backfill-green-$version.log" 2>&1
+  $rehearse || (cd "$private/source-$version" && go test -p=2 -parallel=2 -count=1 ./internal/service -run '^TestUpgradeE2EMeasuredBackfillBehindHighest$' -timeout 2m) >"$evidence/backfill-green-$version.log" 2>&1
   (cd "$private/source-$version" && go test -p=2 -parallel=2 -count=1 ./internal/store -run '^(TestMigrationDefinitionsRejectDuplicateVersions|TestExistingV24MigrationLedgerPreservedWithoutReplay|TestQueuePriorityClassificationAndFIFO)$' -timeout 2m) >"$evidence/store-$version.log" 2>&1
   # Only the server binary changes. Refuse reuse if any runtime substrate
   # input differs; this is a local rehearsal image, not a release build.
   candidate=${candidate_shas[$version]}
   candidate_versions[$version]=$("$helm" show chart "$private/source-$version/charts/oberth" | awk '$1=="appVersion:" {gsub(/"/, "", $2); print $2}')
-  [[ ${candidate_versions[$version]} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  binary_version=${candidate_versions[$version]}-e2e-${candidate:0:8}
+  if $rehearse; then
+    # rehearsal_sources stamped the chart with the exact binary version.
+    binary_version=${candidate_versions[$version]}
+  else
+    [[ ${candidate_versions[$version]} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  fi
   git -C "$repo" diff --exit-code "$base" "$candidate" -- Dockerfile internal/staticgit hack/build-static-git.sh hack/static-git-no-shell.patch hack/install-static-git-packages.sh >"$evidence/substrate-$version.diff"
-  (cd "$private/source-$version" && go build -p=2 -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${candidate_versions[$version]}-e2e-${candidate:0:8}" -o "$private/oberth-$version" ./cmd/oberth)
+  (cd "$private/source-$version" && go build -p=2 -trimpath -buildvcs=false -ldflags "-s -w -X main.version=$binary_version" -o "$private/oberth-$version" ./cmd/oberth)
 done
 for version in baseline "${versions[@]}"; do
   mkdir -p "$private/source-$version/hack/upgrade-e2e/fixture"
@@ -126,7 +153,7 @@ for version in baseline "${versions[@]}"; do
   (cd "$private/source-$version" && go test -p=2 -parallel=2 ./hack/upgrade-e2e/fixture && go build -p=2 -trimpath -buildvcs=false -o "$private/fixture-$version" ./hack/upgrade-e2e/fixture)
 done
 last=${versions[${#versions[@]}-1]}
-bash "$here/migration-probe.sh" "$private/source-$last" "$private/fixture-baseline" \
+$rehearse || bash "$here/migration-probe.sh" "$private/source-$last" "$private/fixture-baseline" \
   "$("$private/oberth-$last" version --schema)" "$published" "$evidence"
 docker pull "$published"
 printf 'FROM %s\nCOPY --chmod=0755 fixture-baseline /fixture\nENTRYPOINT ["/fixture"]\n' "$published" >"$private/Dockerfile.fixture"
@@ -305,6 +332,12 @@ schedule_probe() {
     "$(jq '.Ledger|length' "$evidence/state-$phase.json")" 0
 }
 snapshot baseline
+if $rehearse; then
+  rehearse_rollback
+  k -n oberth get secrets -o json | jq -e '[.items[]|select(.type!="helm.sh/release.v1")]|length==0' >/dev/null
+  printf 'PASS: oberth upgrade across a schema migration (backup, rollback record), oberth upgrade --rollback (Helm rollback, history restore), previous version and history back, no restored run dispatched again\n'
+  exit 0
+fi
 schedule_probe baseline baseline
 previous=baseline-ready
 for version in "${versions[@]}"; do
