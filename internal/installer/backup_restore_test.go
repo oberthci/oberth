@@ -220,6 +220,7 @@ type fakeBackupCluster struct {
 	database      []byte            // what in-pod `oberth backup database` returns
 	rawFiles      map[string][]byte // /data files for the stable-copy fallback
 	oldServer     bool              // server predates `oberth backup database`
+	schemaExecErr error             // the server container does not answer exec (crash-looping)
 	workflows     []runWorkflow
 
 	uploadShort bool     // the restore pod reports a truncated upload (#067)
@@ -423,6 +424,9 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 	joined := strings.Join(command, " ")
 	switch {
 	case joined == "oberth version --schema":
+		if c.schemaExecErr != nil {
+			return nil, c.schemaExecErr
+		}
 		return []byte(fmt.Sprintf("%d\n", c.schema)), nil
 	case joined == "oberth version":
 		return []byte("oberth v0.17.28 commit=abc date=today\n"), nil

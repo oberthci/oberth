@@ -328,9 +328,16 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	}
 	backupSchema := archive.Manifest.Database.Schema
 	if target.Pod != "" {
+		// A pod whose server cannot answer (crash-looping, as the previous
+		// release does on a migrated database during oberth upgrade
+		// --rollback) is a server that is not running: the restore pod then
+		// checks the target schema before the swap, as for a stopped server.
 		if target.Schema, err = podSchemaVersion(ctx, deps.RunCommand, deps.ContextName, cfg.Namespace, target.Pod, serverContainerName); err != nil {
-			return target, openBaoExec{}, err
+			target.Notes = append(target.Notes, fmt.Sprintf("server pod %s does not answer (%v); treated as not running", target.Pod, err))
+			target.Pod, target.Schema = "", 0
 		}
+	}
+	if target.Pod != "" {
 		if parts.History && target.Schema < backupSchema {
 			return target, openBaoExec{}, fmt.Errorf("the target server writes schema %d but the backup holds schema %d; upgrade the target to a release at least as new as %s first",
 				target.Schema, backupSchema, displayOr(archive.Manifest.Source.ServerVersion, "the source"))

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -93,6 +94,27 @@ func TestRestoreHistoryOnlyArchiveNeedsNoToken(t *testing.T) {
 	}
 	assertSubstringsInOrder(t, out.String(), []string{"holds history only", "What changes on this install:", "History    replaced, not merged",
 		"Unchanged  OpenBao secrets, policies, roles and grants"})
+}
+
+// During oberth upgrade --rollback the previous release crash-loops on the
+// migrated database: its pod is Running but answers no exec. The restore
+// treats it as a stopped server and checks the schema in the restore pod.
+func TestRestoreOntoACrashLoopingServer(t *testing.T) {
+	t.Parallel()
+	archive, _, target := historyBackup(t)
+	target.schemaExecErr = errors.New("kubectl: exit status 1: error: unable to upgrade connection: container not found (\"oberth\")")
+	var out bytes.Buffer
+	cfg := RestoreConfig{Input: archive, Yes: true, Only: []string{RestorePartHistory}, Timeout: 10 * time.Second}
+	cfg.applyDefaults()
+	deps := target.deps(&out)
+	deps.rootToken = ""
+	if err := runRestore(context.Background(), cfg, deps); err != nil {
+		t.Fatalf("restore: %v\n%s", err, out.String())
+	}
+	if len(target.swapArgs) != 3 {
+		t.Fatalf("database not restored: swap %v", target.swapArgs)
+	}
+	assertSubstringsInOrder(t, out.String(), []string{"no server pod is running: the target schema is checked in the restore pod", "treated as not running"})
 }
 
 func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
