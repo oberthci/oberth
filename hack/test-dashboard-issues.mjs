@@ -15,12 +15,12 @@ const run = code => vm.runInContext(code, sandbox);
 run(`
  let html='', requests=[];
  replaceApp=value=>{html=value};setChrome=()=>{};setAuto=()=>{};rerenderWhenStatus=()=>{};
- state.repos=[{ID:1,Name:'ours',UpstreamID:1}];
+ state.repos=[{id:1,name:'ours',upstream_id:1}];
  state.status={upstream_info:[{id:1,name:'codeberg',base_url:'https://example.test/acme'}]};
  ensureStatus=()=>Promise.resolve(state.status);
- const baseIssue={ID:42,RepoID:1,upstream:'codeberg',Kind:'ci',State:'open',Title:'Build needs attention',Branch:'feature/fix',CreatedAt:'2026-11-06T09:07:00Z',UpdatedAt:'2026-11-05T17:08:00Z',Occurrences:12,work_status:'active'};
- const rows=[baseIssue,{...baseIssue,ID:43,RepoID:0,Kind:'manual',Title:'Upstream setting'}, {...baseIssue,ID:44,RepoID:0,upstream:'',Kind:'manual',Title:'Installation setting'}, {...baseIssue,ID:45,State:'closed',Title:'Resolved issue'}, {...baseIssue,ID:46,stale:true,Title:'Needs follow-up'}];
- api=async path=>{requests.push(path);return {Issues:rows,counts:{open:4,closed:1,manual:2,ci:3},total:5,NextBefore:42}};
+ const baseIssue={id:42,repo_id:1,upstream:'codeberg',kind:'ci',state:'open',title:'Build needs attention',branch:'feature/fix',created_at:'2026-11-06T09:07:00Z',updated_at:'2026-11-05T17:08:00Z',occurrences:12,work_status:'active'};
+ const rows=[baseIssue,{...baseIssue,id:43,repo_id:0,kind:'manual',title:'Upstream setting'}, {...baseIssue,id:44,repo_id:0,upstream:'',kind:'manual',title:'Installation setting'}, {...baseIssue,id:45,state:'closed',title:'Resolved issue'}, {...baseIssue,id:46,stale:true,title:'Needs follow-up'}];
+ api=async path=>{requests.push(path);return {issues:rows,counts:{open:4,closed:1,manual:2,ci:3},total:5,next_before:42}};
 `);
 assert.equal(run('state.issueState'),'open');
 for (const [stamp, expected] of [
@@ -42,7 +42,7 @@ const upstream=run('issueRow(rows[1])'), installation=run('issueRow(rows[2])');
 assert.match(upstream,/class="clip">codeberg<\/span>/);
 assert.doesNotMatch(upstream,/codeberg \/|installation|issue-branch/);
 assert.match(installation,/class="clip">installation<\/span>/);
-const escaped=run(`issueRow({...baseIssue,Title:'<script>"bad"',Branch:'<branch>'})`);
+const escaped=run(`issueRow({...baseIssue,title:'<script>"bad"',branch:'<branch>'})`);
 assert.doesNotMatch(escaped,/<script>|<branch>/);
 assert.match(escaped,/title="&lt;script&gt;&quot;bad&quot;"/);
 for(const state of ['open','closed','']) {
@@ -64,8 +64,8 @@ assert.match(page,/value="codeberg\/acme\/ours"/);
 run(`state.issueRepo='codeberg/acme/ours';state.issueState='open';state.issueWorkStatus='active';state.issueQuery='needle';state.issueCursor=42`);
 const query=new URL('https://example.test'+run('issueListURL()')).searchParams;
 assert.equal(query.get('repo'),'codeberg/acme/ours');assert.equal(query.get('state'),'open');assert.equal(query.get('work_status'),'active');assert.equal(query.get('query'),'needle');assert.equal(query.get('before'),'42');assert.equal(query.has('kind'),false);
-const when=run(`whenCell({display_status:'passed',StartedAt:baseIssue.UpdatedAt,FinishedAt:baseIssue.UpdatedAt})`);
-assert.ok(when.includes(run('shortStamp(baseIssue.UpdatedAt)')));
+const when=run(`whenCell({display_status:'passed',started_at:baseIssue.updated_at,finished_at:baseIssue.updated_at})`);
+assert.ok(when.includes(run('shortStamp(baseIssue.updated_at)')));
 assert.match(when,/title="[^"<>]+ · \d+[smhd] ago"/);
 if(process.env.DASHBOARD_ISSUES_PREVIEW) {
  const css=readFileSync(new URL('../internal/api/static/app.css',import.meta.url),'utf8');

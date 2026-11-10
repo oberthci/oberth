@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 const admissionUsage = "Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]\n" +
@@ -73,7 +74,7 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 		var released model.AdmissionRelease
-		if asJSON || json.Unmarshal(raw, &released) != nil || released.RunID == "" {
+		if asJSON || recordjson.Unmarshal(raw, &released) != nil || released.RunID == "" {
 			_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 			return err
 		}
@@ -91,7 +92,7 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	var status struct {
 		Admission *model.AdmissionState `json:"admission"`
 	}
-	if err := json.Unmarshal(raw, &status); err != nil || status.Admission == nil {
+	if err := recordjson.Unmarshal(raw, &status); err != nil || status.Admission == nil {
 		return fmt.Errorf("the server does not report admission state (it predates #1099)")
 	}
 	if asJSON {

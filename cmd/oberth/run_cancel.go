@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -258,7 +259,7 @@ func (remote remoteRunCanceller) cancel(ctx context.Context, id, reason string, 
 		return api.RunCancelResponse{}, nil, err
 	}
 	var response api.RunCancelResponse
-	_ = json.Unmarshal(raw, &response)
+	_ = recordjson.Unmarshal(raw, &response)
 	return response, raw, nil
 }
 
@@ -274,7 +275,7 @@ func (remote remoteRunCanceller) activeRuns(ctx context.Context, repo, ref strin
 			Status  string
 		} `json:"runs"`
 	}
-	if err := json.Unmarshal(raw, &page); err != nil {
+	if err := recordjson.Unmarshal(raw, &page); err != nil {
 		return nil, fmt.Errorf("decode run_list: %w", err)
 	}
 	ids := make([]string, 0, len(page.Runs))

@@ -39,7 +39,7 @@ const fire = async delay => {
   assert.ok(entry,`missing timer ${delay}`); timers.delete(entry[0]); return entry[1].fn();
 };
 const frame = (chunk,offset,done=false)=>new TextEncoder().encode(`event: chunk\ndata: ${JSON.stringify({chunk,offset,done})}\n\n`);
-run(`setConn = () => {}; const runningStep = {Burn:'test',Step:'store',Status:'running',StartedAt:'2026-11-05T11:59:58Z',Ordinal:0};`);
+run(`setConn = () => {}; const runningStep = {burn:'test',step:'store',status:'running',started_at:'2026-11-05T11:59:58Z',ordinal:0};`);
 assert.match(run(`stepRow(orderSteps([runningStep])[0],'')`),/data-started="2026-11-05T11:59:58Z" data-timer-kind="step"/);
 const stepCell={dataset:{started:'2026-11-05T11:59:58Z',timerKind:'step'},textContent:''};
 const runCell={dataset:{started:'2026-11-05T11:59:58Z'},textContent:''};
@@ -48,17 +48,17 @@ run('tickRunTimers()'); assert.equal(stepCell.textContent,'2s'); assert.equal(ru
 now+=1000; [...intervals.values()].find(t=>t.delay===1000).fn(); assert.equal(stepCell.textContent,'3s');
 now+=62000; visibility(); assert.equal(stepCell.textContent,'1m 5s','resume recomputes from timestamp, not missed ticks');
 assert.equal(streams.length+polls.length,0,'timers never request data');
-assert.match(run(`stepRow(orderSteps([{...runningStep,Status:'passed',FinishedAt:'2026-11-05T12:00:02Z'}])[0],'')`),/class="dur">4s<\/span>/);
+assert.match(run(`stepRow(orderSteps([{...runningStep,status:'passed',finished_at:'2026-11-05T12:00:02Z'}])[0],'')`),/class="dur">4s<\/span>/);
 cells=[runCell]; now+=1000;run('tickRunTimers()'); assert.equal(stepCell.textContent,'1m 5s','terminal cell leaves the ticker');
-for(const step of ["{Status:'pending'}","{Status:'interrupted'}","{Status:'running',StartedAt:'invalid'}"]){
-  const html=run(`stepRow(orderSteps([{Burn:'test',Step:'store',Ordinal:0,...${step}}])[0],'')`);
+for(const step of ["{status:'pending'}","{status:'interrupted'}","{status:'running',started_at:'invalid'}"]){
+  const html=run(`stepRow(orderSteps([{burn:'test',step:'store',ordinal:0,...${step}}])[0],'')`);
   assert.ok(!html.includes('data-started')&&!html.includes('NaN'));
 }
-assert.match(run(`stepRow(orderSteps([{...runningStep,StartedAt:'2099-01-01T00:00:00Z'}])[0],'')`),/&lt;1s/);
-assert.ok(!run(`stepRow(orderSteps([{...runningStep,FinishedAt:'2026-11-05T12:00:02Z'}])[0],'')`).includes('data-started'),'finished timestamp freezes even before the status catches up');
-assert.match(run(`stepRow(orderSteps([{...runningStep,FinishedAt:'invalid'}])[0],'')`),/data-timer-kind="step"/);
+assert.match(run(`stepRow(orderSteps([{...runningStep,started_at:'2099-01-01T00:00:00Z'}])[0],'')`),/&lt;1s/);
+assert.ok(!run(`stepRow(orderSteps([{...runningStep,finished_at:'2026-11-05T12:00:02Z'}])[0],'')`).includes('data-started'),'finished timestamp freezes even before the status catches up');
+assert.match(run(`stepRow(orderSteps([{...runningStep,finished_at:'invalid'}])[0],'')`),/data-timer-kind="step"/);
 // Receive partial UTF-8/SSE frames, then a partial command record. No render poll.
-await run(`liveLogContent({ID:'timers'},'test','store')`); await settle();
+await run(`liveLogContent({id:'timers'},'test','store')`); await settle();
 assert.equal(streams.length,1);
 const bytes=frame('[test/store] first 🚀\n[test/store] par',42), split=bytes.indexOf(0xf0)+1;
 streams[0].controller.enqueue(bytes.slice(0,split));await settle();assert.equal(run('state.live.offset'),-1);
@@ -82,7 +82,7 @@ assert.equal(run('state.live.text'),'[test/store] first 🚀\n[test/store] parti
 assert.equal(run('state.live.done'),true);assert.equal(run('state.live.source'),null);assert.equal(timers.size,0);
 assert.equal(intervals.size,1,'only local clock interval remains');
 // Navigation aborts a pending fallback request and cancels its reconnect.
-run('closeLiveLog()');await run(`liveLogContent({ID:'next'},'test','store')`);await settle();
+run('closeLiveLog()');await run(`liveLogContent({id:'next'},'test','store')`);await settle();
 streams.at(-1).controller.error(new Error('offline'));await settle();
 run('const abandoned=state.live; closeLiveLog()');await settle();
 assert.equal(polls.at(-1).options.signal.aborted,true);assert.equal(timers.size,0);
@@ -90,7 +90,7 @@ const count=streams.length;
 run(`receiveLiveChunk(abandoned,{chunk:'stale\\n',offset:999})`);
 assert.equal(run('abandoned.offset'),-1);assert.equal(streams.length,count);
 // Fire the actual fallback watchdog while retry waits for cursor ownership.
-await run(`liveLogContent({ID:'timeout'},'test','store')`);await settle();
+await run(`liveLogContent({id:'timeout'},'test','store')`);await settle();
 streams.at(-1).controller.error(new Error('offline'));await settle();
 const stalledPoll=polls.at(-1), beforeTimeout=streams.length;
 const waitingRetry=fire(1000);await settle();

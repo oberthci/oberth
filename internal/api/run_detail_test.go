@@ -21,12 +21,12 @@ func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing
 	if writer.Code != http.StatusOK {
 		t.Fatal(writer.Code, writer.Body.String())
 	}
-	for _, field := range []string{"MeasuredUsage", "MeasuredSizeComparison", "Termination", "Timing"} {
+	for _, field := range []string{"measured_usage", "measured_size_comparison", "termination", "timing", "MeasuredUsage", "Timing"} {
 		if strings.Contains(writer.Body.String(), field) {
 			t.Fatalf("dashboard retained %s", field)
 		}
 	}
-	if !strings.Contains(writer.Body.String(), `"Step":"unit"`) {
+	if !strings.Contains(writer.Body.String(), `"step":"unit"`) || strings.Contains(writer.Body.String(), `"Step"`) {
 		t.Fatal(writer.Body.String())
 	}
 	// The default HTTP representation is also the CLI --json contract.
@@ -37,8 +37,8 @@ func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing
 	if writer.Code != http.StatusOK {
 		t.Fatal(writer.Code, writer.Body.String())
 	}
-	for _, field := range []string{"MeasuredUsage", "MeasuredSizeComparison", "Termination", "Timing"} {
-		if !strings.Contains(writer.Body.String(), field) {
+	for _, field := range []string{"measured_usage", "measured_size_comparison", "termination", "timing"} {
+		if !strings.Contains(writer.Body.String(), `"`+field+`"`) {
 			t.Fatalf("default HTTP response lost %s", field)
 		}
 	}

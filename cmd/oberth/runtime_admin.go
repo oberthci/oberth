@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 // Runtime administration (#1497): release-wif calls audited MCP tools that
@@ -86,7 +88,7 @@ func runReleaseWIF(ctx context.Context, args []string, output io.Writer) error {
 			Error string `json:"error"`
 		} `json:"inactive"`
 	}
-	if *asJSON || json.Unmarshal(raw, &view) != nil {
+	if *asJSON || recordjson.Unmarshal(raw, &view) != nil {
 		_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 		return err
 	}

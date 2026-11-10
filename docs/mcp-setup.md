@@ -272,7 +272,7 @@ call the proxy hostname directly.
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Protected priority runs can be cancelled only by their requester or an unscoped admin; the existing run-cancel policy still applies. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run (`id`): step, pod, attempt, `held_since`, kubelet `deadline`, `patch_capable`, `released`; plus the run's assist record and the `assist.*` policy. Read-only. See [assisted continuation](assisted-continuation.md) |
-| `run_hold_exec` | Run one bounded argv (no shell) inside a held step's main container (`id`, `argv`, optional `step`, `stdin`, `timeout_seconds`). Run's own uplink or admin; bounded by `assist.execTimeout`/`execOutputBytes`; serialized per run; recorded and audited (`run.assist.exec`) before the command runs, which marks the run assisted |
+| `run_hold_exec` | Run one bounded argv (no shell) inside a held step's main container (`id`, `argv`, optional `step`, `stdin`, `timeout_seconds`). Any uplink whose scope covers the run's repository, or admin; bounded by `assist.execTimeout`/`execOutputBytes`; serialized per run; recorded and audited (`run.assist.exec`) before the command runs, which marks the run assisted |
 | `run_hold_patch` | Apply a unified `diff` to the held step's writable `/work/src` through the server's Pod helper (`id`, `diff`, optional `step`): exact context, clean relative paths only, no renames/binaries/`.git`/symlinks, bounded by `assist.patchMaxBytes`/`patchMaxFiles`; the diff's sha256 is recorded and audited as `run.assist.patch` before it is applied, which marks the run assisted |
 | `run_continue` | Release a held step so its real command runs on the (patched) tree and the DAG continues (`id`, optional `step`). Recorded first as `run.assist.continue`; the run becomes assisted: never published, never a promotion source, never green for its SHA, with an `assisted: … not evidence` reason line |
 | `run_hold_abandon` | Delete a held step's parked Pod so the step fails normally (`id`, optional `step`). Audited as `run.assist.abandon` |
@@ -887,13 +887,21 @@ establish the cause of historical uncorrelated 502 or QUIC failures.
 
 ## CLI long-poll timeouts
 
-`oberth mcp call` derives its client deadline from the tool's `timeout` argument
-plus 30 seconds, with a minimum of 60 seconds. `wait` and `promote_status`
-default to a 600-second tool timeout when omitted or zero, so their default
-client deadline is 630 seconds. The server rejects tool timeouts above 600
-seconds.
+`oberth mcp call` derives its client deadline from the tool's own timeout
+argument plus 30 seconds, with a minimum of 60 seconds. The argument is the one
+the tool's schema declares (`timeout` for `wait` and `promote_status`,
+`timeout_s` for `run_wait`, `timeout_seconds` for `run_hold_exec`); when it is
+omitted or zero the CLI uses the bound the schema gives for that tool. `wait`,
+`promote_status` and `run_wait` default to 600 seconds, so their default client
+deadline is 630 seconds; `run_hold_exec` allows for the longest configurable
+`assist.execTimeout` (900 seconds, deadline 930 seconds). The server rejects
+long-poll timeouts above 600 seconds. Tools without a timeout argument keep the
+60-second deadline. A reconnect after a server restart shrinks the long poll's
+timeout argument to the client deadline left.
 
 ```bash
+oberth mcp call --token-file ~/.config/oberth/token run_wait \
+  '{"id":"<run-id>","timeout_s":600}'
 oberth mcp call --token-file ~/.config/oberth/token wait \
   '{"sha":"<tested-sha>","timeout":600}'
 oberth mcp call --token-file ~/.config/oberth/token --timeout 11m wait \

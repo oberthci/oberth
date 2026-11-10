@@ -2,19 +2,45 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
 	"strconv"
-	"strings"
-	"sync"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
-// marshalCompatible adds preferred wire names to typed public records after
-// authorization/redaction. Existing names and envelopes are retained. Map keys
-// are dictionaries (step names, labels, etc.), not Go record field names.
-func marshalCompatible(payload any) ([]byte, error) {
+// GoFieldNamesHeader opts one HTTP or MCP request into the pre-v0.20.3 record
+// shape, where every Go-style field name (ID, RepoID, Steps) is sent next to
+// its snake_case name. The server echoes it on responses that honour it.
+const GoFieldNamesHeader = "X-Oberth-Go-Field-Names"
+
+type goFieldNamesKey struct{}
+
+// goFieldNamesRequested reports an explicit opt-in: the header, or the
+// go_field_names=1 query parameter on HTTP routes.
+func goFieldNamesRequested(request *http.Request) bool {
+	return request.Header.Get(GoFieldNamesHeader) == "1" || request.URL.Query().Get("go_field_names") == "1"
+}
+
+func withGoFieldNames(ctx context.Context) context.Context {
+	return context.WithValue(ctx, goFieldNamesKey{}, true)
+}
+
+func goFieldNames(ctx context.Context) bool {
+	goNames, _ := ctx.Value(goFieldNamesKey{}).(bool)
+	return goNames
+}
+
+// marshalCompatible renames typed public records to their snake_case wire
+// names after authorization/redaction (ID -> id, RepoID -> repo_id, Steps ->
+// steps). With goNames set, the Go-style names are kept next to the
+// snake_case ones, the shape every release before v0.20.3 sent by default.
+// Map keys are dictionaries (step names, labels, etc.), not Go field names.
+func marshalCompatible(payload any, goNames bool) ([]byte, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -26,46 +52,14 @@ func marshalCompatible(payload any) ([]byte, error) {
 		return nil, err
 	}
 	changed := false
-	addRecordAliases(document, reflect.ValueOf(payload), &changed)
+	addRecordAliases(document, reflect.ValueOf(payload), goNames, &changed)
 	if !changed {
 		return raw, nil
 	}
 	return json.Marshal(document)
 }
 
-type recordAliasField struct {
-	index       int
-	name, alias string
-	embedded    bool
-}
-
-var recordAliasPlans sync.Map // reflect.Type -> []recordAliasField, immutable after publication.
-
-func recordAliasPlan(typ reflect.Type) []recordAliasField {
-	if plan, ok := recordAliasPlans.Load(typ); ok {
-		return plan.([]recordAliasField)
-	}
-	fields := make([]recordAliasField, 0, typ.NumField())
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		if field.PkgPath != "" {
-			continue
-		}
-		name := strings.Split(field.Tag.Get("json"), ",")[0]
-		if name == "-" {
-			continue
-		}
-		embedded := field.Anonymous && name == ""
-		if name == "" {
-			name = field.Name
-		}
-		fields = append(fields, recordAliasField{index: i, name: name, alias: snakeCase(name), embedded: embedded})
-	}
-	plan, _ := recordAliasPlans.LoadOrStore(typ, fields)
-	return plan.([]recordAliasField)
-}
-
-func addRecordAliases(document any, value reflect.Value, changed *bool) {
+func addRecordAliases(document any, value reflect.Value, goNames bool, changed *bool) {
 	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
 		if value.IsNil() {
 			return
@@ -82,19 +76,30 @@ func addRecordAliases(document any, value reflect.Value, changed *bool) {
 			return
 		}
 		typ := value.Type()
-		for _, field := range recordAliasPlan(typ) {
-			if field.embedded {
-				addRecordAliases(object, value.Field(field.index), changed)
+		for _, field := range recordjson.Plan(typ) {
+			if field.Embedded {
+				addRecordAliases(object, value.Field(field.Index), goNames, changed)
 				continue
 			}
-			item, exists := object[field.name]
+			item, exists := object[field.Name]
 			if !exists {
 				continue
 			}
-			addRecordAliases(item, value.Field(field.index), changed)
-			if _, exists := object[field.alias]; !exists {
-				object[field.alias] = item
+			addRecordAliases(item, value.Field(field.Index), goNames, changed)
+			if field.Alias == field.Name {
+				continue
+			}
+			if _, exists := object[field.Alias]; !exists {
+				object[field.Alias] = item
 				*changed = true
+				if !goNames && goStyleName(field.Name) {
+					// The snake_case name now carries the value alone. A
+					// name whose alias is another field's key stays, and so
+					// does a name a json tag spells in lowerCamel
+					// (maxNotStarted, activeDeadlineSeconds): that is the
+					// field's declared wire name, not a Go-style duplicate.
+					delete(object, field.Name)
+				}
 			}
 		}
 		// Only primary run records get the identity alias. A promotion's run_id
@@ -126,7 +131,7 @@ func addRecordAliases(document any, value reflect.Value, changed *bool) {
 			return
 		}
 		for i := 0; i < value.Len() && i < len(rows); i++ {
-			addRecordAliases(rows[i], value.Index(i), changed)
+			addRecordAliases(rows[i], value.Index(i), goNames, changed)
 		}
 	case reflect.Map:
 		object, ok := document.(map[string]any)
@@ -137,25 +142,17 @@ func addRecordAliases(document any, value reflect.Value, changed *bool) {
 		for iterator.Next() {
 			key := iterator.Key().String()
 			if item, exists := object[key]; exists {
-				addRecordAliases(item, iterator.Value(), changed)
+				addRecordAliases(item, iterator.Value(), goNames, changed)
 			}
 		}
 	}
 }
 
-func snakeCase(name string) string {
-	runes := []rune(name)
-	var out strings.Builder
-	for i, r := range runes {
-		if unicode.IsUpper(r) {
-			if i > 0 && runes[i-1] != '_' && (unicode.IsLower(runes[i-1]) || unicode.IsDigit(runes[i-1]) || (unicode.IsUpper(runes[i-1]) && i+1 < len(runes) && unicode.IsLower(runes[i+1]))) {
-				out.WriteByte('_')
-			}
-			r = unicode.ToLower(r)
-		}
-		out.WriteRune(r)
-	}
-	return out.String()
+// goStyleName reports a Go field name (ID, RepoID, Steps): an exported
+// identifier, so it starts with an upper-case letter.
+func goStyleName(name string) bool {
+	first, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(first)
 }
 
 // Legacy collection arrays are the default throughout v0.17.x. Callers can

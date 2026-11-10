@@ -17,24 +17,24 @@ const shell = serverSource.match(/io.WriteString\(writer, `(<\!doctype html>.*?)
   .replaceAll('`+view+`', 'runs');
 const now = Date.now();
 const makeRun = (ID, extra = {}) => {
-  const row = {ID, RepoID: 1, Ref: 'main', RefKind: 'branch', Status: 'passed', SHA: 'abc123456789', Actor: 'fixture', Trigger: 'push', QueuedAt: new Date(now-90000).toISOString(), StartedAt: new Date(now-80000).toISOString(), FinishedAt: new Date(now-20000).toISOString(), ...extra};
-  if (['running','queued'].includes(row.Status)) {
+  const row = {id: ID, repo_id: 1, ref: 'main', ref_kind: 'branch', status: 'passed', sha: 'abc123456789', actor: 'fixture', trigger: 'push', queued_at: new Date(now-90000).toISOString(), started_at: new Date(now-80000).toISOString(), finished_at: new Date(now-20000).toISOString(), ...extra};
+  if (['running','queued'].includes(row.status)) {
     row.priority_class ??= 'normal'; row.priority_reason ??= 'ordinary run';
     row.display_reason ??= ''; // Messages are supplied by the server, never fabricated by the UI.
   }
   return row;
 };
-const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority'}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true, display_reason:'release'}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
-const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure', Trigger:'schedule', ScheduleEntry:'weekly', priority_class:'high', priority_reason:'history priority', display_reason:'priority high · history priority fixture failure'});
-const superseded = makeRun('old-superseded', {Status:'interrupted', SupersededBy:'head-main'});
+const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority'}), makeRun('head-tag', {ref:'v1', ref_kind:'tag', release:true, credentialed:true, display_reason:'release'}), makeRun('head-branch', {ref:'v1', status:'failed'}), makeRun('head-queued', {repo_id:2, status:'queued', started_at:null, finished_at:null}), makeRun('head-retry', {ref:'feature', status:'queued', started_at:null, finished_at:null, auto_retry_of:'retry-failed'})];
+const older = makeRun('old-failed', {status:'failed', error:'fixture failure', trigger:'schedule', schedule_entry:'weekly', priority_class:'high', priority_reason:'history priority', display_reason:'priority high · history priority fixture failure'});
+const superseded = makeRun('old-superseded', {status:'interrupted', superseded_by:'head-main'});
 const oldest = makeRun('oldest');
-const scheduled = makeRun('scheduled-running', {Status:'running', Trigger:'schedule', ScheduleEntry:'nightly', FinishedAt:null, display_reason:'schedule: nightly'});
-const scheduledQueued = makeRun('scheduled-queued', {Status:'queued', Trigger:'schedule', ScheduleEntry:'daily', StartedAt:null, FinishedAt:null, display_reason:'awaiting scheduler'});
-const nightlyFailed = makeRun('nightly-failed', {Status:'failed', Trigger:'schedule', ScheduleEntry:'nightly', Error:'nightly failed before a newer successful push'});
-const retried = makeRun('retry-failed', {Ref:'feature', Status:'failed', auto_retried_by:'head-retry'});
+const scheduled = makeRun('scheduled-running', {status:'running', trigger:'schedule', schedule_entry:'nightly', finished_at:null, display_reason:'schedule: nightly'});
+const scheduledQueued = makeRun('scheduled-queued', {status:'queued', trigger:'schedule', schedule_entry:'daily', started_at:null, finished_at:null, display_reason:'awaiting scheduler'});
+const nightlyFailed = makeRun('nightly-failed', {status:'failed', trigger:'schedule', schedule_entry:'nightly', error:'nightly failed before a newer successful push'});
+const retried = makeRun('retry-failed', {ref:'feature', status:'failed', auto_retried_by:'head-retry'});
 const active = [scheduled, scheduledQueued, heads[3], heads[4]];
 const flat = [...heads, older, superseded, oldest, nightlyFailed, retried, scheduled, scheduledQueued];
-const repos = [{ID:1, Name:'oberth', UpstreamID:1}, {ID:2, Name:'example', UpstreamID:1}, {ID:3, Name:'work-laptop-identities', UpstreamID:1}];
+const repos = [{id:1, name:'oberth', upstream_id:1}, {id:2, name:'example', upstream_id:1}, {id:3, name:'work-laptop-identities', upstream_id:1}];
 const status = {version:'test-fixture', upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};
 const requests = [];
 let baseline = false, paging = false, historyError = false, sharedNames = false, delayStatus = false, releaseStatus, activeError = 0, delayOlder = false, releaseOlder;
@@ -43,18 +43,18 @@ const server = createServer((req, res) => {
   requests.push(url.pathname + url.search);
   const json = (body, next) => {res.writeHead(200, {'Content-Type':'application/json', ...(next ? {'X-Oberth-Next-Before':next} : {})}); res.end(JSON.stringify(body));};
   if (url.pathname.startsWith('/api/')) assert.equal(req.headers.authorization, 'Bearer fixture-token');
-  if (url.pathname === '/api/repos') return json(sharedNames ? [repos[0], {ID:4,Name:'oberth',UpstreamID:2}] : repos);
+  if (url.pathname === '/api/repos') return json(sharedNames ? [repos[0], {id:4,name:'oberth',upstream_id:2}] : repos);
   if (url.pathname === '/api/status') {
     const value = sharedNames ? {...status, upstream_info:[...status.upstream_info, {id:2,name:'codeberg',base_url:'https://example.test/team'}]} : status;
     if (delayStatus) {releaseStatus = () => json(value); return;}
     return json(value);
   }
-  if (url.pathname === '/api/runs/counts') return json({Total:12, ByRepo:{1:11,2:1,3:0}});
+  if (url.pathname === '/api/runs/counts') return json({total:12, by_repo:{1:11,2:1,3:0}});
   if (url.pathname === '/api/runs') {
     if (url.searchParams.get('view') === 'active') {
       assert.ok(!url.searchParams.has('before') && !url.searchParams.has('latest_per_ref'));
       if (activeError) {res.writeHead(activeError, {'Content-Type':'application/json'}); return res.end(JSON.stringify({error:'active list temporarily unavailable'}));}
-      return json(active.filter(run => !url.searchParams.has('repo') || `github/org/${repos.find(repo=>repo.ID===run.RepoID)?.Name}` === url.searchParams.get('repo')));
+      return json(active.filter(run => !url.searchParams.has('repo') || `github/org/${repos.find(repo=>repo.id===run.repo_id)?.name}` === url.searchParams.get('repo')));
     }
     if (url.searchParams.has('ref')) {
       if (sharedNames && !url.searchParams.get('repo')?.includes('/')) {res.writeHead(409, {'Content-Type':'application/json'}); return res.end(JSON.stringify({error:'ambiguous repository'}));}
@@ -63,21 +63,21 @@ const server = createServer((req, res) => {
         if (delayOlder) {releaseOlder=()=>json([older, oldest]); return;}
         return json([older, oldest]);
       }
-      return json([heads[0], older, superseded, makeRun('same-name-tag',{RefKind:'tag'}), makeRun('other-repo',{RepoID:2}), makeRun('other-ref',{Ref:'elsewhere'})], 'opaque-history-cursor');
+      return json([heads[0], older, superseded, makeRun('same-name-tag',{ref_kind:'tag'}), makeRun('other-repo',{repo_id:2}), makeRun('other-ref',{ref:'elsewhere'})], 'opaque-history-cursor');
     }
     if (paging) {
-      if (url.searchParams.has('before')) return json([makeRun('page-two', {Ref:'old-branch'})]);
-      return json(Array.from({length:100}, (_,i)=>makeRun(`page-one-${i}`, {Ref:`branch-${i}`})), 'opaque-list-cursor');
+      if (url.searchParams.has('before')) return json([makeRun('page-two', {ref:'old-branch'})]);
+      return json(Array.from({length:100}, (_,i)=>makeRun(`page-one-${i}`, {ref:`branch-${i}`})), 'opaque-list-cursor');
     }
     let rows = url.searchParams.has('latest_per_ref') ? heads : flat;
-    if (url.searchParams.has('repo')) rows = rows.filter(run => run.RepoID === repos.find(repo => `github/org/${repo.Name}` === url.searchParams.get('repo'))?.ID);
+    if (url.searchParams.has('repo')) rows = rows.filter(run => run.repo_id === repos.find(repo => `github/org/${repo.name}` === url.searchParams.get('repo'))?.id);
     return json(rows);
   }
   if (url.pathname.startsWith('/api/runs/')) {
     if (url.pathname.split('/').length === 4) assert.equal(url.searchParams.get('view'), 'dashboard', 'detail polling must request the compact view');
     const id = decodeURIComponent(url.pathname.split('/')[3]);
-    const Run = flat.find(run => run.ID === id || (id.length >= 8 && run.ID.startsWith(id)));
-    return json({Run, Steps:[{Burn:'ci',Step:'publish',Ordinal:2,Status:'passed',Secrets:true,StartedAt:new Date(now-40000).toISOString(),FinishedAt:new Date(now-20000).toISOString()}, {Burn:'ci',Step:'test',Ordinal:1,Status:'passed',StartedAt:new Date(now-60000).toISOString(),FinishedAt:new Date(now-40000).toISOString()}]});
+    const Run = flat.find(run => run.id === id || (id.length >= 8 && run.id.startsWith(id)));
+    return json({run: Run, steps:[{burn:'ci',step:'publish',ordinal:2,status:'passed',secrets:true,started_at:new Date(now-40000).toISOString(),finished_at:new Date(now-20000).toISOString()}, {burn:'ci',step:'test',ordinal:1,status:'passed',started_at:new Date(now-60000).toISOString(),finished_at:new Date(now-40000).toISOString()}]});
   }
   if (url.pathname === '/assets/app.js' || url.pathname === '/assets/app.css') {
     const name = url.pathname.split('/').pop();
@@ -203,11 +203,11 @@ try {
     });
     await page.waitForFunction(()=>!state.attempts.get('head-main').refreshing);
     assert.equal(await page.evaluate(()=>document.activeElement===historyToggle && historyToggle.isConnected && historyTable===document.querySelector('#runHistory .runs-table') && historyTable.scrollLeft===historyLeft), true, 'unchanged poll preserves history nodes, focus and scroll');
-    older.Status = 'passed';
+    older.status = 'passed';
     await page.evaluate(()=>route(true));
     await page.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='passed');
     assert.equal(await page.evaluate(()=>document.activeElement===document.querySelector('#runHistory [data-action="toggle-attempts"]') && document.querySelector('#runHistory .runs-table').scrollLeft===historyLeft), true, 'changed poll refreshes status and restores focus/scroll');
-    older.Status = 'failed';
+    older.status = 'failed';
     await page.locator('[data-action="refresh"]').click();
     await page.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='failed');
     await page.locator('#runHistory [data-run-id="oldest"]').waitFor();
@@ -273,10 +273,10 @@ try {
   await direct.locator('[data-detail-run="head-main"]').waitFor();
   await direct.locator('[data-action="toggle-attempts"]').click();
   await direct.locator('#runHistory .trow[data-run-id="old-failed"]').waitFor();
-  older.Status='passed';
+  older.status='passed';
   await direct.locator('[data-action="refresh"]').click();
   await direct.waitForFunction(()=>document.querySelector('#runHistory .trow[data-run-id="old-failed"] .pill').textContent.trim()==='passed');
-  older.Status='failed';
+  older.status='failed';
   await direct.close();
   sharedNames=false; delayStatus=true;
   const cold = await browser.newPage();

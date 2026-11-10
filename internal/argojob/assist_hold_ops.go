@@ -344,22 +344,10 @@ func assistVictimDue(reason string, activity model.AssistPodActivity, ttl time.D
 	return !assistHoldExpiry(hold, activity, ttl).After(now)
 }
 
-// assistHoldExpiry is when the TTL abandons a hold: held_since + ttl for an
-// idle hold, last action + ttl for a worked one, never later than
-// AssistHoldMaxAgeFactor TTLs after held_since.
+// assistHoldExpiry is model.AssistHoldExpiry, the rule run_hold_list reports
+// as abandon_at.
 func assistHoldExpiry(hold model.AssistHold, activity model.AssistPodActivity, ttl time.Duration) time.Time {
-	start := hold.HeldSince
-	if activity.LastAction.After(start) {
-		start = activity.LastAction
-	}
-	return minTime(start.Add(ttl), hold.HeldSince.Add(AssistHoldMaxAgeFactor*ttl))
-}
-
-func minTime(a, b time.Time) time.Time {
-	if b.Before(a) {
-		return b
-	}
-	return a
+	return model.AssistHoldExpiry(hold, activity, ttl)
 }
 
 // assistEvictedOf describes a held attempt (parked or continued) whose Pod

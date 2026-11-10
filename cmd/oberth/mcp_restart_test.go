@@ -175,6 +175,10 @@ func TestMCPRetryParamsKeepFittingAndOtherTools(t *testing.T) {
 	if got := mcpRetryParams(omitted, service.DefaultMaximumWait, 100*time.Second); string(got.(toolsCallParams).Arguments) != `{"id":"p","timeout":70}` {
 		t.Fatalf("omitted timeout not bounded: %s", got.(toolsCallParams).Arguments)
 	}
+	runWait := toolsCallParams{Name: "run_wait", Arguments: json.RawMessage(`{"id":"r"}`)}
+	if got := mcpRetryParams(runWait, service.DefaultMaximumWait, 100*time.Second); string(got.(toolsCallParams).Arguments) != `{"id":"r","timeout_s":70}` {
+		t.Fatalf("run_wait timeout_s not bounded: %s", got.(toolsCallParams).Arguments)
+	}
 }
 
 func TestMCPReconnectWindowFlag(t *testing.T) {

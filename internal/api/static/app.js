@@ -184,11 +184,11 @@ function bigIcon(status) {
 function displayRunStatus(run) {
   if (run.display_status) return run.display_status;
   if (run.auto_retried_by) return "infra-retried";
-  if (run.Status === "interrupted") return run.SupersededBy && run.Phase !== "cancelled" ? "superseded" : "cancelled";
-  if (run.Status === "waiting" || run.Status === "queued" || (run.Status === "running" && !run.StartedAt)) return "queued";
-  return run.Status;
+  if (run.status === "interrupted") return run.superseded_by && run.phase !== "cancelled" ? "superseded" : "cancelled";
+  if (run.status === "waiting" || run.status === "queued" || (run.status === "running" && !run.started_at)) return "queued";
+  return run.status;
 }
-function scheduleBadge(run) { return run.Trigger === "schedule" && run.ScheduleEntry ? `<span class="v4b dim" title="schedule entry">${esc(run.ScheduleEntry)}</span>` : ""; }
+function scheduleBadge(run) { return run.trigger === "schedule" && run.schedule_entry ? `<span class="v4b dim" title="schedule entry">${esc(run.schedule_entry)}</span>` : ""; }
 function priorityClass(run) {
   const name = run.priority_class || "standard";
   return name === "normal" ? "standard" : name === "highest" ? "high" : name;
@@ -198,17 +198,17 @@ function priorityBadge(run) {
   const label = {low:"low priority", high:"high priority", promotion:"priority promotion"}[priority];
   return label ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${label}</span>` : "";
 }
-function releaseBadge(run) { return priorityBadge(run) + (run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
+function releaseBadge(run) { return priorityBadge(run) + (run.release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
 function runDuration(run) {
-  return spanSeconds(run.StartedAt, run.FinishedAt, run.Status === "running");
+  return spanSeconds(run.started_at, run.finished_at, run.status === "running");
 }
-function runWhen(run) { return run.StartedAt || run.FinishedAt || run.QueuedAt || run.CreatedAt; }
+function runWhen(run) { return run.started_at || run.finished_at || run.queued_at || run.created_at; }
 function runMessage(run) {
   if (run.display_reason) return run.display_reason;
-  if (run.Error) return run.Error;
-  if (run.FailedStep) return `failed at ${run.FailedBurn ? run.FailedBurn + " / " : ""}${run.FailedStep}`;
-  if (run.Reason) return run.Reason;
-  if (displayRunStatus(run) === "queued") return run.Scheduling?.message || "awaiting scheduler";
+  if (run.error) return run.error;
+  if (run.failed_step) return `failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${run.failed_step}`;
+  if (run.reason) return run.reason;
+  if (displayRunStatus(run) === "queued") return run.scheduling?.message || "awaiting scheduler";
   return "";
 }
 /* Repository names repeat across upstreams (a "terraform" under github,
@@ -216,7 +216,7 @@ function runMessage(run) {
    API refuses. The dashboard keys a repository by upstream/org/name — the
    qualified selector the API resolves — and labels a shared name org/name. */
 function upstreamOf(repo) {
-  return (state.status?.upstream_info || []).find(upstream => upstream.id === repo.UpstreamID);
+  return (state.status?.upstream_info || []).find(upstream => upstream.id === repo.upstream_id);
 }
 function orgOfURL(baseURL) {
   const trimmed = String(baseURL || "").replace(/\/+$/, "");
@@ -227,21 +227,21 @@ function repoOrg(upstream) {
 }
 function repoKey(repo) {
   const upstream = upstreamOf(repo);
-  return upstream ? `${upstream.name}/${repoOrg(upstream)}/${repo.Name}` : repo.Name;
+  return upstream ? `${upstream.name}/${repoOrg(upstream)}/${repo.name}` : repo.name;
 }
 /* A shared name is shown as org/repo: two upstreams never share an
    organization (the store refuses it), so that is always unique. */
 function repoLabel(repo) {
-  if (state.repos.filter(other => other.Name === repo.Name).length < 2) return repo.Name;
+  if (state.repos.filter(other => other.name === repo.name).length < 2) return repo.name;
   const upstream = upstreamOf(repo);
-  return upstream ? `${repoOrg(upstream)}/${repo.Name}` : repo.Name;
+  return upstream ? `${repoOrg(upstream)}/${repo.name}` : repo.name;
 }
 function repoKeyOf(repoID) {
-  const repo = state.repos.find(r => r.ID === repoID);
+  const repo = state.repos.find(r => r.id === repoID);
   return repo ? repoKey(repo) : "";
 }
 function repoName(repoID) {
-  const repo = state.repos.find(r => r.ID === repoID);
+  const repo = state.repos.find(r => r.id === repoID);
   return repo ? repoLabel(repo) : (repoID ? "repo#" + repoID : "workspace");
 }
 /* A filter saved before repositories were keyed (a bare name) maps to the one
@@ -251,7 +251,7 @@ function repoName(repoID) {
 function normalizeRepoSelector(value, everything) {
   if (!state.status) return value;
   if (!value || value === everything || state.repos.some(repo => repoKey(repo) === value)) return value;
-  const named = state.repos.filter(repo => repo.Name === value);
+  const named = state.repos.filter(repo => repo.name === value);
   return named.length === 1 ? repoKey(named[0]) : everything;
 }
 /* ensureStatus refreshes /api/status at most once per five minutes in the background. It probes every
@@ -455,9 +455,9 @@ async function loadActiveRuns() {
    bottom, directly above running work. API/MCP claim order stays unchanged. */
 function runListGroup(run) {
   if (isTerminalRun(run)) return 2;
-  return displayRunStatus(run) === "queued" || !run.StartedAt ? 0 : 1;
+  return displayRunStatus(run) === "queued" || !run.started_at ? 0 : 1;
 }
-function isTerminalRun(run) { return ["passed", "failed", "interrupted"].includes(run.Status); }
+function isTerminalRun(run) { return ["passed", "failed", "interrupted"].includes(run.status); }
 /* A scoped viewer sees no queue positions. The active view then supplies
    the queue order: it lists waiting runs in the server's admission order, so
    its index is the same claim order. Without either, the
@@ -466,9 +466,9 @@ function isTerminalRun(run) { return ["passed", "failed", "interrupted"].include
    always leads the position tie-break; the queue is never sorted by time. */
 function orderRuns(runs) {
   const queued = runs.filter(run => runListGroup(run) === 0);
-  const positioned = queued.length > 0 && queued.every(run => run.QueuePosition > 0 || run.Scheduling?.queue_position > 0);
-  const activeIndex = new Map(state.activeRuns.map((run, index) => [run.ID, index + 1]));
-  const position = run => positioned ? run.QueuePosition || run.Scheduling?.queue_position : activeIndex.get(run.ID) || 0;
+  const positioned = queued.length > 0 && queued.every(run => run.queue_position > 0 || run.scheduling?.queue_position > 0);
+  const activeIndex = new Map(state.activeRuns.map((run, index) => [run.id, index + 1]));
+  const position = run => positioned ? run.queue_position || run.scheduling?.queue_position : activeIndex.get(run.id) || 0;
   const priorityRank = run => ({low:-1, standard:0, promotion:1, high:2})[priorityClass(run)] ?? 0;
   const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
   return runs.map((run, index) => ({ run, index })).sort((a, b) => {
@@ -480,14 +480,14 @@ function orderRuns(runs) {
       if (!key) key = position(a.run) && position(b.run) ? position(a.run) - position(b.run) : 0;
       return -key || b.index - a.index;
     }
-    else if (runListGroup(a.run) === 1) key = stamp(b.run.StartedAt) - stamp(a.run.StartedAt);
-    else key = stamp(b.run.FinishedAt || b.run.StartedAt || b.run.QueuedAt) - stamp(a.run.FinishedAt || a.run.StartedAt || a.run.QueuedAt);
+    else if (runListGroup(a.run) === 1) key = stamp(b.run.started_at) - stamp(a.run.started_at);
+    else key = stamp(b.run.finished_at || b.run.started_at || b.run.queued_at) - stamp(a.run.finished_at || a.run.started_at || a.run.queued_at);
     return key || a.index - b.index;
   }).map(item => item.run);
 }
 function runsWithActive(source) {
-  const seen = new Set(source.map(run => run.ID));
-  return orderRuns([...source, ...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID))]);
+  const seen = new Set(source.map(run => run.id));
+  return orderRuns([...source, ...state.activeRuns.filter(run => !seen.has(run.id) && seen.add(run.id))]);
 }
 function runPageFull(source) {
   // Every first page includes the whole queue and all running runs in
@@ -520,28 +520,28 @@ async function loadStatus(opts) {
    release kind compose on the loaded page. */
 function runMatches(run) {
   const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter;
-  return statusOK && (!state.releaseOnly || run.Release);
+  return statusOK && (!state.releaseOnly || run.release);
 }
 function repoCounts(runs) {
   const counts = new Map([["all", runs.length]]);
   for (const run of runs) {
-    const key = repoKeyOf(run.RepoID);
+    const key = repoKeyOf(run.repo_id);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return counts;
 }
 /* ---------- one run list: the queue, running, then finished ---------- */
-function admissionOf(run) { return run.Scheduling?.admission || null; }
+function admissionOf(run) { return run.scheduling?.admission || null; }
 function queueReason(run) { return run.display_reason || ""; }
-function queueDetail(run) { return run.Scheduling?.message || runMessage(run); }
+function queueDetail(run) { return run.scheduling?.message || runMessage(run); }
 function rowMessage(run) { return run.display_reason || ""; }
 function whenCell(run) {
   const status = displayRunStatus(run);
-  const started = status === "queued" ? null : run.StartedAt, stamp = started || run.QueuedAt;
+  const started = status === "queued" ? null : run.started_at, stamp = started || run.queued_at;
   const date = new Date(stamp || "");
   if (status === "queued" && !Number.isFinite(+date)) return "";
   const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${shortStamp(stamp)}` : "";
-  const duration = ["cancelled", "superseded"].includes(status) || !started ? "" : runListDuration(spanSeconds(started, run.FinishedAt, status === "running"));
+  const duration = ["cancelled", "superseded"].includes(status) || !started ? "" : runListDuration(spanSeconds(started, run.finished_at, status === "running"));
   return `<span${status === "running" && started ? ` data-started="${esc(started)}"` : ""}>${esc(duration)}</span><span class="meta" title="${esc(stampTitle(stamp))}">${esc(label)}</span>`;
 }
 function runListDuration(seconds) {
@@ -557,20 +557,20 @@ function tickRunTimers() {
 setInterval(tickRunTimers, 1000);
 document.addEventListener?.("visibilitychange", () => { if (!document.hidden) tickRunTimers(); });
 function prioritySummary(run) {
-  const position = run.QueuePosition || run.Scheduling?.queue_position;
+  const position = run.queue_position || run.scheduling?.queue_position;
   return [`priority ${priorityClass(run)}`, run.priority_requested_by ? `requested by ${run.priority_requested_by}` : "", run.priority_reason, position ? `queue position ${position}` : "", run.priority_refusal].filter(Boolean).join(" · ");
 }
 function runMessageCell(run) {
   const message = rowMessage(run);
   if (run.auto_retried_by) return `<button type="button" class="run-successor retry-warning" data-run-id="${esc(run.auto_retried_by)}">${esc(message)}</button>`;
- if (run.SupersededBy) {
-    return `<button type="button" class="run-successor" data-run-id="${esc(run.SupersededBy)}">${esc(message)}</button>`;
+ if (run.superseded_by) {
+    return `<button type="button" class="run-successor" data-run-id="${esc(run.superseded_by)}">${esc(message)}</button>`;
   }
   return run.display_reason === "server restart, retry needed" ? `<span class="retry-warning">${esc(message)}</span>` : esc(message);
 }
 function runRow(run) {
   const status = displayRunStatus(run);
-  return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.SHA || ""} · actor ${run.Actor || ""}`)}"><div class="run-name"><div class="repo-name">${esc(repoName(run.RepoID))}</div>${status === "queued" ? priorityBadge(run) : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
+  return `<div class="trow" data-run-id="${esc(run.id)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.sha || ""} · actor ${run.actor || ""}`)}"><div class="run-name"><div class="repo-name">${esc(repoName(run.repo_id))}</div>${status === "queued" ? priorityBadge(run) : ""}</div><div class="branch">${esc(run.ref_kind === "tag" ? "tag " : "")}${esc(run.ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
@@ -578,13 +578,13 @@ function runsTable(runs) {
 /* History belongs to the individual run, including superseded runs. The
    API cursor is opaque (scoped uplinks get IDs rather than sequences). */
 function runHistory(run) {
-  const history = state.attempts.get(run.ID);
+  const history = state.attempts.get(run.id);
   const expanded = !!history;
-  return `<button type="button" class="chip" data-action="toggle-attempts" data-head="${esc(run.ID)}" aria-expanded="${expanded}" aria-controls="runHistoryRows">${expanded ? "▾" : "▸"} Run history for this ${run.RefKind === "tag" ? "tag" : "branch"}</button>${expanded ? `<div id="runHistoryRows">${history.rows.length ? runsTable(history.rows) : `<p class="meta">${history.loading ? "Loading run history…" : history.error ? "" : "No other retained runs for this " + (run.RefKind === "tag" ? "tag." : "branch.")}</p>`}${history.error ? `<p class="meta" role="status">${esc(history.error)}</p>` : ""}${history.next || history.error ? `<button type="button" class="chip" data-action="older-attempts" data-head="${esc(run.ID)}" ${history.loading ? 'aria-disabled="true"' : ""}>${history.loading ? "Loading…" : history.error ? "Retry" : "Older runs ›"}</button>` : ""}</div>` : ""}`;
+  return `<button type="button" class="chip" data-action="toggle-attempts" data-head="${esc(run.id)}" aria-expanded="${expanded}" aria-controls="runHistoryRows">${expanded ? "▾" : "▸"} Run history for this ${run.ref_kind === "tag" ? "tag" : "branch"}</button>${expanded ? `<div id="runHistoryRows">${history.rows.length ? runsTable(history.rows) : `<p class="meta">${history.loading ? "Loading run history…" : history.error ? "" : "No other retained runs for this " + (run.ref_kind === "tag" ? "tag." : "branch.")}</p>`}${history.error ? `<p class="meta" role="status">${esc(history.error)}</p>` : ""}${history.next || history.error ? `<button type="button" class="chip" data-action="older-attempts" data-head="${esc(run.id)}" ${history.loading ? 'aria-disabled="true"' : ""}>${history.loading ? "Loading…" : history.error ? "Retry" : "Older runs ›"}</button>` : ""}</div>` : ""}`;
 }
 function updateRunHistory(run) {
   const section = app?.querySelector("[data-detail-run]");
-  if (!section || section.dataset.detailRun !== run.ID) return;
+  if (!section || section.dataset.detailRun !== run.id) return;
   const panel = section.querySelector("#runHistory"), html = runHistory(run);
   if (panel._historyHTML === html) return;
   const tableLeft = panel.querySelector(".runs-table")?.scrollLeft || 0;
@@ -603,7 +603,7 @@ function updateRunHistory(run) {
 }
 async function loadRunAttempts(id, older, refresh = false) {
   const head = state.detailRun;
-  if (!head || head.ID !== id) return;
+  if (!head || head.id !== id) return;
   const previous = state.attempts.get(id);
   if (!older && previous && !refresh) { state.attempts.delete(id); updateRunHistory(head); return; }
   refresh ||= !!(older && previous?.refreshError);
@@ -618,18 +618,18 @@ async function loadRunAttempts(id, older, refresh = false) {
     // Direct links can reach this control before the background probe finishes.
     if (state.statusPending) await state.statusPending;
     if (generation !== state.authGen || state.attempts.get(id) !== history) return;
-    const repo = repoKeyOf(head.RepoID);
+    const repo = repoKeyOf(head.repo_id);
     if (!repo) throw new Error("Repository information unavailable; refresh and retry");
-    const query = new URLSearchParams({repo, ref: head.Ref, limit: String(runPageSize)});
+    const query = new URLSearchParams({repo, ref: head.ref, limit: String(runPageSize)});
     if (!refresh && history.next) query.set("before", String(history.next));
     const page = await api("/api/runs?" + query, {withNext: true, detached: true});
     if (generation !== state.authGen || state.attempts.get(id) !== history) return;
-    const fresh = (page.body || []).filter(run => run.ID !== id && run.RepoID === head.RepoID && run.Ref === head.Ref && run.RefKind === head.RefKind);
+    const fresh = (page.body || []).filter(run => run.id !== id && run.repo_id === head.repo_id && run.ref === head.ref && run.ref_kind === head.ref_kind);
     // Refresh page one, retaining already loaded older rows. Fresh records win
     // by ID, so changing statuses are reflected without losing expanded pages.
     const rows = refresh ? [...fresh, ...history.rows] : [...history.rows, ...fresh];
     const seen = new Set();
-    history.rows = rows.filter(run => !seen.has(run.ID) && seen.add(run.ID));
+    history.rows = rows.filter(run => !seen.has(run.id) && seen.add(run.id));
     history.next = refresh && previous.olderLoaded ? previous.next : page.next;
   } catch (err) {
     if (generation !== state.authGen || state.attempts.get(id) !== history) return;
@@ -659,14 +659,14 @@ async function renderRuns(seq) {
   const runs = state.runs, source = state.repo !== "all" || state.runCursor ? state.repoRuns : runs;
   const visible = runsWithActive(source).filter(runMatches), counts = repoCounts(runs);
   if (state.runCounts) {
-    counts.set("all", state.runCounts.Total || 0);
-    for (const repo of state.repos) counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0);
+    counts.set("all", state.runCounts.total || 0);
+    for (const repo of state.repos) counts.set(repoKey(repo), state.runCounts.by_repo?.[repo.id] || 0);
   } else if (state.repo !== "all" && !state.runCursor) counts.set(state.repo, state.repoRuns.length);
   /* The server names the older page's cursor: a run sequence, or a run ID
      for an uplink scoped to some upstreams, which sees no sequences (#073).
      A server without the header pages by the oldest run's sequence. */
   const named = source === runs ? state.runsNext : state.repoRunsNext;
-  state.runNext = runPageFull(source) ? (named || source[source.length - 1].QueueSequence || 0) : 0;
+  state.runNext = runPageFull(source) ? (named || source[source.length - 1].queue_sequence || 0) : 0;
   const page = state.runCursorHistory.length + 1;
   replaceApp(`
   <section class="screen">
@@ -682,8 +682,8 @@ async function renderRuns(seq) {
         <div class="side-head">Retained runs</div>
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count" title="${esc(retainedRunCount(counts.get("all") || 0))}" aria-label="${esc(retainedRunCount(counts.get("all") || 0))}">${esc(counts.get("all") || 0)}</span></button></div>
         ${orderedRepos(state.repo).map((repo, index, repos) => {
-          const divider = repo.ArchivedAt && (index === 0 || !repos[index - 1].ArchivedAt) ? '<div class="repo-filter-row repo-archived-divider"><span class="meta">archived</span></div>' : "";
-          return `${divider}<div class="repo-filter-row"><button class="${repo.ArchivedAt ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count" title="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}" aria-label="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`;
+          const divider = repo.archived_at && (index === 0 || !repos[index - 1].archived_at) ? '<div class="repo-filter-row repo-archived-divider"><span class="meta">archived</span></div>' : "";
+          return `${divider}<div class="repo-filter-row"><button class="${repo.archived_at ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count" title="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}" aria-label="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`;
         }).join("")}
       </aside>
       <section>
@@ -702,7 +702,7 @@ async function renderRuns(seq) {
 }
 
 /* ---------- run detail: burn/step breakdown + retained logs ---------- */
-function stepKey(step) { return step.Burn + " / " + step.Step; }
+function stepKey(step) { return step.burn + " / " + step.step; }
 /* Argo names the attempts of a retried template task(N). The server folds
    such a row onto its planned declaration, but an attempt of a step the plan
    never declared keeps the suffix on its burn (or, for a retried Pod, its
@@ -711,10 +711,10 @@ function stepKey(step) { return step.Burn + " / " + step.Step; }
    that merely ends in (N) is left alone. */
 function stepIdentity(step, keys) {
   const strip = name => { const match = /^(.*[^\s(])\((\d+)\)$/.exec(name || ""); return match ? { name: match[1], attempt: Number(match[2]) } : { name: name || "", attempt: 0 }; };
-  const burn = strip(step.Burn), name = strip(step.Step);
+  const burn = strip(step.burn), name = strip(step.step);
   const attempt = burn.attempt || name.attempt;
   if (attempt && keys.has(`${burn.name}/${name.name}`)) return { burn: burn.name, step: name.name, attempt };
-  return { burn: step.Burn || "", step: step.Step || "", attempt: 0 };
+  return { burn: step.burn || "", step: step.step || "", attempt: 0 };
 }
 function stepLabel(identity) { return identity.burn === identity.step ? identity.step : `${identity.burn}/${identity.step}`; }
 /* Keep each burn contiguous, ordered by its earliest start, then plan order.
@@ -722,16 +722,16 @@ function stepLabel(identity) { return identity.burn === identity.step ? identity
    their logical burn. Finishing a step cannot change the order. Ordinals are
    the plan's order, never the timing observer's order. */
 function orderSteps(steps) {
-  const keys = new Set((steps || []).map(step => `${step.Burn}/${step.Step}`));
+  const keys = new Set((steps || []).map(step => `${step.burn}/${step.step}`));
   const burns = new Map();
   const rows = (steps || []).map((step, index) => {
     const identity = stepIdentity(step, keys);
-    const parsed = Date.parse(step.StartedAt || "");
+    const parsed = Date.parse(step.started_at || "");
     const started = Number.isFinite(parsed) ? parsed : Infinity;
     if (!burns.has(identity.burn)) burns.set(identity.burn, { burnStart: Infinity, burnOrdinal: Infinity, index });
     const burn = burns.get(identity.burn);
     burn.burnStart = Math.min(burn.burnStart, started);
-    burn.burnOrdinal = Math.min(burn.burnOrdinal, step.Ordinal);
+    burn.burnOrdinal = Math.min(burn.burnOrdinal, step.ordinal);
     return { step, index, identity, label: stepLabel(identity), key: `${identity.burn}/${identity.step}`, started, burn };
   });
   rows.sort((a, b) => {
@@ -740,7 +740,7 @@ function orderSteps(steps) {
       return a.burn.burnOrdinal - b.burn.burnOrdinal || a.burn.index - b.burn.index;
     }
     if (a.started !== b.started) return a.started - b.started;
-    return a.identity.attempt - b.identity.attempt || a.step.Ordinal - b.step.Ordinal || a.index - b.index;
+    return a.identity.attempt - b.identity.attempt || a.step.ordinal - b.step.ordinal || a.index - b.index;
   });
   return rows;
 }
@@ -750,19 +750,19 @@ function orderSteps(steps) {
 function stepDuration(seconds) { return seconds < 1 ? "<1s" : fmtDur(seconds); }
 function stepRow(row, selectedKey) {
   const { step, label, identity } = row;
-  const key = stepKey(step), sk = statusKind(step.Status);
-  const seconds = spanSeconds(step.StartedAt, step.FinishedAt, sk === "run");
+  const key = stepKey(step), sk = statusKind(step.status);
+  const seconds = spanSeconds(step.started_at, step.finished_at, sk === "run");
   // A row that ran shows its duration, never "--": a sub-second step is "<1s".
-  const validStart = Number.isFinite(Date.parse(step.StartedAt || ""));
-  const validFinish = Number.isFinite(Date.parse(step.FinishedAt || ""));
+  const validStart = Number.isFinite(Date.parse(step.started_at || ""));
+  const validFinish = Number.isFinite(Date.parse(step.finished_at || ""));
   const timed = validStart && (validFinish || sk === "run");
   const ticking = validStart && !validFinish && sk === "run";
-  const column = timed ? stepDuration(seconds) : sk === "cancel" ? "skipped" : statusLabel(step.Status);
-  return `<button class="v4row${key === selectedKey ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm">${esc(label)}</span>${identity.attempt ? `<span class="tag">retry ${esc(identity.attempt)}</span>` : ""}${step.Secrets ? '<span class="tag">secret</span>' : ""}<span class="dur"${ticking ? ` data-started="${esc(step.StartedAt)}" data-timer-kind="step"` : ""}>${esc(column)}</span></button>`;
+  const column = timed ? stepDuration(seconds) : sk === "cancel" ? "skipped" : statusLabel(step.status);
+  return `<button class="v4row${key === selectedKey ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm">${esc(label)}</span>${identity.attempt ? `<span class="tag">retry ${esc(identity.attempt)}</span>` : ""}${step.secrets ? '<span class="tag">secret</span>' : ""}<span class="dur"${ticking ? ` data-started="${esc(step.started_at)}" data-timer-kind="step"` : ""}>${esc(column)}</span></button>`;
 }
 function defaultStep(detail) {
-  const steps = detail.Steps || [];
-  const failed = steps.find(step => statusKind(step.Status) === "fail");
+  const steps = detail.steps || [];
+  const failed = steps.find(step => statusKind(step.status) === "fail");
   if (failed) return stepKey(failed);
   return "";
 }
@@ -951,28 +951,28 @@ function renderLogLines(lines, opts = {}) {
   return out;
 }
 function summaryLines(detail) {
-  const run = detail.Run || {}, steps = detail.Steps || [];
+  const run = detail.run || {}, steps = detail.steps || [];
   const lines = [
-    `$ oberth run ${repoName(run.RepoID)}/${run.Ref}`,
-    `run ${run.ID} status=${statusLabel(displayRunStatus(run))} sha=${shortSha(run.SHA)} trigger=${run.Trigger || "--"}${run.Trigger === "schedule" && run.ScheduleEntry ? " schedule=" + run.ScheduleEntry : ""}`,
+    `$ oberth run ${repoName(run.repo_id)}/${run.ref}`,
+    `run ${run.id} status=${statusLabel(displayRunStatus(run))} sha=${shortSha(run.sha)} trigger=${run.trigger || "--"}${run.trigger === "schedule" && run.schedule_entry ? " schedule=" + run.schedule_entry : ""}`,
     "",
   ];
-  const passed = steps.filter(step => step.Status === "passed").length;
+  const passed = steps.filter(step => step.status === "passed").length;
   if (run.resource_message) lines.push(run.resource_message);
-  const burns = new Set(steps.map(step => step.Burn)).size;
+  const burns = new Set(steps.map(step => step.burn)).size;
   /* Steps the pipeline declares that this run never reached. They exist in the
      list because the plan is seeded at submission; counting them is the whole
      point of seeding it — "12 of 16" is a different fact from "12 passed". */
-  const unreached = steps.filter(step => step.Status === "pending").length;
+  const unreached = steps.filter(step => step.status === "pending").length;
   const reached = steps.length - unreached;
-  if (run.Release) lines.push("[release] reachable-tag release run — release burns executed with release credentials");
-  else if (run.Credentialed) lines.push("[credentialed] CI run with approved secret-store access — secrets are scoped per-repo, audit-attributed; in-step redaction via oberth-secret-materialize");
+  if (run.release) lines.push("[release] reachable-tag release run — release burns executed with release credentials");
+  else if (run.credentialed) lines.push("[credentialed] CI run with approved secret-store access — secrets are scoped per-repo, audit-attributed; in-step redaction via oberth-secret-materialize");
   const status = displayRunStatus(run), kind = statusKind(status);
   if (kind === "pass") lines.push(`[pass] ${passed} step${passed === 1 ? "" : "s"} passed across ${burns} burn${burns === 1 ? "" : "s"}`);
-  else if (kind === "fail") lines.push(`[fail] failed at ${run.FailedBurn ? run.FailedBurn + " / " : ""}${run.FailedStep || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
-  else if (kind === "run") lines.push(`[running] running in phase ${run.Phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
+  else if (kind === "fail") lines.push(`[fail] failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${run.failed_step || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
+  else if (kind === "run") lines.push(`[running] running in phase ${run.phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
   else if (status === "queued") {
-    const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
+    const scheduling = detail.scheduling || {}, admission = scheduling.admission || {};
     lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
     if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
     if (admission.position) lines.push(`queue position ${admission.position}`);
@@ -980,9 +980,9 @@ function summaryLines(detail) {
   else if (kind === "warn") lines.push(`[infra error, retried] ${runMessage(run)}`);
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);
-  const execution = detail.Scheduling?.execution;
+  const execution = detail.scheduling?.execution;
   if (execution) {
-    if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.Scheduling.message}`);
+    if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.scheduling.message}`);
     const deadline = execution.deadline;
     if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: ${deadline.clock === "preflight_admitted_at" ? "Preflight admission" : "Workflow start"}`);
     else if (deadline) lines.push(`[deadline] ${deadline.budget_seconds}s budget · Workflow start not observed`);
@@ -991,26 +991,26 @@ function summaryLines(detail) {
     if (execution.reconciliation_lag_seconds != null) lines.push(`[execution] observed ${execution.phase} · finalization lag ${execution.reconciliation_lag_seconds}s`);
   }
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
-  if (run.SupersededBy) lines.push({successor: run.SupersededBy, text: run.display_reason || `view successor ${shortSuccessor(run.SupersededBy)}`});
-  if (run.Reason && run.Reason !== run.display_reason && run.Reason !== run.Error) lines.push("", `reason: ${run.Reason}`);
-  if (run.Error) lines.push("", `error: ${run.Error}`);
-  const timed = steps.map(step => ({ step, seconds: spanSeconds(step.StartedAt, step.FinishedAt, false) })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds);
+  if (run.superseded_by) lines.push({successor: run.superseded_by, text: run.display_reason || `view successor ${shortSuccessor(run.superseded_by)}`});
+  if (run.reason && run.reason !== run.display_reason && run.reason !== run.error) lines.push("", `reason: ${run.reason}`);
+  if (run.error) lines.push("", `error: ${run.error}`);
+  const timed = steps.map(step => ({ step, seconds: spanSeconds(step.started_at, step.finished_at, false) })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds);
   if (timed.length) lines.push("", `slowest: ${timed.slice(0, 2).map(item => `${stepKey(item.step)} ${fmtDur(item.seconds)}`).join(" · ")}`);
   lines.push("", "select a step for its retained log");
   return lines;
 }
 async function stepLogContent(runID, step, active) {
-  if (step.Status === "pending") return renderLogLines([`step: ${stepKey(step)} · pending`, "", "step is declared by the pipeline and has not been reached yet"]);
-  if (statusKind(step.Status) === "pending") return renderLogLines([`step: ${stepKey(step)} · queued`, "", "step is waiting for its turn"]);
-  const cacheKey = `${runID}|${step.Burn}|${step.Step}|${step.FinishedAt || ""}`;
+  if (step.status === "pending") return renderLogLines([`step: ${stepKey(step)} · pending`, "", "step is declared by the pipeline and has not been reached yet"]);
+  if (statusKind(step.status) === "pending") return renderLogLines([`step: ${stepKey(step)} · queued`, "", "step is waiting for its turn"]);
+  const cacheKey = `${runID}|${step.burn}|${step.step}|${step.finished_at || ""}`;
   if (!active && state.logCache.has(cacheKey)) return state.logCache.get(cacheKey);
   let html;
   try {
-    const payload = await api(`/api/runs/${enc(runID)}/logs?burn=${enc(step.Burn)}&step=${enc(step.Step)}`);
-    const lines = stripStepPrefix(splitAttributedLogText(payload.output), step.Burn, step.Step);
-    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.Status)}${step.ExitCode ? ` · exit ${step.ExitCode}` : ""}`, ""].concat(lines.length ? lines : ["no retained step output"]));
+    const payload = await api(`/api/runs/${enc(runID)}/logs?burn=${enc(step.burn)}&step=${enc(step.step)}`);
+    const lines = stripStepPrefix(splitAttributedLogText(payload.output), step.burn, step.step);
+    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.status)}${step.exit_code ? ` · exit ${step.exit_code}` : ""}`, ""].concat(lines.length ? lines : ["no retained step output"]));
   } catch (err) {
-    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.Status)}`, "", `step log unavailable: ${err.message || err}`]);
+    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.status)}`, "", `step log unavailable: ${err.message || err}`]);
   }
   if (state.logCache.size > 32) state.logCache.clear();
   if (!active) state.logCache.set(cacheKey, html);
@@ -1251,9 +1251,9 @@ function appendLiveLines(live) {
   if (indicator) indicator.textContent = live.error ? "RECONNECTING" : live.done ? "COMPLETE" : live.fallback ? "POLLING" : "LIVE";
 }
 async function liveLogContent(run, activeBurn, activeStep) {
-  if (!state.live || state.live.runID !== run.ID) {
+  if (!state.live || state.live.runID !== run.id) {
     closeLiveLog();
-    const live = state.live = {runID: run.ID, routePath: location.pathname, offset: -1, text: "", pending: "", pendingTruncated: false, busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false, frame: null};
+    const live = state.live = {runID: run.id, routePath: location.pathname, offset: -1, text: "", pending: "", pendingTruncated: false, busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false, frame: null};
     if (canStreamLiveLog()) startLiveStream(live);
     else await fallbackLiveLog(live);
     if (state.live !== live) return "";
@@ -1282,15 +1282,15 @@ async function renderRunDetail(runID, seq, background) {
   }
   if (!currentRoute(seq)) return;
   await renderRunDetailView(detail, seq);
-  const resolvedID = state.detailRun?.ID;
+  const resolvedID = state.detailRun?.id;
   if (currentRoute(seq) && state.attempts.has(resolvedID)) loadRunAttempts(resolvedID, false, true);
   rerenderWhenStatus(pending, seq);
 }
 async function renderRunDetailView(detail, seq) {
-  const run = detail.Run || {}, steps = detail.Steps || [];
+  const run = detail.run || {}, steps = detail.steps || [];
   state.detailRun = run;
-  const repository = state.repos.some(repo => repo.ID === run.RepoID) ? repoName(run.RepoID) : (detail.Repository?.Name || repoName(run.RepoID));
-  if (state.stepRunID !== run.ID) { state.step = ""; state.stepRunID = run.ID; }
+  const repository = state.repos.some(repo => repo.id === run.repo_id) ? repoName(run.repo_id) : (detail.repository?.name || repoName(run.repo_id));
+  if (state.stepRunID !== run.id) { state.step = ""; state.stepRunID = run.id; }
   const keys = steps.map(stepKey);
   if (state.step && state.step !== "__summary__" && !keys.includes(state.step)) state.step = "";
   const selectedKey = state.step === "__summary__" ? "" : state.step || defaultStep(detail);
@@ -1301,9 +1301,9 @@ async function renderRunDetailView(detail, seq) {
   const stepCount = steps.length;
   // A running run streams live output in the terminal: on the summary view and
   // on any still-running step. Completed steps keep their retained slice.
-  const executing = run.Status === "running";
-  const live = (executing && (!selected || ["running", "queued"].includes(selected.Status))) || state.step === "__summary__";
-  const terminal = live ? await liveLogContent(run, selected?.Burn, selected?.Step) : selected ? await stepLogContent(run.ID, selected, executing) : renderLogLines(summaryLines(detail));
+  const executing = run.status === "running";
+  const live = (executing && (!selected || ["running", "queued"].includes(selected.status))) || state.step === "__summary__";
+  const terminal = live ? await liveLogContent(run, selected?.burn, selected?.step) : selected ? await stepLogContent(run.id, selected, executing) : renderLogLines(summaryLines(detail));
   if (!currentRoute(seq) || (live && !state.live)) return;
   // Preserve the reader's place across the poll re-render: stick to the
   // bottom while they are at the bottom, hold their position when they have
@@ -1315,46 +1315,46 @@ async function renderRunDetailView(detail, seq) {
   const previousStepScroll = previousStepList ? previousStepList.scrollTop : 0;
   setChrome("runs", `/ ${repository}`);
   const detailHTML = `
-  <section class="screen wide" data-detail-run="${esc(run.ID)}">
+  <section class="screen wide" data-detail-run="${esc(run.id)}">
     <div class="rh">
       <div class="rh1">
         ${bigIcon(status)}
-        <span class="rh-name"><span class="rp">${esc(repository)} /</span> ${esc(run.Ref)}</span>
+        <span class="rh-name"><span class="rp">${esc(repository)} /</span> ${esc(run.ref)}</span>
         <span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)}</span>
         ${releaseBadge(run)}${scheduleBadge(run)}
         <div class="time"><span><b>${esc(fmtDur(seconds))}</b></span><span>${esc(ago(runWhen(run)))}</span><button class="v4back" data-action-back>‹ back</button></div>
       </div>
       <div class="rh2">
-        <span>actor <span class="ag" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</span></span>
-        <span>sha <span class="sha cpy" data-copy-text="${esc(run.SHA)}" title="${esc(run.SHA)} — click to copy">${esc(shortSha(run.SHA))}</span></span>
-        <span class="cpy" data-copy-text="${esc(run.ID)}" title="${esc(run.ID)} — click to copy">run ${esc(shortId(run.ID))} ⧉</span>
-        <span>trigger ${esc(run.Trigger || "--")}</span>
+        <span>actor <span class="ag" title="${esc(run.actor)}">${esc(run.actor || "--")}</span></span>
+        <span>sha <span class="sha cpy" data-copy-text="${esc(run.sha)}" title="${esc(run.sha)} — click to copy">${esc(shortSha(run.sha))}</span></span>
+        <span class="cpy" data-copy-text="${esc(run.id)}" title="${esc(run.id)} — click to copy">run ${esc(shortId(run.id))} ⧉</span>
+        <span>trigger ${esc(run.trigger || "--")}</span>
         <span class="priority-detail">${esc(prioritySummary(run))}</span>
-        <span>${esc(run.RefKind === "tag" ? "tag" : "branch")}</span>
-        <span>queued ${esc(fmtTime(run.QueuedAt))}</span>
-        ${run.FinishedAt ? `<span>finished ${esc(fmtTime(run.FinishedAt))}</span>` : ""}
+        <span>${esc(run.ref_kind === "tag" ? "tag" : "branch")}</span>
+        <span>queued ${esc(fmtTime(run.queued_at))}</span>
+        ${run.finished_at ? `<span>finished ${esc(fmtTime(run.finished_at))}</span>` : ""}
       </div>
     </div>
-    <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.FailedStep ? (run.FailedBurn ? run.FailedBurn + " / " : "") + run.FailedStep : "run failed")}</b><span class="err" title="${esc(run.Error)}">${esc(run.Error || "")}</span></div>` : ""}
-    ${(status === "cancelled" || status === "superseded") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.SupersededBy ? `<button class="chip" data-run-id="${esc(run.SupersededBy)}">view successor ${esc(shortSuccessor(run.SupersededBy))}</button>` : ""}</div>` : ""}
-    ${status === "infra-retried" ? `<div class="sbanner retry-warning"><span>${esc(runMessage(run))}</span><button class="chip" data-run-id="${esc(run.auto_retried_by)}">view retry</button><span>${esc(run.Error || "")}</span></div>` : ""}
+    <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.failed_step ? (run.failed_burn ? run.failed_burn + " / " : "") + run.failed_step : "run failed")}</b><span class="err" title="${esc(run.error)}">${esc(run.error || "")}</span></div>` : ""}
+    ${(status === "cancelled" || status === "superseded") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.superseded_by ? `<button class="chip" data-run-id="${esc(run.superseded_by)}">view successor ${esc(shortSuccessor(run.superseded_by))}</button>` : ""}</div>` : ""}
+    ${status === "infra-retried" ? `<div class="sbanner retry-warning"><span>${esc(runMessage(run))}</span><button class="chip" data-run-id="${esc(run.auto_retried_by)}">view retry</button><span>${esc(run.error || "")}</span></div>` : ""}
     </div>
     <div id="runHistory" class="run-history">${runHistory(run)}</div>
     <div class="v4-body">
       <div class="slist" id="stepList">
-        <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : ""}</span></div>
+        <div class="sl-h"><span>STEPS · ${stepCount}${run.release ? " · RELEASE" : ""}</span></div>
         <button class="v4row summary${selected ? "" : " sel"}" data-select-step=""><span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="dur">${esc(fmtDur(seconds))}</span></button>
         <div class="sl-sep"></div>
-        ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || `<div class="empty">${run.Phase === "preflight" ? "Retired execution preflight; see the run result for upgrade details." : "No step results recorded yet."}</div>`}
+        ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || `<div class="empty">${run.phase === "preflight" ? "Retired execution preflight; see the run result for upgrade details." : "No step results recorded yet."}</div>`}
       </div>
       <div class="logp">
-        <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.Status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.Status) === "pass" ? "pass" : statusKind(selected.Status) === "fail" ? "fail" : statusKind(selected.Status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.Status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
-        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.Ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "RECONNECTING" : state.live?.done ? "COMPLETE" : state.live?.fallback ? "POLLING" : "LIVE"}</span>` : ""}</div>${live ? `<div id="liveDelivery" class="log-delivery" role="status">${esc(liveDeliverySummary(state.live, selected?.Burn, selected?.Step))}</div>` : ""}<div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
+        <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
+        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "RECONNECTING" : state.live?.done ? "COMPLETE" : state.live?.fallback ? "POLLING" : "LIVE"}</span>` : ""}</div>${live ? `<div id="liveDelivery" class="log-delivery" role="status">${esc(liveDeliverySummary(state.live, selected?.burn, selected?.step))}</div>` : ""}<div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
       </div>
     </div>
   </section>`;
   const existing = app?.querySelector("[data-detail-run]");
-  if (existing?.dataset.detailRun === run.ID) {
+  if (existing?.dataset.detailRun === run.id) {
     const template = document.createElement("template");
     template.innerHTML = detailHTML;
     for (const selector of [".rh", "#runBanners", "#stepList", "#logHead", ".term-bar"]) {
@@ -1387,14 +1387,14 @@ function upstreamName(upstreamID) {
   return info ? info.name : (upstreamID ? "#" + upstreamID : "--");
 }
 function historyStrip(runs) {
-  return `<div class="history" aria-label="recent runs, oldest to newest">${runs.slice(0, 12).reverse().map(run => `<button type="button" class="hist ${statusKind(displayRunStatus(run))}" data-run-id="${esc(run.ID)}" title="${esc(`${shortSha(run.SHA)} · ${run.RefKind === "tag" ? "tag" : "branch"} ${run.Ref} · ${statusLabel(displayRunStatus(run))} · ${ago(runWhen(run))}`)}"></button>`).join("") || '<span class="meta">--</span>'}</div>`;
+  return `<div class="history" aria-label="recent runs, oldest to newest">${runs.slice(0, 12).reverse().map(run => `<button type="button" class="hist ${statusKind(displayRunStatus(run))}" data-run-id="${esc(run.id)}" title="${esc(`${shortSha(run.sha)} · ${run.ref_kind === "tag" ? "tag" : "branch"} ${run.ref} · ${statusLabel(displayRunStatus(run))} · ${ago(runWhen(run))}`)}"></button>`).join("") || '<span class="meta">--</span>'}</div>`;
 }
 /* Archived repositories are hidden unless the archived filter is on (#1498).
    A selected archived repository stays listed so its filter remains visible. */
-function archivedRepos() { return state.repos.filter(repo => repo.ArchivedAt); }
+function archivedRepos() { return state.repos.filter(repo => repo.archived_at); }
 function orderedRepos(selected) {
   const archived = archivedRepos().filter(repo => state.showArchived || (selected && repoKey(repo) === selected));
-  return [...state.repos.filter(repo => !repo.ArchivedAt), ...archived];
+  return [...state.repos.filter(repo => !repo.archived_at), ...archived];
 }
 function archivedToggle() {
   const count = archivedRepos().length;
@@ -1417,7 +1417,7 @@ async function renderRepos(seq) {
   await Promise.all([loadRepos(), loadStatus().catch(() => { })]);
   if (!currentRoute(seq)) return;
   const rows = orderedRepos().map(repo => {
-    const runs = repo.LatestRuns || [];
+    const runs = repo.latest_runs || [];
     return { repo, runs, latest: runs[0] || null };
   });
   replaceApp(`
@@ -1425,7 +1425,7 @@ async function renderRepos(seq) {
     <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span>${archivedToggle()}</div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
-      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div><div class="branch">${esc(repo.DefaultBranch || "--")}</div>${branchCount(repo)}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
+      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.archived_at ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div><div class="branch">${esc(repo.default_branch || "--")}</div>${branchCount(repo)}</div><div>${latest ? `<div class="branch">${esc(latest.ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.upstream_id))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
     </div>
   </section>`);
   setAuto(slowPollMs);
@@ -1442,13 +1442,13 @@ function issueListURL() {
   return "/api/issues?" + query.toString();
 }
 function issueRow(issue) {
-  const repo = state.repos.find(repo => repo.ID === issue.RepoID);
-  const upstream = issue.upstream || (repo ? upstreamName(repo.UpstreamID) : "");
-  const where = issue.RepoID ? `${upstream || "--"} / ${repo?.Name || repoName(issue.RepoID)}` : (upstream || "installation");
+  const repo = state.repos.find(repo => repo.id === issue.repo_id);
+  const upstream = issue.upstream || (repo ? upstreamName(repo.upstream_id) : "");
+  const where = issue.repo_id ? `${upstream || "--"} / ${repo?.name || repoName(issue.repo_id)}` : (upstream || "installation");
   const qualified = repo ? repoKey(repo) : where;
-  const closed = state.issueState === "" && issue.State === "closed";
-  const worked = `${closed ? "closed " : ""}${shortStamp(issue.UpdatedAt)}`;
-  return `<button type="button" class="issue-row${closed ? " is-closed" : ""}" data-open-issue="${esc(issue.ID)}" aria-label="Open internal issue ${esc(issue.ID)}: ${esc(issue.Title)}"><span class="issue-id">#${esc(issue.ID)}</span><span class="issue-context"><span class="issue-where" title="${esc(qualified)}"><span class="clip">${esc(where)}</span>${issue.Kind === "ci" && issue.Branch ? `<span class="issue-branch" title="${esc(issue.Branch)}">${esc(issue.Branch)}</span>` : ""}</span><span class="issue-filed" title="${esc(stampTitle(issue.CreatedAt))}">${esc(shortStamp(issue.CreatedAt))}</span><span class="issue-worked" title="${esc(stampTitle(issue.UpdatedAt))}">${esc(worked)}${issue.stale ? '<span class="meta"> stale</span>' : ""}</span></span><span class="issue-title" title="${esc(issue.Title)}">${esc(issue.Title)}</span></button>`;
+  const closed = state.issueState === "" && issue.state === "closed";
+  const worked = `${closed ? "closed " : ""}${shortStamp(issue.updated_at)}`;
+  return `<button type="button" class="issue-row${closed ? " is-closed" : ""}" data-open-issue="${esc(issue.id)}" aria-label="Open internal issue ${esc(issue.id)}: ${esc(issue.title)}"><span class="issue-id">#${esc(issue.id)}</span><span class="issue-context"><span class="issue-where" title="${esc(qualified)}"><span class="clip">${esc(where)}</span>${issue.kind === "ci" && issue.branch ? `<span class="issue-branch" title="${esc(issue.branch)}">${esc(issue.branch)}</span>` : ""}</span><span class="issue-filed" title="${esc(stampTitle(issue.created_at))}">${esc(shortStamp(issue.created_at))}</span><span class="issue-worked" title="${esc(stampTitle(issue.updated_at))}">${esc(worked)}${issue.stale ? '<span class="meta"> stale</span>' : ""}</span></span><span class="issue-title" title="${esc(issue.title)}">${esc(issue.title)}</span></button>`;
 }
 async function renderIssues(seq) {
   setChrome("issues", "/ issues");
@@ -1471,7 +1471,7 @@ async function renderIssues(seq) {
   if (!currentRoute(seq)) return;
   rerenderWhenStatus(pending, seq);
   state.issuePage = page;
-  const issues = page.Issues || [];
+  const issues = page.issues || [];
   const counts = page.counts || {};
   const total = page.total ?? issues.length;
   const issueStart = state.issueCursorHistory.length * 50 + 1;
@@ -1490,7 +1490,7 @@ async function renderIssues(seq) {
     ${issues.length ? `<div class="table issues-table"><div class="issue-row head static"><span>#</span><span>where</span><span>title</span><span>filed</span><span>last worked</span></div>${issues.map(issueRow).join("")}</div>` : '<div class="empty">No internal issues match these filters.</div>'}
     <div class="issue-pager">
       <button type="button" data-action="issue-newer" ${state.issueCursorHistory.length ? "" : "disabled"}>‹ newer</button>
-      <button type="button" data-action="issue-older" ${page.NextBefore ? "" : "disabled"}>older ›</button>
+      <button type="button" data-action="issue-older" ${page.next_before ? "" : "disabled"}>older ›</button>
     </div>
   </section>`);
   setAuto(slowPollMs);
@@ -1502,12 +1502,12 @@ function changeIssueFilter(patch) {
   route();
 }
 async function openIssue(id, opener) {
-  let issue = (state.issuePage?.Issues || []).find(item => String(item.ID) === String(id));
+  let issue = (state.issuePage?.issues || []).find(item => String(item.id) === String(id));
   if (!issue) return;
   state.issueOpener = opener || document.activeElement;
   const dialog = document.getElementById("issueDialog");
-  document.getElementById("issueDialogTitle").textContent = `Issue #${issue.ID}`;
-  document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.upstream || "installation-wide"}`;
+  document.getElementById("issueDialogTitle").textContent = `Issue #${issue.id}`;
+  document.getElementById("issueDialogMeta").textContent = `${issue.kind} · ${issue.state} · ${issue.upstream || "installation-wide"}`;
   const requestID = state.issueDetailRequest = (state.issueDetailRequest || 0) + 1;
   const content = document.getElementById("issueDialogContent");
   content.textContent = "Loading issue…";
@@ -1515,31 +1515,31 @@ async function openIssue(id, opener) {
   if (!dialog.open) dialog.showModal();
   let detail;
   try {
-    detail = await api(`/api/issues/${encodeURIComponent(issue.ID)}`);
+    detail = await api(`/api/issues/${encodeURIComponent(issue.id)}`);
   } catch (err) {
     if (state.issueDetailRequest === requestID && dialog.open) content.textContent = err.message;
     return;
   }
   if (state.issueDetailRequest !== requestID || !dialog.open) return;
-  issue = { ...issue, Body: detail.body, work_status: detail.work_status, stale: detail.stale };
-  document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.work_status || "todo"}${issue.stale ? " · stale" : ""} · ${issue.upstream || "workspace-global"}`;
+  issue = { ...issue, body: detail.body, work_status: detail.work_status, stale: detail.stale };
+  document.getElementById("issueDialogMeta").textContent = `${issue.kind} · ${issue.state} · ${issue.work_status || "todo"}${issue.stale ? " · stale" : ""} · ${issue.upstream || "workspace-global"}`;
   content.innerHTML = `
-    <h3>${esc(issue.Title || "Untitled issue")}</h3>
-    <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "installation-wide"))} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
+    <h3>${esc(issue.title || "Untitled issue")}</h3>
+    <p class="meta">${esc(issue.repo_id ? repoName(issue.repo_id) : (issue.upstream || "installation-wide"))} ${issue.branch ? "/ " + esc(issue.branch) : ""} · Oberth internal ledger</p>
     <dl class="kv-grid">
-      <dt>kind</dt><dd>${esc(issue.Kind)}</dd>
-      <dt>state</dt><dd>${esc(issue.State)}</dd>
+      <dt>kind</dt><dd>${esc(issue.kind)}</dd>
+      <dt>state</dt><dd>${esc(issue.state)}</dd>
       <dt>work</dt><dd>${esc(issue.work_status || "todo")}${issue.stale ? " · stale" : ""}</dd>
       <dt>upstream</dt><dd>${esc(issue.upstream || "installation-wide")}</dd>
-      <dt>occurrences</dt><dd>${esc(issue.Occurrences || 1)}</dd>
-      ${issue.CIOrigin ? `<dt>ci origin</dt><dd>${esc(issue.CIOrigin)}</dd>` : ""}
-      ${issue.CIWorkID ? `<dt>ci work</dt><dd>${esc(issue.CIWorkID)}</dd>` : ""}
-      <dt>created</dt><dd>${esc(fmtTime(issue.CreatedAt))}</dd>
-      <dt>updated</dt><dd>${esc(fmtTime(issue.UpdatedAt))}</dd>
-      ${issue.ClosedAt ? `<dt>closed</dt><dd>${esc(fmtTime(issue.ClosedAt))}</dd>` : ""}
+      <dt>occurrences</dt><dd>${esc(issue.occurrences || 1)}</dd>
+      ${issue.ci_origin ? `<dt>ci origin</dt><dd>${esc(issue.ci_origin)}</dd>` : ""}
+      ${issue.ci_work_id ? `<dt>ci work</dt><dd>${esc(issue.ci_work_id)}</dd>` : ""}
+      <dt>created</dt><dd>${esc(fmtTime(issue.created_at))}</dd>
+      <dt>updated</dt><dd>${esc(fmtTime(issue.updated_at))}</dd>
+      ${issue.closed_at ? `<dt>closed</dt><dd>${esc(fmtTime(issue.closed_at))}</dd>` : ""}
     </dl>
     <h4>Body</h4>
-    <div class="issue-body md">${issue.Body ? renderMarkdown(issue.Body) : esc("(empty)")}</div>`;
+    <div class="issue-body md">${issue.body ? renderMarkdown(issue.body) : esc("(empty)")}</div>`;
 }
 function closeIssue() {
   state.issueDetailRequest = (state.issueDetailRequest || 0) + 1;
@@ -1677,7 +1677,7 @@ document.addEventListener("click", event => {
     case "close-issue": closeIssue(); break;
     case "issue-retry": route(); break;
     case "issue-older": {
-      const next = state.issuePage?.NextBefore;
+      const next = state.issuePage?.next_before;
       if (next) { state.issueCursorHistory.push(state.issueCursor); state.issueCursor = next; route(); }
       break;
     }

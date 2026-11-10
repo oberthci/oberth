@@ -7,22 +7,26 @@ Older clients may continue using their existing names and array responses.
 
 ## Record fields
 
-Typed public records in HTTP JSON bodies and MCP structured content expose
-snake_case aliases alongside legacy Go-style names.
-For example, a run keeps `ID`, `RepoID`, `QueueSequence`, `Status` and `SHA`, and
-also returns `id`, `repo_id`, `queue_sequence`, `status` and `sha`, respectively.
-Nested records follow the same rule: a full run response keeps `Run`, `Steps`
-and `Repository` and adds `run`, `steps` and `repository`. Both spellings contain
-the same value. Integers keep their full JSON integer precision. JavaScript
+Typed public records in HTTP JSON bodies and MCP structured content use
+snake_case field names: a run returns `id`, `repo_id`, `queue_sequence`,
+`status` and `sha`, and a full run response returns `run`, `steps` and
+`repository`. Integers keep their full JSON integer precision. JavaScript
 clients should use an integer-preserving decoder for IDs above 2^53.
 
-Names already written in snake_case retain their spelling. Dictionary keys,
+Releases before v0.20.3 also sent every record's Go-style name (`ID`, `RepoID`,
+`QueueSequence`, `Run`, `Steps`, `Repository`) with the same value, on every
+nested record. That doubled each record and, for a full `run_get` whose steps
+carry resource samples, multiplied the reply about fourfold. Those duplicates
+are no longer sent by default; see [Go-style field names](#go-style-field-names).
+
+Names already written in snake_case retain their spelling. A name a record
+declares in lowerCamel (`maxNotStarted`, `activeDeadlineSeconds`) is not a
+Go-style duplicate: it is still sent next to its snake_case spelling. Dictionary keys,
 such as step names, labels and resource names, are data and are not renamed.
-Aliases are generated after visibility checks and redaction, from fields
+Wire names are generated after visibility checks and redaction, from fields
 already exposed in the response. Private storage fields remain private.
 
-A primary run record returns both `id` and `run_id`, alongside legacy `ID` where
-it was present. Full run details also expose top-level `id` and `run_id`.
+A primary run record returns both `id` and `run_id`. Full run details also expose top-level `id` and `run_id`.
 Run log, artifact-list, artifact, cancel, rerun, preflight and HTTP live-log responses
 keep `run_id` and add `id`. A promotion's `id` still identifies the promotion;
 its related `run_id` never replaces it. Publication responses keep their distinct
@@ -52,14 +56,36 @@ Run paging still returns `X-Oberth-Next-Before`. The opt-in object also includes
 `next_before` for an unscoped sequence cursor or `next_cursor` for a scoped run
 ID, matching `run_list`. Follow the returned cursor; do not derive it from the
 last record. No global sequence is added for scoped callers. Empty collections
-are arrays (`[]`), not null. Existing object responses retain their envelope and
-add record aliases: `/api/issues` keeps `Issues` and `NextBefore` and adds
-`issues` and `next_before`, matching the names in MCP `issue_list`.
+are arrays (`[]`), not null. Existing object responses retain their envelope:
+`/api/issues` returns `issues` and `next_before`, matching the names in MCP
+`issue_list` (and `Issues` and `NextBefore` too with the Go-style opt-in).
 
-Default MCP text and structured JSON carry the same aliases. Tools with a
+Default MCP text and structured JSON carry the same snake_case names. Tools with a
 specialized text format, such as logs or YAML reports, keep that existing text
 format; their structured records receive the additive fields. JSON-RPC framing
 is unchanged.
+
+## Go-style field names
+
+A client that reads the Go-style names asks for them per request:
+
+- HTTP and MCP: send the header `X-Oberth-Go-Field-Names: 1`.
+- HTTP only: or add `go_field_names=1` to the query string.
+- CLI: `oberth mcp call --go-field-names`, or `OBERTH_GO_FIELD_NAMES=1` for
+  `oberth mcp call` and the REST commands (`oberth runs --json` and friends).
+
+The response then carries both spellings with the same value, the shape
+releases before v0.20.3 sent by default, and echoes
+`X-Oberth-Go-Field-Names: 1`. Without the opt-in only the snake_case names are
+sent. The bundled CLI and dashboard read the snake_case names and also accept
+the two-spelling shape, so either side may be upgraded first. Go programs that
+decode responses into untagged records (`model.Run`) can use
+`internal/recordjson.Unmarshal`, which maps the snake_case names back to the Go
+field names.
+
+The v0.20.3 default response shape is an announced exception to the additive
+policy below: the values are unchanged; only the duplicate spelling moved
+behind the opt-in.
 
 ## Compatibility and deprecation policy
 

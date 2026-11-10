@@ -63,7 +63,7 @@ func TestRunDetailKeepsQueuedStagesPending(t *testing.T) {
 	if !strings.Contains(row, `${sk === "pending" ? " pend" : ""}`) {
 		t.Fatal("queued steps do not render as pending rows")
 	}
-	if !strings.Contains(row, `sk === "cancel" ? "skipped" : statusLabel(step.Status)`) {
+	if !strings.Contains(row, `sk === "cancel" ? "skipped" : statusLabel(step.status)`) {
 		t.Fatal("queued rows do not render the queued state")
 	}
 	if !strings.Contains(row, `sk === "cancel" ? "⊘" : "◌"`) {
@@ -88,7 +88,7 @@ func TestRunsServerSideRepoFilter(t *testing.T) {
 	}
 	// The run list pages with ?before and the sidebar counts every retained
 	// run, not just the loaded page (#050).
-	for _, want := range []string{`query.set("before", String(state.runCursor))`, `"/api/runs/counts"`, `data-action="runs-older"`, `state.runCounts.ByRepo?.[repo.ID]`,
+	for _, want := range []string{`query.set("before", String(state.runCursor))`, `"/api/runs/counts"`, `data-action="runs-older"`, `state.runCounts.by_repo?.[repo.id]`,
 		// The older-page cursor is the one the server names (#073): a run ID
 		// for a scoped uplink, which sees no sequences.
 		`response.headers.get("X-Oberth-Next-Before")`, `{ withNext: true }`} {
@@ -140,8 +140,8 @@ func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
 	source := string(script.body)
 	for _, want := range []string{
 		"function repoKey(repo)",
-		"`${upstream.name}/${repoOrg(upstream)}/${repo.Name}`",
-		"`${repoOrg(upstream)}/${repo.Name}`",
+		"`${upstream.name}/${repoOrg(upstream)}/${repo.name}`",
+		"`${repoOrg(upstream)}/${repo.name}`",
 		"if (!state.status) return value;",
 		`[400, 404, 409].includes(err.status)`,
 		`return { pending: ensureStatus() };`,
@@ -151,7 +151,7 @@ func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
 		`data-repo-filter="${esc(repoKey(repo))}"`,
 		`data-repo-runs="${esc(repoKey(repo))}"`,
 		`<option value="${esc(repoKey(repo))}"`,
-		`counts.set(repoKey(repo), state.runCounts.ByRepo?.[repo.ID] || 0)`,
+		`counts.set(repoKey(repo), state.runCounts.by_repo?.[repo.id] || 0)`,
 		`state.repo = normalizeRepoSelector(state.repo, "all")`,
 		`err.status === 409`,
 	} {
@@ -159,7 +159,7 @@ func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {
 			t.Errorf("app.js is missing %s", want)
 		}
 	}
-	for _, bare := range []string{`data-repo-filter="${esc(repo.Name)}"`, `data-repo-runs="${esc(repo.Name)}"`, `<option value="${esc(repo.Name)}"`} {
+	for _, bare := range []string{`data-repo-filter="${esc(repo.name)}"`, `data-repo-runs="${esc(repo.name)}"`, `<option value="${esc(repo.name)}"`} {
 		if strings.Contains(source, bare) {
 			t.Errorf("app.js still selects a repository by its bare name: %s", bare)
 		}
@@ -295,7 +295,7 @@ func TestDashboardUsesBranchTagCountsAndIssueFacets(t *testing.T) {
 			t.Fatalf("dashboard is missing count or range logic %q", want)
 		}
 	}
-	for _, unwanted := range []string{"pill(issue.Kind", "pill(issue.State", "×${esc(issue.Occurrences", "data-issue-kind", "kindCount(value)", "facets.manual"} {
+	for _, unwanted := range []string{"pill(issue.kind", "pill(issue.state", "×${esc(issue.occurrences", "data-issue-kind", "kindCount(value)", "facets.manual"} {
 		if strings.Contains(source, unwanted) {
 			t.Fatalf("issues list retains %q", unwanted)
 		}
@@ -312,7 +312,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 	for _, want := range []string{
 		`const runFilters = ["all", "queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"]`,
 		`const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter`,
-		`return statusOK && (!state.releaseOnly || run.Release)`,
+		`return statusOK && (!state.releaseOnly || run.release)`,
 		`data-kind-filter="release"`, `state.releaseOnly = !state.releaseOnly`,
 		`localStorage.setItem("oberth-kind", state.releaseOnly ? "release" : "all")`,
 		`if (saved === "waiting") return "queued"`,
@@ -320,7 +320,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 		`localStorage.getItem("oberth-filter") === "release"`,
 		`state.runNext = runPageFull(source)`,
 		`function shortSuccessor(s) { return String(s || "").slice(0, 12); }`,
-		`view successor ${esc(shortSuccessor(run.SupersededBy))}`,
+		`view successor ${esc(shortSuccessor(run.superseded_by))}`,
 		`(status === "cancelled" || status === "superseded") ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
 	} {
 		if !strings.Contains(source, want) {
@@ -349,7 +349,7 @@ func TestArchivedRepositoriesHiddenBehindArchivedFilter(t *testing.T) {
 		`data-archived-filter`,
 		`closest("[data-archived-filter]"))) { toggleArchived(); route(); return; }`,
 		`${state.repos.length} configured</span>${archivedToggle()}`,
-		`state.runCounts.ByRepo?.[repo.ID]`,
+		`state.runCounts.by_repo?.[repo.id]`,
 		`pill("archived", "cancel")`,
 	} {
 		if !strings.Contains(source, required) {
@@ -357,7 +357,7 @@ func TestArchivedRepositoriesHiddenBehindArchivedFilter(t *testing.T) {
 		}
 	}
 	for _, unwanted := range []string{
-		`return [...state.repos.filter(repo => !repo.ArchivedAt), ...state.repos.filter(repo => repo.ArchivedAt)];`,
+		`return [...state.repos.filter(repo => !repo.archived_at), ...state.repos.filter(repo => repo.archived_at)];`,
 		`${state.repos.map(repo => `,
 	} {
 		if strings.Contains(source, unwanted) {
@@ -399,7 +399,7 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 		}
 	}
 	detail := section("async function renderRunDetailView(", "\n/* ---------- repositories")
-	if !strings.Contains(detail, `${releaseBadge(run)}`) || !strings.Contains(detail, `${run.Release ? " · RELEASE" : ""}`) {
+	if !strings.Contains(detail, `${releaseBadge(run)}`) || !strings.Contains(detail, `${run.release ? " · RELEASE" : ""}`) {
 		t.Fatal("run detail lost the release badge")
 	}
 	// Every step renders through one row renderer, fed by the ordering
@@ -418,7 +418,7 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 	// Burns stay contiguous in start/plan order, including pending siblings
 	// and legacy retries. The dashboard Node test exercises the live order.
 	order := section("function orderSteps(steps)", "\n/*")
-	for _, want := range []string{"Date.parse(step.StartedAt", "Number.isFinite(parsed)", "burnStart", "burnOrdinal", "a.identity.attempt - b.identity.attempt", "a.step.Ordinal - b.step.Ordinal"} {
+	for _, want := range []string{"Date.parse(step.started_at", "Number.isFinite(parsed)", "burnStart", "burnOrdinal", "a.identity.attempt - b.identity.attempt", "a.step.ordinal - b.step.ordinal"} {
 		if !strings.Contains(order, want) {
 			t.Fatalf("orderSteps is missing %s", want)
 		}
@@ -445,11 +445,11 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 	for _, want := range []string{
 		`<span class="nm">${esc(label)}</span>`,
 		"${identity.attempt ? `<span class=\"tag\">retry ${esc(identity.attempt)}</span>` : \"\"}",
-		`${step.Secrets ? '<span class="tag">secret</span>' : ""}`,
-		"<span class=\"dur\"${ticking ? ` data-started=\"${esc(step.StartedAt)}\" data-timer-kind=\"step\"` : \"\"}>${esc(column)}</span>",
+		`${step.secrets ? '<span class="tag">secret</span>' : ""}`,
+		"<span class=\"dur\"${ticking ? ` data-started=\"${esc(step.started_at)}\" data-timer-kind=\"step\"` : \"\"}>${esc(column)}</span>",
 		`const ticking = validStart && !validFinish && sk === "run";`,
 		`timed ? stepDuration(seconds)`,
-		`sk === "cancel" ? "skipped" : statusLabel(step.Status)`,
+		`sk === "cancel" ? "skipped" : statusLabel(step.status)`,
 	} {
 		if !strings.Contains(row, want) {
 			t.Fatalf("stepRow is missing %s", want)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 	"github.com/oberthci/oberth/internal/runlog"
 )
 
@@ -857,7 +858,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 		return encoder.Encode(document)
 	}
 	var page remoteIssuePage
-	if err = json.Unmarshal(raw, &page); err != nil {
+	if err = recordjson.Unmarshal(raw, &page); err != nil {
 		return err
 	}
 	if len(page.Issues) == 0 {

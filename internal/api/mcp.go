@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -403,7 +404,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 			"protocolVersion": version,
 			"capabilities":    capabilities,
 			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
-			"instructions":    "Snake_case field names are canonical; prefer them over legacy aliases. system_status reports queue_cap with snake_case keys; queueCap remains for one more release. Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
+			"instructions":    "Record fields are snake_case (id, repo_id, steps); the Go-style duplicates (ID, RepoID, Steps) are no longer sent unless the request carries X-Oberth-Go-Field-Names: 1. system_status reports queue_cap with snake_case keys; queueCap remains for one more release. Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
 		}
 		if server.pushAvailable() {
 			result := response.Result.(map[string]any)
@@ -451,7 +452,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if err != nil {
 			response.Result = server.classifyToolFailure(err)
 		} else {
-			response.Result = toolSuccess(result)
+			response.Result = toolSuccess(request.Context(), result)
 		}
 	default:
 		response.Error = &rpcError{Code: -32601, Message: "method not found"}
@@ -493,8 +494,8 @@ func writeRPC(writer http.ResponseWriter, response rpcResponse) {
 	_ = json.NewEncoder(writer).Encode(response)
 }
 
-func toolSuccess(payload any) map[string]any {
-	raw, err := marshalCompatible(payload)
+func toolSuccess(ctx context.Context, payload any) map[string]any {
+	raw, err := marshalCompatible(payload, goFieldNames(ctx))
 	if err != nil || len(raw) == 0 || raw[0] != '{' {
 		return toolFailure(errors.New("internal error: tool result must be a JSON object"))
 	}
@@ -592,6 +593,10 @@ func ToolNames() []string {
 // maxAssistArgv bounds run_hold_exec argv entries (service.maxAssistExecArgs).
 const maxAssistArgv = 64
 
+// maxAssistExecSeconds is argojob.MaxAssistExecTimeout in seconds: the
+// longest run_hold_exec any installation can configure.
+const maxAssistExecSeconds = 900
+
 func toolDefinitions() []map[string]any {
 	stringProperty := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
@@ -669,26 +674,26 @@ func toolDefinitions() []map[string]any {
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm replaying a tag/release run after credentialed/publication work started or when replay safety is unknown"},
 			"assist": map[string]any{"type": "boolean", "description": "Ask for agent-assisted continuation: a failed credential-free step of this branch CI rerun parks its retry for run_hold_* instead of failing (assist.enabled; ignored elsewhere)"},
 		}, "id")),
-		tool("run_hold_list", "List the parked retry attempts (holds) of an assisted branch CI run: step, pod, attempt, held_since, kubelet deadline, whether run_hold_patch can apply files, and whether the hold was already continued or abandoned. Also returns the run's assist record and the installation policy. A run holds only when it asked for assistance (push option oberth.assist=1 or run_rerun assist), assist.enabled is on, and a credential-free step exited nonzero; the retry Pod parks before its command until run_continue, run_hold_abandon or assist.holdTTL (the server abandons an idle hold past the TTL; each exec, patch or continue restarts it, up to twice the TTL after held_since; the Pod deadline shown also covers the step's own budget after release). Read-only.", object(map[string]any{
+		tool("run_hold_list", "List the parked retry attempts (holds) of an assisted branch CI run: step, pod, attempt, held_since, abandon_at (when the server abandons the hold unless someone acts: plan against this), kubelet deadline, whether run_hold_patch can apply files, and whether the hold was already continued or abandoned. Also returns the run's assist record and the installation policy (hold_ttl_s, exec_timeout_s in seconds). A run holds only when it asked for assistance (push option oberth.assist=1 or run_rerun assist), assist.enabled is on, and a credential-free step exited nonzero; the retry Pod parks before its command until run_continue, run_hold_abandon or assist.holdTTL (the server abandons an idle hold past the TTL; each exec, patch or continue restarts it, up to twice the TTL after held_since; the Pod deadline shown also covers the step's own budget after release). Read-only.", object(map[string]any{
 			"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 		}, "id")),
-		tool("run_hold_exec", "Run one bounded command (argv, no shell) inside the held step's main container, as the run's own uplink or an admin: for diagnosing the failure in the live environment. Bounded by assist.execTimeout and assist.execOutputBytes (the deadline stops the stream; a process the image keeps running is not killed), serialized per run, capped installation-wide, and recorded in the run's assist record and audit (run.assist.exec) before the command runs. Any exec marks the run assisted: it is never evidence from this point, whatever the command did.", object(map[string]any{
+		tool("run_hold_exec", "Run one bounded command (argv, no shell) inside the held step's main container, as an uplink whose scope covers the run's repository (who may push to it) or an admin: for diagnosing the failure in the live environment. Bounded by assist.execTimeout and assist.execOutputBytes (the deadline stops the stream; a process the image keeps running is not killed), serialized per run, capped installation-wide, and recorded in the run's assist record and audit (run.assist.exec) before the command runs. Any exec marks the run assisted: it is never evidence from this point, whatever the command did.", object(map[string]any{
 			"id":              stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"step":            stringProperty("Held step (Argo template name); optional when exactly one step is held"),
 			"argv":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": maxAssistArgv, "description": "Command and arguments, executed directly (argv[0] must be on PATH or absolute); no shell interpretation"},
 			"stdin":           stringProperty("Optional standard input, at most 1 MiB"),
-			"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "description": "Optional shorter deadline than assist.execTimeout"},
+			"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": maxAssistExecSeconds, "description": "Optional shorter deadline than assist.execTimeout (itself at most 900)"},
 		}, "id", "argv")),
 		tool("run_hold_patch", "Apply a unified diff to the held step's writable source tree (/work/src) through the server's own Pod helper: exact-context hunks, relative cleaned paths only, no renames, binaries, mode changes, .git or symlink traversal, bounded by assist.patchMaxBytes/patchMaxFiles. The diff's sha256 is recorded in the run's assist record and audit (run.assist.patch) before it is applied, and the run is assisted from then on: never promotion, release or green-for-SHA evidence; push the change as a commit for a real green run.", object(map[string]any{
 			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"step": stringProperty("Held step (Argo template name); optional when exactly one step is held"),
 			"diff": stringProperty("Unified diff (git diff or diff -u output)"),
 		}, "id", "diff")),
-		tool("run_continue", "Release a held step: the parked executor runs the step's real command on the (possibly patched) tree and Argo continues the DAG natively on success. Recorded before the release (run.assist.continue); the run is assisted (as it already is after any exec or patch) and its status carries an 'assisted: ... not evidence' reason line. An assisted run is never published upstream, never a promotion source and never green for its SHA, even when no patch or exec happened (a plain release is still not evidence). A release that fails abandons the Pod. Run's own uplink or admin.", object(map[string]any{
+		tool("run_continue", "Release a held step: the parked executor runs the step's real command on the (possibly patched) tree and Argo continues the DAG natively on success. Recorded before the release (run.assist.continue); the run is assisted (as it already is after any exec or patch) and its status carries an 'assisted: ... not evidence' reason line. An assisted run is never published upstream, never a promotion source and never green for its SHA, even when no patch or exec happened (a plain release is still not evidence). A release that fails abandons the Pod. Any uplink whose scope covers the run's repository, or an admin.", object(map[string]any{
 			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"step": stringProperty("Held step (Argo template name); optional when exactly one step is held"),
 		}, "id")),
-		tool("run_hold_abandon", "Delete a held step's parked Pod so the step fails normally and the run ends red as it would have without assistance. Recorded as run.assist.abandon. Run's own uplink or admin.", object(map[string]any{
+		tool("run_hold_abandon", "Delete a held step's parked Pod so the step fails normally and the run ends red as it would have without assistance. Recorded as run.assist.abandon. Any uplink whose scope covers the run's repository, or an admin.", object(map[string]any{
 			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"step": stringProperty("Held step (Argo template name); optional when exactly one step is held"),
 		}, "id")),

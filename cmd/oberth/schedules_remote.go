@@ -6,12 +6,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
 
+	"github.com/oberthci/oberth/internal/recordjson"
 	"github.com/oberthci/oberth/internal/service"
 )
 
@@ -74,13 +74,13 @@ func runRemoteSchedules(ctx context.Context, subcommand string, arguments []stri
 	switch subcommand {
 	case "list":
 		var response service.ScheduleListResponse
-		if err := json.Unmarshal(raw, &response); err != nil {
+		if err := recordjson.Unmarshal(raw, &response); err != nil {
 			return fmt.Errorf("decode schedule_list: %w", err)
 		}
 		return writeScheduleList(output, response)
 	case "trigger":
 		var response service.ScheduleTriggerResponse
-		if err := json.Unmarshal(raw, &response); err != nil {
+		if err := recordjson.Unmarshal(raw, &response); err != nil {
 			return fmt.Errorf("decode schedule_trigger: %w", err)
 		}
 		_, err := fmt.Fprintf(output, "%s  %s/%s queued at %s on %s\n", response.RunID, response.Repo, response.Entry, shortSHA(response.SHA), response.Branch)
@@ -92,7 +92,7 @@ func runRemoteSchedules(ctx context.Context, subcommand string, arguments []stri
 			Paused  bool   `json:"paused"`
 			Changed bool   `json:"changed"`
 		}
-		if err := json.Unmarshal(raw, &response); err != nil {
+		if err := recordjson.Unmarshal(raw, &response); err != nil {
 			return fmt.Errorf("decode %s: %w", tool, err)
 		}
 		state := "running"

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 // runWaitIdle is an in-pod read of the live daemon, used by upgrade --wait-idle.
@@ -156,7 +156,7 @@ func probeIdle(ctx context.Context, client *http.Client, target, mode string) (s
 		return state, false, false, true, fmt.Errorf("read live daemon queue: %w", readErr)
 	}
 	known = len(body) > 0
-	if (mode == "critical" && !known) || (known && (len(body) > 4096 || json.Unmarshal(body, &state) != nil || !state.Valid())) {
+	if (mode == "critical" && !known) || (known && (len(body) > 4096 || recordjson.Unmarshal(body, &state) != nil || !state.Valid())) {
 		return state, false, false, false, errors.New("invalid live daemon queue snapshot")
 	}
 	return state, true, known, false, nil

@@ -143,14 +143,16 @@ MCP tools (CLI: `oberth run hold ...`):
 
 | Tool | Does |
 |---|---|
-| `run_hold_list` | Parked attempts of the run: step, pod, attempt, held_since, kubelet deadline, `patch_capable`, `released`; plus the assist record and the installation policy. Read-only. |
+| `run_hold_list` | Parked attempts of the run: step, pod, attempt, held_since, `abandon_at` (when the server's TTL sweep abandons an unreleased hold, counting the actions that extended it), kubelet deadline, `patch_capable`, `released`; plus the assist record and the installation policy (`hold_ttl`/`exec_timeout` as duration text, `hold_ttl_s`/`exec_timeout_s` in seconds). Read-only. |
 | `run_hold_exec` | Run one `argv` inside the held `main` container. No shell: the server passes argv straight to `pods/exec`. Bounded by `assist.execTimeout` and `assist.execOutputBytes`, optional `stdin` (1 MiB), optional shorter `timeout_seconds`. |
 | `run_hold_patch` | Apply a unified `diff` to `/work/src`. The server parses it (plain text file patches only: no renames, copies, mode changes, binaries, `.git`, absolute or parent paths), reads the touched files through the Pod helper, applies every hunk with exact context (no fuzz), and writes them back with the read digests as preconditions; the helper refuses the whole write if a file changed in between, never follows a symlink, and writes through a same-directory temporary and rename. The diff's sha256, size and file list are recorded. |
 | `run_continue` | Create the release marker; the executor runs the real command, Argo records the attempt and continues the DAG on success. |
 | `run_hold_abandon` | Delete the held Pod; the step fails normally and the run ends red. |
 
-Rules shared by every mutation: the caller is the run's own uplink
-(`run.actor`) or an admin; a scoped uplink sees only its repositories' runs;
+Rules shared by every mutation: the caller may push to the run's repository
+(the run's own uplink, an unscoped uplink, or a scoped uplink whose scope
+covers the repository) or is an admin; a scoped uplink sees only its
+repositories' runs, so a run outside its scope is "not found";
 the run must be active; actions are serialized per run and capped
 installation-wide (`assist.maxConcurrentHolds` slots); each one is appended
 to the run's `assist_record` and audited as `run.assist.<kind>` with actor,
