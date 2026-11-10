@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 type fakeBackend struct {
@@ -271,7 +272,7 @@ func TestMCPInitializeAdvertisesAgentReadableDashboardState(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status", "has_more", "byte_offset", "offset=0", "empty window", "Snake_case field names are canonical", "queue_cap", "one more release"} {
+	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status", "has_more", "byte_offset", "offset=0", "empty window", "Record fields are snake_case", "X-Oberth-Legacy-Fields", "queue_cap", "one more release"} {
 		if !strings.Contains(decoded.Result.Instructions, route) {
 			t.Fatalf("initialize instructions omit %s: %q", route, decoded.Result.Instructions)
 		}
@@ -1108,11 +1109,11 @@ func TestRunCountsRoute(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || backend.runID != "" || !strings.Contains(response.Body.String(), `"Total":3`) {
+	if response.Code != http.StatusOK || backend.runID != "" || !strings.Contains(response.Body.String(), `"total":3`) {
 		t.Fatalf("status=%d runID=%q body=%s", response.Code, backend.runID, response.Body.String())
 	}
 	var counts model.RunCounts
-	if err := json.Unmarshal(response.Body.Bytes(), &counts); err != nil || counts.Queued != 1 || counts.Running != 1 || counts.QueuedByRepo[1] != 1 || counts.RunningByRepo[2] != 1 {
+	if err := recordjson.Unmarshal(response.Body.Bytes(), &counts); err != nil || counts.Queued != 1 || counts.Running != 1 || counts.QueuedByRepo[1] != 1 || counts.RunningByRepo[2] != 1 {
 		t.Fatalf("counts = %+v, %v", counts, err)
 	}
 	unauthenticated := httptest.NewRecorder()

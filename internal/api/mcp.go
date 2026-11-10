@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -403,7 +404,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 			"protocolVersion": version,
 			"capabilities":    capabilities,
 			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
-			"instructions":    "Snake_case field names are canonical; prefer them over legacy aliases. system_status reports queue_cap with snake_case keys; queueCap remains for one more release. Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
+			"instructions":    "Record fields are snake_case (id, repo_id, steps); the Go-style duplicates (ID, RepoID, Steps) are no longer sent unless the request carries X-Oberth-Legacy-Fields: 1. system_status reports queue_cap with snake_case keys; queueCap remains for one more release. Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
 		}
 		if server.pushAvailable() {
 			result := response.Result.(map[string]any)
@@ -451,7 +452,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if err != nil {
 			response.Result = server.classifyToolFailure(err)
 		} else {
-			response.Result = toolSuccess(result)
+			response.Result = toolSuccess(request.Context(), result)
 		}
 	default:
 		response.Error = &rpcError{Code: -32601, Message: "method not found"}
@@ -493,8 +494,8 @@ func writeRPC(writer http.ResponseWriter, response rpcResponse) {
 	_ = json.NewEncoder(writer).Encode(response)
 }
 
-func toolSuccess(payload any) map[string]any {
-	raw, err := marshalCompatible(payload)
+func toolSuccess(ctx context.Context, payload any) map[string]any {
+	raw, err := marshalCompatible(payload, legacyFields(ctx))
 	if err != nil || len(raw) == 0 || raw[0] != '{' {
 		return toolFailure(errors.New("internal error: tool result must be a JSON object"))
 	}

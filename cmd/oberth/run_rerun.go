@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 const runRerunUsage = "Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]\n" +
@@ -54,7 +55,7 @@ func runRunRerun(ctx context.Context, arguments []string, output io.Writer) erro
 
 func writeRunRerun(output io.Writer, raw json.RawMessage, asJSON bool) error {
 	var response api.RunRerunResponse
-	if asJSON || json.Unmarshal(raw, &response) != nil || response.Mode == "" {
+	if asJSON || recordjson.Unmarshal(raw, &response) != nil || response.Mode == "" {
 		_, err := fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 		return err
 	}

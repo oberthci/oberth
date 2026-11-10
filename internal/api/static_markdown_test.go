@@ -23,7 +23,7 @@ func TestIssueBodyMarkdownRendererInvariants(t *testing.T) {
 		// The renderer exists as a pure function and the dialog uses it for the
 		// body instead of raw escaped text.
 		"function renderMarkdown(raw)",
-		"renderMarkdown(issue.Body)",
+		"renderMarkdown(issue.body)",
 		// Positive scheme allowlist: only http(s) URLs ever become anchors.
 		`function mdSafeHref(url) { return /^https?:\/\//i.test(url); }`,
 		// Generated anchors carry exactly the hardened attribute set.
@@ -40,7 +40,7 @@ func TestIssueBodyMarkdownRendererInvariants(t *testing.T) {
 	}
 
 	// The issue dialog must not fall back to injecting the raw body.
-	if strings.Contains(source, "${esc(issue.Body") {
+	if strings.Contains(source, "${esc(issue.body") {
 		t.Error("issue dialog renders the raw escaped body instead of renderMarkdown")
 	}
 

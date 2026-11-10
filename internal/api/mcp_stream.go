@@ -176,7 +176,7 @@ func (server *Server) streamLongPollObserved(writer http.ResponseWriter, request
 			response.Result = server.classifyWaitFailure(callErr, trace)
 		}
 	} else {
-		response.Result = toolSuccess(payload)
+		response.Result = toolSuccess(request.Context(), payload)
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {

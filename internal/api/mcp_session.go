@@ -287,7 +287,7 @@ func (server *Server) handleMCPResources(request *http.Request, session *mcpSess
 	}
 	switch method {
 	case "resources/read":
-		encoded, err := marshalCompatible(value)
+		encoded, err := marshalCompatible(value, legacyFields(request.Context()))
 		if err != nil {
 			response.Error = &rpcError{Code: -32603, Message: "internal error"}
 			return

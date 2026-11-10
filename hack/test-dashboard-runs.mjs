@@ -14,30 +14,30 @@ run(`
   let html='', requests=[], listNext='', flatPaging=false;
   replaceApp=value=>{html=value};
   const makeRun=(ID,extra={})=>{
-    const row={ID,RepoID:1,Ref:'main',RefKind:'branch',Status:'passed',StartedAt:'2026-11-01T10:00:00Z',FinishedAt:'2026-11-01T10:01:00Z',...extra};
-    if(['running','queued'].includes(row.Status)) {
+    const row={id:ID,repo_id:1,ref:'main',ref_kind:'branch',status:'passed',started_at:'2026-11-01T10:00:00Z',finished_at:'2026-11-01T10:01:00Z',...extra};
+    if(['running','queued'].includes(row.status)) {
       row.priority_class ??= 'standard'; row.priority_reason ??= 'ordinary run';
       row.display_reason ??= '';
     }
     return row;
   };
-  const head=makeRun('push-head',{Status:'queued',StartedAt:null,FinishedAt:null});
-  const scheduled=makeRun('scheduled-running',{Status:'running',Trigger:'schedule',ScheduleEntry:'nightly',FinishedAt:null});
-  const queued=makeRun('publication-queued',{Status:'queued',Ref:'other',StartedAt:null,FinishedAt:null});
-  const failed=makeRun('nightly-failed',{Status:'failed',Trigger:'schedule',ScheduleEntry:'nightly'});
-  const superseded=makeRun('superseded-old',{Status:'interrupted',SupersededBy:head.ID});
-  const retried=makeRun('retried-old',{Ref:'feature',Status:'failed',auto_retried_by:'retry-head'});
+  const head=makeRun('push-head',{status:'queued',started_at:null,finished_at:null});
+  const scheduled=makeRun('scheduled-running',{status:'running',trigger:'schedule',schedule_entry:'nightly',finished_at:null});
+  const queued=makeRun('publication-queued',{status:'queued',ref:'other',started_at:null,finished_at:null});
+  const failed=makeRun('nightly-failed',{status:'failed',trigger:'schedule',schedule_entry:'nightly'});
+  const superseded=makeRun('superseded-old',{status:'interrupted',superseded_by:head.id});
+  const retried=makeRun('retried-old',{ref:'feature',status:'failed',auto_retried_by:'retry-head'});
   state.status={upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};state.statusLoadedAt=Date.now();
   api=async path=>{
     requests.push(path);
-    if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1},{ID:2,Name:'theirs',UpstreamID:1}];
-    if(path==='/api/runs/counts')return {Total:300,ByRepo:{1:299,2:1}};
+    if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1},{id:2,name:'theirs',upstream_id:1}];
+    if(path==='/api/runs/counts')return {total:300,by_repo:{1:299,2:1}};
     const query=new URL(path,'https://example.test').searchParams;
-    if(query.get('view')==='active')return [scheduled,queued,head,...(query.has('repo')?[]:[makeRun('foreign-running',{RepoID:2,Status:'running',FinishedAt:null})])];
+    if(query.get('view')==='active')return [scheduled,queued,head,...(query.has('repo')?[]:[makeRun('foreign-running',{repo_id:2,status:'running',finished_at:null})])];
     let rows;
-    if(query.has('latest_per_ref'))rows=query.has('before')?[makeRun('page-two-head',{Ref:'old-ref'})]:[head,makeRun('retry-head',{Ref:'feature'})];
-    else if(flatPaging)rows=[head,...Array.from({length:100},(_,i)=>makeRun('flat-'+i,{Ref:'ref-'+i}))];
-    else rows=[head,scheduled,queued,failed,superseded,retried,makeRun('retry-head',{Ref:'feature'})];
+    if(query.has('latest_per_ref'))rows=query.has('before')?[makeRun('page-two-head',{ref:'old-ref'})]:[head,makeRun('retry-head',{ref:'feature'})];
+    else if(flatPaging)rows=[head,...Array.from({length:100},(_,i)=>makeRun('flat-'+i,{ref:'ref-'+i}))];
+    else rows=[head,scheduled,queued,failed,superseded,retried,makeRun('retry-head',{ref:'feature'})];
     return {body:rows,next:listNext};
   };
   const apiFixture=api;
@@ -81,23 +81,23 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     state.filter='all';flatPaging=false;changeRunRepo('all');state.runCursor=0;state.runCursorHistory=[];
     const f3Time=minutes=>new Date(Date.UTC(2026,10,3,10,minutes)).toISOString();
     const f3Page=[
-      makeRun('passed-newest',{Ref:'r1',StartedAt:f3Time(0),FinishedAt:f3Time(50)}),
-      makeRun('passed-older',{Ref:'r2',StartedAt:f3Time(5),FinishedAt:f3Time(40)}),
-      makeRun('queued-normal-late',{Ref:'r3',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(20),QueuePosition:3}),
-      makeRun('queued-high-next',{Ref:'r4',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(21),QueuePosition:1,priority_class:'high'}),
-      makeRun('failed-middle',{Ref:'r5',Status:'failed',StartedAt:f3Time(10),FinishedAt:f3Time(45)}),
-      makeRun('running-early',{Ref:'r6',Status:'running',StartedAt:f3Time(30),FinishedAt:null}),
+      makeRun('passed-newest',{ref:'r1',started_at:f3Time(0),finished_at:f3Time(50)}),
+      makeRun('passed-older',{ref:'r2',started_at:f3Time(5),finished_at:f3Time(40)}),
+      makeRun('queued-normal-late',{ref:'r3',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(20),queue_position:3}),
+      makeRun('queued-high-next',{ref:'r4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(21),queue_position:1,priority_class:'high'}),
+      makeRun('failed-middle',{ref:'r5',status:'failed',started_at:f3Time(10),finished_at:f3Time(45)}),
+      makeRun('running-early',{ref:'r6',status:'running',started_at:f3Time(30),finished_at:null}),
     ];
     const f3Active=[
-      makeRun('running-late-hidden',{Ref:'r7',Status:'running',StartedAt:f3Time(35),FinishedAt:null}),
-      makeRun('waiting-hidden',{Ref:'r9',Status:'running',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(23),QueuePosition:4,display_status:'queued'}),
-      makeRun('queued-high-second-hidden',{Ref:'r8',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(22),QueuePosition:2,priority_class:'high'}),
+      makeRun('running-late-hidden',{ref:'r7',status:'running',started_at:f3Time(35),finished_at:null}),
+      makeRun('waiting-hidden',{ref:'r9',status:'running',started_at:null,finished_at:null,queued_at:f3Time(23),queue_position:4,display_status:'queued'}),
+      makeRun('queued-high-second-hidden',{ref:'r8',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22),queue_position:2,priority_class:'high'}),
     ];
     api=async path=>{
-      if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
-      if(path==='/api/runs/counts')return {Total:9,ByRepo:{1:9}};
+      if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+      if(path==='/api/runs/counts')return {total:9,by_repo:{1:9}};
       const query=new URL(path,'https://example.test').searchParams;
-      if(query.get('view')==='active')return [...f3Active,...f3Page.filter(row=>['queued','running'].includes(row.Status))];
+      if(query.get('view')==='active')return [...f3Active,...f3Page.filter(row=>['queued','running'].includes(row.status))];
       return {body:f3Page,next:''};
     };
   `);
@@ -110,14 +110,14 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   // normal run sits above a newer high run that is admitted next.
   run(`
     const f3Scoped=[
-      makeRun('scoped-passed',{Ref:'s1',StartedAt:f3Time(0),FinishedAt:f3Time(50)}),
-      makeRun('scoped-normal-old',{Ref:'s2',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(20)}),
-      makeRun('scoped-high-new',{Ref:'s3',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(25),priority_class:'high'}),
+      makeRun('scoped-passed',{ref:'s1',started_at:f3Time(0),finished_at:f3Time(50)}),
+      makeRun('scoped-normal-old',{ref:'s2',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(20)}),
+      makeRun('scoped-high-new',{ref:'s3',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25),priority_class:'high'}),
     ];
-    const f3ScopedHidden=makeRun('scoped-normal-hidden',{Ref:'s4',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(22)});
+    const f3ScopedHidden=makeRun('scoped-normal-hidden',{ref:'s4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22)});
     api=async path=>{
-      if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
-      if(path==='/api/runs/counts')return {Total:4,ByRepo:{1:4}};
+      if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+      if(path==='/api/runs/counts')return {total:4,by_repo:{1:4}};
       const query=new URL(path,'https://example.test').searchParams;
       if(query.get('view')==='active')return [f3Scoped[2],f3Scoped[1],f3ScopedHidden];
       return {body:f3Scoped,next:''};
@@ -126,7 +126,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-normal-hidden','scoped-normal-old','scoped-high-new','scoped-passed'],
     'F3: without positions the queue reverses the active view order, not queue time');
-  run(`api=async path=>{ if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}]; if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
+  run(`api=async path=>{ if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}]; if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
     'F3: without positions or an active view reverse priority and reverse server FIFO within each class');
@@ -135,13 +135,13 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   // the server's claim order, never "claimed first".
   run(`
     const f3Claimed=[
-      makeRun('scoped-claimed-normal',{Ref:'s5',Status:'running',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(20),display_status:'queued',display_reason:'waiting for CPU budget (2 of 8 CPU free)'}),
-      makeRun('scoped-high-unclaimed',{Ref:'s6',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(25),priority_class:'high',display_status:'queued',display_reason:'next in line'}),
-      makeRun('scoped-started',{Ref:'s7',Status:'running',StartedAt:f3Time(30),FinishedAt:null,display_status:'running'}),
+      makeRun('scoped-claimed-normal',{ref:'s5',status:'running',started_at:null,finished_at:null,queued_at:f3Time(20),display_status:'queued',display_reason:'waiting for CPU budget (2 of 8 CPU free)'}),
+      makeRun('scoped-high-unclaimed',{ref:'s6',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25),priority_class:'high',display_status:'queued',display_reason:'next in line'}),
+      makeRun('scoped-started',{ref:'s7',status:'running',started_at:f3Time(30),finished_at:null,display_status:'running'}),
     ];
     api=async path=>{
-      if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
-      if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}};
+      if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+      if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}};
       const query=new URL(path,'https://example.test').searchParams;
       if(query.get('view')==='active')return [f3Claimed[2],f3Claimed[1],f3Claimed[0]];
       return {body:f3Claimed,next:''};
@@ -205,7 +205,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4'
   assert.ok(run('html').includes('all active runs included'),'a successful poll clears the unavailable notice');
   assert.ok(run('html').includes('Retained runs'),'touch users have a visible explanation of the sidebar counts');
   run(`
-    state.detailRun={ID:'history-full-id',RepoID:1,Ref:'main',RefKind:'branch'};
+    state.detailRun={id:'history-full-id',repo_id:1,ref:'main',ref_kind:'branch'};
     state.attempts.set('history-full-id',{rows:[],next:'older-cursor'});
     let finishRefresh, olderCalls=0;
     api=async path=>{
@@ -223,9 +223,9 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4'
 }
 
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5A') {
-  for (const [extra, expected] of [[{Trigger:'schedule',ScheduleEntry:'nightly'},''],[{Release:true},''],[{},''],[{Error:'execution failed'},''],[{display_reason:'KVM preflight'},'KVM preflight']]) {
+  for (const [extra, expected] of [[{trigger:'schedule',schedule_entry:'nightly'},''],[{release:true},''],[{},''],[{error:'execution failed'},''],[{display_reason:'KVM preflight'},'KVM preflight']]) {
     sandbox.rowExtra=extra;
-    run(`rowFixture=makeRun('row-message',{Status:'running',FinishedAt:null,...rowExtra})`);
+    run(`rowFixture=makeRun('row-message',{status:'running',finished_at:null,...rowExtra})`);
     assert.equal(run('runMessageCell(rowFixture)'),expected,'server reason is authoritative');
     const tooltip=[...run('runRow(rowFixture)').matchAll(/<div class="clip" title="([^"]*)">/g)].at(-1)[1];
     assert.equal(tooltip,expected,'tooltip shows the complete server message');
@@ -254,22 +254,22 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5B
 }
 
 // The shared row renderer serves /runs and run history; detail badges stay separate.
-run(`state.repos=[{ID:1,Name:'ours'}];`);
-const badgeRow = run(`runRow({ID:'labels',RepoID:1,Ref:'v1',RefKind:'tag',Status:'passed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',priority_class:'high',priority_reason:'urgent',ConcurrencyGroup:'deploy',Scheduling:{admission:{group:'deploy'}}})`);
+run(`state.repos=[{id:1,name:'ours'}];`);
+const badgeRow = run(`runRow({id:'labels',repo_id:1,ref:'v1',ref_kind:'tag',status:'passed',release:true,trigger:'schedule',schedule_entry:'nightly',priority_class:'high',priority_reason:'urgent',concurrency_group:'deploy',scheduling:{admission:{group:'deploy'}}})`);
 assert.ok(badgeRow.includes('<div class="repo-name">ours</div>'));
 assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history rows have no inline badges');
 assert.ok(!badgeRow.includes('priority highest') && !badgeRow.includes('urgent'),'priority metadata stays in detail');
-assert.ok(run(`prioritySummary({priority_class:'high',priority_reason:'urgent',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',QueuePosition:2})`).includes('requested by operator<unsafe>'));
-assert.ok(run(`runRow({ID:'priority',RepoID:1,Ref:'main',Status:'queued',priority_class:'high',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',QueuePosition:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
-assert.equal(run(`runMessageCell({Status:'passed',Release:true})`),'');
-assert.equal(run(`runMessageCell({Status:'passed',Trigger:'schedule',ScheduleEntry:'nightly<unsafe>',display_reason:'schedule nightly<unsafe>'})`),'schedule nightly&lt;unsafe&gt;');
-assert.equal(run(`runMessageCell({Status:'passed',priority_class:'high',ConcurrencyGroup:'deploy'})`),'');
-for(const extra of [`display_reason:'existing reason'`, `Error:'existing reason'`, `FailedStep:'test'`, `Reason:'existing reason'`]) {
-  assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('display_reason')?'existing reason':'');
+assert.ok(run(`prioritySummary({priority_class:'high',priority_reason:'urgent',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',queue_position:2})`).includes('requested by operator<unsafe>'));
+assert.ok(run(`runRow({id:'priority',repo_id:1,ref:'main',status:'queued',priority_class:'high',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',queue_position:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
+assert.equal(run(`runMessageCell({status:'passed',release:true})`),'');
+assert.equal(run(`runMessageCell({status:'passed',trigger:'schedule',schedule_entry:'nightly<unsafe>',display_reason:'schedule nightly<unsafe>'})`),'schedule nightly&lt;unsafe&gt;');
+assert.equal(run(`runMessageCell({status:'passed',priority_class:'high',concurrency_group:'deploy'})`),'');
+for(const extra of [`display_reason:'existing reason'`, `error:'existing reason'`, `failed_step:'test'`, `reason:'existing reason'`]) {
+  assert.equal(run(`runMessageCell({status:'failed',release:true,trigger:'schedule',schedule_entry:'nightly',${extra}})`), extra.startsWith('display_reason')?'existing reason':'');
 }
-assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',display_reason:'waiting for an Argo workflow slot (controller parallelism)',Scheduling:{state:'waiting'}})`),'waiting for an Argo workflow slot (controller parallelism)');
-assert.equal(run(`runMessageCell({Status:'queued',Scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'','detail observation does not become a row message');
-assert.ok(run(`releaseBadge({Release:true,priority_class:'high',priority_reason:'urgent'})`).includes('high priority'),'detail priority and reason remain available');
+assert.equal(run(`runMessageCell({status:'queued',release:true,trigger:'schedule',schedule_entry:'nightly',display_reason:'waiting for an Argo workflow slot (controller parallelism)',scheduling:{state:'waiting'}})`),'waiting for an Argo workflow slot (controller parallelism)');
+assert.equal(run(`runMessageCell({status:'queued',scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'','detail observation does not become a row message');
+assert.ok(run(`releaseBadge({release:true,priority_class:'high',priority_reason:'urgent'})`).includes('high priority'),'detail priority and reason remain available');
 console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');
 
 // One grey queued status for every run that has not started. The raw wire
@@ -278,19 +278,19 @@ console.log('R4B passed: label-free rows, empty-message fallbacks, existing reas
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1') {
   const pills = html => [...html.matchAll(/<span class="pill ([a-z]+)"><span class="dot [a-z]+"><\/span>([^<]*)<\/span>/g)].map(m => [m[1], m[2]]);
   const notStarted = [
-    {ID:'claimed', Status:'running', StartedAt:null, display_status:'queued', display_reason:'waiting for CPU budget (12.5 of 40 CPU free)', Scheduling:{state:'waiting', admission:{state:'waiting'}}},
-    {ID:'wire-waiting', Status:'waiting', StartedAt:null, display_status:'queued', display_reason:'host IO pressure (42%)', Scheduling:{state:'waiting'}},
-    {ID:'admitted', Status:'running', StartedAt:null, display_status:'queued', display_reason:'admitted, starting the workflow', Scheduling:{state:'waiting', admission:{state:'admitted'}}},
-    {ID:'preflight', Status:'running', StartedAt:null, display_status:'queued', display_reason:'KVM preflight running', Scheduling:{state:'preflight'}},
-    {ID:'durable', Status:'queued', StartedAt:null, display_status:'queued', display_reason:'next in line', Scheduling:{state:'queued', queue_position:1}},
-    {ID:'raw-only', Status:'waiting', StartedAt:null},
+    {id:'claimed', status:'running', started_at:null, display_status:'queued', display_reason:'waiting for CPU budget (12.5 of 40 CPU free)', scheduling:{state:'waiting', admission:{state:'waiting'}}},
+    {id:'wire-waiting', status:'waiting', started_at:null, display_status:'queued', display_reason:'host IO pressure (42%)', scheduling:{state:'waiting'}},
+    {id:'admitted', status:'running', started_at:null, display_status:'queued', display_reason:'admitted, starting the workflow', scheduling:{state:'waiting', admission:{state:'admitted'}}},
+    {id:'preflight', status:'running', started_at:null, display_status:'queued', display_reason:'KVM preflight running', scheduling:{state:'preflight'}},
+    {id:'durable', status:'queued', started_at:null, display_status:'queued', display_reason:'next in line', scheduling:{state:'queued', queue_position:1}},
+    {id:'raw-only', status:'waiting', started_at:null},
   ];
   sandbox.notStarted = notStarted;
   const table = run('runsTable(notStarted)');
   for (const [kind, label] of pills(table)) assert.deepEqual([kind, label], ['pending', 'queued'], 'V1: every not-started run is one grey queued pill');
   assert.ok(!/waiting<\/span>/.test(table) && !table.includes('>admitted<') && !table.includes('>preflight<'), 'V1: no second not-started status');
   for (const row of notStarted) if (row.display_reason) assert.ok(table.includes(row.display_reason), 'V1: the reason line shows ' + row.display_reason);
-  for (const row of notStarted) assert.equal(run(`runListGroup(notStarted.find(r => r.ID === '${row.ID}'))`), 0, 'V1: ' + row.ID + ' sorts in the queue group');
+  for (const row of notStarted) assert.equal(run(`runListGroup(notStarted.find(r => r.id === '${row.id}'))`), 0, 'V1: ' + row.id + ' sorts in the queue group');
   // The vocabulary is seven statuses; each has a known kind and label.
   for (const status of ['queued', 'running', 'passed', 'failed', 'infra-retried', 'superseded', 'cancelled']) {
     assert.notEqual(run(`statusKind('${status}')`), 'unknown', 'V1: ' + status + ' has a kind');
@@ -298,8 +298,8 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1'
   for (const gone of ['waiting', 'infra-pending', 'deadline-exceeded', 'interrupted']) {
     assert.equal(run(`statusKind('${gone}')`), 'unknown', 'V1: ' + gone + ' is not a run status');
   }
-  assert.equal(run(`displayRunStatus({Status:'failed', display_status:'failed', display_reason:'Execution deadline exceeded.'})`), 'failed');
-  assert.equal(run(`displayRunStatus({Status:'running', StartedAt:'2026-11-03T10:00:00Z', display_status:'running', Phase:'infrastructure-pending'})`), 'running');
+  assert.equal(run(`displayRunStatus({status:'failed', display_status:'failed', display_reason:'Execution deadline exceeded.'})`), 'failed');
+  assert.equal(run(`displayRunStatus({status:'running', started_at:'2026-11-03T10:00:00Z', display_status:'running', phase:'infrastructure-pending'})`), 'running');
   console.log('V1 passed: one queued status, reasons on the message line');
 }
 
@@ -314,14 +314,14 @@ for (const latest of [false, true]) {
       changeRunRepo('all'); state.filter=claimOrderLatest?'all':'queued'; state.activeRuns=[];
       claimListPath='';
       const claimOrderRows=[
-        makeRun('claim-high-first',{Ref:'q1',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:1,priority_class:'promotion'}),
-        makeRun('claim-aged',{Ref:'q2',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:2,priority_class:'promotion',priority_reason:'aged: standard run waited at least 60 minutes'}),
-        makeRun('claim-high-last',{Ref:'q3',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:3,priority_class:'promotion'}),
-        makeRun('claim-normal',{Ref:'q4',Status:'waiting',StartedAt:null,FinishedAt:null,QueuePosition:4,display_status:'queued'}),
-      ].map(row=>claimOrderScoped?{...row,QueuePosition:0}:row);
+        makeRun('claim-high-first',{ref:'q1',status:'queued',started_at:null,finished_at:null,queue_position:1,priority_class:'promotion'}),
+        makeRun('claim-aged',{ref:'q2',status:'queued',started_at:null,finished_at:null,queue_position:2,priority_class:'promotion',priority_reason:'aged: standard run waited at least 60 minutes'}),
+        makeRun('claim-high-last',{ref:'q3',status:'queued',started_at:null,finished_at:null,queue_position:3,priority_class:'promotion'}),
+        makeRun('claim-normal',{ref:'q4',status:'waiting',started_at:null,finished_at:null,queue_position:4,display_status:'queued'}),
+      ].map(row=>claimOrderScoped?{...row,queue_position:0}:row);
       api=async path=>{
-        if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
-        if(path==='/api/runs/counts')return {Total:4,ByRepo:{1:4}};
+        if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+        if(path==='/api/runs/counts')return {total:4,by_repo:{1:4}};
         if(path.includes('view=active'))return claimOrderRows;
         claimListPath=path;
         return {body:claimOrderLatest?[claimOrderRows[2],claimOrderRows[0]]:claimOrderRows,next:''};
@@ -339,14 +339,14 @@ console.log('Queued groups reverse scheduler priority and FIFO in flat, latest-p
 // never put a normal row between two priority rows.
 run(`{
   changeRunRepo('all'); state.filter='all';
-  const high=makeRun('cache-high',{Ref:'cache/high',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'promotion'});
-  const normal=makeRun('cache-normal',{Ref:'cache/normal',Status:'queued',StartedAt:null,FinishedAt:null});
-  const bumped=makeRun('cache-bumped',{Ref:'cache/bumped',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'high',priority_reason:'operator bump'});
+  const high=makeRun('cache-high',{ref:'cache/high',status:'queued',started_at:null,finished_at:null,priority_class:'promotion'});
+  const normal=makeRun('cache-normal',{ref:'cache/normal',status:'queued',started_at:null,finished_at:null});
+  const bumped=makeRun('cache-bumped',{ref:'cache/bumped',status:'queued',started_at:null,finished_at:null,priority_class:'high',priority_reason:'operator bump'});
   state.activeRuns=[high,normal,{...bumped,priority_class:'normal'}];
   state.activeRunsRepo='all'; state.activeRunsComplete=true;
   api=async path=>{
-    if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
-    if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}};
+    if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+    if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}};
     if(path.includes('view=active'))throw Object.assign(new Error('offline'),{status:503});
     return {body:[bumped,normal],next:''};
   };
@@ -357,7 +357,7 @@ console.log('Priority classes remain grouped when the scoped active request fail
 
 // Server messages are the entire row message, including empty messages.
 for (const status of ['queued','running','passed','failed','cancelled','superseded','infra-retried']) {
- sandbox.contractRun={ID:'contract',RepoID:1,Ref:'main',Status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_class:'high',priority_reason:'hidden priority',Scheduling:{message:'hidden observation'}};
+ sandbox.contractRun={id:'contract',repo_id:1,ref:'main',status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_class:'high',priority_reason:'hidden priority',scheduling:{message:'hidden observation'}};
  assert.equal(run('rowMessage(contractRun)'),`message ${status}`);
  sandbox.contractRun.display_reason='';
  assert.equal(run('rowMessage(contractRun)'),'');
@@ -367,22 +367,22 @@ const clockNow=new Date(), yesterday=new Date(clockNow.getTime()-86400000);
 sandbox.clockNow=clockNow;sandbox.yesterday=yesterday;
 assert.equal(run(`whenCell({display_status:'queued'})`),'');
 for (const status of ['queued', 'running']) {
- sandbox.queuedTimeRun={Status:status,display_status:'queued',QueuedAt:clockNow.toISOString(),StartedAt:yesterday.toISOString()};
+ sandbox.queuedTimeRun={status:status,display_status:'queued',queued_at:clockNow.toISOString(),started_at:yesterday.toISOString()};
  const queuedCell=run('whenCell(queuedTimeRun)');
  assert.match(queuedCell, /queued at \d{2}:\d{2}<\/span>/, 'waiting runs show their original enqueue time');
  assert.doesNotMatch(queuedCell, /data-started|started at|\d+m \d+s/, 'waiting runs have no duration timer or start label');
- sandbox.queuedTimeRun.QueuedAt=yesterday.toISOString();
+ sandbox.queuedTimeRun.queued_at=yesterday.toISOString();
  assert.match(run('whenCell(queuedTimeRun)'), /queued at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}<\/span>/);
  for (const QueuedAt of [undefined,null,'','invalid']) {
-  sandbox.queuedTimeRun.QueuedAt=QueuedAt;
+  sandbox.queuedTimeRun.queued_at=QueuedAt;
   assert.equal(run('whenCell(queuedTimeRun)'), '', 'missing or invalid enqueue times stay empty even with a start time');
  }
 }
-assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:new Date(clockNow.getTime()+62000)})`),/1m 2s/);
-assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:clockNow})`),/started at \d\d:\d\d/);
-assert.match(run(`whenCell({display_status:'passed',StartedAt:yesterday,FinishedAt:clockNow})`),/started at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}/);
-assert.match(run(`whenCell({display_status:'running',StartedAt:clockNow})`),/data-started=/);
-assert.match(run(`whenCell({display_status:'cancelled',QueuedAt:clockNow})`),/queued at/);
+assert.match(run(`whenCell({display_status:'passed',started_at:clockNow,finished_at:new Date(clockNow.getTime()+62000)})`),/1m 2s/);
+assert.match(run(`whenCell({display_status:'passed',started_at:clockNow,finished_at:clockNow})`),/started at \d\d:\d\d/);
+assert.match(run(`whenCell({display_status:'passed',started_at:yesterday,finished_at:clockNow})`),/started at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}/);
+assert.match(run(`whenCell({display_status:'running',started_at:clockNow})`),/data-started=/);
+assert.match(run(`whenCell({display_status:'cancelled',queued_at:clockNow})`),/queued at/);
 
 // Exercise the installed interval with a fake clock and DOM cell, without a poll.
 const liveTimer = intervals.find(timer => timer.ms === 1000);
@@ -398,22 +398,22 @@ try {
  Date.now = () => timerStart + 62000;
  liveTimer.fn();
  assert.equal(timerCell.textContent,'1m 2s','timer advances without list polling');
- sandbox.queuedTimeRun={Status:'running',display_status:'queued',QueuedAt:'2026-11-03T08:17:00Z',StartedAt:clockNow.toISOString()};
+ sandbox.queuedTimeRun={status:'running',display_status:'queued',queued_at:'2026-11-03T08:17:00Z',started_at:clockNow.toISOString()};
  const queuedCell=run('whenCell(queuedTimeRun)');
  Date.now = () => timerStart + 3600000;
  liveTimer.fn();
  assert.equal(run('whenCell(queuedTimeRun)').replace(/ title="[^"]*"/g,''),queuedCell.replace(/ title="[^"]*"/g,''),'timer ticks and later list renders preserve the original enqueue time');
- const queuedDate=new Date(sandbox.queuedTimeRun.QueuedAt);
+ const queuedDate=new Date(sandbox.queuedTimeRun.queued_at);
  assert.ok(queuedCell.includes(queuedDate.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})), 'the displayed time comes from QueuedAt');
 } finally { Date.now = savedNow }
 for (const status of ['running','passed','failed','cancelled','superseded','infra-retried']) {
- sandbox.timeRun={display_status:status,StartedAt:clockNow.toISOString(),FinishedAt:status==='running'?null:new Date(clockNow.getTime()+62000).toISOString()};
+ sandbox.timeRun={display_status:status,started_at:clockNow.toISOString(),finished_at:status==='running'?null:new Date(clockNow.getTime()+62000).toISOString()};
  assert.match(run('whenCell(timeRun)'),/started at \d\d:\d\d/);
- sandbox.timeRun.StartedAt=yesterday.toISOString();
+ sandbox.timeRun.started_at=yesterday.toISOString();
  assert.match(run('whenCell(timeRun)'),/started at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}/);
  if (['cancelled','superseded'].includes(status)) assert.match(run('whenCell(timeRun)'),/^<span><\/span>/);
 }
-assert.match(run(`runRow({ID:'escaped',RepoID:1,Ref:'<script>',SHA:'sha"<unsafe>',Actor:'actor"<unsafe>',display_status:'failed',display_reason:'reason"<unsafe>'})`),/reason&quot;&lt;unsafe&gt;/);
+assert.match(run(`runRow({id:'escaped',repo_id:1,ref:'<script>',sha:'sha"<unsafe>',actor:'actor"<unsafe>',display_status:'failed',display_reason:'reason"<unsafe>'})`),/reason&quot;&lt;unsafe&gt;/);
 console.log('Run-list contract passed: seven states, today/older start lines, live timer and escaping');
 
 assert.equal(run(`runMessageCell({display_status:'passed',display_reason:'closes #1415, #1416 · schedule nightly'})`),'closes #1415, #1416 · schedule nightly');
@@ -421,14 +421,14 @@ assert.equal(run(`runMessageCell({display_status:'passed',issue_trailers:[{issue
 
 const olderStart = new Date(clockNow.getFullYear(),clockNow.getMonth(),clockNow.getDate()-2,12,50);
 sandbox.olderStart=olderStart;
-assert.ok(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`).includes(`started at ${run('shortStamp(olderStart)')}</span>`));
-assert.doesNotMatch(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`).replace(/ title="[^"]*"/g,''),/AM|PM|12:50:00/);
+assert.ok(run(`whenCell({display_status:'failed',started_at:olderStart,finished_at:olderStart})`).includes(`started at ${run('shortStamp(olderStart)')}</span>`));
+assert.doesNotMatch(run(`whenCell({display_status:'failed',started_at:olderStart,finished_at:olderStart})`).replace(/ title="[^"]*"/g,''),/AM|PM|12:50:00/);
 
 // Four canonical classes reverse server FIFO, including views without positions.
 run('state.activeRuns=[]');
 assert.deepEqual(JSON.parse(run(`JSON.stringify(orderRuns([
- ...['low','standard','promotion','high','low','standard','promotion','high'].map((priority,index)=>makeRun(priority+'-'+index,{Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:0,priority_class:priority}))
-]).map(row=>row.ID))`)), ['low-4','low-0','standard-5','standard-1','promotion-6','promotion-2','high-7','high-3']);
+ ...['low','standard','promotion','high','low','standard','promotion','high'].map((priority,index)=>makeRun(priority+'-'+index,{status:'queued',started_at:null,finished_at:null,queue_position:0,priority_class:priority}))
+]).map(row=>row.id))`)), ['low-4','low-0','standard-5','standard-1','promotion-6','promotion-2','high-7','high-3']);
 assert.equal(run(`prioritySummary({priority_class:'normal'})`), 'priority standard');
 assert.equal(run(`prioritySummary({priority_class:'highest'})`), 'priority high');
 console.log('Four canonical priority classes and legacy response aliases pass');
@@ -440,9 +440,9 @@ run(`
   loadRepoContext = async () => ({pending:null});
   currentRoute = () => true;
   rerenderWhenStatus = () => {};
-  renderRunDetailView = async detail => { state.detailRun = detail.Run; };
+  renderRunDetailView = async detail => { state.detailRun = detail.run; };
   state.attempts = new Map();
-  api = async path => { detailPaths.push(path); return {Run:{ID:'detail-fixture'},Steps:[]}; };
+  api = async path => { detailPaths.push(path); return {run:{id:'detail-fixture'},steps:[]}; };
 `);
 await run(`renderRunDetail('detail-fixture', 1, true)`);
 assert.deepEqual(JSON.parse(run('JSON.stringify(detailPaths)')), ['/api/runs/detail-fixture?view=dashboard']);
@@ -455,23 +455,23 @@ run(`
     ['owner-next','high',1], ['owner-high','high',2],
     ['owner-standard','standard',3], ['owner-low','low',4],
   ].map(([ID,priority,position])=>makeRun(ID,{
-    Ref:ID,Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:position,
+    ref:ID,status:'queued',started_at:null,finished_at:null,queue_position:position,
     priority_class:priority,display_status:'queued',
     display_reason:'needs 2 CPU, 4 GiB · '+(position===1?'next in line':'position '+position),
   }));
   const ownerRunning = [
-    makeRun('owner-running-new',{Status:'running',StartedAt:'2026-11-05T12:00:00Z',FinishedAt:null}),
-    makeRun('owner-running-old',{Status:'running',StartedAt:'2026-11-05T11:00:00Z',FinishedAt:null}),
+    makeRun('owner-running-new',{status:'running',started_at:'2026-11-05T12:00:00Z',finished_at:null}),
+    makeRun('owner-running-old',{status:'running',started_at:'2026-11-05T11:00:00Z',finished_at:null}),
   ];
   const ownerFinished = ['passed','failed','cancelled'].map((status,index)=>makeRun('owner-'+status,{
-    Status:status==='cancelled'?'interrupted':status,display_status:status,
-    FinishedAt:'2026-11-05T10:0'+(3-index)+':00Z',
+    status:status==='cancelled'?'interrupted':status,display_status:status,
+    finished_at:'2026-11-05T10:0'+(3-index)+':00Z',
   }));
   const ownerRows=[...ownerQueue,...ownerRunning,...ownerFinished];
   const ownerWire=JSON.stringify(ownerRows);
   api=async path=>{
-    if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
-    if(path==='/api/runs/counts')return {Total:ownerRows.length,ByRepo:{1:ownerRows.length}};
+    if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+    if(path==='/api/runs/counts')return {total:ownerRows.length,by_repo:{1:ownerRows.length}};
     if(path.includes('view=active'))return [...ownerQueue,...ownerRunning];
     return {body:ownerRows,next:''};
   };
@@ -505,10 +505,10 @@ run(`
   state.showArchived=false;
   api=async path=>{
     if(path==='/api/repos')return [
-      {ID:1,Name:'ours',UpstreamID:1,DefaultBranch:'main',non_default_branches:2,LatestRuns:[]},
-      {ID:2,Name:'clean',UpstreamID:1,DefaultBranch:'main',non_default_branches:0,LatestRuns:[]},
-      {ID:3,Name:'uncounted',UpstreamID:1,DefaultBranch:'main',non_default_branches:null,LatestRuns:[]},
-      {ID:4,Name:'old',UpstreamID:1,DefaultBranch:'main',non_default_branches:7,ArchivedAt:'2026-11-01T00:00:00Z',LatestRuns:[]}];
+      {id:1,name:'ours',upstream_id:1,default_branch:'main',non_default_branches:2,latest_runs:[]},
+      {id:2,name:'clean',upstream_id:1,default_branch:'main',non_default_branches:0,latest_runs:[]},
+      {id:3,name:'uncounted',upstream_id:1,default_branch:'main',non_default_branches:null,latest_runs:[]},
+      {id:4,name:'old',upstream_id:1,default_branch:'main',non_default_branches:7,archived_at:'2026-11-01T00:00:00Z',latest_runs:[]}];
     if(path==='/api/status')return state.status;
     return [];
   };

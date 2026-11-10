@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 func requestLiveUplinkTokenPolicy(ctx context.Context, databasePath string) (model.UplinkTokenPolicy, error) {
@@ -51,7 +51,7 @@ func requestUplinkTokenPolicy(ctx context.Context, socket, databasePath string) 
 		return model.UplinkTokenPolicy{}, errors.New("live uplink token policy response too large")
 	}
 	var policy model.UplinkTokenPolicy
-	if err := json.Unmarshal(body, &policy); err != nil {
+	if err := recordjson.Unmarshal(body, &policy); err != nil {
 		return policy, err
 	}
 	return policy, policy.Validate()

@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 const publicationUsage = "Usage: oberth publication abandon <publication-id> --reason <text> [--json]\n" +
@@ -35,7 +35,7 @@ func runPublication(ctx context.Context, arguments []string, output io.Writer) e
 		return err
 	}
 	var result api.PublicationAbandonResponse
-	if options.asJSON || json.Unmarshal(raw, &result) != nil || result.PublicationID == "" {
+	if options.asJSON || recordjson.Unmarshal(raw, &result) != nil || result.PublicationID == "" {
 		_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 		return err
 	}

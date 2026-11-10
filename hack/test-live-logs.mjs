@@ -8,7 +8,7 @@ vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- 
 const run = code => vm.runInContext(code, sandbox);
 run(`
   repoName = () => 'oberth';
-  const fixtureRun = { ID: 'live-run', Ref: 'fix/live', Phase: 'test', Status: 'running' };
+  const fixtureRun = { id: 'live-run', ref: 'fix/live', phase: 'test', status: 'running' };
   // Drive fallback ticks explicitly; metadata rendering no longer polls logs.
   const realLiveLogContent = liveLogContent;
   liveLogContent = async (...args) => {
@@ -63,7 +63,7 @@ run(`polls.push({chunk:'', offset:300, done:true}); awaitResult = liveLogContent
 assert.ok((await run('awaitResult')).includes('split-final'));
 // Retained single-step logs remove only the outer transport attribution,
 // leaving command-authored bracketed messages untouched.
-run(`polls.push({output:'[release-build/full-our-step-name] actual log\\n[release-build/full-our-step-name] [INFO] user message\\n'}); awaitResult = stepLogContent('completed', {Burn:'release-build', Step:'full-our-step-name', Status:'passed'}, false);`);
+run(`polls.push({output:'[release-build/full-our-step-name] actual log\\n[release-build/full-our-step-name] [INFO] user message\\n'}); awaitResult = stepLogContent('completed', {burn:'release-build', step:'full-our-step-name', status:'passed'}, false);`);
 html = await run('awaitResult');
 assert.ok(html.includes('actual log') && html.includes('[INFO] user message'));
 assert.ok(!html.includes('[release-build/full-our-step-name]'));
@@ -77,48 +77,48 @@ assert.ok(html.includes('── build / two ──'));
 // API/plan order need not be execution order. Equal-time parallel steps use a
 // stable ordinal tie-breaker; pending steps remain after all started steps.
 run(`const orderedFixture = [
-  {Burn:'ci', Step:'pending', Ordinal:0, Status:'pending'},
-  {Burn:'ci', Step:'late', Ordinal:1, StartedAt:'2026-10-23T01:00:02Z'},
-  {Burn:'ci', Step:'parallel-b', Ordinal:3, StartedAt:'2026-10-23T01:00:01Z'},
-  {Burn:'ci', Step:'early', Ordinal:99, StartedAt:'2026-10-23T01:00:00Z'},
-  {Burn:'ci', Step:'parallel-a', Ordinal:2, StartedAt:'2026-10-23T01:00:01Z'}
+  {burn:'ci', step:'pending', ordinal:0, status:'pending'},
+  {burn:'ci', step:'late', ordinal:1, started_at:'2026-10-23T01:00:02Z'},
+  {burn:'ci', step:'parallel-b', ordinal:3, started_at:'2026-10-23T01:00:01Z'},
+  {burn:'ci', step:'early', ordinal:99, started_at:'2026-10-23T01:00:00Z'},
+  {burn:'ci', step:'parallel-a', ordinal:2, started_at:'2026-10-23T01:00:01Z'}
 ];`);
-assert.equal(run(`orderSteps(orderedFixture).map(row => row.step.Step).join(',')`), 'early,parallel-a,parallel-b,late,pending');
+assert.equal(run(`orderSteps(orderedFixture).map(row => row.step.step).join(',')`), 'early,parallel-a,parallel-b,late,pending');
 run(`const legacyRetryFixture = [
-  {Burn:'build(2)', Step:'compile', Ordinal:3, StartedAt:'2026-10-23T01:00:03Z'},
-  {Burn:'lint', Step:'lint', Ordinal:1, StartedAt:'2026-10-23T01:00:01Z'},
-  {Burn:'build', Step:'compile', Ordinal:0, StartedAt:'2026-10-23T01:00:00Z'},
-  {Burn:'build(1)', Step:'compile', Ordinal:2, StartedAt:'2026-10-23T01:00:02Z'}
+  {burn:'build(2)', step:'compile', ordinal:3, started_at:'2026-10-23T01:00:03Z'},
+  {burn:'lint', step:'lint', ordinal:1, started_at:'2026-10-23T01:00:01Z'},
+  {burn:'build', step:'compile', ordinal:0, started_at:'2026-10-23T01:00:00Z'},
+  {burn:'build(1)', step:'compile', ordinal:2, started_at:'2026-10-23T01:00:02Z'}
 ];`);
-assert.equal(run(`orderSteps(legacyRetryFixture).map(row => row.step.Burn).join(',')`), 'build,build(1),build(2),lint');
+assert.equal(run(`orderSteps(legacyRetryFixture).map(row => row.step.burn).join(',')`), 'build,build(1),build(2),lint');
 // #1196: run 02609902 at 22:38Z, before vpt-verify starts. Argo start
 // times have one-second resolution; parallel siblings must not split burns.
 run(`const burnOrderFixture = [
-  {"Burn":"setup","Step":"tools-dir","Ordinal":0,"Status":"passed","StartedAt":"2026-10-23T22:32:46Z"},
-  {"Burn":"setup","Step":"link-go","Ordinal":1,"Status":"passed","StartedAt":"2026-10-23T22:33:06Z"},
-  {"Burn":"setup","Step":"install-golangci-lint","Ordinal":2,"Status":"passed","StartedAt":"2026-10-23T22:33:16Z"},
-  {"Burn":"setup","Step":"install-helm","Ordinal":3,"Status":"passed","StartedAt":"2026-10-23T22:33:36Z"},
-  {"Burn":"setup","Step":"fetch-shellcheck","Ordinal":4,"Status":"passed","StartedAt":"2026-10-23T22:33:56Z"},
-  {"Burn":"setup","Step":"verify-shellcheck","Ordinal":5,"Status":"passed","StartedAt":"2026-10-23T22:34:06Z"},
-  {"Burn":"setup","Step":"decompress-shellcheck","Ordinal":6,"Status":"passed","StartedAt":"2026-10-23T22:34:17Z"},
-  {"Burn":"setup","Step":"install-shellcheck","Ordinal":7,"Status":"passed","StartedAt":"2026-10-23T22:34:27Z"},
-  {"Burn":"lint","Step":"vet","Ordinal":8,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
-  {"Burn":"lint","Step":"golangci-lint-run","Ordinal":9,"Status":"passed","StartedAt":"2026-10-23T22:35:07Z"},
-  {"Burn":"test-store","Step":"test-store","Ordinal":10,"Status":"running","StartedAt":"2026-10-23T22:37:32Z"},
-  {"Burn":"test-service","Step":"test-service","Ordinal":11,"Status":"running","StartedAt":"2026-10-23T22:37:32Z"},
-  {"Burn":"test-rest","Step":"test-rest","Ordinal":12,"Status":"running","StartedAt":"2026-10-23T22:37:32Z"},
-  {"Burn":"test-openbao","Step":"test-openbao","Ordinal":13,"Status":"running","StartedAt":"2026-10-23T22:34:37Z"},
-  {"Burn":"security","Step":"security","Ordinal":14,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
-  {"Burn":"shellcheck","Step":"shellcheck","Ordinal":15,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
-  {"Burn":"chart","Step":"chart","Ordinal":16,"Status":"passed","StartedAt":"2026-10-23T22:37:32Z"},
-  {"Burn":"release-diagnostic","Step":"release-diagnostic","Ordinal":17,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
-  {"Burn":"verify-publisher-tools","Step":"vpt-build-and-fetch","Ordinal":18,"Status":"running","StartedAt":"2026-10-23T22:34:37Z"},
-  {"Burn":"verify-publisher-tools","Step":"vpt-copy-trivy","Ordinal":19,"Status":"passed","StartedAt":"2026-10-23T22:34:37Z"},
-  {"Burn":"verify-publisher-tools","Step":"vpt-verify","Ordinal":20,"Status":"pending","StartedAt":""},
-  {"Burn":"build-amd64","Step":"build-amd64","Ordinal":21,"Status":"pending","StartedAt":""},
-  {"Burn":"build-arm64","Step":"build-arm64","Ordinal":22,"Status":"pending","StartedAt":""},
-  {"Burn":"build-darwin-amd64","Step":"build-darwin-amd64","Ordinal":23,"Status":"pending","StartedAt":""},
-  {"Burn":"build-darwin-arm64","Step":"build-darwin-arm64","Ordinal":24,"Status":"pending","StartedAt":""},
+  {"burn":"setup","step":"tools-dir","ordinal":0,"status":"passed","started_at":"2026-10-23T22:32:46Z"},
+  {"burn":"setup","step":"link-go","ordinal":1,"status":"passed","started_at":"2026-10-23T22:33:06Z"},
+  {"burn":"setup","step":"install-golangci-lint","ordinal":2,"status":"passed","started_at":"2026-10-23T22:33:16Z"},
+  {"burn":"setup","step":"install-helm","ordinal":3,"status":"passed","started_at":"2026-10-23T22:33:36Z"},
+  {"burn":"setup","step":"fetch-shellcheck","ordinal":4,"status":"passed","started_at":"2026-10-23T22:33:56Z"},
+  {"burn":"setup","step":"verify-shellcheck","ordinal":5,"status":"passed","started_at":"2026-10-23T22:34:06Z"},
+  {"burn":"setup","step":"decompress-shellcheck","ordinal":6,"status":"passed","started_at":"2026-10-23T22:34:17Z"},
+  {"burn":"setup","step":"install-shellcheck","ordinal":7,"status":"passed","started_at":"2026-10-23T22:34:27Z"},
+  {"burn":"lint","step":"vet","ordinal":8,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
+  {"burn":"lint","step":"golangci-lint-run","ordinal":9,"status":"passed","started_at":"2026-10-23T22:35:07Z"},
+  {"burn":"test-store","step":"test-store","ordinal":10,"status":"running","started_at":"2026-10-23T22:37:32Z"},
+  {"burn":"test-service","step":"test-service","ordinal":11,"status":"running","started_at":"2026-10-23T22:37:32Z"},
+  {"burn":"test-rest","step":"test-rest","ordinal":12,"status":"running","started_at":"2026-10-23T22:37:32Z"},
+  {"burn":"test-openbao","step":"test-openbao","ordinal":13,"status":"running","started_at":"2026-10-23T22:34:37Z"},
+  {"burn":"security","step":"security","ordinal":14,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
+  {"burn":"shellcheck","step":"shellcheck","ordinal":15,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
+  {"burn":"chart","step":"chart","ordinal":16,"status":"passed","started_at":"2026-10-23T22:37:32Z"},
+  {"burn":"release-diagnostic","step":"release-diagnostic","ordinal":17,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
+  {"burn":"verify-publisher-tools","step":"vpt-build-and-fetch","ordinal":18,"status":"running","started_at":"2026-10-23T22:34:37Z"},
+  {"burn":"verify-publisher-tools","step":"vpt-copy-trivy","ordinal":19,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
+  {"burn":"verify-publisher-tools","step":"vpt-verify","ordinal":20,"status":"pending","started_at":""},
+  {"burn":"build-amd64","step":"build-amd64","ordinal":21,"status":"pending","started_at":""},
+  {"burn":"build-arm64","step":"build-arm64","ordinal":22,"status":"pending","started_at":""},
+  {"burn":"build-darwin-amd64","step":"build-darwin-amd64","ordinal":23,"status":"pending","started_at":""},
+  {"burn":"build-darwin-arm64","step":"build-darwin-arm64","ordinal":24,"status":"pending","started_at":""},
 ];`);
 assert.equal(run(`burnOrderFixture.length`), 25);
 const expectedBurnOrder = [
@@ -129,30 +129,30 @@ const expectedBurnOrder = [
   'test-store', 'test-service', 'test-rest', 'chart',
   'build-amd64', 'build-arm64', 'build-darwin-amd64', 'build-darwin-arm64'
 ].join(',');
-assert.equal(run(`orderSteps(burnOrderFixture).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+assert.equal(run(`orderSteps(burnOrderFixture).map(row => row.step.step).join(',')`), expectedBurnOrder);
 // Finishing a step cannot move it or its burn across polls.
-assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.Status === 'running' ? {...step, Status:'passed', FinishedAt:'2026-10-23T22:38:01Z'} : step)).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.status === 'running' ? {...step, status:'passed', finished_at:'2026-10-23T22:38:01Z'} : step)).map(row => row.step.step).join(',')`), expectedBurnOrder);
 // Starting the last sibling of an active burn keeps it inside that block.
-assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.Step === 'vpt-verify' ? {...step, Status:'running', StartedAt:'2026-10-23T22:38:52Z'} : step)).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.step === 'vpt-verify' ? {...step, status:'running', started_at:'2026-10-23T22:38:52Z'} : step)).map(row => row.step.step).join(',')`), expectedBurnOrder);
 // Reversing the API rows does not change unique plan-ordinal tie breaks.
-assert.equal(run(`orderSteps([...burnOrderFixture].reverse()).map(row => row.step.Step).join(',')`), expectedBurnOrder);
+assert.equal(run(`orderSteps([...burnOrderFixture].reverse()).map(row => row.step.step).join(',')`), expectedBurnOrder);
 assert.equal(run(`orderSteps([]).length`), 0);
 assert.equal(run(`orderSteps(null).length`), 0);
 
 // Equal burn ordinals still form contiguous blocks; invalid starts are pending.
 run(`const tiedBurnFixture = [
-  {Burn:'second', Step:'a', Ordinal:1, StartedAt:'invalid'},
-  {Burn:'first', Step:'original', Ordinal:0},
-  {Burn:'third', Step:'a', Ordinal:1},
-  {Burn:'first', Step:'original(1)', Ordinal:0},
-  {Burn:'second', Step:'b', Ordinal:2},
-  {Burn:'third', Step:'b', Ordinal:2},
-  {Burn:'first', Step:'last', Ordinal:0}
+  {burn:'second', step:'a', ordinal:1, started_at:'invalid'},
+  {burn:'first', step:'original', ordinal:0},
+  {burn:'third', step:'a', ordinal:1},
+  {burn:'first', step:'original(1)', ordinal:0},
+  {burn:'second', step:'b', ordinal:2},
+  {burn:'third', step:'b', ordinal:2},
+  {burn:'first', step:'last', ordinal:0}
 ];`);
 assert.equal(run(`orderSteps(tiedBurnFixture).map(row => row.label).join(',')`),
   'first/original,first/last,first/original,second/a,second/b,third/a,third/b');
 // A newly started burn moves ahead of wholly unstarted burns.
-assert.equal(run(`orderSteps(tiedBurnFixture.map(step => step.Burn === 'third' && step.Step === 'a' ? {...step, StartedAt:'2026-10-23T22:38:00Z'} : step)).map(row => row.identity.burn).join(',')`),
+assert.equal(run(`orderSteps(tiedBurnFixture.map(step => step.burn === 'third' && step.step === 'a' ? {...step, started_at:'2026-10-23T22:38:00Z'} : step)).map(row => row.identity.burn).join(',')`),
   'third,third,first,first,first,second,second');
 
 // An oversized partial record keeps its original attribution. Trimming its
@@ -170,7 +170,7 @@ assert.equal(run(`(renderLogLines(splitLogText(state.live.text)).match(/class="l
 // Exercise the actual detail renderer's scroll restoration and combined-view
 // selection, including a terminal poll that must continue draining chunks.
 run(`
-  state.repos = [{ID: 1, Name:'oberth'}];
+  state.repos = [{id: 1, name:'oberth'}];
   state.stepRunID = 'scroll-run'; state.step = '__summary__';
   currentRoute = () => true; setChrome = () => {}; replaceApp = () => {};
   liveLogContent = async () => 'fixture log';
@@ -185,12 +185,12 @@ run(`
     return null;
   }};
   setAuto = () => {};
-  awaitResult = renderRunDetailView({Run:{ID:'scroll-run', RepoID:1, Status:'running', Ref:'fix/live'}, Steps:[]}, 0);
+  awaitResult = renderRunDetailView({run:{id:'scroll-run', repo_id:1, status:'running', ref:'fix/live'}, steps:[]}, 0);
 `);
 await run('awaitResult');
 assert.equal(run('newTerm.scrollTop'), 123);
 assert.equal(run('newSteps.scrollTop'), 45);
-run(`termReads=0; stepReads=0; oldTerm.scrollTop=900; awaitResult=renderRunDetailView({Run:{ID:'scroll-run',RepoID:1,Status:'running',StartedAt:new Date().toISOString(),Ref:'fix/live'},Steps:[]},0);`);
+run(`termReads=0; stepReads=0; oldTerm.scrollTop=900; awaitResult=renderRunDetailView({run:{id:'scroll-run',repo_id:1,status:'running',started_at:new Date().toISOString(),ref:'fix/live'},steps:[]},0);`);
 await run('awaitResult');
 assert.equal(run('newTerm.scrollTop'), 1200);
 
@@ -200,55 +200,55 @@ run(`
   state.step = 'build / compile';
   state.stepRunID = 'scroll-run';
   termReads=0; stepReads=0;
-  awaitResult=renderRunDetailView({Run:{ID:'scroll-run',RepoID:1,Status:'running',StartedAt:new Date().toISOString(),Ref:'fix/live'},Steps:[{Burn:'build',Step:'compile',Status:'queued',Ordinal:0}]},0);
+  awaitResult=renderRunDetailView({run:{id:'scroll-run',repo_id:1,status:'running',started_at:new Date().toISOString(),ref:'fix/live'},steps:[{burn:'build',step:'compile',status:'queued',ordinal:0}]},0);
 `);
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log'), 'a queued pod can emit before Argo publishes Running');
 
 // Empty row messages identify schedules, escaped; detail keeps its schedule badge.
-run(`const scheduleRun = {ID:'scroll-run', RepoID:1, Status:'passed', Ref:'main', Trigger:'schedule', ScheduleEntry:'nightly<unsafe>', display_reason:'schedule nightly<unsafe>'};`);
-html = run(`runsTable([scheduleRun, {...scheduleRun, ID:'weekly-run', ScheduleEntry:'weekly-sweep', display_reason:'schedule weekly-sweep'}])`);
+run(`const scheduleRun = {id:'scroll-run', repo_id:1, status:'passed', ref:'main', trigger:'schedule', schedule_entry:'nightly<unsafe>', display_reason:'schedule nightly<unsafe>'};`);
+html = run(`runsTable([scheduleRun, {...scheduleRun, id:'weekly-run', schedule_entry:'weekly-sweep', display_reason:'schedule weekly-sweep'}])`);
 assert.ok(html.includes('schedule nightly&lt;unsafe&gt;') && html.includes('schedule weekly-sweep'));
 assert.ok(!html.includes('nightly<unsafe>'));
-assert.equal(run(`scheduleBadge({...scheduleRun, Trigger:'branch'})`), '');
-assert.equal(run(`scheduleBadge({...scheduleRun, ScheduleEntry:''})`), '');
-run(`state.step='__summary__'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({Run:scheduleRun,Steps:[]},0);`);
+assert.equal(run(`scheduleBadge({...scheduleRun, trigger:'branch'})`), '');
+assert.equal(run(`scheduleBadge({...scheduleRun, schedule_entry:''})`), '');
+run(`state.step='__summary__'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({run:scheduleRun,steps:[]},0);`);
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('title="schedule entry">nightly&lt;unsafe&gt;'));
-assert.ok(run(`summaryLines({Run:scheduleRun,Steps:[]}).join(' ')`).includes('schedule=nightly<unsafe>'));
+assert.ok(run(`summaryLines({run:scheduleRun,steps:[]}).join(' ')`).includes('schedule=nightly<unsafe>'));
 
 // The deadline is a running run's reason, never a status of its own.
 assert.equal(run(`statusKind('deadline-exceeded')`), 'unknown');
-assert.equal(run(`displayRunStatus({Status:'running',StartedAt:'2026-10-30T09:00:00Z',display_status:'running',display_reason:'Execution deadline exceeded.'})`), 'running');
-const deadlineSummary = run(`summaryLines({Run:{ID:'deadline',Status:'running',display_status:'running',display_reason:'Execution deadline exceeded.'},Steps:[],Scheduling:{message:'Execution deadline exceeded.',execution:{state:'deadline_exceeded',phase:'Failed',reconciliation_lag_seconds:3080,deadline:{budget_seconds:5400,expires_at:'2026-10-30T10:33:37Z',remaining_seconds:0}}}}).join(' ')`);
+assert.equal(run(`displayRunStatus({status:'running',started_at:'2026-10-30T09:00:00Z',display_status:'running',display_reason:'Execution deadline exceeded.'})`), 'running');
+const deadlineSummary = run(`summaryLines({run:{id:'deadline',status:'running',display_status:'running',display_reason:'Execution deadline exceeded.'},steps:[],scheduling:{message:'Execution deadline exceeded.',execution:{state:'deadline_exceeded',phase:'Failed',reconciliation_lag_seconds:3080,deadline:{budget_seconds:5400,expires_at:'2026-10-30T10:33:37Z',remaining_seconds:0}}}}).join(' ')`);
 for (const text of ['[running]', 'Execution deadline exceeded', '3080s', '0s remaining', 'clock: Workflow start']) assert.ok(deadlineSummary.includes(text), text);
 assert.ok(!deadlineSummary.includes('[queued]'));
-run(`state.step='build / compile'; state.stepRunID='scroll-run'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({Run:{ID:'scroll-run',RepoID:1,Status:'running',display_status:'running',display_reason:'Execution deadline exceeded.',StartedAt:new Date().toISOString(),Ref:'fix/live'},Steps:[{Burn:'build',Step:'compile',Status:'running',Ordinal:0}]},0);`);
+run(`state.step='build / compile'; state.stepRunID='scroll-run'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({run:{id:'scroll-run',repo_id:1,status:'running',display_status:'running',display_reason:'Execution deadline exceeded.',started_at:new Date().toISOString(),ref:'fix/live'},steps:[{burn:'build',step:'compile',status:'running',ordinal:0}]},0);`);
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').includes('live output'), 'an execution display label must not stop durable-running log refresh');
 console.log('live log dashboard checks passed');
 
 // Host pressure is a scheduling hold, distinct from running-work failures.
 // The server computes the reason once; the dashboard shows display_reason.
-assert.equal(run(`queueReason({display_reason:'host IO pressure (42%)',Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',avg60:42.25}}}})`), 'host IO pressure (42%)');
-assert.equal(run(`queueReason({display_reason:'host CPU pressure (75%), behind org/app/main',Scheduling:{state:'waiting',admission:{state:'waiting',blocked_by:{pressure:{resource:'cpu',avg60:75},size:'M'}}}})`), 'host CPU pressure (75%), behind org/app/main');
+assert.equal(run(`queueReason({display_reason:'host IO pressure (42%)',scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',avg60:42.25}}}})`), 'host IO pressure (42%)');
+assert.equal(run(`queueReason({display_reason:'host CPU pressure (75%), behind org/app/main',scheduling:{state:'waiting',admission:{state:'waiting',blocked_by:{pressure:{resource:'cpu',avg60:75},size:'M'}}}})`), 'host CPU pressure (75%), behind org/app/main');
 assert.equal(run(`pressureStatusCard(null)`), '', 'scoped status omits host PSI');
 assert.ok(run(`pressureStatusCard({available:false})`).includes('admission fails open'));
 assert.ok(run(`pressureStatusCard({available:true,holding:true,resource:'io',sample:{io:{full_avg60:40},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('deferring new grants'));
-assert.equal(run(`queueReason({display_reason:'host IO pressure',Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'host IO pressure');
+assert.equal(run(`queueReason({display_reason:'host IO pressure',scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'host IO pressure');
 
 // RCA run-list vocabulary is additive: raw failure/cancellation states survive.
-assert.equal(run(`displayRunStatus({Status:'failed',auto_retried_by:'retry'})`), 'infra-retried');
+assert.equal(run(`displayRunStatus({status:'failed',auto_retried_by:'retry'})`), 'infra-retried');
 assert.equal(run(`statusKind('infra-retried')`), 'warn');
-assert.equal(run(`displayRunStatus({Status:'interrupted',SupersededBy:'new'})`), 'superseded');
-assert.equal(run(`displayRunStatus({Status:'interrupted'})`), 'cancelled');
+assert.equal(run(`displayRunStatus({status:'interrupted',superseded_by:'new'})`), 'superseded');
+assert.equal(run(`displayRunStatus({status:'interrupted'})`), 'cancelled');
 // The list always shows branch/tag heads, with history only on run detail.
-assert.equal(run(`state.filter='all';runMatches({Status:'interrupted',SupersededBy:'new'})`), true);
-run(`state.attempts.clear();state.attempts.set('head',{rows:[{ID:'old',RepoID:1,Status:'interrupted',SupersededBy:'head'}],next:''});`);
-const headTable = run(`runsTable([{ID:'head',RepoID:1,Status:'passed',Ref:'feature',earlier_attempts:1}])`);
+assert.equal(run(`state.filter='all';runMatches({status:'interrupted',superseded_by:'new'})`), true);
+run(`state.attempts.clear();state.attempts.set('head',{rows:[{id:'old',repo_id:1,status:'interrupted',superseded_by:'head'}],next:''});`);
+const headTable = run(`runsTable([{id:'head',repo_id:1,status:'passed',ref:'feature',earlier_attempts:1}])`);
 assert.ok(!headTable.includes('earlier attempts') && !headTable.includes('data-run-id="old"'));
-assert.ok(run(`runHistory({ID:'head',RefKind:'branch'})`).includes('data-run-id="old"'), 'superseded runs remain available in detail history');
-assert.ok(run(`runHistory({ID:'unloaded',RefKind:'tag'})`).includes('Run history for this tag'));
+assert.ok(run(`runHistory({id:'head',ref_kind:'branch'})`).includes('data-run-id="old"'), 'superseded runs remain available in detail history');
+assert.ok(run(`runHistory({id:'unloaded',ref_kind:'tag'})`).includes('Run history for this tag'));
 
 run(`let rcaRequests=[]; api=async path=>{rcaRequests.push(path);return {body:[],next:''};};awaitResult=loadRuns();`);
 await run('awaitResult');
@@ -257,20 +257,20 @@ run(`state.repo='ours';state.runCursor='opaque-cursor';awaitResult=loadRepoRuns(
 await run('awaitResult');
 assert.ok(run(`rcaRequests[1]`).includes('latest_per_ref=1') && run(`rcaRequests[1]`).includes('before=opaque-cursor'));
 run(`
- state.repos=[{ID:1,Name:'ours'},{ID:2,Name:'theirs'}];state.status={upstream_info:[]};
+ state.repos=[{id:1,name:'ours'},{id:2,name:'theirs'}];state.status={upstream_info:[]};
  // A directly loaded detail has no list-page head in memory.
  state.runs=[];state.repoRuns=[];state.attempts.clear();
- state.detailRun={ID:'rca-head',RepoID:1,Ref:'feature',RefKind:'branch',Status:'passed'};
- api=async path=>{rcaRequests.push(path);return {body:[state.detailRun,{ID:'our-old',RepoID:1,Ref:'feature',RefKind:'branch',Status:'interrupted',SupersededBy:'rca-head'},{ID:'tag-same-name',RepoID:1,Ref:'feature',RefKind:'tag'},{ID:'other-repo',RepoID:2,Ref:'feature',RefKind:'branch'},{ID:'other-ref',RepoID:1,Ref:'elsewhere',RefKind:'branch'}],next:'opaque-history-cursor'};};
+ state.detailRun={id:'rca-head',repo_id:1,ref:'feature',ref_kind:'branch',status:'passed'};
+ api=async path=>{rcaRequests.push(path);return {body:[state.detailRun,{id:'our-old',repo_id:1,ref:'feature',ref_kind:'branch',status:'interrupted',superseded_by:'rca-head'},{id:'tag-same-name',repo_id:1,ref:'feature',ref_kind:'tag'},{id:'other-repo',repo_id:2,ref:'feature',ref_kind:'branch'},{id:'other-ref',repo_id:1,ref:'elsewhere',ref_kind:'branch'}],next:'opaque-history-cursor'};};
  awaitResult=loadRunAttempts('rca-head',false);
 `);
 await run('awaitResult');
-assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.ID))`), JSON.stringify(['our-old']));
+assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.id))`), JSON.stringify(['our-old']));
 assert.ok(!run(`rcaRequests.at(-1)`).includes('latest_per_ref'));
-run(`api=async path=>{rcaRequests.push(path);return {body:[{ID:'our-old',RepoID:1,Ref:'feature',RefKind:'branch'},{ID:'older',RepoID:1,Ref:'feature',RefKind:'branch'}],next:''};};awaitResult=loadRunAttempts('rca-head',true);`);
+run(`api=async path=>{rcaRequests.push(path);return {body:[{id:'our-old',repo_id:1,ref:'feature',ref_kind:'branch'},{id:'older',repo_id:1,ref:'feature',ref_kind:'branch'}],next:''};};awaitResult=loadRunAttempts('rca-head',true);`);
 await run('awaitResult');
 assert.ok(run(`rcaRequests.at(-1)`).includes('before=opaque-history-cursor'));
-assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.ID))`), JSON.stringify(['our-old','older']));
+assert.equal(run(`JSON.stringify(state.attempts.get('rca-head').rows.map(row=>row.id))`), JSON.stringify(['our-old','older']));
 // A failed history page keeps loaded rows and offers a local retry.
 run(`api=async()=>{throw new Error('<offline>')};awaitResult=loadRunAttempts('rca-head',true);`);
 await run('awaitResult');
@@ -290,7 +290,7 @@ await run('awaitResult');
 assert.equal(run(`state.attempts.size`), 0);
 console.log('run-list grouping and detail-history checks passed');
 
-assert.equal(run(`summaryLines({Run:{ID:'original',Status:'failed',auto_retried_by:'retry',display_reason:'infra error, retried as retry'},Steps:[]}).some(line => line.startsWith('[queued]'))`), false);
+assert.equal(run(`summaryLines({run:{id:'original',status:'failed',auto_retried_by:'retry',display_reason:'infra error, retried as retry'},steps:[]}).some(line => line.startsWith('[queued]'))`), false);
 
 assert.equal(run(`admissionStatusCard(undefined)`), '');
 const admissionCard = run(`admissionStatusCard({runs:3,used:3})`);
@@ -343,10 +343,10 @@ assert.ok(run(`pressureStatusCard({mode:'observe',available:true,threshold_excee
 assert.ok(!run(`pressureStatusCard({mode:'observe',available:true,threshold_exceeded:true,holding:false,resource:'io'})`).includes('deferring new grants'));
 
 // Avg10 host admission reports both signals and preserves scoped redaction.
-assert.equal(run(`queueReason({display_reason:'host CPU and IO pressure (CPU 45%, IO 31%)',Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu+io',avg10_gate:true,cpu_avg10:45.25,io_avg10:30.5}}}})`), 'host CPU and IO pressure (CPU 45%, IO 31%)');
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',message:'Waiting in the weighted resource admission queue.',admission:{pressure:{resource:'cpu+io',redacted:true}}}})`), '', 'long observations stay in detail when no server reason was presented');
+assert.equal(run(`queueReason({display_reason:'host CPU and IO pressure (CPU 45%, IO 31%)',scheduling:{state:'waiting',admission:{pressure:{resource:'cpu+io',avg10_gate:true,cpu_avg10:45.25,io_avg10:30.5}}}})`), 'host CPU and IO pressure (CPU 45%, IO 31%)');
+assert.equal(run(`queueReason({scheduling:{state:'waiting',message:'Waiting in the weighted resource admission queue.',admission:{pressure:{resource:'cpu+io',redacted:true}}}})`), '', 'long observations stay in detail when no server reason was presented');
 const avg10Card=run(`pressureStatusCard({cpu_some_avg10:40,available:true,holding:true,resource:'cpu',sample:{cpu:{some_avg10:60},io:{some_avg10:12}}})`);
 assert.ok(avg10Card.includes('CPU some 60.0%') && avg10Card.includes('IO some 12.0%') && avg10Card.includes('(avg10)'));
 assert.ok(run(`pressureStatusCard({available:false})`).includes('budget-only admission'));
 
-assert.equal(run(`queueReason({display_reason:'host CPU pressure (CPU 60%, IO 0%)',Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu',avg10_gate:true,cpu_avg10:60}}}})`), 'host CPU pressure (CPU 60%, IO 0%)');
+assert.equal(run(`queueReason({display_reason:'host CPU pressure (CPU 60%, IO 0%)',scheduling:{state:'waiting',admission:{pressure:{resource:'cpu',avg10_gate:true,cpu_avg10:60}}}})`), 'host CPU pressure (CPU 60%, IO 0%)');

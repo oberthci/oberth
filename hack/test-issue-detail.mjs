@@ -5,7 +5,7 @@ const source = readFileSync(new URL('../internal/api/static/app.js', import.meta
 const nodes = Object.fromEntries(['issueDialog', 'issueDialogTitle', 'issueDialogMeta', 'issueDialogContent', '.app'].map(id => [id, { open: false, showModal() { this.open = true; }, close() { this.open = false; }, set textContent(value) { this.innerHTML = value; } }]));
 const pending = [];
 const sandbox = vm.createContext({
- state: { issuePage: { Issues: [{ ID: 42, Title: 'summary', Kind: 'manual', State: 'open' }] } },
+ state: { issuePage: { issues: [{ id: 42, title: 'summary', kind: 'manual', state: 'open' }] } },
  document: { getElementById: id => nodes[id], querySelector: id => nodes[id] },
  api: url => new Promise((resolve, reject) => pending.push({ url, resolve, reject })),
  esc: value => String(value), renderMarkdown: value => `rendered:${value}`, fmtTime: String, repoName: String,

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/argojob"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 // `oberth run hold ...` is the CLI form of the assisted-continuation MCP
@@ -192,7 +193,7 @@ func writeRunHold(output io.Writer, action string, raw json.RawMessage, asJSON b
 				Released     bool   `json:"released"`
 			} `json:"holds"`
 		}
-		if err := json.Unmarshal(raw, &response); err != nil {
+		if err := recordjson.Unmarshal(raw, &response); err != nil {
 			_, err := fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 			return err
 		}
@@ -220,7 +221,7 @@ func writeRunHold(output io.Writer, action string, raw json.RawMessage, asJSON b
 				TimedOut  bool   `json:"timed_out"`
 			} `json:"result"`
 		}
-		if err := json.Unmarshal(raw, &response); err != nil {
+		if err := recordjson.Unmarshal(raw, &response); err != nil {
 			_, err := fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 			return err
 		}

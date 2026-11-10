@@ -57,12 +57,15 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 		t.Fatal("context read polled execution")
 		return nil, nil
 	})
-	assert := func(t *testing.T, row map[string]any, summary bool) {
+	// snake: HTTP rows carry snake_case wire names; summary: qualified repo.
+	assertNames := func(t *testing.T, row map[string]any, snake, summary bool) {
 		t.Helper()
 		repo, ref, sha, position := "Repo", "Ref", "SHA", "QueuePosition"
 		expectedRepo := f.repo.Name
-		if summary {
+		if snake || summary {
 			repo, ref, sha, position = "repo", "ref", "sha", "queue_position"
+		}
+		if summary {
 			expectedRepo = "codeberg/acme/oberth"
 		}
 		if row[repo] != expectedRepo || row[ref] != old.Ref || row[sha] != old.SHA || row[position] != float64(1) || row["superseded"] != true {
@@ -73,6 +76,10 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 				t.Errorf("retired admission field %s still exposed: %#v", retired, row)
 			}
 		}
+	}
+	assert := func(t *testing.T, row map[string]any, summary bool) {
+		t.Helper()
+		assertNames(t, row, false, summary)
 	}
 	for _, view := range []string{"all", "active"} {
 		t.Run("MCP/"+view, func(t *testing.T) {
@@ -125,15 +132,15 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 				}
 				oldIndex, newIndex := 0, 1
 				oldRow, newRow := rows[oldIndex].(map[string]any), rows[newIndex].(map[string]any)
-				if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID || newRow["QueuePosition"] != float64(2) {
+				if oldRow["id"] != old.ID || newRow["id"] != newer.ID || newRow["queue_position"] != float64(2) || oldRow["ID"] != nil {
 					t.Fatalf("unexpected %s queue order: %#v", path, rows)
 				}
-				assert(t, oldRow, false)
+				assertNames(t, oldRow, true, false)
 				if newRow["superseded"] != false {
 					t.Error("newest run is superseded")
 				}
 			} else {
-				assert(t, value.(map[string]any)["Run"].(map[string]any), false)
+				assertNames(t, value.(map[string]any)["run"].(map[string]any), true, false)
 			}
 		})
 	}
@@ -271,7 +278,7 @@ func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 			if len(rows) != tc.count {
 				t.Fatalf("filtered rows: %s", response.Body)
 			}
-			if tc.count == 1 && (rows[0]["ID"] != runs[0].ID || rows[0]["superseded"] != true || rows[0]["QueuePosition"] != float64(2)) {
+			if tc.count == 1 && (rows[0]["id"] != runs[0].ID || rows[0]["superseded"] != true || rows[0]["queue_position"] != float64(2)) {
 				t.Fatalf("wrong filtered context: %#v", rows[0])
 			}
 		})

@@ -9,10 +9,10 @@ const sandbox = vm.createContext({
 });
 vm.runInContext(source.slice(source.indexOf('function issueListURL()'), source.indexOf('async function renderIssues(')), sandbox);
 assert.match(vm.runInContext('issueListURL()', sandbox), /work_status=active/);
-const html = vm.runInContext('issueRow({ID:1, Kind:"manual", State:"open", work_status:"active", stale:true, Title:"<script>"})', sandbox);
+const html = vm.runInContext('issueRow({id:1, kind:"manual", state:"open", work_status:"active", stale:true, title:"<script>"})', sandbox);
 assert.doesNotMatch(html, /active/);
 assert.match(html, /stale/);
 assert.doesNotMatch(html, /<script>/);
-const fresh = vm.runInContext('issueRow({ID:2, State:"closed", work_status:"review", stale:false})', sandbox);
+const fresh = vm.runInContext('issueRow({id:2, state:"closed", work_status:"review", stale:false})', sandbox);
 assert.doesNotMatch(fresh, /review/);
 assert.doesNotMatch(fresh, />stale</);

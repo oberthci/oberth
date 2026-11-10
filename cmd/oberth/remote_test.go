@@ -60,10 +60,11 @@ func TestRunsJSONEmitsTheServerPayload(t *testing.T) {
 }
 
 func TestRunDetailMarksTheFailingStep(t *testing.T) {
-	payload := `{"Run":{"ID":"run-abc","Status":"failed","Ref":"main","SHA":"0123456789abcdef",` +
-		`"FailedBurn":"ci","FailedStep":"test","Actor":"miki","Trigger":"branch"},` +
-		`"Steps":[{"Burn":"ci","Step":"lint","Status":"passed"},{"Burn":"ci","Step":"test","Status":"failed"}],` +
-		`"Repository":{"Name":"demo","DefaultBranch":"main"}}`
+	// The v0.20.3 default shape: snake_case record names only.
+	payload := `{"run":{"id":"run-abc","status":"failed","ref":"main","sha":"0123456789abcdef",` +
+		`"failed_burn":"ci","failed_step":"test","actor":"miki","trigger":"branch"},` +
+		`"steps":[{"burn":"ci","step":"lint","status":"passed"},{"burn":"ci","step":"test","status":"failed"}],` +
+		`"repository":{"name":"demo","default_branch":"main"}}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer
 	if err := runRunDetail(context.Background(), []string{"run-abc"}, &out); err != nil {
