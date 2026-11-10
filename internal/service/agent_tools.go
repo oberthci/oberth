@@ -178,7 +178,7 @@ func (service *API) AgentEventsFor(ctx context.Context, actor api.Actor, subscri
 	for _, event := range raw {
 		page.NextAfterID = event.ID
 		if subscription.Matches(event, actor.Identity) {
-			page.Events = append(page.Events, event)
+			page.Events = append(page.Events, service.scopeLockWaitHolders(ctx, scoped.scope, event))
 		}
 	}
 	if !page.HasMore && page.NextAfterID < latest && len(raw) < limit {
@@ -186,6 +186,54 @@ func (service *API) AgentEventsFor(ctx context.Context, actor api.Actor, subscri
 		page.NextAfterID = latest
 	}
 	return page, nil
+}
+
+// scopeLockWaitHolders keeps a run.lock_wait event's holders inside the
+// reader's scope. The recorder stores every holder of the lock, which may be
+// runs of repositories the reader cannot see; for a scoped reader those are
+// dropped from holders and the summary and counted in hidden_holders
+// (holder_count stays the total). A holder whose run cannot be read counts
+// as hidden. Unscoped readers get the event unchanged.
+func (service *API) scopeLockWaitHolders(ctx context.Context, scope *repoScope, event model.AgentEvent) model.AgentEvent {
+	if scope == nil || event.Kind != model.AgentEventRunLockWait {
+		return event
+	}
+	raw, ok := event.Data["holders"].([]any)
+	if !ok {
+		return event
+	}
+	visible, short, hidden := []string{}, []string{}, 0
+	for _, value := range raw {
+		id, _ := value.(string)
+		if id == "" || service.history == nil {
+			hidden++
+			continue
+		}
+		run, err := service.history.Run(ctx, id)
+		if err != nil || !scope.seesRepo(run.RepoID) {
+			hidden++
+			continue
+		}
+		visible = append(visible, id)
+		short = append(short, shortRunID(id))
+	}
+	if hidden == 0 {
+		return event
+	}
+	data := make(map[string]any, len(event.Data)+1)
+	for key, value := range event.Data {
+		data[key] = value
+	}
+	data["holders"], data["hidden_holders"] = visible, hidden
+	event.Data = data
+	if index := strings.LastIndex(event.Summary, " held by "); index >= 0 {
+		text := fmt.Sprintf("%d run(s) outside your scope", hidden)
+		if len(short) > 0 {
+			text = strings.Join(short, ", ") + fmt.Sprintf(" and %d run(s) outside your scope", hidden)
+		}
+		event.Summary = event.Summary[:index] + " held by " + text
+	}
+	return event
 }
 
 // RunWaitResponse is run_wait: why the wait returned and the run then.

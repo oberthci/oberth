@@ -279,6 +279,58 @@ func TestAgentEventsScopedToUplink(t *testing.T) {
 	}
 }
 
+// run.lock_wait names the lock's holders; a holder in a repository outside a
+// scoped reader's uplink scope is dropped from holders and the summary and
+// counted in hidden_holders. An unscoped reader sees every holder.
+func TestAgentEventLockWaitHoldersScopedToReader(t *testing.T) {
+	f := newAgentFixture(t)
+	github, err := storetest.CreateUpstream(f.store, t.Context(), model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := f.store.CreateRepository(t.Context(), model.RepositorySpec{Name: "secret-project", UpstreamID: github.ID, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueued, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: foreign.ID, RefKind: model.RefBranch, Ref: "land/hidden",
+		SHA: strings.Repeat("e", 40), Actor: "other@host", Trigger: "push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder, err := f.store.Run(t.Context(), enqueued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter := f.enqueue(t, "land/waiter", "d", false)
+	holder.Status, holder.WorkflowName = model.RunRunning, "wf-holder"
+	waiter.Status, waiter.WorkflowName = model.RunRunning, "wf-waiter"
+	lock := "oberth-argo/ConfigMap/oberth-sync-limits/kvm"
+	f.observer.byRun[holder.ID] = &model.SyncObservation{Holding: []string{lock}}
+	f.observer.byRun[waiter.ID] = &model.SyncObservation{Waiting: []string{lock}}
+	f.recorder.observeActive(t.Context(), []model.Run{holder, waiter})
+	f.now = f.now.Add(90 * time.Second)
+	f.recorder.observeActive(t.Context(), []model.Run{holder, waiter})
+
+	kinds := map[string]any{"kinds": []string{model.AgentEventRunLockWait}}
+	scoped := f.events(t, api.Actor{Identity: "own@host", Scope: []string{"codeberg"}}, kinds)
+	if len(scoped.Events) != 1 {
+		t.Fatalf("scoped lock wait events = %+v", scoped.Events)
+	}
+	event := scoped.Events[0]
+	encoded, _ := json.Marshal(event)
+	if strings.Contains(string(encoded), holder.ID) || strings.Contains(event.Summary, shortRunID(holder.ID)) {
+		t.Fatalf("a holder outside the reader's scope leaked: %s", encoded)
+	}
+	holders, _ := event.Data["holders"].([]string)
+	if len(holders) != 0 || event.Data["hidden_holders"] != 1 || event.Data["holder_count"] != float64(1) || !strings.Contains(event.Summary, "1 run(s) outside your scope") {
+		t.Fatalf("scoped lock wait = %+v (%q)", event.Data, event.Summary)
+	}
+	full := f.events(t, agentActor, kinds)
+	if all, _ := full.Events[0].Data["holders"].([]any); len(all) != 1 || all[0] != holder.ID || full.Events[0].Data["hidden_holders"] != nil {
+		t.Fatalf("unscoped lock wait = %+v", full.Events[0].Data)
+	}
+}
+
 // Releases and publication failures have their own events; an automatic
 // publication retry is reported per attempt with its schedule.
 func TestAgentEventReleaseAndPublication(t *testing.T) {
