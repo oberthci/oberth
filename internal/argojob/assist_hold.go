@@ -44,8 +44,9 @@ const (
 	// metadata admission refuses it from repositories; only Build writes it.
 	AssistHoldAnnotation = "oberth.ci/assist-hold"
 	// AssistWorkflowAnnotation records on the Workflow that the run is in
-	// assist mode, with the hold TTL in seconds Build added to the workflow
-	// deadline. Build deletes an authored copy before stamping its own.
+	// assist mode, with the hold TTL in seconds; Build added
+	// AssistHoldMaxAgeFactor of them to the workflow deadline. Build deletes
+	// an authored copy before stamping its own.
 	AssistWorkflowAnnotation = "oberth.ci/assist"
 
 	// assistPauseEnv is Argo's emissary debug pause (cmd/argoexec/commands/
@@ -105,6 +106,18 @@ func assistRetryExpression(budget int64) string { return assistCommandFailure(bu
 // again unheld.
 const assistPatchCondition = "asInt(retries) > 0"
 
+// AssistHoldMaxAgeFactor bounds a worked hold: a hold with an agent action
+// ages from its last action instead of held_since, but never beyond this
+// many hold TTLs after held_since. The held Pod's deadline and the workflow
+// deadline therefore grow by AssistHoldMaxAgeFactor TTLs, so a hold
+// extended to the cap still has the step's whole budget after release.
+const AssistHoldMaxAgeFactor = 2
+
+// assistHoldAllowance is the time a held attempt may spend parked: the
+// bound the sweep enforces on a worked hold, added to the Pod and workflow
+// deadlines.
+func assistHoldAllowance(ttl int64) int64 { return AssistHoldMaxAgeFactor * ttl }
+
 // Administrator bounds for AssistConfig.
 const (
 	DefaultAssistHoldTTL            = 20 * time.Minute
@@ -127,8 +140,10 @@ type AssistConfig struct {
 	// Enabled turns the feature on. Disabled, Build injects nothing even for
 	// a run that asked, and the hold tools refuse.
 	Enabled bool
-	// HoldTTL bounds how long a parked retry waits for the agent before the
-	// kubelet fails it. Zero selects DefaultAssistHoldTTL.
+	// HoldTTL bounds how long an idle parked retry waits for the agent
+	// before the server sweep abandons it; a hold with agent activity ages
+	// from its last action, up to AssistHoldMaxAgeFactor TTLs. Zero selects
+	// DefaultAssistHoldTTL.
 	HoldTTL time.Duration
 	// MaxConcurrentHolds caps parked pods across the installation; the
 	// newest hold above the cap is abandoned. Zero selects the default.
@@ -236,7 +251,7 @@ func assistHoldEligible(t *wfv1.Template, workflowServiceAccount string, nonroot
 
 // markAssistHolds runs early, before executor tokens and placement read the
 // workflow deadline: it stamps hold-eligible leaves, extends the workflow
-// deadline by one hold TTL so a parked step cannot be cut short by the
+// deadline by the hold allowance (AssistHoldMaxAgeFactor TTLs) so a parked step cannot be cut short by the
 // run's own budget, and records assist mode on the Workflow. The hold
 // annotations are server-owned: authored copies are removed first.
 func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, credentialed bool) error {
@@ -290,7 +305,7 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 		if t.Metadata.Annotations == nil {
 			t.Metadata.Annotations = map[string]string{}
 		}
-		t.Metadata.Annotations[AssistHoldAnnotation] = strconv.FormatInt(budget+ttl, 10)
+		t.Metadata.Annotations[AssistHoldAnnotation] = strconv.FormatInt(budget+assistHoldAllowance(ttl), 10)
 		eligible++
 		if request.binaryDelivered() && request.SourceVolume.ClaimName != "" {
 			// run_hold_patch applies files through this server's own static
@@ -311,7 +326,7 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 		return nil
 	}
 	if workflow.Spec.ActiveDeadlineSeconds != nil && *workflow.Spec.ActiveDeadlineSeconds > 0 {
-		extended := *workflow.Spec.ActiveDeadlineSeconds + ttl
+		extended := *workflow.Spec.ActiveDeadlineSeconds + assistHoldAllowance(ttl)
 		workflow.Spec.ActiveDeadlineSeconds = &extended
 	}
 	if workflow.Annotations == nil {
@@ -354,13 +369,14 @@ func injectAssistHolds(workflow *wfv1.Workflow) error {
 			return
 		}
 		deadline, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || deadline <= ttl {
-			failure = fmt.Errorf("argojob: %s on %q is not a hold deadline above the TTL", AssistHoldAnnotation, t.Name)
+		if err != nil || deadline <= assistHoldAllowance(ttl) {
+			failure = fmt.Errorf("argojob: %s on %q is not a hold deadline above the hold allowance", AssistHoldAnnotation, t.Name)
 			return
 		}
-		// markAssistHolds wrote the floored step budget plus one TTL; the
-		// budget is the bound a failed command must have finished under.
-		budget := deadline - ttl
+		// markAssistHolds wrote the floored step budget plus the hold
+		// allowance (AssistHoldMaxAgeFactor TTLs); the budget is the bound a
+		// failed command must have finished under.
+		budget := deadline - assistHoldAllowance(ttl)
 		main := usageContainer(t)
 		if main == nil {
 			failure = fmt.Errorf("argojob: hold-eligible template %q lost its main container", t.Name)

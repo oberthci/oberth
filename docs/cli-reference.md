@@ -1315,7 +1315,7 @@ Usage of serve:
   -assist-exec-timeout duration
         deadline of one run_hold_exec command (at most 15m) (default 1m0s)
   -assist-hold-ttl duration
-        how long an unreleased assist hold waits for its agent before the server abandons it; the held Pod deadline is the step budget plus this TTL (whole seconds, at most 4h) (default 20m0s)
+        how long an idle assist hold waits for its agent before the server abandons it; a hold with an agent action ages from its last action, at most 2x this TTL; the held Pod deadline is the step budget plus 2x this TTL (whole seconds, at most 4h) (default 20m0s)
   -assist-max-concurrent-holds int
         parked assist retries allowed at once across the installation; newer holds above it are abandoned (1-64) (default 2)
   -assist-patch-max-bytes int

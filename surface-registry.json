@@ -115,6 +115,10 @@
     "flag:reason": {
       "doc_anchor": "docs/agent-events.md#safe-land-promote-with-prune_source",
       "test_ref": "internal/service/promotion_prune_test.go TestBranchDeleteManyUnmergedNeedsReason"
+    },
+    "flag:assist-hold-ttl": {
+      "doc_anchor": "docs/assisted-continuation.md#helm-values-serve-flags-chart-default-equals-binary-default",
+      "test_ref": "cmd/oberth/assist_flags_test.go TestServeAssistDefaultOffAndValidated"
     }
   }
 }

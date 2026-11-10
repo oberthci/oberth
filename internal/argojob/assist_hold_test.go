@@ -129,15 +129,15 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 	if got := wf.Annotations[AssistWorkflowAnnotation]; got != "1200" {
 		t.Fatalf("workflow assist annotation = %q, want the 1200-second hold TTL", got)
 	}
-	if got := *wf.Spec.ActiveDeadlineSeconds; got != 3600+1200 {
-		t.Fatalf("workflow deadline = %d, want 3600 + one hold TTL", got)
+	if got := *wf.Spec.ActiveDeadlineSeconds; got != 3600+2*1200 {
+		t.Fatalf("workflow deadline = %d, want 3600 + the hold allowance of two TTLs", got)
 	}
 	// Argo's workflow/common constants are not imported by the server; the
 	// expression variables are the documented retry-local names.
 	test := templateNamed(t, wf, "test")
 	floored := DefaultStepStartupAllowance.Floored(600)
-	if want := strconv.FormatInt(floored+1200, 10); test.Metadata.Annotations[AssistHoldAnnotation] != want {
-		t.Fatalf("test hold deadline = %q, want the floored step budget %d + 1200", test.Metadata.Annotations[AssistHoldAnnotation], floored)
+	if want := strconv.FormatInt(floored+2*1200, 10); test.Metadata.Annotations[AssistHoldAnnotation] != want {
+		t.Fatalf("test hold deadline = %q, want the floored step budget %d + 2x1200 (a worked hold may age to two TTLs)", test.Metadata.Annotations[AssistHoldAnnotation], floored)
 	}
 	if test.RetryStrategy == nil || test.RetryStrategy.Limit.String() != "1" || test.RetryStrategy.RetryPolicy != wfv1.RetryPolicyOnFailure || test.RetryStrategy.Expression != assistRetryExpression(floored) {
 		t.Fatalf("test retryStrategy = %+v", test.RetryStrategy)
@@ -152,8 +152,8 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 		t.Fatalf("the Pod patch must not repeat the retry discriminator (deferred-pod re-substitution): %s", test.PodSpecPatch)
 	}
 	lint := templateNamed(t, wf, "lint")
-	if got := lint.Metadata.Annotations[AssistHoldAnnotation]; got != "4800" {
-		t.Fatalf("lint hold deadline = %q, want the 3600 workflow budget + 1200", got)
+	if got := lint.Metadata.Annotations[AssistHoldAnnotation]; got != "6000" {
+		t.Fatalf("lint hold deadline = %q, want the 3600 workflow budget + 2x1200", got)
 	}
 	if lint.RetryStrategy == nil || lint.RetryStrategy.Expression != assistRetryExpression(3600) {
 		t.Fatalf("lint (no own deadline) is hold-eligible and must be bounded by the 3600 workflow budget: %+v", lint.RetryStrategy)
@@ -342,7 +342,7 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 		t.Fatal("attempt 1 re-substituted for a deferred Pod is paused")
 	}
 	deferred := resolve("1", "0", "0")
-	if env := containerEnv(mainOf(deferred)); env[assistPauseEnv] != "true" || *deferred.ActiveDeadlineSeconds != floored+1200 {
+	if env := containerEnv(mainOf(deferred)); env[assistPauseEnv] != "true" || *deferred.ActiveDeadlineSeconds != floored+2*1200 {
 		t.Fatalf("a retry whose Pod creation was deferred must still park (plain unheld retry otherwise): %v deadline=%d", env, *deferred.ActiveDeadlineSeconds)
 	}
 	for name, params := range map[string][3]string{
@@ -365,8 +365,8 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	if env["GOCACHE"] != AssistScratchCachePath+"/gobuild" || env["GOMODCACHE"] != AssistScratchCachePath+"/gomod" || env["OBERTH_CACHE_DIR"] != AssistScratchCachePath {
 		t.Fatalf("held attempt still writes the shared cache: GOCACHE=%q GOMODCACHE=%q OBERTH_CACHE_DIR=%q", env["GOCACHE"], env["GOMODCACHE"], env["OBERTH_CACHE_DIR"])
 	}
-	if got := *held.ActiveDeadlineSeconds; got != DefaultStepStartupAllowance.Floored(600)+1200 {
-		t.Fatalf("held attempt deadline = %d, want 600 floored (%d) + 1200", got, DefaultStepStartupAllowance.Floored(600))
+	if got := *held.ActiveDeadlineSeconds; got != DefaultStepStartupAllowance.Floored(600)+2*1200 {
+		t.Fatalf("held attempt deadline = %d, want 600 floored (%d) + 2x1200", got, DefaultStepStartupAllowance.Floored(600))
 	}
 	if readOnly, ok := mountReadOnly(main, SourceMountPath); !ok || readOnly {
 		t.Fatal("held attempt source mount is not writable")
@@ -465,13 +465,13 @@ func TestBuildAssistBoundsInheritedTemplateDefaultsDeadline(t *testing.T) {
 		t.Fatalf("templateDefaults deadline = %s, want the floored %d", got, inherited)
 	}
 	lint := templateNamed(t, wf, "lint")
-	if got := lint.Metadata.Annotations[AssistHoldAnnotation]; got != strconv.FormatInt(inherited+1200, 10) {
-		t.Fatalf("lint hold deadline = %q, want the inherited floored budget %d + 1200", got, inherited)
+	if got := lint.Metadata.Annotations[AssistHoldAnnotation]; got != strconv.FormatInt(inherited+2*1200, 10) {
+		t.Fatalf("lint hold deadline = %q, want the inherited floored budget %d + 2x1200", got, inherited)
 	}
 	if lint.RetryStrategy == nil || lint.RetryStrategy.Expression != assistRetryExpression(inherited) {
 		t.Fatalf("lint retry expression = %+v, want the inherited budget %d", lint.RetryStrategy, inherited)
 	}
-	if !strings.Contains(lint.PodSpecPatch, fmt.Sprintf(`"activeDeadlineSeconds":%d,`, inherited+1200)) {
+	if !strings.Contains(lint.PodSpecPatch, fmt.Sprintf(`"activeDeadlineSeconds":%d,`, inherited+2*1200)) {
 		t.Fatalf("lint held patch does not carry the inherited deadline: %s", lint.PodSpecPatch)
 	}
 	// The leaf's own deadline still wins over the default.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -348,5 +349,64 @@ func TestEnforceAssistHoldsRechecksVictimBeforeDelete(t *testing.T) {
 	}
 	if _, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), "wf-c-test-1", metav1.GetOptions{}); err != nil {
 		t.Fatal("hold patched after the snapshot was deleted")
+	}
+}
+
+// TestEnforceAssistHoldsTTLExtendsOnActivity: an idle hold is still
+// abandoned at held_since + holdTTL; a hold with an agent action ages from
+// that action instead, but never past AssistHoldMaxAgeFactor TTLs after
+// held_since, which the held Pod's deadline (budget + 2 TTLs) covers.
+func TestEnforceAssistHoldsTTLExtendsOnActivity(t *testing.T) {
+	ttl := 20 * time.Minute
+	idle := heldPodFixture("wf-a-test-1", "wf-a", "test", ttl, false)
+	worked := heldPodFixture("wf-b-test-1", "wf-b", "test", 25*time.Minute, false)
+	stale := heldPodFixture("wf-c-test-1", "wf-c", "test", 30*time.Minute, false)
+	capped := heldPodFixture("wf-d-test-1", "wf-d", "test", AssistHoldMaxAgeFactor*ttl, false)
+	now := time.Now() // after the fixtures: idle and capped are exactly at their bound
+	client := fake.NewClientset(idle, worked, stale, capped)
+	activity := map[string]model.AssistPodActivity{
+		"wf-b-test-1": {LastAction: now.Add(-10 * time.Minute)}, // extended to 30m: still held
+		"wf-c-test-1": {LastAction: now.Add(-ttl)},              // its last action is one TTL old
+		"wf-d-test-1": {LastAction: now.Add(-time.Second)},      // worked, but at the hard cap
+	}
+	config := testConfig()
+	config.Assist = AssistConfig{Enabled: true, MaxConcurrentHolds: 64, HoldTTL: ttl}
+	controller, err := NewController(&staticWorkflowClient{}, client, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned, err := controller.EnforceAssistHolds(context.Background(), activity, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, pod := range abandonedPods(abandoned) {
+		got[pod] = true
+	}
+	if len(got) != 3 || !got["wf-a-test-1/ttl"] || !got["wf-c-test-1/ttl"] || !got["wf-d-test-1/ttl"] {
+		t.Fatalf("abandoned = %v, want the idle hold at TTL, the stale worked hold and the capped one", abandonedPods(abandoned))
+	}
+	if _, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), "wf-b-test-1", metav1.GetOptions{}); err != nil {
+		t.Fatal("a hold worked 10 minutes ago was abandoned at its original TTL")
+	}
+
+	// A patch landing after the snapshot extends a TTL victim on recheck.
+	client = fake.NewClientset(heldPodFixture("wf-e-test-1", "wf-e", "test", 21*time.Minute, false))
+	patched := func(context.Context, string, string) (model.AssistPodActivity, error) {
+		return model.AssistPodActivity{LastAction: now.Add(-time.Second)}, nil
+	}
+	if abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), nil, patched, now); err != nil || len(abandoned) != 0 {
+		t.Fatalf("a hold patched after the snapshot was abandoned at its original TTL: %v %v", abandonedPods(abandoned), err)
+	}
+
+	// The held Pod's deadline covers the cap plus the whole step budget.
+	built, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, assistDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ttlSeconds := int64(assistConfig().Assist.Effective().HoldTTL / time.Second)
+	budget := DefaultStepStartupAllowance.Floored(600)
+	if got := templateNamed(t, built, "test").Metadata.Annotations[AssistHoldAnnotation]; got != strconv.FormatInt(budget+AssistHoldMaxAgeFactor*ttlSeconds, 10) {
+		t.Fatalf("held Pod deadline = %s, want budget %d + %d TTLs of %ds", got, budget, AssistHoldMaxAgeFactor, ttlSeconds)
 	}
 }

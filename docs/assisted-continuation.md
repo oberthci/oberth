@@ -65,9 +65,10 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   patch every step already gets.
   `<held>` additionally sets `ARGO_DEBUG_PAUSE_BEFORE=true` and
   `OBERTH_ASSIST_HOLD=1` on `main`, sets the Pod `activeDeadlineSeconds` to
-  the step's #1499-floored budget plus `assist.holdTTL` so the kubelet bounds
-  the whole attempt (hold and the command after release) while the server
-  abandons an unreleased hold once `holdTTL` has passed, makes the `/work/src` mount writable, makes the shared
+  the step's #1499-floored budget plus two `assist.holdTTL` (the longest a
+  worked hold may stay parked, see *Capacity, supersession and bounds*) so
+  the kubelet bounds the whole attempt (hold and the command after release)
+  while the server abandons an unreleased hold, makes the `/work/src` mount writable, makes the shared
   `/work/cache` mount read-only and moves every cache variable that pointed
   into it (`GOCACHE`, `GOMODCACHE`, `OBERTH_CACHE_DIR`) to
   `/tmp/oberth-assist-cache`, and pins the server's architecture when the
@@ -79,7 +80,7 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   `run_hold_patch` and `run_continue` need no shell in the image.
 
 The Workflow gets `oberth.ci/assist: <hold TTL seconds>` and its
-`activeDeadlineSeconds` grows by one hold TTL, so a parked step is not cut
+`activeDeadlineSeconds` grows by two hold TTLs, so a parked step is not cut
 short by the run's own budget; the executor token lifetime and the server
 watchdog follow the Workflow deadline. Both annotations are server-owned:
 template-metadata admission refuses `oberth.ci/assist-hold` from
@@ -91,7 +92,7 @@ step shows as running, and the run keeps its Argo parallelism slot and
 template locks. If nobody acts before `holdTTL`, the server's hold sweep (the scheduler's
 settlement tick) abandons the Pod, the retry is exhausted and the run fails
 as it would have, recorded as a server abandon (see *Capacity, supersession
-and bounds*); the kubelet deadline (budget plus TTL) is the backstop if
+and bounds*); the kubelet deadline (budget plus two TTLs) is the backstop if
 the server is down, and such a kubelet kill is not recorded. That deadline is not the recorded floored step deadline,
 so #1499 never classifies a timed-out hold as a start-up failure, and a
 retained failed step prevents the automatic infrastructure retry.
@@ -208,8 +209,8 @@ tier) is read-only on a held attempt and every cache variable that pointed
 into it is moved to private scratch, so a patched tree cannot write into
 state later runs read. Attempt 1 uses the caches exactly as before. A held
 attempt therefore starts with cold caches; that is the price of the shared
-cache's integrity, and it is bounded by the step's own budget plus the hold
-TTL. Per-run workspace caches (`work` volume claim templates) are
+cache's integrity, and it is bounded by the step's own budget plus two hold
+TTLs. Per-run workspace caches (`work` volume claim templates) are
 per-workflow and unaffected.
 
 ## Capacity, supersession and bounds
@@ -218,8 +219,15 @@ per-workflow and unaffected.
   Workflow ends: it counts as running work
   ([what occupies a slot](where-limits-live.md#what-occupies-a-slot)).
 - The scheduler's settlement tick (every 5 s) sweeps the branch-CI step
-  Pods (`oberth.ci/trigger=ci`, the label `Build` writes). An unreleased hold
-  whose `held_since` is `assist.holdTTL` old is abandoned (reason `ttl`).
+  Pods (`oberth.ci/trigger=ci`, the label `Build` writes). An unreleased idle
+  hold whose `held_since` is `assist.holdTTL` old is abandoned (reason
+  `ttl`). **TTL extension:** a hold with an agent exec, patch or continue
+  ages from its last action instead, so it is abandoned `holdTTL` after that
+  action, but never later than two `holdTTL` after `held_since`, whatever
+  its activity. The held Pod's deadline is the step budget plus two TTLs, so
+  a hold released at that cap still has the step's whole budget. `run.held`
+  `abandon_at` is the idle deadline (`held_since + holdTTL`); every action
+  moves it, up to `held_since + 2 × holdTTL`.
   Holds whose run's assist record shows a continue or abandon are running
   commands and are skipped; if that record cannot be read the sweep does
   nothing rather than kill a released step. The record is read again for
@@ -257,7 +265,7 @@ per-workflow and unaffected.
 | Value | Flag | Default | Bound |
 |---|---|---|---|
 | `assist.enabled` | `--assist-enabled` | `false` | |
-| `assist.holdTTL` | `--assist-hold-ttl` | `20m` | whole seconds, at most `4h`; unreleased holds are abandoned after it, the held Pod deadline is step budget + TTL |
+| `assist.holdTTL` | `--assist-hold-ttl` | `20m` | whole seconds, at most `4h`; idle holds are abandoned after it, worked holds after it from their last action, at most 2 × TTL from `held_since`; the held Pod deadline is step budget + 2 × TTL |
 | `assist.maxConcurrentHolds` | `--assist-max-concurrent-holds` | `2` | 1-64 |
 | `assist.execTimeout` | `--assist-exec-timeout` | `1m` | at most `15m` |
 | `assist.execOutputBytes` | `--assist-exec-output-bytes` | `65536` | at most 4 MiB |
@@ -273,8 +281,8 @@ per-workflow and unaffected.
   deadline kill (signal exit code, or a duration at or above the floored
   budget), so a start-up failure does not get a second in-workflow attempt
   before the run-level infrastructure retry sees it, and a step that ran out
-  of time is never given a second budget plus the hold TTL.
-- **Workflow deadline**: extended by one hold TTL per assisted run.
+  of time is never given a second budget plus the hold allowance.
+- **Workflow deadline**: extended by two hold TTLs per assisted run.
 - **Template locks, Argo parallelism, admission hold**: unchanged; a
   held run holds its native Argo lock and its parallelism slot for the whole
   hold.

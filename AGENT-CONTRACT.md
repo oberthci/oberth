@@ -3116,10 +3116,11 @@ base }}`; a retry attempt exists only after the retry expression passed, and
 the patch is re-substituted for a deferred retry Pod with zeroed `lastRetry`
 values, so it must not repeat the discriminator). Attempt 1 is unchanged. The held retry parks before its command
 (`ARGO_DEBUG_PAUSE_BEFORE`), has a Pod deadline of the floored step budget plus
-`assist.holdTTL` (the server abandons an unreleased hold once `holdTTL` has
-passed; the Pod deadline is the backstop), a writable `/work/src`, a read-only `/work/cache` with its
+two `assist.holdTTL` (the server abandons an idle unreleased hold once `holdTTL` has
+passed; a hold with an agent exec, patch or continue ages from its last action,
+at most two TTLs after `held_since`; the Pod deadline is the backstop), a writable `/work/src`, a read-only `/work/cache` with its
 cache variables moved to private scratch, and the server executable mounted.
-The Workflow deadline grows by one hold TTL. Server-owned annotations
+The Workflow deadline grows by two hold TTLs. Server-owned annotations
 `oberth.ci/assist` (Workflow) and `oberth.ci/assist-hold` (template, refused
 from repositories) mark the mode. Release, tag, promotion, schedule, plan and
 apply runs never hold; a deadline-killed (signal exit code 137/143, or an

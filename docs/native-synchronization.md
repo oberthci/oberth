@@ -106,7 +106,7 @@ template lock: Argo acquires a template-level lock once, for the retry parent,
 before attempt 1, and releases it when the retry parent is fulfilled. The hold
 parks the retry child; the lock stays taken for the hold. Size the semaphore
 and `assist.maxConcurrentHolds` together: a held run on a limit-1 key keeps
-that key for up to the step budget plus `assist.holdTTL`.
+that key for up to the step budget plus two `assist.holdTTL`.
 
 ## Security
 

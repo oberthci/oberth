@@ -99,7 +99,7 @@ complete. That includes Workflows that are admitted but still waiting:
   Workflow waiting for a workflow-level semaphore or mutex of its own;
 - a Workflow with a step waiting for a template-level lock;
 - an assisted retry hold: the held run's Workflow is running, so it keeps its
-  slot for up to the step budget plus `assist.holdTTL`, and at most
+  slot for up to the step budget plus two `assist.holdTTL`, and at most
   `assist.maxConcurrentHolds` held runs do so at once.
 
 A postponed Workflow holds no lock (Argo takes locks only after admitting it),

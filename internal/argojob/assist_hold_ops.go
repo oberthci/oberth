@@ -233,9 +233,11 @@ var assistSweepSelector = triggerLabel + "=" + string(pipeline.TriggerCI)
 // Holds already released by their agent are running commands and are
 // neither aged nor counted.
 //
-//   - TTL: an unreleased hold whose HeldSince is assist.holdTTL old is
-//     abandoned (the Pod deadline covers the step budget too, so the server,
-//     not the kubelet, enforces the TTL).
+//   - TTL: an unreleased idle hold whose HeldSince is assist.holdTTL old is
+//     abandoned. A hold with an agent exec, patch or continue ages from its
+//     last action instead, but is abandoned at AssistHoldMaxAgeFactor TTLs
+//     after HeldSince whatever its activity. The Pod deadline is the step
+//     budget plus that cap, so the server, not the kubelet, enforces both.
 //   - Cap: above assist.maxConcurrentHolds the newest idle holds are
 //     abandoned first. The sweep runs every few seconds, so in practice a
 //     hold that parks over the cap fails at once, as if the run were
@@ -245,8 +247,9 @@ var assistSweepSelector = triggerLabel + "=" + string(pipeline.TriggerCI)
 //
 // activity is a snapshot read before the Pod list. When recheck is set, each
 // chosen victim's activity is read again right before its delete and the
-// victim is spared if that fresh record no longer condemns it (released, or
-// for the cap, worked inside the window), closing the window in which an
+// victim is spared if that fresh record no longer condemns it (released,
+// for the TTL a newer action that extends it, for the cap worked inside the
+// window), closing the window in which an
 // action landing between snapshot and delete would be killed.
 func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity map[string]model.AssistPodActivity, recheck model.AssistActivityRecheck, now time.Time) ([]model.AssistAbandon, error) {
 	if controller.kube == nil || !controller.config.Assist.Enabled {
@@ -331,7 +334,25 @@ func assistVictimDue(reason string, activity model.AssistPodActivity, ttl time.D
 	if reason == model.AssistAbandonCap {
 		return activity.LastAction.IsZero() || now.Sub(activity.LastAction) >= model.AssistActivityWindow
 	}
-	return !hold.HeldSince.Add(ttl).After(now)
+	return !assistHoldExpiry(hold, activity, ttl).After(now)
+}
+
+// assistHoldExpiry is when the TTL abandons a hold: held_since + ttl for an
+// idle hold, last action + ttl for a worked one, never later than
+// AssistHoldMaxAgeFactor TTLs after held_since.
+func assistHoldExpiry(hold model.AssistHold, activity model.AssistPodActivity, ttl time.Duration) time.Time {
+	start := hold.HeldSince
+	if activity.LastAction.After(start) {
+		start = activity.LastAction
+	}
+	return minTime(start.Add(ttl), hold.HeldSince.Add(AssistHoldMaxAgeFactor*ttl))
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }
 
 type assistSweepHold struct {
