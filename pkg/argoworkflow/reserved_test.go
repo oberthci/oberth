@@ -33,7 +33,7 @@ func TestAdmitRefusesReservedWorkflowMetadataAndReleaseMutex(t *testing.T) {
     annotations:
       oberth.ci/run-id: someone-else
 `,
-			expect: `spec.workflowMetadata.annotations["oberth.ci/run-id"] is refused`,
+			expect: `spec.workflowMetadata.annotations["` + ReservedMetadataPrefix + `run-id"] is refused`,
 		},
 		{
 			name: "workflowMetadata label",
@@ -51,6 +51,22 @@ func TestAdmitRefusesReservedWorkflowMetadataAndReleaseMutex(t *testing.T) {
         expression: "'release'"
 `,
 			expect: `spec.workflowMetadata.labelsFrom["oberth.ci/trigger"] is refused`,
+		},
+		{
+			name: "workflowMetadata argo controller instance label",
+			spec: `  workflowMetadata:
+    labels:
+      workflows.argoproj.io/controller-instanceid: elsewhere
+`,
+			expect: `spec.workflowMetadata.labels["workflows.argoproj.io/controller-instanceid"] is refused: keys under workflows.argoproj.io/ are assigned by the Argo controller`,
+		},
+		{
+			name: "workflowMetadata argo annotation",
+			spec: `  workflowMetadata:
+    annotations:
+      workflows.argoproj.io/pod-name-format: v1
+`,
+			expect: `spec.workflowMetadata.annotations["workflows.argoproj.io/pod-name-format"] is refused`,
 		},
 		{
 			name: "workflow-level release mutex",

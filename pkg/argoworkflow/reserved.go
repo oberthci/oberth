@@ -14,6 +14,12 @@ import (
 // cancels, adopts or finalizes a Workflow.
 const ReservedMetadataPrefix = "oberth.ci/"
 
+// ArgoMetadataPrefix is the label and annotation namespace the Argo
+// controller owns. workflowMetadata copies it onto the live Workflow, so a
+// key such as workflows.argoproj.io/controller-instanceid there could hide
+// the run from the controller Oberth submitted it to.
+const ArgoMetadataPrefix = "workflows.argoproj.io/"
+
 // ReleaseMutexName is the fixed native Argo mutex the server adds to every
 // release run while release serialization is on. A document that took it
 // itself would hold every release in the installation behind its own run.
@@ -22,7 +28,8 @@ const ReleaseMutexName = "oberth-release"
 // templateTagOpen starts every Argo template tag, simple or expression.
 const templateTagOpen = "{{"
 
-// admitWorkflowMetadata refuses Oberth-owned keys in spec.workflowMetadata.
+// admitWorkflowMetadata refuses Oberth- and Argo-owned keys in
+// spec.workflowMetadata.
 // The Argo controller copies workflowMetadata onto the live Workflow at every
 // reconcile, after Oberth has stamped its own metadata, so an oberth.ci/ key
 // here would overwrite the server's ownership record. Keys outside the
@@ -39,6 +46,12 @@ func admitWorkflowMetadata(location string, metadata *wfv1.WorkflowMetadata) []e
 				problems = append(problems, fmt.Errorf(
 					"argoworkflow: %s.%s[%q] is refused: keys under %s are assigned by Oberth and record which run owns the Workflow; remove the key or rename it outside %s",
 					location, field, key, ReservedMetadataPrefix, ReservedMetadataPrefix))
+				continue
+			}
+			if strings.HasPrefix(key, ArgoMetadataPrefix) {
+				problems = append(problems, fmt.Errorf(
+					"argoworkflow: %s.%s[%q] is refused: keys under %s are assigned by the Argo controller and decide which controller runs the Workflow; remove the key or rename it outside %s",
+					location, field, key, ArgoMetadataPrefix, ArgoMetadataPrefix))
 				continue
 			}
 			// The controller substitutes {{...}} across the whole serialized
