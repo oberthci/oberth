@@ -30,7 +30,7 @@ requires a verified HTTPS secret store address.
 
 Upgrading from a pre-v0.10.57 (store schema v2) install? A plain helm upgrade
 crash-loops by design: schema v3 is backup-and-replace only. Follow
-docs/upgrade-schema-v3.md before upgrading.
+docs/archive/upgrade-schema-v3.md before upgrading.
 
 Docs — MCP client setup, secret store, restore after a rebuild, release
 secrets: https://github.com/oberthci/oberth#documentation (docs/mcp-setup.md)
