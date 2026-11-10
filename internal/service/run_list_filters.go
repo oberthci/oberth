@@ -22,6 +22,9 @@ func (service *API) heldRuns(ctx context.Context, filter api.RunFilter) (any, er
 	if filter.Before != 0 || strings.TrimSpace(filter.BeforeRun) != "" {
 		return nil, fmt.Errorf("%w: before does not apply to held:true, which is one unpaged list", ErrInvalidInput)
 	}
+	if !api.ValidRunView(filter.View) {
+		return nil, fmt.Errorf("%w: view must be all, active or history", ErrInvalidInput)
+	}
 	if filter.View == api.RunViewHistory {
 		return nil, fmt.Errorf("%w: held:true lists running runs; it cannot combine with view history", ErrInvalidInput)
 	}

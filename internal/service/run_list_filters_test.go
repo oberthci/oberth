@@ -73,7 +73,7 @@ func TestRunListOwnAndHeldFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	if current, _ := f.store.Run(t.Context(), mine.ID); current.Status != model.RunRunning {
-		t.Skipf("fixture run is %s, not running", current.Status)
+		t.Fatalf("fixture run is %s, not running", current.Status)
 	}
 	f.holds.holds = []model.AssistHold{{Pod: "wf-mine-test-1", Step: "test", Attempt: 1, HeldSince: time.Now()}}
 	if runs, err := f.runList(t, map[string]any{"held": true, "own": true}); err != nil || len(runs) != 1 || runs[0].ID != mine.ID {
@@ -87,6 +87,7 @@ func TestRunListOwnAndHeldFilters(t *testing.T) {
 		"before":     {"held": true, "before": 5},
 		"history":    {"held": true, "view": "history"},
 		"superseded": {"held": true, "superseded": true},
+		"view":       {"held": true, "view": "bogus"},
 	} {
 		if _, err := f.runList(t, arguments); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("held with %s = %v", name, err)
