@@ -552,6 +552,9 @@ func TestAgentEventRunHeldNotDelayedBySlowSweep(t *testing.T) {
 		defer done()
 		_ = f.service.Shutdown(shutdown)
 	})
+	// A short hold loop keeps the 10 s bound far from the tick under -race;
+	// the sweep stays stuck either way.
+	f.recorder.holdInterval = 500 * time.Millisecond
 	if err := f.service.StartAgentEvents(ctx); err != nil {
 		t.Fatal(err)
 	}
