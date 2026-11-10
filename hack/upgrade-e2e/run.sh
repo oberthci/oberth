@@ -205,8 +205,13 @@ bao write auth/kubernetes/role/oberth-ci bound_service_account_names=oberth boun
   --set controller.workflowDefaults.spec.suspend=true \
   --set 'controller.extraEnv[0].name=POD_NAMES' --set-string 'controller.extraEnv[0].value=v1' --wait --timeout 180s
 # A fresh server intentionally fails readiness until a local upstream exists.
+rehearsal_install=()
+# The rollback rehearsal keeps the seeded runs queued until its upgrade lifts
+# this admission disk floor (larger than any volume): since v0.20 a released
+# server submits every admitted run at once.
+! $rehearse || rehearsal_install=(--set admission.diskFloorBytes=1125899906842624)
 "$helm" install oberth "$chart" -n oberth --values "$here/values.yaml" \
-  --set-string "runnerImagePrefixes[0]=${published%@sha256:*}"
+  --set-string "runnerImagePrefixes[0]=${published%@sha256:*}" "${rehearsal_install[@]}"
 booted=false
 for ((i=0;i<60;i++)); do
   if k -n oberth logs deploy/oberth -c oberth 2>/dev/null | rg -q 'ready for bootstrap'; then booted=true; break; fi
@@ -334,13 +339,13 @@ schedule_probe() {
   "$private/fixture-baseline" verify "$evidence/ledger-$phase.json" "$evidence/ledger-$phase-ready.json" \
     "$(jq '.Ledger|length' "$evidence/state-$phase.json")" 0
 }
-snapshot baseline
 if $rehearse; then
   rehearse_rollback
   k -n oberth get secrets -o json | jq -e '[.items[]|select(.type!="helm.sh/release.v1")]|length==0' >/dev/null
   printf 'PASS: oberth upgrade across a schema migration (backup, rollback record), oberth upgrade --rollback (Helm rollback, history restore), previous version and history back, no restored run dispatched again\n'
   exit 0
 fi
+snapshot baseline
 schedule_probe baseline baseline
 previous=baseline-ready
 for version in "${versions[@]}"; do
