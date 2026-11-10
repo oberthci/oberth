@@ -362,7 +362,8 @@ func readFileWithin(path string, limit int64) ([]byte, error) {
 	defer func() { _ = root.Close() }()
 	file, err := root.Open(filepath.Base(path))
 	if err != nil {
-		return nil, err
+		// os.Root reports the bare file name; keep the path the operator gave.
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	defer func() { _ = file.Close() }()
 	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
