@@ -543,6 +543,14 @@ record and for scoped callers. A latest backup record whose details cannot be
 read omits `last_backup` and reports `last_backup_warning` instead; `database`
 stays `ready`.
 
+`admin_tokens` (unscoped callers only, since v0.21.0) shows when the active
+unscoped admin uplink tokens expire: `earliest_expires_at`,
+`expiring_within_30d`, and a `warning` once the earliest is less than 14 days
+away. The server also logs that warning hourly. Rotate before the expiry, while
+the token still works: `oberth uplink rotate <name> --ttl <duration>` in the
+server pod. Tokens without an expiry are counted by the separate hourly
+"no expiry" warning instead.
+
 ## Schedules
 
 Schedules are declared in a repository's `.oberth/schedule.yaml` on its default

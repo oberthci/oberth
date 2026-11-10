@@ -98,3 +98,38 @@ func TestLegacyTokenWarningsAreReadOnlyAndExcludeInactiveCredentials(t *testing.
 		t.Fatalf("warning retroactively assigned expiry: %v, %v", credential.ExpiresAt, err)
 	}
 }
+
+func TestAdminTokenExpiryWarnsInsideTwoWeeks(t *testing.T) {
+	now := time.Now().UTC()
+	database := testStore(t, &now)
+	if expiry, err := database.AdminTokenExpiry(t.Context()); err != nil || expiry != nil {
+		t.Fatalf("no admin: %+v, %v", expiry, err)
+	}
+	// The default 90-day admin token: visible, no warning yet.
+	admin, _ := lifecycleUplink(t, database, "admin", "SHA256:admin", true)
+	scoped, _ := lifecycleUplink(t, database, "member", "SHA256:member", false)
+	expiry, err := database.AdminTokenExpiry(t.Context())
+	if err != nil || expiry == nil || expiry.Warning != "" || expiry.ExpiringWithin30Days != 0 ||
+		!expiry.EarliestExpiresAt.Equal(now.Add(90*24*time.Hour).Truncate(time.Nanosecond)) {
+		t.Fatalf("90-day admin: %+v, %v", expiry, err)
+	}
+	// Non-admin tokens never count; an admin token 10 days out warns.
+	if _, err := database.db.ExecContext(t.Context(), `UPDATE token_credentials SET expires_at=? WHERE id=?`, unixNano(now.Add(24*time.Hour)), scoped.TokenCredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.db.ExecContext(t.Context(), `UPDATE token_credentials SET expires_at=? WHERE id=?`, unixNano(now.Add(10*24*time.Hour)), admin.TokenCredentialID); err != nil {
+		t.Fatal(err)
+	}
+	expiry, err = database.AdminTokenExpiry(t.Context())
+	if err != nil || expiry == nil || expiry.ExpiringWithin30Days != 1 || expiry.Warning == "" ||
+		!expiry.EarliestExpiresAt.Equal(now.Add(10*24*time.Hour)) {
+		t.Fatalf("10-day admin: %+v, %v", expiry, err)
+	}
+	// An already expired token is no longer an active admin.
+	if _, err := database.db.ExecContext(t.Context(), `UPDATE token_credentials SET expires_at=? WHERE id=?`, unixNano(now.Add(-time.Hour)), admin.TokenCredentialID); err != nil {
+		t.Fatal(err)
+	}
+	if expiry, err := database.AdminTokenExpiry(t.Context()); err != nil || expiry != nil {
+		t.Fatalf("expired admin: %+v, %v", expiry, err)
+	}
+}

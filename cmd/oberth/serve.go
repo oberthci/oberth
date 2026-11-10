@@ -1344,6 +1344,12 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		defer close(tokenWarningsDone)
 		watchNonExpiringUplinkTokens(tokenWarningCtx, database.CountNonExpiringUplinkTokens, logger)
 	}()
+	adminExpiryDone := make(chan struct{})
+	go func() {
+		defer close(adminExpiryDone)
+		watchAdminTokenExpiry(tokenWarningCtx, database.AdminTokenExpiry, logger)
+	}()
+	defer func() { stopTokenWarnings(); <-adminExpiryDone }()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
 	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)

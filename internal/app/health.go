@@ -158,6 +158,9 @@ type HealthStatus struct {
 	// LastBackupWarning explains an omitted last_backup when the latest
 	// backup record exists but cannot be read.
 	LastBackupWarning string `json:"last_backup_warning,omitempty"`
+	// AdminTokens is when the installation's admin tokens expire, with a
+	// warning inside two weeks of the earliest. Unscoped status only.
+	AdminTokens *model.AdminTokenExpiry `json:"admin_tokens,omitempty"`
 	// AdmissionBlocker names the run at the head of the admission queue that
 	// every later run waits behind, e.g. an XL run waiting for a full drain
 	// (#1021). Unscoped status only.
@@ -348,6 +351,13 @@ func (health Health) Status(ctx context.Context) (any, error) {
 			status.LastBackupWarning = boundedDetail(err.Error())
 		default:
 			status.Database = "unavailable"
+		}
+	}
+	if reader, ok := health.Store.(interface {
+		AdminTokenExpiry(context.Context) (*model.AdminTokenExpiry, error)
+	}); ok {
+		if expiry, err := reader.AdminTokenExpiry(ctx); err == nil {
+			status.AdminTokens = expiry
 		}
 	}
 	if health.Admission != nil {
