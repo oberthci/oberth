@@ -70,7 +70,10 @@ type UpgradeConfig struct {
 	// verifiedChart is set once the chart is the verified local file of a
 	// signed release; Helm then gets no --version.
 	verifiedChart bool
-	storedValues  string // internal schema-validated legacy migration snapshot
+	// defaultPins keep previously rendered values of changed chart defaults
+	// (upgrade_defaults.go); the operator's --values/--set still win.
+	defaultPins  []string
+	storedValues string // internal schema-validated legacy migration snapshot
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -528,6 +531,13 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err != nil {
 		return result, err
 	}
+	defaults, err := reconcileChangedDefaults(ctx, cfg, deps, prepared.revision, valuesYAML)
+	if err != nil {
+		prepared.cleanup()
+		return result, err
+	}
+	cfg.defaultPins = defaults.args
+	defaults.print(w)
 
 	defer prepared.cleanup()
 	cfg.storedValues = prepared.storedValues
@@ -745,6 +755,7 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile,
 			"--set-string", "argo.controllerProfileConfigMap=")
 	}
+	args = append(args, cfg.defaultPins...)
 	// User values files come after pins. Pinned-key conflicts have already
 	// been refused by checkPinnedKeyConflicts, so these cannot override a pin.
 	for _, f := range cfg.UserValues {

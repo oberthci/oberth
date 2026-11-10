@@ -71,6 +71,9 @@ server flag, so admission paused between the argo-workflows and the Oberth
 upgrade. That pause happens one last time while upgrading to v0.21.0 (the old
 server still holds the pin); afterwards it does not recur. A name set in
 `argo.controllerProfileConfigMap` by hand still pins exactly that profile.
+`oberth upgrade` clears a stored pin that names the profile the controller
+runs now (the value an earlier installer wrote) and prints that it did; a
+pin naming another profile is left as set.
 
 **Default: half the cluster's CPUs.** Since v0.21.0 a fresh `oberth install`
 that creates the argo-workflows release sets `parallelism` to half the
