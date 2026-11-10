@@ -66,7 +66,7 @@ so exactly those render; a value an operator set on purpose fails here with
 the replacement named, never silently ignored.
 */ -}}
 {{- if and (hasKey .Values "maxConcurrentJobs") (not (kindIs "invalid" .Values.maxConcurrentJobs)) (ne (int .Values.maxConcurrentJobs) 0) -}}
-{{- fail "maxConcurrentJobs is gone since v0.20.0: Oberth submits every run and the Argo controller's parallelism postpones the excess. Delete the key and set controller.parallelism on the argo-workflows release (oberth install --argo-parallelism N); see docs/where-limits-live.md" -}}
+{{- fail "maxConcurrentJobs is gone since v0.20.0: Oberth submits every run and the Argo controller's parallelism postpones the excess. Set maxConcurrentJobs to 0 in the values you pass (a --reuse-values upgrade keeps a key that is only deleted from the file) and set controller.parallelism on the argo-workflows release (oberth install --argo-parallelism N); see docs/where-limits-live.md" -}}
 {{- end -}}
 {{- $retiredCapacity := (.Values.admission | default dict).runtimeCapacity | default dict -}}
 {{- if or (and (hasKey $retiredCapacity "enabled") (ne (toString $retiredCapacity.enabled) "true")) (and (hasKey $retiredCapacity "maxConcurrentJobs") (not (kindIs "invalid" $retiredCapacity.maxConcurrentJobs)) (ne (int $retiredCapacity.maxConcurrentJobs) 0)) -}}
@@ -74,7 +74,7 @@ the replacement named, never silently ignored.
 {{- end -}}
 {{- $argoSync := .Values.argoSync | default dict -}}
 {{- if $argoSync.semaphores -}}
-{{- fail "argoSync.semaphores is gone since v0.20.0: the ConfigMap oberth-sync-limits is rendered by the argo-workflows release. Hand it over with oberth install --argo-sync-limit key=N (one per key) and delete argoSync from these values; see docs/where-limits-live.md#moving-the-semaphore-limits" -}}
+{{- fail "argoSync.semaphores is gone since v0.20.0: the ConfigMap oberth-sync-limits is rendered by the argo-workflows release. Hand it over with oberth install --argo-sync-limit key=N (one per key) and set argoSync.semaphores to null in the values you pass (a --reuse-values upgrade keeps a key that is only deleted from the file); see docs/where-limits-live.md#moving-the-semaphore-limits" -}}
 {{- end -}}
 {{- /*
 The ConfigMap oberth-sync-limits that a v0.18 or v0.19 release of this chart

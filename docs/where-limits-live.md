@@ -157,10 +157,23 @@ helm upgrade argo-workflows argo/argo-workflows -n oberth-argo --version 1.0.24 
   --reuse-values -f argo-limits.yaml   # the extraObjects above
 ```
 
-Then remove `argoSync` from the Oberth values file. The Oberth chart refuses a
-non-empty `argoSync.semaphores`, and refuses to upgrade while the live
-ConfigMap still belongs to the Oberth release without `keep`, so it is never
-deleted by accident.
+Then clear `argoSync.semaphores` in the Oberth release. `oberth install` and a
+`helm upgrade --reuse-values` keep every value the release already has, so a
+key merely deleted from your values file stays set; pass it as `null` once, in
+the values file you give the installer or with `--set argoSync.semaphores=null`:
+
+```yaml
+argoSync:
+  semaphores: null
+```
+
+The Oberth chart refuses a non-empty `argoSync.semaphores`, and refuses to
+upgrade while the live ConfigMap still belongs to the Oberth release without
+`keep`, so it is never deleted by accident.
+
+With the nonroot controller profile (`--argo-controller-profile`), the
+installer puts the limits ConfigMap beside the profile's own ConfigMap in the
+release's `extraObjects`; pass the profile flag on every run as before.
 
 ## Migrating from concurrency groups
 
