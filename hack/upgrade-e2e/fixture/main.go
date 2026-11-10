@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -111,6 +112,13 @@ func main() {
 	must(json.NewEncoder(os.Stdout).Encode(snapshotState{ledger, values, count}))
 }
 func seed(ctx context.Context, path string) {
+	// Admin opens refuse a missing database; seed creates it the way a
+	// server's first start does. CreateGenesis exists in every baseline.
+	if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
+		created, err := store.CreateGenesis(ctx, path, store.Options{})
+		must(err)
+		must(created.Close())
+	}
 	s, err := store.OpenAdminClient(ctx, path, store.Options{})
 	must(err)
 	defer func() { must(s.Close()) }()

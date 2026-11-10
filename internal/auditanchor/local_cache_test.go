@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestLocalCycleCannotResetVerifiedPrefixAfterRollback(t *testing.T) {
@@ -20,7 +21,7 @@ func TestLocalCycleCannotResetVerifiedPrefixAfterRollback(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			now := time.Now()
 			path := filepath.Join(t.TempDir(), "audit.db")
-			database, err := store.OpenAdminClient(t.Context(), path, store.Options{})
+			database, err := storetest.OpenAdminClient(t.Context(), path, store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}

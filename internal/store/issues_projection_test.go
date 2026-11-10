@@ -487,7 +487,7 @@ func TestLegacyPromotionFailureIssueClosesOnGreenBranchRun(t *testing.T) {
 func TestRestartInterruptedPromotionDoesNotProjectIssue(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := OpenAdminClient(ctx, path, Options{})
+	database, err := openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

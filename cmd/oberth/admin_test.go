@@ -36,7 +36,7 @@ func registerTestUpstream(t *testing.T, databasePath, name, baseURL string) {
 
 func registerTestUpstreamWithKey(t *testing.T, databasePath, name, baseURL, keyName string) {
 	t.Helper()
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestRepoAddMapsRepositoryToNamedUpstreamAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(output.String(), "registered repository widget -> upstream github") {
 		t.Fatalf("repo add output = %q", output.String())
 	}
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestRepoAddMapsRepositoryToNamedUpstreamAndIsIdempotent(t *testing.T) {
 	if !strings.Contains(output.String(), "registered repository widget -> upstream codeberg") {
 		t.Fatalf("cross-upstream repo add output = %q", output.String())
 	}
-	database, err = store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err = storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestUpstreamRemoveRequiresConfirmationAndRemovesMappings(t *testing.T) {
 	if !strings.Contains(output.String(), "removed upstream github") || !strings.Contains(output.String(), "widget") {
 		t.Fatalf("upstream remove output = %q", output.String())
 	}
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestUpstreamRemoveFailsClosedWhenRepositoryHasHistory(t *testing.T) {
 	}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestUpstreamRemoveFailsClosedWhenRepositoryHasHistory(t *testing.T) {
 
 func registerTestUplink(t *testing.T, databasePath, identity, fingerprint string) {
 	t.Helper()
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestUplinkListAndRemoveRevokeTokenImmediately(t *testing.T) {
 	if !strings.Contains(output.String(), "removed uplink agent@runner") {
 		t.Fatalf("uplink remove output = %q", output.String())
 	}
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,6 +606,10 @@ func TestUpstreamAddWaitsForKeyRegistrationInOneInvocation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := newBootstrapClient("ci", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	probeCalls := 0
@@ -729,6 +733,10 @@ func TestUpstreamAddStoresPerUpstreamDataKeys(t *testing.T) {
 		probe: func(context.Context, string, []byte, []byte) error { return nil },
 	}
 	databasePath := filepath.Join(directory, "oberth.sqlite")
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), databasePath, store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	var output bytes.Buffer
 	if err := runUpstreamWithDependencies(ctx, []string{
 		"add",
@@ -751,7 +759,7 @@ func TestUpstreamAddStoresPerUpstreamDataKeys(t *testing.T) {
 	if len(secret.Data["id_ed25519"]) != 0 {
 		t.Fatal("per-upstream add must not write the shared data key")
 	}
-	database, err := store.OpenAdminClient(ctx, databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1030,6 +1038,10 @@ func TestUpstreamAddRequiresBothExplicitConfirmations(t *testing.T) {
 func TestUpstreamAddUsesProvidedProjectedMaterialWithoutKubernetes(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	hostKey, privateBody, _ := testSSHIdentity(t)
 	privatePath := filepath.Join(directory, "id_ed25519")
 	knownHostsPath := filepath.Join(directory, "known_hosts")
@@ -1139,6 +1151,10 @@ func TestUplinkAddReadsOneBoundedKeyFromStdinOrRawArgument(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
+			// Admin commands act on a database the server created; they never create one.
+			if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+				t.Fatal(err)
+			}
 			certificatePath := filepath.Join(directory, "tls.crt")
 			writeTestCertificate(t, certificatePath, publicKey, privateKey)
 			var output bytes.Buffer
@@ -1165,6 +1181,10 @@ func TestUplinkMutationsPassThroughDaemonGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	certificatePath := filepath.Join(directory, "tls.crt")
 	writeTestCertificate(t, certificatePath, publicKey, privateKey)
 	var operations []string
@@ -1316,7 +1336,7 @@ func newBootstrapClient(namespace, privateKeySecret, knownHostsSecret string) *f
 
 func upstreamCount(t *testing.T, databasePath string) int {
 	t.Helper()
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1371,6 +1391,10 @@ func TestAccessRevokeFailsClosedWithoutMutationGate(t *testing.T) {
 
 func TestAccessAllowUpdatesConfigMapAndSQLite(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), databasePath, store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := fake.NewClientset()
 	var output bytes.Buffer
 	if err := runAccessAllowWithDependencies(context.Background(), []string{
@@ -1396,7 +1420,7 @@ func TestAccessAllowUpdatesConfigMapAndSQLite(t *testing.T) {
 	}
 
 	// Verify sqlite was synced.
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1425,7 +1449,7 @@ func TestAccessRevokeUpdatesConfigMapAndSQLite(t *testing.T) {
 	})
 	// Seed the sqlite to match.
 	{
-		database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+		database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1454,7 +1478,7 @@ func TestAccessRevokeUpdatesConfigMapAndSQLite(t *testing.T) {
 	}
 
 	// Verify one grant remaining in sqlite.
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1952,6 +1976,10 @@ func TestHostModeTargetDisclosure(t *testing.T) {
 func TestInPodModeSkipsKeySelectionPrompt(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := newBootstrapClient("oberth", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	var output bytes.Buffer
@@ -2055,7 +2083,7 @@ func TestRepoRemoveDeletesMappingAndCleansCacheDirectory(t *testing.T) {
 	}
 
 	// Verify the repository is gone from the database.
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2085,7 +2113,7 @@ func TestRepoRemoveRefusesInFlightRuns(t *testing.T) {
 	}
 
 	// Create an in-flight run.
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2165,6 +2193,10 @@ func TestUplinkRotateReplacesTheIdentityKey(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
 	database := filepath.Join(directory, "oberth.sqlite")
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), database, store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	oldKey, certificateKey := newTestUplinkKey(t)
 	certificatePath := filepath.Join(directory, "tls.crt")
 	writeTestCertificate(t, certificatePath, certificateKey.Public().(ed25519.PublicKey), certificateKey)

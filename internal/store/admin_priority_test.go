@@ -47,7 +47,7 @@ func TestAdminPriorityLoweringPersistsAndCapsAging(t *testing.T) {
 			if err != nil || next.ID != normal.ID {
 				t.Fatalf("lowered run still blocks head: %+v %v", next, err)
 			}
-			reopened, err := OpenAdminClient(t.Context(), s.livePath, Options{Now: func() time.Time { return now }})
+			reopened, err := openAdminClientForTest(t.Context(), s.livePath, Options{Now: func() time.Time { return now }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +112,7 @@ func TestAdminPriorityMigrationPreservesOverridesAndAudit(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenAdminClient(t.Context(), path, Options{Now: func() time.Time { return now }})
+	reopened, err := openAdminClientForTest(t.Context(), path, Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}

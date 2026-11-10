@@ -12,7 +12,7 @@ import (
 
 func TestTokenExpiryMigrationPreservesExistingCredentials(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := OpenAdminClient(t.Context(), path, Options{})
+	database, err := openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestTokenExpiryMigrationPreservesExistingCredentials(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	database, err = OpenAdminClient(t.Context(), path, Options{})
+	database, err = openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -189,7 +189,7 @@ func TestQueueCapConcurrentArrivalsAndNoLeapfrog(t *testing.T) {
 		t.Fatal(err)
 	}
 	results := make(chan error, 12)
-	other, err := OpenAdminClient(ctx, s.livePath, Options{})
+	other, err := openAdminClientForTest(ctx, s.livePath, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,7 +22,7 @@ func TestSlowKubernetesReconcileDoesNotBlockWriter(t *testing.T) {
 		t.Run(writer, func(t *testing.T) {
 			now := time.Now()
 			path := filepath.Join(t.TempDir(), "audit.sqlite")
-			database, err := store.OpenAdminClient(t.Context(), path, store.Options{})
+			database, err := storetest.OpenAdminClient(t.Context(), path, store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -41,7 +42,7 @@ func TestSlowKubernetesReconcileDoesNotBlockWriter(t *testing.T) {
 			}
 			writeStore := database
 			if writer == "other-store" {
-				writeStore, err = store.OpenAdminClient(t.Context(), path, store.Options{})
+				writeStore, err = storetest.OpenAdminClient(t.Context(), path, store.Options{})
 				if err != nil {
 					t.Fatal(err)
 				}

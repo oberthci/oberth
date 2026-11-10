@@ -351,7 +351,7 @@ func TestAuditFenceRejectsRegressedOrReplacedHeadWithoutBusyRetry(t *testing.T) 
 				writeStore := s
 				if writer == "foreign" {
 					var err error
-					writeStore, err = OpenAdminClient(t.Context(), s.livePath, Options{})
+					writeStore, err = openAdminClientForTest(t.Context(), s.livePath, Options{})
 					if err != nil {
 						t.Fatal(err)
 					}

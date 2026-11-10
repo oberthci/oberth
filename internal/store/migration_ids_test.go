@@ -16,7 +16,7 @@ func TestMigrationIDsUnknownAppliedIDRefusesBeforeRecovery(t *testing.T) {
 	for name, open := range map[string]func(context.Context, string, Options) (*Store, error){"owner": Open, "admin": OpenAdminClient, "current": OpenCurrent, "inspection": InspectCurrent} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "unknown.sqlite")
-			s, err := OpenAdminClient(t.Context(), path, Options{})
+			s, err := openAdminClientForTest(t.Context(), path, Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +53,7 @@ func TestMigrationIDsUnknownAppliedIDRefusesBeforeRecovery(t *testing.T) {
 }
 
 func TestMigrationIDsCurrentLedgerRecordsEveryID(t *testing.T) {
-	s, err := OpenAdminClient(t.Context(), filepath.Join(t.TempDir(), "ids.sqlite"), Options{})
+	s, err := openAdminClientForTest(t.Context(), filepath.Join(t.TempDir(), "ids.sqlite"), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -153,7 +153,7 @@ func TestOpenRefusesExistingVersionTwoForBackupAndReplace(t *testing.T) {
 	}
 	before := readAuthoritativeDatabaseFiles(t, path)
 
-	opened, err := OpenAdminClient(context.Background(), path, Options{})
+	opened, err := openAdminClientForTest(context.Background(), path, Options{})
 	if opened != nil {
 		_ = opened.Close()
 	}
@@ -790,7 +790,7 @@ func TestOptionsBusyTimeoutOverridesDSNPragma(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "busy-override.sqlite") +
 		"?_pragma=busy_timeout(1234)&_pragma=foreign_keys(1)"
-	opened, err := OpenAdminClient(context.Background(), path, Options{BusyTimeout: 50 * time.Millisecond})
+	opened, err := openAdminClientForTest(context.Background(), path, Options{BusyTimeout: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -952,7 +952,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	store, err := OpenAdminClient(context.Background(), path, Options{})
+	store, err := openAdminClientForTest(context.Background(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1229,7 +1229,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenAdminClient(context.Background(), path, Options{})
+	reopened, err := openAdminClientForTest(context.Background(), path, Options{})
 	if err != nil {
 		t.Fatalf("reopen fresh schema: %v", err)
 	}
@@ -1240,7 +1240,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 func TestSchemaIdentityIsImmutable(t *testing.T) {
 	t.Parallel()
 
-	store, err := OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), Options{})
+	store, err := openAdminClientForTest(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1261,7 +1261,7 @@ func TestSchemaIdentityIsImmutable(t *testing.T) {
 func TestPromotionIssueWorkRequiresExclusivePromotionOwner(t *testing.T) {
 	t.Parallel()
 
-	store, err := OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), Options{})
+	store, err := openAdminClientForTest(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1302,7 +1302,7 @@ SELECT run_id IS NULL FROM ci_issue_work WHERE promotion_id = 'promotion-1'`).Sc
 func TestPromotionRunIndexAllowsOneNonEmptyBinding(t *testing.T) {
 	t.Parallel()
 
-	store, err := OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), Options{})
+	store, err := openAdminClientForTest(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1420,7 +1420,7 @@ INSERT INTO schema_migrations(version, applied_at) VALUES(?, 0);`, test.version)
 				t.Fatal(err)
 			}
 
-			opened, err := OpenAdminClient(context.Background(), path, Options{})
+			opened, err := openAdminClientForTest(context.Background(), path, Options{})
 			if opened != nil {
 				_ = opened.Close()
 			}

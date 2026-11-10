@@ -8,13 +8,14 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // T1: TestManagerWitnessOnlyModeAcceptsAdoptionIntentOverNonGenesisChain
 func TestManagerWitnessOnlyModeAcceptsAdoptionIntentOverNonGenesisChain(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"),
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"),
 		store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)

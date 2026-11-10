@@ -24,6 +24,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/auth"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestParseServeOptionsRequiresSafeComposition(t *testing.T) {
@@ -166,6 +167,10 @@ func TestAdministrativeBootstrapRegistersUpstreamAndBoundToken(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	databasePath := filepath.Join(directory, "oberth.sqlite")
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), databasePath, store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	upstreamKeyPath := filepath.Join(directory, "upstream-key")
 	knownHostsPath := filepath.Join(directory, "known_hosts")
 	publicKey, privateKey, err := ed25519.GenerateKey(cryptorand.Reader)
@@ -226,7 +231,7 @@ func TestAdministrativeBootstrapRegistersUpstreamAndBoundToken(t *testing.T) {
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "Uplink token for ") || !strings.HasPrefix(lines[1], "oberth_") {
 		t.Fatalf("uplink output shape = %q", uplinkOutput.String())
 	}
-	database, err := store.OpenAdminClient(ctx, databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

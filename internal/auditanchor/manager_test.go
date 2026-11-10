@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -80,7 +81,7 @@ func (continuity *countingContinuity) Reconcile(ctx context.Context, history []m
 func TestMutationGateRequiresFreshExternalWitnessRead(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 45, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestMutationGateRequiresFreshExternalWitnessRead(t *testing.T) {
 func TestMutationGateRejectsUnresolvedPrePublicationIntent(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 47, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ func TestMutationGateRejectsUnresolvedPrePublicationIntent(t *testing.T) {
 func TestManagerCompletesPendingPrefixBeforeAdvancedHead(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 48, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +216,7 @@ func TestMutationGateRejectsDeletedPersistedCheckpointAfterReadiness(t *testing.
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 50, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +256,7 @@ func TestMutationGateReverifiesPersistedCheckpointReceipt(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 55, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +296,7 @@ func TestMutationGateDoesNotReconcileAfterStateChangesDuringWitnessRecovery(t *t
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 57, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +352,7 @@ func TestMutationGateRejectsTamperingDuringExternalChecks(t *testing.T) {
 			ctx := context.Background()
 			now := time.Date(2026, 8, 6, 16, 58, 0, 0, time.UTC)
 			path := filepath.Join(t.TempDir(), "oberth.sqlite")
-			database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+			database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -414,7 +415,7 @@ func TestMutationGateRejectsTamperingDuringExternalChecks(t *testing.T) {
 func TestMutationGateFailsWhenContinuityReconciliationFails(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 59, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +487,7 @@ func (authority *fakeAuthority) Verify(anchor model.AuditAnchor) error {
 
 func TestManagerAnchorsGenesisAndEnforcesFreshness(t *testing.T) {
 	now := time.Date(2026, 8, 6, 15, 0, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +718,7 @@ func TestManagerRejectsMultipleWitnessesWithoutLocalCheckpoint(t *testing.T) {
 
 func TestManagerKeepsValidCheckpointDuringTransientTSAFailure(t *testing.T) {
 	now := time.Date(2026, 8, 6, 16, 0, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -747,7 +748,7 @@ func TestManagerKeepsValidCheckpointDuringTransientTSAFailure(t *testing.T) {
 
 func TestManagerDoesNotFallbackOnInvalidTimestampEvidence(t *testing.T) {
 	now := time.Date(2026, 8, 6, 16, 15, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +776,7 @@ func TestMutationGateRechecksStateAfterCachedReadiness(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 16, 30, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,7 +824,7 @@ func TestMutationGateRechecksStateAfterCachedReadiness(t *testing.T) {
 // whose pins can be rolled back with the SQLite volume protects nothing.
 func TestManagerConfigRequirements(t *testing.T) {
 	now := time.Date(2026, 8, 6, 17, 0, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +861,7 @@ func TestManagerRejectsErasedHistoryAfterRestartEvenWithANewerWitness(t *testing
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 18, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -914,7 +915,7 @@ func TestManagerRejectsErasedHistoryAfterRestartEvenWithANewerWitness(t *testing
 	external.history = append(external.history, model.AuditWitness{
 		UUID: "witness-newer", LogIndex: 99, IntegratedAt: now.Add(time.Minute), AuditSHA256: make([]byte, 32),
 	})
-	database, err = store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err = storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -936,7 +937,7 @@ func TestManagerRejectsWholeDatabaseRollbackWithStaleWitnessPrefix(t *testing.T)
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 18, 30, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -969,7 +970,7 @@ func TestManagerRejectsWholeDatabaseRollbackWithStaleWitnessPrefix(t *testing.T)
 		t.Fatal(err)
 	}
 
-	database, err = store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err = storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1006,7 +1007,7 @@ func TestManagerRejectsWholeDatabaseRollbackWithStaleWitnessPrefix(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	database, err = store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err = storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1059,7 +1060,7 @@ func TestManagerRejectsRollbackAcrossPrePublicationIntentCrash(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 6, 19, 15, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1088,7 +1089,7 @@ func TestManagerRejectsRollbackAcrossPrePublicationIntentCrash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	database, err = store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err = storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1114,7 +1115,7 @@ func TestManagerRejectsRollbackAcrossPrePublicationIntentCrash(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	database, err = store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err = storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1135,7 +1136,7 @@ func TestManagerRejectsRollbackAcrossPrePublicationIntentCrash(t *testing.T) {
 func TestManagerRecoversDegradedStartupWhenWitnessBecomeAvailable(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1167,7 +1168,7 @@ func TestManagerRecoversDegradedStartupWhenWitnessBecomeAvailable(t *testing.T) 
 func TestManagerDegradedStartupBlocksMutationsUntilRecovery(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 8, 10, 5, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1208,7 +1209,7 @@ func TestManagerLocalModeVerifiesChainWithoutExternalServices(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1280,7 +1281,7 @@ func TestManagerLocalModeVerifiesChainWithoutExternalServices(t *testing.T) {
 func TestManagerTimestampOnlyModeEnforcesCheckpointFreshness(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
-	database, err := store.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1342,7 +1343,7 @@ func TestManagerWitnessOnlyModePublishesAndSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 8, 11, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1418,7 +1419,7 @@ func TestIncrementalMutationGateDetectsTamperedSuffix(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}

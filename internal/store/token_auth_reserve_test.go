@@ -81,7 +81,7 @@ func TestTokenAuthReserveReadsFreshScopeAndRevocation(t *testing.T) {
 			case "credential":
 				err = s.RevokeTokenCredential(ctx, uplink.TokenCredentialID)
 			case "external-process":
-				other, openErr := OpenAdminClient(ctx, s.livePath, Options{})
+				other, openErr := openAdminClientForTest(ctx, s.livePath, Options{})
 				if openErr != nil {
 					t.Fatal(openErr)
 				}

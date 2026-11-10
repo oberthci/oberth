@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestRepoRemoveUsesDaemonCacheCleanup(t *testing.T) {
@@ -40,7 +41,7 @@ func TestDaemonCacheCleanupUsesLiveLocksAndChecksIdentity(t *testing.T) {
 	if err := runRepoAdd(t.Context(), []string{"--database", path, "repo", "github"}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
 		t.Fatal(err)
 	}
-	database, err := store.OpenAdminClient(t.Context(), path, store.Options{})
+	database, err := storetest.OpenAdminClient(t.Context(), path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestRepoRemoveDefersCatalogMutationToLiveOwner(t *testing.T) {
 	called := false
 	err := runRepoRemove(t.Context(), []string{"--database", path, "repo"}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: func(ctx context.Context, database, root, input string) (store.RemovedRepository, error) {
 		called = true
-		s, err := store.OpenAdminClient(ctx, database, store.Options{})
+		s, err := storetest.OpenAdminClient(ctx, database, store.Options{})
 		if err != nil {
 			return store.RemovedRepository{}, err
 		}
