@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/storetest"
@@ -361,5 +362,32 @@ func TestSchedulerAutomaticallyResumesDuePublication(t *testing.T) {
 	f.scheduler.deliveryPermit <- struct{}{}
 	if calls != 2 || len(f.jobs.createdCI) != 0 {
 		t.Fatalf("pushes=%d jobs=%d", calls, len(f.jobs.createdCI))
+	}
+}
+
+// The incident wording: the git-ssh shim's transport line followed by Git's
+// generic access-rights advice must queue a retry, not fail attempt one.
+func TestGitSSHTransportFailureQueuesPublicationRetry(t *testing.T) {
+	f := newControlFixture(t)
+	run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("git push: exit status 128: " + gitssh.TemporaryFailureMessage +
+		"\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.")
+	g := &retryPublicationGit{controlGit: f.git, failure: failure}
+	final, err := deliverPublication(t.Context(), f.store, g, f.store, f.repo, f.repo.Name, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Publication.Status != model.PublicationPending || final.Publication.Attempts != 1 || final.Publication.RetryAfter.IsZero() {
+		t.Fatalf("transport failure was not queued for retry: %+v", final.Publication)
 	}
 }
