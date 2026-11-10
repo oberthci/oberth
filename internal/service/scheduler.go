@@ -1273,10 +1273,9 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if promotionErr != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
 	}
-	if jobResult.Status == model.RunPassed && !scheduler.runAssisted(finalizeCtx, run.ID) {
-		if gateErr := require(finalizeCtx); gateErr != nil {
-			return gateErr
-		}
+	if publish, gateErr := scheduler.publicationGate(finalizeCtx, run.ID, jobResult, require); gateErr != nil {
+		return gateErr
+	} else if publish {
 		publication, beginErr := scheduler.beginRunPublication(finalizeCtx, repository, run, promotion)
 		if beginErr != nil {
 			jobResult.Status = model.RunFailed
@@ -1428,17 +1427,26 @@ func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) 
 	return promotion, nil
 }
 
-// runAssisted re-reads the run's durable assisted verdict at finalization: a
-// held step continued by the agent means the passed tree is not the commit,
-// so the run finishes passed in Oberth's own record but is never published
-// upstream. An unreadable run is treated as assisted, failing closed.
-func (scheduler *Scheduler) runAssisted(ctx context.Context, runID string) bool {
+// publicationGate reports whether a finalizing run is published upstream:
+// only a passed run that is not assisted, after the mutation gate. It
+// re-reads the run's durable assisted verdict: a held step continued by the
+// agent means the passed tree is not the commit, so the run finishes passed
+// in Oberth's own record but is never published. An unreadable verdict is
+// returned as an error: finalization stops with the run unfinished, as for
+// any other unreadable durable state, instead of finishing a passed run
+// silently unpublished.
+func (scheduler *Scheduler) publicationGate(ctx context.Context, runID string, result JobResult, require mutationRequirement) (bool, error) {
+	if result.Status != model.RunPassed {
+		return false, nil
+	}
 	current, err := scheduler.database().Run(ctx, runID)
 	if err != nil {
-		log.Printf("WARN: run=%s assisted verdict unreadable at finalization; publication skipped: %v", runID, err)
-		return true
+		return false, fmt.Errorf("read assisted verdict of run %s at finalization: %w", runID, err)
 	}
-	return current.Assisted
+	if current.Assisted {
+		return false, nil
+	}
+	return true, require(ctx)
 }
 
 func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository model.Repository, run model.Run, promotion model.Promotion) (model.Publication, error) {
@@ -1851,13 +1859,12 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	if promotionErr != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
 	}
-	if jobResult.Status == model.RunPassed && !scheduler.runAssisted(ctx, run.ID) {
+	if publish, gateErr := scheduler.publicationGate(ctx, run.ID, jobResult, require); gateErr != nil {
+		return gateErr
+	} else if publish {
 		repository, err := scheduler.database().Repository(ctx, run.RepoID)
 		if err != nil {
 			return err
-		}
-		if gateErr := require(ctx); gateErr != nil {
-			return gateErr
 		}
 		publication, beginErr := scheduler.beginRunPublication(ctx, repository, run, promotion)
 		if beginErr != nil {
