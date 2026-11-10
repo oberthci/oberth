@@ -351,7 +351,7 @@ schedule_probe() {
 if $rehearse; then
   if $rehearse_published; then rehearse_rollback_to_published; else rehearse_rollback; fi
   k -n oberth get secrets -o json | jq -e '[.items[]|select(.type!="helm.sh/release.v1")]|length==0' >/dev/null
-  printf 'PASS: oberth upgrade across a schema migration (backup, rollback record), oberth upgrade --rollback (Helm rollback, history restore), previous version and history back, no restored run dispatched again\n'
+  printf 'PASS: oberth upgrade across a schema migration (backup, rollback record), oberth upgrade --rollback (Helm rollback, history restore), previous version and history back, no restored run dispatched again (held until released when rolling back to the published release)\n'
   exit 0
 fi
 snapshot baseline

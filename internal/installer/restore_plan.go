@@ -216,12 +216,17 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 			_, _ = fmt.Fprintf(w, "  Workflows  delete %d whose runs the restored database does not know: %s\n", len(names), strings.Join(names, ", "))
 		}
 		if len(target.RestoredRunning) > 0 {
+			version := canonicalChartVersion(target.ChartVersion)
+			held := cfg.InterruptQueued && (version == "" || semver.Compare(version, "v0.21.0-0") < 0)
 			what := "running when the backup was taken: marked interrupted if their Workflow is not here, never re-executed"
-			if cfg.InterruptQueued {
+			switch {
+			case held:
+				what = "queued, waiting or running when the backup was taken (they may have run after it): held, not dispatched, until you release the hold"
+			case cfg.InterruptQueued:
 				what = "queued, waiting or running when the backup was taken: cancelled or interrupted, never dispatched again (they may have run after it)"
 			}
 			_, _ = fmt.Fprintf(w, "  Runs       %d %s: %s\n", len(target.RestoredRunning), what, strings.Join(target.RestoredRunning, ", "))
-			if version := canonicalChartVersion(target.ChartVersion); cfg.InterruptQueued && (version == "" || semver.Compare(version, "v0.21.0-0") < 0) {
+			if held {
 				_, _ = fmt.Fprintf(w, "  Admission  held in the restored database while queued runs remain (%s does not read the restored-runs marker); release it after checking them\n",
 					displayOr(target.ChartVersion, "the target release"))
 			}
