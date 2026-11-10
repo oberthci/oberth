@@ -173,7 +173,9 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	if created := fixture.awaitCreated(t, 1); !created[running.ID] {
 		t.Fatalf("created %v; want the running run", created)
 	}
-	if queued, err := fixture.store.Run(t.Context(), next.ID); err != nil || queued.Status != model.RunQueued {
+	// The scheduler may already have claimed next (running, phase waiting);
+	// what the running run retains is its Workflow, so assert that.
+	if queued, err := fixture.store.Run(t.Context(), next.ID); err != nil || queued.Status.Terminal() || queued.StartedAt != nil || fixture.engine.wasCreated(next.ID) {
 		t.Fatalf("workflow ceiling did not retain the queued run: %+v %v", queued, err)
 	}
 	submitted := fixture.awaitRunStarted(t, running.ID)
