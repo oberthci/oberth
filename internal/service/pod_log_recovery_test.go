@@ -323,8 +323,13 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(jobs.waitBlocks)
-	if err := <-done; err == nil {
-		t.Fatal("uncertain physical cleanup hidden")
+	// The refused deletion is deferred to the dispatch-loop retry instead of
+	// ending the scheduler, and its obligation stays pending.
+	if err := <-done; err != nil {
+		t.Fatalf("refused deletion ended the owner with an error: %v", err)
+	}
+	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 1 || pending[0].RunID != run.ID {
+		t.Fatalf("uncertain physical cleanup hidden: pending=%+v %v", pending, err)
 	}
 	current, err := fixture.store.Run(context.Background(), run.ID)
 	if err != nil || !current.Status.Terminal() {
