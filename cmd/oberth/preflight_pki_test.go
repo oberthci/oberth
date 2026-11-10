@@ -14,7 +14,7 @@ func TestPKIPreflightHelpAndUpgradeTLSFlags(t *testing.T) {
 		if command == "preflight" {
 			err = runPreflight(context.Background(), []string{"pki", "--help"}, &output)
 		} else {
-			err = runUpgrade(context.Background(), []string{"--help"}, &output)
+			err = runUpgrade(context.Background(), []string{"--help"}, nil, &output)
 		}
 		if err != nil {
 			t.Fatal(err)

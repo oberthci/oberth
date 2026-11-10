@@ -1544,10 +1544,14 @@ Usage: oberth status [flags]
 
 ```text
 Usage of upgrade:
+  -allow-downgrade
+        accept a CLI older than the installed release (a deliberate rollback within one database schema)
   -allow-retired-execution
         override retired resource/repository checks; accept orphaned resources and refused legacy runs
   -argo-controller-profile string
         explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
+  -backup-dir DIR
+        write the pre-upgrade backup and the rollback record to DIR (default: the current directory)
   -chart string
         deploy this chart instead of the signed release (development only: not verified)
   -chart-repository string
@@ -1560,6 +1564,8 @@ Usage of upgrade:
         alias for --values
   -namespace string
         Oberth namespace (default: oberth)
+  -no-backup
+        upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)
   -openbao-namespace string
         OpenBao namespace (default: openbao)
   -ownership-handoff string
@@ -1568,6 +1574,8 @@ Usage of upgrade:
         read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
   -release-origin string
         fetch release.json from this HTTPS mirror of https://releases.oberth.ci
+  -rollback FILE
+        roll back the upgrade recorded in FILE (the rollback record an upgrade printed): Helm revisions, then the pre-upgrade backup when a migration ran
   -set value
         one canonical dotted key=scalar per flag; escape literal commas (repeatable)
   -timeout duration

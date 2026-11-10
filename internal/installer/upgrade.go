@@ -53,14 +53,20 @@ type UpgradeConfig struct {
 	// ReleaseDir reads the signed release objects from a directory instead
 	// of fetching them (air-gapped hosts). ReleaseOrigin and ChartRepository
 	// override the publication origins for a mirror; verification is the same.
-	ReleaseDir string
-	// NoBackup skips the pre-upgrade backup (explicit --no-backup); Backup
-	// takes it. Without either the upgrade refuses before any write.
-	NoBackup        bool
-	Backup          func(context.Context) (UpgradeBackup, error)
+	ReleaseDir      string
 	ReleaseOrigin   string
 	ChartRepository string
-	serverPKI       bool
+	// NoBackup skips the pre-upgrade backup (explicit --no-backup); Backup
+	// takes it. Without either the upgrade refuses before any write.
+	NoBackup bool
+	Backup   func(context.Context) (UpgradeBackup, error)
+	// RecordDir is where the rollback record is written (default: next to
+	// the backup, else the current directory).
+	RecordDir string
+	// AllowDowngrade accepts a target older than the installed release, for
+	// a deliberate rollback within one database schema.
+	AllowDowngrade bool
+	serverPKI      bool
 	// verifiedChart is set once the chart is the verified local file of a
 	// signed release; Helm then gets no --version.
 	verifiedChart bool
@@ -120,6 +126,7 @@ type UpgradeResult struct {
 	AlreadyUpToDate bool
 	Upgraded        bool
 	Migrated        string // legacy key/value stripped from stored configuration
+	RecordPath      string // rollback record written before the first change
 }
 
 // ValidateUpgrade checks UpgradeConfig for invalid flag combinations and
@@ -398,9 +405,13 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 			return result, fmt.Errorf("helm release %q%s has unknown state %q at version %s; refusing a same-version no-op or retry — inspect helm status %s -n %s", release.Name, revision, release.Status, displayVersion(currentVersion), release.Name, cfg.Namespace)
 		}
 	}
-	if cmp > 0 {
-		return result, fmt.Errorf("installed version %s is newer than CLI version %s — upgrade the CLI first",
+	if cmp > 0 && !cfg.AllowDowngrade {
+		return result, fmt.Errorf("installed version %s is newer than CLI version %s — upgrade the CLI first "+
+			"(a deliberate rollback is oberth upgrade --rollback <record>, or --allow-downgrade within one database schema)",
 			displayVersion(currentVersion), displayVersion(targetVersion))
+	}
+	if cmp > 0 {
+		_, _ = fmt.Fprintf(w, "WARNING: --allow-downgrade: moving the server from %s back to %s\n", displayVersion(currentVersion), displayVersion(targetVersion))
 	}
 
 	// Validate user overrides early (no network needed).
@@ -426,16 +437,22 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	defer cleanupProfile()
 
-	// The CLI does not attest a backup's existence/freshness. Warn before any
-	// mutation whenever a migration is known OR the source schema is unknown.
+	// Announce a known or possible migration before any mutation. The
+	// upgrade takes the backup itself (takeUpgradeBackup) unless --no-backup.
+	liveSchema := 0
 	if cfg.BinarySchemaVersion > 0 {
-		liveSchema, schemaErr := queryRunningSchemaVersion(ctx, deps, cfg)
+		var schemaErr error
+		liveSchema, schemaErr = queryRunningSchemaVersion(ctx, deps, cfg)
 		if schemaErr != nil || liveSchema <= 0 {
+			liveSchema = 0
 			_, _ = fmt.Fprintln(w, "\nWARNING: running database schema is unknown; the target may run forward-only migrations.")
-			warnUpgradeBackup(w, cfg.Namespace)
+			warnUpgradeBackup(w, cfg)
 		} else if liveSchema < cfg.BinarySchemaVersion {
-			_, _ = fmt.Fprintf(w, "\nSchema migration v%d will run (forward-only; rollback requires a database restore of /data/oberth.sqlite)\n", cfg.BinarySchemaVersion)
-			warnUpgradeBackup(w, cfg.Namespace)
+			_, _ = fmt.Fprintf(w, "\nSchema migration v%d will run (forward-only; rolling back restores the pre-upgrade backup)\n", cfg.BinarySchemaVersion)
+			warnUpgradeBackup(w, cfg)
+		} else if liveSchema > cfg.BinarySchemaVersion {
+			return result, fmt.Errorf("the server writes database schema %d, newer than this CLI's %d, which the target server cannot open; "+
+				"upgrade the CLI first, or roll back with oberth upgrade --rollback <record>, which restores the pre-upgrade backup", liveSchema, cfg.BinarySchemaVersion)
 		}
 	}
 
@@ -551,6 +568,30 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 
+	// The backup and the rollback record come last before the first write,
+	// so they hold the state the upgrade starts from.
+	backupPath, err := takeUpgradeBackup(ctx, cfg, w)
+	if err != nil {
+		return result, err
+	}
+	record := UpgradeRecord{
+		Format: upgradeRecordFormat, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Context: deps.ContextName, APIServer: server, ClusterUID: kubeSystemUID(ctx, deps), Namespace: cfg.Namespace,
+		From: currentVersion, To: targetVersion, OberthRevision: helmRevisionNumber(release.Revision),
+		SchemaBefore: liveSchema, SchemaAfter: cfg.BinarySchemaVersion, Backup: backupPath,
+	}
+	if profile != nil {
+		record.ArgoNamespace, record.ArgoRevision = profile.namespace, profile.revisionNumber
+	}
+	if record.OberthRevision > 0 && (cfg.RecordDir != "" || backupPath != "") {
+		recordPath, err := writeUpgradeRecord(cfg, record)
+		if err != nil {
+			return result, err
+		}
+		result.RecordPath = recordPath
+		_, _ = fmt.Fprintf(w, "Rollback record: %s (roll back with: oberth upgrade --rollback %s)\n", recordPath, recordPath)
+	}
+
 	if profile != nil {
 		if err := profile.apply(ctx, cfg, deps); err != nil {
 			return result, fmt.Errorf("argo controller profile transition incomplete: %w", err)
@@ -607,14 +648,16 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	return result, nil
 }
 
-// Loudly warn even with --yes: that flag acknowledges cluster selection,
-// never backup completion. Do not infer freshness from a filename or audit row.
-func warnUpgradeBackup(w io.Writer, namespace string) {
-	_, _ = fmt.Fprintf(w, "WARNING: NO FRESH BACKUP HAS BEEN VERIFIED by this upgrade.\n"+
-		"  Complete `oberth backup --history-only --namespace %s` against this same cluster/context before proceeding.\n"+
-		"  Confirm successful verification and retain the encrypted file and its private key.\n"+
-		"  This upgrade does not create/check a backup; --yes does not prove one exists.\n"+
-		"  Migrations are forward-only: Helm rollback alone cannot restore the database.\n", namespace)
+// warnUpgradeBackup says what protects a migrating upgrade: the backup it
+// takes itself before the first write, or, with --no-backup, nothing.
+func warnUpgradeBackup(w io.Writer, cfg UpgradeConfig) {
+	if cfg.NoBackup {
+		_, _ = fmt.Fprintf(w, "WARNING: --no-backup: NO BACKUP WILL BE TAKEN by this upgrade.\n"+
+			"  Migrations are forward-only: without a backup of namespace %s, Helm rollback alone cannot restore the database.\n", cfg.Namespace)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "  A history-only backup of namespace %s is taken before the first change and verified;\n"+
+		"  oberth upgrade --rollback restores it if you roll back. Keep its private key off this machine.\n", cfg.Namespace)
 }
 
 // helmRevisionLabel accepts Helm's quoted and numeric JSON revision forms.
@@ -834,7 +877,9 @@ func printRecoveryGuidance(w io.Writer, namespace string) {
 	_, _ = fmt.Fprintf(w, "\nRecovery:\n")
 	_, _ = fmt.Fprintf(w, "  Release state:  helm status oberth -n %s\n", namespace)
 	_, _ = fmt.Fprintf(w, "  Pod logs:       kubectl logs -n %s deploy/oberth\n", namespace)
-	_, _ = fmt.Fprintf(w, "\nDO NOT run 'helm rollback' — database migrations are forward-only.\nFix the issue and run 'oberth upgrade' again.\n")
+	_, _ = fmt.Fprintf(w, "\nDo not run a bare 'helm rollback': database migrations are forward-only.\n"+
+		"Fix the issue and run 'oberth upgrade' again, or roll back with 'oberth upgrade --rollback <record>'\n"+
+		"(the rollback record printed above), which also restores the pre-upgrade backup when a migration ran.\n")
 }
 
 // verifyRunningVersion execs into the Oberth pod, runs `oberth version`,

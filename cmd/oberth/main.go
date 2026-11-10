@@ -214,7 +214,7 @@ Commands:
 	case "wait-idle":
 		return runWaitIdle(ctx, arguments[1:], output)
 	case "upgrade":
-		return runUpgrade(ctx, arguments[1:], output)
+		return runUpgrade(ctx, arguments[1:], input, output)
 	case "backup":
 		return runBackup(ctx, arguments[1:], input, output)
 	case "restore":

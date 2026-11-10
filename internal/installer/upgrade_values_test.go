@@ -313,7 +313,7 @@ func TestRunUpgradeRetriesFailedShadowMigration(t *testing.T) {
 					}
 				},
 			}
-			result, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", DryRun: dryRun}, deps)
+			result, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true}, deps)
 			if histories != 1 || result.AlreadyUpToDate || result.Upgraded || result.Migrated != "gitcache.shadow=true" {
 				t.Fatalf("retry result=%+v histories=%d err=%v", result, histories, err)
 			}
@@ -374,7 +374,7 @@ func TestRunUpgradeAppliesValidatedShadowMigrationSnapshot(t *testing.T) {
 			}
 		},
 	}
-	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture"}, deps)
+	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", NoBackup: true}, deps)
 	if !errors.Is(err, stop) || !applied {
 		t.Fatalf("did not reach apply with migration: %v", err)
 	}

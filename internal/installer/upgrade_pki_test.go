@@ -71,7 +71,7 @@ func TestPlainPKIUpgradeNeedsNoBaoToken(t *testing.T) {
 					return nil, nil
 				},
 			}
-			result, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.17.81", ChartOverride: "fixture", DryRun: dryRun}, deps)
+			result, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.17.81", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true}, deps)
 			if err != nil || result.Upgraded != !dryRun || applied != !dryRun {
 				t.Fatalf("result=%+v applied=%t err=%v", result, applied, err)
 			}

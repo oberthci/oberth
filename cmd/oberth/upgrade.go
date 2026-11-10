@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
@@ -13,7 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error {
+func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
 	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 
@@ -43,6 +45,10 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
 	flags.Var(&userValues, "f", "alias for --values")
 	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")
+	flags.BoolVar(&cfg.NoBackup, "no-backup", false, "upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)")
+	backupDir := flags.String("backup-dir", "", "write the pre-upgrade backup and the rollback record to `DIR` (default: the current directory)")
+	flags.BoolVar(&cfg.AllowDowngrade, "allow-downgrade", false, "accept a CLI older than the installed release (a deliberate rollback within one database schema)")
+	rollback := flags.String("rollback", "", "roll back the upgrade recorded in `FILE` (the rollback record an upgrade printed): Helm revisions, then the pre-upgrade backup when a migration ran")
 	timeout := flags.Duration("timeout", 5*time.Minute, "wait timeout for rollout completion")
 
 	if err := flags.Parse(arguments); err != nil {
@@ -55,6 +61,9 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: upgrade accepts flags only, no positional arguments", errUsage)
+	}
+	if *rollback != "" {
+		return runUpgradeRollback(ctx, *rollback, kubeContext, cfg, *timeout, input, output)
 	}
 
 	if cfg.WaitTimeout <= 0 {
@@ -89,6 +98,24 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 		return err
 	}
 
+	recordDir := *backupDir
+	if recordDir == "" {
+		recordDir = "."
+	}
+	absDir, err := filepath.Abs(recordDir)
+	if err != nil {
+		return err
+	}
+	cfg.RecordDir = absDir
+	if info, statErr := os.Stat(cfg.RecordDir); statErr != nil || !info.IsDir() {
+		return fmt.Errorf("%w: --backup-dir %s is not a directory", errUsage, recordDir)
+	}
+	if !cfg.NoBackup {
+		cfg.Backup = func(ctx context.Context) (installer.UpgradeBackup, error) {
+			return takePreUpgradeBackup(ctx, cfg.RecordDir, kubeContext, cfg.Namespace, input, output)
+		}
+	}
+
 	kubeClient, restConfig, selectedContext, err := installer.LoadKubeConfigForContext(kubeContext, output)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
@@ -119,4 +146,63 @@ func upgradeCompletionError(dryRun bool, result installer.UpgradeResult) error {
 		return nil
 	}
 	return errors.New("upgrade not performed")
+}
+
+// takePreUpgradeBackup is oberth backup --history-only, run by oberth upgrade
+// before its first change against the same context and namespace.
+func takePreUpgradeBackup(ctx context.Context, dir, kubeContext, namespace string, input io.Reader, output io.Writer) (installer.UpgradeBackup, error) {
+	recipient, err := defaultBackupRecipient(false, input, output)
+	if err != nil {
+		return installer.UpgradeBackup{}, err
+	}
+	archive := filepath.Join(dir, archivePrefix+time.Now().UTC().Format("20060102-150405")+archiveSuffix)
+	cfg := installer.BackupConfig{
+		MaxDatabaseBytes: store.DefaultBackupMaxBytes,
+		ContextName:      kubeContext,
+		Namespace:        namespace,
+		Output:           archive,
+		Recipient:        recipient,
+		Scope:            installer.BackupScopeHistory,
+		ToolVersion:      version,
+	}
+	if err := installer.ExecuteBackup(ctx, cfg, installer.InstallDeps{Output: output, Input: input}); err != nil {
+		return installer.UpgradeBackup{}, err
+	}
+	return installer.UpgradeBackup{Path: archive}, nil
+}
+
+// runUpgradeRollback rolls back one recorded upgrade; a restore of the
+// pre-upgrade backup runs through oberth restore --only history.
+func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg installer.UpgradeConfig, timeout time.Duration, input io.Reader, output io.Writer) error {
+	kubeClient, restConfig, selectedContext, err := installer.LoadKubeConfigForContext(kubeContext, output)
+	if err != nil {
+		return fmt.Errorf("load kubeconfig: %w", err)
+	}
+	helmKubeArgs, _, _ := installer.ResolveHelmKubeArgs(kubeContext)
+	restore := func(ctx context.Context, archive string) error {
+		key, err := resolveBackupKey("", archive)
+		if err != nil {
+			return err
+		}
+		return installer.ExecuteRestore(ctx, installer.RestoreConfig{
+			MaxDatabaseBytes: store.DefaultBackupMaxBytes,
+			ContextName:      kubeContext,
+			Namespace:        cfg.Namespace,
+			Input:            archive,
+			PrivateKey:       key,
+			Only:             []string{installer.RestorePartHistory},
+			Yes:              true,
+			Timeout:          timeout,
+		}, installer.InstallDeps{Output: output, Input: input})
+	}
+	return installer.RunRollback(ctx, installer.RollbackConfig{
+		Record: record, Namespace: cfg.Namespace, DryRun: cfg.DryRun, Yes: cfg.Yes, Timeout: timeout, Restore: restore,
+	}, installer.Deps{
+		Output:      output,
+		RunHelm:     installer.HelmWithKubeArgs(installer.DefaultRunHelm, helmKubeArgs),
+		RunCommand:  installer.DefaultRunCommand,
+		KubeClient:  kubeClient,
+		RestConfig:  restConfig,
+		ContextName: selectedContext,
+	})
 }

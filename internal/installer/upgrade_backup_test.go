@@ -4,17 +4,34 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
-func TestUpgradeLoudlyWarnsWhenFreshBackupUnverified(t *testing.T) {
-	for _, live := range []string{"16", "17", "unknown"} {
-		t.Run(live, func(t *testing.T) {
+func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
+	for _, tc := range []struct {
+		live     string
+		noBackup bool
+		want     string
+	}{
+		{"16", false, "is taken before the first change"},
+		{"unknown", false, "is taken before the first change"},
+		{"16", true, "NO BACKUP WILL BE TAKEN"},
+		{"17", false, ""},
+	} {
+		t.Run(fmt.Sprintf("%s/no-backup=%t", tc.live, tc.noBackup), func(t *testing.T) {
 			var output bytes.Buffer
 			deps := Deps{Output: &output, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://cluster.example:6443"},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -26,23 +43,273 @@ func TestUpgradeLoudlyWarnsWhenFreshBackupUnverified(t *testing.T) {
 					}
 					return nil, fmt.Errorf("unexpected mutating helm call: %v", args)
 				},
-				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte(live), nil },
+				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte(tc.live), nil },
 			}
-			_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, Namespace: "chosen", Yes: true, DryRun: true}, deps)
+			_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, Namespace: "chosen", Yes: true, DryRun: true, NoBackup: tc.noBackup}, deps)
 			if err != nil {
 				t.Fatal(err)
 			}
-			warn := strings.Contains(output.String(), "WARNING: NO FRESH BACKUP HAS BEEN VERIFIED")
-			if warn != (live != "17") {
-				t.Fatalf("backup warning does not follow pending/unknown migration: %s", output.String())
+			if tc.want == "" {
+				if strings.Contains(output.String(), "backup") {
+					t.Fatalf("no migration, yet a backup note: %s", output.String())
+				}
+				return
 			}
-			if warn {
-				for _, text := range []string{"backup --history-only --namespace chosen", "same cluster/context", "--yes does not prove", "Helm rollback alone"} {
-					if !strings.Contains(output.String(), text) {
-						t.Fatalf("missing %q: %s", text, output.String())
-					}
+			if !strings.Contains(output.String(), tc.want) || !strings.Contains(output.String(), "namespace chosen") {
+				t.Fatalf("missing %q: %s", tc.want, output.String())
+			}
+		})
+	}
+}
+
+// An older target server cannot open a newer database: refuse before any
+// change and point at the supported rollback.
+func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
+	t.Parallel()
+	deps := Deps{Output: &bytes.Buffer{}, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
+			if args[0] == "list" {
+				return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-0.16.20"}})
+			}
+			return nil, fmt.Errorf("unexpected helm call: %v", args)
+		},
+		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte("18"), nil },
+	}
+	_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
+	if err == nil || !strings.Contains(err.Error(), "--rollback") {
+		t.Fatalf("newer live schema: %v", err)
+	}
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, DryRun: true}, deps)
+	if err == nil || !strings.Contains(err.Error(), "--allow-downgrade") {
+		t.Fatalf("downgrade without the flag: %v", err)
+	}
+}
+
+type upgradeFixture struct {
+	deps   Deps
+	calls  *[]string
+	output *bytes.Buffer
+}
+
+func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgradeFixture {
+	t.Helper()
+	image := fakeChartImageRef
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: "oberth", Generation: 2, Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}},
+		Spec: appsv1.DeploymentSpec{Replicas: &replicas, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "oberth", Image: image}},
+		}}},
+		Status: appsv1.DeploymentStatus{ObservedGeneration: 2, UpdatedReplicas: 1, AvailableReplicas: 1},
+	}
+	calls := &[]string{}
+	output := &bytes.Buffer{}
+	deps := Deps{
+		Output: output,
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if out, ok := testUpgradeValuePreflight(args); ok {
+				return out, nil
+			}
+			*calls = append(*calls, strings.Join(args, " "))
+			switch args[0] {
+			case "list":
+				return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-" + installed, Revision: json.RawMessage(`7`)}})
+			case "show":
+				return []byte("image:\n  ref: " + image + "\n"), nil
+			case "upgrade", "rollback":
+				return nil, nil
+			}
+			return nil, fmt.Errorf("unexpected helm call: %v", args)
+		},
+		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+			command := strings.Join(args, " ")
+			switch {
+			case strings.HasSuffix(command, "version --schema"):
+				return []byte(liveSchema), nil
+			case strings.HasSuffix(command, "oberth version"):
+				*calls = append(*calls, "verify")
+				return []byte("oberth v" + strings.TrimPrefix(target, "v") + " commit=abc date=2026-11-10T00:00:00Z\n"), nil
+			}
+			return nil, nil
+		},
+		KubeClient:  fake.NewClientset(deployment),
+		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
+		ContextName: "fixture",
+	}
+	withSignedRelease(t, &deps, target, image)
+	return upgradeFixture{deps: deps, calls: calls, output: output}
+}
+
+func TestUpgradeBacksUpBeforeTheFirstChangeAndRecordsTheRollback(t *testing.T) {
+	t.Parallel()
+	// Below v0.17.83 the fixture needs no legacy-execution inventory.
+	fixture := newUpgradeFixture(t, "0.16.20", "0.16.21", "73")
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "oberth-backup-test.tar.gz.enc")
+	cfg := UpgradeConfig{BinaryVersion: "0.16.21", BinarySchemaVersion: 74, Namespace: "oberth", Timeout: 10 * time.Second,
+		Backup: func(context.Context) (UpgradeBackup, error) {
+			for _, call := range *fixture.calls {
+				if strings.HasPrefix(call, "upgrade ") && !strings.Contains(call, "--dry-run=server") {
+					t.Fatalf("backup after a write: %v", *fixture.calls)
+				}
+			}
+			*fixture.calls = append(*fixture.calls, "backup")
+			return UpgradeBackup{Path: archive}, nil
+		}}
+	result, err := RunUpgrade(t.Context(), cfg, fixture.deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupAt := slices.Index(*fixture.calls, "backup")
+	upgradeAt := slices.IndexFunc(*fixture.calls, func(call string) bool {
+		return strings.HasPrefix(call, "upgrade oberth") && !strings.Contains(call, "--dry-run=server")
+	})
+	if backupAt < 0 || upgradeAt < backupAt {
+		t.Fatalf("backup must precede the upgrade: %v", *fixture.calls)
+	}
+	if result.RecordPath == "" || filepath.Dir(result.RecordPath) != dir {
+		t.Fatalf("record %q not next to the backup in %s", result.RecordPath, dir)
+	}
+	record, err := ReadUpgradeRecord(result.RecordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.From != "0.16.20" || record.To != "0.16.21" || record.OberthRevision != 7 || record.SchemaBefore != 73 || record.SchemaAfter != 74 ||
+		record.Backup != archive || record.APIServer != "https://127.0.0.1:6443" || !record.migrates() {
+		t.Fatalf("record = %+v", record)
+	}
+	if info, err := os.Stat(result.RecordPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("record mode: %v %v", info, err)
+	}
+	if !strings.Contains(fixture.output.String(), "oberth upgrade --rollback "+result.RecordPath) {
+		t.Fatalf("rollback command not printed: %s", fixture.output.String())
+	}
+}
+
+func TestUpgradeWithoutABackupChangesNothing(t *testing.T) {
+	t.Parallel()
+	for name, cfg := range map[string]UpgradeConfig{
+		"no backup configured": {},
+		"backup fails": {Backup: func(context.Context) (UpgradeBackup, error) {
+			return UpgradeBackup{}, errors.New("no running server pod")
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newUpgradeFixture(t, "0.16.20", "0.16.21", "73")
+			cfg.BinaryVersion, cfg.BinarySchemaVersion, cfg.Namespace, cfg.RecordDir = "0.16.21", 74, "oberth", t.TempDir()
+			_, err := RunUpgrade(t.Context(), cfg, fixture.deps)
+			if err == nil || !strings.Contains(err.Error(), "--no-backup") {
+				t.Fatalf("err = %v", err)
+			}
+			for _, call := range *fixture.calls {
+				if strings.HasPrefix(call, "upgrade ") && !strings.Contains(call, "--dry-run=server") {
+					t.Fatalf("wrote without a backup: %v", *fixture.calls)
+				}
+			}
+			if entries, _ := os.ReadDir(cfg.RecordDir); len(entries) != 0 {
+				t.Fatal("record written although the upgrade never started")
+			}
+		})
+	}
+}
+
+func writeTestRecord(t *testing.T, record UpgradeRecord) string {
+	t.Helper()
+	record.Format = upgradeRecordFormat
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "record.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
+	t.Parallel()
+	fixture := newUpgradeFixture(t, "0.21.0", "0.20.1", "74")
+	archive := filepath.Join(t.TempDir(), "backup.tar.gz.enc")
+	if err := os.WriteFile(archive, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTestRecord(t, UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0",
+		OberthRevision: 7, ArgoNamespace: "oberth-argo", ArgoRevision: 3, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
+	restored := ""
+	err := RunRollback(t.Context(), RollbackConfig{Record: path, Timeout: time.Minute, Restore: func(_ context.Context, file string) error {
+		*fixture.calls = append(*fixture.calls, "restore")
+		restored = file
+		return nil
+	}}, fixture.deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"list -n oberth --deployed --failed --pending --superseded --uninstalling --uninstalled -o json",
+		"rollback argo-workflows 3 -n oberth-argo --wait --timeout 1m0s",
+		"rollback oberth 7 -n oberth --timeout 1m0s",
+		"restore",
+		"verify",
+	}
+	got := slices.DeleteFunc(slices.Clone(*fixture.calls), func(call string) bool { return strings.HasPrefix(call, "list") })
+	if !slices.Equal(got, want[1:]) || restored != archive {
+		t.Fatalf("rollback sequence = %v (restored %q)", *fixture.calls, restored)
+	}
+}
+
+func TestRollbackWithinOneSchemaNeedsNoRestore(t *testing.T) {
+	t.Parallel()
+	fixture := newUpgradeFixture(t, "0.21.1", "0.21.0", "74")
+	path := writeTestRecord(t, UpgradeRecord{Namespace: "oberth", From: "0.21.0", To: "0.21.1", OberthRevision: 9, SchemaBefore: 74, SchemaAfter: 74})
+	if err := RunRollback(t.Context(), RollbackConfig{Record: path, Timeout: time.Minute}, fixture.deps); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(*fixture.calls, "rollback oberth 9 -n oberth --timeout 1m0s --wait") || slices.Contains(*fixture.calls, "restore") {
+		t.Fatalf("calls = %v", *fixture.calls)
+	}
+}
+
+func TestRollbackRefusals(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		record UpgradeRecord
+		want   string
+	}{
+		"migration without backup": {UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 7, SchemaBefore: 73, SchemaAfter: 74}, "took no backup"},
+		"other cluster":            {UpgradeRecord{APIServer: "https://other.example:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 7, SchemaBefore: 74, SchemaAfter: 74}, "API server"},
+		"release moved":            {UpgradeRecord{Namespace: "oberth", From: "0.19.0", To: "0.19.1", OberthRevision: 7, SchemaBefore: 74, SchemaAfter: 74}, "moved since"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newUpgradeFixture(t, "0.21.0", "0.20.1", "74")
+			err := RunRollback(t.Context(), RollbackConfig{Record: writeTestRecord(t, tc.record)}, fixture.deps)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			for _, call := range *fixture.calls {
+				if strings.HasPrefix(call, "rollback") {
+					t.Fatalf("refused rollback still ran %q", call)
 				}
 			}
 		})
+	}
+	// --dry-run prints the plan and changes nothing.
+	fixture := newUpgradeFixture(t, "0.21.0", "0.20.1", "74")
+	path := writeTestRecord(t, UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 7, SchemaBefore: 74, SchemaAfter: 74})
+	if err := RunRollback(t.Context(), RollbackConfig{Record: path, DryRun: true}, fixture.deps); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range *fixture.calls {
+		if strings.HasPrefix(call, "rollback") {
+			t.Fatalf("dry-run ran %q", call)
+		}
+	}
+	if !strings.Contains(fixture.output.String(), "helm rollback oberth 7") {
+		t.Fatalf("plan: %s", fixture.output.String())
 	}
 }

@@ -482,7 +482,9 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		return err
 	}
 	if schema > store.LatestMigrationVersion() {
-		return fmt.Errorf("the server writes database schema %d but this oberth CLI understands only up to %d; upgrade the CLI first",
+		return fmt.Errorf("the server writes database schema %d but this oberth CLI understands only up to %d: "+
+			"back up with a CLI at least as new as the server (any newer CLI reads every older schema; "+
+			"oberth upgrade takes its own pre-upgrade backup with the target release's CLI)",
 			schema, store.LatestMigrationVersion())
 	}
 

@@ -1465,7 +1465,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 	}
 	// Recovery guidance should be printed on version-verify failure.
 	text := output.String()
-	if !strings.Contains(text, "DO NOT run 'helm rollback'") {
+	if !strings.Contains(text, "oberth upgrade --rollback <record>") {
 		t.Fatalf("missing recovery guidance in output: %q", text)
 	}
 }
@@ -1603,7 +1603,7 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 		t.Fatal("expected error from helm upgrade failure")
 	}
 	text := output.String()
-	if !strings.Contains(text, "DO NOT run 'helm rollback'") {
+	if !strings.Contains(text, "oberth upgrade --rollback <record>") {
 		t.Fatalf("missing recovery guidance in output: %q", text)
 	}
 	if !strings.Contains(text, "forward-only") {
@@ -1693,7 +1693,7 @@ func TestRunUpgradeRecoveryGuidanceOnRolloutFailure(t *testing.T) {
 		t.Fatal("expected error from rollout timeout")
 	}
 	text := output.String()
-	if !strings.Contains(text, "DO NOT run 'helm rollback'") {
+	if !strings.Contains(text, "oberth upgrade --rollback <record>") {
 		t.Fatalf("missing recovery guidance in output: %q", text)
 	}
 	if !strings.Contains(text, "helm status oberth") {

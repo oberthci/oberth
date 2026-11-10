@@ -28,7 +28,7 @@ func TestUpgradeWaitProcessHelper(t *testing.T) {
 	switch os.Getenv("OBERTH_TEST_WAIT_ROLE") {
 	case "cli":
 		version = "0.17.52"
-		os.Args = []string{"oberth", "upgrade", "--yes", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
+		os.Args = []string{"oberth", "upgrade", "--yes", "--no-backup", "--backup-dir=" + os.Getenv("HOME"), "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
 		if os.Getenv("OBERTH_TEST_OLD_CRITICAL") == "yes" {
 			os.Args = append(os.Args, "--wait-for=critical")
 		}
