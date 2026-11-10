@@ -56,3 +56,31 @@ func TestChartRendersAssistFlagsWithBinaryDefaults(t *testing.T) {
 		}
 	}
 }
+
+// The assist duration values take Go durations, as their serve flags do:
+// compound forms such as 1h30m pass the schema; holdTTL must stay whole
+// seconds (the server refuses 1500ms), execTimeout may be any duration.
+// Every accepted value parses as a flag.
+func TestChartAssistDurationValuesAreGoDurations(t *testing.T) {
+	render := func(set string) (string, error) {
+		output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", set).CombinedOutput()
+		return string(output), err
+	}
+	for set, flag := range map[string]string{
+		"assist.holdTTL=1h30m": "--assist-hold-ttl=1h30m", "assist.holdTTL=90s": "--assist-hold-ttl=90s", "assist.holdTTL=2h0m30s": "--assist-hold-ttl=2h0m30s",
+		"assist.execTimeout=1m30s": "--assist-exec-timeout=1m30s", "assist.execTimeout=1500ms": "--assist-exec-timeout=1500ms",
+	} {
+		text, err := render(set)
+		if err != nil || !strings.Contains(text, `"`+flag+`"`) {
+			t.Fatalf("chart refused or did not render %s: %v %s", set, err, text)
+		}
+		if _, err := parseServeOptions([]string{"--argo-namespace=argo", flag}, io.Discard); err != nil {
+			t.Fatalf("chart accepts %s but the server refuses it: %v", set, err)
+		}
+	}
+	for _, set := range []string{"assist.holdTTL=1500ms", "assist.holdTTL=1.5h", "assist.holdTTL=20 minutes", "assist.holdTTL=m", "assist.execTimeout=soon", "assist.execTimeout=1m-"} {
+		if _, err := render(set); err == nil {
+			t.Fatal("chart schema accepted", set)
+		}
+	}
+}

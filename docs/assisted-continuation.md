@@ -265,12 +265,16 @@ per-workflow and unaffected.
 | Value | Flag | Default | Bound |
 |---|---|---|---|
 | `assist.enabled` | `--assist-enabled` | `false` | |
-| `assist.holdTTL` | `--assist-hold-ttl` | `20m` | whole seconds, at most `4h`; idle holds are abandoned after it, worked holds after it from their last action, at most 2 × TTL from `held_since`; the held Pod deadline is step budget + 2 × TTL |
+| `assist.holdTTL` | `--assist-hold-ttl` | `20m` | a Go duration in whole seconds (`20m`, `1h30m`), at most `4h`; idle holds are abandoned after it, worked holds after it from their last action, at most 2 × TTL from `held_since`; the held Pod deadline is step budget + 2 × TTL |
 | `assist.maxConcurrentHolds` | `--assist-max-concurrent-holds` | `2` | 1-64 |
 | `assist.execTimeout` | `--assist-exec-timeout` | `1m` | at most `15m` |
 | `assist.execOutputBytes` | `--assist-exec-output-bytes` | `65536` | at most 4 MiB |
 | `assist.patchMaxBytes` | `--assist-patch-max-bytes` | `1048576` | at most 16 MiB; also the largest patched file |
 | `assist.patchMaxFiles` | `--assist-patch-max-files` | `64` | at most 1024 |
+
+`assist.holdTTL` and `assist.execTimeout` are Go durations, as the flags
+take them: `holdTTL` in whole seconds (`20m`, `1h30m`), `execTimeout` any
+duration (`90s`, `1m30s`). The chart schema refuses anything else.
 
 ## Interaction with other policies
 
