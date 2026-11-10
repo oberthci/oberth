@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/releaseverify"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -35,7 +36,10 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	flags.StringVar(&cfg.WaitFor, "wait-for", "", "enable waiting for all or critical (tag/promotion/plan/apply/unknown) runs")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed without confirmation for non-local targets")
-	flags.StringVar(&cfg.ChartOverride, "chart", "", "override the chart reference (for testing)")
+	flags.StringVar(&cfg.ChartOverride, "chart", "", "deploy this chart instead of the signed release (development only: not verified)")
+	flags.StringVar(&cfg.ReleaseDir, "release-dir", "", "read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from `DIR` instead of fetching it")
+	flags.StringVar(&cfg.ReleaseOrigin, "release-origin", "", "fetch release.json from this HTTPS mirror of "+releaseverify.DefaultReleaseOrigin)
+	flags.StringVar(&cfg.ChartRepository, "chart-repository", "", "fetch the chart from this HTTPS mirror of "+releaseverify.DefaultChartRepository)
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
 	flags.Var(&userValues, "f", "alias for --values")
 	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")

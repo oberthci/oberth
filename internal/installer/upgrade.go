@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oberthci/oberth/internal/releaseverify"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 
 	"golang.org/x/mod/semver"
@@ -49,8 +50,21 @@ type UpgradeConfig struct {
 	TLSRemoveDNSNames     []string
 	TLSRemoveIPs          []string
 	OpenBaoNamespace      string
-	serverPKI             bool
-	storedValues          string // internal schema-validated legacy migration snapshot
+	// ReleaseDir reads the signed release objects from a directory instead
+	// of fetching them (air-gapped hosts). ReleaseOrigin and ChartRepository
+	// override the publication origins for a mirror; verification is the same.
+	ReleaseDir string
+	// NoBackup skips the pre-upgrade backup (explicit --no-backup); Backup
+	// takes it. Without either the upgrade refuses before any write.
+	NoBackup        bool
+	Backup          func(context.Context) (UpgradeBackup, error)
+	ReleaseOrigin   string
+	ChartRepository string
+	serverPKI       bool
+	// verifiedChart is set once the chart is the verified local file of a
+	// signed release; Helm then gets no --version.
+	verifiedChart bool
+	storedValues  string // internal schema-validated legacy migration snapshot
 	// argoProfileConfigMap is the nonroot profile ConfigMap the controller
 	// transition renders, pinned into the Oberth chart (#1517).
 	argoProfileConfigMap string
@@ -459,19 +473,32 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	// Resolve the chart reference. Use the existing Helm repo if no override.
+	// Resolve the chart: the verified chart of the signed release for this
+	// CLI's version, or an explicit --chart (development; unverified).
 	chart := cfg.ChartOverride
+	var signed *verifiedUpgradeRelease
 	if chart == "" {
-		if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
-			return result, fmt.Errorf("add Oberth helm repo: %w", err)
+		signed, err = verifyUpgradeRelease(ctx, cfg, deps)
+		if err != nil {
+			return result, err
 		}
-		chart = oberthRepoName + "/oberth"
+		defer signed.cleanup()
+		signed.describe(w)
+		chart = signed.chartPath
+		cfg.verifiedChart = true
+	} else {
+		_, _ = fmt.Fprintf(w, "WARNING: --chart %s is not a signed release; its contents are not verified.\n", cfg.ChartOverride)
 	}
 
 	// Resolve the target chart's image ref so the upgrade pins the exact image.
-	imageRef, valuesYAML, err := resolveChartImageRef(ctx, deps, chart, targetVersion, cfg.ChartOverride != "")
+	imageRef, valuesYAML, err := resolveChartImageRef(ctx, deps, chart, targetVersion, true)
 	if err != nil {
 		return result, fmt.Errorf("resolve chart image: %w", err)
+	}
+	if signed != nil {
+		if err := signed.requireRecordImage(imageRef); err != nil {
+			return result, err
+		}
 	}
 
 	// Validate user --set keys against the chart values schema.
@@ -688,8 +715,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		ips, _ := json.Marshal(append([]string{}, cfg.TLSExtraIPs...))
 		args = append(args, "--set-json", "tls.extraDNSNames="+string(dns), "--set-json", "tls.extraIPs="+string(ips))
 	}
-	// Only pin --version for published charts; a local path IS the version.
-	if cfg.ChartOverride == "" && cfg.BinaryVersion != "" {
+	// Only pin --version for repository charts; a local path (an explicit
+	// --chart or the verified release chart) IS the version.
+	if cfg.ChartOverride == "" && !cfg.verifiedChart && cfg.BinaryVersion != "" {
 		args = append(args, "--version", helmChartVersion(cfg.BinaryVersion))
 	}
 	// Pass the user's timeout to helm so it respects the same deadline.
@@ -886,10 +914,16 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 
 	chart := cfg.ChartOverride
 	if chart == "" {
-		chart = oberthRepoName + "/oberth"
-		_, _ = fmt.Fprintf(w, "  %d. Add/update Helm repo\n", step)
-		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
-		_, _ = fmt.Fprintf(w, "     helm repo update %s\n\n", oberthRepoName)
+		_, _, chartName, _ := releaseverify.Names(canonicalChartVersion(cfg.BinaryVersion))
+		chart = "<verified " + chartName + ">"
+		cfg.verifiedChart = true
+		source := "fetch from " + displayOr(cfg.ReleaseOrigin, releaseverify.DefaultReleaseOrigin) + " and " + displayOr(cfg.ChartRepository, releaseverify.DefaultChartRepository)
+		if cfg.ReleaseDir != "" {
+			source = "read from " + cfg.ReleaseDir
+		}
+		_, _ = fmt.Fprintf(w, "  %d. Verify the signed release %s (%s): release.json and the chart against the compiled-in release key,\n", step, displayVersion(cfg.BinaryVersion), source)
+		_, _ = fmt.Fprintln(w, "     the chart against the record's digest, and pin the record's server image digest")
+		_, _ = fmt.Fprintln(w)
 		step++
 	}
 

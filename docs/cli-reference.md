@@ -1549,7 +1549,9 @@ Usage of upgrade:
   -argo-controller-profile string
         explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
   -chart string
-        override the chart reference (for testing)
+        deploy this chart instead of the signed release (development only: not verified)
+  -chart-repository string
+        fetch the chart from this HTTPS mirror of https://charts.oberth.ci
   -context string
         kubeconfig context to target (default: current-context)
   -dry-run
@@ -1562,6 +1564,10 @@ Usage of upgrade:
         OpenBao namespace (default: openbao)
   -ownership-handoff string
         verified connector/site ownership handoff receipt required before retirement
+  -release-dir DIR
+        read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
+  -release-origin string
+        fetch release.json from this HTTPS mirror of https://releases.oberth.ci
   -set value
         one canonical dotted key=scalar per flag; escape literal commas (repeatable)
   -timeout duration

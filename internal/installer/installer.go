@@ -10,6 +10,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/oberthci/oberth/internal/releaseverify"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -483,6 +485,11 @@ type Deps struct {
 	// (e.g., "deploy oberth", "rollout ready") matched by the TUI's
 	// stepNameToIndex map. Status is "done".
 	StepProgressSink func(step, status string)
+	// ReleaseGetter fetches published release objects for oberth upgrade;
+	// nil selects HTTPS (releaseverify.HTTPSGetter).
+	ReleaseGetter releaseverify.Getter
+	// releaseKey replaces the compiled-in release key in tests.
+	releaseKey *ecdsa.PublicKey
 }
 
 // ClusterInfo describes the target Kubernetes cluster.

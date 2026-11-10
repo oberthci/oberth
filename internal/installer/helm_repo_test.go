@@ -34,10 +34,6 @@ func TestChartConsumersRefreshHelmRepo(t *testing.T) {
 			_, err := InstallOberth(ctx, Config{ChartVersion: version, Upgrade: true}, deps, OpenBaoResult{}, RekorResult{})
 			return err
 		}},
-		{"upgrade", oberthRepoName, OberthHelmRepoURL, "upgrade", false, func(ctx context.Context, deps Deps) error {
-			_, err := RunUpgrade(ctx, UpgradeConfig{BinaryVersion: version}, deps)
-			return err
-		}},
 		{"openbao", openBaoRepoName, OpenBaoHelmRepoURL, "upgrade", false, func(ctx context.Context, deps Deps) error {
 			_, err := InstallOpenBao(ctx, Config{OpenBaoChartVersion: version}, deps)
 			return err
@@ -117,17 +113,15 @@ func TestChartConsumersRefreshHelmRepo(t *testing.T) {
 
 func TestDryRunPlansRefreshRegisteredRepos(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{"plain", "kind", "production OpenBao", "dev OpenBao", "upgrade"} {
+	// oberth upgrade takes no chart from a Helm repository: it deploys the
+	// verified chart of the signed release (upgrade_release_test.go).
+	for _, kind := range []string{"plain", "kind", "production OpenBao", "dev OpenBao"} {
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
 			var out bytes.Buffer
 			cfg := Config{ChartVersion: "0.17.16", InstallSecretStore: kind == "production OpenBao", InstallSecretStoreDev: kind == "dev OpenBao"}
 			var err error
-			if kind == "upgrade" {
-				_, err = printUpgradeDryRun(&out, UpgradeConfig{BinaryVersion: "0.17.16"}, UpgradeResult{TargetVersion: "0.17.16"}, false)
-			} else {
-				err = printDryRunPlan(cfg, &out, ClusterInfo{Engine: kind})
-			}
+			err = printDryRunPlan(cfg, &out, ClusterInfo{Engine: kind})
 			if err != nil {
 				t.Fatal(err)
 			}
