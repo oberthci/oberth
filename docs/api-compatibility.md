@@ -87,6 +87,18 @@ The v0.20.3 default response shape is an announced exception to the additive
 policy below: the values are unchanged; only the duplicate spelling moved
 behind the opt-in.
 
+## Conditional requests
+
+Every `200` JSON view carries a weak `ETag`, the digest of its uncompressed
+body. A `GET` that sends it back in `If-None-Match` gets `304 Not Modified`
+with no body while the view is unchanged; other headers, such as
+`X-Oberth-Next-Before`, are still sent. `GET /api/repos?view=summary` returns
+the repository records without their latest runs. The dashboard uses both
+while polling.
+The validator covers the shape actually sent, so a Go-field-names response and
+a snake_case-only response of the same view carry different ETags; responses
+vary on `X-Oberth-Go-Field-Names` and `Accept-Encoding`.
+
 ## Compatibility and deprecation policy
 
 Apart from the issue-list privacy and resource-deadline safety exceptions, no
