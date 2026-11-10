@@ -124,6 +124,11 @@ func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgra
 			*calls = append(*calls, strings.Join(args, " "))
 			switch args[0] {
 			case "list":
+				// Upgrade fixtures start at revision 7; rollback records name
+				// the revisions before the upgrade they undo (6, and argo 3).
+				if slices.Contains(args, "oberth-argo") {
+					return json.Marshal([]helmRelease{{Name: "argo-workflows", Namespace: "oberth-argo", Status: "deployed", Chart: "argo-workflows-1.0.24", Revision: json.RawMessage(`4`)}})
+				}
 				return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-" + installed, Revision: json.RawMessage(`7`)}})
 			case "show":
 				return []byte("image:\n  ref: " + image + "\n"), nil
@@ -247,7 +252,7 @@ func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := writeTestRecord(t, UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0",
-		OberthRevision: 7, ArgoNamespace: "oberth-argo", ArgoRevision: 3, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
+		OberthRevision: 6, ArgoNamespace: "oberth-argo", ArgoRevision: 3, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
 	restored := ""
 	restore := func(_ context.Context, target RollbackRestore) error {
 		*fixture.calls = append(*fixture.calls, "restore")
@@ -274,7 +279,7 @@ func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
 	want := []string{
 		"list -n oberth --deployed --failed --pending --superseded --uninstalling --uninstalled -o json",
 		"rollback argo-workflows 3 -n oberth-argo --wait --timeout 1m0s",
-		"rollback oberth 7 -n oberth --timeout 1m0s",
+		"rollback oberth 6 -n oberth --timeout 1m0s",
 		"restore",
 		"verify",
 	}
@@ -294,7 +299,7 @@ func TestRollbackRestoresIntoTheRecordsNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := writeTestRecord(t, UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "ci", From: "0.20.1", To: "0.21.0",
-		OberthRevision: 7, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
+		OberthRevision: 6, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
 	var got RollbackRestore
 	// The fixture's server runs in "oberth", so the readback after the
 	// restore fails; what matters is where the restore was aimed.
@@ -305,7 +310,7 @@ func TestRollbackRestoresIntoTheRecordsNamespace(t *testing.T) {
 	if got.Namespace != "ci" || got.Archive != archive {
 		t.Fatalf("restore target = %+v, want namespace ci", got)
 	}
-	if !slices.Contains(*fixture.calls, "rollback oberth 7 -n ci --timeout 1m0s") {
+	if !slices.Contains(*fixture.calls, "rollback oberth 6 -n ci --timeout 1m0s") {
 		t.Fatalf("helm rollback not in the record's namespace: %v", *fixture.calls)
 	}
 }
@@ -313,11 +318,11 @@ func TestRollbackRestoresIntoTheRecordsNamespace(t *testing.T) {
 func TestRollbackWithinOneSchemaNeedsNoRestore(t *testing.T) {
 	t.Parallel()
 	fixture := newUpgradeFixture(t, "0.21.1", "0.21.0", "74")
-	path := writeTestRecord(t, UpgradeRecord{Namespace: "oberth", From: "0.21.0", To: "0.21.1", OberthRevision: 9, SchemaBefore: 74, SchemaAfter: 74})
+	path := writeTestRecord(t, UpgradeRecord{Namespace: "oberth", From: "0.21.0", To: "0.21.1", OberthRevision: 6, SchemaBefore: 74, SchemaAfter: 74})
 	if err := RunRollback(t.Context(), RollbackConfig{Record: path, Timeout: time.Minute}, fixture.deps); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(*fixture.calls, "rollback oberth 9 -n oberth --timeout 1m0s --wait") || slices.Contains(*fixture.calls, "restore") {
+	if !slices.Contains(*fixture.calls, "rollback oberth 6 -n oberth --timeout 1m0s --wait") || slices.Contains(*fixture.calls, "restore") {
 		t.Fatalf("calls = %v", *fixture.calls)
 	}
 }
@@ -328,9 +333,10 @@ func TestRollbackRefusals(t *testing.T) {
 		record UpgradeRecord
 		want   string
 	}{
-		"migration without backup": {UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 7, SchemaBefore: 73, SchemaAfter: 74}, "took no backup"},
-		"other cluster":            {UpgradeRecord{APIServer: "https://other.example:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 7, SchemaBefore: 74, SchemaAfter: 74}, "API server"},
-		"release moved":            {UpgradeRecord{Namespace: "oberth", From: "0.19.0", To: "0.19.1", OberthRevision: 7, SchemaBefore: 74, SchemaAfter: 74}, "moved since"},
+		"migration without backup": {UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 6, SchemaBefore: 73, SchemaAfter: 74}, "took no backup"},
+		"other cluster":            {UpgradeRecord{APIServer: "https://other.example:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 6, SchemaBefore: 74, SchemaAfter: 74}, "API server"},
+		"stale record":             {UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 3, SchemaBefore: 74, SchemaAfter: 74}, "record is stale"},
+		"release moved":            {UpgradeRecord{Namespace: "oberth", From: "0.19.0", To: "0.19.1", OberthRevision: 6, SchemaBefore: 74, SchemaAfter: 74}, "moved since"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -348,7 +354,7 @@ func TestRollbackRefusals(t *testing.T) {
 	}
 	// --dry-run prints the plan and changes nothing.
 	fixture := newUpgradeFixture(t, "0.21.0", "0.20.1", "74")
-	path := writeTestRecord(t, UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 7, SchemaBefore: 74, SchemaAfter: 74})
+	path := writeTestRecord(t, UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 6, SchemaBefore: 74, SchemaAfter: 74})
 	if err := RunRollback(t.Context(), RollbackConfig{Record: path, DryRun: true}, fixture.deps); err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +363,11 @@ func TestRollbackRefusals(t *testing.T) {
 			t.Fatalf("dry-run ran %q", call)
 		}
 	}
-	if !strings.Contains(fixture.output.String(), "helm rollback oberth 7") {
+	stale := writeTestRecord(t, UpgradeRecord{Namespace: "oberth", From: "0.20.1", To: "0.21.0", OberthRevision: 3, SchemaBefore: 74, SchemaAfter: 74})
+	if err := RunRollback(t.Context(), RollbackConfig{Record: stale, DryRun: true, ForceRecord: true}, fixture.deps); err != nil {
+		t.Fatalf("--force-record did not accept a stale record: %v", err)
+	}
+	if !strings.Contains(fixture.output.String(), "helm rollback oberth 6") {
 		t.Fatalf("plan: %s", fixture.output.String())
 	}
 }

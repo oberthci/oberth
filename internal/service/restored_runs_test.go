@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -48,6 +49,15 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	if _, err := database.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
+	// A run still queued in the backup may already have run on the version a
+	// rollback undid: it is cancelled, not dispatched again.
+	queued, err := storetest.EnqueueRun(database, ctx, model.RunSpec{
+		RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1.2.3",
+		SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host", Trigger: "tag",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +68,7 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close() })
 
 	marker := filepath.Join(root, RestoredRunsFile)
-	if err := os.WriteFile(marker, []byte(`{"runs":["`+enqueued.ID+`"]}`), 0o600); err != nil {
+	if err := os.WriteFile(marker, []byte(`{"runs":["`+enqueued.ID+`","`+queued.ID+`","no-such-run"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	logs, err := runlog.Open(filepath.Join(root, "logs"))
@@ -78,8 +88,17 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != model.RunInterrupted || run.Error != restoredRunInterruption {
+	// Admitted but not started (phase waiting): cancelled, like a run caught
+	// mid-submission; a started one is interrupted (restoredRunInterruption).
+	if run.Status != model.RunInterrupted || (run.Error != restoredRunInterruption && !strings.Contains(run.Reason, restoredRunCancelReason)) {
 		t.Fatalf("restored run = %s %q, want interrupted, not requeued", run.Status, run.Error)
+	}
+	cancelled, err := database.Run(ctx, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cancelled.Cancelled() || !strings.Contains(cancelled.Reason, restoredRunCancelReason) {
+		t.Fatalf("restored queued run = %s/%s %q, want cancelled with the restore reason", cancelled.Status, cancelled.Phase, cancelled.Reason)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("marker not retired: %v", err)

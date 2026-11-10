@@ -142,7 +142,10 @@ type RollbackConfig struct {
 	Namespace string
 	DryRun    bool
 	Yes       bool
-	Timeout   time.Duration
+	// ForceRecord accepts a record whose Helm revisions are not the ones the
+	// recorded upgrade left (a later change to either release).
+	ForceRecord bool
+	Timeout     time.Duration
 	// Restore restores the record's backup (history only) onto the rolled
 	// back release; the CLI wires it to oberth restore.
 	Restore func(ctx context.Context, restore RollbackRestore) error
@@ -239,6 +242,24 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		return fmt.Errorf("the release runs %s, neither the upgrade's target %s nor its source %s; it moved since this record, refusing to roll back",
 			displayVersion(current), displayVersion(record.To), displayVersion(record.From))
 	}
+	// Bind the record to the revisions its upgrade left: one helm upgrade
+	// after the recorded one, or two once a rollback of it already ran. Any
+	// later change to the release makes the record stale.
+	if err := checkRecordRevision("oberth", record.Namespace, record.OberthRevision, release, cfg.ForceRecord); err != nil {
+		return err
+	}
+	if record.ArgoRevision > 0 {
+		argo, found, err := findHelmRelease(ctx, deps, "argo-workflows", record.ArgoNamespace)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("no argo-workflows Helm release in namespace %s", record.ArgoNamespace)
+		}
+		if err := checkRecordRevision("argo-workflows", record.ArgoNamespace, record.ArgoRevision, argo, cfg.ForceRecord); err != nil {
+			return err
+		}
+	}
 	needRestore := record.migrates()
 	if needRestore && record.Backup == "" {
 		return fmt.Errorf("the upgrade from %s to %s migrated (or may have migrated) the database and took no backup (--no-backup): "+
@@ -311,4 +332,17 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	recordServerAudit(ctx, deps, record.Namespace, "deploy/oberth", "upgrade.completed", map[string]any{"from": record.To, "to": record.From, "rollback": true})
 	_, _ = fmt.Fprintf(w, "\nRolled back: Oberth %s in namespace %s (context %s)\n", running, record.Namespace, deps.ContextName)
 	return nil
+}
+
+// checkRecordRevision refuses a record when the release's deployed revision
+// is not the one the recorded upgrade made (recorded+1), or the one a
+// rollback of it made (recorded+2), unless force.
+func checkRecordRevision(name, namespace string, recorded int, release helmRelease, force bool) error {
+	deployed := helmRevisionNumber(release.Revision)
+	if deployed == recorded+1 || deployed == recorded+2 || force {
+		return nil
+	}
+	return fmt.Errorf("release %s in %s is at revision %d, but this record's upgrade started from revision %d: "+
+		"the release changed after that upgrade, so the record is stale; refusing to roll back (--force-record overrides after checking helm history %s -n %s)",
+		name, namespace, deployed, recorded, name, namespace)
 }

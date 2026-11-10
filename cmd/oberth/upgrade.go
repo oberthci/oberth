@@ -48,6 +48,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.BoolVar(&cfg.NoBackup, "no-backup", false, "upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)")
 	backupDir := flags.String("backup-dir", "", "write the pre-upgrade backup and the rollback record to `DIR` (default: the current directory)")
 	flags.BoolVar(&cfg.AllowDowngrade, "allow-downgrade", false, "accept a CLI older than the installed release (a deliberate rollback within one database schema)")
+	forceRecord := flags.Bool("force-record", false, "with --rollback: accept a record although either release changed after its upgrade (check helm history first)")
 	rollback := flags.String("rollback", "", "roll back the upgrade recorded in `FILE` (the rollback record an upgrade printed): Helm revisions, then the pre-upgrade backup when a migration ran")
 	timeout := flags.Duration("timeout", 5*time.Minute, "wait timeout for rollout completion")
 
@@ -63,7 +64,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 		return fmt.Errorf("%w: upgrade accepts flags only, no positional arguments", errUsage)
 	}
 	if *rollback != "" {
-		return runUpgradeRollback(ctx, *rollback, kubeContext, cfg, *timeout, input, output)
+		return runUpgradeRollback(ctx, *rollback, kubeContext, cfg, *forceRecord, *timeout, input, output)
 	}
 
 	if cfg.WaitTimeout <= 0 {
@@ -173,7 +174,7 @@ func takePreUpgradeBackup(ctx context.Context, dir, kubeContext, namespace strin
 
 // runUpgradeRollback rolls back one recorded upgrade; a restore of the
 // pre-upgrade backup runs through oberth restore --only history.
-func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg installer.UpgradeConfig, timeout time.Duration, input io.Reader, output io.Writer) error {
+func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg installer.UpgradeConfig, forceRecord bool, timeout time.Duration, input io.Reader, output io.Writer) error {
 	kubeClient, restConfig, selectedContext, err := installer.LoadKubeConfigForContext(kubeContext, output)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
@@ -194,12 +195,13 @@ func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg ins
 			Input:            target.Archive,
 			PrivateKey:       key,
 			Only:             []string{installer.RestorePartHistory},
+			InterruptQueued:  true,
 			Yes:              true,
 			Timeout:          timeout,
 		}, installer.InstallDeps{Output: output, Input: input})
 	}
 	return installer.RunRollback(ctx, installer.RollbackConfig{
-		Record: record, Namespace: cfg.Namespace, DryRun: cfg.DryRun, Yes: cfg.Yes, Timeout: timeout, Restore: restore,
+		Record: record, Namespace: cfg.Namespace, DryRun: cfg.DryRun, Yes: cfg.Yes, ForceRecord: forceRecord, Timeout: timeout, Restore: restore,
 	}, installer.Deps{
 		Output:      output,
 		RunHelm:     installer.HelmWithKubeArgs(installer.DefaultRunHelm, helmKubeArgs),

@@ -1736,9 +1736,19 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 	if err != nil {
 		return err
 	}
+	handled := make(map[string]bool, len(runs))
 	for _, run := range runs {
+		handled[run.ID] = true
 		if run.Phase == "preflight" {
 			if err := scheduler.failRetiredRun(ctx, run, require); err != nil {
+				return err
+			}
+			continue
+		}
+		// A restored run caught mid-submission or before its Workflow
+		// started is cancelled, never settled and submitted (restored_runs.go).
+		if restored[run.ID] && (isPendingCreate(run) || run.Phase == "waiting") {
+			if err := scheduler.cancelRestoredRun(ctx, run.ID, require); err != nil {
 				return err
 			}
 			continue
@@ -1847,6 +1857,17 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			}
 		}
 		cancelCleanup()
+	}
+	// Restored runs that were queued (or waiting without a Workflow) in the
+	// backup may already have run after it; cancel them instead of
+	// dispatching them again.
+	for id := range restored {
+		if handled[id] {
+			continue
+		}
+		if err := scheduler.cancelRestoredRun(ctx, id, require); err != nil {
+			return err
+		}
 	}
 	return retireRestoredRunsMarker(scheduler.restoredRunsFile)
 }

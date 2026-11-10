@@ -61,9 +61,13 @@ type RestoreConfig struct {
 	Only []string
 	// Inspect prints what the archive holds and stops; no cluster is used.
 	Inspect bool
-	DryRun  bool
-	Yes     bool
-	Timeout time.Duration
+	// InterruptQueued (set by oberth upgrade --rollback) also hands the
+	// backup's queued and waiting runs to the server as restored: they may
+	// already have run on the version the rollback undid.
+	InterruptQueued bool
+	DryRun          bool
+	Yes             bool
+	Timeout         time.Duration
 }
 
 func (cfg *RestoreConfig) applyDefaults() {
@@ -346,7 +350,7 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	target.ClusterUID = clusterUID(ctx, deps)
 
 	if parts.History {
-		if target.RestoredRunning, err = restoredRunningRuns(ctx, archive); err != nil {
+		if target.RestoredRunning, err = restoredRunningRuns(ctx, archive, cfg.InterruptQueued); err != nil {
 			return target, openBaoExec{}, err
 		}
 		readTargetContents(ctx, cfg, deps, &target, work)
@@ -843,14 +847,23 @@ const restoredRunsFile = ".oberth-restored-runs.json"
 
 // restoredRunningRuns lists the runs the archive records as running with a
 // Workflow: on the target their Workflows do not exist, and the server marks
-// them interrupted from the marker instead of re-executing them.
-func restoredRunningRuns(ctx context.Context, archive restoreArchive) (ids []string, resultErr error) {
+// them interrupted from the marker instead of re-executing them. With
+// queued (a rollback restore) it lists every active run: queued or waiting
+// work in a pre-upgrade backup may already have run after the upgrade, and
+// the server cancels it instead of dispatching it again.
+func restoredRunningRuns(ctx context.Context, archive restoreArchive, queued bool) (ids []string, resultErr error) {
 	compat := archive.Manifest.Compatibility
 	inspection, err := store.InspectCurrent(ctx, archive.LocalDatabase, store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}, SnapshotTempDir: filepath.Dir(archive.LocalDatabase)})
 	if err != nil {
 		return nil, fmt.Errorf("open restored database: %w", err)
 	}
 	defer func() { resultErr = errors.Join(resultErr, inspection.Close()) }()
+	if queued {
+		if ids, err = inspection.ActiveRunIDs(ctx); err != nil {
+			return nil, fmt.Errorf("list the backup's active runs: %w", err)
+		}
+		return ids, nil
+	}
 	runs, err := inspection.RunningRunsWithJobs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list the backup's running runs: %w", err)

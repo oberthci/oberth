@@ -435,9 +435,14 @@ three times. Without a terminal it needs `--yes`.
    recorded as running are listed in the plan and named in a marker on the
    volume (`/data/.oberth-restored-runs.json`); at startup the server marks
    each one whose Workflow is not on this cluster `interrupted` ("restored
-   without re-executing it") instead of requeueing it, so a restore never
-   re-runs a pipeline or a release by itself. Re-run one deliberately if
-   needed. The server removes the marker once it has handled it.
+   without re-executing it") instead of requeueing it; a restored run that was
+   admitted but had not started, or was caught mid-submission, is cancelled
+   (reason "restored from a backup; not dispatched again"). Runs still queued
+   in the backup are dispatched as usual by a plain `oberth restore`; the
+   restore that `oberth upgrade --rollback` runs hands them to the server too
+   and they are cancelled, because they may already have run on the version
+   the rollback undoes. Re-run one deliberately if needed. The server removes
+   the marker once it has handled it.
 7. With `history`, if they differ: sets the compatibility values with
    `helm upgrade --reuse-values` (published chart at the release's current
    version, or `--chart`). If Helm reports a field conflict on

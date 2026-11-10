@@ -149,6 +149,23 @@ func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
 	}
 }
 
+// A rollback restore (oberth upgrade --rollback) hands every active run of
+// the backup to the server, not only the running ones.
+func TestRollbackRestoreHandsQueuedRunsToTheServer(t *testing.T) {
+	t.Parallel()
+	archive, _, _, target := reinstallFixture(t)
+	out := runFixtureRestore(t, archive, target, RestoreConfig{Only: []string{RestorePartHistory}, InterruptQueued: true})
+	var marker struct {
+		Runs []string `json:"runs"`
+	}
+	if err := json.Unmarshal(target.restoredRunsMarker, &marker); err != nil || len(marker.Runs) != 1 {
+		t.Fatalf("restored-runs marker = %q, %v", target.restoredRunsMarker, err)
+	}
+	if !strings.Contains(out, "queued, waiting or running when the backup was taken") {
+		t.Fatalf("plan does not name the rollback's run handling:\n%s", out)
+	}
+}
+
 func TestRestoreOnlySecrets(t *testing.T) {
 	t.Parallel()
 	archive, _, source, target := reinstallFixture(t)

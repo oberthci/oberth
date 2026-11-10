@@ -214,8 +214,11 @@ func printRestorePlan(w io.Writer, cfg RestoreConfig, deps backupDeps, archive r
 			_, _ = fmt.Fprintf(w, "  Workflows  delete %d whose runs the restored database does not know: %s\n", len(names), strings.Join(names, ", "))
 		}
 		if len(target.RestoredRunning) > 0 {
-			_, _ = fmt.Fprintf(w, "  Runs       %d running when the backup was taken: marked interrupted if their Workflow is not here, never re-executed: %s\n",
-				len(target.RestoredRunning), strings.Join(target.RestoredRunning, ", "))
+			what := "running when the backup was taken: marked interrupted if their Workflow is not here, never re-executed"
+			if cfg.InterruptQueued {
+				what = "queued, waiting or running when the backup was taken: cancelled or interrupted, never dispatched again (they may have run after it)"
+			}
+			_, _ = fmt.Fprintf(w, "  Runs       %d %s: %s\n", len(target.RestoredRunning), what, strings.Join(target.RestoredRunning, ", "))
 		}
 	}
 	if parts.Secrets {

@@ -1562,6 +1562,8 @@ Usage of upgrade:
         show what would change without doing it
   -f value
         alias for --values
+  -force-record
+        with --rollback: accept a record although either release changed after its upgrade (check helm history first)
   -namespace string
         Oberth namespace (default: oberth)
   -no-backup
