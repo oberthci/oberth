@@ -74,7 +74,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, client, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -136,6 +136,7 @@ Commands:
   release-wif   Grant, revoke or reset runtime release WIF repository capabilities
   secretstore   Verify and inspect the secret store
   mcp           Call Oberth MCP tools
+  client        Configure this machine's MCP client (Claude Code)
   preflight     Release pre-flight checks
   version       Print version information
 `)
@@ -202,6 +203,8 @@ Commands:
 		return runSecretStore(ctx, arguments[1:], output)
 	case "mcp":
 		return runMCP(ctx, arguments[1:], output)
+	case "client":
+		return runClient(ctx, arguments[1:], output)
 	case "preflight":
 		return runPreflight(ctx, arguments[1:], output)
 	case "install":

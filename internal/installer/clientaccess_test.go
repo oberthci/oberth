@@ -22,6 +22,7 @@ func clientAccessDeps(t *testing.T, input string) (Deps, *bytes.Buffer, string) 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 
 	var out bytes.Buffer
 	deps := Deps{

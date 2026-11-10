@@ -614,6 +614,45 @@ Usage: oberth mcp tools [arguments] [flags]
         MCP URL
 ```
 
+## oberth client
+
+```text
+Usage: oberth client setup [flags]
+Configure this machine's MCP client (Claude Code) for an Oberth server.
+Use oberth client setup --help for its flags.
+```
+
+## oberth client setup
+
+```text
+Usage: oberth client setup [flags]
+Register Oberth as a user-scope Claude Code MCP server and trust its CA.
+
+The server entry is an HTTP url, a headersHelper that reads the token when
+Claude Code connects (no token is written to any file), and a 630000 ms
+timeout so run_wait's 600 s server-side wait is not cut at 60 s. The CA is
+trusted through env.NODE_EXTRA_CA_CERTS in ~/.claude/settings.json (other
+keys are kept), or the operating system trust store with --ca-trust system.
+
+Unset flags fall back to OBERTH_MCP_URL, OBERTH_BASE_URL, OBERTH_CA_CERT,
+OBERTH_TOKEN_COMMAND, the files oberth install writes in ~/.config/oberth,
+and the server Claude Code already has registered. A working headersHelper
+already registered is kept unless --token-file or --token-command is given.
+Running it again changes nothing. --dry-run prints what would change.
+  -ca-file string
+        the deployment's CA certificate (PEM)
+  -ca-trust string
+        how Claude Code trusts the CA: settings, system, none (default "settings")
+  -dry-run
+        print what would change and change nothing
+  -token-command string
+        command that prints the bearer token; the headersHelper runs it
+  -token-file string
+        owner-only (0600) file holding the bearer token; the headersHelper reads it
+  -url string
+        server MCP endpoint or base address, e.g. https://localhost:30443/mcp
+```
+
 ## oberth outbox
 
 ```text

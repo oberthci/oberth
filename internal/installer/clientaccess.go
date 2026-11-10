@@ -161,7 +161,7 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	}
 	if choice == clientAccessBoth || choice == clientAccessMCP {
 		path := filepath.Join(root, "mcp.json")
-		body, marshalErr := renderMCPConfig(baseURL, tokenCommand)
+		body, marshalErr := renderMCPConfig(baseURL+"/mcp", tokenCommand)
 		switch {
 		case marshalErr != nil:
 			tw.AppendRow("MCP access", displayPath(path), "✗ error", false)
@@ -169,19 +169,44 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 			tw.AppendRow("MCP access", displayPath(path), "✗ error", false)
 		default:
 			// The file alone configures nothing: no client reads this path. It
-			// is written as the record, and the client is registered through
-			// its own documented command where one exists.
-			if registerWithClaudeCode(ctx, deps, body) {
-				tw.AppendRow("MCP access", "registered with Claude Code", "✓ ready", false)
-			} else {
-				tw.AppendRow("MCP access", displayPath(path), "✓ written", false)
-			}
+			// is written as the record, and Claude Code is configured through
+			// the same path as `oberth client setup`.
+			configureClaudeCodeFromInstall(ctx, deps, tw, path, ClaudeCodeSetup{
+				URL: baseURL + "/mcp", TokenCommand: tokenCommand, CAFile: caPath, CATrust: CATrustSettings,
+			})
 		}
 	}
 
 	tw.WriteFooter()
 	printClientAccessNotes(w, root, choice, tokenHint, freshToken)
 	return nil
+}
+
+// configureClaudeCodeFromInstall reports SetupClaudeCode as table rows. A
+// machine without Claude Code keeps the written mcp.json as the record; a
+// failure is a row, never a failed install.
+func configureClaudeCodeFromInstall(ctx context.Context, deps Deps, tw *tableWriter, path string, setup ClaudeCodeSetup) {
+	changes, err := SetupClaudeCode(ctx, deps, setup)
+	if errors.Is(err, ErrClaudeCodeMissing) {
+		tw.AppendRow("MCP access", displayPath(path), "✓ written", false)
+		return
+	}
+	registered := false
+	for _, change := range changes {
+		switch {
+		case strings.HasPrefix(change.Target, "Claude Code MCP server"):
+			registered = true
+			tw.AppendRow("MCP access", "registered with Claude Code", "✓ ready", false)
+		case strings.HasPrefix(change.Target, "Claude Code CA trust"):
+			tw.AppendRow("Claude Code CA", change.Action, "✓ ready", false)
+		}
+	}
+	if !registered {
+		tw.AppendRow("MCP access", displayPath(path), "✓ written", false)
+	}
+	if err != nil {
+		tw.AppendRow("Claude Code", err.Error(), "⚠ manual", false)
+	}
 }
 
 // renderClientEnv writes what the CLI reads and deliberately not the token.
@@ -206,22 +231,11 @@ export OBERTH_TOKEN_COMMAND=%q
 // header, so the same token command serves both clients and neither config
 // file holds a credential. The helper is Claude Code's; a client that does not
 // implement it needs a literal header, which is why the install prints that
-// rather than writing a credential for a client we cannot check.
-func renderMCPConfig(baseURL, tokenCommand string) ([]byte, error) {
-	type server struct {
-		Type          string `json:"type"`
-		URL           string `json:"url"`
-		HeadersHelper string `json:"headersHelper"`
-	}
-	document := map[string]map[string]server{
-		"mcpServers": {
-			"oberth": {
-				Type: "http",
-				URL:  baseURL + "/mcp",
-				HeadersHelper: fmt.Sprintf(
-					`printf '{"Authorization":"Bearer %%s"}' "$(%s)"`, tokenCommand),
-			},
-		},
+// rather than writing a credential for a client we cannot check. The entry is
+// the one SetupClaudeCode registers, timeout included.
+func renderMCPConfig(mcpURL, tokenCommand string) ([]byte, error) {
+	document := map[string]map[string]claudeCodeServer{
+		"mcpServers": {claudeCodeServerName: newClaudeCodeServer(mcpURL, headersHelperFor(tokenCommand))},
 	}
 	body, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
@@ -359,9 +373,11 @@ func printClientAccessNotes(w io.Writer, root string, choice int, storeCommand s
 	}
 	if choice == clientAccessBoth || choice == clientAccessMCP {
 		_, _ = fmt.Fprintf(w,
-			"\nMCP: merge %s into your client's configuration. It uses headersHelper,\n"+
-				"which Claude Code implements; a client without it needs a literal\n"+
-				"\"Authorization\": \"Bearer <token>\" header instead.\n",
+			"\nMCP: Claude Code on this machine is configured when it is on PATH; on any\n"+
+				"other machine run `oberth client setup`. %s is the same entry for\n"+
+				"other clients. It uses headersHelper, which Claude Code implements; a\n"+
+				"client without it needs a literal \"Authorization\": \"Bearer <token>\"\n"+
+				"header instead.\n",
 			displayPath(filepath.Join(root, "mcp.json")))
 	}
 }
@@ -420,48 +436,6 @@ func warnCertificateNamesWillNotTakeEffect(w io.Writer, cfg Config, missing []st
 		ns = DefaultNamespace
 	}
 	_, _ = fmt.Fprintf(w, "\nWARNING: the existing server certificate does not cover %s. Its identity is preserved in OpenBao at oberth/identities/%s/server. Configure the required names on a fresh installation or perform an explicit certificate rotation; upgrading will not replace the trusted key.\n", strings.Join(missing, ", "), ns)
-}
-
-// registerWithClaudeCode adds the server through the client's own documented
-// command rather than by editing its configuration file, which is the client's
-// to own and whose shape may change. Reports whether it succeeded.
-//
-// The JSON carries a headersHelper and no credential, so nothing sensitive
-// reaches the argument list.
-func registerWithClaudeCode(ctx context.Context, deps Deps, config []byte) bool {
-	lookPath := deps.LookPath
-	if lookPath == nil {
-		lookPath = exec.LookPath
-	}
-	if _, err := lookPath("claude"); err != nil {
-		return false
-	}
-	server, err := claudeServerEntry(config)
-	if err != nil {
-		return false
-	}
-	run := deps.RunCommand
-	if run == nil {
-		run = DefaultRunCommand
-	}
-	_, err = run(ctx, nil, "claude", "mcp", "add-json", "oberth", string(server), "--scope", "user")
-	return err == nil
-}
-
-// claudeServerEntry unwraps the mcpServers envelope, because add-json takes the
-// server object itself rather than the file a manual setup would write.
-func claudeServerEntry(config []byte) ([]byte, error) {
-	var document struct {
-		MCPServers map[string]json.RawMessage `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(config, &document); err != nil {
-		return nil, err
-	}
-	entry, ok := document.MCPServers["oberth"]
-	if !ok {
-		return nil, errors.New("rendered configuration has no oberth server")
-	}
-	return entry, nil
 }
 
 // refreshPinnedServerCA rewrites the CA this machine's CLI and MCP client

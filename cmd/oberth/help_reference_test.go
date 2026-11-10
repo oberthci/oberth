@@ -51,6 +51,8 @@ log
 mcp
 mcp call
 mcp tools
+client
+client setup
 outbox
 preflight
 preflight drift

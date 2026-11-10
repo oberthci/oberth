@@ -127,6 +127,38 @@
     "flag:assist-scratch-bytes": {
       "doc_anchor": "docs/assisted-continuation.md#caches",
       "test_ref": "internal/argojob/assist_scratch_test.go TestAssistHeldAttemptGetsScratchEphemeralStorage"
+    },
+    "flag:url": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "cmd/oberth/client_test.go TestClientSetupDryRunPrintsAndChangesNothing"
+    },
+    "flag:ca-file": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "cmd/oberth/client_test.go TestClientSetupDryRunPrintsAndChangesNothing"
+    },
+    "flag:token-command": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "cmd/oberth/client_test.go TestClientSetupDryRunPrintsAndChangesNothing"
+    },
+    "flag:token-file": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "internal/installer/claudecode_test.go TestResolveClaudeCodeSetupUsesTheCLIConfiguration"
+    },
+    "flag:ca-trust": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "internal/installer/claudecode_test.go TestClaudeCodeSetupSystemTrustPrintsTheCommand"
+    },
+    "flag:dry-run": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "internal/installer/claudecode_test.go TestClaudeCodeSetupDryRunChangesNothing"
+    },
+    "env:CLAUDE_CONFIG_DIR": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "internal/installer/claudecode_test.go TestClaudeCodeSetupRegistersAndMergesSettings"
+    },
+    "env:OBERTH_MCP_URL": {
+      "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
+      "test_ref": "internal/installer/claudecode_test.go TestResolveClaudeCodeSetupUsesTheCLIConfiguration"
     }
   }
 }
