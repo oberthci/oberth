@@ -1,0 +1,30 @@
+#!/bin/sh
+# headersHelper of the Oberth plugin: prints the Authorization header Claude
+# Code sends to the Oberth MCP server. The token comes from
+# OBERTH_TOKEN_COMMAND when it is set (a command that prints it, such as a
+# secret-store lookup), else from the owner-only token file oberth install
+# saves. Nothing is written; the token is never logged.
+set -eu
+if [ -n "${OBERTH_TOKEN_COMMAND:-}" ]; then
+	token=$(/bin/sh -c "$OBERTH_TOKEN_COMMAND")
+else
+	file="${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"
+	if [ ! -r "$file" ]; then
+		echo "oberth: no token: set OBERTH_TOKEN_COMMAND or save the token as $file (mode 0600)" >&2
+		exit 1
+	fi
+	case "$(ls -l "$file" | cut -c5-10)" in
+	------) ;;
+	*)
+		echo "oberth: $file is readable by others; chmod 600 it" >&2
+		exit 1
+		;;
+	esac
+	token=$(cat "$file")
+fi
+token=$(printf '%s' "$token" | tr -d '\r\n')
+if [ -z "$token" ]; then
+	echo "oberth: the token source printed nothing" >&2
+	exit 1
+fi
+printf '{"Authorization":"Bearer %s"}\n' "$token"
