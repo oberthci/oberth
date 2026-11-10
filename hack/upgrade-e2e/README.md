@@ -94,3 +94,55 @@ If a host wrapper suspends an in-flight fixture wait past its watch deadline,
 the runner performs a fresh status read and accepts only `Succeeded`. Failed,
 pending or unreadable fixture Pods still fail; no completion assertion is
 waived and no host guard is disabled.
+
+## Rollback rehearsal (`--rehearse-rollback`)
+
+```bash
+bash hack/upgrade-e2e/run.sh --from 0.20.1 --candidate HEAD --rehearse-rollback
+```
+
+Opt-in; without the flag nothing above changes. It takes exactly one
+candidate and also needs `openssl`. On the same throwaway k3d cluster it:
+
+1. deploys the published release with an admission disk floor larger than any
+   volume (since v0.20 a server submits every admitted run at once, so this is
+   what keeps the four seeded runs queued), seeds the five runs and the
+   suspended holder Workflow as above, and upgrades with Helm to the candidate
+   as committed (`candidate-1`);
+2. builds a second image of the same commit, `rehearsal`, whose archived source
+   tree alone carries one throwaway migration
+   (`internal/store/migrations/29991231235959-upgrade-e2e-rehearsal.sql`), so
+   the next step crosses a real schema migration; nothing is committed to the
+   product;
+3. runs the product command `oberth upgrade --chart <rehearsal chart> --yes
+   --backup-dir <evidence>/rehearsal` with the rehearsal CLI (the local chart is
+   unsigned, hence `--chart`; signature verification is covered by the unit
+   tests on the published record), under a private `HOME`, so the operator's
+   backup key and client configuration are never used;
+4. lifts the disk floor in that same `oberth upgrade` (`--set
+   admission.diskFloorBytes=0`) and deletes the holder's Workflow, so the
+   upgraded server admits the backup's queued runs: work done on the new
+   version;
+5. runs `oberth upgrade --rollback <record> --yes` and checks that the server
+   reports the candidate's version and schema again, the run set is exactly
+   the backup's, every restored run is interrupted (the queued ones with the
+   reason "restored from a backup; not dispatched again", the holder as
+   restored without re-executing it), no Workflow was created for them after
+   the rollback began, and the Workflow the upgraded server admitted is gone;
+6. lifts the disk floor the rollback brought back, restarts, and checks again
+   that nothing is dispatched and every restored run stays interrupted.
+
+The two chart versions are stamped `v<major>.<minor+1>.0-e2e.a.<sha>` and
+`...-e2e.b.<sha>`. The behavioral backfill check and the migration probe of
+the default path are skipped. Evidence is under `<evidence>/rehearsal/`.
+
+The rollback target here is a build of the candidate itself, which reads the
+restored-runs marker. `--rehearse-rollback-to-published` instead runs
+`oberth upgrade` from the published release straight to the rehearsal build
+and rolls back to the published release, which predates the marker. The seed
+hold then lasts five minutes: it covers the pre-upgrade backup and lapses
+before the restore, so the upgraded server claims the queued work and the
+restore has to place its own hold. The rehearsal checks that the published
+server, after the rollback, leaves the backup's queued runs queued and adds
+none, and that releasing the hold (the operator's step) is what lets it
+dispatch them.

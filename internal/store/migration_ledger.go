@@ -84,7 +84,7 @@ func readAppliedMigrationsWith(ctx context.Context, q migrationQuerier, items []
 		if !recordedID.Valid {
 			// A pre-ID database can only contain the frozen integer lineage.
 			if version > lastIntegerMigrationVersion {
-				return nil, 0, fmt.Errorf("%w: database=%d binary=%d; see docs/upgrade-schema-v3.md", ErrSchemaTooNew, version, len(items))
+				return nil, 0, fmt.Errorf("%w: database=%d binary=%d; this binary is older than the database: run the release that wrote it or newer, or roll back with oberth upgrade --rollback (see docs/backup-restore.md)", ErrSchemaTooNew, version, len(items))
 			}
 			id = strconv.Itoa(version)
 		}
@@ -92,7 +92,7 @@ func readAppliedMigrationsWith(ctx context.Context, q migrationQuerier, items []
 			return nil, 0, fmt.Errorf("%w: invalid or duplicate applied migration ID %q at receipt %d", ErrSchemaIncompatible, id, version)
 		}
 		if !known[id] {
-			return nil, 0, fmt.Errorf("%w: unknown applied migration ID %q; see docs/schema-migrations.md", ErrSchemaTooNew, id)
+			return nil, 0, fmt.Errorf("%w: unknown applied migration ID %q; this binary is older than the database (see docs/backup-restore.md)", ErrSchemaTooNew, id)
 		}
 		if (version <= lastIntegerMigrationVersion && id != strconv.Itoa(version)) || (version > lastIntegerMigrationVersion && !validTimestampMigrationID(id)) {
 			return nil, 0, fmt.Errorf("%w: migration ID %q at invalid receipt %d", ErrSchemaIncompatible, id, version)

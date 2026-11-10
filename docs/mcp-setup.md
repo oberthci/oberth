@@ -455,12 +455,17 @@ its policies and budgets are configured with the chart's `retention` values.
 | `retention.artifacts.limitBytes` | `268435456` (256 MiB) | `--artifacts-limit-bytes`: maximum collected artifact bytes per run |
 | `retention.artifacts.budgetBytes` | `4294967296` (4 GiB) | `--artifacts-budget-bytes`: total artifact budget; `0` disables size retention |
 
+Since v0.21.0 the chart default of `retention.logs.budgetBytes` is 2 GiB
+(`2147483648`) for fresh installs; `oberth upgrade` keeps an existing release's
+rendered value (`0` before v0.21.0) unless you set one.
+
 Age values use Go durations, for example `720h` for 30 days. Sweeps delete
 oldest eligible evidence when either its age or the global storage budget is
 exceeded. Active runs, protected evidence, and the newest terminal runs per ref
 can keep storage above the budget. Manual purges keep the same evidence
 protections but may remove the newest terminal run. The separate
-`admission.diskFloorBytes` value controls the free-space admission floor.
+`admission.diskFloorBytes` value controls the free-space admission floor
+(1 GiB by default since v0.21.0; `0` disables it).
 
 When an evidence class has an enabled age or budget policy, sweeps also reclaim
 orphaned files with no run row, recording the removal in the audit trail.
@@ -572,6 +577,14 @@ appends do not change the snapshot head. The field is omitted before any backup
 record and for scoped callers. A latest backup record whose details cannot be
 read omits `last_backup` and reports `last_backup_warning` instead; `database`
 stays `ready`.
+
+`admin_tokens` (unscoped callers only, since v0.21.0) shows when the active
+unscoped admin uplink tokens expire: `earliest_expires_at`,
+`expiring_within_30d`, and a `warning` once the earliest is less than 14 days
+away. The server also logs that warning hourly. Rotate before the expiry, while
+the token still works: `oberth uplink rotate <name> --ttl <duration>` in the
+server pod. Tokens without an expiry are counted by the separate hourly
+"no expiry" warning instead.
 
 ## Schedules
 

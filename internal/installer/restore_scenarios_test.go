@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,6 +96,27 @@ func TestRestoreHistoryOnlyArchiveNeedsNoToken(t *testing.T) {
 		"Unchanged  OpenBao secrets, policies, roles and grants"})
 }
 
+// During oberth upgrade --rollback the previous release crash-loops on the
+// migrated database: its pod is Running but answers no exec. The restore
+// treats it as a stopped server and checks the schema in the restore pod.
+func TestRestoreOntoACrashLoopingServer(t *testing.T) {
+	t.Parallel()
+	archive, _, target := historyBackup(t)
+	target.schemaExecErr = errors.New("kubectl: exit status 1: error: unable to upgrade connection: container not found (\"oberth\")")
+	var out bytes.Buffer
+	cfg := RestoreConfig{Input: archive, Yes: true, Only: []string{RestorePartHistory}, Timeout: 10 * time.Second}
+	cfg.applyDefaults()
+	deps := target.deps(&out)
+	deps.rootToken = ""
+	if err := runRestore(context.Background(), cfg, deps); err != nil {
+		t.Fatalf("restore: %v\n%s", err, out.String())
+	}
+	if len(target.swapArgs) != 3 {
+		t.Fatalf("database not restored: swap %v", target.swapArgs)
+	}
+	assertSubstringsInOrder(t, out.String(), []string{"no server pod is running: the target schema is checked in the restore pod", "treated as not running"})
+}
+
 func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
 	t.Parallel()
 	archive, _, _, target := reinstallFixture(t)
@@ -105,6 +127,17 @@ func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
 	if len(target.swapArgs) != 3 {
 		t.Fatal("--only history did not swap the database")
 	}
+	// The run that was running in the backup is handed to the server as
+	// restored, so startup recovery interrupts it instead of re-running it.
+	var marker struct {
+		Runs []string `json:"runs"`
+	}
+	if err := json.Unmarshal(target.restoredRunsMarker, &marker); err != nil || len(marker.Runs) != 1 {
+		t.Fatalf("restored-runs marker = %q, %v", target.restoredRunsMarker, err)
+	}
+	if !strings.Contains(out, "1 running when the backup was taken") {
+		t.Fatalf("plan does not name the restored running run:\n%s", out)
+	}
 	if _, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1GetOptions()); err == nil {
 		t.Fatal("--only history wrote the grants table")
 	}
@@ -113,6 +146,29 @@ func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
 	}
 	if !strings.Contains(out, "Unchanged  OpenBao secrets, policies, roles and grants") {
 		t.Fatalf("plan does not say what stays:\n%s", out)
+	}
+}
+
+// A rollback restore (oberth upgrade --rollback) hands every active run of
+// the backup to the server, not only the running ones.
+func TestRollbackRestoreHandsQueuedRunsToTheServer(t *testing.T) {
+	t.Parallel()
+	archive, runID, _, target := reinstallFixture(t)
+	// The backup's own Workflow of its running run is kept; one submitted
+	// for that run under another name (after the backup) is not.
+	target.workflows = append(target.workflows, runWorkflow{Name: "oberth-backup-fixture", RunID: runID, Phase: "Running"})
+	out := runFixtureRestore(t, archive, target, RestoreConfig{Only: []string{RestorePartHistory}, InterruptQueued: true})
+	if deleted := slices.Sorted(slices.Values(target.deleted)); !slices.Equal(deleted, []string{"oberth-oberth-known", "oberth-oberth-orphan"}) {
+		t.Fatalf("rollback restore deleted %v, want the after-backup and the unknown Workflow", target.deleted)
+	}
+	var marker struct {
+		Runs []string `json:"runs"`
+	}
+	if err := json.Unmarshal(target.restoredRunsMarker, &marker); err != nil || len(marker.Runs) != 1 {
+		t.Fatalf("restored-runs marker = %q, %v", target.restoredRunsMarker, err)
+	}
+	if !strings.Contains(out, "queued, waiting or running when the backup was taken") {
+		t.Fatalf("plan does not name the rollback's run handling:\n%s", out)
 	}
 }
 

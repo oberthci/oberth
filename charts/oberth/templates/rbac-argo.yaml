@@ -3,8 +3,10 @@
 # not sit beside server-tier ones. That means a second, namespaced Role: the
 # server creates and supervises Workflows there, and reads the step Pods' logs.
 #
-# The optional nonroot profile adds GET on one exact public immutable ConfigMap.
-# It adds no collection/write or Secret permission; existing source-seeding
+# The optional nonroot profile adds GET on the built-in public immutable
+# profile ConfigMap here (frozen); a profile carrying controller limits has a
+# digest-derived name, read through the -argo-controller-profile Role below.
+# Neither adds collection/write or Secret permission; existing source-seeding
 # permissions below retain their established ownership boundary.
 #
 # FROZEN RULES (issue #813): the rules list of this Role is fixed at its
@@ -36,7 +38,7 @@ rules:
   # collection, write or Secret permission accompanies the binding.
   - apiGroups: [""]
     resources: ["configmaps"]
-    resourceNames: [{{ .Values.argo.controllerProfileConfigMap | default "oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e" | quote }}]
+    resourceNames: ["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"]
     verbs: ["get"]
   {{- end }}
   - apiGroups: ["argoproj.io"]
@@ -205,4 +207,39 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "oberth.fullname" . }}-argo-controller-history
+---
+# The controller profile ConfigMap the running controller names in its
+# --configmap argument (#1517). Its name is oberth-argo-nr-<content digest>,
+# so the server reads whichever profile the controller runs and verifies the
+# content against that digest; no name is pinned here, so an Argo limits
+# change needs no ordered second release and no admission pause. GET only (no
+# list or watch, no write): the pipeline namespace holds only public
+# ConfigMaps (profiles, sync limits, the cluster root CA), never Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-controller-profile
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-controller-profile
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-argo-controller-profile
 {{- end }}

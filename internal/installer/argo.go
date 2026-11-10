@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -126,6 +129,15 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		result.TargetVersion = DefaultArgoChartVersion
 	}
 
+	if !exists && cfg.ArgoParallelism == nil && cfg.ArgoNamespaceParallelism == nil {
+		// A fresh controller gets a run ceiling sized to the cluster instead of
+		// none: on a single node a push storm otherwise starts every run at
+		// once. An explicit --argo-parallelism (0 is no limit) always wins.
+		if parallelism, ok := defaultArgoParallelism(ctx, deps); ok {
+			cfg.ArgoParallelism = &parallelism
+			_, _ = fmt.Fprintf(deps.Output, "Argo parallelism defaults to %d (half the cluster's allocatable CPUs, at least 2); change it with --argo-parallelism.\n", parallelism)
+		}
+	}
 	if cfg.ArgoControllerProfile == "" && exists && argoLimitsRequested(cfg) {
 		// Under the nonroot profile the chart never renders
 		// controller.parallelism: the limits must go into the profile
@@ -273,8 +285,11 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	}
 	values := []string{"--set", "argo.namespace=" + ns}
 	if cfg.ArgoControllerProfile != "" {
+		// No profile name is pinned (and an earlier pin is cleared): the
+		// server follows the canonical profile the controller runs, so the
+		// two releases need no order and admission never pauses (#1517).
 		values = append(values, "--set", "argo.controllerProfile="+cfg.ArgoControllerProfile,
-			"--set-string", "argo.controllerProfileConfigMap="+cfg.nonrootProfile().ConfigMap)
+			"--set-string", "argo.controllerProfileConfigMap=")
 	}
 	address := strings.TrimSpace(cfg.ArgoVaultAddress)
 	// When the installer manages a production secret store and the caller did
@@ -343,4 +358,26 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 		"--set", "argo.goProxy.port=8444",
 	)
 	return values
+}
+
+// defaultArgoParallelism is half the cluster's allocatable CPUs, at least 2,
+// or false when no node can be read (the controller then keeps no limit).
+func defaultArgoParallelism(ctx context.Context, deps Deps) (int, bool) {
+	if deps.KubeClient == nil {
+		return 0, false
+	}
+	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil || len(nodes.Items) == 0 {
+		return 0, false
+	}
+	var millis int64
+	for _, node := range nodes.Items {
+		if cpu, ok := node.Status.Allocatable[corev1.ResourceCPU]; ok {
+			millis += cpu.MilliValue()
+		}
+	}
+	if millis <= 0 {
+		return 0, false
+	}
+	return int(min(max(millis/2000, 2), maxArgoParallelism)), true
 }

@@ -37,13 +37,43 @@ func TestNonrootVerifierAcceptsTheParallelismProfile(t *testing.T) {
 	if err != nil || baseProof.binding() == proof.binding() {
 		t.Fatal("the profile digest does not bind the submission")
 	}
-	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
-		t.Fatal("a controller on another profile passed the built-in pin")
+	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, argoworkflow.NonrootProfileConfigMap, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
+		t.Fatal("a controller on another profile passed an explicit built-in pin")
 	}
 	edited, editedCM := nonrootVerifierObjects()
 	withProfile(edited, editedCM, profile)
 	editedCM.Data["config"] = argoworkflow.NonrootProfileConfig
-	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(edited, editedCM), testNamespace, profile.ConfigMap, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
-		t.Fatal("non-canonical content under a profile name accepted")
+	for _, pin := range []string{profile.ConfigMap, ""} {
+		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(edited, editedCM), testNamespace, pin, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
+			t.Fatalf("pin %q: non-canonical content under a profile name accepted", pin)
+		}
+	}
+}
+
+// Without a pin the server follows the profile the controller runs, so an
+// Argo limits change needs no Oberth release first and no admission pause:
+// the profile verifies under its digest name, and the proof binds its digest.
+func TestNonrootVerifierFollowsTheRunningProfile(t *testing.T) {
+	profile, err := argoworkflow.NewNonrootProfile(4, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod, cm := nonrootVerifierObjects()
+	withProfile(pod, cm, profile)
+	proof, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument))
+	if err != nil || proof.configSHA256 != profile.SHA256 {
+		t.Fatalf("followed profile = %+v, %v", proof, err)
+	}
+	// A profile name whose ConfigMap is missing is refused, not replaced by
+	// the built-in one.
+	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
+		t.Fatal("missing followed profile ConfigMap accepted")
+	}
+	// A --configmap that is not a profile name falls back to the built-in
+	// name, which the exact argument check then refuses.
+	other, otherCM := nonrootVerifierObjects()
+	other.Spec.Containers[0].Args[1] = "workflow-controller-configmap"
+	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(other, otherCM), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
+		t.Fatal("controller on a non-profile ConfigMap accepted")
 	}
 }

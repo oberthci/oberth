@@ -14,7 +14,7 @@ import (
 func TestRunUpgradeHelpReturnsNil(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	err := runUpgrade(context.Background(), []string{"--help"}, &output)
+	err := runUpgrade(context.Background(), []string{"--help"}, nil, &output)
 	if err != nil {
 		t.Fatalf("runUpgrade --help = %v", err)
 	}
@@ -28,7 +28,7 @@ func TestRunUpgradeHelpReturnsNil(t *testing.T) {
 
 func TestRunUpgradeRejectsPositionalArguments(t *testing.T) {
 	t.Parallel()
-	err := runUpgrade(context.Background(), []string{"extra"}, io.Discard)
+	err := runUpgrade(context.Background(), []string{"extra"}, nil, io.Discard)
 	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "no positional arguments") {
 		t.Fatalf("positional argument error = %v", err)
 	}
@@ -36,7 +36,7 @@ func TestRunUpgradeRejectsPositionalArguments(t *testing.T) {
 
 func TestRunUpgradeRejectsUnknownFlags(t *testing.T) {
 	t.Parallel()
-	err := runUpgrade(context.Background(), []string{"--nonexistent"}, io.Discard)
+	err := runUpgrade(context.Background(), []string{"--nonexistent"}, nil, io.Discard)
 	if !errors.Is(err, errUsage) {
 		t.Fatalf("unknown flag error = %v", err)
 	}
@@ -45,7 +45,7 @@ func TestRunUpgradeRejectsUnknownFlags(t *testing.T) {
 func TestRunUpgradeRejectsDevBuild(t *testing.T) {
 	t.Parallel()
 	// The default version is "dev" which should be rejected.
-	err := runUpgrade(context.Background(), nil, io.Discard)
+	err := runUpgrade(context.Background(), nil, nil, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "dev build") {
 		t.Fatalf("dev build error = %v", err)
 	}
@@ -64,7 +64,7 @@ func TestUpgradeCompletionExitStatus(t *testing.T) {
 
 func TestUpgradeRejectsInvalidWaitOptionsBeforeClusterAccess(t *testing.T) {
 	for _, args := range [][]string{{"--wait-idle", "--wait-timeout=0"}, {"--wait-idle", "--wait-timeout=-1s"}, {"--wait-for=unknown"}, {"--wait-for="}, {"--wait-timeout=1h"}} {
-		if err := runUpgrade(t.Context(), args, io.Discard); !errors.Is(err, errUsage) {
+		if err := runUpgrade(t.Context(), args, nil, io.Discard); !errors.Is(err, errUsage) {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}

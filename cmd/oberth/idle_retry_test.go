@@ -72,7 +72,7 @@ func TestUpgradeWaitRetriesTimeoutBeforeUpgrade(t *testing.T) {
 						}
 					},
 				}
-				_, err := installer.RunUpgrade(t.Context(), installer.UpgradeConfig{BinaryVersion: "0.17.67", ChartOverride: "/fixture", Yes: true, WaitFor: "critical", WaitTimeout: 2 * time.Minute}, deps)
+				_, err := installer.RunUpgrade(t.Context(), installer.UpgradeConfig{BinaryVersion: "0.17.67", ChartOverride: "/fixture", NoBackup: true, Yes: true, WaitFor: "critical", WaitTimeout: 2 * time.Minute}, deps)
 				if persistent {
 					if upgrades != 0 || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "last idle probe failure: read live daemon queue") || !strings.Contains(err.Error(), "upgrade not attempted") || time.Since(start) != 2*time.Minute {
 						t.Fatalf("upgrades=%d elapsed=%s err=%v", upgrades, time.Since(start), err)

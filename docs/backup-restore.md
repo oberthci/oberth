@@ -431,7 +431,18 @@ three times. Without a terminal it needs `--yes`.
 6. With `history`: lists the Argo Workflows again, now that no server can
    submit new ones, and deletes those whose `oberth.ci/run` label names a run
    the restored database does not know: they belong to the replaced database
-   and would otherwise keep running and hold pipeline slots.
+   and would otherwise keep running and hold pipeline slots. Runs the backup
+   recorded as running are listed in the plan and named in a marker on the
+   volume (`/data/.oberth-restored-runs.json`); at startup the server marks
+   each one whose Workflow is not on this cluster `interrupted` ("restored
+   without re-executing it") instead of requeueing it; a restored run that was
+   admitted but had not started, or was caught mid-submission, is cancelled
+   (reason "restored from a backup; not dispatched again"). Runs still queued
+   in the backup are dispatched as usual by a plain `oberth restore`; the
+   restore that `oberth upgrade --rollback` runs hands them to the server too
+   and they are cancelled, because they may already have run on the version
+   the rollback undoes. Re-run one deliberately if needed. The server removes
+   the marker once it has handled it.
 7. With `history`, if they differ: sets the compatibility values with
    `helm upgrade --reuse-values` (published chart at the release's current
    version, or `--chart`). If Helm reports a field conflict on
@@ -564,14 +575,18 @@ key changes.
 
 ## Upgrading across migrations
 
-Before upgrading, run `oberth backup --history-only` (or a full backup), using
-exactly the target cluster/context and namespace. Confirm successful verification,
-retain the encrypted archive and keep its private key off the machine.
+Since v0.21.0 `oberth upgrade` takes the backup itself: a verified
+history-only backup of the same context and namespace (in `--backup-dir`,
+default the current directory) after its preflight and preview and before its
+first change, plus a rollback record next to it. It refuses to upgrade without
+one unless `--no-backup` is given. Keep the archive's private key off the
+machine as for any backup.
 
-`oberth upgrade` loudly warns when the target schema is newer than the running
-schema, or when the running schema cannot be determined. It does not verify a
-backup's existence or freshness; the warning is unconditional in those cases,
-even with `--yes`, and does not block the upgrade. A matching schema needs no
-migration warning. This avoids treating filenames or an audit entry as proof of
-a usable current backup. Never interpret `--yes` as backup confirmation.
-Migrations are forward-only: Helm rollback alone cannot restore the database.
+The backup is taken with the target release's CLI. A CLI reads every older
+schema, so a newer CLI backs up an older server; only a CLI older than the
+server's schema is refused (use the server's release CLI or newer).
+
+Migrations are forward-only: a bare `helm rollback` cannot restore the
+database. `oberth upgrade --rollback <record>` rolls the Helm releases back and,
+when a migration ran, restores the pre-upgrade backup's history
+([installer reruns](installer-reruns.md#install-reconciles-upgrade-moves-versions)).

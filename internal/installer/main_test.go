@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,11 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	}
+	// No test reaches the real release origins: a test that needs a signed
+	// release serves one (withSignedRelease).
+	defaultReleaseGetter = func(_ context.Context, url string, _ int64) ([]byte, error) {
+		return nil, fmt.Errorf("fetch %s: HTTP 404 (tests never reach the network)", url)
 	}
 	// client-go caches this path before TestMain changes the environment.
 	clientcmd.RecommendedHomeFile = filepath.Join(home, ".kube", "config")

@@ -29,6 +29,13 @@ func TestUpgradeWaitProcessHelper(t *testing.T) {
 	case "cli":
 		version = "0.17.52"
 		os.Args = []string{"oberth", "upgrade", "--yes", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
+		// The fixture has no server database to back up; the record (none
+		// without a backup) would go to the helper's private home.
+		home, err := os.UserHomeDir()
+		if err != nil {
+			os.Exit(93)
+		}
+		os.Args = append(os.Args, "--no-backup", "--backup-dir="+home)
 		if os.Getenv("OBERTH_TEST_OLD_CRITICAL") == "yes" {
 			os.Args = append(os.Args, "--wait-for=critical")
 		}

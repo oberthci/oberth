@@ -313,7 +313,7 @@ func TestRunUpgradeRetriesFailedShadowMigration(t *testing.T) {
 					}
 				},
 			}
-			result, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", DryRun: dryRun}, deps)
+			result, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true}, deps)
 			if histories != 1 || result.AlreadyUpToDate || result.Upgraded || result.Migrated != "gitcache.shadow=true" {
 				t.Fatalf("retry result=%+v histories=%d err=%v", result, histories, err)
 			}
@@ -322,7 +322,9 @@ func TestRunUpgradeRetriesFailedShadowMigration(t *testing.T) {
 					t.Fatalf("incorrect migration preview: %s; reads=%d applies=%d err=%v", output.String(), reads, applies, err)
 				}
 			} else {
-				if !errors.Is(err, stop) || reads != 3 || applies != 1 || previews != 1 {
+				// Three reads prepare the snapshot; two (stored and rendered,
+				// same revision) decide the changed-default pins.
+				if !errors.Is(err, stop) || reads != 5 || applies != 1 || previews != 1 {
 					t.Fatalf("retry did not apply migration: reads=%d applies=%d err=%v", reads, applies, err)
 				}
 				if _, err := os.Stat(snapshot); !errors.Is(err, os.ErrNotExist) {
@@ -374,7 +376,7 @@ func TestRunUpgradeAppliesValidatedShadowMigrationSnapshot(t *testing.T) {
 			}
 		},
 	}
-	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture"}, deps)
+	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", NoBackup: true}, deps)
 	if !errors.Is(err, stop) || !applied {
 		t.Fatalf("did not reach apply with migration: %v", err)
 	}

@@ -462,7 +462,7 @@ Usage of install:
   -tls-remove-ip value
         remove a permitted IP; refused while the served certificate contains it (repeatable)
   -upgrade
-        force helm upgrade of existing releases even when already up to date (re-runs auto-upgrade when a newer chart is targeted; this flag forces reconciliation)
+        force helm reconciliation of existing releases at the installed Oberth version; version changes of an existing Oberth release are refused here and go through oberth upgrade
   -uplink-identity string
         workstation identity
   -upstream-key-file string
@@ -1439,7 +1439,7 @@ Usage of serve:
   -argo-controller-profile string
         exact controller profile to verify before nonroot submission; empty disables nonroot
   -argo-controller-profile-configmap string
-        nonroot profile ConfigMap the controller runs (oberth-argo-nr-<digest>); empty is the built-in profile without controller limits
+        pin the nonroot profile ConfigMap (oberth-argo-nr-<digest>); empty follows the canonical profile the controller names in --configmap
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
   -argo-default-workflow-timeout duration
@@ -1707,24 +1707,40 @@ Usage: oberth status [flags]
 
 ```text
 Usage of upgrade:
+  -allow-downgrade
+        accept a CLI older than the installed release (a deliberate rollback within one database schema)
   -allow-retired-execution
         override retired resource/repository checks; accept orphaned resources and refused legacy runs
   -argo-controller-profile string
         explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
+  -backup-dir DIR
+        write the pre-upgrade backup and the rollback record to DIR (default: the current directory)
   -chart string
-        override the chart reference (for testing)
+        deploy this chart instead of the signed release (development only: not verified)
+  -chart-repository string
+        fetch the chart from this HTTPS origin instead of https://charts.oberth.ci
   -context string
         kubeconfig context to target (default: current-context)
   -dry-run
         show what would change without doing it
   -f value
         alias for --values
+  -force-record
+        DANGEROUS, with --rollback: accept a stale record although either release changed after its upgrade; later changes are undone and the database may be replaced by an old backup (check helm history first)
   -namespace string
         Oberth namespace (default: oberth)
+  -no-backup
+        upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)
   -openbao-namespace string
         OpenBao namespace (default: openbao)
   -ownership-handoff string
         verified connector/site ownership handoff receipt required before retirement
+  -release-dir DIR
+        read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
+  -release-origin string
+        fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
+  -rollback FILE
+        roll back the upgrade recorded in FILE (the rollback record an upgrade printed): Helm revisions, then the pre-upgrade backup when a migration ran
   -set value
         one canonical dotted key=scalar per flag; escape literal commas (repeatable)
   -timeout duration

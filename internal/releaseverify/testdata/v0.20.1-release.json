@@ -1,0 +1,30 @@
+{
+  "artifacts": {
+    "oberth-darwin-amd64": "sha256:6b9ff0c7d300450cbb3fdf4d79fad00194f6b0fa79f7b52450992663156c04f3",
+    "oberth-darwin-arm64": "sha256:63d3d85a868dbd096c941f8cc9dbb051a7bb1327f3a4148e7d50d2d12babb902",
+    "oberth-linux-amd64": "sha256:0ef147a5f9e06035474fa6639db3b79d05fa7681e5c1673451486ed3b9e35d69",
+    "oberth-linux-arm64": "sha256:ca813560eea1c2d9d99588e058e3d35104093bc06ecaff6c94730875f88c37b2",
+    "sha256:0ef147a5f9e06035474fa6639db3b79d05fa7681e5c1673451486ed3b9e35d69": "oberth-linux-amd64",
+    "sha256:63d3d85a868dbd096c941f8cc9dbb051a7bb1327f3a4148e7d50d2d12babb902": "oberth-darwin-arm64",
+    "sha256:6b9ff0c7d300450cbb3fdf4d79fad00194f6b0fa79f7b52450992663156c04f3": "oberth-darwin-amd64",
+    "sha256:ca813560eea1c2d9d99588e058e3d35104093bc06ecaff6c94730875f88c37b2": "oberth-linux-arm64"
+  },
+  "chart": {
+    "digest": "sha256:4a502091a531a2c0e3d8cd62901e0e4102f12758799e0e26489ecf80ef3e1fb3",
+    "garRef": "europe-west4-docker.pkg.dev/skipopsmain/oberth-helm/oberth@sha256:774767cad119e737e84b0c89b0ca11f3287694af7eed5c167082c81eaef9cfdf",
+    "version": "0.20.1"
+  },
+  "component": "oberth",
+  "images": {
+    "server": {
+      "ref": "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:578a121745ebdb7ebe26a009b2cb3bd50a739b55fc6f1d2dde9330698de12306"
+    }
+  },
+  "schemaVersion": 1,
+  "source": {
+    "created": "2026-11-10T06:24:57+01:00",
+    "repository": "github.com/oberthci/oberth",
+    "sha": "90b9189099b9e6ed3f8e40bd5569e6625147763c"
+  },
+  "version": "v0.20.1"
+}

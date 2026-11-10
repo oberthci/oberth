@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,9 +62,13 @@ type RestoreConfig struct {
 	Only []string
 	// Inspect prints what the archive holds and stops; no cluster is used.
 	Inspect bool
-	DryRun  bool
-	Yes     bool
-	Timeout time.Duration
+	// InterruptQueued (set by oberth upgrade --rollback) also hands the
+	// backup's queued and waiting runs to the server as restored: they may
+	// already have run on the version the rollback undid.
+	InterruptQueued bool
+	DryRun          bool
+	Yes             bool
+	Timeout         time.Duration
 }
 
 func (cfg *RestoreConfig) applyDefaults() {
@@ -255,6 +260,9 @@ type restoreTarget struct {
 	ContentsNote string
 	// Grants counts the target's current grants.
 	Grants int
+	// RestoredRunning are the runs the backup recorded as running; the
+	// server interrupts them instead of re-executing them.
+	RestoredRunning []string
 	// KV is the archive's secrets as they will be written: known_hosts pins
 	// of this server updated (#074).
 	KV   kvExport
@@ -325,9 +333,16 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	}
 	backupSchema := archive.Manifest.Database.Schema
 	if target.Pod != "" {
+		// A pod whose server cannot answer (crash-looping, as the previous
+		// release does on a migrated database during oberth upgrade
+		// --rollback) is a server that is not running: the restore pod then
+		// checks the target schema before the swap, as for a stopped server.
 		if target.Schema, err = podSchemaVersion(ctx, deps.RunCommand, deps.ContextName, cfg.Namespace, target.Pod, serverContainerName); err != nil {
-			return target, openBaoExec{}, err
+			target.Notes = append(target.Notes, fmt.Sprintf("server pod %s does not answer (%v); treated as not running", target.Pod, err))
+			target.Pod, target.Schema = "", 0
 		}
+	}
+	if target.Pod != "" {
 		if parts.History && target.Schema < backupSchema {
 			return target, openBaoExec{}, fmt.Errorf("the target server writes schema %d but the backup holds schema %d; upgrade the target to a release at least as new as %s first",
 				target.Schema, backupSchema, displayOr(archive.Manifest.Source.ServerVersion, "the source"))
@@ -336,12 +351,15 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	target.ClusterUID = clusterUID(ctx, deps)
 
 	if parts.History {
+		if target.RestoredRunning, err = restoredRunningRuns(ctx, archive, cfg.InterruptQueued); err != nil {
+			return target, openBaoExec{}, err
+		}
 		readTargetContents(ctx, cfg, deps, &target, work)
 		target.Overlay = compatibilityOverlay(archive, target)
 		workflows, listErr := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
 		if listErr != nil {
 			target.Notes = append(target.Notes, fmt.Sprintf("could not list Argo Workflows in %s (%v); orphaned workflows are not cleaned up", cfg.ArgoNamespace, listErr))
-		} else if target.Orphans, err = orphanedWorkflows(ctx, workflows, archive); err != nil {
+		} else if target.Orphans, err = orphanedWorkflows(ctx, workflows, archive, cfg.InterruptQueued); err != nil {
 			return target, openBaoExec{}, err
 		}
 	}
@@ -510,6 +528,13 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			err, target.Timestamp, target.Server.ClaimName)
 	}
 
+	if parts.History {
+		var err error
+		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
+			return err
+		}
+	}
+
 	_, _ = fmt.Fprintln(w, "Stopping the server...")
 	if err := scaleServer(ctx, deps.Deps, cfg.Namespace, 0); err != nil {
 		return err
@@ -537,7 +562,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 
 	// List again now that no server can submit new workflows.
 	if workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace); parts.History && err == nil {
-		orphans, err := orphanedWorkflows(ctx, workflows, archive)
+		orphans, err := orphanedWorkflows(ctx, workflows, archive, cfg.InterruptQueued)
 		if err != nil {
 			return stopped(err)
 		}
@@ -805,7 +830,56 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if got := strings.TrimSpace(lines[len(lines)-1]); got != want {
 		return fmt.Errorf("%w: restored database has owner and mode %q, want %q", errRestoredDatabaseInPlace, got, want)
 	}
+	if len(target.RestoredRunning) > 0 {
+		marker, err := json.Marshal(map[string][]string{"runs": target.RestoredRunning})
+		if err != nil {
+			return err
+		}
+		if out, err := inPod(marker, restoredRunsScript); err != nil {
+			return fmt.Errorf("%w: write the restored-runs marker (without it the server would re-execute %d runs): %w%s",
+				errRestoredDatabaseInPlace, len(target.RestoredRunning), err, commandOutputSuffix(out))
+		}
+	}
 	return nil
+}
+
+// restoredRunsScript writes the server's restored-runs marker
+// (service.RestoredRunsFile) from stdin, atomically, beside the database.
+const restoredRunsScript = `set -eu
+umask 077
+cat > /data/.oberth-restored-runs.json.tmp
+mv -f /data/.oberth-restored-runs.json.tmp /data/` + restoredRunsFile
+
+// restoredRunsFile is service.RestoredRunsFile (a test keeps them equal).
+const restoredRunsFile = ".oberth-restored-runs.json"
+
+// restoredRunningRuns lists the runs the archive records as running with a
+// Workflow: on the target their Workflows do not exist, and the server marks
+// them interrupted from the marker instead of re-executing them. With
+// queued (a rollback restore) it lists every active run: queued or waiting
+// work in a pre-upgrade backup may already have run after the upgrade, and
+// the server cancels it instead of dispatching it again.
+func restoredRunningRuns(ctx context.Context, archive restoreArchive, queued bool) (ids []string, resultErr error) {
+	compat := archive.Manifest.Compatibility
+	inspection, err := store.InspectCurrent(ctx, archive.LocalDatabase, store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}, SnapshotTempDir: filepath.Dir(archive.LocalDatabase)})
+	if err != nil {
+		return nil, fmt.Errorf("open restored database: %w", err)
+	}
+	defer func() { resultErr = errors.Join(resultErr, inspection.Close()) }()
+	if queued {
+		if ids, err = inspection.ActiveRunIDs(ctx); err != nil {
+			return nil, fmt.Errorf("list the backup's active runs: %w", err)
+		}
+		return ids, nil
+	}
+	runs, err := inspection.RunningRunsWithJobs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list the backup's running runs: %w", err)
+	}
+	for _, run := range runs {
+		ids = append(ids, run.ID)
+	}
+	return ids, nil
 }
 
 // checkUploadedSize compares the size stageUploadScript reports with what
@@ -883,8 +957,12 @@ func listRunWorkflows(ctx context.Context, deps backupDeps, namespace string) ([
 
 // orphanedWorkflows returns the workflows whose run the restored database
 // does not know: submitted by the database being replaced, they would hold
-// pipeline slots and report to runs that no longer exist (issue 048).
-func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive restoreArchive) (orphans []runWorkflow, resultErr error) {
+// pipeline slots and report to runs that no longer exist (issue 048). With
+// newer (a rollback restore) it also returns the workflows the restored
+// database does not name for their run: submitted after the backup for a run
+// it holds as queued (or under another name), they are work of the version
+// the rollback undoes, and the restored run is cancelled, not continued.
+func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive restoreArchive, newer bool) (orphans []runWorkflow, resultErr error) {
 	if len(workflows) == 0 {
 		return nil, nil
 	}
@@ -905,6 +983,16 @@ func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive res
 	for _, wf := range workflows {
 		if !known[wf.RunID] {
 			orphans = append(orphans, wf)
+			continue
+		}
+		if newer {
+			name, err := inspection.RunWorkflowName(ctx, wf.RunID)
+			if err != nil {
+				return nil, fmt.Errorf("read restored run %s: %w", wf.RunID, err)
+			}
+			if name != wf.Name {
+				orphans = append(orphans, wf)
+			}
 		}
 	}
 	return orphans, nil
@@ -978,3 +1066,59 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 // errRestoredDatabaseInPlace marks a swap failure that happened after the
 // restored database was already in place.
 var errRestoredDatabaseInPlace = errors.New("the restored database is in place but its final check failed")
+
+// rollbackHoldReason is the reason line of the hold a rollback restore places.
+const rollbackHoldReason = "restored by oberth upgrade --rollback: check the queued runs, then release this hold"
+
+// rollbackHoldDuration is the longest hold the store accepts.
+const rollbackHoldDuration = 12 * time.Hour
+
+// placeRollbackHold holds admission in the restored database before any
+// server opens it, when a rollback restores queued or waiting runs onto a
+// release older than v0.21.0: such a server does not read the restored-runs
+// marker and would dispatch that work again (and requeue a running run whose
+// Workflow is gone), although it may already have run on the version the
+// rollback undid. An admission hold is honoured by every release since
+// v0.17.85. A hold the backup already had is replaced by this stricter one.
+// The file changes, so its hashes are taken again for the swap.
+func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreArchive, target restoreTarget, w io.Writer) (restoreArchive, error) {
+	if !cfg.InterruptQueued {
+		return archive, nil
+	}
+	if version := canonicalChartVersion(target.ChartVersion); version != "" && semver.Compare(version, "v0.21.0-0") >= 0 {
+		// The server reads the restored-runs marker and cancels that work.
+		return archive, nil
+	}
+	compat := archive.Manifest.Compatibility
+	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}}
+	placed, hold, previous, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
+	switch {
+	case errors.Is(err, store.ErrNoAdmissionHold):
+		_, _ = fmt.Fprintf(w, "WARNING: the backup predates the admission hold; release %s may dispatch the backup's queued runs again: check its queue once it starts.\n",
+			displayVersion(target.ChartVersion))
+		return archive, nil
+	case err != nil:
+		return archive, fmt.Errorf("hold admission in the restored database: %w", err)
+	case !placed:
+		return archive, nil
+	}
+	if archive.Database.MainSHA256, err = fileSHA256(archive.Database.Main); err != nil {
+		return archive, err
+	}
+	archive.Database.WAL, archive.Database.WALSHA256 = "", ""
+	if info, err := os.Stat(archive.Database.Main + "-wal"); err == nil && info.Size() > 0 {
+		archive.Database.WAL = archive.Database.Main + "-wal"
+		if archive.Database.WALSHA256, err = fileSHA256(archive.Database.WAL); err != nil {
+			return archive, err
+		}
+	}
+	_, _ = fmt.Fprintf(w, "  ✓ admission held in the restored database until %s: release %s does not read the restored-runs marker and would dispatch the backup's queued runs again\n"+
+		"    Check them (oberth runs), cancel what already ran, then release the hold:\n"+
+		"        oberth admission hold off --reason \"restored runs checked\"\n",
+		hold.ExpiresAt.Format(time.RFC3339), displayVersion(target.ChartVersion))
+	if previous.On {
+		_, _ = fmt.Fprintf(w, "    It replaces the hold the backup had (%q, allowing [%s], until %s)\n",
+			previous.Reason, strings.Join(previous.Allow, ","), previous.ExpiresAt.Format(time.RFC3339))
+	}
+	return archive, nil
+}

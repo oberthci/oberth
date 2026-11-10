@@ -194,6 +194,8 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 				return []byte("oberth v0.17.23"), nil
 			}
 			fixtureActions := len(client.Actions())
+			withSignedRelease(t, &deps, "0.17.23", controllerServerTestImage)
+			cfg.NoBackup = true
 			result, err := RunUpgrade(t.Context(), cfg, deps)
 			if (err == nil) != complete || result.Upgraded != complete {
 				t.Fatalf("partial transition mislabeled: %+v %v", result, err)

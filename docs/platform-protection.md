@@ -2,7 +2,15 @@
 
 Set `platformProtection.enabled: true` to create three PriorityClasses for
 Oberth, its Argo workflow-controller and OpenBao. Default, false, and historical
-stored values without this key leave workloads unchanged. Run admission capacity
+stored values without this key leave workloads unchanged. The classes are
+cluster-scoped and preempt lower-priority Pods, so on a node shared with other
+workloads they are an explicit choice. (Chart versions v0.17.79 through v0.20.x
+defaulted to true. Since v0.21.0 an `oberth upgrade` of an install that never
+set the key removes the server's `priorityClassName` and the Oberth class and
+prints which classes go; the Argo controller and OpenBao classes carry
+`helm.sh/resource-policy: keep` and stay. If a Pod outside the release uses a
+class the upgrade would delete, the upgrade refuses and names it. Pass
+`--set platformProtection.enabled=true` once to keep protection.) Run admission capacity
 is unchanged. External ingress, connectors and other projects have their own
 protection policy outside Oberth.
 

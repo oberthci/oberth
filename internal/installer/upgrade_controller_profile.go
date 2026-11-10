@@ -24,13 +24,15 @@ import (
 // This opt-in transition touches only the already managed Argo release and the
 // normal Oberth upgrade. It never reconciles Secretstore, namespaces or uplinks.
 type upgradeControllerProfile struct {
-	namespace    string
-	status       string
-	revision     string
-	valuesFile   string
-	valuesDigest [32]byte
-	chartPath    string
-	chartDigest  string
+	namespace string
+	status    string
+	revision  string
+	// revisionNumber is the argo-workflows revision before the transition.
+	revisionNumber int
+	valuesFile     string
+	valuesDigest   [32]byte
+	chartPath      string
+	chartDigest    string
 	// profile is the canonical profile the reused limits select (#1517).
 	profile argoworkflow.NonrootProfile
 }
@@ -89,16 +91,6 @@ func installedPipelineNamespace(ctx context.Context, cfg UpgradeConfig, deps Dep
 	return values.Argo.Namespace, nil
 }
 
-// pinUpgradeControllerProfile prepares the transition and records its
-// profile ConfigMap for the Oberth chart (#1517).
-func pinUpgradeControllerProfile(ctx context.Context, cfg *UpgradeConfig, deps Deps) (*upgradeControllerProfile, func(), error) {
-	profile, cleanup, err := prepareUpgradeControllerProfile(ctx, *cfg, deps)
-	if err == nil && profile != nil {
-		cfg.argoProfileConfigMap = profile.profile.ConfigMap
-	}
-	return profile, cleanup, err
-}
-
 func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, deps Deps) (*upgradeControllerProfile, func(), error) {
 	noop := func() {}
 	if cfg.ArgoControllerProfile == "" {
@@ -137,7 +129,7 @@ func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, dep
 		cleanup()
 		return nil, noop, errors.New("changed or unsupported Argo values")
 	}
-	return &upgradeControllerProfile{namespace: namespace, status: release.Status, revision: helmRevisionLabel(release.Revision), valuesFile: file, valuesDigest: sha256.Sum256(raw), chartDigest: "7b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50", profile: *profile}, cleanup, nil
+	return &upgradeControllerProfile{namespace: namespace, status: release.Status, revision: helmRevisionLabel(release.Revision), revisionNumber: helmRevisionNumber(release.Revision), valuesFile: file, valuesDigest: sha256.Sum256(raw), chartDigest: "7b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50", profile: *profile}, cleanup, nil
 }
 
 func (p *upgradeControllerProfile) args(timeout time.Duration) []string {
@@ -224,8 +216,10 @@ func (p *upgradeControllerProfile) verifyFinal(ctx context.Context, cfg UpgradeC
 			ProfileConfigMap string `json:"controllerProfileConfigMap"`
 		} `json:"argo"`
 	}
+	// The transition clears any pinned profile name; the server follows the
+	// controller, which apply already verified on p.profile.
 	if readErr != nil || json.Unmarshal(raw, &values) != nil || values.Argo.Profile != argoworkflow.NonrootStaticProfile ||
-		(values.Argo.ProfileConfigMap != p.profile.ConfigMap && (values.Argo.ProfileConfigMap != "" || p.profile.ConfigMap != argoworkflow.NonrootProfileConfigMap)) {
+		values.Argo.ProfileConfigMap != "" {
 		return errors.New("oberth controller profile values readback refused")
 	}
 	deployments, err := deps.KubeClient.AppsV1().Deployments(cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=oberth"})

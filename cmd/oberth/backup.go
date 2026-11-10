@@ -79,39 +79,9 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 		cfg.Scope = installer.BackupScopeHistory
 	}
 	if cfg.Recipient == "" {
-		keyPath, certPath, err := installer.BackupRecipientPaths()
-		if err != nil {
+		if cfg.Recipient, err = defaultBackupRecipient(cfg.DryRun, input, output); err != nil {
 			return err
 		}
-		_, certErr := os.Stat(certPath)
-		_, keyErr := os.Stat(keyPath)
-		if certErr == nil && keyErr != nil {
-			// Encrypting to a certificate whose private key is gone would
-			// write backups nobody can restore.
-			return fmt.Errorf("%s exists but its private key %s does not: backups encrypted to it could never be restored. "+
-				"Put the key back, or move %s aside so the next backup creates a new pair", displayHomePath(certPath), displayHomePath(keyPath), displayHomePath(certPath))
-		}
-		created := false
-		if certErr != nil {
-			if cfg.DryRun {
-				_, _ = fmt.Fprintf(output, "No backup key yet: a real backup creates %s first.\n", displayHomePath(keyPath))
-			} else {
-				if _, _, err := installer.GenerateBackupRecipient(filepath.Dir(keyPath)); err != nil {
-					return err
-				}
-				created = true
-				_, _ = fmt.Fprintf(output, "Created the backup key %s (first backup on this machine).\n"+
-					"  Every backup is encrypted to it and cannot be restored without it: keep a copy OFF this machine.\n\n", displayHomePath(keyPath))
-			}
-		}
-		// Ask before the first archive, not after it, while nothing is read
-		// yet (#072): the key once went with a wiped ~/.config/oberth.
-		if !cfg.DryRun && !installer.BackupKeyStored(certPath) {
-			if err := confirmBackupKeyStored(keyPath, certPath, created, input, output); err != nil {
-				return err
-			}
-		}
-		cfg.Recipient = certPath
 	}
 	if cfg.Output == "" {
 		cfg.Output = archivePrefix + time.Now().UTC().Format("20060102-150405") + archiveSuffix
@@ -121,6 +91,45 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 	}
 	cfg.ToolVersion = version
 	return installer.ExecuteBackup(ctx, cfg, installer.InstallDeps{Output: output, Input: input})
+}
+
+// defaultBackupRecipient returns the default backup certificate, creating
+// the key pair on the first real backup and asking once, on a terminal, that
+// a copy of the key is kept off this machine.
+func defaultBackupRecipient(dryRun bool, input io.Reader, output io.Writer) (string, error) {
+	keyPath, certPath, err := installer.BackupRecipientPaths()
+	if err != nil {
+		return "", err
+	}
+	_, certErr := os.Stat(certPath)
+	_, keyErr := os.Stat(keyPath)
+	if certErr == nil && keyErr != nil {
+		// Encrypting to a certificate whose private key is gone would
+		// write backups nobody can restore.
+		return "", fmt.Errorf("%s exists but its private key %s does not: backups encrypted to it could never be restored. "+
+			"Put the key back, or move %s aside so the next backup creates a new pair", displayHomePath(certPath), displayHomePath(keyPath), displayHomePath(certPath))
+	}
+	created := false
+	if certErr != nil {
+		if dryRun {
+			_, _ = fmt.Fprintf(output, "No backup key yet: a real backup creates %s first.\n", displayHomePath(keyPath))
+		} else {
+			if _, _, err := installer.GenerateBackupRecipient(filepath.Dir(keyPath)); err != nil {
+				return "", err
+			}
+			created = true
+			_, _ = fmt.Fprintf(output, "Created the backup key %s (first backup on this machine).\n"+
+				"  Every backup is encrypted to it and cannot be restored without it: keep a copy OFF this machine.\n\n", displayHomePath(keyPath))
+		}
+	}
+	// Ask before the first archive, not after it, while nothing is read
+	// yet (#072): the key once went with a wiped ~/.config/oberth.
+	if !dryRun && !installer.BackupKeyStored(certPath) {
+		if err := confirmBackupKeyStored(keyPath, certPath, created, input, output); err != nil {
+			return "", err
+		}
+	}
+	return certPath, nil
 }
 
 func printBackupUsage(flags *flag.FlagSet, output io.Writer) error {

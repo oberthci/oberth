@@ -14,7 +14,8 @@ no run ceiling, no concurrency groups and no semaphore table of its own.
 
 What Oberth still holds back, because it reads the host and not a workflow:
 the PSI hard valve (`admission.pressure.*`), the disk floor
-(`admission.diskFloorBytes`) and the administrator hold (`admission_hold`).
+(`admission.diskFloorBytes`, 1 GiB free by default since v0.21.0; 0 disables
+it) and the administrator hold (`admission_hold`).
 Priority still orders Oberth's queue; see [Ordering](#ordering).
 
 ## How many Workflows run at once
@@ -53,22 +54,34 @@ the `config` is
 ```
 
 `oberth install --upgrade --argo-parallelism N` on a profile release keeps the
-profile, renders the matching ConfigMap, points the controller at it, and
-sets the Oberth chart's `argo.controllerProfileConfigMap` to that name. The
-server reads only that one ConfigMap (its Role's single `get`) and verifies
-before each nonroot submission that the controller runs it and that its data
-is exactly the canonical profile for its name; any other key or byte is
-refused. A changed limit is a new immutable ConfigMap, so the controller rolls
-once; running Workflows survive the rollout. Between the argo-workflows
-upgrade and the Oberth upgrade, nonroot admission pauses because the running
-controller and the pinned name disagree; it resumes when both match.
+profile, renders the matching ConfigMap and points the controller at it. The
+Oberth release pins no name (`argo.controllerProfileConfigMap` stays empty, and
+the installer clears an earlier pin): before each nonroot submission the server
+reads the profile ConfigMap the running controller names in `--configmap` and
+verifies that its data is exactly the canonical profile its digest-derived name
+stands for; any other key or byte is refused. The server's Role
+`<release>-argo-controller-profile` grants `get` (no list, watch or write) on
+ConfigMaps in the pipeline namespace for this. A changed limit is a new
+immutable ConfigMap, so the controller rolls once; running Workflows survive
+the rollout. Changing the limits needs no Oberth upgrade and no release order,
+and nonroot admission does not pause.
 
-**Default: none.** Neither Oberth nor the installer sets a limit. That is the
-behaviour Oberth has had since v0.18.0, whose `maxConcurrentJobs` default was
-`0` (no ceiling): Kubernetes places each step Pod by its `resources`, and the
-PSI valve and disk floor still hold new runs on an overloaded host. A useful
-number depends on the host, so a generic default would be wrong for most
-installs. On a small single-node host, set one.
+Since v0.21.0. Before it, the Oberth chart pinned the name in its Role and the
+server flag, so admission paused between the argo-workflows and the Oberth
+upgrade. That pause happens one last time while upgrading to v0.21.0 (the old
+server still holds the pin); afterwards it does not recur. A name set in
+`argo.controllerProfileConfigMap` by hand still pins exactly that profile.
+`oberth upgrade` clears a stored pin that names the profile the controller
+runs now (the value an earlier installer wrote) and prints that it did; a
+pin naming another profile is left as set.
+
+**Default: half the cluster's CPUs.** Since v0.21.0 a fresh `oberth install`
+that creates the argo-workflows release sets `parallelism` to half the
+cluster's allocatable CPUs, at least 2 (it prints the number). An explicit
+`--argo-parallelism N` wins, `0` is no limit, and an existing release keeps
+whatever it has: an upgrade never adds a limit. Without a limit Kubernetes
+places each step Pod by its `resources`, and only the PSI valve and the disk
+floor hold new runs on an overloaded host.
 
 A Workflow beyond the limit stays `Pending` with Argo's message
 `Workflow processing has been postponed because too many workflows are already running`

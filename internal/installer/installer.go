@@ -10,6 +10,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/oberthci/oberth/internal/releaseverify"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -483,6 +485,11 @@ type Deps struct {
 	// (e.g., "deploy oberth", "rollout ready") matched by the TUI's
 	// stepNameToIndex map. Status is "done".
 	StepProgressSink func(step, status string)
+	// ReleaseGetter fetches published release objects for oberth upgrade;
+	// nil selects HTTPS (releaseverify.HTTPSGetter).
+	ReleaseGetter releaseverify.Getter
+	// releaseKey replaces the compiled-in release key in tests.
+	releaseKey *ecdsa.PublicKey
 }
 
 // ClusterInfo describes the target Kubernetes cluster.
@@ -712,6 +719,20 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
+// resolveInstallClientHost sets the address clients are told to use: kind
+// publishes on 127.0.0.1 only, so a kind install advertises localhost.
+func resolveInstallClientHost(cfg *Config, deps *Deps, cluster ClusterInfo) {
+	deps.ClientHost = cfg.ClientHost
+	if deps.ClientHost != "" && cluster.Engine == "kind" && !isLoopbackHost(deps.ClientHost) {
+		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
+		deps.ClientHost = "localhost"
+		cfg.ClientHost = "localhost"
+	}
+	if warning := LocalNameWarning(deps.ClientHost); warning != "" {
+		_, _ = fmt.Fprintf(deps.Output, "NOTE: %s\n", warning)
+	}
+}
+
 // Run executes the full install flow.
 func Run(ctx context.Context, cfg Config, deps Deps) error {
 	cfg.installValuesRequested = explicitInstallValues(cfg)
@@ -737,15 +758,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 	// Cluster info line omitted — the kind/k3s creation messages already
 	// communicate the cluster identity; repeating it adds noise.
-	deps.ClientHost = cfg.ClientHost
-	if deps.ClientHost != "" && cluster.Engine == "kind" && !isLoopbackHost(deps.ClientHost) {
-		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
-		deps.ClientHost = "localhost"
-		cfg.ClientHost = "localhost"
-	}
-	if warning := LocalNameWarning(deps.ClientHost); warning != "" {
-		_, _ = fmt.Fprintf(deps.Output, "NOTE: %s\n", warning)
-	}
+	resolveInstallClientHost(&cfg, &deps, cluster)
 
 	if !cluster.IsLocal && !cfg.Yes {
 		return fmt.Errorf("context %q does not appear to be a local cluster (server: %s); "+
@@ -807,6 +820,12 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 
 	if cfg.DryRun {
 		return printDryRunPlan(cfg, deps.Output, cluster)
+	}
+	// Before any release is touched: a version change of an existing Oberth
+	// release belongs to oberth upgrade, and an older installer must never
+	// force-bump the Argo, OpenBao or Rekor releases on its way to refusing.
+	if err := preflightInstallVersionMove(ctx, cfg, deps); err != nil {
+		return err
 	}
 	// Helm --create-namespace cannot attach PSA labels. Create only missing
 	// server/pipeline namespaces ourselves, with the required policy explicit.
@@ -1542,6 +1561,11 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		cfg.ChartVersion = result.InstalledVersion
 		result.TargetVersion = result.InstalledVersion
 		action = actionUpgrade
+	}
+	if action == actionUpgrade && exists && strings.TrimSpace(cfg.ChartPath) == "" {
+		if err := refuseInstallVersionMove(result.InstalledVersion, cfg.ChartVersion); err != nil {
+			return result, err
+		}
 	}
 	if action == actionSkip {
 		result.AlreadyInstalled = true

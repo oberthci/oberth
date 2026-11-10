@@ -55,9 +55,13 @@ type SchedulerConfig struct {
 	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root (#673).
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
+	// RestoredRunsFile is oberth restore's marker (RestoredRunsFile in the
+	// data root); empty disables it.
+	RestoredRunsFile string
 }
 
 type Scheduler struct {
+	restoredRunsFile               string
 	disableInfrastructureAutoRetry bool
 
 	databaseRetryCount atomic.Uint64
@@ -173,7 +177,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		store: config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
 		releaseJobs: config.ReleaseJobs,
 		auditor:     config.Auditor, signals: signals,
-		workspaces: workspaces, workspaceRoot: workspaceRoot,
+		workspaces: workspaces, workspaceRoot: workspaceRoot, restoredRunsFile: config.RestoredRunsFile,
 		admission:      newAdmissionGate(),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate, stalledRunTimeout: config.StalledRunTimeout,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
@@ -1764,9 +1768,23 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 	if err != nil {
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
+	restored, err := loadRestoredRuns(scheduler.restoredRunsFile)
+	if err != nil {
+		return err
+	}
+	handled := make(map[string]bool, len(runs))
 	for _, run := range runs {
+		handled[run.ID] = true
 		if run.Phase == "preflight" {
 			if err := scheduler.failRetiredRun(ctx, run, require); err != nil {
+				return err
+			}
+			continue
+		}
+		// A restored run caught mid-submission or before its Workflow
+		// started is cancelled, never settled and submitted (restored_runs.go).
+		if restored[run.ID] && (isPendingCreate(run) || run.Phase == "waiting") {
+			if err := scheduler.cancelRestoredRun(ctx, run.ID, require); err != nil {
 				return err
 			}
 			continue
@@ -1816,7 +1834,10 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 				return err
 			}
 		} else {
-			requeued, requeueErr := scheduler.database().RequeueStrandedRun(ctx, run.ID)
+			requeued, requeueErr := model.Run{}, errRestoredRun
+			if !restored[run.ID] {
+				requeued, requeueErr = scheduler.database().RequeueStrandedRun(ctx, run.ID)
+			}
 			if requeueErr == nil {
 				// The same run stays queued behind its prior Workflow's durable
 				// cleanup obligation. Do not complete that obligation here;
@@ -1844,6 +1865,9 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			if !errors.Is(termErr, ErrJobNotTerminal) {
 				errMsg = fmt.Sprintf("job state unreadable at restart: %v", termErr)
 			}
+			if restored[run.ID] {
+				errMsg = restoredRunInterruption
+			}
 			if gateErr := require(ctx); gateErr != nil {
 				return gateErr
 			}
@@ -1870,7 +1894,18 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		}
 		cancelCleanup()
 	}
-	return nil
+	// Restored runs that were queued (or waiting without a Workflow) in the
+	// backup may already have run after it; cancel them instead of
+	// dispatching them again.
+	for id := range restored {
+		if handled[id] {
+			continue
+		}
+		if err := scheduler.cancelRestoredRun(ctx, id, require); err != nil {
+			return err
+		}
+	}
+	return retireRestoredRunsMarker(scheduler.restoredRunsFile)
 }
 
 // finalizeReconciledRun records the durable result of a K8s Job that completed

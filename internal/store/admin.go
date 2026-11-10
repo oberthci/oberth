@@ -651,3 +651,26 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	return value, nil
 }
+
+// AdminTokenExpiry reports the soonest expiry of the active unscoped admin
+// tokens that have one, or nil when none expires (or none exists).
+func (s *Store) AdminTokenExpiry(ctx context.Context) (*model.AdminTokenExpiry, error) {
+	now := s.now()
+	var earliest sql.NullInt64
+	var within int
+	err := s.reader().QueryRowContext(ctx, `SELECT MIN(t.expires_at), COUNT(DISTINCT CASE WHEN t.expires_at<=? THEN t.id END)
+FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id
+WHERE u.admin=1 AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL
+AND t.expires_at IS NOT NULL AND t.expires_at>?
+AND NOT EXISTS(SELECT 1 FROM uplink_scopes sc WHERE sc.uplink_id=u.id)`,
+		unixNano(now.Add(30*24*time.Hour)), unixNano(now)).Scan(&earliest, &within)
+	if err != nil || !earliest.Valid {
+		return nil, err
+	}
+	expiry := &model.AdminTokenExpiry{EarliestExpiresAt: fromUnixNano(earliest.Int64), ExpiringWithin30Days: within}
+	if left := expiry.EarliestExpiresAt.Sub(now); left <= model.AdminTokenWarningWindow {
+		expiry.Warning = fmt.Sprintf("an admin uplink token expires in %s (%s); rotate it before then: oberth uplink rotate <name> --ttl <duration>",
+			left.Truncate(time.Hour), expiry.EarliestExpiresAt.Format(time.RFC3339))
+	}
+	return expiry, nil
+}

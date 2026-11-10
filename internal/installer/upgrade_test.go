@@ -174,7 +174,7 @@ func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := output.String()
-	for _, want := range []string{"revision 57 is FAILED", "same-version forward repair", "helm upgrade oberth", "--version 0.16.6", "No cluster changes were made"} {
+	for _, want := range []string{"revision 57 is FAILED", "same-version forward repair", "helm upgrade oberth", "Verify the signed release v0.16.6", "<verified oberth-0.16.6.tgz>", "No cluster changes were made"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("dry-run output missing %q: %q", want, text)
 		}
@@ -270,8 +270,9 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 		KubeClient: fake.NewClientset(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
+	withSignedRelease(t, &deps, targetVersion, targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: targetVersion, Namespace: "oberth", Timeout: 10 * time.Second,
+		BinaryVersion: targetVersion, Namespace: "oberth", Timeout: 10 * time.Second, NoBackup: true,
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
@@ -279,15 +280,13 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 	if !result.Upgraded || result.AlreadyUpToDate || !strings.Contains(output.String(), "FAILED") || strings.Contains(output.String(), "Already running") {
 		t.Fatalf("failed same-version retry result=%+v, output=%q", result, output.String())
 	}
-	if len(calls) != 5 || calls[0][0] != "list" ||
-		strings.Join(calls[1], " ") != "repo add --force-update oberth-charts https://charts.oberth.ci" ||
-		strings.Join(calls[2], " ") != "repo update oberth-charts" || calls[3][0] != "show" || calls[4][0] != "upgrade" {
+	if len(calls) != 3 || calls[0][0] != "list" || calls[1][0] != "show" || calls[2][0] != "upgrade" {
 		t.Fatalf("unexpected Helm flow: %v", calls)
 	}
-	show := strings.Join(calls[3], " ")
-	upgrade := strings.Join(calls[4], " ")
-	if !strings.Contains(show, "--version "+targetVersion) ||
-		!strings.Contains(upgrade, "--version "+targetVersion) ||
+	show := strings.Join(calls[1], " ")
+	upgrade := strings.Join(calls[2], " ")
+	if !isVerifiedChartArg(calls[1][2], targetVersion) || !isVerifiedChartArg(calls[2][2], targetVersion) ||
+		strings.Contains(upgrade, "--version") ||
 		!strings.Contains(upgrade, "image.ref="+targetImage) ||
 		!strings.Contains(upgrade, "--wait") {
 		t.Fatalf("retry lost version/image pin: show=%q upgrade=%q", show, upgrade)
@@ -348,8 +347,9 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 	if err := os.WriteFile(valuesFile, []byte("watchTunnel:\n  enabled: true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	withSignedRelease(t, &deps, targetVersion, targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: targetVersion, Namespace: "oberth", Timeout: 10 * time.Second, UserValues: []string{valuesFile},
+		BinaryVersion: targetVersion, Namespace: "oberth", Timeout: 10 * time.Second, UserValues: []string{valuesFile}, NoBackup: true,
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
@@ -357,15 +357,13 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 	if !result.Upgraded || result.AlreadyUpToDate || !strings.Contains(output.String(), "re-applying the given --values/--set") {
 		t.Fatalf("same-version values result=%+v, output=%q", result, output.String())
 	}
-	if len(calls) != 5 || calls[0][0] != "list" ||
-		strings.Join(calls[1], " ") != "repo add --force-update oberth-charts https://charts.oberth.ci" ||
-		strings.Join(calls[2], " ") != "repo update oberth-charts" || calls[3][0] != "show" || calls[4][0] != "upgrade" {
+	if len(calls) != 3 || calls[0][0] != "list" || calls[1][0] != "show" || calls[2][0] != "upgrade" {
 		t.Fatalf("unexpected Helm flow: %v", calls)
 	}
-	show := strings.Join(calls[3], " ")
-	upgrade := strings.Join(calls[4], " ")
-	if !strings.Contains(show, "--version "+targetVersion) ||
-		!strings.Contains(upgrade, "--version "+targetVersion) ||
+	show := strings.Join(calls[1], " ")
+	upgrade := strings.Join(calls[2], " ")
+	if !isVerifiedChartArg(calls[1][2], targetVersion) || !isVerifiedChartArg(calls[2][2], targetVersion) ||
+		strings.Contains(upgrade, "--version") ||
 		!strings.Contains(upgrade, "image.ref="+targetImage) ||
 		!strings.Contains(upgrade, "--wait") || !strings.Contains(upgrade, "--values "+valuesFile) || !strings.Contains(upgrade, "--reset-then-reuse-values") {
 		t.Fatalf("re-apply lost version/image pin or values: show=%q upgrade=%q", show, upgrade)
@@ -398,8 +396,9 @@ func TestRunUpgradeFailedSameVersionRejectsTagOnlyImage(t *testing.T) {
 		KubeClient: fake.NewClientset(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
+	withSignedRelease(t, &deps, "0.16.6", fakeChartImageRef)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.16.6", Namespace: "oberth",
+		BinaryVersion: "0.16.6", Namespace: "oberth", NoBackup: true,
 	}, deps)
 	if err == nil || !strings.Contains(err.Error(), "digest-pinned") || result.Upgraded || result.AlreadyUpToDate || upgradeCalls != 0 {
 		t.Fatalf("tag-only same-version retry: result=%+v, err=%v, upgradeCalls=%d", result, err, upgradeCalls)
@@ -423,7 +422,9 @@ func TestRunUpgradeNoRelease(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 	}, deps)
@@ -490,7 +491,9 @@ func TestRunUpgradeRejectsUnparseableInstalledVersion(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 	}, deps)
@@ -528,7 +531,9 @@ func TestRunUpgradeDryRun(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		DryRun:        true,
@@ -1004,11 +1009,13 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, ta
 		ContextName: "remote-fixture",
 	}
 
+	withSignedRelease(t, &deps, target, targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: target,
 		Yes:           true,
 		Namespace:     "oberth",
 		Timeout:       10 * time.Second,
+		NoBackup:      true,
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
@@ -1164,7 +1171,9 @@ func TestRunUpgradeRejectsNonLocalWithoutYes(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://example.com:6443"},
 		KubeClient:  fake.NewClientset(),
 	}
+	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 	}, deps)
@@ -1194,7 +1203,9 @@ func TestRunUpgradeAllowsNonLocalWithYes(t *testing.T) {
 		},
 		KubeClient: fake.NewClientset(),
 	}
+	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		Yes:           true,
@@ -1265,7 +1276,9 @@ func TestRunUpgradeRejectsEmptyInstalledVersion(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 	}, deps)
@@ -1348,7 +1361,9 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		Timeout:       10 * time.Second,
@@ -1432,7 +1447,9 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		Timeout:       10 * time.Second,
@@ -1448,7 +1465,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 	}
 	// Recovery guidance should be printed on version-verify failure.
 	text := output.String()
-	if !strings.Contains(text, "DO NOT run 'helm rollback'") {
+	if !strings.Contains(text, "oberth upgrade --rollback <record>") {
 		t.Fatalf("missing recovery guidance in output: %q", text)
 	}
 }
@@ -1521,7 +1538,9 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		Timeout:       10 * time.Second,
@@ -1573,7 +1592,9 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		Timeout:       10 * time.Second,
@@ -1582,7 +1603,7 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 		t.Fatal("expected error from helm upgrade failure")
 	}
 	text := output.String()
-	if !strings.Contains(text, "DO NOT run 'helm rollback'") {
+	if !strings.Contains(text, "oberth upgrade --rollback <record>") {
 		t.Fatalf("missing recovery guidance in output: %q", text)
 	}
 	if !strings.Contains(text, "forward-only") {
@@ -1661,16 +1682,18 @@ func TestRunUpgradeRecoveryGuidanceOnRolloutFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
+	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(ctx, UpgradeConfig{
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		Timeout:       100 * time.Millisecond,
+		NoBackup:      true,
 	}, deps)
 	if err == nil {
 		t.Fatal("expected error from rollout timeout")
 	}
 	text := output.String()
-	if !strings.Contains(text, "DO NOT run 'helm rollback'") {
+	if !strings.Contains(text, "oberth upgrade --rollback <record>") {
 		t.Fatalf("missing recovery guidance in output: %q", text)
 	}
 	if !strings.Contains(text, "helm status oberth") {
@@ -1838,7 +1861,9 @@ func TestDryRunRendersGoProxyPins(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
+	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
+		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
 		DryRun:        true,

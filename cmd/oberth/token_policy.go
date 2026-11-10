@@ -84,3 +84,27 @@ func watchNonExpiringUplinkTokens(ctx context.Context, count func(context.Contex
 		}
 	}
 }
+
+// watchAdminTokenExpiry logs a WARNING every hour once an admin token is
+// within model.AdminTokenWarningWindow of expiring, so the expiry never
+// arrives unannounced as a 401 on every admin call.
+func watchAdminTokenExpiry(ctx context.Context, read func(context.Context) (*model.AdminTokenExpiry, error), logger *log.Logger) {
+	ticker := time.NewTicker(legacyTokenWarningInterval)
+	defer ticker.Stop()
+	for {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		expiry, err := read(readCtx)
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil && expiry != nil && expiry.Warning != "" {
+			logger.Printf("WARNING: %s", expiry.Warning)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}

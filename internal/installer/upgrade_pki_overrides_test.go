@@ -30,7 +30,7 @@ func TestUpgradePinsTLSOverridesOnlyForLivePKI(t *testing.T) {
 				{values: "tls: null\n"},
 			} {
 				t.Run(fmt.Sprintf("live-pki=%t/dry-run=%t/%s%s", enabled, dryRun, override.set, override.values), func(t *testing.T) {
-					cfg := UpgradeConfig{BinaryVersion: "0.17.81", ChartOverride: "fixture", DryRun: dryRun}
+					cfg := UpgradeConfig{BinaryVersion: "0.17.81", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true}
 					if override.set != "" {
 						cfg.UserSet = []string{override.set}
 					} else {

@@ -419,6 +419,25 @@ func readSecretAccess(ctx context.Context, deps Deps, namespace string) (secretA
 	return secretAccessExport{Present: true, Data: data}, nil
 }
 
+// printBackupPlan is the --dry-run plan: what would be read and written.
+func printBackupPlan(w io.Writer, cfg BackupConfig, server serverDeployment, pod string, full bool) {
+	_, _ = fmt.Fprintln(w, "Plan (--dry-run):")
+	if full {
+		_, _ = fmt.Fprintf(w, "  OpenBao   every KV v2 secret under %s/, every ACL policy except root and default,\n", defaultKVPrefix)
+		_, _ = fmt.Fprintf(w, "            every auth/%s role (all fields); auth config, Transit and PKI metadata for reference\n", defaultAuthMount)
+	} else {
+		_, _ = fmt.Fprintln(w, "  OpenBao   not read (--scope history)")
+	}
+	_, _ = fmt.Fprintf(w, "  Database  verified snapshot of %s through pod %s\n", serverDatabasePath, pod)
+	_, _ = fmt.Fprintf(w, "            schema identity %s, audit domain %s, witness key info %s\n",
+		server.Compatibility.SchemaIdentity, server.Compatibility.AuditDomain, server.Compatibility.WitnessKeyInfo)
+	if full {
+		_, _ = fmt.Fprintf(w, "  Grants    ConfigMap %s/%s\n", cfg.Namespace, secretAccessConfigMapName)
+	}
+	_, _ = fmt.Fprintf(w, "  Output    %s, encrypted to %s\n", cfg.Output, cfg.Recipient)
+	_, _ = fmt.Fprintln(w, "Nothing was read from OpenBao or written to disk (--dry-run).")
+}
+
 // --- Backup flow ---
 
 func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultErr error) {
@@ -459,21 +478,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	}
 
 	if cfg.DryRun {
-		_, _ = fmt.Fprintln(w, "Plan (--dry-run):")
-		if full {
-			_, _ = fmt.Fprintf(w, "  OpenBao   every KV v2 secret under %s/, every ACL policy except root and default,\n", defaultKVPrefix)
-			_, _ = fmt.Fprintf(w, "            every auth/%s role (all fields); auth config, Transit and PKI metadata for reference\n", defaultAuthMount)
-		} else {
-			_, _ = fmt.Fprintln(w, "  OpenBao   not read (--scope history)")
-		}
-		_, _ = fmt.Fprintf(w, "  Database  verified snapshot of %s through pod %s\n", serverDatabasePath, pod)
-		_, _ = fmt.Fprintf(w, "            schema identity %s, audit domain %s, witness key info %s\n",
-			server.Compatibility.SchemaIdentity, server.Compatibility.AuditDomain, server.Compatibility.WitnessKeyInfo)
-		if full {
-			_, _ = fmt.Fprintf(w, "  Grants    ConfigMap %s/%s\n", cfg.Namespace, secretAccessConfigMapName)
-		}
-		_, _ = fmt.Fprintf(w, "  Output    %s, encrypted to %s\n", cfg.Output, cfg.Recipient)
-		_, _ = fmt.Fprintln(w, "Nothing was read from OpenBao or written to disk (--dry-run).")
+		printBackupPlan(w, cfg, server, pod, full)
 		return nil
 	}
 
@@ -482,7 +487,9 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 		return err
 	}
 	if schema > store.LatestMigrationVersion() {
-		return fmt.Errorf("the server writes database schema %d but this oberth CLI understands only up to %d; upgrade the CLI first",
+		return fmt.Errorf("the server writes database schema %d but this oberth CLI understands only up to %d: "+
+			"back up with a CLI at least as new as the server (any newer CLI reads every older schema; "+
+			"oberth upgrade takes its own pre-upgrade backup with the target release's CLI)",
 			schema, store.LatestMigrationVersion())
 	}
 
