@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -36,7 +37,17 @@ func loadRestoredRuns(path string) (map[string]bool, error) {
 	if path == "" {
 		return nil, nil
 	}
-	file, err := os.Open(path) // #nosec G304 -- fixed marker name on the server's own data volume.
+	// The marker has a fixed name in the data root; os.Root keeps the open
+	// inside that directory.
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read restored-runs marker %s: %w", path, err)
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.Open(filepath.Base(path))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}

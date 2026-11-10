@@ -114,14 +114,22 @@ func writeUpgradeRecord(cfg UpgradeConfig, record UpgradeRecord) (string, error)
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
+	// The record is created inside the chosen directory only: the name is
+	// fixed, and os.Root refuses anything that would leave the directory.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", fmt.Errorf("write rollback record: %w", err)
+	}
+	defer func() { _ = root.Close() }()
 	var file *os.File
 	var path string
 	for attempt := 1; ; attempt++ {
-		path = filepath.Join(dir, stem+".json")
+		name := stem + ".json"
 		if attempt > 1 {
-			path = filepath.Join(dir, fmt.Sprintf("%s-%d.json", stem, attempt))
+			name = fmt.Sprintf("%s-%d.json", stem, attempt)
 		}
-		file, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- operator-chosen record directory, fixed name.
+		path = filepath.Join(dir, name)
+		file, err = root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
 			break
 		}
@@ -180,12 +188,9 @@ func releasePipelineNamespace(ctx context.Context, deps Deps, namespace string) 
 // ReadUpgradeRecord reads and checks a rollback record.
 func ReadUpgradeRecord(path string) (UpgradeRecord, error) {
 	var record UpgradeRecord
-	raw, err := os.ReadFile(path) // #nosec G304 -- operator-named record file.
+	raw, err := readFileWithin(path, 64<<10)
 	if err != nil {
 		return record, err
-	}
-	if len(raw) > 64<<10 {
-		return record, errors.New("rollback record is too large")
 	}
 	if err := json.Unmarshal(raw, &record); err != nil {
 		return record, fmt.Errorf("decode rollback record: %w", err)
@@ -345,4 +350,30 @@ func checkRecordRevision(name, namespace string, recorded int, release helmRelea
 	return fmt.Errorf("release %s in %s is at revision %d, but this record's upgrade started from revision %d: "+
 		"the release changed after that upgrade, so the record is stale; refusing to roll back (--force-record overrides after checking helm history %s -n %s)",
 		name, namespace, deployed, recorded, name, namespace)
+}
+
+// readFileWithin reads one regular file of at most limit bytes, opened
+// through an os.Root on its own directory so the name cannot leave it.
+func readFileWithin(path string, limit int64) ([]byte, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.Open(filepath.Base(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, limit)
+	}
+	return raw, nil
 }

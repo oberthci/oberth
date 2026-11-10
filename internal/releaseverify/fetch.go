@@ -99,6 +99,12 @@ func Fetch(ctx context.Context, get Getter, releaseOrigin, chartRepository, tag 
 // release.json.sigstore.json, oberth-<version>.tgz and its .sigstore.json.
 func LoadDir(dir, tag string) (Files, error) {
 	record, recordBundle, chart, chartBundle := Names(tag)
+	// Fixed member names, opened through an os.Root on the directory.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return Files{}, fmt.Errorf("release directory %s: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
 	var files Files
 	for _, item := range []struct {
 		name  string
@@ -111,16 +117,24 @@ func LoadDir(dir, tag string) (Files, error) {
 		{chartBundle, MaxBundleBytes, &files.ChartBundle},
 	} {
 		path := filepath.Join(dir, item.name)
-		info, err := os.Lstat(path)
+		info, err := root.Lstat(item.name)
 		if err != nil {
 			return Files{}, fmt.Errorf("release file %s: %w", path, err)
 		}
 		if !info.Mode().IsRegular() || info.Size() > item.limit {
 			return Files{}, fmt.Errorf("release file %s is not a regular file within %d bytes", path, item.limit)
 		}
-		body, err := os.ReadFile(path) // #nosec G304 -- operator-chosen release directory, fixed member names.
+		file, err := root.Open(item.name)
 		if err != nil {
 			return Files{}, err
+		}
+		body, err := io.ReadAll(io.LimitReader(file, item.limit+1))
+		closeErr := file.Close()
+		if err = errors.Join(err, closeErr); err != nil {
+			return Files{}, err
+		}
+		if int64(len(body)) > item.limit {
+			return Files{}, fmt.Errorf("release file %s grew past %d bytes", path, item.limit)
 		}
 		*item.into = body
 	}

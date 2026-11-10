@@ -73,7 +73,7 @@ type UpgradeConfig struct {
 	// defaultPins keep previously rendered values of changed chart defaults
 	// (upgrade_defaults.go); the operator's --values/--set still win.
 	defaultPins  []string
-	storedValues string // internal schema-validated legacy migration snapshot
+	storedValues string // internal schema-validated snapshot with retired keys stripped
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -359,60 +359,12 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 
 	phase(w, "Current version", displayVersion(currentVersion), color)
 
-	// Compare versions. Refuse to proceed when the installed version cannot
-	// be parsed (unknown state) or is strictly newer than the CLI (silent
-	// downgrade).
-	currentCanonical := canonicalChartVersion(currentVersion)
+	cmp, retryFailed, upToDate, err := planUpgradeVersions(w, cfg, release, currentVersion, targetVersion)
+	if err != nil || upToDate {
+		result.AlreadyUpToDate = upToDate
+		return result, err
+	}
 	targetCanonical := canonicalChartVersion(targetVersion)
-	if targetCanonical == "" {
-		return result, fmt.Errorf("target version %q is not a valid semantic version", targetVersion)
-	}
-	if currentCanonical == "" {
-		if currentVersion == "" {
-			return result, errors.New("no version could be determined from the installed Helm release; " +
-				"refusing to upgrade an unknown release — use helm upgrade directly or reinstall with oberth install")
-		}
-		return result, fmt.Errorf("installed version %q could not be parsed; refusing to upgrade an unknown release — "+
-			"use helm upgrade directly or reinstall with oberth install", currentVersion)
-	}
-	cmp := semver.Compare(currentCanonical, targetCanonical)
-	status := strings.ToLower(strings.TrimSpace(release.Status))
-	revision := helmRevisionLabel(release.Revision)
-	retryFailed := false
-	if cmp == 0 {
-		switch {
-		case status == "deployed" && upgradeHasTLSFlags(cfg):
-			// Explicit TLS changes require the same-version reconciliation path.
-		case status == "deployed" && cfg.ArgoControllerProfile != "":
-		// Explicit supported profile reconciliation is not a same-version no-op.
-		case status == "deployed" && (len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0):
-			// Explicit --values/--set are a request to change the release, so
-			// re-apply them through the same pinned upgrade path (#055).
-			_, _ = fmt.Fprintf(w, "\nAlready running %s; re-applying the given --values/--set\n", displayVersion(targetVersion))
-		case status == "deployed":
-			result.AlreadyUpToDate = true
-			_, _ = fmt.Fprintf(w, "\nAlready running %s; no upgrade performed\n", displayVersion(targetVersion))
-			return result, nil
-		case status == "failed":
-			// A failed revision can carry the target chart version while a
-			// healthy Deployment still runs. Retry it through the same pinned
-			// image, Helm upgrade, rollout, and version-verification path.
-			retryFailed = true
-			_, _ = fmt.Fprintf(w, "\nHelm release %q%s is FAILED at %s; same-version forward repair required.\n", release.Name, revision, displayVersion(currentVersion))
-		case strings.HasPrefix(status, "pending"):
-			return result, fmt.Errorf("helm release %q%s is %q at version %s; a Helm operation may still be in progress — inspect helm status %s -n %s before retrying", release.Name, revision, release.Status, displayVersion(currentVersion), release.Name, cfg.Namespace)
-		default:
-			return result, fmt.Errorf("helm release %q%s has unknown state %q at version %s; refusing a same-version no-op or retry — inspect helm status %s -n %s", release.Name, revision, release.Status, displayVersion(currentVersion), release.Name, cfg.Namespace)
-		}
-	}
-	if cmp > 0 && !cfg.AllowDowngrade {
-		return result, fmt.Errorf("installed version %s is newer than CLI version %s — upgrade the CLI first "+
-			"(a deliberate rollback is oberth upgrade --rollback <record>, or --allow-downgrade within one database schema)",
-			displayVersion(currentVersion), displayVersion(targetVersion))
-	}
-	if cmp > 0 {
-		_, _ = fmt.Fprintf(w, "WARNING: --allow-downgrade: moving the server from %s back to %s\n", displayVersion(currentVersion), displayVersion(targetVersion))
-	}
 
 	// Validate user overrides early (no network needed).
 	if err := checkPinnedKeyConflicts(cfg.UserSet, cfg.UserValues); err != nil {
@@ -437,27 +389,9 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	defer cleanupProfile()
 
-	// Announce a known or possible migration before any mutation. The
-	// upgrade takes the backup itself (takeUpgradeBackup) unless --no-backup.
-	liveSchema := 0
-	if cfg.BinarySchemaVersion > 0 {
-		var schemaErr error
-		liveSchema, schemaErr = queryRunningSchemaVersion(ctx, deps, cfg)
-		if schemaErr != nil || liveSchema <= 0 {
-			if cmp > 0 {
-				return result, errors.New("--allow-downgrade needs the running database schema, which could not be read: " +
-					"an older server cannot open a newer database; roll back with oberth upgrade --rollback <record> instead")
-			}
-			liveSchema = 0
-			_, _ = fmt.Fprintln(w, "\nWARNING: running database schema is unknown; the target may run forward-only migrations.")
-			warnUpgradeBackup(w, cfg)
-		} else if liveSchema < cfg.BinarySchemaVersion {
-			_, _ = fmt.Fprintf(w, "\nSchema migration v%d will run (forward-only; rolling back restores the pre-upgrade backup)\n", cfg.BinarySchemaVersion)
-			warnUpgradeBackup(w, cfg)
-		} else if liveSchema > cfg.BinarySchemaVersion {
-			return result, fmt.Errorf("the server writes database schema %d, newer than this CLI's %d, which the target server cannot open; "+
-				"upgrade the CLI first, or roll back with oberth upgrade --rollback <record>, which restores the pre-upgrade backup", liveSchema, cfg.BinarySchemaVersion)
-		}
+	liveSchema, err := announceUpgradeSchema(ctx, w, cfg, deps, cmp > 0)
+	if err != nil {
+		return result, err
 	}
 
 	if cfg.DryRun {
@@ -657,6 +591,93 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
 	_, _ = fmt.Fprintf(w, "\nReady — Oberth deployment in namespace %s (context %s)\n", cfg.Namespace, deps.ContextName)
 	return result, nil
+}
+
+// planUpgradeVersions compares the installed and the target version. It
+// refuses when the installed version cannot be parsed (unknown state), when a
+// same-version release is pending or in an unknown state, and when the
+// installed version is newer without --allow-downgrade. upToDate reports a
+// same-version deployed release with nothing to reconcile.
+func planUpgradeVersions(w io.Writer, cfg UpgradeConfig, release helmRelease, currentVersion, targetVersion string) (cmp int, retryFailed, upToDate bool, err error) {
+	// Compare versions. Refuse to proceed when the installed version cannot
+	// be parsed (unknown state) or is strictly newer than the CLI (silent
+	// downgrade).
+	currentCanonical := canonicalChartVersion(currentVersion)
+	targetCanonical := canonicalChartVersion(targetVersion)
+	if targetCanonical == "" {
+		return 0, false, false, fmt.Errorf("target version %q is not a valid semantic version", targetVersion)
+	}
+	if currentCanonical == "" {
+		if currentVersion == "" {
+			return 0, false, false, errors.New("no version could be determined from the installed Helm release; " +
+				"refusing to upgrade an unknown release — use helm upgrade directly or reinstall with oberth install")
+		}
+		return 0, false, false, fmt.Errorf("installed version %q could not be parsed; refusing to upgrade an unknown release — "+
+			"use helm upgrade directly or reinstall with oberth install", currentVersion)
+	}
+	cmp = semver.Compare(currentCanonical, targetCanonical)
+	status := strings.ToLower(strings.TrimSpace(release.Status))
+	revision := helmRevisionLabel(release.Revision)
+	if cmp == 0 {
+		switch {
+		case status == "deployed" && upgradeHasTLSFlags(cfg):
+			// Explicit TLS changes require the same-version reconciliation path.
+		case status == "deployed" && cfg.ArgoControllerProfile != "":
+		// Explicit supported profile reconciliation is not a same-version no-op.
+		case status == "deployed" && (len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0):
+			// Explicit --values/--set are a request to change the release, so
+			// re-apply them through the same pinned upgrade path (#055).
+			_, _ = fmt.Fprintf(w, "\nAlready running %s; re-applying the given --values/--set\n", displayVersion(targetVersion))
+		case status == "deployed":
+			_, _ = fmt.Fprintf(w, "\nAlready running %s; no upgrade performed\n", displayVersion(targetVersion))
+			return cmp, false, true, nil
+		case status == "failed":
+			// A failed revision can carry the target chart version while a
+			// healthy Deployment still runs. Retry it through the same pinned
+			// image, Helm upgrade, rollout, and version-verification path.
+			retryFailed = true
+			_, _ = fmt.Fprintf(w, "\nHelm release %q%s is FAILED at %s; same-version forward repair required.\n", release.Name, revision, displayVersion(currentVersion))
+		case strings.HasPrefix(status, "pending"):
+			return 0, false, false, fmt.Errorf("helm release %q%s is %q at version %s; a Helm operation may still be in progress — inspect helm status %s -n %s before retrying", release.Name, revision, release.Status, displayVersion(currentVersion), release.Name, cfg.Namespace)
+		default:
+			return 0, false, false, fmt.Errorf("helm release %q%s has unknown state %q at version %s; refusing a same-version no-op or retry — inspect helm status %s -n %s", release.Name, revision, release.Status, displayVersion(currentVersion), release.Name, cfg.Namespace)
+		}
+	}
+	if cmp > 0 && !cfg.AllowDowngrade {
+		return 0, false, false, fmt.Errorf("installed version %s is newer than CLI version %s — upgrade the CLI first "+
+			"(a deliberate rollback is oberth upgrade --rollback <record>, or --allow-downgrade within one database schema)",
+			displayVersion(currentVersion), displayVersion(targetVersion))
+	}
+	if cmp > 0 {
+		_, _ = fmt.Fprintf(w, "WARNING: --allow-downgrade: moving the server from %s back to %s\n", displayVersion(currentVersion), displayVersion(targetVersion))
+	}
+	return cmp, retryFailed, false, nil
+}
+
+// announceUpgradeSchema reads the running schema and announces a known or
+// possible migration before any mutation; the upgrade takes the backup itself
+// (takeUpgradeBackup) unless --no-backup. 0 is an unknown schema.
+func announceUpgradeSchema(ctx context.Context, w io.Writer, cfg UpgradeConfig, deps Deps, downgrade bool) (liveSchema int, err error) {
+	if cfg.BinarySchemaVersion > 0 {
+		var schemaErr error
+		liveSchema, schemaErr = queryRunningSchemaVersion(ctx, deps, cfg)
+		if schemaErr != nil || liveSchema <= 0 {
+			if downgrade {
+				return 0, errors.New("--allow-downgrade needs the running database schema, which could not be read: " +
+					"an older server cannot open a newer database; roll back with oberth upgrade --rollback <record> instead")
+			}
+			liveSchema = 0
+			_, _ = fmt.Fprintln(w, "\nWARNING: running database schema is unknown; the target may run forward-only migrations.")
+			warnUpgradeBackup(w, cfg)
+		} else if liveSchema < cfg.BinarySchemaVersion {
+			_, _ = fmt.Fprintf(w, "\nSchema migration v%d will run (forward-only; rolling back restores the pre-upgrade backup)\n", cfg.BinarySchemaVersion)
+			warnUpgradeBackup(w, cfg)
+		} else if liveSchema > cfg.BinarySchemaVersion {
+			return 0, fmt.Errorf("the server writes database schema %d, newer than this CLI's %d, which the target server cannot open; "+
+				"upgrade the CLI first, or roll back with oberth upgrade --rollback <record>, which restores the pre-upgrade backup", liveSchema, cfg.BinarySchemaVersion)
+		}
+	}
+	return liveSchema, nil
 }
 
 // warnUpgradeBackup says what protects a migrating upgrade: the backup it

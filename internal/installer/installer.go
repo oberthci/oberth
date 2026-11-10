@@ -719,6 +719,20 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
+// resolveInstallClientHost sets the address clients are told to use: kind
+// publishes on 127.0.0.1 only, so a kind install advertises localhost.
+func resolveInstallClientHost(cfg *Config, deps *Deps, cluster ClusterInfo) {
+	deps.ClientHost = cfg.ClientHost
+	if deps.ClientHost != "" && cluster.Engine == "kind" && !isLoopbackHost(deps.ClientHost) {
+		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
+		deps.ClientHost = "localhost"
+		cfg.ClientHost = "localhost"
+	}
+	if warning := LocalNameWarning(deps.ClientHost); warning != "" {
+		_, _ = fmt.Fprintf(deps.Output, "NOTE: %s\n", warning)
+	}
+}
+
 // Run executes the full install flow.
 func Run(ctx context.Context, cfg Config, deps Deps) error {
 	cfg.installValuesRequested = explicitInstallValues(cfg)
@@ -744,15 +758,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 	// Cluster info line omitted — the kind/k3s creation messages already
 	// communicate the cluster identity; repeating it adds noise.
-	deps.ClientHost = cfg.ClientHost
-	if deps.ClientHost != "" && cluster.Engine == "kind" && !isLoopbackHost(deps.ClientHost) {
-		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
-		deps.ClientHost = "localhost"
-		cfg.ClientHost = "localhost"
-	}
-	if warning := LocalNameWarning(deps.ClientHost); warning != "" {
-		_, _ = fmt.Fprintf(deps.Output, "NOTE: %s\n", warning)
-	}
+	resolveInstallClientHost(&cfg, &deps, cluster)
 
 	if !cluster.IsLocal && !cfg.Yes {
 		return fmt.Errorf("context %q does not appear to be a local cluster (server: %s); "+
