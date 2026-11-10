@@ -538,8 +538,8 @@ func holderText(holders []string) string {
 }
 
 // observeHolds records run.held once per parked Pod: step, pod, held_since
-// and abandon_at (held_since + assist.holdTTL: the idle deadline; each agent
-// action moves it, up to twice the TTL), and how many steps the run
+// and abandon_at (held_since + assist.holdTTL: the idle deadline, recorded once;
+// the sweep's deadline moves with activity, up to twice the TTL), and how many steps the run
 // holds, so an agent services the right one before the TTL.
 func (recorder *agentEventRecorder) observeHolds(ctx context.Context, run model.Run) {
 	operator := recorder.base.assistHolds

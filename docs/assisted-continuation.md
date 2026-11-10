@@ -225,9 +225,10 @@ per-workflow and unaffected.
   ages from its last action instead, so it is abandoned `holdTTL` after that
   action, but never later than two `holdTTL` after `held_since`, whatever
   its activity. The held Pod's deadline is the step budget plus two TTLs, so
-  a hold released at that cap still has the step's whole budget. `run.held`
-  `abandon_at` is the idle deadline (`held_since + holdTTL`); every action
-  moves it, up to `held_since + 2 × holdTTL`.
+  a hold released at that cap still has the step's whole budget. `run.held` is
+  recorded once per Pod, so its `abandon_at` stays the idle deadline
+  (`held_since + holdTTL`); the server-side deadline moves with every
+  action, up to `held_since + 2 × holdTTL`.
   Holds whose run's assist record shows a continue or abandon are running
   commands and are skipped; if that record cannot be read the sweep does
   nothing rather than kill a released step. The record is read again for
