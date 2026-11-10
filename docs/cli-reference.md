@@ -1322,6 +1322,8 @@ Usage of serve:
         largest run_hold_patch diff and largest patched file (at most 16 MiB) (default 1048576)
   -assist-patch-max-files int
         most files one run_hold_patch diff may touch (at most 1024) (default 64)
+  -assist-scratch-bytes int
+        ephemeral storage added to a held attempt's main container request and limit for its private cold caches; -1 adds none (at most 64 GiB) (default 8589934592)
   -audit-anchor-interval duration
         external audit checkpoint interval (default 10m0s)
   -audit-anchor-max-age duration

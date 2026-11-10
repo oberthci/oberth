@@ -75,6 +75,10 @@ assist:
   # One run_hold_patch diff: bytes (also the largest patched file, at most 16Mi) and files (at most 1024).
   patchMaxBytes: 1048576
   patchMaxFiles: 64
+  # Ephemeral storage (bytes) added to a held attempt's main container request
+  # and limit for its private cold caches; 8Gi by default, -1 adds none, at
+  # most 64Gi. Without it a continued Go test step can be evicted (#1518).
+  scratchBytes: 8589934592
 
 # MCP agent loop (#1514): durable agent events (run.finished, run.held,
 # run.lock_wait, promotion.finished, release.published, publication.failed)

@@ -43,7 +43,8 @@ var ErrNotHeld = errors.New("argojob: pod is not a held assist attempt")
 func (controller *Controller) AssistPolicy() model.AssistPolicy {
 	assist := controller.config.Assist.Effective()
 	return model.AssistPolicy{Enabled: controller.config.Assist.Enabled, HoldTTL: assist.HoldTTL, MaxConcurrentHolds: assist.MaxConcurrentHolds,
-		ExecTimeout: assist.ExecTimeout, ExecOutputBytes: assist.ExecOutputBytes, PatchMaxBytes: assist.PatchMaxBytes, PatchMaxFiles: assist.PatchMaxFiles}
+		ExecTimeout: assist.ExecTimeout, ExecOutputBytes: assist.ExecOutputBytes, PatchMaxBytes: assist.PatchMaxBytes, PatchMaxFiles: assist.PatchMaxFiles,
+		ScratchBytes: max(assist.ScratchBytes, 0)}
 }
 
 // ListAssistHolds returns the parked attempts of one Workflow, oldest first.
@@ -281,6 +282,12 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 	seen := map[string]bool{}
 	for index := range pods.Items {
 		pod := &pods.Items[index]
+		if evicted, ok := assistEvictedOf(pod); ok {
+			if eviction, record := controller.assistEviction(ctx, pods.Items, pod, evicted, activity, recheck, now); record {
+				abandoned = append(abandoned, eviction)
+			}
+			continue
+		}
 		hold, ok := assistHoldOf(pod)
 		if !ok || activity[hold.Pod].Released {
 			continue
@@ -353,6 +360,72 @@ func minTime(a, b time.Time) time.Time {
 		return b
 	}
 	return a
+}
+
+// assistEvictedOf describes a held attempt (parked or continued) whose Pod
+// the kubelet evicted: the hold annotation and pause, a retry node, phase
+// Failed with reason Evicted. HeldSince is when its main container started,
+// if it did.
+func assistEvictedOf(pod *corev1.Pod) (model.AssistHold, bool) {
+	if !AssistHoldPod(pod) || pod.Status.Phase != corev1.PodFailed || pod.Status.Reason != "Evicted" {
+		return model.AssistHold{}, false
+	}
+	hold := model.AssistHold{Pod: pod.Name, Node: pod.Annotations[argoNodeNameAnnotation]}
+	match := retryAttemptSuffix.FindStringSubmatch(hold.Node)
+	if match == nil {
+		return model.AssistHold{}, false
+	}
+	if hold.Attempt, _ = strconv.Atoi(match[1]); hold.Attempt < 1 {
+		return model.AssistHold{}, false
+	}
+	for _, container := range pod.Spec.Containers {
+		if container.Name != mainContainerName {
+			continue
+		}
+		for _, variable := range container.Env {
+			if variable.Name == "OBERTH_STEP" {
+				hold.Step = variable.Value
+			}
+		}
+	}
+	if hold.Step == "" {
+		hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name != mainContainerName {
+			continue
+		}
+		switch {
+		case status.State.Terminated != nil && !status.State.Terminated.StartedAt.IsZero():
+			hold.HeldSince = status.State.Terminated.StartedAt.Time
+		case status.State.Running != nil:
+			hold.HeldSince = status.State.Running.StartedAt.Time
+		}
+	}
+	if hold.HeldSince.IsZero() && pod.Status.StartTime != nil {
+		hold.HeldSince = pod.Status.StartTime.Time
+	}
+	return hold, true
+}
+
+// assistEviction reports an evicted held attempt once: it is recorded when
+// neither the snapshot nor, when set, the fresh record holds its eviction
+// yet. The run may already have finished (the Pod stays until its Workflow
+// goes), so the fresh record, which reads any run, is what deduplicates.
+func (controller *Controller) assistEviction(ctx context.Context, pods []corev1.Pod, pod *corev1.Pod, evicted model.AssistHold, activity map[string]model.AssistPodActivity,
+	recheck model.AssistActivityRecheck, now time.Time) (model.AssistAbandon, bool) {
+	if activity[evicted.Pod].Evicted {
+		return model.AssistAbandon{}, false
+	}
+	runID := pod.Labels[runLabel]
+	if recheck != nil {
+		fresh, err := recheck(ctx, runID, evicted.Pod)
+		if err != nil || fresh.Evicted {
+			return model.AssistAbandon{}, false
+		}
+	}
+	return model.AssistAbandon{RunID: runID, Pod: evicted.Pod, Step: evicted.Step, Reason: model.AssistAbandonEvicted, HeldSince: evicted.HeldSince,
+		AbandonedAt: now, FailedAttempt: evicted.Attempt - 1, FailedExitCode: failedAttemptExit(pods, pod, evicted), Eviction: pod.Status.Message}, true
 }
 
 type assistSweepHold struct {

@@ -1005,7 +1005,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
 		return nil, err
 	}
-	if err := injectAssistHolds(workflow); err != nil {
+	if err := injectAssistHolds(workflow, config.Assist); err != nil {
 		return nil, err
 	}
 	stampPodDemand(workflow, request.PodDemand)

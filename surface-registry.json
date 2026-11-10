@@ -119,6 +119,14 @@
     "flag:assist-hold-ttl": {
       "doc_anchor": "docs/assisted-continuation.md#helm-values-serve-flags-chart-default-equals-binary-default",
       "test_ref": "cmd/oberth/assist_flags_test.go TestServeAssistDefaultOffAndValidated"
+    },
+    "value:scratchBytes": {
+      "doc_anchor": "docs/assisted-continuation.md#caches",
+      "test_ref": "internal/argojob/assist_scratch_test.go TestAssistHeldAttemptGetsScratchEphemeralStorage"
+    },
+    "flag:assist-scratch-bytes": {
+      "doc_anchor": "docs/assisted-continuation.md#caches",
+      "test_ref": "internal/argojob/assist_scratch_test.go TestAssistHeldAttemptGetsScratchEphemeralStorage"
     }
   }
 }

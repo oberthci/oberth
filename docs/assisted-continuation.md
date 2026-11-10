@@ -210,7 +210,11 @@ into it is moved to private scratch, so a patched tree cannot write into
 state later runs read. Attempt 1 uses the caches exactly as before. A held
 attempt therefore starts with cold caches; that is the price of the shared
 cache's integrity, and it is bounded by the step's own budget plus two hold
-TTLs. Per-run workspace caches (`work` volume claim templates) are
+TTLs. Because the private caches live on the node's disk, the held attempt's
+`main` container gets `assist.scratchBytes` (default 8 GiB) more
+ephemeral-storage request and limit than attempt 1; without it a continued
+Go test step that rebuilds from cold caches is evicted at the step's own
+limit (#1518). Per-run workspace caches (`work` volume claim templates) are
 per-workflow and unaffected.
 
 ## Capacity, supersession and bounds
@@ -253,6 +257,13 @@ per-workflow and unaffected.
   failed step's generic deadline wording is not added: the held Pod's
   deadline and runtime describe the hold, not the step. The server logs
   `assist: hold started run=… step=… pod=…` when it first sees a hold.
+- **Evictions.** When the kubelet evicts a held or continued attempt, the
+  sweep records it once in the run's assist record (actor `oberth`,
+  `abandon_reason: evicted`, `eviction` with the kubelet's message) and the
+  audit (`run.assist.abandon`). The reason line names it, for example
+  `step test-service evicted after continue: ephemeral-storage (…)`, instead
+  of a plain step failure or a budget to raise in git; `run.hold_abandoned`
+  carries `abandon_reason: evicted` and `eviction`. No status is added.
 - A newer push that supersedes the run deletes its Workflow through the
   existing cancellation path, which removes any held Pod; explicit
   `run_cancel` does the same.
@@ -272,6 +283,11 @@ per-workflow and unaffected.
 | `assist.execOutputBytes` | `--assist-exec-output-bytes` | `65536` | at most 4 MiB |
 | `assist.patchMaxBytes` | `--assist-patch-max-bytes` | `1048576` | at most 16 MiB; also the largest patched file |
 | `assist.patchMaxFiles` | `--assist-patch-max-files` | `64` | at most 1024 |
+
+`assist.scratchBytes` (`--assist-scratch-bytes`, default `8589934592`,
+8 GiB) is added to the held attempt's `main` ephemeral-storage request and
+limit (a missing value counts as zero); `-1` adds none, at most 64 GiB.
+Attempt 1 is unchanged.
 
 `assist.holdTTL` and `assist.execTimeout` are Go durations, as the flags
 take them: `holdTTL` in whole seconds (`20m`, `1h30m`), `execTimeout` any

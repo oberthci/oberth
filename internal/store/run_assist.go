@@ -78,6 +78,9 @@ func (s *Store) AppendRunAssist(ctx context.Context, request model.RunAssistRequ
 	if event.AbandonReason != "" {
 		fields["reason"], fields["held_since"], fields["abandoned_at"] = event.AbandonReason, event.HeldSince, event.At
 		fields["failed_attempt"], fields["failed_exit_code"] = event.FailedAttempt, event.FailedExitCode
+		if event.Eviction != "" {
+			fields["eviction"] = event.Eviction
+		}
 	}
 	details, err := json.Marshal(fields)
 	if err != nil {

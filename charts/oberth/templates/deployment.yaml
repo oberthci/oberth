@@ -265,6 +265,9 @@ spec:
             - --assist-exec-output-bytes={{ $assistOutput }}
             - --assist-patch-max-bytes={{ $assistPatchBytes }}
             - --assist-patch-max-files={{ $assistPatchFiles }}
+            {{- $assistScratch := int64 8589934592 }}
+            {{- if hasKey $assist "scratchBytes" }}{{- $assistScratch = int64 $assist.scratchBytes }}{{- end }}
+            - --assist-scratch-bytes={{ $assistScratch }}
             {{- /* MCP agent loop (#1514): every knob is a flag with the binary default. */}}
             {{- $events := .Values.agentEvents | default dict }}
             {{- $eventsRetention := int64 10000 }}

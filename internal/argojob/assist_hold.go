@@ -13,6 +13,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/oberthci/oberth/internal/holdfs"
@@ -132,6 +133,8 @@ const (
 	MaxAssistPatchMaxBytes          = int64(16 << 20)
 	DefaultAssistPatchMaxFiles      = 64
 	MaxAssistPatchMaxFiles          = 1024
+	DefaultAssistScratchBytes       = int64(8 << 30)
+	MaxAssistScratchBytes           = int64(64 << 30)
 )
 
 // AssistConfig is the administrator policy for agent-assisted continuation.
@@ -154,6 +157,11 @@ type AssistConfig struct {
 	// PatchMaxBytes, PatchMaxFiles bound one run_hold_patch diff.
 	PatchMaxBytes int64
 	PatchMaxFiles int
+	// ScratchBytes is added to the main container's ephemeral-storage
+	// request and limit on a held attempt: its Go caches move to private
+	// scratch, so the continued command rebuilds from cold caches on the
+	// node's disk (#1518). Zero selects the default; negative adds nothing.
+	ScratchBytes int64
 }
 
 func (assist AssistConfig) withDefaults() AssistConfig {
@@ -174,6 +182,9 @@ func (assist AssistConfig) withDefaults() AssistConfig {
 	}
 	if assist.PatchMaxFiles <= 0 {
 		assist.PatchMaxFiles = DefaultAssistPatchMaxFiles
+	}
+	if assist.ScratchBytes == 0 {
+		assist.ScratchBytes = DefaultAssistScratchBytes
 	}
 	return assist
 }
@@ -197,6 +208,9 @@ func (assist AssistConfig) Validate() error {
 	}
 	if assist.PatchMaxFiles < 0 || assist.PatchMaxFiles > MaxAssistPatchMaxFiles {
 		return fmt.Errorf("argojob: assist patch files must be 0 to %d", MaxAssistPatchMaxFiles)
+	}
+	if assist.ScratchBytes < -1 || assist.ScratchBytes > MaxAssistScratchBytes {
+		return fmt.Errorf("argojob: assist scratch bytes must be -1 (none), 0 (default) or up to %d", MaxAssistScratchBytes)
 	}
 	return nil
 }
@@ -353,7 +367,7 @@ func leafDeadline(t *wfv1.Template, defaults *wfv1.Template) *intstr.IntOrString
 // marked leaf's plain server patch into Argo's conditional expression form.
 // Every earlier pass merges JSON into t.PodSpecPatch; an expression there
 // would break them, so this pass must stay after wrapStepUsage.
-func injectAssistHolds(workflow *wfv1.Workflow) error {
+func injectAssistHolds(workflow *wfv1.Workflow, assist AssistConfig) error {
 	rawTTL, assisted := workflow.Annotations[AssistWorkflowAnnotation]
 	if !assisted {
 		return nil
@@ -389,7 +403,7 @@ func injectAssistHolds(workflow *wfv1.Workflow) error {
 				return
 			}
 		}
-		held, err := assistHoldPatch(base, main, deadline)
+		held, err := assistHoldPatch(base, main, deadline, max(assist.withDefaults().ScratchBytes, 0))
 		if err != nil {
 			failure = err
 			return
@@ -408,8 +422,9 @@ func injectAssistHolds(workflow *wfv1.Workflow) error {
 
 // assistHoldPatch is the Pod patch of a held attempt: the base server patch
 // plus the pause, the wider kubelet deadline, a writable source mount, a
-// read-only shared cache and cache variables moved into private scratch.
-func assistHoldPatch(base map[string]any, main *corev1.Container, deadline int64) (map[string]any, error) {
+// read-only shared cache and cache variables moved into private scratch,
+// with scratch bytes more ephemeral storage on main for that scratch.
+func assistHoldPatch(base map[string]any, main *corev1.Container, deadline, scratch int64) (map[string]any, error) {
 	encoded, err := json.Marshal(base)
 	if err != nil {
 		return nil, err
@@ -443,6 +458,13 @@ func assistHoldPatch(base map[string]any, main *corev1.Container, deadline int64
 		container["volumeMounts"] = mounts
 	}
 	containers, _ := held["containers"].([]any)
+	if scratch > 0 {
+		resources, err := assistScratchResources(containers, main, scratch)
+		if err != nil {
+			return nil, err
+		}
+		container["resources"] = resources
+	}
 	replaced := false
 	for index, entry := range containers {
 		existing, _ := entry.(map[string]any)
@@ -468,6 +490,59 @@ func assistHoldPatch(base map[string]any, main *corev1.Container, deadline int64
 		held["nodeSelector"] = selectors
 	}
 	return held, nil
+}
+
+// assistScratchResources is main's resources on a held attempt: the
+// ephemeral-storage request and limit the attempt would otherwise get (the
+// server patch's main entry, else the template container) plus scratch. A
+// missing request or limit counts as zero, so the allowance always widens
+// the Pod's total ephemeral-storage limit the kubelet evicts at. CPU and
+// memory are carried over unchanged.
+func assistScratchResources(containers []any, main *corev1.Container, scratch int64) (map[string]any, error) {
+	effective := main.Resources.DeepCopy()
+	for _, entry := range containers {
+		existing, _ := entry.(map[string]any)
+		if existing["name"] != mainContainerName || existing["resources"] == nil {
+			continue
+		}
+		encoded, err := json.Marshal(existing["resources"])
+		if err != nil {
+			return nil, err
+		}
+		patched := corev1.ResourceRequirements{}
+		if err := json.Unmarshal(encoded, &patched); err != nil {
+			return nil, fmt.Errorf("argojob: main resources in the server patch: %w", err)
+		}
+		for name, value := range patched.Requests {
+			if effective.Requests == nil {
+				effective.Requests = corev1.ResourceList{}
+			}
+			effective.Requests[name] = value
+		}
+		for name, value := range patched.Limits {
+			if effective.Limits == nil {
+				effective.Limits = corev1.ResourceList{}
+			}
+			effective.Limits[name] = value
+		}
+	}
+	widen := func(list corev1.ResourceList) corev1.ResourceList {
+		if list == nil {
+			list = corev1.ResourceList{}
+		}
+		value := list[corev1.ResourceEphemeralStorage]
+		value.Add(*resource.NewQuantity(scratch, resource.BinarySI))
+		list[corev1.ResourceEphemeralStorage] = value
+		return list
+	}
+	effective.Requests = widen(effective.Requests)
+	effective.Limits = widen(effective.Limits)
+	encoded, err := json.Marshal(effective)
+	if err != nil {
+		return nil, err
+	}
+	resources := map[string]any{}
+	return resources, json.Unmarshal(encoded, &resources)
 }
 
 func hasUsageBinary(main *corev1.Container) bool {

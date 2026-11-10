@@ -691,6 +691,10 @@ func (recorder *agentEventRecorder) observeAbandons(ctx context.Context, run mod
 			data["held_since"] = event.HeldSince.UTC().Format(time.RFC3339)
 			summary += " after " + event.At.Sub(*event.HeldSince).Round(time.Second).String()
 		}
+		if event.Eviction != "" {
+			data["eviction"] = event.Eviction
+			summary += ": " + model.EvictionResource(event.Eviction)
+		}
 		if event.AbandonReason != "" {
 			data["failed_attempt"] = event.FailedAttempt
 			if event.FailedExitCode != nil {

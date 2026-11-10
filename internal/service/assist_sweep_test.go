@@ -112,3 +112,21 @@ func TestSweepAssistHoldsRecheckReadsTheVictimsRun(t *testing.T) {
 		t.Fatal("an unreadable run did not fail the recheck")
 	}
 }
+
+// #1518, run 1b816b4a: a continued test-service attempt the kubelet evicted
+// for ephemeral storage reads as an eviction after continue, not as a plain
+// step failure with a resource budget to raise in git.
+func TestEvictedContinuedHoldReasonLine(t *testing.T) {
+	held := time.Date(2026, 11, 10, 5, 6, 39, 0, time.UTC)
+	message := "Pod ephemeral local storage usage exceeds the total limit of containers 1216Mi."
+	record := model.RunAssistRecord{Events: []model.RunAssistEvent{
+		{At: held.Add(3 * time.Minute), Actor: "admin@host", Step: "test-service", Pod: "wf-ts-1", Kind: model.RunAssistContinue},
+		model.AssistAbandon{Pod: "wf-ts-1", Step: "test-service", Reason: model.AssistAbandonEvicted, HeldSince: held, AbandonedAt: held.Add(30 * time.Minute), Eviction: message}.Event(),
+	}}
+	run := model.Run{ID: "1b816b4a376691425ba694f9f6e02bd7", Status: model.RunFailed, FailedStage: "test-service", FailedStep: "test-service", AssistRequested: true, Assisted: true, Assist: &record,
+		Error: "Step test-service/test-service exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at the total container limit 1216Mi (the step's limits plus Argo helper limits)."}
+	got := presentationRun(run).DisplayReason
+	if !strings.Contains(got, "step test-service evicted after continue: ephemeral-storage") || strings.Contains(got, "test-service failed") {
+		t.Fatalf("display reason = %q", got)
+	}
+}

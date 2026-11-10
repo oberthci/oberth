@@ -260,6 +260,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.assist.ExecOutputBytes, "assist-exec-output-bytes", argojob.DefaultAssistExecOutputBytes, "captured stdout/stderr bound of one run_hold_exec command (at most 4 MiB)")
 	flags.Int64Var(&options.assist.PatchMaxBytes, "assist-patch-max-bytes", argojob.DefaultAssistPatchMaxBytes, "largest run_hold_patch diff and largest patched file (at most 16 MiB)")
 	flags.IntVar(&options.assist.PatchMaxFiles, "assist-patch-max-files", argojob.DefaultAssistPatchMaxFiles, "most files one run_hold_patch diff may touch (at most 1024)")
+	flags.Int64Var(&options.assist.ScratchBytes, "assist-scratch-bytes", argojob.DefaultAssistScratchBytes, "ephemeral storage added to a held attempt's main container request and limit for its private cold caches; -1 adds none (at most 64 GiB)")
 	flags.IntVar(&options.agentEvents.Retention, "agent-events-retention", service.DefaultAgentEventRetention, "newest agent events kept for events_since and push replay (1-1000000; Helm agentEvents.retention)")
 	flags.IntVar(&options.agentEvents.SyncRetention, "agent-events-sync-retention", service.DefaultAgentSyncRetention, "newest native Argo lock holder/waiter intervals kept for sync_status (1-1000000)")
 	flags.DurationVar(&options.agentEvents.Interval, "agent-events-interval", service.DefaultAgentEventInterval, "sweep period for native lock waits and publication retries; retry holds have their own 5s loop (2s-5m)")

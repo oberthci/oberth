@@ -48,13 +48,22 @@ type RunAssistEvent struct {
 	HeldSince      *time.Time `json:"held_since,omitempty"`
 	FailedAttempt  int        `json:"failed_attempt,omitempty"`
 	FailedExitCode *int       `json:"failed_exit_code,omitempty"`
+	// Eviction is the kubelet's message for a held or continued attempt
+	// the node evicted (AbandonReason AssistAbandonEvicted), bounded.
+	Eviction string `json:"eviction,omitempty"`
 }
 
-// Sweep abandon reasons.
+// Sweep abandon reasons. AssistAbandonEvicted is not an abandon the sweep
+// chose: it records that the kubelet evicted a held or continued attempt,
+// so the reason line names the eviction instead of a plain step failure.
 const (
-	AssistAbandonTTL = "ttl"
-	AssistAbandonCap = "cap"
+	AssistAbandonTTL     = "ttl"
+	AssistAbandonCap     = "cap"
+	AssistAbandonEvicted = "evicted"
 )
+
+// MaximumAssistEvictionLength bounds the recorded kubelet message.
+const MaximumAssistEvictionLength = 200
 
 // AssistActivityWindow is how long after an agent's last exec, patch or
 // continue a hold counts as being worked: the cap never abandons such a hold.
@@ -66,6 +75,8 @@ const AssistActivityWindow = 5 * time.Minute
 type AssistPodActivity struct {
 	Released   bool
 	LastAction time.Time
+	// Evicted: the record already holds the Pod's eviction.
+	Evicted bool
 }
 
 // AssistActivityRecheck re-reads one held Pod's activity from its run's
@@ -87,6 +98,9 @@ func (record RunAssistRecord) PodActivities() map[string]AssistPodActivity {
 		if event.Kind == RunAssistContinue || event.Kind == RunAssistAbandon {
 			activity.Released = true
 		}
+		if event.Kind == RunAssistAbandon && event.AbandonReason == AssistAbandonEvicted {
+			activity.Evicted = true
+		}
 		if event.Kind != RunAssistAbandon && event.At.After(activity.LastAction) {
 			activity.LastAction = event.At
 		}
@@ -105,13 +119,18 @@ type AssistAbandon struct {
 	AbandonedAt    time.Time
 	FailedAttempt  int
 	FailedExitCode *int
+	Eviction       string
 }
 
 // Event is the assist record entry for a sweep abandon.
 func (abandon AssistAbandon) Event() RunAssistEvent {
 	held := abandon.HeldSince.UTC()
+	eviction := []rune(strings.Join(strings.Fields(abandon.Eviction), " "))
+	if len(eviction) > MaximumAssistEvictionLength {
+		eviction = append(eviction[:MaximumAssistEvictionLength-1], '…')
+	}
 	return RunAssistEvent{At: abandon.AbandonedAt.UTC(), Actor: "oberth", Step: abandon.Step, Pod: abandon.Pod, Kind: RunAssistAbandon,
-		AbandonReason: abandon.Reason, HeldSince: &held, FailedAttempt: abandon.FailedAttempt, FailedExitCode: abandon.FailedExitCode}
+		AbandonReason: abandon.Reason, HeldSince: &held, FailedAttempt: abandon.FailedAttempt, FailedExitCode: abandon.FailedExitCode, Eviction: string(eviction)}
 }
 
 // RunAssistRecord is the JSON stored in runs.assist_record.
@@ -208,6 +227,9 @@ func (record RunAssistRecord) Reason() string {
 }
 
 func (record RunAssistRecord) sweepClause(abandon RunAssistEvent) string {
+	if abandon.AbandonReason == AssistAbandonEvicted {
+		return record.evictionClause(abandon)
+	}
 	exit := "exit unknown"
 	if abandon.FailedExitCode != nil {
 		exit = fmt.Sprintf("exit %d", *abandon.FailedExitCode)
@@ -223,6 +245,38 @@ func (record RunAssistRecord) sweepClause(abandon RunAssistEvent) string {
 		}
 	}
 	return fmt.Sprintf("step %s failed at attempt %d (%s); hold abandoned %safter %s (%s)", abandon.Step, abandon.FailedAttempt, exit, serviced, held, abandon.AbandonReason)
+}
+
+// evictionClause reads "step test evicted after continue: ephemeral-storage
+// (<kubelet message>)", or "evicted while held" when nobody released it.
+func (record RunAssistRecord) evictionClause(eviction RunAssistEvent) string {
+	when := "while held"
+	for _, event := range record.Events {
+		if event.Pod == eviction.Pod && event.Kind == RunAssistContinue {
+			when = "after continue"
+		}
+	}
+	text := "step " + eviction.Step + " evicted " + when + ": " + EvictionResource(eviction.Eviction)
+	if eviction.Eviction != "" {
+		text += " (" + eviction.Eviction + ")"
+	}
+	return text
+}
+
+// EvictionResource names the resource a kubelet eviction message is about.
+func EvictionResource(message string) string {
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "ephemeral"):
+		return "ephemeral-storage"
+	case strings.Contains(lower, "memory"):
+		return "memory"
+	case strings.Contains(lower, "pid"):
+		return "pids"
+	case strings.Contains(lower, "disk") || strings.Contains(lower, "storage"):
+		return "disk"
+	}
+	return "node pressure"
 }
 
 func (record RunAssistRecord) lastPatch(step string) string {
@@ -300,4 +354,7 @@ type AssistPolicy struct {
 	ExecOutputBytes    int64         `json:"exec_output_bytes"`
 	PatchMaxBytes      int64         `json:"patch_max_bytes"`
 	PatchMaxFiles      int           `json:"patch_max_files"`
+	// ScratchBytes is the ephemeral storage a held attempt's main
+	// container gets on top of its own, for its private cold caches.
+	ScratchBytes int64 `json:"scratch_bytes,omitempty"`
 }

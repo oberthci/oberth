@@ -1312,7 +1312,8 @@ func (jobs *ArgoJobs) AssistPolicy() model.AssistPolicy {
 	assist := jobs.config.Assist.Effective()
 	_, capable := jobs.controller.(assistHoldController)
 	return model.AssistPolicy{Enabled: jobs.config.Assist.Enabled && capable, HoldTTL: assist.HoldTTL, MaxConcurrentHolds: assist.MaxConcurrentHolds,
-		ExecTimeout: assist.ExecTimeout, ExecOutputBytes: assist.ExecOutputBytes, PatchMaxBytes: assist.PatchMaxBytes, PatchMaxFiles: assist.PatchMaxFiles}
+		ExecTimeout: assist.ExecTimeout, ExecOutputBytes: assist.ExecOutputBytes, PatchMaxBytes: assist.PatchMaxBytes, PatchMaxFiles: assist.PatchMaxFiles,
+		ScratchBytes: max(assist.ScratchBytes, 0)}
 }
 
 func (jobs *ArgoJobs) assistController() (assistHoldController, error) {

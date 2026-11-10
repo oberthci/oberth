@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,5 +25,30 @@ func TestRunAssistReasonSweepOnlyIsNotAssisted(t *testing.T) {
 	}
 	if got := (RunAssistRecord{}).Reason(); got != "" {
 		t.Fatalf("empty record reason = %q", got)
+	}
+}
+
+// #1518: an eviction after a continue reads as such inside the assisted
+// line; one while parked, with nobody acting, is not assisted.
+func TestRunAssistReasonNamesEviction(t *testing.T) {
+	held := time.Date(2026, 11, 10, 5, 6, 39, 0, time.UTC)
+	message := "Pod ephemeral local storage usage exceeds the total limit of containers 1216Mi."
+	eviction := AssistAbandon{Pod: "wf-ts-1", Step: "test-service", Reason: AssistAbandonEvicted, HeldSince: held, AbandonedAt: held.Add(20 * time.Minute), Eviction: message}.Event()
+	cont := RunAssistEvent{At: held.Add(3 * time.Minute), Actor: "admin@host", Step: "test-service", Pod: "wf-ts-1", Kind: RunAssistContinue}
+	record := RunAssistRecord{Events: []RunAssistEvent{cont, eviction}}
+	want := "assisted: step test-service continued without changes by admin@host; step test-service evicted after continue: ephemeral-storage (" + message + "); not evidence"
+	if got := record.Reason(); got != want {
+		t.Fatalf("reason = %q, want %q", got, want)
+	}
+	if !record.SweepAbandoned("test-service") || !record.PodActivities()["wf-ts-1"].Evicted {
+		t.Fatalf("eviction not attributed: %+v", record.PodActivities())
+	}
+	parked := RunAssistRecord{Events: []RunAssistEvent{eviction}}
+	if got := parked.Reason(); got != "step test-service evicted while held: ephemeral-storage ("+message+")" {
+		t.Fatalf("parked eviction reason = %q", got)
+	}
+	long := AssistAbandon{Step: "s", Reason: AssistAbandonEvicted, Eviction: strings.Repeat("x", 500)}.Event()
+	if len([]rune(long.Eviction)) != MaximumAssistEvictionLength {
+		t.Fatalf("eviction message not bounded: %d", len(long.Eviction))
 	}
 }

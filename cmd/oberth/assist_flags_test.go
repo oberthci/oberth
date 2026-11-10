@@ -11,14 +11,14 @@ import (
 // Assisted continuation is off by default and every knob is bounded.
 func TestServeAssistDefaultOffAndValidated(t *testing.T) {
 	defaults, err := parseServeOptions([]string{"--argo-namespace=argo"}, io.Discard)
-	if err != nil || defaults.assist.Enabled || defaults.assist.HoldTTL != 20*time.Minute || defaults.assist.MaxConcurrentHolds != 2 {
+	if err != nil || defaults.assist.Enabled || defaults.assist.HoldTTL != 20*time.Minute || defaults.assist.MaxConcurrentHolds != 2 || defaults.assist.ScratchBytes != 8<<30 {
 		t.Fatalf("assist defaults = %+v, %v", defaults.assist, err)
 	}
 	configured, err := parseServeOptions([]string{"--argo-namespace=argo", "--assist-enabled", "--assist-hold-ttl=45m", "--assist-max-concurrent-holds=4", "--assist-exec-timeout=2m", "--assist-exec-output-bytes=131072", "--assist-patch-max-bytes=2097152", "--assist-patch-max-files=16"}, io.Discard)
 	if err != nil || !configured.assist.Enabled || configured.assist.HoldTTL != 45*time.Minute || configured.assist.MaxConcurrentHolds != 4 || configured.assist.ExecTimeout != 2*time.Minute || configured.assist.ExecOutputBytes != 131072 || configured.assist.PatchMaxBytes != 2097152 || configured.assist.PatchMaxFiles != 16 {
 		t.Fatalf("assist flags not parsed: %+v, %v", configured.assist, err)
 	}
-	for _, value := range []string{"--assist-hold-ttl=5h", "--assist-hold-ttl=1500ms", "--assist-max-concurrent-holds=65", "--assist-exec-timeout=16m", "--assist-exec-output-bytes=5000000", "--assist-patch-max-bytes=20000000", "--assist-patch-max-files=2000"} {
+	for _, value := range []string{"--assist-hold-ttl=5h", "--assist-hold-ttl=1500ms", "--assist-scratch-bytes=-2", "--assist-scratch-bytes=68719476737", "--assist-max-concurrent-holds=65", "--assist-exec-timeout=16m", "--assist-exec-output-bytes=5000000", "--assist-patch-max-bytes=20000000", "--assist-patch-max-files=2000"} {
 		if _, err := parseServeOptions([]string{"--argo-namespace=argo", value}, io.Discard); err == nil {
 			t.Fatal("out-of-range assist flag accepted", value)
 		}
@@ -41,7 +41,7 @@ func TestChartRendersAssistFlagsWithBinaryDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default chart: %v %s", err, text)
 	}
-	for _, want := range []string{"- --assist-enabled=false", `"--assist-hold-ttl=20m"`, "- --assist-max-concurrent-holds=2", `"--assist-exec-timeout=1m"`, "- --assist-exec-output-bytes=65536", "- --assist-patch-max-bytes=1048576", "- --assist-patch-max-files=64"} {
+	for _, want := range []string{"- --assist-enabled=false", `"--assist-hold-ttl=20m"`, "- --assist-max-concurrent-holds=2", `"--assist-exec-timeout=1m"`, "- --assist-exec-output-bytes=65536", "- --assist-patch-max-bytes=1048576", "- --assist-patch-max-files=64", "- --assist-scratch-bytes=8589934592"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("default chart misses %q:\n%s", want, text)
 		}
@@ -50,7 +50,10 @@ func TestChartRendersAssistFlagsWithBinaryDefaults(t *testing.T) {
 	if err != nil || !strings.Contains(text, "- --assist-enabled=true") || !strings.Contains(text, `"--assist-hold-ttl=30m"`) || !strings.Contains(text, "- --assist-max-concurrent-holds=3") {
 		t.Fatalf("assist values not rendered: %v %s", err, text)
 	}
-	for _, set := range []string{"assist.maxConcurrentHolds=0", "assist.maxConcurrentHolds=65", "assist.holdTTL=soon", "assist.patchMaxFiles=0", "assist.bogus=1"} {
+	if text, err := render("assist.scratchBytes=-1"); err != nil || !strings.Contains(text, "- --assist-scratch-bytes=-1") {
+		t.Fatalf("assist.scratchBytes not rendered: %v %s", err, text)
+	}
+	for _, set := range []string{"assist.maxConcurrentHolds=0", "assist.maxConcurrentHolds=65", "assist.holdTTL=soon", "assist.patchMaxFiles=0", "assist.bogus=1", "assist.scratchBytes=-2", "assist.scratchBytes=68719476737"} {
 		if _, err := render(set); err == nil {
 			t.Fatal("chart schema accepted", set)
 		}
