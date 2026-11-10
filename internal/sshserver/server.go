@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/ssh"
 
@@ -505,7 +506,15 @@ func gitFailureText(err error) (text string, internal bool) {
 // boundedCause is the innermost readable reason on one line, at most 200
 // runes; the pusher sees the cause, the server log keeps the whole chain.
 func boundedCause(err error) string {
-	text := strings.Join(strings.Fields(err.Error()), " ")
+	// The text reaches the pusher's terminal over SSH stderr: no control
+	// characters, whatever an inner error quoted.
+	text := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && !unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, err.Error())
+	text = strings.Join(strings.Fields(text), " ")
 	if runes := []rune(text); len(runes) > 200 {
 		text = string(runes[:199]) + "…"
 	}

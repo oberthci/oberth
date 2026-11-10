@@ -45,6 +45,11 @@ func TestGitFailureTextNamesTheRemedy(t *testing.T) {
 		t.Fatalf("ordinary failure changed: %q", plain)
 	}
 
+	escaped := &gitcache.ReceiveDeliveryError{Repo: "r", EventID: "e", Ref: "x", Err: errors.New("bad\x1b[2J value\r\nnext")}
+	if text, _ := gitFailureText(escaped); strings.ContainsAny(text, "\x1b\r") || !strings.Contains(text, "bad[2J value next") {
+		t.Fatalf("control characters reached the pusher: %q", text)
+	}
+
 	long := &gitcache.ReceiveDeliveryError{Repo: "r", EventID: "e", Ref: "x", Err: errors.New(strings.Repeat("Q", 500))}
 	if text, _ := gitFailureText(long); strings.Count(text, "Q") > 200 {
 		t.Fatal("cause is unbounded")

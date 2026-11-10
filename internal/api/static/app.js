@@ -350,7 +350,7 @@ function toggleTheme() {
 
 /* ---------- auth: token entered once, kept in localStorage ---------- */
 function hasToken() { return !!localStorage.getItem("oberth-token"); }
-function setToken(t) { viewCache.clear(); if (t) localStorage.setItem("oberth-token", t.trim()); else localStorage.removeItem("oberth-token"); }
+function setToken(t) { viewCache.clear(); state.reposLoadedAt = 0; if (t) localStorage.setItem("oberth-token", t.trim()); else localStorage.removeItem("oberth-token"); }
 function authHeaders() { const token = localStorage.getItem("oberth-token"); return token ? { "Authorization": "Bearer " + token } : {}; }
 function showTokenPrompt(message) {
   closeLiveLog();
