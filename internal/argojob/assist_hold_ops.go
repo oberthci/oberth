@@ -18,6 +18,7 @@ import (
 	kexec "k8s.io/client-go/util/exec"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -88,6 +89,9 @@ func assistHoldOf(pod *corev1.Pod) (model.AssistHold, bool) {
 			hold.Step = variable.Value
 		}
 	}
+	if hold.Step == "" {
+		hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
+	}
 	// Only a retry child (node "...(N)", N >= 1) can be a hold: the held
 	// patch branch is never applied to attempt 1, and the pause variable is
 	// refused from repositories, so an attempt-1 Pod carrying it is not ours.
@@ -115,6 +119,19 @@ func assistHoldOf(pod *corev1.Pod) (model.AssistHold, bool) {
 		hold.Deadline = start.Add(time.Duration(*pod.Spec.ActiveDeadlineSeconds) * time.Second)
 	}
 	return hold, true
+}
+
+// nodeStepName is the step a Pod's Argo node name stands for when the Pod
+// carries no OBERTH_STEP: the same rule the failure display applies to the
+// node tree (stageAndStep), i.e. the node's own display name, the last
+// dotted segment of "<workflow>.<boundary>.<task>(N)", without the retry
+// suffix. A hold recorded under it matches the run's FailedStep.
+func nodeStepName(workflow, node string) string {
+	name := strings.TrimPrefix(node, workflow+".")
+	if index := strings.LastIndex(name, "."); index >= 0 {
+		name = name[index+1:]
+	}
+	return argoworkflow.StepName(stripRetrySuffix(name))
 }
 
 // heldPod loads and verifies a hold target.
@@ -239,11 +256,7 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, sweep.hold.Pod, metav1.DeleteOptions{}); err != nil {
 			return fmt.Errorf("abandon hold %s: %w", sweep.hold.Pod, err)
 		}
-		step := sweep.hold.Step
-		if step == "" {
-			step = sweep.hold.Node
-		}
-		abandoned = append(abandoned, model.AssistAbandon{RunID: sweep.runID, Pod: sweep.hold.Pod, Step: step, Reason: reason,
+		abandoned = append(abandoned, model.AssistAbandon{RunID: sweep.runID, Pod: sweep.hold.Pod, Step: sweep.hold.Step, Reason: reason,
 			HeldSince: sweep.hold.HeldSince, AbandonedAt: now, FailedAttempt: sweep.hold.Attempt - 1, FailedExitCode: sweep.failedExit})
 		return nil
 	}

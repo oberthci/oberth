@@ -264,3 +264,27 @@ func TestEnforceAssistHoldsCapRefusesNewestIdleHold(t *testing.T) {
 		t.Fatalf("disabled policy acted: %v %v", abandoned, err)
 	}
 }
+
+// TestAssistHoldStepWithoutStepEnvMatchesFailedStep: a held Pod without
+// OBERTH_STEP takes its step from the Argo node name by the failure
+// display's rule (the node's display name without the retry suffix), never
+// the raw node name, so the sweep record matches the run's FailedStep.
+func TestAssistHoldStepWithoutStepEnvMatchesFailedStep(t *testing.T) {
+	for node, want := range map[string]string{"wf-a.test(1)": "test", "wf-a.ci.test(1)": "test", "wf-a.ci.unit-tests(2)": "unit-tests"} {
+		held := heldPodFixture("wf-a-test-1", "wf-a", "test", 21*time.Minute, false)
+		held.Spec.Containers[0].Env = []corev1.EnvVar{{Name: assistPauseEnv, Value: "true"}, {Name: AssistHoldEnv, Value: "1"}}
+		held.Annotations[argoNodeNameAnnotation] = node
+		hold, ok := assistHoldOf(held)
+		if !ok || hold.Step != want {
+			t.Fatalf("node %s: hold = %+v %v, want step %s", node, hold, ok, want)
+		}
+		abandoned, err := assistSweepController(t, fake.NewClientset(held)).EnforceAssistHolds(context.Background(), nil, time.Now())
+		if err != nil || len(abandoned) != 1 {
+			t.Fatalf("node %s: abandoned = %+v %v", node, abandoned, err)
+		}
+		record := model.RunAssistRecord{Events: []model.RunAssistEvent{abandoned[0].Event()}}
+		if !record.SweepAbandoned(want) {
+			t.Fatalf("node %s: sweep record step %q does not match FailedStep %q", node, abandoned[0].Step, want)
+		}
+	}
+}
