@@ -30,7 +30,7 @@ func collectIssuePages(ctx context.Context, start int64, load func(context.Conte
 			first = object
 			issuesKey, cursorKey = "issues", "next_before"
 			if _, ok := object["issues"]; !ok {
-				if _, legacy := object["Issues"]; legacy {
+				if _, goStyle := object["Issues"]; goStyle {
 					issuesKey, cursorKey = "Issues", "NextBefore"
 				}
 			}

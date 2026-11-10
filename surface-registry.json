@@ -211,6 +211,10 @@
     "env:XDG_CONFIG_HOME": {
       "doc_anchor": "docs/remote-cli.md#configuration",
       "test_ref": "internal/client/connection_test.go TestResolveConnectionReadsTheClientFiles"
+    },
+    "flag:max": {
+      "doc_anchor": "docs/cli-reference.md#oberth-size-grant",
+      "test_ref": "cmd/oberth/size_grant_test.go TestSizeGrantCLIReadsAndValidates"
     }
   }
 }

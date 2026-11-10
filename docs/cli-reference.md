@@ -1678,7 +1678,7 @@ Usage of size grant:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
   -max string
-        legacy size maximum, L or XL; sizes do not affect admission, any grant enables automatic tag priority
+        size grant maximum, L or XL; sizes do not affect admission, any grant enables automatic tag priority
 ```
 
 ## oberth size revoke

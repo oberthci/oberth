@@ -883,7 +883,7 @@ type remoteIssuePage struct {
 }
 
 // UnmarshalJSON reads the preferred snake_case envelope and falls back to the
-// legacy PascalCase names, so the CLI keeps working when the aliases go.
+// Go-style PascalCase names an older server sends, so the CLI reads both.
 func (page *remoteIssuePage) UnmarshalJSON(raw []byte) error {
 	var wire struct {
 		Issues       []remoteIssueSummary `json:"issues"`

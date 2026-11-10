@@ -55,7 +55,7 @@ queued status and reason line, with the whole reason and the expiry to the
 second:
 
 ```text
-queue held by admin: release qualification, until 2026-11-04T12:00:00Z
+queue held by admin: release qualification, until <expires_at, RFC 3339 to the second>
 ```
 
 `oberth status` prints the same hold as an `admission:` line (reason, actor,

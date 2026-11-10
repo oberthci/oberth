@@ -50,7 +50,8 @@ func TestStatusShowsTheWholeAdmissionHold(t *testing.T) {
 	if err := runRemoteStatus(t.Context(), nil, &out); err != nil {
 		t.Fatal(err)
 	}
-	want := "admission:     held by admin operator until 2026-11-04T12:00:00Z: " + reason + " (allowed: tag, release)"
+	expiry := "2026-11-04T12:00:00Z" // the hold's expires_at, to the second
+	want := "admission:     held by admin operator until " + expiry + ": " + reason + " (allowed: tag, release)"
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("status omits the hold:\n%s", out.String())
 	}

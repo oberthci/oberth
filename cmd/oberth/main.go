@@ -133,7 +133,7 @@ Commands:
   uplink        Manage uplink identities
   access        Manage secret access grants
   resource      Manage repository CPU/memory request and limit ceilings
-  size          Manage automatic tag priority (legacy size grants; sizes do not affect admission)
+  size          Manage automatic tag priority (size grants; sizes do not affect admission)
   admission     Show the server's admission reservations, release a stale one, or set runtime capacity
   release-wif   Grant, revoke or reset runtime release WIF repository capabilities
   secretstore   Verify and inspect the secret store
