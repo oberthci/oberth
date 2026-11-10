@@ -899,6 +899,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		AdmissionDiskFloorBytes:        options.admissionDiskFloorBytes,
 		AdmissionPressure:              options.admissionPressure,
 		StalledRunTimeout:              options.admissionStallTimeout,
+		RestoredRunsFile:               filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})
 	if err != nil {
 		return err

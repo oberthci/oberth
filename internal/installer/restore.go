@@ -255,6 +255,9 @@ type restoreTarget struct {
 	ContentsNote string
 	// Grants counts the target's current grants.
 	Grants int
+	// RestoredRunning are the runs the backup recorded as running; the
+	// server interrupts them instead of re-executing them.
+	RestoredRunning []string
 	// KV is the archive's secrets as they will be written: known_hosts pins
 	// of this server updated (#074).
 	KV   kvExport
@@ -336,6 +339,9 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	target.ClusterUID = clusterUID(ctx, deps)
 
 	if parts.History {
+		if target.RestoredRunning, err = restoredRunningRuns(ctx, archive); err != nil {
+			return target, openBaoExec{}, err
+		}
 		readTargetContents(ctx, cfg, deps, &target, work)
 		target.Overlay = compatibilityOverlay(archive, target)
 		workflows, listErr := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
@@ -805,7 +811,47 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if got := strings.TrimSpace(lines[len(lines)-1]); got != want {
 		return fmt.Errorf("%w: restored database has owner and mode %q, want %q", errRestoredDatabaseInPlace, got, want)
 	}
+	if len(target.RestoredRunning) > 0 {
+		marker, err := json.Marshal(map[string][]string{"runs": target.RestoredRunning})
+		if err != nil {
+			return err
+		}
+		if out, err := inPod(marker, restoredRunsScript); err != nil {
+			return fmt.Errorf("%w: write the restored-runs marker (without it the server would re-execute %d runs): %w%s",
+				errRestoredDatabaseInPlace, len(target.RestoredRunning), err, commandOutputSuffix(out))
+		}
+	}
 	return nil
+}
+
+// restoredRunsScript writes the server's restored-runs marker
+// (service.RestoredRunsFile) from stdin, atomically, beside the database.
+const restoredRunsScript = `set -eu
+umask 077
+cat > /data/.oberth-restored-runs.json.tmp
+mv -f /data/.oberth-restored-runs.json.tmp /data/` + restoredRunsFile
+
+// restoredRunsFile is service.RestoredRunsFile (a test keeps them equal).
+const restoredRunsFile = ".oberth-restored-runs.json"
+
+// restoredRunningRuns lists the runs the archive records as running with a
+// Workflow: on the target their Workflows do not exist, and the server marks
+// them interrupted from the marker instead of re-executing them.
+func restoredRunningRuns(ctx context.Context, archive restoreArchive) (ids []string, resultErr error) {
+	compat := archive.Manifest.Compatibility
+	inspection, err := store.InspectCurrent(ctx, archive.LocalDatabase, store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}, SnapshotTempDir: filepath.Dir(archive.LocalDatabase)})
+	if err != nil {
+		return nil, fmt.Errorf("open restored database: %w", err)
+	}
+	defer func() { resultErr = errors.Join(resultErr, inspection.Close()) }()
+	runs, err := inspection.RunningRunsWithJobs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list the backup's running runs: %w", err)
+	}
+	for _, run := range runs {
+		ids = append(ids, run.ID)
+	}
+	return ids, nil
 }
 
 // checkUploadedSize compares the size stageUploadScript reports with what

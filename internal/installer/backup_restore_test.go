@@ -228,14 +228,16 @@ type fakeBackupCluster struct {
 	// helmConflictOnce fails the next helm upgrade with an SSA conflict.
 	helmConflictOnce bool
 
-	argvs       [][]string
-	uploads     map[string][]byte
-	swapArgs    []string
-	audited     []string // `oberth audit record` commands, in order
-	deleted     []string
-	helmUpgrade []string
-	helmValues  map[string]any
-	scales      []int32
+	argvs    [][]string
+	uploads  map[string][]byte
+	swapArgs []string
+	// restoredRunsMarker is what restore wrote as the server's restored-runs marker.
+	restoredRunsMarker []byte
+	audited            []string // `oberth audit record` commands, in order
+	deleted            []string
+	helmUpgrade        []string
+	helmValues         map[string]any
+	scales             []int32
 }
 
 func serverDeploymentFixture(compat backupCompatibility) *appsv1.Deployment {
@@ -454,6 +456,9 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 	case container == restoreHelperContainer && command[2] == swapScript:
 		c.swapArgs = command[4:]
 		return []byte("65534:65534 600\n"), nil
+	case container == restoreHelperContainer && command[2] == restoredRunsScript:
+		c.restoredRunsMarker = append([]byte(nil), input...)
+		return nil, nil
 	}
 	c.t.Fatalf("unscripted in-pod command %v in %s/%s", command, pod, container)
 	return nil, nil
@@ -518,6 +523,14 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	run, err := storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "main",
 		SHA: strings.Repeat("a", 40), Actor: "SHA256:test", Trigger: "push"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// The run was running when the backup was taken: a restore must not
+	// re-execute it.
+	if _, err := database.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.SetRunWorkflowName(ctx, run.ID, "oberth-backup-fixture"); err != nil {
 		t.Fatal(err)
 	}
 	// An audited action makes the hash chain depend on the audit domain.

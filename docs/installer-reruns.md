@@ -11,4 +11,31 @@ Before applying an existing Oberth release, the installer renders a server-side 
 - An existing push banner URL is preserved. Use `--push-banner-url=https://host/runs` to change it, or `--push-banner-url=` to clear it. TLS certificate names alone do not rewrite the live banner.
 - An outstanding witness genesis acknowledgement remains in reused values. Clear it explicitly with `--install-rekor --accept-witness-genesis=` after verifying that the server consumed it.
 
-Explicit settings are reconciled even when the installed chart version matches the CLI. Helm and Kubernetes targeting errors are propagated; an unreadable kubeconfig cannot silently select a different Helm target. Database migrations remain forward-only: repair with `oberth upgrade`, not Helm rollback.
+Explicit settings are reconciled even when the installed chart version matches the CLI. Helm and Kubernetes targeting errors are propagated; an unreadable kubeconfig cannot silently select a different Helm target. Database migrations remain forward-only: repair with `oberth upgrade`, not a bare Helm rollback.
+
+## Install reconciles, upgrade moves versions
+
+Since v0.21.0 `oberth install` (with or without `--upgrade`) never changes the chart version of an existing Oberth release. When the CLI is newer than the release it stops before touching any release and points at `oberth upgrade`; when the CLI is older it refuses to downgrade the server, whose newer database the older binary cannot open, and asks for a newer CLI. Same-version reconciliation (a secret store, Rekor, TLS names, Argo limits with `--argo-parallelism` / `--argo-sync-limit`) stays with `install --upgrade`. A local `--chart` is not a version move.
+
+Version changes go through one command:
+
+```sh
+oberth upgrade --yes            # from the directory where the backup and rollback record should go
+```
+
+It, in order:
+
+1. refuses an installed release newer than the CLI (`--allow-downgrade` accepts one within the same database schema) and a running schema newer than the CLI's;
+2. fetches the signed release for the CLI's version (`release.json`, `oberth-<version>.tgz` and their sigstore bundles from `releases.oberth.ci` and `charts.oberth.ci`, or `--release-dir DIR`), verifies both signatures against the release key compiled into the CLI, checks the chart against the record's digest and pins the server image digest the record names; any failure refuses the upgrade (`--chart` is the explicit unverified development override);
+3. previews the Helm change server-side and prints the changed value paths;
+4. takes a verified history-only backup (`oberth backup --history-only`, in `--backup-dir`, default the current directory) and writes a rollback record next to it, before the first change; without a backup it refuses unless `--no-backup`;
+5. applies the Argo controller profile transition if asked, upgrades the Oberth release, waits for the rollout and verifies the running version.
+
+To roll back the upgrade that record describes:
+
+```sh
+oberth upgrade --rollback ./oberth-upgrade-v0.20.1-to-v0.21.0-<time>.json --dry-run   # the plan
+oberth upgrade --rollback ./oberth-upgrade-v0.20.1-to-v0.21.0-<time>.json --yes
+```
+
+It refuses another cluster and a release that moved since, rolls back the argo-workflows release (when the upgrade changed it) and the Oberth release to the recorded revisions, and, when the upgrade migrated the database, restores the pre-upgrade backup's history (`oberth restore --only history`), because the previous server cannot open the migrated database. Runs that were running in that backup are not re-executed (see [backup and restore](backup-restore.md)).

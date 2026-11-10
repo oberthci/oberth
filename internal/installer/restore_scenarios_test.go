@@ -105,6 +105,17 @@ func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
 	if len(target.swapArgs) != 3 {
 		t.Fatal("--only history did not swap the database")
 	}
+	// The run that was running in the backup is handed to the server as
+	// restored, so startup recovery interrupts it instead of re-running it.
+	var marker struct {
+		Runs []string `json:"runs"`
+	}
+	if err := json.Unmarshal(target.restoredRunsMarker, &marker); err != nil || len(marker.Runs) != 1 {
+		t.Fatalf("restored-runs marker = %q, %v", target.restoredRunsMarker, err)
+	}
+	if !strings.Contains(out, "1 running when the backup was taken") {
+		t.Fatalf("plan does not name the restored running run:\n%s", out)
+	}
 	if _, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1GetOptions()); err == nil {
 		t.Fatal("--only history wrote the grants table")
 	}
