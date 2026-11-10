@@ -26,7 +26,9 @@ import (
 //
 //   - notifications/claude/channel, the session-push notification Claude
 //     Code accepts from a server declaring the experimental claude/channel
-//     capability (launch with --channels server:<name>);
+//     capability (an interactive session launched with
+//     --dangerously-load-development-channels server:<name>; a session
+//     without it falls back to run_wait and events_since);
 //   - notifications/resources/updated for each subscribed run://<id>.
 //
 // Delivery reads the durable event log after a cursor, so it is at-least-once

@@ -49,8 +49,8 @@ filter, `run://<id>` resource subscriptions and the `GET /mcp` event stream.
 A request that sends no `Mcp-Session-Id` is served without a session. A
 session ID owned by another credential, or a malformed or repeated header,
 answers HTTP 404. An unknown well-formed ID (for example one issued before a
-restart) is adopted for the same credential by `resources/subscribe` and
-`events_subscribe`, and otherwise ignored. See
+restart) is adopted for the same credential by `resources/subscribe`,
+`events_subscribe` and the `GET /mcp` stream, and otherwise ignored. See
 [agent events](agent-events.md#push-to-a-connected-session).
 
 On subsequent requests, clients using `2025-06-18` must send
