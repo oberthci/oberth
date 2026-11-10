@@ -157,7 +157,7 @@ $rehearse || bash "$here/migration-probe.sh" "$private/source-$last" "$private/f
   "$("$private/oberth-$last" version --schema)" "$published" "$evidence"
 docker pull "$published"
 printf 'FROM %s\nCOPY --chmod=0755 fixture-baseline /fixture\nENTRYPOINT ["/fixture"]\n' "$published" >"$private/Dockerfile.fixture"
-printf '*\n!fixture-*\n!oberth-candidate-*\n' >"$private/.dockerignore"
+printf '*\n!fixture-*\n!oberth-candidate-*\n!oberth-rehearsal\n' >"$private/.dockerignore"
 images+=("$fixture_image")
 docker build -f "$private/Dockerfile.fixture" -t "$fixture_image" "$private"
 for version in "${versions[@]}"; do
