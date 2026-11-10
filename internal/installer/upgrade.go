@@ -969,6 +969,13 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 		step++
 	}
 
+	if cfg.NoBackup {
+		_, _ = fmt.Fprintf(w, "  %d. No pre-upgrade backup (--no-backup)\n\n", step)
+	} else {
+		_, _ = fmt.Fprintf(w, "  %d. Take and verify a history-only backup and write the rollback record (oberth upgrade --rollback FILE)\n\n", step)
+	}
+	step++
+
 	switch {
 	case retryFailed:
 		_, _ = fmt.Fprintf(w, "  %d. Retry FAILED Helm release at %s (same-version forward repair)\n", step, displayVersion(result.TargetVersion))

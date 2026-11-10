@@ -50,7 +50,7 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.want == "" {
-				if strings.Contains(output.String(), "backup") {
+				if strings.Contains(output.String(), "is taken before the first change") || strings.Contains(output.String(), "NO BACKUP") {
 					t.Fatalf("no migration, yet a backup note: %s", output.String())
 				}
 				return

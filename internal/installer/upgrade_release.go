@@ -85,9 +85,7 @@ func (r *verifiedUpgradeRelease) describe(w io.Writer) {
 		r.record.Version, r.record.Source.Repository, r.record.Source.SHA[:12], r.record.Chart.Digest, r.record.Images.Server.Ref)
 }
 
-// UpgradeBackup is the pre-upgrade backup oberth upgrade took: the archive
-// file and the database schema it holds.
+// UpgradeBackup is the pre-upgrade backup oberth upgrade took.
 type UpgradeBackup struct {
-	Path   string
-	Schema int
+	Path string // the encrypted archive
 }
