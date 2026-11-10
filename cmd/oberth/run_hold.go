@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/argojob"
 )
 
 // `oberth run hold ...` is the CLI form of the assisted-continuation MCP
@@ -108,9 +110,12 @@ func runRunHold(ctx context.Context, arguments []string, output io.Writer) error
 		}
 		var content []byte
 		if options.diffFile == "-" {
-			content, err = io.ReadAll(os.Stdin)
-		} else {
+			content, err = readHoldDiff(os.Stdin, argojob.MaxAssistPatchMaxBytes)
+		} else if err = holdDiffFileWithinLimit(options.diffFile, argojob.MaxAssistPatchMaxBytes); err == nil {
 			content, err = os.ReadFile(options.diffFile) // #nosec G304 -- operator-named local file.
+		}
+		if err == nil {
+			err = holdDiffWithinLimit(int64(len(content)), argojob.MaxAssistPatchMaxBytes)
 		}
 		if err != nil {
 			return err
@@ -122,6 +127,41 @@ func runRunHold(ctx context.Context, arguments []string, output io.Writer) error
 		return err
 	}
 	return writeRunHold(output, action, raw, options.asJSON)
+}
+
+// The run hold patch diff is bounded by limit (the largest
+// assist.patchMaxBytes any server accepts) before it is read into memory
+// and encoded, so a wrong file or an endless pipe fails fast on the client
+// instead of in a request the server must refuse.
+
+// readHoldDiff reads at most limit+1 bytes of a piped diff.
+func readHoldDiff(stdin io.Reader, limit int64) ([]byte, error) {
+	content, err := io.ReadAll(io.LimitReader(stdin, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	return content, holdDiffWithinLimit(int64(len(content)), limit)
+}
+
+// holdDiffFileWithinLimit refuses a diff file larger than limit, or one
+// that is not a regular file (a device or FIFO has no size to check; pipe
+// it through --diff-file - instead), before it is read.
+func holdDiffFileWithinLimit(path string, limit int64) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: --diff-file %s is not a regular file; use --diff-file - to read a pipe", errUsage, path)
+	}
+	return holdDiffWithinLimit(info.Size(), limit)
+}
+
+func holdDiffWithinLimit(size, limit int64) error {
+	if size > limit {
+		return fmt.Errorf("%w: diff is larger than %d bytes, the largest assist.patchMaxBytes; push the change as a commit instead", errUsage, limit)
+	}
+	return nil
 }
 
 func indexOf(values []string, want string) int {
