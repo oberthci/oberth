@@ -1038,7 +1038,7 @@ ORDER BY queue_sequence`)
 				if err != nil {
 					return err
 				}
-				promotion, err = finishPromotionTx(ctx, tx, promotion, model.PromotionFailed, recovered.ID, recovered.Error, now)
+				_, err = finishPromotionTx(ctx, tx, promotion, model.PromotionFailed, recovered.ID, recovered.Error, now)
 				if err != nil {
 					return err
 				}
@@ -1086,7 +1086,7 @@ RETURNING `+runColumns, now, now, active.ID))
 			if promotionErr != nil {
 				return fmt.Errorf("load interrupted promotion for run %s: %w", recovered.ID, promotionErr)
 			}
-			promotion, promotionErr = finishPromotionTx(
+			_, promotionErr = finishPromotionTx(
 				ctx, tx, promotion, model.PromotionInterrupted, recovered.ID,
 				"oberth restarted during promotion CI", now,
 			)

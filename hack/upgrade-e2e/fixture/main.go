@@ -114,7 +114,7 @@ func main() {
 func seed(ctx context.Context, path string) {
 	// Admin opens refuse a missing database; seed creates it the way a
 	// server's first start does. CreateGenesis exists in every baseline.
-	if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
+	if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) { // #nosec G703 -- The CLI caller chooses the isolated fixture database.
 		created, err := store.CreateGenesis(ctx, path, store.Options{})
 		must(err)
 		must(created.Close())

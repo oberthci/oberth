@@ -1001,7 +1001,7 @@ RETURNING `+runColumns,
 		case model.RunInterrupted:
 			promotionStatus = model.PromotionInterrupted
 		}
-		promotion, promotionErr = finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now)
+		_, promotionErr = finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now)
 		if promotionErr != nil {
 			return model.Run{}, promotionErr
 		}
