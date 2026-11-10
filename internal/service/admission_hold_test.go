@@ -46,7 +46,7 @@ func TestAdmissionHoldToolKeepsOrdinaryWorkQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := value.(RunDetailResponse)
-	if detail.Run.DisplayStatus != model.DisplayQueued || detail.Run.DisplayReason != displayFailureText(reason) {
+	if detail.Run.DisplayStatus != model.DisplayQueued || detail.Run.DisplayReason != reason {
 		t.Fatal("hold missing from detail reason", detail.Run.DisplayStatus, detail.Run.DisplayReason)
 	}
 	value, err = control.CallTool(t.Context(), actor, "run_list", json.RawMessage(`{"status":"queued"}`))
@@ -54,7 +54,7 @@ func TestAdmissionHoldToolKeepsOrdinaryWorkQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := value.(api.RunListResponse).Runs.([]model.Run)
-	if len(rows) != 1 || rows[0].DisplayStatus != model.DisplayQueued || rows[0].DisplayReason != displayFailureText(reason) {
+	if len(rows) != 1 || rows[0].DisplayStatus != model.DisplayQueued || rows[0].DisplayReason != reason {
 		t.Fatal("hold missing from list reason", rows)
 	}
 
@@ -357,4 +357,32 @@ func TestAdmissionHoldWorkflowOnlyKeepsRunningGrant(t *testing.T) {
 		t.Fatal("workflow accounting changed", state)
 	}
 	releaseOrdinary()
+}
+
+// A held run's reason line carries the admin's whole reason and a
+// second-resolution expiry; it is the only place the reason shows per run.
+func TestAdmissionHoldReasonIsNotTruncated(t *testing.T) {
+	f := newControlFixture(t)
+	control := f.api(t)
+	actor := api.Actor{Identity: "operator", Admin: true}
+	long := "release qualification for the storage migration; do not admit branch work until the backup is verified"
+	if _, err := control.CallTool(t.Context(), actor, "admission_hold", json.RawMessage(`{"on":true,"reason":"`+long+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/held", SHA: strings.Repeat("b", 40), Actor: "developer", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := control.Run(t.Context(), actor, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reason := value.(RunDetailResponse).Run.DisplayReason
+	if !strings.Contains(reason, long) || strings.Contains(reason, "…") {
+		t.Fatalf("hold reason was cut: %q", reason)
+	}
+	until := reason[strings.LastIndex(reason, "until ")+len("until "):]
+	if _, err := time.Parse(time.RFC3339, until); err != nil || strings.Contains(until, ".") {
+		t.Fatalf("expiry %q is not second-resolution RFC 3339: %v", until, err)
+	}
 }

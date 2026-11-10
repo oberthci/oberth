@@ -53,7 +53,12 @@ func queuePositionReason(position int64) string {
 }
 
 func withQueueRequests(requests *argoworkflow.PodRequests, reason string) string {
-	reason = displayFailureText(reason)
+	return withQueueRequestsWhole(requests, displayFailureText(reason))
+}
+
+// withQueueRequestsWhole prefixes the requests without shortening reason.
+func withQueueRequestsWhole(requests *argoworkflow.PodRequests, reason string) string {
+	reason = strings.Join(strings.Fields(reason), " ")
 	if requests == nil {
 		return reason
 	}

@@ -794,6 +794,32 @@ type remoteHealthStatus struct {
 	Cluster       string `json:"cluster"`
 	Audit         string `json:"audit"`
 	Version       string `json:"version,omitempty"`
+	Admission     *struct {
+		Hold *model.AdmissionHold `json:"hold,omitempty"`
+	} `json:"admission,omitempty"`
+}
+
+// admissionHoldLine is the status line of an active administrator hold: the
+// whole reason, who set it, when it ends and what may still pass.
+func admissionHoldLine(hold *model.AdmissionHold) string {
+	if hold == nil || !hold.On {
+		return ""
+	}
+	line := "held by admin"
+	if hold.Actor != "" {
+		line += " " + hold.Actor
+	}
+	if !hold.ExpiresAt.IsZero() {
+		line += " until " + hold.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339)
+	}
+	if hold.Reason != "" {
+		line += ": " + hold.Reason
+	}
+	allowed := "nothing"
+	if len(hold.Allow) > 0 {
+		allowed = strings.Join(hold.Allow, ", ")
+	}
+	return line + " (allowed: " + allowed + ")"
 }
 
 func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) error {
@@ -831,6 +857,13 @@ func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) 
 	} {
 		if _, err := fmt.Fprintf(output, "%-14s %s\n", row.label, row.value); err != nil {
 			return err
+		}
+	}
+	if status.Admission != nil {
+		if line := admissionHoldLine(status.Admission.Hold); line != "" {
+			if _, err := fmt.Fprintf(output, "%-14s %s\n", "admission:", line); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

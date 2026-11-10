@@ -51,11 +51,16 @@ there is no separate expiry-write dependency.
 reason, allow list, actor, absolute `expires_at` and `changed_at`. Expired holds
 report `on:false` while retaining their last settings for diagnosis. Scoped
 status omits installation-wide hold configuration. A held run uses its existing
-queued status and reason line:
+queued status and reason line, with the whole reason and the expiry to the
+second:
 
 ```text
-admission held by admin: release qualification, until <UTC time>
+queue held by admin: release qualification, until 2026-11-04T12:00:00Z
 ```
+
+`oberth status` prints the same hold as an `admission:` line (reason, actor,
+expiry and allowed classes), and the dashboard Status page shows it on the
+admission card.
 
 Held work is neither cancelled nor re-enqueued. Its original queue sequence and
 priority/FIFO order are preserved; allowed work can pass it. Claimed work still

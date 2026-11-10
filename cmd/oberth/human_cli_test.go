@@ -39,3 +39,24 @@ func TestUsageErrorIsNotDoubled(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestStatusShowsTheWholeAdmissionHold(t *testing.T) {
+	reason := "release qualification for the storage migration; do not admit branch work until the backup is verified"
+	configure(t, remoteServer(t, `{"database":"ok","admission":{"hold":{"on":true,"reason":"`+reason+`","actor":"operator","allow":["tag","release"],"expires_at":"2026-11-04T12:00:00.123456789Z"},"used":0,"runs":0,"reservations":[]}}`))
+	var out bytes.Buffer
+	if err := runRemoteStatus(t.Context(), nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	want := "admission:     held by admin operator until 2026-11-04T12:00:00Z: " + reason + " (allowed: tag, release)"
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("status omits the hold:\n%s", out.String())
+	}
+	configure(t, remoteServer(t, `{"database":"ok","admission":{"hold":{"on":false,"reason":"old"}}}`))
+	out.Reset()
+	if err := runRemoteStatus(t.Context(), nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "admission:") {
+		t.Fatalf("an expired hold is shown:\n%s", out.String())
+	}
+}
