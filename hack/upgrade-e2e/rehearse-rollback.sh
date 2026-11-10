@@ -44,6 +44,17 @@ rehearsal_runs() {
   k -n oberth delete pod "runs-$1" --wait=true
 }
 
+# rehearsal_release_hold clears the admission hold with the fixture of the
+# running build ($1), the server stopped, and starts the server again.
+rehearsal_release_hold() {
+  k -n oberth scale deploy/oberth --replicas=0
+  k -n oberth wait --for=delete pod -l app.kubernetes.io/name=oberth --timeout=100s
+  fixture_pod "hold-off-$1" hold-off "$2"
+  k -n oberth delete pod "hold-off-$1" --wait=true
+  k -n oberth scale deploy/oberth --replicas=1
+  k -n oberth rollout status deploy/oberth --timeout=180s
+}
+
 rehearsal_version() {
   local want=$1 i
   for ((i=0;i<60;i++)); do
@@ -59,7 +70,7 @@ rehearsal_version() {
 
 rehearse_rollback() {
   local a=candidate-1 b=rehearsal out="$evidence/rehearsal" home="$private/home"
-  local cli="$private/oberth-$b" schema_a schema_b record holder target job started
+  local cli="$private/oberth-$b" schema_a schema_b record holder target started
   mkdir -p "$out" "$home"
   schema_a=$("$private/oberth-$a" version --schema)
   schema_b=$("$private/oberth-$b" version --schema)
@@ -84,10 +95,8 @@ rehearse_rollback() {
   rg -qF "ref: ${candidate_refs[$b]}" "$private/source-$b/charts/oberth/values.yaml"
   # A private HOME: the backup key and client configuration of the operator
   # running this rehearsal are never read or written.
-  # Lifting the disk floor lets the upgraded server admit the backup's queued
-  # runs: work done on the version the rollback then undoes.
   HOME=$home nice "$cli" upgrade --chart "$private/source-$b/charts/oberth" --yes --backup-dir "$out" \
-    --set image.pullPolicy=Never --set admission.diskFloorBytes=0 --timeout 5m >"$out/upgrade.log" 2>&1 || { cat "$out/upgrade.log" >&2; return 1; }
+    --set image.pullPolicy=Never --timeout 5m >"$out/upgrade.log" 2>&1 || { cat "$out/upgrade.log" >&2; return 1; }
   rehearsal_version "${candidate_versions[$b]}" upgraded
   record=$(find "$out" -maxdepth 1 -name 'oberth-upgrade-*.json' -print -quit)
   [[ -n $record ]] || { echo "oberth upgrade wrote no rollback record" >&2; return 1; }
@@ -96,19 +105,21 @@ rehearse_rollback() {
   rehearsal_runs upgraded
   jq -se --argjson s "$schema_b" '(map(select(.schema))|.[0].schema)==$s' "$out/runs-upgraded.jsonl" >/dev/null
 
-  # 3. Work that happens on the new version: the upgraded server admits the
-  # backup's queued runs; the holder's Workflow ends.
+  # 3. Work that happens on the new version: the holder's Workflow ends, the
+  # hold is released, and the upgraded server claims the backup's queued runs.
+  # (The fixture's local upstream is refused since v0.20, so a claimed run
+  # fails before submission and is retried once: claimed all the same.)
   holder=$(jq -sr '.[]|select(.status=="running")|.id' "$out/runs-before.jsonl")
   target=$(jq -sr '[.[]|select(.status=="queued")]|.[0].id' "$out/runs-before.jsonl")
   k -n oberth-argo delete workflow oberth-e2e-running --wait=true
-  job=
-  for ((i=0;i<90;i++)); do
-    job=$(k -n oberth-argo get workflows -o json | jq -r --arg id "$target" '[.items[]|select(.metadata.labels."oberth.ci/run"==$id)]|.[0].metadata.name // empty')
-    [[ -z $job ]] || break
+  rehearsal_release_hold upgraded "${candidate_refs[$b]}"
+  for ((i=0;i<45;i++)); do
+    rehearsal_runs dispatched
+    if jq -se '[.[]|select(.id)]|all(.status!="queued")' "$out/runs-dispatched.jsonl" >/dev/null; then break; fi
     sleep 2
   done
-  [[ -n $job ]] || { echo "the upgraded server did not admit queued run $target" >&2; return 1; }
-  k -n oberth-argo get workflows -o json | jq '[.items[]|{name:.metadata.name,run:.metadata.labels."oberth.ci/run"}]' >"$out/dispatched-after-upgrade.json"
+  jq -se --arg id "$target" '[.[]|select(.id==$id)]|.[0].status!="queued"' "$out/runs-dispatched.jsonl" >/dev/null ||
+    { echo "the upgraded server did not claim queued run $target" >&2; return 1; }
 
   # 4. oberth upgrade --rollback: Helm revisions back, then the backup.
   started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -136,21 +147,21 @@ rehearse_rollback() {
   k -n oberth-argo get workflows -o json >"$out/workflows-rolled-back.json"
   jq -e --arg since "$started" '[.items[]|select(.metadata.labels."oberth.ci/run"!=null and .metadata.creationTimestamp>=$since)]|length==0' \
     "$out/workflows-rolled-back.json" >/dev/null || { echo "a restored run was dispatched again" >&2; return 1; }
-  jq -e --arg job "$job" '[.items[]|select(.metadata.name==$job)]|length==0' "$out/workflows-rolled-back.json" >/dev/null ||
-    { echo "the Workflow the upgraded server admitted ($job) survived the rollback" >&2; return 1; }
-  # The rollback brought the disk floor back. Lift it once more and restart:
-  # had the restored queued runs been left queued, this would dispatch them.
+  # The restored database holds admission again (the backup's hold).
+  # Release it and restart: had the restored queued runs been left queued,
+  # this would claim them, fail them and add retries.
   started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  "$helm" upgrade oberth "$private/source-$a/charts/oberth" -n oberth --reuse-values \
-    --set admission.diskFloorBytes=0 --wait --timeout 180s
-  k -n oberth rollout status deploy/oberth --timeout=180s
+  rehearsal_release_hold rolled-back "${candidate_refs[$a]}"
   sleep 45
-  k -n oberth-argo get workflows -o json >"$out/workflows-floor-lifted.json"
+  k -n oberth-argo get workflows -o json >"$out/workflows-hold-released.json"
   jq -e --arg since "$started" '[.items[]|select(.metadata.labels."oberth.ci/run"!=null and .metadata.creationTimestamp>=$since)]|length==0' \
-    "$out/workflows-floor-lifted.json" >/dev/null || { echo "a restored run was dispatched once admission opened" >&2; return 1; }
-  rehearsal_runs floor-lifted
-  jq -se '[.[]|select(.id)]|all(.status=="interrupted")' "$out/runs-floor-lifted.jsonl" >/dev/null ||
+    "$out/workflows-hold-released.json" >/dev/null || { echo "a restored run was dispatched once admission opened" >&2; return 1; }
+  rehearsal_runs hold-released
+  jq -se '[.[]|select(.id)]|all(.status=="interrupted")' "$out/runs-hold-released.jsonl" >/dev/null ||
     { echo "a restored run became active again" >&2; return 1; }
+  jq -se --slurpfile before <(jq -s 'map(select(.id))|map(.id)|sort' "$out/runs-before.jsonl") \
+    'map(select(.id))|map(.id)|sort == $before[0]' "$out/runs-hold-released.jsonl" >/dev/null ||
+    { echo "runs were created after admission opened" >&2; return 1; }
   k -n oberth get pods -l app.kubernetes.io/name=oberth -o json >"$out/pods-rolled-back.json"
   jq -e '.items|length==1 and all(.[]; .status.phase=="Running" and all(.status.containerStatuses[]; .ready==true))' "$out/pods-rolled-back.json" >/dev/null
   printf 'rehearsal: %s -> %s (schema %s -> %s) -> rollback to %s; run admitted after the upgrade: %s; holder %s\n' \

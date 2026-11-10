@@ -205,13 +205,8 @@ bao write auth/kubernetes/role/oberth-ci bound_service_account_names=oberth boun
   --set controller.workflowDefaults.spec.suspend=true \
   --set 'controller.extraEnv[0].name=POD_NAMES' --set-string 'controller.extraEnv[0].value=v1' --wait --timeout 180s
 # A fresh server intentionally fails readiness until a local upstream exists.
-rehearsal_install=()
-# The rollback rehearsal keeps the seeded runs queued until its upgrade lifts
-# this admission disk floor (larger than any volume): since v0.20 a released
-# server submits every admitted run at once.
-! $rehearse || rehearsal_install=(--set admission.diskFloorBytes=1125899906842624)
 "$helm" install oberth "$chart" -n oberth --values "$here/values.yaml" \
-  --set-string "runnerImagePrefixes[0]=${published%@sha256:*}" "${rehearsal_install[@]}"
+  --set-string "runnerImagePrefixes[0]=${published%@sha256:*}"
 booted=false
 for ((i=0;i<60;i++)); do
   if k -n oberth logs deploy/oberth -c oberth 2>/dev/null | rg -q 'ready for bootstrap'; then booted=true; break; fi
@@ -221,7 +216,7 @@ $booted
 k -n oberth scale deploy/oberth --replicas=0
 k -n oberth wait --for=delete pod -l app.kubernetes.io/name=oberth --timeout=100s
 fixture_pod() {
-  local name=$1 mode=$2
+  local name=$1 mode=$2 image=${3:-$fixture_image}
   local extra=
   [[ $mode != seed ]] || extra=", $published"
   cat <<YAML | k create -f -
@@ -239,7 +234,7 @@ spec:
     fsGroup: 65534
   containers:
     - name: fixture
-      image: $fixture_image
+      image: $image
       imagePullPolicy: Never
       command: [/fixture]
       args: [$mode, /data/oberth.sqlite$extra]
@@ -268,6 +263,13 @@ YAML
 }
 fixture_pod fixture-seed seed
 k -n oberth logs fixture-seed >"$evidence/workflow.json"
+if $rehearse; then
+  # Since v0.20 a server claims every queued run at once; the rollback
+  # rehearsal needs queued runs in its pre-upgrade backup, so it holds
+  # admission (administrator hold, no class allowed) until it releases them.
+  fixture_pod fixture-hold hold-on
+  k -n oberth delete pod fixture-hold --wait=true
+fi
 k create -f "$evidence/workflow.json"
 k -n oberth-argo wait --for=jsonpath='{.status.phase}'=Running workflow/oberth-e2e-running --timeout=60s
 k -n oberth delete pod fixture-seed --wait=true
