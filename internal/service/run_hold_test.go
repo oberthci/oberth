@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -352,7 +353,10 @@ func TestRunHoldScopedServicerNeedsTheRunRepository(t *testing.T) {
 	elsewhere.scope = &repoScope{actor: scopedActor, repos: map[int64]model.Repository{run.RepoID + 1: {ID: run.RepoID + 1}}}
 	before := len(operator.execs)
 	for name, call := range map[string]func() error{
-		"exec":     func() error { _, err := elsewhere.execRunHold(ctx, scopedActor, run.ID, "", []string{"true"}, "", 0); return err },
+		"exec": func() error {
+			_, err := elsewhere.execRunHold(ctx, scopedActor, run.ID, "", []string{"true"}, "", 0)
+			return err
+		},
 		"continue": func() error { _, err := elsewhere.continueRunHold(ctx, scopedActor, run.ID, ""); return err },
 		"abandon":  func() error { _, err := elsewhere.abandonRunHold(ctx, scopedActor, run.ID, ""); return err },
 	} {
@@ -370,5 +374,51 @@ func TestRunHoldScopedServicerNeedsTheRunRepository(t *testing.T) {
 	// The run's own uplink and an admin keep working.
 	if _, err := elsewhere.execRunHold(ctx, api.Actor{Identity: "root", Admin: true}, run.ID, "", []string{"true"}, "", 0); err != nil {
 		t.Fatalf("admin exec: %v", err)
+	}
+}
+
+// run_hold_list reports the server's own abandon deadline and spells the
+// policy durations in seconds and text, never nanoseconds.
+func TestRunHoldListReportsAbandonAtAndReadableDurations(t *testing.T) {
+	service, operator, assists, run := holdFixture(t)
+	ctx := context.Background()
+	held := operator.holds[0].HeldSince
+	listed, err := service.listRunHolds(ctx, api.Actor{Identity: "uplink-a"}, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at := listed.Holds[0].AbandonAt; at == nil || !at.Equal(held.Add(20*time.Minute)) {
+		t.Fatalf("idle abandon_at = %v, want held_since + hold TTL", at)
+	}
+	// An action moves the deadline to last action + TTL, capped at 2 TTLs.
+	worked := run
+	worked.Assist = &model.RunAssistRecord{Events: []model.RunAssistEvent{{Pod: operator.holds[0].Pod, Kind: model.RunAssistExec, At: held.Add(30 * time.Minute)}}}
+	assists.history.runs[run.ID] = worked
+	listed, err = service.listRunHolds(ctx, api.Actor{Identity: "uplink-a"}, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at := listed.Holds[0].AbandonAt; at == nil || !at.Equal(held.Add(40*time.Minute)) {
+		t.Fatalf("worked abandon_at = %v, want the 2-TTL cap", at)
+	}
+	encoded, err := json.Marshal(listed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Policy map[string]any `json:"policy"`
+		Holds  []map[string]any
+	}
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Policy["hold_ttl"] != "20m0s" || wire.Policy["hold_ttl_s"] != float64(1200) || wire.Policy["exec_timeout"] != "1m0s" || wire.Policy["exec_timeout_s"] != float64(60) || wire.Policy["enabled"] != true {
+		t.Fatalf("policy = %v", wire.Policy)
+	}
+	released := worked
+	released.Assist.Events = append(released.Assist.Events, model.RunAssistEvent{Pod: operator.holds[0].Pod, Kind: model.RunAssistContinue, At: held.Add(31 * time.Minute)})
+	assists.history.runs[run.ID] = released
+	if listed, err = service.listRunHolds(ctx, api.Actor{Identity: "uplink-a"}, run.ID); err != nil || listed.Holds[0].AbandonAt != nil {
+		t.Fatalf("released hold abandon_at = %v, %v", listed.Holds[0].AbandonAt, err)
 	}
 }

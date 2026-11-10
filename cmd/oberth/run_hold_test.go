@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -39,5 +41,16 @@ func TestReadHoldDiffBoundsSizeBeforeEncoding(t *testing.T) {
 	}
 	if err := holdDiffFileWithinLimit(filepath.Join(dir, "missing"), limit); err == nil {
 		t.Fatal("a missing diff file passed")
+	}
+}
+
+func TestRunHoldListPrintsTheServerAbandonDeadline(t *testing.T) {
+	raw := json.RawMessage(`{"run_id":"aaaaaaaa","assisted":false,"holds":[{"pod":"wf-test-1","step":"test","attempt":1,"abandon_at":"2026-11-10T12:20:00Z","deadline":"2026-11-10T12:52:00Z","patch_capable":true}]}`)
+	var out bytes.Buffer
+	if err := writeRunHold(&out, "list", raw, false); err != nil {
+		t.Fatal(err)
+	}
+	if want := "test\tattempt 1\tparked\tpod wf-test-1\tabandon at 2026-11-10T12:20:00Z\tdeadline 2026-11-10T12:52:00Z\tpatch=true\n"; out.String() != want {
+		t.Fatalf("output %q, want %q", out.String(), want)
 	}
 }

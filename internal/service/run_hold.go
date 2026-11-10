@@ -193,11 +193,31 @@ func (service *API) listRunHolds(ctx context.Context, actor api.Actor, id string
 	if err != nil {
 		return RunHoldListResponse{}, fmt.Errorf("list holds: %w", err)
 	}
+	activities := assistActivities(run.Assist)
 	for _, hold := range holds {
 		hold.Released = assistReleased(run.Assist, hold.Pod)
+		withAbandonAt(&hold, activities, response.Policy.HoldTTL)
 		response.Holds = append(response.Holds, hold)
 	}
 	return response, nil
+}
+
+func assistActivities(record *model.RunAssistRecord) map[string]model.AssistPodActivity {
+	if record == nil {
+		return nil
+	}
+	return record.PodActivities()
+}
+
+// withAbandonAt fills the server's abandon deadline of an unreleased hold:
+// the sweep's own rule over the run's assist record, so actions that moved
+// it are counted.
+func withAbandonAt(hold *model.AssistHold, activities map[string]model.AssistPodActivity, ttl time.Duration) {
+	if hold.Released || ttl <= 0 || hold.HeldSince.IsZero() {
+		return
+	}
+	at := model.AssistHoldExpiry(*hold, activities[hold.Pod], ttl).UTC()
+	hold.AbandonAt = &at
 }
 
 func assistReleased(record *model.RunAssistRecord, pod string) bool {

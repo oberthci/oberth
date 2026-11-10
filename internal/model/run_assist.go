@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -322,6 +323,29 @@ type AssistHold struct {
 	// Released is filled from the run's assist record: the hold was
 	// continued or abandoned already.
 	Released bool `json:"released,omitempty"`
+	// AbandonAt is when the server's TTL sweep abandons this hold if nobody
+	// acts (AssistHoldExpiry), filled by the service for unreleased holds.
+	// It comes before Deadline, the kubelet's own bound.
+	AbandonAt *time.Time `json:"abandon_at,omitempty"`
+}
+
+// AssistHoldMaxAgeFactor caps how far actions extend a hold: at most this
+// many hold TTLs after held_since.
+const AssistHoldMaxAgeFactor = 2
+
+// AssistHoldExpiry is when the TTL abandons a hold: held_since + ttl for an
+// idle hold, last action + ttl for a worked one, never later than
+// AssistHoldMaxAgeFactor TTLs after held_since.
+func AssistHoldExpiry(hold AssistHold, activity AssistPodActivity, ttl time.Duration) time.Time {
+	start := hold.HeldSince
+	if activity.LastAction.After(start) {
+		start = activity.LastAction
+	}
+	limit := hold.HeldSince.Add(AssistHoldMaxAgeFactor * ttl)
+	if expiry := start.Add(ttl); expiry.Before(limit) {
+		return expiry
+	}
+	return limit
 }
 
 // AssistExecRequest runs one bounded argv in a held Pod's main container.
@@ -346,6 +370,8 @@ type AssistExecResult struct {
 }
 
 // AssistPolicy is the administrator policy the tools report and enforce.
+// Its JSON form spells durations as seconds (hold_ttl_s, exec_timeout_s) and
+// as Go duration text (hold_ttl "20m0s"), never as nanoseconds.
 type AssistPolicy struct {
 	Enabled            bool          `json:"enabled"`
 	HoldTTL            time.Duration `json:"hold_ttl"`
@@ -357,4 +383,18 @@ type AssistPolicy struct {
 	// ScratchBytes is the ephemeral storage a held attempt's main
 	// container gets on top of its own, for its private cold caches.
 	ScratchBytes int64 `json:"scratch_bytes,omitempty"`
+}
+
+// MarshalJSON reports the durations an agent plans against in seconds and
+// as readable text instead of raw nanoseconds.
+func (policy AssistPolicy) MarshalJSON() ([]byte, error) {
+	type wire AssistPolicy
+	return json.Marshal(struct {
+		wire
+		HoldTTL      string `json:"hold_ttl"`
+		HoldTTLS     int64  `json:"hold_ttl_s"`
+		ExecTimeout  string `json:"exec_timeout"`
+		ExecTimeoutS int64  `json:"exec_timeout_s"`
+	}{wire: wire(policy), HoldTTL: policy.HoldTTL.String(), HoldTTLS: int64(policy.HoldTTL / time.Second),
+		ExecTimeout: policy.ExecTimeout.String(), ExecTimeoutS: int64(policy.ExecTimeout / time.Second)})
 }

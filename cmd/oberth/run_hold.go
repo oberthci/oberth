@@ -188,6 +188,7 @@ func writeRunHold(output io.Writer, action string, raw json.RawMessage, asJSON b
 				Pod          string `json:"pod"`
 				Step         string `json:"step"`
 				Attempt      int    `json:"attempt"`
+				AbandonAt    string `json:"abandon_at"`
 				Deadline     string `json:"deadline"`
 				PatchCapable bool   `json:"patch_capable"`
 				Released     bool   `json:"released"`
@@ -206,7 +207,13 @@ func writeRunHold(output io.Writer, action string, raw json.RawMessage, asJSON b
 			if hold.Released {
 				state = "released"
 			}
-			if _, err := fmt.Fprintf(output, "%s\tattempt %d\t%s\tpod %s\tdeadline %s\tpatch=%v\n", hold.Step, hold.Attempt, state, hold.Pod, hold.Deadline, hold.PatchCapable); err != nil {
+			// abandon_at is the server's TTL deadline, the one to plan
+			// against; the kubelet deadline is later.
+			abandon := hold.AbandonAt
+			if abandon == "" {
+				abandon = "-"
+			}
+			if _, err := fmt.Fprintf(output, "%s\tattempt %d\t%s\tpod %s\tabandon at %s\tdeadline %s\tpatch=%v\n", hold.Step, hold.Attempt, state, hold.Pod, abandon, hold.Deadline, hold.PatchCapable); err != nil {
 				return err
 			}
 		}
