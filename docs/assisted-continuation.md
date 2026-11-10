@@ -149,8 +149,10 @@ MCP tools (CLI: `oberth run hold ...`):
 | `run_continue` | Create the release marker; the executor runs the real command, Argo records the attempt and continues the DAG on success. |
 | `run_hold_abandon` | Delete the held Pod; the step fails normally and the run ends red. |
 
-Rules shared by every mutation: the caller is the run's own uplink
-(`run.actor`) or an admin; a scoped uplink sees only its repositories' runs;
+Rules shared by every mutation: the caller may push to the run's repository
+(the run's own uplink, an unscoped uplink, or a scoped uplink whose scope
+covers the repository) or is an admin; a scoped uplink sees only its
+repositories' runs, so a run outside its scope is "not found";
 the run must be active; actions are serialized per run and capped
 installation-wide (`assist.maxConcurrentHolds` slots); each one is appended
 to the run's `assist_record` and audited as `run.assist.<kind>` with actor,

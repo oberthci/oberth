@@ -127,19 +127,21 @@ func holdFixture(t *testing.T) (*API, *holdOperator, *holdAssistStore, model.Run
 	return service, operator, assists, run
 }
 
-func TestRunHoldToolsAuthorizeOwnerUplinkOrAdminOnly(t *testing.T) {
-	service, operator, _, run := holdFixture(t)
+func TestRunHoldToolsAuthorizeRepositoryPushersOrAdmin(t *testing.T) {
+	service, operator, assists, run := holdFixture(t)
 	ctx := context.Background()
 	owner, other, admin := api.Actor{Identity: "uplink-a"}, api.Actor{Identity: "uplink-b"}, api.Actor{Identity: "root", Admin: true}
 
 	if _, err := service.listRunHolds(ctx, other, run.ID); err != nil {
 		t.Fatalf("listing is a read for any actor who sees the run: %v", err)
 	}
-	if _, err := service.execRunHold(ctx, other, run.ID, "", []string{"true"}, "", 0); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("other uplink exec = %v, want forbidden", err)
+	// An unscoped uplink may push to every repository, so it may service
+	// the hold of a run another uplink pushed; the record names it.
+	if _, err := service.execRunHold(ctx, other, run.ID, "", []string{"true"}, "", 0); err != nil {
+		t.Fatalf("other unscoped uplink exec: %v", err)
 	}
-	if _, err := service.continueRunHold(ctx, other, run.ID, ""); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("other uplink continue = %v, want forbidden", err)
+	if got := assists.events[len(assists.events)-1].Actor; got != "uplink-b" {
+		t.Fatalf("assist record names %q, want the servicing uplink", got)
 	}
 	if _, err := service.execRunHold(ctx, owner, run.ID, "", []string{"true"}, "", 0); err != nil {
 		t.Fatalf("owner exec: %v", err)
@@ -147,7 +149,7 @@ func TestRunHoldToolsAuthorizeOwnerUplinkOrAdminOnly(t *testing.T) {
 	if _, err := service.execRunHold(ctx, admin, run.ID, "test", []string{"true"}, "", 0); err != nil {
 		t.Fatalf("admin exec: %v", err)
 	}
-	if len(operator.execs) != 2 {
+	if len(operator.execs) != 3 {
 		t.Fatalf("execs = %v", operator.execs)
 	}
 
@@ -325,5 +327,48 @@ func TestRunHoldStepSelectionAndAbandon(t *testing.T) {
 		t.Fatal(err)
 	} else {
 		release2()
+	}
+}
+
+// A scoped uplink services holds only on runs of repositories its scope
+// covers, the same rule that decides where it may push; a scope that does
+// not cover the run is refused even if the run were visible.
+func TestRunHoldScopedServicerNeedsTheRunRepository(t *testing.T) {
+	service, operator, assists, run := holdFixture(t)
+	ctx := context.Background()
+	scopedActor := api.Actor{Identity: "uplink-c", Scope: []string{"codeberg"}}
+	covering := *service
+	covering.scope = &repoScope{actor: scopedActor, repos: map[int64]model.Repository{run.RepoID: {ID: run.RepoID}}}
+	if _, err := covering.execRunHold(ctx, scopedActor, run.ID, "", []string{"true"}, "", 0); err != nil {
+		t.Fatalf("scoped uplink covering the repository: %v", err)
+	}
+	if _, err := covering.patchRunHold(ctx, scopedActor, run.ID, "", "--- a/go.mod\n+++ b/go.mod\n@@ -1 +1 @@\n-module example.com/x\n+module example.com/y\n"); err != nil {
+		t.Fatalf("scoped uplink patch: %v", err)
+	}
+	if got := assists.events[len(assists.events)-1]; got.Actor != "uplink-c" || got.Kind != model.RunAssistPatch {
+		t.Fatalf("last assist event = %+v, want a patch by uplink-c", got)
+	}
+	elsewhere := *service
+	elsewhere.scope = &repoScope{actor: scopedActor, repos: map[int64]model.Repository{run.RepoID + 1: {ID: run.RepoID + 1}}}
+	before := len(operator.execs)
+	for name, call := range map[string]func() error{
+		"exec":     func() error { _, err := elsewhere.execRunHold(ctx, scopedActor, run.ID, "", []string{"true"}, "", 0); return err },
+		"continue": func() error { _, err := elsewhere.continueRunHold(ctx, scopedActor, run.ID, ""); return err },
+		"abandon":  func() error { _, err := elsewhere.abandonRunHold(ctx, scopedActor, run.ID, ""); return err },
+	} {
+		if err := call(); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("%s outside the scope = %v, want forbidden", name, err)
+		}
+	}
+	// A scoped actor without its scoped view fails closed.
+	if _, err := service.execRunHold(ctx, scopedActor, run.ID, "", []string{"true"}, "", 0); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("scoped actor on an unscoped view = %v, want forbidden", err)
+	}
+	if len(operator.execs) != before || len(operator.released) != 0 || len(operator.abandoned) != 0 {
+		t.Fatalf("a refused call reached the engine: execs %v released %v abandoned %v", operator.execs[before:], operator.released, operator.abandoned)
+	}
+	// The run's own uplink and an admin keep working.
+	if _, err := elsewhere.execRunHold(ctx, api.Actor{Identity: "root", Admin: true}, run.ID, "", []string{"true"}, "", 0); err != nil {
+		t.Fatalf("admin exec: %v", err)
 	}
 }

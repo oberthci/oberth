@@ -18,8 +18,9 @@ import (
 
 // Agent-assisted continuation tools (run_hold_list, run_hold_exec,
 // run_hold_patch, run_continue, run_hold_abandon). See
-// docs/assisted-continuation.md. Every mutation is allowed only to the run's
-// own uplink or an admin, only on an active branch-CI run that asked for
+// docs/assisted-continuation.md. Every mutation is allowed only to an uplink
+// that may push to the run's repository (its scope covers it) or an admin,
+// only on an active branch-CI run that asked for
 // assistance, is serialized per run, capped in concurrency, bounded in time
 // and bytes, and appended to the run's audited assist record.
 
@@ -147,13 +148,36 @@ func (service *API) authorizeAssist(ctx context.Context, actor api.Actor, id str
 	if run.RefKind != model.RefBranch || run.Release || (run.Trigger != "branch" && run.Trigger != "push") {
 		return model.Run{}, refuse(ErrForbidden, "assisted continuation applies to branch CI runs only")
 	}
-	if mutation && !actor.Admin && run.Actor != actor.Identity {
-		return model.Run{}, refuse(ErrForbidden, "hold actions on run %s are allowed to its own uplink %s or an admin", shortRunID(run.ID), run.Actor)
+	if mutation {
+		if err := service.authorizeHoldServicer(actor, run); err != nil {
+			return model.Run{}, err
+		}
 	}
 	if mutation && !run.Status.Active() {
 		return model.Run{}, refuse(ErrInvalidInput, "run %s is %s; nothing is held", shortRunID(run.ID), run.Status)
 	}
 	return run, nil
+}
+
+// authorizeHoldServicer decides who may exec, patch, continue or abandon a
+// hold: the permission that already decides who may push to the run's
+// repository. An admin; the run's own uplink; or any other uplink whose scope
+// covers the run's repository (an unscoped uplink pushes to every one). A
+// scoped caller only reaches here through its scoped view, so a run outside
+// its scope is already "not found"; the explicit check keeps the rule local.
+// The acting identity, not the run's, is what the assist record and audit
+// store for every action.
+func (service *API) authorizeHoldServicer(actor api.Actor, run model.Run) error {
+	if actor.Admin || run.Actor == actor.Identity {
+		return nil
+	}
+	if !actor.Scoped() {
+		return nil
+	}
+	if service.scope == nil || service.scope.actor.Identity != actor.Identity || !service.scope.seesRepo(run.RepoID) {
+		return refuse(ErrForbidden, "hold actions on run %s need an uplink whose scope covers its repository, or an admin", shortRunID(run.ID))
+	}
+	return nil
 }
 
 func (service *API) listRunHolds(ctx context.Context, actor api.Actor, id string) (RunHoldListResponse, error) {
@@ -225,8 +249,11 @@ func (service *API) recordAssist(ctx context.Context, actor api.Actor, run model
 		if !current.Status.Active() && event.Kind != model.RunAssistAbandon {
 			return fmt.Errorf("%w: run %s is %s", store.ErrInvalidState, shortRunID(current.ID), current.Status)
 		}
-		if !actor.Admin && current.Actor != actor.Identity {
-			return fmt.Errorf("%w: run %s belongs to %s", ErrForbidden, shortRunID(current.ID), current.Actor)
+		if current.RepoID != run.RepoID {
+			return fmt.Errorf("%w: run %s changed repository", ErrForbidden, shortRunID(current.ID))
+		}
+		if err := service.authorizeHoldServicer(actor, current); err != nil {
+			return err
 		}
 		return nil
 	}})
