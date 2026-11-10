@@ -324,3 +324,39 @@ func keys(object map[string]json.RawMessage) []string {
 	}
 	return names
 }
+
+// A json tag that spells a lowerCamel wire name (queue_cap_config's
+// maxNotStarted, a declaration's activeDeadlineSeconds) is the field's
+// declared name, not a Go-style duplicate: it stays next to its snake_case
+// spelling, so system_status keeps the legacy queueCap shape it documents.
+func TestLowerCamelTaggedNamesStayByDefault(t *testing.T) {
+	payload := struct {
+		Canonical *struct {
+			MaxNotStarted int `json:"max_not_started"`
+		} `json:"queue_cap,omitempty"`
+		QueueCap model.QueueCapStatus `json:"queueCap"`
+		RepoID   int64
+	}{QueueCap: model.QueueCapStatus{MaxNotStarted: 3, NotStarted: 1}, RepoID: 7}
+	raw, err := marshalCompatible(payload, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		QueueCap map[string]any `json:"queueCap"`
+		Fields   map[string]any `json:"-"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &wire.Fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"maxNotStarted", "max_not_started", "notStarted", "not_started"} {
+		if _, ok := wire.QueueCap[name]; !ok {
+			t.Fatalf("queueCap lost %q: %s", name, raw)
+		}
+	}
+	if _, goName := wire.Fields["RepoID"]; goName || wire.Fields["repo_id"] != float64(7) {
+		t.Fatalf("Go-style name was not replaced by snake_case: %s", raw)
+	}
+}

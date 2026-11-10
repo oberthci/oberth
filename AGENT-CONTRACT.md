@@ -993,7 +993,7 @@ containing CI and real workload qualification remain separately required.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
 - MCP exposes 92 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
-  assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (run's own uplink or admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
+  assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (any uplink whose scope covers the run's repository, or an admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
   `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
@@ -3130,7 +3130,7 @@ attempt is never retried in the Workflow, so #1499 classification and the
 run-level infrastructure retry are unchanged, a timed-out step never gets a
 second budget, and a hold that expires is the step's own failure. The tools
 `run_hold_list` (read), `run_hold_exec`, `run_hold_patch`, `run_continue` and
-`run_hold_abandon` (run's own uplink or admin, active run only, serialized per
+`run_hold_abandon` (any uplink whose scope covers the run's repository, or an admin, active run only, serialized per
 run, capped by `assist.maxConcurrentHolds`, bounded by `assist.execTimeout`,
 `execOutputBytes`, `patchMaxBytes`, `patchMaxFiles`; argv-only exec; exact-
 context unified diffs applied through the Pod helper `oberth internal-hold-fs`

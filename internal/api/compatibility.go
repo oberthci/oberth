@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/oberthci/oberth/internal/recordjson"
 )
@@ -90,9 +92,12 @@ func addRecordAliases(document any, value reflect.Value, goNames bool, changed *
 			if _, exists := object[field.Alias]; !exists {
 				object[field.Alias] = item
 				*changed = true
-				if !goNames {
+				if !goNames && goStyleName(field.Name) {
 					// The snake_case name now carries the value alone. A
-					// name whose alias is another field's key stays.
+					// name whose alias is another field's key stays, and so
+					// does a name a json tag spells in lowerCamel
+					// (maxNotStarted, activeDeadlineSeconds): that is the
+					// field's declared wire name, not a Go-style duplicate.
 					delete(object, field.Name)
 				}
 			}
@@ -141,6 +146,13 @@ func addRecordAliases(document any, value reflect.Value, goNames bool, changed *
 			}
 		}
 	}
+}
+
+// goStyleName reports a Go field name (ID, RepoID, Steps): an exported
+// identifier, so it starts with an upper-case letter.
+func goStyleName(name string) bool {
+	first, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(first)
 }
 
 // Legacy collection arrays are the default throughout v0.17.x. Callers can

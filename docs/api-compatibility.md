@@ -19,7 +19,9 @@ nested record. That doubled each record and, for a full `run_get` whose steps
 carry resource samples, multiplied the reply about fourfold. Those duplicates
 are no longer sent by default; see [Go-style field names](#go-style-field-names).
 
-Names already written in snake_case retain their spelling. Dictionary keys,
+Names already written in snake_case retain their spelling. A name a record
+declares in lowerCamel (`maxNotStarted`, `activeDeadlineSeconds`) is not a
+Go-style duplicate: it is still sent next to its snake_case spelling. Dictionary keys,
 such as step names, labels and resource names, are data and are not renamed.
 Wire names are generated after visibility checks and redaction, from fields
 already exposed in the response. Private storage fields remain private.
@@ -54,9 +56,9 @@ Run paging still returns `X-Oberth-Next-Before`. The opt-in object also includes
 `next_before` for an unscoped sequence cursor or `next_cursor` for a scoped run
 ID, matching `run_list`. Follow the returned cursor; do not derive it from the
 last record. No global sequence is added for scoped callers. Empty collections
-are arrays (`[]`), not null. Existing object responses retain their envelope and
-add record aliases: `/api/issues` keeps `Issues` and `NextBefore` and adds
-`issues` and `next_before`, matching the names in MCP `issue_list`.
+are arrays (`[]`), not null. Existing object responses retain their envelope:
+`/api/issues` returns `issues` and `next_before`, matching the names in MCP
+`issue_list` (and `Issues` and `NextBefore` too with the Go-style opt-in).
 
 Default MCP text and structured JSON carry the same snake_case names. Tools with a
 specialized text format, such as logs or YAML reports, keep that existing text
