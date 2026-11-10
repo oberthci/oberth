@@ -84,7 +84,9 @@ or rewrites the name any more.
 `releases.serialize: true` (`--serialize-releases`) gives every release run of
 every repository the workflow-level mutex `oberth-release`, so no two releases
 run at the same time. The decision is the run's trigger, not its document; a
-document's own `spec.synchronization` is kept beside the server's mutex. A
+document's own `spec.synchronization` is kept beside the server's mutex. The
+name `oberth-release` is reserved: admission refuses a document that declares
+it at workflow or template level, so only the server holds it. A
 second release shows `waiting for lock Mutex/oberth-release (0/1 free)`
 until the first finishes. Off by default. A release waiting for the mutex has
 been admitted by Argo and occupies a controller parallelism slot

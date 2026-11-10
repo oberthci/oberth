@@ -2252,6 +2252,43 @@ spec:
 	}
 }
 
+// A branch document can neither take the server's release mutex nor rewrite
+// the ownership metadata the server reads back through workflowMetadata,
+// which Argo copies onto the live Workflow at every reconcile.
+func TestBuildRefusesReservedLockAndOwnershipMetadata(t *testing.T) {
+	const leaf = `
+  templates:
+    - name: main
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	const head = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+`
+	config := testConfig()
+	config.SerializeReleases = true
+	for _, tc := range []struct {
+		name, body, expect string
+		trigger            pipeline.Trigger
+	}{
+		{"ci holds release mutex", "  synchronization:\n    mutexes:\n      - name: oberth-release\n", "spec.synchronization.mutexes[0].name \"oberth-release\" is reserved", pipeline.TriggerCI},
+		{"release declares release mutex", "  synchronization:\n    mutexes:\n      - name: oberth-release\n", "spec.synchronization.mutexes[0].name \"oberth-release\" is reserved", pipeline.TriggerRelease},
+		{"ci rewrites run-id", "  workflowMetadata:\n    annotations:\n      oberth.ci/run-id: x\n", "spec.workflowMetadata.annotations[\"oberth.ci/run-id\"] is refused", pipeline.TriggerCI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Build(config, testRequest(tc.trigger, head+tc.body+leaf))
+			if err == nil || !strings.Contains(err.Error(), tc.expect) {
+				t.Fatalf("Build error = %v, want %q", err, tc.expect)
+			}
+		})
+	}
+}
+
 // A release run carries spec.priority ReleasePriority whatever the release
 // serialisation policy, so Argo admits it from the postponed queue, and grants
 // it a shared lock, before the branch runs created ahead of it (#1517). A CI

@@ -1305,7 +1305,9 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 // workflow level while Config.SerializeReleases is on. One name across all
 // repositories is the point: releases wait for each other in Argo's queue,
 // priority then creation time, and show "Waiting for lock .../Mutex/oberth-release".
-const ReleaseMutexName = "oberth-release"
+// Admission refuses the name in authored documents, so the server is its only
+// holder.
+const ReleaseMutexName = argoworkflow.ReleaseMutexName
 
 // serializeReleases adds the release mutex to a release run's workflow-level
 // synchronization, merging with whatever the document declares there. A
