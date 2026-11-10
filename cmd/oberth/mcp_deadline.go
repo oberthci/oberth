@@ -52,13 +52,13 @@ func mcpDeadline(cfg mcpFlagResult, params any) (time.Duration, time.Duration, e
 }
 
 // mcpTimeoutArguments lists the argument names that may carry a tool's own
-// bound: the schema's spelling first for known tools, every spelling for
-// tools this client does not know (a newer server).
+// bound: the schema's documented spelling, then its aliases, for known tools;
+// every spelling for tools this client does not know (a newer server).
 func mcpTimeoutArguments(tool string) []string {
 	if known, ok := api.ToolTimeouts()[tool]; ok {
-		return []string{known.Argument}
+		return append([]string{known.Argument}, known.Aliases...)
 	}
-	return []string{"timeout", "timeout_s", "timeout_seconds"}
+	return api.ToolTimeoutArguments
 }
 
 func mcpDeadlineError(limit, toolTimeout time.Duration, err error) error {
@@ -96,7 +96,20 @@ func mcpRetryParams(params any, toolTimeout, remaining time.Duration) any {
 	if arguments == nil {
 		arguments = map[string]json.RawMessage{}
 	}
-	arguments[known.Argument] = json.RawMessage(strconv.FormatInt(max(seconds, 1), 10))
+	// The bound is rewritten under the spelling the caller sent, else the
+	// one every server release accepts; one spelling only, since another
+	// left beside it with its old value would be refused as a conflict.
+	spelling := known.Argument
+	for _, name := range append([]string{known.Argument}, known.Aliases...) {
+		if _, given := arguments[name]; given {
+			spelling = name
+			break
+		}
+	}
+	for _, name := range append([]string{known.Argument}, known.Aliases...) {
+		delete(arguments, name)
+	}
+	arguments[spelling] = json.RawMessage(strconv.FormatInt(max(seconds, 1), 10))
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
 		return params

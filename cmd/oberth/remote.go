@@ -74,14 +74,6 @@ type remoteRunDetail struct {
 	RerunOf    string
 }
 
-func remoteClient(ctx context.Context) (*client.Client, error) {
-	config := client.FromEnv()
-	if !config.Configured() {
-		return nil, errors.New("set OBERTH_BASE_URL to the server's address to read it from here")
-	}
-	return client.New(ctx, config)
-}
-
 func reportMode(mode string) {
 	if mode == "server" {
 		return
@@ -92,7 +84,7 @@ func reportMode(mode string) {
 // remoteSubcommands lists the verbs a command dispatches before parsing its
 // own flags, so --help shows every form the command accepts.
 var remoteSubcommands = map[string]string{
-	"run":  "       oberth run resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)",
+	"run":  "       oberth run wait|resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)",
 	"runs": "       oberth runs cancel --repo <repo> --ref <branch> [flags] (see oberth runs cancel --help)",
 }
 
@@ -118,20 +110,21 @@ func setRemoteUsage(flags *flag.FlagSet) {
 	}
 }
 
-func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagSet, *bool, error) {
+func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagSet, *bool, *client.ConnectionFlags, error) {
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	setRemoteUsage(flags)
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
+	transport := registerTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
-			return nil, nil, nil
+			return nil, nil, nil, nil
 		}
-		return nil, nil, usageError(err)
+		return nil, nil, nil, usageError(err)
 	}
-	return flags, asJSON, nil
+	return flags, asJSON, transport, nil
 }
 
 func emitJSON(ctx context.Context, api *client.Client, path string, query map[string]string, output io.Writer) error {
@@ -164,6 +157,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	all := flags.Bool("all", false, "follow pages to the oldest run")
 	active := flags.Bool("active", false, "only queued and running runs, in scheduling order, with queue position and wait reason")
 	asJSON := flags.Bool("json", false, `emit {"runs":[...],"next_before":N}; --active emits the server's array unchanged`)
+	transport := registerTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -175,7 +169,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: runs takes no positional arguments; use --repo and --ref to filter", errUsage)
 	}
-	api, err := remoteClient(ctx)
+	api, err := remoteClient(ctx, transport)
 	if err != nil {
 		return err
 	}
@@ -413,20 +407,23 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if len(arguments) > 0 && arguments[0] == "rerun" {
 		return runRunRerun(ctx, arguments[1:], output)
 	}
+	if len(arguments) > 0 && arguments[0] == "wait" {
+		return runRunWait(ctx, arguments[1:], output)
+	}
 	if len(arguments) > 0 && arguments[0] == "hold" {
 		return runRunHold(ctx, arguments[1:], output)
 	}
-	flags, asJSON, err := remoteFlags("run", arguments, output)
+	flags, asJSON, transport, err := remoteFlags("run", arguments, output)
 	if err != nil || flags == nil {
 		return err
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: run <run-id>", errUsage)
 	}
-	if err := refuseVerbAsRunID("run", flags.Arg(0), "<run-id>, or a subcommand: resources, retry, rerun, cancel, purge or hold"); err != nil {
+	if err := refuseVerbAsRunID("run", flags.Arg(0), "<run-id>, or a subcommand: wait, resources, retry, rerun, cancel, purge or hold"); err != nil {
 		return err
 	}
-	api, err := remoteClient(ctx)
+	api, err := remoteClient(ctx, transport)
 	if err != nil {
 		return err
 	}
@@ -599,6 +596,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	tail := flags.Bool("tail", false, "read from the end")
 	raw := flags.Bool("raw", false, "keep the [burn/step] prefix on each line and the Argo executor lines")
 	asJSON := flags.Bool("json", false, "emit JSON, including the default window when used")
+	transport := registerTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -613,7 +611,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if err := refuseVerbAsRunID("log", flags.Arg(0), "<run-id> [--burn <burn> --step <step>]"); err != nil {
 		return err
 	}
-	api, err := remoteClient(ctx)
+	api, err := remoteClient(ctx, transport)
 	if err != nil {
 		return err
 	}
@@ -758,14 +756,14 @@ func stripStepPrefix(body, stage, step string) string {
 }
 
 func runRepos(ctx context.Context, arguments []string, output io.Writer) error {
-	flags, asJSON, err := remoteFlags("repos", arguments, output)
+	flags, asJSON, transport, err := remoteFlags("repos", arguments, output)
 	if err != nil || flags == nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: repos takes no arguments", errUsage)
 	}
-	api, err := remoteClient(ctx)
+	api, err := remoteClient(ctx, transport)
 	if err != nil {
 		return err
 	}
@@ -823,14 +821,14 @@ func admissionHoldLine(hold *model.AdmissionHold) string {
 }
 
 func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) error {
-	flags, asJSON, err := remoteFlags("status", arguments, output)
+	flags, asJSON, transport, err := remoteFlags("status", arguments, output)
 	if err != nil || flags == nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: status takes no arguments; for branch CI status use: oberth runs --ref <branch>", errUsage)
 	}
-	api, err := remoteClient(ctx)
+	api, err := remoteClient(ctx, transport)
 	if err != nil {
 		return err
 	}
@@ -933,6 +931,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	limit := flags.Int("limit", issuePageLimit, "issues per page (1 to 50)")
 	before := flags.Int64("before", 0, "only issues older than this issue ID (printed after a full page)")
 	all := flags.Bool("all", false, "follow every page to the oldest matching issue")
+	transport := registerTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -967,7 +966,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: issues takes no arguments; use the dashboard for individual issue detail", errUsage)
 	}
-	api, err := remoteClient(ctx)
+	api, err := remoteClient(ctx, transport)
 	if err != nil {
 		return err
 	}

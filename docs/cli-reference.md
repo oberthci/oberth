@@ -88,12 +88,18 @@ Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [
 ```text
 Usage: oberth artifacts <run-id> [name] [--output FILE]
 Lists a run's artifacts, or writes one artifact to stdout or --output.
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -data-root string
         Oberth data root holding the artifact store (default "/data")
   -o string
         shorthand for --output
   -output string
         save the artifact to this file (written atomically, digest-verified)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth audit
@@ -484,6 +490,8 @@ A full page ends with the --before value for the next page; --all follows every 
         follow every page to the oldest matching issue
   -before int
         only issues older than this issue ID (printed after a full page)
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -json
         emit the server payload (one page, or every page with --all)
   -limit int
@@ -492,6 +500,10 @@ A full page ends with the --before value for the next page; --all follows every 
         override the general stale window (duration)
   -state string
         filter open, closed or all issues (default "open")
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
   -work-status string
         filter todo, active, waiting or review
 ```
@@ -517,6 +529,8 @@ With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail
         burn name
   -byte-offset int
         absolute log cursor from next_byte_offset
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -context int
         lines of context around each match
   -json
@@ -533,6 +547,77 @@ With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail
         step name
   -tail
         read from the end
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
+```
+
+## oberth events
+
+```text
+Usage: oberth events [--since <event-id>] [--wait] [--timeout 600] [--kind <kind>]... [--repo <repo>]...
+         [--run <run-id>]... [--ref-glob <pattern>] [--own] [--limit N] [--json]
+         [--url <url>] [--token-file <path>] [--ca-file <path>]
+Print agent events after --since (default: from the oldest retained). With --wait, block until
+at least one matching event arrives (default: one after the newest) or --timeout seconds pass.
+The last line names the cursor to pass as --since next time.
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -json
+        emit the tool's JSON result unchanged
+  -kind value
+        event kind (repeatable), e.g. run.finished, run.held
+  -limit int
+        page size before filtering, 1 to 200 (default 100)
+  -own
+        only events about this uplink's runs and promotions
+  -ref-glob string
+        shell-style pattern on the ref, e.g. land/*
+  -repo value
+        repository (repeatable); use upstream/org/name when ambiguous
+  -run value
+        with --wait: only events about this run (repeatable)
+  -since int
+        print events after this event ID (the cursor a previous call printed) (default -1)
+  -timeout int
+        with --wait: bound in seconds, 1 to 600 (default 600)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
+  -wait
+        block until at least one matching event arrives (events_wait)
+```
+
+## oberth sync
+
+```text
+Usage: oberth sync status [--lock <key>] [--since 24h] [--limit N] [--json]
+         [--url <url>] [--token-file <path>] [--ca-file <path>]
+Native Argo semaphore and mutex holders and waiters now, and their stored history.
+```
+
+## oberth sync status
+
+```text
+Usage: oberth sync status [--lock <key>] [--since 24h] [--limit N] [--json]
+         [--url <url>] [--token-file <path>] [--ca-file <path>]
+Native Argo semaphore and mutex holders and waiters now, and their stored history.
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -json
+        emit the tool's JSON result unchanged
+  -limit int
+        maximum stored intervals, newest first (default 2000)
+  -lock string
+        one lock key, e.g. Mutex/oberth-release
+  -since string
+        history window such as 6h or 7d (default 24h)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth mcp
@@ -564,9 +649,11 @@ Environment:
   OBERTH_TOKEN          Bearer token for authentication
   OBERTH_TOKEN_COMMAND  Command that prints a token when OBERTH_TOKEN is unset
   OBERTH_CA_CERT        Inline PEM or CA certificate file path (overridden by --ca-file)
+  Unset, each falls back to the client files oberth install writes in
+  ~/.config/oberth (env, mcp.json, ca.crt, token), as for every remote command.
 
 Flags:
-  --url <url>          MCP server URL
+  --url <url>          Server address or its /mcp endpoint
   --token-file <path>  Path to a file containing the bearer token (0600)
   --ca-file <path>     PEM CA certificate for TLS verification
   --timeout <duration> Client deadline override (e.g. 90s or 11m); by default
@@ -592,7 +679,7 @@ Usage: oberth mcp call [arguments] [flags]
   -args-file string
         JSON file or - for stdin
   -ca-file string
-        CA file
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -go-field-names
         also send Go-style record names
   -o string
@@ -604,9 +691,9 @@ Usage: oberth mcp call [arguments] [flags]
   -timeout string
         positive request duration
   -token-file string
-        token file
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -url string
-        MCP URL
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth mcp tools
@@ -616,7 +703,7 @@ Usage: oberth mcp tools [arguments] [flags]
   -args-file string
         JSON file or - for stdin
   -ca-file string
-        CA file
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -go-field-names
         also send Go-style record names
   -o string
@@ -628,9 +715,9 @@ Usage: oberth mcp tools [arguments] [flags]
   -timeout string
         positive request duration
   -token-file string
-        token file
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
   -url string
-        MCP URL
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth client
@@ -680,7 +767,8 @@ Usage: oberth outbox list
        oberth outbox abandon <upstream/org/repo> --id <record-id> --reason <text>
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 Repair a receive record that blocks its repository: show it, retry delivery, or abandon it
-(moved aside under abandoned/, audited). Unscoped admin only.
+(moved aside under abandoned/, audited). --id takes the record ID, or the <record-id>:<index>
+a failed push prints. Unscoped admin only.
 ```
 
 ## oberth preflight
@@ -881,8 +969,14 @@ Usage of repo verify:
 
 ```text
 Usage: oberth repos [flags]
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -json
         emit the server's payload unchanged
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth resource
@@ -974,9 +1068,15 @@ Guide: https://github.com/oberthci/oberth/blob/main/docs/backup-restore.md
 
 ```text
 Usage: oberth run <run-id> [flags]
-       oberth run resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
+       oberth run wait|resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -json
         emit the server's payload unchanged
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth run cancel
@@ -984,6 +1084,28 @@ Usage: oberth run <run-id> [flags]
 ```text
 Usage: oberth run cancel <run-id> [--reason <text>] [--force] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>] | [--database <path>]
+```
+
+## oberth run wait
+
+```text
+Usage: oberth run wait <run-id> [--until finished|held|any] [--timeout 600] [--json]
+         [--url <url>] [--token-file <path>] [--ca-file <path>]
+Block until the run finishes (or, with --until held, parks a retry for assisted continuation;
+--until any: changes in any way), at most --timeout seconds (default and maximum 600).
+Exit status 0 whatever the run's outcome; read the state and status lines, or --json.
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -json
+        emit the tool's JSON result unchanged
+  -timeout int
+        wait bound in seconds, 1 to 600 (default 600)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -until string
+        finished, held or any (default "finished")
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth run hold
@@ -1071,6 +1193,8 @@ Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]
 Usage of run resources:
   -burn string
         optional burn
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -format string
         json or yaml (default "json")
   -include-failed
@@ -1087,6 +1211,10 @@ Usage of run resources:
         exact run ID or unique prefix
   -step string
         optional template name
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
   -yaml
         YAML report with paste-ready resources
 ```
@@ -1108,6 +1236,8 @@ Usage: oberth runs [flags]
         follow pages to the oldest run
   -before string
         only runs older than this cursor (printed after a full page)
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -json
         emit {"runs":[...],"next_before":N}; --active emits the server's array unchanged
   -limit int
@@ -1116,6 +1246,10 @@ Usage: oberth runs [flags]
         only this branch or tag
   -repo string
         only this repository; use upstream/org/name when ambiguous
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth runs cancel
@@ -1559,8 +1693,14 @@ Usage of size revoke:
 
 ```text
 Usage: oberth status [flags]
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -json
         emit the server's payload unchanged
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth upgrade

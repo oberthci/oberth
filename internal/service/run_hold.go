@@ -48,6 +48,14 @@ const (
 	assistHoldHelperPath = "/run/oberth/usage/oberth"
 )
 
+// maxConcurrentHoldActions bounds in-flight hold actions (exec, patch,
+// continue, abandon) installation-wide. It is not assist.maxConcurrentHolds:
+// that caps parked holds, and an action holds no slot of it, so one agent's
+// running exec never refuses another agent's continue on its own hold. Each
+// run takes one action at a time; this ceiling only guards the Kubernetes API
+// against a burst, and is the largest hold cap an installation can set.
+const maxConcurrentHoldActions = 64
+
 // assistGate serializes hold actions per run and caps them installation-wide.
 type assistGate struct {
 	mu    sync.Mutex
@@ -518,13 +526,6 @@ func (service *API) abandonRunHold(ctx context.Context, actor api.Actor, id, ste
 		return RunHoldActionResponse{}, err
 	}
 	return RunHoldActionResponse{RunID: run.ID, Step: hold.Step, Pod: hold.Pod, Action: model.RunAssistAbandon, Assisted: updated.Assisted}, nil
-}
-
-func assistGateLimit(operator AssistHoldOperator) int {
-	if operator == nil {
-		return 0
-	}
-	return operator.AssistPolicy().MaxConcurrentHolds
 }
 
 func encodeJSON(value any) ([]byte, error) {

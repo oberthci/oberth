@@ -422,3 +422,31 @@ func TestRunHoldListReportsAbandonAtAndReadableDurations(t *testing.T) {
 		t.Fatalf("released hold abandon_at = %v, %v", listed.Holds[0].AbandonAt, err)
 	}
 }
+
+// Hold actions do not count against assist.maxConcurrentHolds: three agents
+// acting on three runs of an installation whose hold cap is 2 are all
+// served; only the same run twice is refused (review P2-7).
+func TestHoldActionsAreNotCappedByTheHoldCap(t *testing.T) {
+	database, err := openTestStore(t, context.Background(), filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	service, err := NewAPI(APIConfig{Runs: database, History: database, AssistHolds: &holdOperator{enabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cap(service.assistGate.slots); got != maxConcurrentHoldActions {
+		t.Fatalf("action slots = %d, want %d whatever the hold cap", got, maxConcurrentHoldActions)
+	}
+	for _, run := range []string{"run-a", "run-b", "run-c"} {
+		release, err := service.assistGate.acquire(run)
+		if err != nil {
+			t.Fatalf("%s refused although the hold cap counts holds, not actions: %v", run, err)
+		}
+		defer release()
+	}
+	if _, err := service.assistGate.acquire("run-a"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("same run twice = %v", err)
+	}
+}

@@ -687,18 +687,19 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"status":              {"ref", "repo"},
 		"logs":                {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
 		"run_get":             {"id", "run_id", "summary"},
-		"run_list":            {"before", "limit", "ref", "repo", "status", "superseded", "view"},
+		"run_list":            {"before", "held", "limit", "own", "ref", "repo", "status", "superseded", "view"},
 		"run_resources":       {"burn", "format", "include_failed", "last", "ref", "repo", "resource_only", "run", "run_id", "step"},
 		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "run_id", "tail"},
 		"run_retry":           {"id", "priority", "priority_reason", "run_id"},
 		"run_cancel":          {"force", "id", "reason", "run_id"},
 		"run_purge":           {"id", "reason", "run_id", "what"},
 		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "run_id", "step", "tail"},
-		"wait":                {"id", "repo", "run_id", "sha", "timeout", "trigger"},
+		"wait":                {"id", "repo", "run_id", "sha", "timeout", "timeout_s", "timeout_seconds", "trigger"},
 		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
 		"promote":             {"branch", "priority", "priority_reason", "prune_source", "repo", "sha", "skip_conflicting", "sources"},
-		"run_wait":            {"id", "run_id", "timeout_s", "until"},
+		"run_wait":            {"id", "run_id", "timeout", "timeout_s", "timeout_seconds", "until"},
 		"events_since":        {"after_id", "kinds", "limit", "own", "refs_glob", "repos"},
+		"events_wait":         {"after_id", "kinds", "limit", "own", "refs_glob", "repos", "run_ids", "timeout", "timeout_s", "timeout_seconds"},
 		"issue_list":          {"active_stale_after", "before", "kind", "limit", "query", "repo", "stale_after", "state", "work_status"},
 		"issue_get":           {"active_stale_after", "body_limit", "fields", "id", "stale_after"},
 		"issue_get_many":      {"active_stale_after", "body_limit", "fields", "ids", "stale_after"},
@@ -841,7 +842,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 92
+	const documented = 93
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -923,7 +924,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
 		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_cap_config", "release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_hold", "admission_release",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "branch_delete_many", "branch_deletion_list", "branch_deletion_resolve", "ref_delete_many", "receive_outbox", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
-		"promote_grant", "promote_grant_revoke", "promote_grant_list", "run_wait", "events_subscribe", "events_since", "sync_status",
+		"promote_grant", "promote_grant_revoke", "promote_grant_list", "run_wait", "events_subscribe", "events_since", "events_wait", "sync_status",
 	}
 	definitions := toolDefinitions()
 	got := make([]string, 0, len(definitions))

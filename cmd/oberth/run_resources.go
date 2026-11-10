@@ -25,6 +25,7 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	format := flags.String("format", "json", "json or yaml")
 	asYAML := flags.Bool("yaml", false, "YAML report with paste-ready resources")
 	asJSON := flags.Bool("json", false, "JSON report (default)")
+	transport := registerTransportFlags(flags)
 	if e := parseCommandFlags(flags, arguments); e != nil {
 		if errors.Is(e, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -50,7 +51,7 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	if *format != "json" && *format != "yaml" || *last < 1 || *last > measured.MaxRuns || *repo == "" && *run == "" {
 		return fmt.Errorf("%w: run resources requires repo or run; last 1..100; format json or yaml", errUsage)
 	}
-	api, e := remoteClient(ctx)
+	api, e := remoteClient(ctx, transport)
 	if e != nil {
 		return e
 	}

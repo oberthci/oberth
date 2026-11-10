@@ -15,8 +15,8 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-// MCP agent loop tools (#1514): events_subscribe, events_since, run_wait and
-// sync_status. Every read is scoped by the caller's uplink scope; nothing
+// MCP agent loop tools (#1514): events_subscribe, events_since, events_wait,
+// run_wait and sync_status. Every read is scoped by the caller's uplink scope; nothing
 // here mutates a run, a promotion or a repository.
 
 const (
@@ -261,9 +261,9 @@ type runWaitObservation struct {
 
 func (service *API) prepareRunWait(ctx context.Context, raw json.RawMessage) (func(context.Context) (RunWaitResponse, error), error) {
 	var arguments struct {
-		ID       string `json:"id"`
-		Until    string `json:"until"`
-		TimeoutS int    `json:"timeout_s"`
+		ID    string `json:"id"`
+		Until string `json:"until"`
+		timeoutArguments
 	}
 	if err := decodeTool(raw, &arguments); err != nil {
 		return nil, err
@@ -281,7 +281,11 @@ func (service *API) prepareRunWait(ctx context.Context, raw json.RawMessage) (fu
 	if service.history == nil {
 		return nil, refuse(ErrUnavailable, "run history")
 	}
-	duration, err := service.waitDuration(arguments.TimeoutS)
+	seconds, err := arguments.seconds()
+	if err != nil {
+		return nil, err
+	}
+	duration, err := service.waitDuration(seconds)
 	if err != nil {
 		return nil, err
 	}
@@ -577,6 +581,12 @@ func (service *API) dispatchTool(ctx context.Context, actor api.Actor, name stri
 		return service.syncStatus(ctx, raw)
 	case "run_wait":
 		prepared, err := service.prepareRunWait(ctx, raw)
+		if err != nil {
+			return nil, err
+		}
+		return prepared(ctx)
+	case "events_wait":
+		prepared, err := service.prepareEventsWait(ctx, actor, raw)
 		if err != nil {
 			return nil, err
 		}

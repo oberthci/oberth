@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -29,17 +28,16 @@ var auditTailInterval = 2 * time.Second
 // mcpTransportFlags registers the common MCP transport flags on a flag set
 // and returns a function building the arguments parseMCPFlags understands.
 func mcpTransportFlags(flags *flag.FlagSet) func() []string {
-	url := flags.String("url", "", "MCP URL")
-	tokenFile := flags.String("token-file", "", "token file")
-	caFile := flags.String("ca-file", "", "CA file")
+	connection := registerTransportFlags(flags)
 	return func() []string {
 		var transport []string
-		for name, value := range map[string]string{"--url": *url, "--token-file": *tokenFile, "--ca-file": *caFile} {
-			if value != "" {
-				transport = append(transport, name+"="+value)
+		for _, option := range []struct{ name, value string }{
+			{"--ca-file", connection.CAFile}, {"--token-file", connection.TokenFile}, {"--url", connection.URL},
+		} {
+			if option.value != "" {
+				transport = append(transport, option.name+"="+option.value)
 			}
 		}
-		sort.Strings(transport)
 		return transport
 	}
 }

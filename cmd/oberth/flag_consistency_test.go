@@ -17,7 +17,7 @@ func TestSharedFlagSyntax(t *testing.T) {
 	if err != nil || options.force {
 		t.Fatalf("explicit boolean rejected: %+v %v", options, err)
 	}
-	flags, _, err := remoteFlags("fixture", []string{"--json", "--", "-literal"}, &bytes.Buffer{})
+	flags, _, _, err := remoteFlags("fixture", []string{"--json", "--", "-literal"}, &bytes.Buffer{})
 	if err != nil || flags == nil || flags.NArg() != 1 || flags.Arg(0) != "-literal" {
 		t.Fatalf("double dash lost: %v %v", flags, err)
 	}

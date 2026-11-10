@@ -421,7 +421,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		}
 		server.handleMCPResources(request, session, incoming.Method, incoming.Params, &response)
 	case "tools/list":
-		response.Result = map[string]any{"tools": toolDefinitions()}
+		response.Result = map[string]any{"tools": toolDefinitionsFor(actorFrom(request.Context()))}
 	case "tools/call":
 		var call callParams
 		if err := strictUnmarshal(incoming.Params, &call); err != nil || call.Name == "" {
@@ -438,7 +438,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if server.refuseDuringDrain(writer) {
 			return
 		}
-		if call.Name == "wait" || call.Name == "promote_status" || call.Name == "run_wait" {
+		if longPollTool(call.Name) {
 			server.handleMCPLongPoll(writer, request, response, call)
 			return
 		}
@@ -458,6 +458,16 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		response.Error = &rpcError{Code: -32601, Message: "method not found"}
 	}
 	writeRPC(writer, response)
+}
+
+// longPollTool names the tools served through the long-poll transport:
+// heartbeats while waiting, a write deadline past the tool's own bound.
+func longPollTool(name string) bool {
+	switch name {
+	case "wait", "promote_status", "run_wait", "events_wait":
+		return true
+	}
+	return false
 }
 
 func (server *Server) pushAvailable() bool {
@@ -579,6 +589,50 @@ var registeredToolNames = sync.OnceValue(func() map[string]bool {
 
 func knownTool(name string) bool { return registeredToolNames()[name] }
 
+// adminOnlyTools refuse every non-admin uplink whatever the arguments; the
+// service enforces that (TestAdminOnlyToolsRefuseNonAdmins proves this set
+// against it). tools/list leaves them out for a non-admin token, so an agent
+// is not offered 46 tools it can only be refused; a call is still answered
+// with the server's refusal.
+var adminOnlyTools = map[string]bool{
+	"publication_abandon": true, "run_purge": true, "issue_unlock": true, "issue_close_many": true,
+	"uplink_list": true, "uplink_revoke": true, "uplink_rotate": true,
+	"access_dismiss": true, "access_allow": true, "access_revoke": true,
+	"workflow_capability_grant": true, "workflow_capability_revoke": true,
+	"resource_grant": true, "resource_revoke": true, "size_grant": true, "size_revoke": true,
+	"queue_cap_config": true, "release_wif_list": true, "release_wif_grant": true, "release_wif_revoke": true, "release_wif_reset": true,
+	"queue_priority_config": true, "queue_priority_get": true, "priority_grant": true, "priority_grant_list": true, "priority_grant_revoke": true,
+	"run_priority": true, "admission_hold": true, "admission_release": true,
+	"repo_archive": true, "repo_unarchive": true, "repo_remove": true,
+	"branch_delete_many": true, "branch_deletion_list": true, "branch_deletion_resolve": true, "ref_delete_many": true, "receive_outbox": true,
+	"audit_list": true, "schedule_pause": true, "schedule_resume": true, "schedule_trigger": true,
+	"secretstore_plan": true, "secretstore_sync_receipt": true, "secretstore_verify": true,
+	"promote_grant": true, "promote_grant_revoke": true,
+}
+
+// AdminOnlyTool reports whether tools/list shows name only to admin uplinks.
+func AdminOnlyTool(name string) bool { return adminOnlyTools[name] }
+
+var nonAdminToolDefinitions = sync.OnceValue(func() []map[string]any {
+	definitions := toolDefinitions()
+	visible := make([]map[string]any, 0, len(definitions))
+	for _, definition := range definitions {
+		if !AdminOnlyTool(definition["name"].(string)) {
+			visible = append(visible, definition)
+		}
+	}
+	return visible
+})
+
+// toolDefinitionsFor is tools/list for one caller: every tool for an admin,
+// the tools a non-admin can use otherwise.
+func toolDefinitionsFor(actor Actor) []map[string]any {
+	if actor.Admin {
+		return toolDefinitions()
+	}
+	return nonAdminToolDefinitions()
+}
+
 // ToolNames lists every MCP tool the server offers, so the service can prove
 // each one is classified for scoped uplinks (#073).
 func ToolNames() []string {
@@ -615,8 +669,8 @@ func toolDefinitions() []map[string]any {
 		properties["tail"] = map[string]any{"type": "boolean", "description": "Take from the end of the step instead of the start"}
 		return properties
 	}
-	timeoutProperty := func() map[string]any {
-		return map[string]any{"type": "integer", "description": "Timeout seconds; omitted or zero defaults to 600; values above 600 are rejected", "minimum": 0, "maximum": 600, "default": 600}
+	longPollTimeout := func() map[string]any {
+		return map[string]any{"type": "integer", "description": "Wait bound in seconds; omitted or zero defaults to 600; values above 600 are rejected", "minimum": 0, "maximum": 600, "default": 600}
 	}
 	object := func(properties map[string]any, required ...string) map[string]any {
 		if repo, ok := properties["repo"].(map[string]any); ok {
@@ -677,13 +731,12 @@ func toolDefinitions() []map[string]any {
 		tool("run_hold_list", "List the parked retry attempts (holds) of an assisted branch CI run: step, pod, attempt, held_since, abandon_at (when the server abandons the hold unless someone acts: plan against this), kubelet deadline, whether run_hold_patch can apply files, and whether the hold was already continued or abandoned. Also returns the run's assist record and the installation policy (hold_ttl_s, exec_timeout_s in seconds). A run holds only when it asked for assistance (push option oberth.assist=1 or run_rerun assist), assist.enabled is on, and a credential-free step exited nonzero; the retry Pod parks before its command until run_continue, run_hold_abandon or assist.holdTTL (the server abandons an idle hold past the TTL; each exec, patch or continue restarts it, up to twice the TTL after held_since; the Pod deadline shown also covers the step's own budget after release). Read-only.", object(map[string]any{
 			"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 		}, "id")),
-		tool("run_hold_exec", "Run one bounded command (argv, no shell) inside the held step's main container, as an uplink whose scope covers the run's repository (who may push to it) or an admin: for diagnosing the failure in the live environment. Bounded by assist.execTimeout and assist.execOutputBytes (the deadline stops the stream; a process the image keeps running is not killed), serialized per run, capped installation-wide, and recorded in the run's assist record and audit (run.assist.exec) before the command runs. Any exec marks the run assisted: it is never evidence from this point, whatever the command did.", object(map[string]any{
-			"id":              stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
-			"step":            stringProperty("Held step (Argo template name); optional when exactly one step is held"),
-			"argv":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": maxAssistArgv, "description": "Command and arguments, executed directly (argv[0] must be on PATH or absolute); no shell interpretation"},
-			"stdin":           stringProperty("Optional standard input, at most 1 MiB"),
-			"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": maxAssistExecSeconds, "description": "Optional shorter deadline than assist.execTimeout (itself at most 900)"},
-		}, "id", "argv")),
+		tool("run_hold_exec", "Run one bounded command (argv, no shell) inside the held step's main container, as an uplink whose scope covers the run's repository (who may push to it) or an admin: for diagnosing the failure in the live environment. Bounded by assist.execTimeout and assist.execOutputBytes (the deadline stops the stream; a process the image keeps running is not killed), serialized per run, capped installation-wide, and recorded in the run's assist record and audit (run.assist.exec) before the command runs. Any exec marks the run assisted: it is never evidence from this point, whatever the command did.", object(withTimeout(map[string]any{
+			"id":    stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+			"step":  stringProperty("Held step (Argo template name); optional when exactly one step is held"),
+			"argv":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": maxAssistArgv, "description": "Command and arguments, executed directly (argv[0] must be on PATH or absolute); no shell interpretation"},
+			"stdin": stringProperty("Optional standard input, at most 1 MiB"),
+		}, map[string]any{"type": "integer", "minimum": 1, "maximum": maxAssistExecSeconds, "description": "Optional shorter deadline in seconds than assist.execTimeout (itself at most 900)"}), "id", "argv")),
 		tool("run_hold_patch", "Apply a unified diff to the held step's writable source tree (/work/src) through the server's own Pod helper: exact-context hunks, relative cleaned paths only, no renames, binaries, mode changes, .git or symlink traversal, bounded by assist.patchMaxBytes/patchMaxFiles. The diff's sha256 is recorded in the run's assist record and audit (run.assist.patch) before it is applied, and the run is assisted from then on: never promotion, release or green-for-SHA evidence; push the change as a commit for a real green run.", object(map[string]any{
 			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"step": stringProperty("Held step (Argo template name); optional when exactly one step is held"),
@@ -705,7 +758,7 @@ func toolDefinitions() []map[string]any {
 		tool("artifacts", "List the files a run kept: test reports, coverage output, anything the pipeline copied to OBERTH_ARTIFACTS. Cheap; call this before artifact_get.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
 		tool("artifact_get", "Return one artifact's contents by run ID and name, optionally filtered server-side. Prefer a pattern over retrieving a whole file: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one.", object(logFilterProperties(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "name": stringProperty("Artifact name as reported by artifacts")}), "id", "name")),
 		tool("run_logs", "Return one exact burn/step log by full run ID or unique hexadecimal prefix (at least 8 characters), optionally filtered server-side. With no pattern, limit, tail, offset or byte_offset, returns the last 200 lines and a window explanation. Pass tail:true with limit:N for a larger tail, or limit:0 for the existing bounded full read. Explicit filters retain their behavior. A step without burn selects its unique matching burn; ambiguous names return the candidate burns. Active steps without retained output return an actionable pending error. Log discovery/filtering scan at most 4 MiB each per call and stop head pages early on limit. total_scanned_bytes includes both phases; scan_limit_bytes is the aggregate cap (4 MiB terminal, 8 MiB active). Pattern scans allow one concurrent call per bearer token and two globally; waiting shares the 10-second read budget. When has_more is true, continue with next_byte_offset as byte_offset, retaining tail/pattern/context and resetting offset to zero. Counts are lower bounds unless scan_complete is true; bytes is exact only when bytes_exact is true. withheld_bytes/withheld_lines report omitted data. Lines above 64 KiB are omitted and counted.", object(logFilterProperties(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "burn": stringProperty("Burn name (inferred from an explicit unique step; otherwise defaults to the failed burn)"), "step": stringProperty("Step name (without burn, must be unique across the run; defaults to the failed step or the selected burn's only step)")}), "id")),
-		tool("wait", "Long-poll until a SHA or exact run reaches a terminal state; timeout returns still-running cleanly. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. Pass id alone to wait for one run by full ID or unique prefix of at least 8 hex characters. When trigger is set, waits for a run with that trigger (e.g. 'release' for a tag-push run).", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters); cannot be combined with repo, sha, or trigger"), "repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA (required unless id is provided)"), "trigger": stringProperty("Filter by trigger type (e.g. 'release' for tag runs, 'branch' for branch runs; 'ci' is accepted as an alias for 'branch')"), "timeout": timeoutProperty()})),
+		tool("wait", "Long-poll until a SHA or exact run reaches a terminal state; timeout returns still-running cleanly. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. Pass id alone to wait for one run by full ID or unique prefix of at least 8 hex characters. When trigger is set, waits for a run with that trigger (e.g. 'release' for a tag-push run).", object(withTimeout(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters); cannot be combined with repo, sha, or trigger"), "repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA (required unless id is provided)"), "trigger": stringProperty("Filter by trigger type (e.g. 'release' for tag runs, 'branch' for branch runs; 'ci' is accepted as an alias for 'branch')")}, longPollTimeout()))),
 		tool("sync", "Park the exact SHA's WIP branch upstream without a green gate; this is not completion or promotion evidence. Rejects promotion, release, plan, and apply runs. When the SHA has branch-trigger runs on multiple distinct branches, the explicit branch argument is required.", object(map[string]any{"priority": executionPriorityProperty(), "priority_reason": stringProperty("Reason for submission priority"), "repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA"), "branch": stringProperty("Explicit branch name; required when the SHA has runs on multiple branches, optional otherwise")}, "sha")),
 		tool("promote", "Green-gate and publish without force. Provide sha for one source, or 1..32 ordered sources for a merge train: sources must be exactly tested green branch commits or authorized park refs. Parked sources always run full merged-tree CI, with skipped branch CI recorded. Trains wait in the existing target queue, merge onto its current head and run CI once before publishing. Conflicts name source and paths; skip_conflicting drops them and records the reason. Example: {\"repo\":\"codeberg/acme/widgets\",\"branch\":\"main\",\"sources\":[{\"sha\":\"1111111111111111111111111111111111111111\"},{\"sha\":\"2222222222222222222222222222222222222222\"},{\"sha\":\"3333333333333333333333333333333333333333\"}]}", promotionInputSchema()),
 		tool("promotion_list", "Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before (or next_cursor for a scoped uplink) as before for older records. Status comes from the committed promotion row, as in promote_status; remote ref equality alone never marks a pending record passed.", object(map[string]any{
@@ -715,7 +768,7 @@ func toolDefinitions() []map[string]any {
 			"before":     map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (an admission sequence) or next_cursor (a full promotion ID or unique hexadecimal prefix of at least 8 characters) from the previous page"},
 			"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Page size (default 50, maximum 200)"},
 		})),
-		tool("promote_status", "Wait for an append-only promotion record to become terminal. A failed or interrupted promotion that was retried names its successor in retried_as. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline.", object(map[string]any{"id": stringProperty("Full promotion ID or unique hexadecimal prefix (at least 8 characters)"), "timeout": timeoutProperty()}, "id")),
+		tool("promote_status", "Wait for an append-only promotion record to become terminal. A failed or interrupted promotion that was retried names its successor in retried_as. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline.", object(withTimeout(map[string]any{"id": stringProperty("Full promotion ID or unique hexadecimal prefix (at least 8 characters)")}, longPollTimeout()), "id")),
 		tool("promote_retry", "Retry a failed or interrupted promotion: a new promotion of the same repository, source SHA and target, merged onto the target's current head and re-tested like promote. After a transient push-only failure, an unchanged target reuses the exact tested SHA without repeating CI. Same authorization as promote; a grant is consumed only by a delivered promotion, so the original grant authorizes the retry. Refused while a promotion of the same tuple is pending or delivered, or when the source SHA's newest run is not green. Audited as promotion.retry.", object(map[string]any{"id": stringProperty("Full ID or unique hexadecimal prefix (at least 8 characters) of the failed or interrupted promotion")}, "id")),
 		tool("issue_create", "Create a manual issue, installation-wide or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "upstream": stringProperty("Upstream name to file the issue under (required for an uplink scoped to several upstreams)")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID. Full record by default for compatibility. Optional fields selects only named fields; body_limit caps retained body/occurrence-history bytes with an explicit truncated N bytes marker. The numeric occurrences count remains exact. Read-only; does not renew locks.", object(issueReadProperties("id", integerProperty("Issue ID")), "id")),
@@ -831,6 +884,8 @@ func toolDefinitions() []map[string]any {
 			"superseded": map[string]any{"type": "boolean", "description": "Only branch runs with newer queued or running work for the same repository, ref and schedule entry; tags and promotion attempts never qualify. Priority-protected runs and runs with pending publications can still match. False or omitted leaves the list unfiltered. Read only; review before explicit admin run_cancel."},
 			"status":     map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": 10}}, "description": "Filter by one existing display status or a list: queued, running, passed, failed, cancelled, superseded, infra-retried. Paging is unchanged; repeat the same filters on later pages."},
 			"ref":        stringProperty("Filter by branch or tag ref"),
+			"own":        map[string]any{"type": "boolean", "description": "Only runs this uplink pushed or triggered (actor is the caller's identity); paging is unchanged"},
+			"held":       map[string]any{"type": "boolean", "description": "Only running assisted runs with a parked retry attempt (hold) that no action released: one unpaged list, no before; service each with run_hold_list and run_hold_* before its abandon_at"},
 			"limit":      integerProperty("Maximum terminal runs per page (default 50, max 100); the first page also carries every queued and running run"),
 			"before":     map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (a run sequence) or next_cursor (a run ID) from the previous page"},
 			"view": map[string]any{"type": "string", "enum": []string{"all", "active", "history"}, "default": "all",
@@ -939,14 +994,25 @@ func executionPriorityProperty() map[string]any {
 	return map[string]any{"type": "string", "enum": []string{"low", "standard", "promotion", "high", "normal", "highest"}, "description": "Execution class low < standard < promotion < high. Deprecated aliases: normal=standard, highest=high. Promotion/high requests require unscoped-admin or unexpired grant authority; lowering an existing run requires the run_priority admin tool."}
 }
 
+// withTimeout adds a blocking tool's own bound as timeout_s, the one
+// documented spelling, and accepts timeout and timeout_seconds as aliases so
+// an agent that learned another tool is not refused; two different values
+// are refused.
+func withTimeout(properties map[string]any, bound map[string]any) map[string]any {
+	properties["timeout_s"] = bound
+	for _, alias := range []string{"timeout", "timeout_seconds"} {
+		properties[alias] = map[string]any{"type": "integer", "minimum": bound["minimum"], "maximum": bound["maximum"], "description": "Alias of timeout_s"}
+	}
+	return properties
+}
+
 // agentLoopToolDefinitions are the read-only MCP agent loop tools (#1514).
 func agentLoopToolDefinitions(tool func(string, string, map[string]any) map[string]any, object func(map[string]any, ...string) map[string]any, stringProperty func(string) map[string]any) []map[string]any {
 	return []map[string]any{
-		tool("run_wait", "Block server-side until one run finishes, holds a retry (assisted runs: a parked step waits for run_hold_*), or changes in any way, bounded by timeout_s (default and maximum 600). Returns state finished, held, changed or timeout with the run summary, its unreleased holds and retry_hint. Read-only; replaces client polling loops.", object(map[string]any{
-			"id":        stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
-			"until":     map[string]any{"type": "string", "enum": []string{"finished", "held", "any"}, "description": "finished (default): terminal status; held: a parked retry hold or terminal; any: any change of status, phase, failed step, error, assist record or holds"},
-			"timeout_s": map[string]any{"type": "integer", "minimum": 1, "maximum": 600, "description": "Wait bound in seconds (default 600)"},
-		}, "id")),
+		tool("run_wait", "Block server-side until one run finishes, holds a retry (assisted runs: a parked step waits for run_hold_*), or changes in any way, bounded by timeout_s (default and maximum 600). Returns state finished, held, changed or timeout with the run summary, its unreleased holds and retry_hint. Read-only; replaces client polling loops.", object(withTimeout(map[string]any{
+			"id":    stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+			"until": map[string]any{"type": "string", "enum": []string{"finished", "held", "any"}, "description": "finished (default): terminal status; held: a parked retry hold or terminal; any: any change of status, phase, failed step, error, assist record or holds"},
+		}, map[string]any{"type": "integer", "minimum": 1, "maximum": 600, "description": "Wait bound in seconds (default 600)"}), "id")),
 		tool("events_subscribe", "Set which agent events this MCP session receives as server push: a notifications/claude/channel message on the session's GET event stream (Claude Code shows it only in an interactive session started with --dangerously-load-development-channels server:<name>; otherwise use run_wait and events_since), and notifications/resources/updated for run://<id> resources the session subscribed. Kinds: run.finished (status, failed step, reason, retry_hint), run.held (step, pod, held_since, abandon_at, holds_in_run), run.hold_abandoned (step, pod, reason ttl, cap or the agent, held_since, abandoned_at, failed attempt and exit code), run.lock_wait (a native Argo lock wait past agentEvents.lockWaitThreshold, with the lock and its holders; lock Parallelism/workflow-controller with postponed true is a Workflow the Argo controller postponed for its parallelism), promotion.finished (with the prune_source outcome), release.published and publication.failed (final, or an automatic retry attempt). Without a call a session receives every kind for every repository in its uplink scope. Events carry a monotonically increasing id; delivery is at-least-once; after a reconnect resume with events_since. Read-only.", object(map[string]any{
 			"repos":     map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Repositories (qualified or unique names) in scope; empty: all"},
 			"refs_glob": stringProperty("Shell-style pattern on the ref, e.g. land/*; empty: all"),
@@ -961,6 +1027,15 @@ func agentLoopToolDefinitions(tool func(string, string, map[string]any) map[stri
 			"kinds":     map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"run.finished", "run.held", "run.hold_abandoned", "run.lock_wait", "promotion.finished", "release.published", "publication.failed"}}, "description": "Event kinds; empty: all"},
 			"own":       map[string]any{"type": "boolean", "description": "Only events about runs and promotions of this uplink"},
 		})),
+		tool("events_wait", "Block server-side until at least one agent event after after_id passes every filter (the caller's uplink scope, repos, refs_glob, kinds, own, run_ids), or until timeout_s (default and maximum 600). Returns the events_since page of the first match; pass next_after_id back as after_id for the next wait, so one call covers every run and every hold of a worker. On timeout: no events, timed_out true and next_after_id moved past every event scanned. Without after_id it waits for the next event. run_ids match run events only. Read-only.", object(withTimeout(map[string]any{
+			"after_id":  map[string]any{"type": "integer", "minimum": 0, "description": "Wait for events with a larger id; omitted: only events recorded after the call"},
+			"limit":     map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Page size before filtering (default 100)"},
+			"run_ids":   map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Only events about these runs (full IDs or unique prefixes of at least 8 characters); empty: all"},
+			"repos":     map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Repositories (qualified or unique names) in scope; empty: all"},
+			"refs_glob": stringProperty("Shell-style pattern on the ref, e.g. land/*; empty: all"),
+			"kinds":     map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"run.finished", "run.held", "run.hold_abandoned", "run.lock_wait", "promotion.finished", "release.published", "publication.failed"}}, "description": "Event kinds; empty: all"},
+			"own":       map[string]any{"type": "boolean", "description": "Only events about runs and promotions of this uplink"},
+		}, map[string]any{"type": "integer", "minimum": 1, "maximum": 600, "description": "Wait bound in seconds (default 600)"}))),
 		tool("sync_status", "Native Argo synchronization: the current holders and waiters of every semaphore and mutex observed on active runs (sampled every agentEvents.interval from Workflow status.synchronization), and of the Argo controller parallelism as Parallelism/workflow-controller (waiters are postponed Workflows, holders admitted ones), and the bounded stored history per lock: holder and waiter intervals, the maximum number of concurrent holders (proves two runs never overlapped) and wait durations. A scoped uplink sees only its own runs. Read-only.", object(map[string]any{
 			"lock":  stringProperty("One lock key, e.g. ConfigMap/oberth-sync-limits/kvm or Mutex/oberth-release; empty: all"),
 			"since": stringProperty("History window such as 6h or 7d (default 24h, maximum 30d)"),

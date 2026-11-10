@@ -148,6 +148,19 @@ unaffected.
   60 s).
 - `events_since {after_id, limit, repos?, refs_glob?, kinds?, own?}` pages the
   event log in ID order; continue with `next_after_id`.
+- `events_wait {after_id?, timeout_s, repos?, refs_glob?, kinds?, own?, run_ids?}`
+  blocks server-side, at most 600 s, until at least one event after `after_id`
+  passes the uplink scope and every filter, and returns that `events_since`
+  page; on timeout `timed_out` is true, `events` is empty and `next_after_id`
+  has moved past every event scanned. Without `after_id` it waits for the next
+  event. One loop of `events_wait` with the returned cursor covers every run
+  and hold of a worker, in sessions that receive no pushed events too. CLI:
+  `oberth events --since <id> --wait`, and `oberth run wait <id>` for one run.
+- Every blocking tool documents its bound as `timeout_s` and accepts
+  `timeout` and `timeout_seconds` as aliases; different values under two
+  spellings are refused.
+- `run_list {own: true}` keeps the caller's own runs; `run_list {held: true}`
+  lists the running assisted runs with a parked hold no action released.
 - `sync_status {lock?, since?, limit?}` returns, per native Argo lock key
   (`ConfigMap/<name>/<key>`, `Mutex/<name>`) and for the Argo controller's
   parallelism (`Parallelism/workflow-controller`: waiters are postponed

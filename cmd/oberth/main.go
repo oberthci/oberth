@@ -74,7 +74,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, client, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, client, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -121,10 +121,12 @@ Commands:
   fragments     Manage pipeline fragments
   artifacts     List and download build artifacts
   runs          List recent CI/CD runs, or cancel a ref's active runs
-  run           Show a run; retry, rerun at the same SHA, cancel one, or purge its retained logs/artifacts
+  run           Show or wait for a run; retry, rerun at the same SHA, cancel one, or purge its retained logs/artifacts
   promotion     Promote source commits as a train, or retry a failed promotion
   publication   Abandon a pending upstream publication (admin only)
   log           Show step logs for a run
+  events        Print agent events after a cursor, or wait for the next matching one
+  sync          Show native Argo semaphore and mutex holders and waiters (sync status)
   repos         List registered repositories
   issues        List and manage issues
   status        Show server status
@@ -187,6 +189,10 @@ Commands:
 		return runRemoteStatus(ctx, arguments[1:], output)
 	case "log":
 		return runRemoteLog(ctx, arguments[1:], output)
+	case "events":
+		return runEvents(ctx, arguments[1:], output)
+	case "sync":
+		return runSync(ctx, arguments[1:], output)
 	case "uplink":
 		return runUplink(ctx, arguments[1:], input, output)
 	case "access":

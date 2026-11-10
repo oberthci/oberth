@@ -1,16 +1,11 @@
 package installer
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/client"
@@ -173,41 +168,9 @@ func ownerOnlyTokenFile(path string) (string, error) {
 	return absolute, nil
 }
 
-// readClientEnvFile reads the export lines renderClientEnv writes.
-func readClientEnvFile(path string) map[string]string {
-	values := map[string]string{}
-	body, err := os.ReadFile(path) //nolint:gosec // G304: the client configuration this installer writes.
-	if err != nil {
-		return values
-	}
-	scanner := bufio.NewScanner(bytes.NewReader(body))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		name, value, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
-		if !ok || strings.HasPrefix(line, "#") || !strings.HasPrefix(name, "OBERTH_") {
-			continue
-		}
-		if unquoted, err := strconv.Unquote(value); err == nil {
-			value = unquoted
-		}
-		values[name] = strings.TrimSpace(value)
-	}
-	return values
-}
+// readClientEnvFile reads the export lines renderClientEnv writes, with the
+// same reader the remote commands use (client.ResolveConnection).
+func readClientEnvFile(path string) map[string]string { return client.ReadConfigEnv(path) }
 
 // mcpConfigURL reads the endpoint from the mcp.json `oberth install` writes.
-func mcpConfigURL(path string) string {
-	body, err := os.ReadFile(path) //nolint:gosec // G304: the client configuration this installer writes.
-	if errors.Is(err, fs.ErrNotExist) || err != nil {
-		return ""
-	}
-	var document struct {
-		MCPServers map[string]struct {
-			URL string `json:"url"`
-		} `json:"mcpServers"`
-	}
-	if json.Unmarshal(body, &document) != nil {
-		return ""
-	}
-	return document.MCPServers[claudeCodeServerName].URL
-}
+func mcpConfigURL(path string) string { return client.ConfigMCPURL(path) }

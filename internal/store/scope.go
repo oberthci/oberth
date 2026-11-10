@@ -41,6 +41,17 @@ func repoRestriction(column string, ids []int64) (string, []any) {
 	return " AND " + column + " IN (" + placeholders + ")", args
 }
 
+// runRestriction narrows a run list to the filter's repositories and, when
+// Actor is set, to the runs that identity pushed or triggered.
+func runRestriction(filter model.RunListFilter) (string, []any) {
+	restriction, args := repoRestriction("repo_id", filter.RepoIDs)
+	if filter.Actor != "" {
+		restriction += " AND actor = ?"
+		args = append(args, filter.Actor)
+	}
+	return restriction, args
+}
+
 func normalizeUplinkScopes(scopes []string) ([]string, error) {
 	if len(scopes) > maximumUplinkScopes {
 		return nil, fmt.Errorf("%w: at most %d uplink scopes", ErrInvalid, maximumUplinkScopes)

@@ -27,7 +27,7 @@ func TestReadmeMCPToolsMatchRegistry(t *testing.T) {
 	end := start + offset
 	if os.Getenv("OBERTH_UPDATE_TOOL_REFERENCE") == "1" {
 		var table strings.Builder
-		table.WriteString("## MCP tools\n\nThe authenticated `tools/list` response is the authoritative registry.\nList it with `oberth mcp tools`; available operations are:\n\n| Tool | Description |\n|------|-------------|\n")
+		table.WriteString("## MCP tools\n\nThe authenticated `tools/list` response is the authoritative registry.\nList it with `oberth mcp tools`. A non-admin token is not shown the admin-only\ntools (a call to one is still refused by the server); available operations are:\n\n| Tool | Description |\n|------|-------------|\n")
 		for _, tool := range toolDefinitions() {
 			description := strings.ReplaceAll(tool["description"].(string), "\n", " ")
 			description = strings.ReplaceAll(description, "|", "&#124;")

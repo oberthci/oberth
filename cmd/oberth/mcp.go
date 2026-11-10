@@ -145,9 +145,11 @@ Environment:
   OBERTH_TOKEN          Bearer token for authentication
   OBERTH_TOKEN_COMMAND  Command that prints a token when OBERTH_TOKEN is unset
   OBERTH_CA_CERT        Inline PEM or CA certificate file path (overridden by --ca-file)
+  Unset, each falls back to the client files oberth install writes in
+  ~/.config/oberth (env, mcp.json, ca.crt, token), as for every remote command.
 
 Flags:
-  --url <url>          MCP server URL
+  --url <url>          Server address or its /mcp endpoint
   --token-file <path>  Path to a file containing the bearer token (0600)
   --ca-file <path>     PEM CA certificate for TLS verification
   --timeout <duration> Client deadline override (e.g. 90s or 11m); by default
@@ -326,7 +328,6 @@ type mcpFlagResult struct {
 // is the expected count of positional arguments, or -1 for any count.
 func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlagResult, error) {
 	var result mcpFlagResult
-	var tokenFile string
 	var timeoutFlag string
 	var timeoutSet bool
 	var reconnectFlag string
@@ -334,9 +335,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 	var positional []string
 
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
-	flags.StringVar(&result.URL, "url", "", "MCP URL")
-	flags.StringVar(&tokenFile, "token-file", "", "token file")
-	flags.StringVar(&result.CAFile, "ca-file", "", "CA file")
+	transport := registerTransportFlags(flags)
 	flags.StringVar(&timeoutFlag, "timeout", "", "positive request duration")
 	flags.StringVar(&reconnectFlag, "reconnect-window", "", "positive reconnect duration")
 	flags.StringVar(&result.argsFile, "args-file", "", "JSON file or - for stdin")
@@ -380,49 +379,14 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		result.reconnectWindow = parsed
 	}
 
-	// Resolve URL.
-	if result.URL == "" {
-		result.URL = strings.TrimSpace(os.Getenv("OBERTH_MCP_URL"))
-	}
-	if baseURL := strings.TrimSpace(os.Getenv("OBERTH_BASE_URL")); result.URL == "" && baseURL != "" {
-		result.URL = strings.TrimRight(baseURL, "/") + "/mcp"
-	}
-	if result.URL == "" {
-		return result, errors.New("set --url, OBERTH_MCP_URL, or OBERTH_BASE_URL to the operator's MCP server")
-	}
-	if _, err := client.ValidateServerURL(result.URL); err != nil {
+	// One resolver for every remote command: flag, then environment, then
+	// the client files oberth install writes.
+	connection, err := client.ResolveConnection(*transport)
+	if err != nil {
 		return result, err
 	}
-	environment := client.FromEnv()
-	if result.CAFile == "" {
-		result.CAFile = environment.CACert
-	}
-
-	// Resolve token.
-	if tokenFile != "" {
-		info, err := os.Stat(tokenFile) //nolint:gosec // G703: operator-supplied --token-file path.
-		if err != nil {
-			return result, fmt.Errorf("token file: %w", err)
-		}
-		perm := info.Mode().Perm()
-		if perm&0o077 != 0 {
-			return result, fmt.Errorf("token file %s has mode %04o; expected 0600 (no group/other access)", tokenFile, perm)
-		}
-		data, err := os.ReadFile(tokenFile) //nolint:gosec // G304: operator-supplied path.
-		if err != nil {
-			return result, fmt.Errorf("read token file: %w", err)
-		}
-		result.Token = strings.TrimSpace(string(data))
-		if result.Token == "" {
-			return result, fmt.Errorf("token file %s is empty", tokenFile)
-		}
-	} else {
-		result.Token = environment.Token
-		result.TokenCommand = environment.TokenCommand
-	}
-	if result.Token == "" && result.TokenCommand == "" {
-		return result, errors.New("set OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, or use --token-file to authenticate")
-	}
+	result.URL, result.CAFile = connection.MCPURL, connection.CACert
+	result.Token, result.TokenCommand, result.TokenEnv = connection.Token, connection.TokenCommand, connection.TokenFromEnvironment
 
 	result.Version = version
 	return result, nil
@@ -522,7 +486,7 @@ func mcpRetryBody(ctx context.Context, request jsonRPCRequest, toolTimeout time.
 // mutation gate and changes no durable state, so a lost reply can be asked
 // again. Unknown tools fail closed.
 var mcpReconnectableTools = map[string]bool{
-	"wait": true, "run_wait": true, "events_since": true, "run_hold_list": true, "status": true, "logs": true, "system_status": true,
+	"wait": true, "run_wait": true, "events_since": true, "events_wait": true, "sync_status": true, "run_hold_list": true, "status": true, "logs": true, "system_status": true,
 	"run_get": true, "run_logs": true, "run_resources": true, "run_list": true, "artifacts": true, "artifact_get": true,
 	"promote_status": true, "promotion_list": true, "promote_grant_list": true,
 	"repo_usage": true, "repo_list": true, "issue_get": true, "issue_get_many": true, "issue_list": true,

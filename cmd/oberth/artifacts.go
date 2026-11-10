@@ -19,6 +19,7 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 	var outputPath string
 	flags.StringVar(&outputPath, "output", "", "save the artifact to this file (written atomically, digest-verified)")
 	flags.StringVar(&outputPath, "o", "", "shorthand for --output")
+	transport := registerTransportFlags(flags)
 	flags.Usage = func() {
 		_, _ = fmt.Fprintln(flags.Output(), "Usage: oberth artifacts <run-id> [name] [--output FILE]\nLists a run's artifacts, or writes one artifact to stdout or --output.")
 		flags.PrintDefaults()
@@ -49,11 +50,19 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 			localForced = true
 		}
 	})
-	if config := client.FromEnv(); config.Configured() && !localForced {
-		return remoteArtifacts(ctx, config, rest, outputPath, output)
+	// Without --data-root the server named by the transport flags, the
+	// environment or the client files is read; only when none names one
+	// does the command read the local store (in-pod).
+	connection, resolveErr := client.ResolveConnection(*transport)
+	remote := !errors.Is(resolveErr, client.ErrNotConfigured)
+	if remote && !localForced {
+		if resolveErr != nil {
+			return resolveErr
+		}
+		return remoteArtifacts(ctx, connection.Config(), rest, outputPath, output)
 	}
-	if localForced && client.FromEnv().Configured() {
-		fmt.Fprintf(os.Stderr, "note: --data-root overrides OBERTH_BASE_URL; reading local store\n")
+	if localForced && remote {
+		fmt.Fprintf(os.Stderr, "note: --data-root overrides the configured server; reading local store\n")
 	}
 	reportMode("local store")
 	store, err := artifacts.Open(*dataRoot + "/artifacts")

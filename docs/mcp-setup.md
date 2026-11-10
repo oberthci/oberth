@@ -69,6 +69,22 @@ sequence number.
 
 ## 2. Configure Claude Code
 
+### As a plugin
+
+The repository is also a Claude Code plugin marketplace. Its `oberth` plugin
+registers the MCP server (`type: http`, `timeout: 630000`) with a
+headersHelper that reads the token from `OBERTH_TOKEN_COMMAND` or the
+owner-only `~/.config/oberth/token`, and adds the `oberth-agent-loop` skill
+(waiting with `run_wait`/`events_wait`, servicing holds before `abandon_at`,
+assisted runs are never evidence). The URL is `OBERTH_MCP_URL`, by default
+`https://localhost:30443/mcp`; Claude Code must trust the server's CA, as
+below.
+
+```bash
+claude plugin marketplace add <path or git URL of the oberth repository>
+claude plugin install oberth@oberth
+```
+
 ### `oberth client setup`
 
 On any machine that holds the token (in `~/.config/oberth/token`, mode 0600,
@@ -262,6 +278,11 @@ call the proxy hostname directly.
 
 ## MCP tools
 
+`tools/list` shows a non-admin token only the tools it may call: the
+admin-only tools (uplink, access, grant, queue, archive, prune, outbox, audit,
+schedule actions and the secret store) are listed for admin tokens. A call to
+one with a non-admin token is still answered with the server's refusal.
+
 | Tool | Description |
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
@@ -279,6 +300,7 @@ call the proxy hostname directly.
 | `run_wait` | Block server-side until one run (`id`) finishes, holds a retry, or changes at all (`until`: `finished`, `held`, `any`), bounded by `timeout_s` (default and maximum 600); returns `state` (`finished`, `held`, `changed`, `timeout`), the run summary, unreleased holds and `retry_hint`. See [agent events](agent-events.md) |
 | `events_subscribe` | Narrow the agent events this MCP session receives as server push (`repos`, `refs_glob`, `kinds`, `own`); without a call a session receives every kind in its uplink scope. Kinds: `run.finished`, `run.held`, `run.lock_wait`, `promotion.finished`, `release.published`, `publication.failed`. See [agent events](agent-events.md) |
 | `events_since` | Agent events after a cursor (`after_id`, `limit`, same filters), in id order, scoped to the uplink; `next_after_id` continues, `gap` reports pruned history |
+| `events_wait` | Block server-side until at least one agent event after `after_id` (omitted: the next event) passes the uplink scope and the filters (`repos`, `refs_glob`, `kinds`, `own`, `run_ids`), bounded by `timeout_s` (default and maximum 600); returns the `events_since` page of the first match, or `timed_out` with `next_after_id` past every event scanned. One call covers every run and hold of a worker. See [agent events](agent-events.md) |
 | `sync_status` | Native Argo semaphore and mutex holders and waiters now, and the stored history per lock: intervals, maximum concurrent holders, wait durations (`lock`, `since`, `limit`); scoped uplinks see their own runs only |
 | `run_purge` | Purge retained logs, artifacts or both for a terminal run; requires an unscoped admin uplink and `id`, `what`, `reason`. Active runs and protected release/promotion/issue/grant evidence are refused. Run/step history remains; audited purge markers identify the actor and date |
 | `run_logs` | One exact burn/step log by full run ID or unique 8+ character prefix; defaults to the last 200 lines without explicit filters |
@@ -490,7 +512,7 @@ step: a single step can exceed a model's context window.
 | `branch_deletion_list` | Upstream state of accepted branch deletions: pending, propagated, failed or skipped, with global `counts` and per-page `page_counts` (unscoped admin only) |
 | `branch_deletion_resolve` | Close failed branch deletion records as skipped with a reason line, by id or (without ids) those whose branch is gone from the mirror; no ref changes; audited (unscoped admin only) |
 | `receive_outbox` | Show, retry or abandon a receive record that blocks its repository; retry/abandon audited (unscoped admin only) |
-| `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page) |
+| `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page); `own:true` keeps the caller's own runs, `held:true` the running assisted runs with a parked hold (one unpaged list) |
 | `audit_list` | Admin-only: verified audit-chain entries newest first, filtered by action prefix, actor, repo and time range (paged) |
 | `schedule_list` | Schedules declared in `.oberth/schedule.yaml`: cron, next run, last outcome, pause (scoped uplinks see their repositories) |
 | `schedule_pause` | Admin-only: pause one schedule entry (audited `schedule.pause`) |
@@ -889,10 +911,12 @@ establish the cause of historical uncorrelated 502 or QUIC failures.
 
 `oberth mcp call` derives its client deadline from the tool's own timeout
 argument plus 30 seconds, with a minimum of 60 seconds. The argument is the one
-the tool's schema declares (`timeout` for `wait` and `promote_status`,
-`timeout_s` for `run_wait`, `timeout_seconds` for `run_hold_exec`); when it is
-omitted or zero the CLI uses the bound the schema gives for that tool. `wait`,
-`promote_status` and `run_wait` default to 600 seconds, so their default client
+the tool's schema declares. Every blocking tool (`wait`, `promote_status`,
+`run_wait`, `events_wait`, `run_hold_exec`) documents `timeout_s` and accepts
+`timeout` and `timeout_seconds` as aliases; two spellings with different
+values are refused. When it is omitted or zero the CLI uses the bound the
+schema gives for that tool. `wait`, `promote_status`, `run_wait` and
+`events_wait` default to 600 seconds, so their default client
 deadline is 630 seconds; `run_hold_exec` allows for the longest configurable
 `assist.execTimeout` (900 seconds, deadline 930 seconds). The server rejects
 long-poll timeouts above 600 seconds. Tools without a timeout argument keep the
@@ -1022,16 +1046,18 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **92 tools**, including administrator-only
-`publication_abandon`.
+The current MCP surface has **93 tools**, including administrator-only
+`publication_abandon`; a non-admin token's `tools/list` omits the
+administrator-only ones.
 
-The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
-`/mcp` appended). `OBERTH_TOKEN_COMMAND` and
-`OBERTH_CA_CERT` follow the installer environment; explicit flags take
-precedence. With no configured endpoint, the CLI refuses before reading a
-credential file, running a token command or creating a transport. There is no
-hosted fallback: load the installer-provided environment or set the URL
-explicitly. This credential-safety change also applies to older scripts.
+The CLI uses `--url` (the base address or the `/mcp` endpoint),
+`OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with `/mcp` appended), then the client
+files `oberth install` writes (`~/.config/oberth/env`, `mcp.json`, `ca.crt`,
+`token`); the REST commands resolve the same way
+([remote CLI](remote-cli.md#configuration)). Explicit flags take precedence,
+then the environment, then the files. With no configured endpoint, the CLI
+refuses before reading a credential file, running a token command or creating
+a transport. There is no hosted fallback. This credential-safety change also applies to older scripts.
 MCP and REST both refuse plain HTTP except to
 `localhost`, `127.0.0.1`, or `::1`, before resolving credentials. Redirects
 cannot downgrade HTTPS to HTTP.

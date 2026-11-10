@@ -1,0 +1,115 @@
+package client
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// isolate clears every connection variable and points the client files at
+// an empty directory, returning that directory.
+func isolate(t *testing.T) string {
+	t.Helper()
+	for _, name := range []string{"OBERTH_BASE_URL", "OBERTH_MCP_URL", "OBERTH_TOKEN", "OBERTH_TOKEN_COMMAND", "OBERTH_CA_CERT"} {
+		t.Setenv(name, "")
+	}
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	directory := filepath.Join(root, "oberth")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func write(t *testing.T, path, body string, mode os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveConnectionNamesEveryWayWhenNothingIsConfigured(t *testing.T) {
+	isolate(t)
+	_, err := ResolveConnection(ConnectionFlags{})
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("err = %v", err)
+	}
+	for _, want := range []string{"--url", "OBERTH_BASE_URL", "OBERTH_TOKEN_COMMAND", "~/.config/oberth"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not name %s: %v", want, err)
+		}
+	}
+}
+
+// The files oberth install writes are enough: env names the server and the
+// token command, ca.crt the CA; a saved token file serves without either.
+func TestResolveConnectionReadsTheClientFiles(t *testing.T) {
+	directory := isolate(t)
+	write(t, filepath.Join(directory, "ca.crt"), "pem", 0o644)
+	write(t, filepath.Join(directory, "token"), "file-token\n", 0o600)
+	connection, err := ResolveConnection(ConnectionFlags{})
+	if !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("a token alone named a server: %+v %v", connection, err)
+	}
+	write(t, filepath.Join(directory, "mcp.json"), `{"mcpServers":{"oberth":{"type":"http","url":"https://ci.example.test:30443/mcp"}}}`, 0o644)
+	connection, err = ResolveConnection(ConnectionFlags{})
+	if err != nil || connection.BaseURL != "https://ci.example.test:30443" || connection.MCPURL != "https://ci.example.test:30443/mcp" ||
+		connection.Token != "file-token" || connection.CACert != filepath.Join(directory, "ca.crt") {
+		t.Fatalf("mcp.json + token = %+v %v", connection, err)
+	}
+	write(t, filepath.Join(directory, "env"), "export OBERTH_BASE_URL=\"https://env.example.test:30443\"\nexport OBERTH_TOKEN_COMMAND=\"printf env-token\"\nexport OBERTH_CA_CERT=\"/env/ca.crt\"\n", 0o644)
+	connection, err = ResolveConnection(ConnectionFlags{})
+	if err != nil || connection.BaseURL != "https://env.example.test:30443" || connection.MCPURL != "https://env.example.test:30443/mcp" ||
+		connection.Token != "" || connection.TokenCommand != "printf env-token" || connection.CACert != "/env/ca.crt" {
+		t.Fatalf("env file = %+v %v", connection, err)
+	}
+}
+
+// Precedence per setting: flag, then environment, then the client files.
+func TestResolveConnectionPrecedenceFlagEnvironmentFiles(t *testing.T) {
+	directory := isolate(t)
+	write(t, filepath.Join(directory, "env"), "export OBERTH_BASE_URL=\"https://file.example.test\"\nexport OBERTH_TOKEN_COMMAND=\"printf file\"\n", 0o644)
+	t.Setenv("OBERTH_BASE_URL", "https://env.example.test:8443")
+	t.Setenv("OBERTH_TOKEN", "env-token")
+	t.Setenv("OBERTH_CA_CERT", "/env/ca.crt")
+	connection, err := ResolveConnection(ConnectionFlags{})
+	if err != nil || connection.BaseURL != "https://env.example.test:8443" || connection.MCPURL != "https://env.example.test:8443/mcp" ||
+		connection.Token != "env-token" || !connection.TokenFromEnvironment || connection.CACert != "/env/ca.crt" {
+		t.Fatalf("environment = %+v %v", connection, err)
+	}
+	t.Setenv("OBERTH_MCP_URL", "https://proxy.example.test/oberth/mcp")
+	if connection, err = ResolveConnection(ConnectionFlags{}); err != nil || connection.MCPURL != "https://proxy.example.test/oberth/mcp" || connection.BaseURL != "https://env.example.test:8443" {
+		t.Fatalf("both variables = %+v %v", connection, err)
+	}
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	write(t, tokenFile, "flag-token", 0o600)
+	connection, err = ResolveConnection(ConnectionFlags{URL: "https://flag.example.test:30443/mcp", TokenFile: tokenFile, CAFile: "/flag/ca.crt"})
+	if err != nil || connection.BaseURL != "https://flag.example.test:30443" || connection.MCPURL != "https://flag.example.test:30443/mcp" ||
+		connection.Token != "flag-token" || connection.TokenFromEnvironment || connection.CACert != "/flag/ca.crt" {
+		t.Fatalf("flags = %+v %v", connection, err)
+	}
+	if connection, err = ResolveConnection(ConnectionFlags{URL: "https://flag.example.test:30443/"}); err != nil || connection.MCPURL != "https://flag.example.test:30443/mcp" {
+		t.Fatalf("base address flag = %+v %v", connection, err)
+	}
+}
+
+func TestResolveConnectionRefusesUnsafeTokenFilesAndCleartext(t *testing.T) {
+	directory := isolate(t)
+	write(t, filepath.Join(directory, "token"), "file-token", 0o644)
+	if _, err := ResolveConnection(ConnectionFlags{URL: "https://ci.example.test"}); err == nil || !strings.Contains(err.Error(), "0600") {
+		t.Fatalf("group-readable saved token = %v", err)
+	}
+	if err := os.Remove(filepath.Join(directory, "token")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveConnection(ConnectionFlags{URL: "https://ci.example.test"}); err == nil || !strings.Contains(err.Error(), "no Oberth credential") {
+		t.Fatalf("no credential = %v", err)
+	}
+	t.Setenv("OBERTH_TOKEN", "x")
+	if _, err := ResolveConnection(ConnectionFlags{URL: "http://ci.example.test"}); err == nil || !strings.Contains(err.Error(), "cleartext") {
+		t.Fatalf("plain http = %v", err)
+	}
+}

@@ -48,6 +48,9 @@ install
 issues
 issues update
 log
+events
+sync
+sync status
 mcp
 mcp call
 mcp tools
@@ -82,6 +85,7 @@ resource revoke
 restore
 run
 run cancel
+run wait
 run hold
 run hold abandon
 run hold continue

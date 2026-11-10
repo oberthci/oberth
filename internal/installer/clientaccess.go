@@ -17,6 +17,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/client"
 )
 
 // Client access is offered here, immediately after the uplink is registered,
@@ -333,20 +335,11 @@ func (deps Deps) clientConfigRoot() (string, error) {
 	return clientConfigRoot()
 }
 
-// clientConfigRoot honours XDG_CONFIG_HOME and otherwise uses ~/.config on both
-// macOS and Linux. os.UserConfigDir would return ~/Library/Application Support
-// on macOS, which is right for an application and wrong for something an
-// operator edits and sources from a shell profile.
-func clientConfigRoot() (string, error) {
-	if base := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); base != "" {
-		return filepath.Join(base, "oberth"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "oberth"), nil
-}
+// clientConfigRoot is client.ConfigDir: XDG_CONFIG_HOME, else ~/.config on
+// both macOS and Linux. os.UserConfigDir would return ~/Library/Application
+// Support on macOS, which is right for an application and wrong for something
+// an operator edits and sources from a shell profile.
+func clientConfigRoot() (string, error) { return client.ConfigDir() }
 
 // displayPath shortens a path under the home directory to ~/..., because an
 // absolute path to a home directory is noise in a terminal.

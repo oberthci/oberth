@@ -31,7 +31,7 @@ func toolOutputSchema(name string) map[string]any {
 		collection = "uplinks"
 	case "audit_list":
 		collection = "entries"
-	case "events_since":
+	case "events_since", "events_wait":
 		collection = "events"
 	case "sync_status":
 		collection = "locks"

@@ -14,7 +14,7 @@ import (
 // --json on every command without saying where it goes, and the end is where
 // it gets typed.
 func TestFlagsAreAcceptedAfterPositionals(t *testing.T) {
-	flags, asJSON, err := remoteFlags("run", []string{"abc123", "--json"}, io_Discard{})
+	flags, asJSON, _, err := remoteFlags("run", []string{"abc123", "--json"}, io_Discard{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestFlagsAreAcceptedAfterPositionals(t *testing.T) {
 }
 
 func TestFlagsBeforePositionalsStillWork(t *testing.T) {
-	flags, asJSON, err := remoteFlags("run", []string{"--json", "abc123"}, io_Discard{})
+	flags, asJSON, _, err := remoteFlags("run", []string{"--json", "abc123"}, io_Discard{})
 	if err != nil || !*asJSON || flags.Arg(0) != "abc123" {
 		t.Fatalf("asJSON=%v args=%v err=%v", asJSON, flags.Args(), err)
 	}

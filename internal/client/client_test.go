@@ -33,14 +33,14 @@ func clearEnv(t *testing.T) {
 	}
 }
 
-func TestConfiguredReportsWhetherAServerIsSet(t *testing.T) {
+func TestFromEnvReadsTheServerAddress(t *testing.T) {
 	clearEnv(t)
-	if FromEnv().Configured() {
-		t.Fatal("configured with no base URL")
+	if FromEnv().BaseURL != "" {
+		t.Fatal("an address with no OBERTH_BASE_URL")
 	}
 	t.Setenv("OBERTH_BASE_URL", "https://oberth.example")
-	if !FromEnv().Configured() {
-		t.Fatal("not configured with a base URL set")
+	if FromEnv().BaseURL != "https://oberth.example" {
+		t.Fatal("OBERTH_BASE_URL not read")
 	}
 }
 

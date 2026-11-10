@@ -254,6 +254,9 @@ type RunListFilter struct {
 	// Terminal keeps only finished runs (passed, failed, interrupted): the
 	// history view, which never repeats an active run.
 	Terminal bool
+	// Actor, when set, keeps only runs whose actor is this uplink identity
+	// (run_list own).
+	Actor string
 }
 
 // RunCounts is the number of retained runs, in total and per repository ID.

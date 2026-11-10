@@ -34,9 +34,13 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 			Repo    string `json:"repo"`
 			SHA     string `json:"sha"`
 			Trigger string `json:"trigger"`
-			Timeout int    `json:"timeout"`
+			timeoutArguments
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		timeout, err := arguments.seconds()
+		if err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(arguments.ID) == "" && strings.TrimSpace(arguments.SHA) == "" {
@@ -47,9 +51,9 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 			if arguments.Repo != "" || arguments.SHA != "" || arguments.Trigger != "" {
 				return nil, fmt.Errorf("%w: id cannot be combined with repo, sha, or trigger", ErrInvalidInput)
 			}
-			prepared, err = service.prepareWaitRunID(ctx, arguments.ID, arguments.Timeout)
+			prepared, err = service.prepareWaitRunID(ctx, arguments.ID, timeout)
 		} else {
-			prepared, err = service.prepareWaitRun(ctx, arguments.Repo, arguments.SHA, arguments.Trigger, arguments.Timeout, actor.Identity)
+			prepared, err = service.prepareWaitRun(ctx, arguments.Repo, arguments.SHA, arguments.Trigger, timeout, actor.Identity)
 		}
 		if err != nil {
 			return nil, err
@@ -60,13 +64,17 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		}, nil
 	case "promote_status":
 		var arguments struct {
-			ID      string `json:"id"`
-			Timeout int    `json:"timeout"`
+			ID string `json:"id"`
+			timeoutArguments
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		prepared, err := service.prepareWaitPromotion(ctx, arguments.ID, arguments.Timeout)
+		timeout, err := arguments.seconds()
+		if err != nil {
+			return nil, err
+		}
+		prepared, err := service.prepareWaitPromotion(ctx, arguments.ID, timeout)
 		if err != nil {
 			return nil, err
 		}
@@ -76,6 +84,15 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		}, nil
 	case "run_wait":
 		prepared, err := service.prepareRunWait(ctx, raw)
+		if err != nil {
+			return nil, err
+		}
+		return func(ctx context.Context) (any, error) {
+			response, err := prepared(ctx)
+			return response, toolSelectorError(raw, err)
+		}, nil
+	case "events_wait":
+		prepared, err := service.prepareEventsWait(ctx, actor, raw)
 		if err != nil {
 			return nil, err
 		}

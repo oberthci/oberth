@@ -50,7 +50,7 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 	if err != nil {
 		return nil, err
 	}
-	restriction, args := repoRestriction("repo_id", filter.RepoIDs)
+	restriction, args := runRestriction(filter)
 	params := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, args...)
 	params = append(params, statusArgs...)
 	params = append(params, beforeID, MaxActiveRuns, beforeID, beforeTime, beforeTime, beforeID, pageLimit(filter.Limit))

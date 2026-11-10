@@ -43,8 +43,6 @@ func FromEnv() Config {
 	}
 }
 
-func (config Config) Configured() bool { return config.BaseURL != "" }
-
 // ResolveToken shares credential precedence between REST and MCP clients.
 // The caller's context bounds execution of an operator-configured command.
 func (config Config) ResolveToken(ctx context.Context) (string, error) {

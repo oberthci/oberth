@@ -14,6 +14,23 @@ variables into your shell profile:
 . ~/.config/oberth/env
 ```
 
+Sourcing it is optional: every remote command, the REST reads (`runs`,
+`run`, `log`, `repos`, `issues`, `status`, `artifacts`, `run resources`) and
+the MCP-backed ones (`mcp call`, `run wait`, `events`, `run hold`, `admission`
+and the rest) resolves the server the same way, one setting at a time:
+
+- Server: `--url`; `OBERTH_MCP_URL` / `OBERTH_BASE_URL`; `OBERTH_BASE_URL`
+  in `~/.config/oberth/env`; the url in `~/.config/oberth/mcp.json`.
+- Token: `--token-file` (mode 0600); `OBERTH_TOKEN`; `OBERTH_TOKEN_COMMAND`;
+  `OBERTH_TOKEN_COMMAND` in the env file; `~/.config/oberth/token` (mode 0600).
+- CA: `--ca-file`; `OBERTH_CA_CERT`; `OBERTH_CA_CERT` in the env file;
+  `~/.config/oberth/ca.crt`.
+
+`--url` takes the server's base address or its `/mcp` endpoint; either
+command family derives the other form. `XDG_CONFIG_HOME` replaces
+`~/.config`. With none of them set, a command says so and names the three
+ways.
+
 The rest of this section is what that file contains and why.
 
 | Variable | Meaning |
@@ -26,8 +43,7 @@ The rest of this section is what that file contains and why.
 A token of an upstream-scoped uplink reads only its upstreams' runs, issues
 and repositories; see [Limit an uplink to some upstreams](mcp-setup.md#limit-an-uplink-to-some-upstreams).
 
-Oberth never writes a token to disk. There is no config file and no
-`oberth login`. `OBERTH_TOKEN_COMMAND` exists so the token can come from a
+Oberth never writes a token to disk. There is no `oberth login`. `OBERTH_TOKEN_COMMAND` exists so the token can come from a
 password manager or the system keychain without ever landing in a file:
 
 ```
@@ -46,6 +62,9 @@ to exactly that file (mode 0600; a different token already there is kept as
 ```
 oberth runs [--repo NAME] [--ref REF] [--limit N] [--before CURSOR] [--all] [--json]
 oberth run <run-id>
+oberth run wait <run-id> [--until finished|held|any] [--timeout SECONDS] [--json]
+oberth events [--since ID] [--wait] [--timeout SECONDS] [--kind K]... [--repo R]... [--run ID]... [--own] [--json]
+oberth sync status [--lock KEY] [--since 24h] [--json]
 oberth run retry <run-id> [--json]
 oberth run rerun <run-id> [--reason TEXT] [--force] [--json]
 oberth run cancel <run-id> [--reason TEXT] [--force] [--json]

@@ -72,6 +72,9 @@ type RunFilter struct {
 	// terminal-only paging; "active" is the unpaged compatibility view of
 	// non-terminal runs.
 	View string
+	// Actor keeps only runs whose actor is this uplink identity: run_list
+	// own:true sets it to the caller.
+	Actor string
 }
 
 // Run list views accepted by RunFilter.View.

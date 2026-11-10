@@ -417,6 +417,8 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"run_wait", map[string]any{"id": hiddenRun.ID, "timeout_s": 1}, map[string]any{"id": missingRunID, "timeout_s": 1}},
 		{"events_subscribe", map[string]any{"repos": []string{hiddenRepo}}, map[string]any{"repos": []string{missingRepo}}},
 		{"events_since", map[string]any{"repos": []string{hiddenRepo}}, map[string]any{"repos": []string{missingRepo}}},
+		{"events_wait", map[string]any{"repos": []string{hiddenRepo}, "timeout_s": 1}, map[string]any{"repos": []string{missingRepo}, "timeout_s": 1}},
+		{"events_wait", map[string]any{"run_ids": []string{hiddenRun.ID}, "timeout_s": 1}, map[string]any{"run_ids": []string{missingRunID}, "timeout_s": 1}},
 		{"run_hold_exec", map[string]any{"id": hiddenRun.ID, "argv": []string{"true"}}, map[string]any{"id": missingRunID, "argv": []string{"true"}}},
 		{"run_hold_patch", map[string]any{"id": hiddenRun.ID, "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"}, map[string]any{"id": missingRunID, "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"}},
 		{"run_continue", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
@@ -714,7 +716,7 @@ var toolScopeBehaviour = map[string]string{
 	"branch_delete_many": "refused", "branch_deletion_list": "refused", "branch_deletion_resolve": "refused", "ref_delete_many": "refused", "receive_outbox": "refused",
 	"secretstore_verify": "refused", "secretstore_plan": "refused", "secretstore_sync_receipt": "refused",
 	"audit_list": "refused",
-	"run_wait":   "lookup", "events_subscribe": "lookup", "events_since": "filtered", "sync_status": "filtered",
+	"run_wait":   "lookup", "events_subscribe": "lookup", "events_since": "filtered", "events_wait": "filtered", "sync_status": "filtered",
 }
 
 // A new tool must be classified here AND covered by the behaviour tests:

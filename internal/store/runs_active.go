@@ -31,7 +31,7 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	if err != nil {
 		return nil, err
 	}
-	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	restriction, restrictionArgs := runRestriction(filter)
 	restriction += statusSQL
 	restrictionArgs = append(restrictionArgs, statusArgs...)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)

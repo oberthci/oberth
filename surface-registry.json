@@ -167,6 +167,50 @@
     "env:OBERTH_GO_FIELD_NAMES": {
       "doc_anchor": "docs/api-compatibility.md#go-style-field-names",
       "test_ref": "cmd/oberth/mcp_go_field_names_test.go TestMCPGoFieldNamesOptIn"
+    },
+    "flag:json": {
+      "doc_anchor": "docs/remote-cli.md#configuration",
+      "test_ref": "cmd/oberth/transport_test.go TestRESTAndMCPCommandsShareTheTransportFlags"
+    },
+    "flag:limit": {
+      "doc_anchor": "docs/remote-cli.md#configuration",
+      "test_ref": "cmd/oberth/issue_paging_review_test.go TestIssuesCLIReadsAllPages"
+    },
+    "flag:all": {
+      "doc_anchor": "docs/remote-cli.md#configuration",
+      "test_ref": "cmd/oberth/issue_paging_review_test.go TestIssuesCLIReadsAllPages"
+    },
+    "flag:lock": {
+      "doc_anchor": "docs/agent-events.md#tools",
+      "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
+    },
+    "flag:own": {
+      "doc_anchor": "docs/agent-events.md#tools",
+      "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
+    },
+    "flag:ref-glob": {
+      "doc_anchor": "docs/agent-events.md#tools",
+      "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
+    },
+    "flag:since": {
+      "doc_anchor": "docs/agent-events.md#tools",
+      "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
+    },
+    "flag:timeout": {
+      "doc_anchor": "docs/agent-events.md#tools",
+      "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
+    },
+    "flag:until": {
+      "doc_anchor": "docs/agent-events.md#tools",
+      "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
+    },
+    "flag:wait": {
+      "doc_anchor": "docs/agent-events.md#tools",
+      "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
+    },
+    "env:XDG_CONFIG_HOME": {
+      "doc_anchor": "docs/remote-cli.md#configuration",
+      "test_ref": "internal/client/connection_test.go TestResolveConnectionReadsTheClientFiles"
     }
   }
 }

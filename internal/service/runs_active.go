@@ -26,7 +26,7 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	if filter.Before != 0 || strings.TrimSpace(filter.BeforeRun) != "" {
 		return nil, fmt.Errorf("%w: before does not apply to the active view, which is not paged", ErrInvalidInput)
 	}
-	storeFilter := model.RunListFilter{Status: filter.Status, Superseded: filter.Superseded, Ref: filter.Ref}
+	storeFilter := model.RunListFilter{Status: filter.Status, Superseded: filter.Superseded, Ref: filter.Ref, Actor: filter.Actor}
 	if strings.TrimSpace(filter.Repository) != "" {
 		repository, err := service.runs.RepositoryByName(ctx, filter.Repository)
 		if err != nil {

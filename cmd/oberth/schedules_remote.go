@@ -32,7 +32,7 @@ func runRemoteSchedules(ctx context.Context, subcommand string, arguments []stri
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	reason := flags.String("reason", "", "why the entry is paused")
 	force := flags.Bool("force", false, "run despite active runs or a pause")
-	transport := scheduleTransportFlags(flags)
+	transport := mcpTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		return usageError(err)
 	}
@@ -145,21 +145,4 @@ func writeScheduleList(output io.Writer, response service.ScheduleListResponse) 
 		}
 	}
 	return nil
-}
-
-// scheduleTransportFlags registers the common MCP transport flags and returns
-// a function building the arguments parseMCPFlags understands.
-func scheduleTransportFlags(flags *flag.FlagSet) func() []string {
-	url := flags.String("url", "", "MCP URL")
-	tokenFile := flags.String("token-file", "", "token file")
-	caFile := flags.String("ca-file", "", "CA file")
-	return func() []string {
-		var transport []string
-		for _, option := range []struct{ name, value string }{{"--url", *url}, {"--token-file", *tokenFile}, {"--ca-file", *caFile}} {
-			if option.value != "" {
-				transport = append(transport, option.name+"="+option.value)
-			}
-		}
-		return transport
-	}
 }

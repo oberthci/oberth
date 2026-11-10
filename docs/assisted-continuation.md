@@ -153,8 +153,11 @@ Rules shared by every mutation: the caller may push to the run's repository
 (the run's own uplink, an unscoped uplink, or a scoped uplink whose scope
 covers the repository) or is an admin; a scoped uplink sees only its
 repositories' runs, so a run outside its scope is "not found";
-the run must be active; actions are serialized per run and capped
-installation-wide (`assist.maxConcurrentHolds` slots); each one is appended
+the run must be active; actions are serialized per run (a second action on
+the same run while one is in progress is refused) and bounded only by a
+fixed ceiling of 64 in flight installation-wide. `assist.maxConcurrentHolds`
+caps parked holds, not actions, so one agent's running exec never refuses
+another agent's continue on its own hold. Each action is appended
 to the run's `assist_record` and audited as `run.assist.<kind>` with actor,
 run, step, pod, argv and exit code or patch digest, bytes and files.
 
