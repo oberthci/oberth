@@ -24,3 +24,15 @@ func (s *Store) ActiveRunIDs(ctx context.Context) ([]string, error) {
 	}
 	return ids, rows.Err()
 }
+
+// RunWorkflowName is the Workflow a run names, "" when it names none. Like
+// RunIDsExist it reads one long-standing column, not the full run row, so it
+// works on a backup whose schema is older than this binary: a rollback
+// restore reads exactly such a database.
+func (s *Store) RunWorkflowName(ctx context.Context, id string) (string, error) {
+	var name string
+	if err := s.reader().QueryRowContext(ctx, `SELECT job_name FROM runs WHERE id = ?`, id).Scan(&name); err != nil {
+		return "", translateNotFound("run", err)
+	}
+	return name, nil
+}

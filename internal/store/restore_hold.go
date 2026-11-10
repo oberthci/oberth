@@ -20,12 +20,15 @@ var ErrNoAdmissionHold = errors.New("store: database predates the admission hold
 // action, at the file's own schema: nothing is migrated.
 //
 // It places nothing and returns placed=false when no run is queued or
-// waiting, or when the database already holds admission (that hold is kept
-// and returned).
-func PlaceRestoreHold(ctx context.Context, path string, opts Options, actor, reason string, duration time.Duration) (placed bool, hold model.AdmissionHold, resultErr error) {
+// running. A running run counts: a server older than the marker requeues one
+// whose Workflow is gone. A hold the database already has is replaced and
+// returned as previous: it may allow tag or release runs, or lapse minutes
+// after the restore, and the hold placed here allows nothing and outlasts it
+// (the audit action records the replaced hold).
+func PlaceRestoreHold(ctx context.Context, path string, opts Options, actor, reason string, duration time.Duration) (placed bool, hold, previous model.AdmissionHold, resultErr error) {
 	s, err := openCurrentUnverified(ctx, path, opts, false)
 	if err != nil {
-		return false, hold, err
+		return false, hold, previous, err
 	}
 	defer func() {
 		// Fold the WAL into the main file so the caller ships one file.
@@ -37,31 +40,31 @@ func PlaceRestoreHold(ctx context.Context, path string, opts Options, actor, rea
 		resultErr = errors.Join(resultErr, s.db.Close())
 	}()
 	if err := s.verifyCurrentSchema(ctx); err != nil {
-		return false, hold, err
+		return false, hold, previous, err
 	}
 	if err := s.verifyConfiguredProtocol(ctx); err != nil {
-		return false, hold, err
+		return false, hold, previous, err
 	}
 	var tables int
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='admission_holds'`).Scan(&tables); err != nil {
-		return false, hold, err
+		return false, hold, previous, err
 	}
 	if tables == 0 {
-		return false, hold, ErrNoAdmissionHold
+		return false, hold, previous, ErrNoAdmissionHold
 	}
-	var waiting int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE status IN ('queued','waiting')`).Scan(&waiting); err != nil {
-		return false, hold, err
+	var active int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE status IN ('queued','running')`).Scan(&active); err != nil {
+		return false, hold, previous, err
 	}
-	if waiting == 0 {
-		return false, hold, nil
+	if active == 0 {
+		return false, hold, previous, nil
 	}
-	if hold, err = s.AdmissionHold(ctx); err != nil {
-		return false, hold, err
+	if previous, err = s.AdmissionHold(ctx); err != nil {
+		return false, hold, previous, err
 	}
-	if hold.On && hold.ExpiresAt.After(s.now()) {
-		return false, hold, nil
+	if !previous.On || !previous.ExpiresAt.After(s.now()) {
+		previous = model.AdmissionHold{}
 	}
 	hold, err = s.SetAdmissionHold(ctx, actor, model.AdmissionHoldRequest{On: true, Reason: reason, Allow: []string{}, Duration: duration})
-	return err == nil, hold, err
+	return err == nil, hold, previous, err
 }

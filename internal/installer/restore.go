@@ -986,11 +986,11 @@ func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive res
 			continue
 		}
 		if newer {
-			run, err := inspection.Run(ctx, wf.RunID)
+			name, err := inspection.RunWorkflowName(ctx, wf.RunID)
 			if err != nil {
 				return nil, fmt.Errorf("read restored run %s: %w", wf.RunID, err)
 			}
-			if run.WorkflowName != wf.Name {
+			if name != wf.Name {
 				orphans = append(orphans, wf)
 			}
 		}
@@ -1076,10 +1076,11 @@ const rollbackHoldDuration = 12 * time.Hour
 // placeRollbackHold holds admission in the restored database before any
 // server opens it, when a rollback restores queued or waiting runs onto a
 // release older than v0.21.0: such a server does not read the restored-runs
-// marker and would dispatch that work again, although it may already have run
-// on the version the rollback undid. An admission hold is honoured by every
-// release since v0.17.85. A hold the backup already had is kept. The file
-// changes, so its hashes are taken again for the swap.
+// marker and would dispatch that work again (and requeue a running run whose
+// Workflow is gone), although it may already have run on the version the
+// rollback undid. An admission hold is honoured by every release since
+// v0.17.85. A hold the backup already had is replaced by this stricter one.
+// The file changes, so its hashes are taken again for the swap.
 func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreArchive, target restoreTarget, w io.Writer) (restoreArchive, error) {
 	if !cfg.InterruptQueued {
 		return archive, nil
@@ -1090,7 +1091,7 @@ func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreAr
 	}
 	compat := archive.Manifest.Compatibility
 	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}}
-	placed, hold, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
+	placed, hold, previous, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
 	switch {
 	case errors.Is(err, store.ErrNoAdmissionHold):
 		_, _ = fmt.Fprintf(w, "WARNING: the backup predates the admission hold; release %s may dispatch the backup's queued runs again: check its queue once it starts.\n",
@@ -1098,9 +1099,6 @@ func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreAr
 		return archive, nil
 	case err != nil:
 		return archive, fmt.Errorf("hold admission in the restored database: %w", err)
-	case !placed && hold.On:
-		_, _ = fmt.Fprintf(w, "  ✓ the backup already holds admission (%q, until %s); it is kept\n", hold.Reason, hold.ExpiresAt.Format(time.RFC3339))
-		return archive, nil
 	case !placed:
 		return archive, nil
 	}
@@ -1118,5 +1116,9 @@ func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreAr
 		"    Check them (oberth runs), cancel what already ran, then release the hold:\n"+
 		"        oberth admission hold off --reason \"restored runs checked\"\n",
 		hold.ExpiresAt.Format(time.RFC3339), displayVersion(target.ChartVersion))
+	if previous.On {
+		_, _ = fmt.Fprintf(w, "    It replaces the hold the backup had (%q, allowing [%s], until %s)\n",
+			previous.Reason, strings.Join(previous.Allow, ","), previous.ExpiresAt.Format(time.RFC3339))
+	}
 	return archive, nil
 }

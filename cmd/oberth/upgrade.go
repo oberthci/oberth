@@ -48,7 +48,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.BoolVar(&cfg.NoBackup, "no-backup", false, "upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)")
 	backupDir := flags.String("backup-dir", "", "write the pre-upgrade backup and the rollback record to `DIR` (default: the current directory)")
 	flags.BoolVar(&cfg.AllowDowngrade, "allow-downgrade", false, "accept a CLI older than the installed release (a deliberate rollback within one database schema)")
-	forceRecord := flags.Bool("force-record", false, "with --rollback: accept a record although either release changed after its upgrade (check helm history first)")
+	forceRecord := flags.Bool("force-record", false, "DANGEROUS, with --rollback: accept a stale record although either release changed after its upgrade; later changes are undone and the database may be replaced by an old backup (check helm history first)")
 	rollback := flags.String("rollback", "", "roll back the upgrade recorded in `FILE` (the rollback record an upgrade printed): Helm revisions, then the pre-upgrade backup when a migration ran")
 	timeout := flags.Duration("timeout", 5*time.Minute, "wait timeout for rollout completion")
 

@@ -1563,7 +1563,7 @@ Usage of upgrade:
   -f value
         alias for --values
   -force-record
-        with --rollback: accept a record although either release changed after its upgrade (check helm history first)
+        DANGEROUS, with --rollback: accept a stale record although either release changed after its upgrade; later changes are undone and the database may be replaced by an old backup (check helm history first)
   -namespace string
         Oberth namespace (default: oberth)
   -no-backup

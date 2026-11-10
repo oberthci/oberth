@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -48,6 +49,12 @@ func TestActiveRunIDsListsEveryNonTerminalRun(t *testing.T) {
 	active, err := database.ActiveRunIDs(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if name, err := database.RunWorkflowName(ctx, ids[2]); err != nil || name != "" {
+		t.Fatalf("workflow of a queued run = %q, %v", name, err)
+	}
+	if _, err := database.RunWorkflowName(ctx, "no-such-run"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown run: %v", err)
 	}
 	want := slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return id == claimed.ID })
 	if !slices.Equal(active, want) {
