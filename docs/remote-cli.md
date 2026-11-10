@@ -26,6 +26,13 @@ and the rest) resolves the server the same way, one setting at a time:
 - CA: `--ca-file`; `OBERTH_CA_CERT`; `OBERTH_CA_CERT` in the env file;
   `~/.config/oberth/ca.crt`.
 
+The token and CA from the files belong to the server the files name: when
+`--url` or a variable names a different address, the files' token, token
+command and CA are not used, and that address needs its own `--token-file`,
+`OBERTH_TOKEN` or `OBERTH_TOKEN_COMMAND`. A token file with no server named in
+`env` or `mcp.json` is not used either. The env file's `OBERTH_TOKEN_COMMAND`
+runs only when the file is yours and not writable by group or others.
+
 `--url` takes the server's base address or its `/mcp` endpoint; either
 command family derives the other form. `XDG_CONFIG_HOME` replaces
 `~/.config`. With none of them set, a command says so and names the three

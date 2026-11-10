@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -44,12 +43,14 @@ func TestClaudePluginManifests(t *testing.T) {
 		t.Fatalf("marketplace plugin = %+v", entry)
 	}
 	var plugin struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Version     string `json:"version"`
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		Version     *string `json:"version"`
 	}
 	read("claude-plugin/.claude-plugin/plugin.json", &plugin)
-	if plugin.Name != entry.Name || plugin.Description == "" || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(plugin.Version) {
+	// No fixed version: Claude Code then tracks the commit, so an update
+	// reaches installed copies without a manual bump (review P2-1).
+	if plugin.Name != entry.Name || plugin.Description == "" || plugin.Version != nil {
 		t.Fatalf("plugin = %+v", plugin)
 	}
 	var servers struct {
@@ -112,6 +113,12 @@ func TestClaudePluginHeadersHelper(t *testing.T) {
 	}
 	if err := os.Chmod(token, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	// A token that would need JSON escaping is refused, not printed.
+	for _, unsafe := range []string{`printf 'a"b'`, `printf 'a\\b'`, `printf 'a b'`} {
+		if out, err := run("OBERTH_TOKEN_COMMAND=" + unsafe); err == nil {
+			t.Fatalf("%s printed %q", unsafe, out)
+		}
 	}
 	for environment, want := range map[string]string{"": "file-token", "OBERTH_TOKEN_COMMAND=printf command-token": "command-token"} {
 		var extra []string

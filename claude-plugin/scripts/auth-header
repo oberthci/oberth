@@ -27,4 +27,11 @@ if [ -z "$token" ]; then
 	echo "oberth: the token source printed nothing" >&2
 	exit 1
 fi
+# The header is JSON: a token is printed only when it needs no escaping.
+case "$token" in
+*[!A-Za-z0-9._~+/=:-]*)
+	echo "oberth: the token holds characters a bearer token does not use; refusing to print it" >&2
+	exit 1
+	;;
+esac
 printf '{"Authorization":"Bearer %s"}\n' "$token"

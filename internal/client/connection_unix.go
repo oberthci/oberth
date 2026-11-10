@@ -1,0 +1,26 @@
+//go:build unix
+
+package client
+
+import (
+	"fmt"
+	"os"
+	"syscall"
+)
+
+// trustedConfigFile refuses a client file whose command would run as this
+// user while someone else can change it: not owned by the user, or writable
+// by its group or by others.
+func trustedConfigFile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("client file: %w", err)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("%s is writable by others (mode %04o); its OBERTH_TOKEN_COMMAND is not run: chmod go-w it", path, info.Mode().Perm())
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && int(stat.Uid) != os.Getuid() {
+		return fmt.Errorf("%s is not owned by this user; its OBERTH_TOKEN_COMMAND is not run", path)
+	}
+	return nil
+}

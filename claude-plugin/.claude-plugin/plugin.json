@@ -1,7 +1,6 @@
 {
   "name": "oberth",
   "description": "Oberth CI over MCP: run_wait and events_wait instead of polling, assisted-continuation holds serviced within their TTL, and the rule that an assisted run is never evidence.",
-  "version": "0.21.1",
   "author": {
     "name": "Oberth"
   },

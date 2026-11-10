@@ -98,6 +98,7 @@ func TestResolveConnectionPrecedenceFlagEnvironmentFiles(t *testing.T) {
 
 func TestResolveConnectionRefusesUnsafeTokenFilesAndCleartext(t *testing.T) {
 	directory := isolate(t)
+	write(t, filepath.Join(directory, "env"), "export OBERTH_BASE_URL=\"https://ci.example.test\"\n", 0o600)
 	write(t, filepath.Join(directory, "token"), "file-token", 0o644)
 	if _, err := ResolveConnection(ConnectionFlags{URL: "https://ci.example.test"}); err == nil || !strings.Contains(err.Error(), "0600") {
 		t.Fatalf("group-readable saved token = %v", err)
@@ -111,5 +112,66 @@ func TestResolveConnectionRefusesUnsafeTokenFilesAndCleartext(t *testing.T) {
 	t.Setenv("OBERTH_TOKEN", "x")
 	if _, err := ResolveConnection(ConnectionFlags{URL: "http://ci.example.test"}); err == nil || !strings.Contains(err.Error(), "cleartext") {
 		t.Fatalf("plain http = %v", err)
+	}
+}
+
+// A saved token and CA belong to the server the client files name; a flag or
+// variable naming another address never gets them (review P2-2).
+func TestSavedCredentialNeverFollowsAnotherAddress(t *testing.T) {
+	directory := isolate(t)
+	write(t, filepath.Join(directory, "env"), "export OBERTH_BASE_URL=\"https://a.example.test:30443\"\nexport OBERTH_CA_CERT=\"/a/ca.crt\"\n", 0o600)
+	write(t, filepath.Join(directory, "token"), "token-of-a", 0o600)
+	write(t, filepath.Join(directory, "ca.crt"), "pem", 0o644)
+	// The same server, spelled as its /mcp endpoint, keeps the files.
+	connection, err := ResolveConnection(ConnectionFlags{URL: "https://A.example.test:30443/mcp/"})
+	if err != nil || connection.Token != "token-of-a" || connection.CACert != "/a/ca.crt" {
+		t.Fatalf("same server = %+v %v", connection, err)
+	}
+	for name, configure := range map[string]func(){
+		"flag":     func() {},
+		"variable": func() { t.Setenv("OBERTH_BASE_URL", "https://b.example.test") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			configure()
+			given := ConnectionFlags{}
+			if name == "flag" {
+				given.URL = "https://b.example.test"
+			}
+			connection, err := ResolveConnection(given)
+			if err == nil || connection.Token != "" || !strings.Contains(err.Error(), "never sent to another server") ||
+				!strings.Contains(err.Error(), "https://a.example.test:30443") || !strings.Contains(err.Error(), "--token-file") {
+				t.Fatalf("other server = %+v %v", connection, err)
+			}
+			t.Setenv("OBERTH_TOKEN", "token-of-b")
+			connection, err = ResolveConnection(given)
+			if err != nil || connection.Token != "token-of-b" || connection.CACert != "" {
+				t.Fatalf("other server with its own token = %+v %v (the files' CA must not apply)", connection, err)
+			}
+			t.Setenv("OBERTH_TOKEN", "")
+		})
+	}
+	// Files that name no server lend their token to nobody.
+	if err := os.Remove(filepath.Join(directory, "env")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveConnection(ConnectionFlags{URL: "https://a.example.test:30443"}); err == nil || !strings.Contains(err.Error(), "names no server address") {
+		t.Fatalf("unnamed saved token = %v", err)
+	}
+}
+
+// An env file's token command runs only from a file the user owns and only
+// the user can change.
+func TestEnvFileTokenCommandNeedsAFileOnlyTheUserCanChange(t *testing.T) {
+	directory := isolate(t)
+	env := filepath.Join(directory, "env")
+	write(t, env, "export OBERTH_BASE_URL=\"https://ci.example.test\"\nexport OBERTH_TOKEN_COMMAND=\"printf x\"\n", 0o644)
+	if connection, err := ResolveConnection(ConnectionFlags{}); err != nil || connection.TokenCommand != "printf x" {
+		t.Fatalf("owner-only env = %+v %v", connection, err)
+	}
+	if err := os.Chmod(env, 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveConnection(ConnectionFlags{}); err == nil || !strings.Contains(err.Error(), "writable by others") {
+		t.Fatalf("group-writable env = %v", err)
 	}
 }

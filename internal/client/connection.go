@@ -141,6 +141,12 @@ func ReadOwnerOnlyTokenFile(path string) (string, error) {
 //	         OBERTH_TOKEN_COMMAND in env; the token file
 //	CA:      --ca-file; OBERTH_CA_CERT; OBERTH_CA_CERT in env; ca.crt
 //
+// The token and CA of the client files are used only for the server those
+// files name: when a flag or variable names another address, they are not
+// read, and that address needs its own --token-file, OBERTH_TOKEN or
+// OBERTH_TOKEN_COMMAND. An env file's OBERTH_TOKEN_COMMAND runs only when the
+// file is owned by the user and not writable by group or others.
+//
 // A base address and an /mcp endpoint are both accepted wherever an address
 // is: the base address is the endpoint without its /mcp path, and an
 // address without a path gets /mcp for the MCP endpoint.
@@ -160,6 +166,18 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 	environment := FromEnv()
 	mcpEnvironment := strings.TrimSpace(os.Getenv("OBERTH_MCP_URL"))
 
+	// The address the client files name: their credential and CA belong to
+	// that server and to no other.
+	filesAddress := ""
+	if rootErr == nil {
+		filesAddress = written["OBERTH_MCP_URL"]
+		if written["OBERTH_BASE_URL"] != "" {
+			filesAddress = written["OBERTH_BASE_URL"]
+		}
+		if filesAddress == "" {
+			filesAddress = ConfigMCPURL(configured("mcp.json"))
+		}
+	}
 	switch {
 	case strings.TrimSpace(flags.URL) != "":
 		connection.BaseURL, connection.MCPURL = addressPair(flags.URL)
@@ -176,16 +194,16 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 		if connection.BaseURL == "" {
 			connection.BaseURL, _ = addressPair(connection.MCPURL)
 		}
-	case written["OBERTH_BASE_URL"] != "" || written["OBERTH_MCP_URL"] != "":
-		address := written["OBERTH_MCP_URL"]
-		if written["OBERTH_BASE_URL"] != "" {
-			address = written["OBERTH_BASE_URL"]
-		}
-		connection.BaseURL, connection.MCPURL = addressPair(address)
-	default:
-		if address := ConfigMCPURL(configured("mcp.json")); address != "" && rootErr == nil {
-			connection.BaseURL, connection.MCPURL = addressPair(address)
-		}
+	case filesAddress != "":
+		connection.BaseURL, connection.MCPURL = addressPair(filesAddress)
+	}
+	// A saved token or CA never follows a different address: a flag or
+	// variable naming another server than the client files gets neither,
+	// and needs its own credential.
+	filesServer := filesAddress != "" && sameServer(connection.BaseURL, filesAddress)
+	if !filesServer {
+		written = map[string]string{}
+		configured = func(string) string { return "" }
 	}
 	if connection.BaseURL == "" {
 		return connection, ErrNotConfigured
@@ -216,6 +234,9 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 	case environment.TokenCommand != "":
 		connection.TokenCommand = environment.TokenCommand
 	case written["OBERTH_TOKEN_COMMAND"] != "":
+		if err := trustedConfigFile(filepath.Join(root, "env")); err != nil {
+			return connection, err
+		}
 		connection.TokenCommand = written["OBERTH_TOKEN_COMMAND"]
 	case regularFile(configured("token")) != "":
 		token, err := ReadOwnerOnlyTokenFile(configured("token"))
@@ -223,10 +244,31 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 			return connection, err
 		}
 		connection.Token = token
+	case !filesServer && rootErr == nil && (regularFile(filepath.Join(root, "token")) != "" || ReadConfigEnv(filepath.Join(root, "env"))["OBERTH_TOKEN_COMMAND"] != ""):
+		saved := "names no server address"
+		if filesAddress != "" {
+			saved = "belongs to " + filesAddress
+		}
+		return connection, fmt.Errorf("no credential for %s: the token saved in ~/.config/oberth %s and is never sent to another server; "+
+			"pass --token-file, or set OBERTH_TOKEN or OBERTH_TOKEN_COMMAND, for this address", connection.BaseURL, saved)
 	default:
 		return connection, errNoCredential
 	}
 	return connection, nil
+}
+
+// sameServer compares two addresses by scheme, host and base path, with
+// the /mcp endpoint and a trailing slash ignored.
+func sameServer(left, right string) bool {
+	normal := func(address string) string {
+		base, _ := addressPair(address)
+		parsed, err := url.Parse(base)
+		if err != nil {
+			return base
+		}
+		return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host) + strings.TrimRight(parsed.Path, "/")
+	}
+	return normal(left) == normal(right)
 }
 
 // addressPair derives the base address and the MCP endpoint from either.
