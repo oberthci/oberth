@@ -117,18 +117,8 @@ func (s *Store) AssistPodActivity(ctx context.Context) (map[string]model.AssistP
 		if err := json.Unmarshal([]byte(raw), &record); err != nil {
 			return nil, fmt.Errorf("decode assist record: %w", err)
 		}
-		for _, event := range record.Events {
-			if event.Pod == "" {
-				continue
-			}
-			activity := pods[event.Pod]
-			if event.Kind == model.RunAssistContinue || event.Kind == model.RunAssistAbandon {
-				activity.Released = true
-			}
-			if event.Kind != model.RunAssistAbandon && event.At.After(activity.LastAction) {
-				activity.LastAction = event.At
-			}
-			pods[event.Pod] = activity
+		for pod, activity := range record.PodActivities() {
+			pods[pod] = activity
 		}
 	}
 	if err := rows.Err(); err != nil {

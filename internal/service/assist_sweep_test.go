@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,14 @@ type assistSweepStore struct {
 	SchedulerStore
 	activity map[string]model.AssistPodActivity
 	appended []model.RunAssistRequest
+	runs     map[string]model.Run
+}
+
+func (store *assistSweepStore) Run(_ context.Context, id string) (model.Run, error) {
+	if run, ok := store.runs[id]; ok {
+		return run, nil
+	}
+	return model.Run{}, errors.New("run not found")
 }
 
 func (store *assistSweepStore) AssistPodActivity(context.Context) (map[string]model.AssistPodActivity, error) {
@@ -27,11 +36,12 @@ func (store *assistSweepStore) AppendRunAssist(_ context.Context, request model.
 type assistSweepJobs struct {
 	JobController
 	activity map[string]model.AssistPodActivity
+	recheck  model.AssistActivityRecheck
 	abandons []model.AssistAbandon
 }
 
-func (jobs *assistSweepJobs) EnforceAssistHolds(_ context.Context, activity map[string]model.AssistPodActivity, _ time.Time) ([]model.AssistAbandon, error) {
-	jobs.activity = activity
+func (jobs *assistSweepJobs) EnforceAssistHolds(_ context.Context, activity map[string]model.AssistPodActivity, recheck model.AssistActivityRecheck, _ time.Time) ([]model.AssistAbandon, error) {
+	jobs.activity, jobs.recheck = activity, recheck
 	return jobs.abandons, nil
 }
 
@@ -79,5 +89,26 @@ func TestAbandonedHoldReasonLineIsNotADeadline(t *testing.T) {
 	run.FailedStep = "lint"
 	if got := presentationRun(run).DisplayReason; !strings.HasPrefix(got, "lint failed · deadline") || !strings.HasSuffix(got, want) {
 		t.Fatalf("other step display reason = %q", got)
+	}
+}
+
+// TestSweepAssistHoldsRecheckReadsTheVictimsRun: the engine's per-victim
+// recheck reads the run's current assist record, so a continue written after
+// the snapshot releases the Pod; a run that cannot be read is an error, which
+// spares the victim.
+func TestSweepAssistHoldsRecheckReadsTheVictimsRun(t *testing.T) {
+	continued := model.RunAssistRecord{Events: []model.RunAssistEvent{{At: time.Now(), Actor: "uplink-a", Step: "test", Pod: "wf-test-1", Kind: model.RunAssistContinue}}}
+	store := &assistSweepStore{activity: map[string]model.AssistPodActivity{}, runs: map[string]model.Run{"run-a": {ID: "run-a", Assist: &continued}}}
+	jobs := &assistSweepJobs{}
+	scheduler := &Scheduler{store: store, jobs: jobs, signals: NewSignals()}
+	scheduler.sweepAssistHolds(context.Background())
+	if jobs.recheck == nil {
+		t.Fatal("the sweep gave the engine no per-victim recheck")
+	}
+	if fresh, err := jobs.recheck(context.Background(), "run-a", "wf-test-1"); err != nil || !fresh.Released {
+		t.Fatalf("recheck = %+v %v, want the continue written after the snapshot", fresh, err)
+	}
+	if _, err := jobs.recheck(context.Background(), "run-missing", "wf-test-1"); err == nil {
+		t.Fatal("an unreadable run did not fail the recheck")
 	}
 }

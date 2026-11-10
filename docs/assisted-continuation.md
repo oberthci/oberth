@@ -222,7 +222,9 @@ per-workflow and unaffected.
   whose `held_since` is `assist.holdTTL` old is abandoned (reason `ttl`).
   Holds whose run's assist record shows a continue or abandon are running
   commands and are skipped; if that record cannot be read the sweep does
-  nothing rather than kill a released step.
+  nothing rather than kill a released step. The record is read again for
+  each chosen hold right before its delete, so a continue (or, for the cap,
+  an exec or patch) that lands during the sweep spares it.
 - **Cap rule.** Above `assist.maxConcurrentHolds` the newest *idle* hold is
   abandoned first (reason `cap`). Because the sweep runs every few seconds, a
   hold that parks over the cap in practice fails at once, as if the run were

@@ -242,7 +242,13 @@ var assistSweepSelector = triggerLabel + "=" + string(pipeline.TriggerCI)
 //     unassisted, and the holds agents already have keep their slots. A hold
 //     with an exec, patch or continue in the last model.AssistActivityWindow
 //     is never abandoned by the cap; it still counts toward it.
-func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity map[string]model.AssistPodActivity, now time.Time) ([]model.AssistAbandon, error) {
+//
+// activity is a snapshot read before the Pod list. When recheck is set, each
+// chosen victim's activity is read again right before its delete and the
+// victim is spared if that fresh record no longer condemns it (released, or
+// for the cap, worked inside the window), closing the window in which an
+// action landing between snapshot and delete would be killed.
+func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity map[string]model.AssistPodActivity, recheck model.AssistActivityRecheck, now time.Time) ([]model.AssistAbandon, error) {
 	if controller.kube == nil || !controller.config.Assist.Enabled {
 		return nil, nil
 	}
@@ -252,13 +258,21 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		return nil, fmt.Errorf("list branch pods: %w", err)
 	}
 	var abandoned []model.AssistAbandon
-	abandon := func(sweep assistSweepHold, reason string) error {
+	released := map[string]bool{} // released between snapshot and recheck
+	abandon := func(sweep assistSweepHold, reason string) (bool, error) {
+		if recheck != nil {
+			fresh, err := recheck(ctx, sweep.runID, sweep.hold.Pod)
+			released[sweep.hold.Pod] = err == nil && fresh.Released
+			if err != nil || !assistVictimDue(reason, fresh, assist.HoldTTL, sweep.hold, now) {
+				return false, nil
+			}
+		}
 		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, sweep.hold.Pod, metav1.DeleteOptions{}); err != nil {
-			return fmt.Errorf("abandon hold %s: %w", sweep.hold.Pod, err)
+			return false, fmt.Errorf("abandon hold %s: %w", sweep.hold.Pod, err)
 		}
 		abandoned = append(abandoned, model.AssistAbandon{RunID: sweep.runID, Pod: sweep.hold.Pod, Step: sweep.hold.Step, Reason: reason,
 			HeldSince: sweep.hold.HeldSince, AbandonedAt: now, FailedAttempt: sweep.hold.Attempt - 1, FailedExitCode: sweep.failedExit})
-		return nil
+		return true, nil
 	}
 	var holds []assistSweepHold
 	seen := map[string]bool{}
@@ -271,11 +285,14 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		sweep := assistSweepHold{hold: hold, runID: pod.Labels[runLabel], failedExit: failedAttemptExit(pods.Items, pod, hold)}
 		seen[hold.Pod] = true
 		controller.noteAssistHold(sweep)
-		if !hold.HeldSince.Add(assist.HoldTTL).After(now) {
-			if err := abandon(sweep, model.AssistAbandonTTL); err != nil {
+		if assistVictimDue(model.AssistAbandonTTL, activity[hold.Pod], assist.HoldTTL, hold, now) {
+			done, err := abandon(sweep, model.AssistAbandonTTL)
+			if err != nil {
 				return abandoned, err
 			}
-			continue
+			if done || released[hold.Pod] {
+				continue // a hold released meanwhile is running work: not counted
+			}
 		}
 		holds = append(holds, sweep)
 	}
@@ -289,15 +306,32 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		if excess == 0 {
 			break
 		}
-		if last := activity[sweep.hold.Pod].LastAction; !last.IsZero() && now.Sub(last) < model.AssistActivityWindow {
+		if !assistVictimDue(model.AssistAbandonCap, activity[sweep.hold.Pod], assist.HoldTTL, sweep.hold, now) {
 			continue
 		}
-		if err := abandon(sweep, model.AssistAbandonCap); err != nil {
+		done, err := abandon(sweep, model.AssistAbandonCap)
+		if err != nil {
 			return abandoned, err
 		}
-		excess--
+		if done {
+			excess--
+		}
 	}
 	return abandoned, nil
+}
+
+// assistVictimDue applies the sweep rule that chose a victim to one
+// activity reading: a released hold is never due; a TTL victim is due when
+// its hold TTL has run out; a cap victim is due unless it was worked inside
+// model.AssistActivityWindow.
+func assistVictimDue(reason string, activity model.AssistPodActivity, ttl time.Duration, hold model.AssistHold, now time.Time) bool {
+	if activity.Released {
+		return false
+	}
+	if reason == model.AssistAbandonCap {
+		return activity.LastAction.IsZero() || now.Sub(activity.LastAction) >= model.AssistActivityWindow
+	}
+	return !hold.HeldSince.Add(ttl).After(now)
 }
 
 type assistSweepHold struct {

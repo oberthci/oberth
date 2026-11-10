@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -65,6 +66,33 @@ const AssistActivityWindow = 5 * time.Minute
 type AssistPodActivity struct {
 	Released   bool
 	LastAction time.Time
+}
+
+// AssistActivityRecheck re-reads one held Pod's activity from its run's
+// current assist record. The sweep calls it for each chosen victim right
+// before the delete, so an action that landed after the sweep's snapshot
+// (a continue, or an exec or patch inside the protection window) is seen.
+type AssistActivityRecheck func(ctx context.Context, runID, pod string) (AssistPodActivity, error)
+
+// PodActivities is the per-Pod activity this record shows: a continue or
+// abandon releases the Pod; LastAction is its latest exec, patch or
+// continue.
+func (record RunAssistRecord) PodActivities() map[string]AssistPodActivity {
+	pods := map[string]AssistPodActivity{}
+	for _, event := range record.Events {
+		if event.Pod == "" {
+			continue
+		}
+		activity := pods[event.Pod]
+		if event.Kind == RunAssistContinue || event.Kind == RunAssistAbandon {
+			activity.Released = true
+		}
+		if event.Kind != RunAssistAbandon && event.At.After(activity.LastAction) {
+			activity.LastAction = event.At
+		}
+		pods[event.Pod] = activity
+	}
+	return pods
 }
 
 // AssistAbandon is one hold the server sweep abandoned.

@@ -179,7 +179,7 @@ func TestEnforceAssistHoldsFindsPodsLabelledByBuild(t *testing.T) {
 	client := fake.NewClientset(held, failedAttemptFixture(held, 3))
 	controller := assistSweepController(t, client)
 	now := time.Now()
-	abandoned, err := controller.EnforceAssistHolds(context.Background(), nil, now)
+	abandoned, err := controller.EnforceAssistHolds(context.Background(), nil, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestEnforceAssistHoldsFindsPodsLabelledByBuild(t *testing.T) {
 	release := heldPodFixture("wf-r-test-1", "wf-r", "test", time.Hour, false)
 	release.Labels[triggerLabel] = string(pipeline.TriggerRelease)
 	client = fake.NewClientset(release)
-	if abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), nil, now); err != nil || len(abandoned) != 0 {
+	if abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), nil, nil, now); err != nil || len(abandoned) != 0 {
 		t.Fatalf("release Pod swept: %v %v", abandoned, err)
 	}
 }
@@ -218,7 +218,7 @@ func TestEnforceAssistHoldsCapRefusesNewestIdleHold(t *testing.T) {
 	client := fake.NewClientset(oldest, middle, newest, released, expired)
 	controller := assistSweepController(t, client)
 	activity := map[string]model.AssistPodActivity{"wf-d-test-1": {Released: true}}
-	abandoned, err := controller.EnforceAssistHolds(context.Background(), activity, now)
+	abandoned, err := controller.EnforceAssistHolds(context.Background(), activity, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestEnforceAssistHoldsCapRefusesNewestIdleHold(t *testing.T) {
 		"wf-c-test-1": {LastAction: now.Add(-2 * time.Minute)},
 		"wf-b-test-1": {LastAction: now.Add(-model.AssistActivityWindow - time.Second)},
 	}
-	abandoned, err = assistSweepController(t, client).EnforceAssistHolds(context.Background(), activity, now)
+	abandoned, err = assistSweepController(t, client).EnforceAssistHolds(context.Background(), activity, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,14 +253,14 @@ func TestEnforceAssistHoldsCapRefusesNewestIdleHold(t *testing.T) {
 		heldPodFixture("wf-b-test-1", "wf-b", "test", 2*time.Minute, false), heldPodFixture("wf-c-test-1", "wf-c", "test", time.Minute, false))
 	recent := model.AssistPodActivity{LastAction: now.Add(-time.Minute)}
 	activity = map[string]model.AssistPodActivity{"wf-a-test-1": recent, "wf-b-test-1": recent, "wf-c-test-1": recent}
-	if abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), activity, now); err != nil || len(abandoned) != 0 {
+	if abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), activity, nil, now); err != nil || len(abandoned) != 0 {
 		t.Fatalf("cap abandoned a worked hold: %v %v", abandonedPods(abandoned), err)
 	}
 
 	config := testConfig()
 	config.Assist = AssistConfig{Enabled: false}
 	disabled, _ := NewController(&staticWorkflowClient{}, client, config)
-	if abandoned, err := disabled.EnforceAssistHolds(context.Background(), nil, now); err != nil || abandoned != nil {
+	if abandoned, err := disabled.EnforceAssistHolds(context.Background(), nil, nil, now); err != nil || abandoned != nil {
 		t.Fatalf("disabled policy acted: %v %v", abandoned, err)
 	}
 }
@@ -278,7 +278,7 @@ func TestAssistHoldStepWithoutStepEnvMatchesFailedStep(t *testing.T) {
 		if !ok || hold.Step != want {
 			t.Fatalf("node %s: hold = %+v %v, want step %s", node, hold, ok, want)
 		}
-		abandoned, err := assistSweepController(t, fake.NewClientset(held)).EnforceAssistHolds(context.Background(), nil, time.Now())
+		abandoned, err := assistSweepController(t, fake.NewClientset(held)).EnforceAssistHolds(context.Background(), nil, nil, time.Now())
 		if err != nil || len(abandoned) != 1 {
 			t.Fatalf("node %s: abandoned = %+v %v", node, abandoned, err)
 		}
@@ -286,5 +286,67 @@ func TestAssistHoldStepWithoutStepEnvMatchesFailedStep(t *testing.T) {
 		if !record.SweepAbandoned(want) {
 			t.Fatalf("node %s: sweep record step %q does not match FailedStep %q", node, abandoned[0].Step, want)
 		}
+	}
+}
+
+// TestEnforceAssistHoldsRechecksVictimBeforeDelete is the snapshot race: the
+// activity snapshot predates the Pod list, so a continue (or, for the cap, an
+// exec or patch) landing in between must spare the victim. The sweep re-reads
+// each victim right before the delete; an unreadable record spares it too,
+// and the cap then moves on to the next idle hold.
+func TestEnforceAssistHoldsRechecksVictimBeforeDelete(t *testing.T) {
+	now := time.Now()
+	expired := heldPodFixture("wf-a-test-1", "wf-a", "test", 21*time.Minute, false)
+	client := fake.NewClientset(expired)
+	continued := func(_ context.Context, _, pod string) (model.AssistPodActivity, error) {
+		return model.AssistPodActivity{Released: true, LastAction: now}, nil
+	}
+	abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), nil, continued, now)
+	if err != nil || len(abandoned) != 0 {
+		t.Fatalf("a hold continued after the snapshot was abandoned: %v %v", abandonedPods(abandoned), err)
+	}
+	if _, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), "wf-a-test-1", metav1.GetOptions{}); err != nil {
+		t.Fatal("continued hold Pod was deleted")
+	}
+	// Cap 2: the expired hold continued after the snapshot is running work,
+	// so with two idle holds beside it nothing is over the cap.
+	client = fake.NewClientset(heldPodFixture("wf-a-test-1", "wf-a", "test", 21*time.Minute, false),
+		heldPodFixture("wf-b-test-1", "wf-b", "test", 2*time.Minute, false), heldPodFixture("wf-c-test-1", "wf-c", "test", time.Minute, false))
+	onlyExpiredContinued := func(_ context.Context, _, pod string) (model.AssistPodActivity, error) {
+		return model.AssistPodActivity{Released: pod == "wf-a-test-1"}, nil
+	}
+	if abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), nil, onlyExpiredContinued, now); err != nil || len(abandoned) != 0 {
+		t.Fatalf("a hold released after the snapshot still counted toward the cap: %v %v", abandonedPods(abandoned), err)
+	}
+	client = fake.NewClientset(expired)
+	unreadable := func(context.Context, string, string) (model.AssistPodActivity, error) {
+		return model.AssistPodActivity{}, errors.New("database locked")
+	}
+	if abandoned, err := assistSweepController(t, client).EnforceAssistHolds(context.Background(), nil, unreadable, now); err != nil || len(abandoned) != 0 {
+		t.Fatalf("an unreadable record did not spare the victim: %v %v", abandonedPods(abandoned), err)
+	}
+
+	// Cap 2, three idle holds in the snapshot: the newest is the victim, but
+	// its agent patched it after the snapshot. It is spared and the next idle
+	// hold goes instead.
+	client = fake.NewClientset(heldPodFixture("wf-a-test-1", "wf-a", "test", 3*time.Minute, false),
+		heldPodFixture("wf-b-test-1", "wf-b", "test", 2*time.Minute, false), heldPodFixture("wf-c-test-1", "wf-c", "test", time.Minute, false))
+	var rechecked []string
+	patched := func(_ context.Context, _, pod string) (model.AssistPodActivity, error) {
+		rechecked = append(rechecked, pod)
+		if pod == "wf-c-test-1" {
+			return model.AssistPodActivity{LastAction: now.Add(-time.Second)}, nil
+		}
+		return model.AssistPodActivity{}, nil
+	}
+	abandoned, err = assistSweepController(t, client).EnforceAssistHolds(context.Background(), map[string]model.AssistPodActivity{}, patched, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(abandonedPods(abandoned), ","); got != "wf-b-test-1/cap" || strings.Join(rechecked, ",") != "wf-c-test-1,wf-b-test-1" {
+		t.Fatalf("abandoned = %s after rechecking %v, want the patched newest hold spared and the next idle one abandoned", got, rechecked)
+	}
+	if _, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), "wf-c-test-1", metav1.GetOptions{}); err != nil {
+		t.Fatal("hold patched after the snapshot was deleted")
 	}
 }

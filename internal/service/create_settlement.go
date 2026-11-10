@@ -403,11 +403,12 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 // above the installation cap. Pods their agent already continued or
 // abandoned (the run's assist record) are running work and are skipped; if
 // that record cannot be read, nothing is abandoned, so a released step is
-// never killed by a blind sweep. Each abandon is appended to its run's
+// never killed by a blind sweep; each victim's record is read again right
+// before its delete. Each abandon is appended to its run's
 // assist record and audited as run.assist.abandon with actor oberth.
 func (scheduler *Scheduler) sweepAssistHolds(ctx context.Context) {
 	holds, ok := scheduler.jobs.(interface {
-		EnforceAssistHolds(context.Context, map[string]model.AssistPodActivity, time.Time) ([]model.AssistAbandon, error)
+		EnforceAssistHolds(context.Context, map[string]model.AssistPodActivity, model.AssistActivityRecheck, time.Time) ([]model.AssistAbandon, error)
 	})
 	if !ok {
 		return
@@ -424,7 +425,23 @@ func (scheduler *Scheduler) sweepAssistHolds(ctx context.Context) {
 			return
 		}
 	}
-	abandoned, err := holds.EnforceAssistHolds(attempt, activity, time.Now())
+	// The snapshot above predates the Pod list; each victim is re-read
+	// from its run right before the delete, so a continue or a worked
+	// action landing in between spares it. An unreadable run spares it too.
+	recheck := func(ctx context.Context, runID, pod string) (model.AssistPodActivity, error) {
+		if runID == "" {
+			return model.AssistPodActivity{}, nil
+		}
+		run, err := scheduler.store.Run(ctx, runID)
+		if err != nil {
+			return model.AssistPodActivity{}, err
+		}
+		if run.Assist == nil {
+			return model.AssistPodActivity{}, nil
+		}
+		return run.Assist.PodActivities()[pod], nil
+	}
+	abandoned, err := holds.EnforceAssistHolds(attempt, activity, recheck, time.Now())
 	if err != nil {
 		log.Print("WARN: assist hold sweep remains pending")
 	}
