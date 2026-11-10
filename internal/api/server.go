@@ -242,7 +242,7 @@ func (server *Server) refuseDuringDrain(writer http.ResponseWriter) bool {
 }
 
 func (server *Server) Handler() http.Handler {
-	return gzipJSON(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	return gzipJSON(conditionalJSON(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("Strict-Transport-Security", "max-age=31536000")
@@ -262,7 +262,7 @@ func (server *Server) Handler() http.Handler {
 			request = request.WithContext(ctx)
 		}
 		server.mux.ServeHTTP(writer, request)
-	}))
+	})))
 }
 
 func (server *Server) routes() {
@@ -702,7 +702,32 @@ func validRunSelector(value string) bool {
 
 func (server *Server) handleRepos(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Repositories(request.Context(), actorFrom(request.Context()))
+	if err == nil && request.URL.Query().Get("view") == "summary" {
+		value, err = repositorySummaries(value)
+	}
 	server.writeCollectionView(writer, request, "repositories", value, err)
+}
+
+// repositorySummaries is ?view=summary of /api/repos: each repository record
+// without its latest runs. The runs page polls it for names and archive state
+// only; the full view carries a dozen runs per repository.
+func repositorySummaries(value any) (any, error) {
+	raw, err := marshalCompatible(value)
+	if err != nil {
+		return nil, err
+	}
+	var rows []map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &rows); err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		delete(row, "LatestRuns")
+		delete(row, "latest_runs")
+	}
+	if rows == nil {
+		rows = []map[string]json.RawMessage{}
+	}
+	return rows, nil
 }
 
 func (server *Server) handleIssues(writer http.ResponseWriter, request *http.Request) {
@@ -875,11 +900,15 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 		status = http.StatusInternalServerError
 		raw = []byte(`{"error":"internal error"}`)
 	}
+	body := append(raw, '\n')
 	writer.Header().Set("Content-Type", "application/json")
+	if status == http.StatusOK {
+		writer.Header().Set("ETag", jsonETag(body))
+	}
 	writer.WriteHeader(status)
 	// Compression is decided on the first Write; keep the complete JSON body in one write.
 	// #nosec G705 -- marshalCompatible uses json.Marshal with HTML escaping on every success path; the response is application/json.
-	_, _ = writer.Write(append(raw, '\n'))
+	_, _ = writer.Write(body)
 }
 
 // servePage writes the dashboard shell: server-rendered chrome (brand, tabs,
@@ -891,7 +920,7 @@ func (server *Server) servePage(writer http.ResponseWriter, view string) {
 	// The shell names the current asset versions, so no cache may keep it.
 	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
-	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="`+versionedAssetURL("app.css")+`"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme">T</button><button class="iconbtn" data-action="refresh" title="Refresh">R</button><button class="iconbtn" data-action="clear-token" title="Sign out">L</button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="`+versionedAssetURL("app.js")+`" defer></script></body></html>`)
+	_, _ = io.WriteString(writer, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oberth Dashboard</title><link rel="stylesheet" href="`+versionedAssetURL("app.css")+`"></head><body data-version="`+html.EscapeString(server.version)+`"><div class="app"><header class="top"><button class="brand" data-route="/runs"><span class="mark">[▲]</span><span>oberth</span><span id="brandSub" class="sub">/ dashboard</span></button><nav class="tabs"><button id="tabRuns" class="tab" data-route="/runs">runs</button><button id="tabRepos" class="tab" data-route="/repos">repos</button><button id="tabIssues" class="tab" data-route="/issues">issues</button><button id="tabStatus" class="tab" data-route="/status">status</button></nav><div class="top-right"><div class="top-status" aria-label="System status"><span class="status-segment backend" title="loading" aria-label="loading"><span id="connLed" class="led" aria-hidden="true"></span><span id="connText">api</span></span><span class="status-divider" aria-hidden="true"></span><span id="versionStatus" class="status-segment version-mode unknown" role="status" aria-live="polite"><span>oberth</span> <span id="verLabel" class="ver">...</span></span></div><button class="iconbtn" data-action="toggle-theme" title="Theme" aria-label="Toggle theme">T</button><button class="iconbtn" data-action="refresh" title="Refresh" aria-label="Refresh">R</button><button class="iconbtn" data-action="clear-token" title="Sign out" aria-label="Sign out">L</button></div></header><main id="app" class="main" data-view="`+view+`"><noscript><p>The Oberth dashboard requires JavaScript. The JSON views remain available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status with a bearer token.</p></noscript></main></div><dialog id="issueDialog" class="dlg" aria-labelledby="issueDialogTitle"><div class="dlg-shell"><header class="dlg-head"><h2 id="issueDialogTitle">Issue</h2><span id="issueDialogMeta" class="meta"></span><button class="dlg-close" data-action="close-issue" aria-label="Close issue details">×</button></header><div id="issueDialogContent" class="dlg-body"></div></div></dialog><script src="`+versionedAssetURL("app.js")+`" defer></script></body></html>`)
 }
 
 // etagMatches is the weak comparison If-None-Match requires (RFC 9110
