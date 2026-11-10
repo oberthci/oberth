@@ -175,9 +175,8 @@ Only default-branch and scheduled branch runs register CI issue work, receiving
 a global admission sequence in the same transaction as the run. Ordinary
 feature-branch runs, promotions, and tag/release runs register none. Per-branch
 and per-origin watermarks keep projections monotonic: delayed older completions
-cannot overwrite newer failures. A finished promotion projects nothing; an
-open issue an older release filed for a promotion failure closes when the
-branch next runs green. Red creates or updates
+cannot overwrite newer failures. A finished promotion projects nothing. Red
+creates or updates
 one open issue per repository and branch; green closes it. Projection never
 acquires, renews, or deletes issue locks. Each branch failure projection includes
 the caller-supplied bounded retained-log tail and a command hint for the complete

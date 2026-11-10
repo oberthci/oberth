@@ -452,17 +452,17 @@ func TestLegacyPromotionFailureIssueClosesOnGreenBranchRun(t *testing.T) {
 		TargetRef: "main", PreviousSHA: projectionBaseSHA, ResultSHA: projectionResultSHA,
 		Actor: "agent@host",
 	}
-	legacy, err := database.AppendPromotion(ctx, spec)
+	earlier, err := database.AppendPromotion(ctx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedLegacyPromotionIssue(t, database, legacy)
+	seedEarlierPromotionIssue(t, database, earlier)
 	issue, err := database.OpenCIIssue(ctx, repository.ID, branch)
-	if err != nil || !strings.Contains(issue.Body, legacy.ID) {
-		t.Fatalf("legacy promotion issue = %#v, %v", issue, err)
+	if err != nil || !strings.Contains(issue.Body, earlier.ID) {
+		t.Fatalf("earlier promotion issue = %#v, %v", issue, err)
 	}
 
-	// A promotion finishing now leaves the legacy issue as it was.
+	// A promotion finishing now leaves the older issue as it was.
 	current, err := database.AppendPromotion(ctx, spec)
 	if err != nil {
 		t.Fatal(err)
@@ -519,9 +519,9 @@ func TestRestartInterruptedPromotionDoesNotProjectIssue(t *testing.T) {
 	}
 }
 
-// seedLegacyPromotionIssue recreates the state an older binary left: a
+// seedEarlierPromotionIssue recreates the state an older binary left: a
 // promotion's issue work and its failed projection with an open CI issue.
-func seedLegacyPromotionIssue(t *testing.T, database *Store, promotion model.Promotion) {
+func seedEarlierPromotionIssue(t *testing.T, database *Store, promotion model.Promotion) {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := database.db.BeginTx(ctx, nil)

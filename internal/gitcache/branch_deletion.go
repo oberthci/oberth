@@ -307,7 +307,7 @@ func (c *Cache) BranchInventory(ctx context.Context, input, target string) (Bran
 	targetRef := upstreamRefPrefix + "heads/" + target
 	targetSHA, err := c.capture(ctx, path, "rev-parse", "--verify", "--quiet", targetRef+"^{commit}")
 	if err != nil {
-		return BranchInventory{}, fmt.Errorf("branch %s has no forge-confirmed head on the mirror, so merged branches cannot be judged; wait for the next upstream refresh and plan again", target)
+		return BranchInventory{}, fmt.Errorf("branch %s has no forge-confirmed head on the mirror, so merged branches cannot be judged; publish the default branch to the forge if it has none yet, or wait for the next upstream refresh, then plan again", target)
 	}
 	inventory := BranchInventory{DefaultBranch: defaultBranch, Target: target, TargetSHA: strings.TrimSpace(targetSHA)}
 	listCtx, cancel := context.WithCancel(ctx)
