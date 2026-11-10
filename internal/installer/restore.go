@@ -358,7 +358,7 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 		workflows, listErr := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
 		if listErr != nil {
 			target.Notes = append(target.Notes, fmt.Sprintf("could not list Argo Workflows in %s (%v); orphaned workflows are not cleaned up", cfg.ArgoNamespace, listErr))
-		} else if target.Orphans, err = orphanedWorkflows(ctx, workflows, archive); err != nil {
+		} else if target.Orphans, err = orphanedWorkflows(ctx, workflows, archive, cfg.InterruptQueued); err != nil {
 			return target, openBaoExec{}, err
 		}
 	}
@@ -554,7 +554,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 
 	// List again now that no server can submit new workflows.
 	if workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace); parts.History && err == nil {
-		orphans, err := orphanedWorkflows(ctx, workflows, archive)
+		orphans, err := orphanedWorkflows(ctx, workflows, archive, cfg.InterruptQueued)
 		if err != nil {
 			return stopped(err)
 		}
@@ -949,8 +949,12 @@ func listRunWorkflows(ctx context.Context, deps backupDeps, namespace string) ([
 
 // orphanedWorkflows returns the workflows whose run the restored database
 // does not know: submitted by the database being replaced, they would hold
-// pipeline slots and report to runs that no longer exist (issue 048).
-func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive restoreArchive) (orphans []runWorkflow, resultErr error) {
+// pipeline slots and report to runs that no longer exist (issue 048). With
+// newer (a rollback restore) it also returns the workflows the restored
+// database does not name for their run: submitted after the backup for a run
+// it holds as queued (or under another name), they are work of the version
+// the rollback undoes, and the restored run is cancelled, not continued.
+func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive restoreArchive, newer bool) (orphans []runWorkflow, resultErr error) {
 	if len(workflows) == 0 {
 		return nil, nil
 	}
@@ -971,6 +975,16 @@ func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive res
 	for _, wf := range workflows {
 		if !known[wf.RunID] {
 			orphans = append(orphans, wf)
+			continue
+		}
+		if newer {
+			run, err := inspection.Run(ctx, wf.RunID)
+			if err != nil {
+				return nil, fmt.Errorf("read restored run %s: %w", wf.RunID, err)
+			}
+			if run.WorkflowName != wf.Name {
+				orphans = append(orphans, wf)
+			}
 		}
 	}
 	return orphans, nil

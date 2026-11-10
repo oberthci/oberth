@@ -153,8 +153,14 @@ func TestRestoreOnlyHistoryFromAFullArchive(t *testing.T) {
 // the backup to the server, not only the running ones.
 func TestRollbackRestoreHandsQueuedRunsToTheServer(t *testing.T) {
 	t.Parallel()
-	archive, _, _, target := reinstallFixture(t)
+	archive, runID, _, target := reinstallFixture(t)
+	// The backup's own Workflow of its running run is kept; one submitted
+	// for that run under another name (after the backup) is not.
+	target.workflows = append(target.workflows, runWorkflow{Name: "oberth-backup-fixture", RunID: runID, Phase: "Running"})
 	out := runFixtureRestore(t, archive, target, RestoreConfig{Only: []string{RestorePartHistory}, InterruptQueued: true})
+	if deleted := slices.Sorted(slices.Values(target.deleted)); !slices.Equal(deleted, []string{"oberth-oberth-known", "oberth-oberth-orphan"}) {
+		t.Fatalf("rollback restore deleted %v, want the after-backup and the unknown Workflow", target.deleted)
+	}
 	var marker struct {
 		Runs []string `json:"runs"`
 	}
