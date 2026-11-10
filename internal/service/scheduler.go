@@ -61,7 +61,7 @@ type SchedulerConfig struct {
 }
 
 type Scheduler struct {
-	restoredRunsFile string
+	restoredRunsFile               string
 	disableInfrastructureAutoRetry bool
 
 	databaseRetryCount atomic.Uint64

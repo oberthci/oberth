@@ -120,9 +120,7 @@ func TestDryRunPlansRefreshRegisteredRepos(t *testing.T) {
 			t.Parallel()
 			var out bytes.Buffer
 			cfg := Config{ChartVersion: "0.17.16", InstallSecretStore: kind == "production OpenBao", InstallSecretStoreDev: kind == "dev OpenBao"}
-			var err error
-			err = printDryRunPlan(cfg, &out, ClusterInfo{Engine: kind})
-			if err != nil {
+			if err := printDryRunPlan(cfg, &out, ClusterInfo{Engine: kind}); err != nil {
 				t.Fatal(err)
 			}
 			lines := strings.Split(out.String(), "\n")
