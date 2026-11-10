@@ -86,6 +86,14 @@ func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--allow-downgrade") {
 		t.Fatalf("downgrade without the flag: %v", err)
 	}
+	// A downgrade never proceeds on an unreadable schema.
+	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
+		return nil, errors.New("container not found")
+	}
+	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
+	if err == nil || !strings.Contains(err.Error(), "could not be read") {
+		t.Fatalf("downgrade on an unknown schema: %v", err)
+	}
 }
 
 type upgradeFixture struct {
@@ -241,11 +249,25 @@ func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
 	path := writeTestRecord(t, UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0",
 		OberthRevision: 7, ArgoNamespace: "oberth-argo", ArgoRevision: 3, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
 	restored := ""
-	err := RunRollback(t.Context(), RollbackConfig{Record: path, Timeout: time.Minute, Restore: func(_ context.Context, file string) error {
+	restore := func(_ context.Context, target RollbackRestore) error {
 		*fixture.calls = append(*fixture.calls, "restore")
-		restored = file
+		// The restore is aimed at the record's namespace.
+		if target.Namespace != "oberth" {
+			t.Errorf("restore namespace = %q, want the record's", target.Namespace)
+		}
+		restored = target.Archive
 		return nil
-	}}, fixture.deps)
+	}
+	// Replacing the database needs --yes, on a local cluster too.
+	if err := RunRollback(t.Context(), RollbackConfig{Record: path, Timeout: time.Minute, Restore: restore}, fixture.deps); err == nil || !strings.Contains(err.Error(), "--yes") {
+		t.Fatalf("restoring rollback without --yes: %v", err)
+	}
+	for _, call := range *fixture.calls {
+		if strings.HasPrefix(call, "rollback") || call == "restore" {
+			t.Fatalf("unconfirmed rollback ran %q", call)
+		}
+	}
+	err := RunRollback(t.Context(), RollbackConfig{Record: path, Yes: true, Timeout: time.Minute, Restore: restore}, fixture.deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,6 +281,32 @@ func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
 	got := slices.DeleteFunc(slices.Clone(*fixture.calls), func(call string) bool { return strings.HasPrefix(call, "list") })
 	if !slices.Equal(got, want[1:]) || restored != archive {
 		t.Fatalf("rollback sequence = %v (restored %q)", *fixture.calls, restored)
+	}
+}
+
+// The restore of a rollback goes to the record's installation, not to the
+// default namespace: another install there must never get this database.
+func TestRollbackRestoresIntoTheRecordsNamespace(t *testing.T) {
+	t.Parallel()
+	fixture := newUpgradeFixture(t, "0.21.0", "0.20.1", "74")
+	archive := filepath.Join(t.TempDir(), "backup.tar.gz.enc")
+	if err := os.WriteFile(archive, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTestRecord(t, UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "ci", From: "0.20.1", To: "0.21.0",
+		OberthRevision: 7, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
+	var got RollbackRestore
+	// The fixture's server runs in "oberth", so the readback after the
+	// restore fails; what matters is where the restore was aimed.
+	_ = RunRollback(t.Context(), RollbackConfig{Record: path, Yes: true, Timeout: time.Minute, Restore: func(_ context.Context, target RollbackRestore) error {
+		got = target
+		return nil
+	}}, fixture.deps)
+	if got.Namespace != "ci" || got.Archive != archive {
+		t.Fatalf("restore target = %+v, want namespace ci", got)
+	}
+	if !slices.Contains(*fixture.calls, "rollback oberth 7 -n ci --timeout 1m0s") {
+		t.Fatalf("helm rollback not in the record's namespace: %v", *fixture.calls)
 	}
 }
 

@@ -441,6 +441,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		var schemaErr error
 		liveSchema, schemaErr = queryRunningSchemaVersion(ctx, deps, cfg)
 		if schemaErr != nil || liveSchema <= 0 {
+			if cmp > 0 {
+				return result, errors.New("--allow-downgrade needs the running database schema, which could not be read: " +
+					"an older server cannot open a newer database; roll back with oberth upgrade --rollback <record> instead")
+			}
 			liveSchema = 0
 			_, _ = fmt.Fprintln(w, "\nWARNING: running database schema is unknown; the target may run forward-only migrations.")
 			warnUpgradeBackup(w, cfg)

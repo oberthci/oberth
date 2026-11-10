@@ -145,7 +145,33 @@ type RollbackConfig struct {
 	Timeout   time.Duration
 	// Restore restores the record's backup (history only) onto the rolled
 	// back release; the CLI wires it to oberth restore.
-	Restore func(ctx context.Context, archive string) error
+	Restore func(ctx context.Context, restore RollbackRestore) error
+}
+
+// RollbackRestore names what a rollback restores and where: the record's
+// installation, never the CLI's default namespaces.
+type RollbackRestore struct {
+	Namespace     string // the record's Oberth namespace
+	ArgoNamespace string // that release's pipeline namespace
+	Archive       string // the pre-upgrade backup
+}
+
+// releasePipelineNamespace reads argo.namespace of the oberth release in
+// namespace ("" when its values name none).
+func releasePipelineNamespace(ctx context.Context, deps Deps, namespace string) (string, error) {
+	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "--all", "-o", "json"})
+	if err != nil {
+		return "", fmt.Errorf("read the pipeline namespace of release oberth in %s: %w", namespace, err)
+	}
+	var values struct {
+		Argo struct {
+			Namespace string `json:"namespace"`
+		} `json:"argo"`
+	}
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return "", fmt.Errorf("read the pipeline namespace of release oberth in %s: %w", namespace, err)
+	}
+	return values.Argo.Namespace, nil
 }
 
 // ReadUpgradeRecord reads and checks a rollback record.
@@ -218,9 +244,13 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		return fmt.Errorf("the upgrade from %s to %s migrated (or may have migrated) the database and took no backup (--no-backup): "+
 			"the previous server cannot open the migrated database; fix forward with oberth upgrade instead", displayVersion(record.From), displayVersion(record.To))
 	}
+	restore := RollbackRestore{Namespace: record.Namespace, Archive: record.Backup}
 	if needRestore {
 		if _, err := os.Stat(record.Backup); err != nil {
 			return fmt.Errorf("pre-upgrade backup %s: %w", record.Backup, err)
+		}
+		if restore.ArgoNamespace, err = releasePipelineNamespace(ctx, deps, record.Namespace); err != nil {
+			return err
 		}
 	}
 
@@ -242,9 +272,17 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		step++
 	}
 	_, _ = fmt.Fprintf(w, "  %d. verify the server runs %s\n", step, displayVersion(record.From))
+	if needRestore {
+		_, _ = fmt.Fprintf(w, "The restore replaces the database with the backup of %s: history recorded since then is not kept.\n", displayOr(record.CreatedAt, "the upgrade"))
+	}
 	if cfg.DryRun {
 		_, _ = fmt.Fprintln(w, "No changes were made (--dry-run).")
 		return nil
+	}
+	// A restore replaces the database, on a local cluster too: like oberth
+	// restore, it never runs on the record's name alone.
+	if needRestore && !cfg.Yes {
+		return errors.New("this rollback replaces the server database with the pre-upgrade backup; review the plan above and rerun with --yes")
 	}
 	if needRestore && cfg.Restore == nil {
 		return errors.New("the rollback needs a restore of the backup, and no restore is configured")
@@ -261,7 +299,7 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	}
 	_, _ = fmt.Fprintf(w, "oberth rolled back to revision %d\n", record.OberthRevision)
 	if needRestore {
-		if err := cfg.Restore(ctx, record.Backup); err != nil {
+		if err := cfg.Restore(ctx, restore); err != nil {
 			return fmt.Errorf("restore the pre-upgrade backup: %w", err)
 		}
 	}

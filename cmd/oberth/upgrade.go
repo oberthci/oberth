@@ -179,16 +179,19 @@ func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg ins
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
 	helmKubeArgs, _, _ := installer.ResolveHelmKubeArgs(kubeContext)
-	restore := func(ctx context.Context, archive string) error {
-		key, err := resolveBackupKey("", archive)
+	// The restore targets the record's installation (its namespace and that
+	// release's pipeline namespace), never this command's defaults.
+	restore := func(ctx context.Context, target installer.RollbackRestore) error {
+		key, err := resolveBackupKey("", target.Archive)
 		if err != nil {
 			return err
 		}
 		return installer.ExecuteRestore(ctx, installer.RestoreConfig{
 			MaxDatabaseBytes: store.DefaultBackupMaxBytes,
 			ContextName:      kubeContext,
-			Namespace:        cfg.Namespace,
-			Input:            archive,
+			Namespace:        target.Namespace,
+			ArgoNamespace:    target.ArgoNamespace,
+			Input:            target.Archive,
 			PrivateKey:       key,
 			Only:             []string{installer.RestorePartHistory},
 			Yes:              true,
