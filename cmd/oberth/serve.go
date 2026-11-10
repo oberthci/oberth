@@ -353,7 +353,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 			flags.Usage()
 			return serveOptions{}, flag.ErrHelp
 		}
-		return serveOptions{}, usageError(err)
+		return serveOptions{}, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 0 {
 		return serveOptions{}, fmt.Errorf("%w: serve accepts flags only", errUsage)
