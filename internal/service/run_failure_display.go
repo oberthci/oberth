@@ -44,7 +44,7 @@ func failedRunDisplayReason(run model.Run) string {
 				return "upstream rejected: " + class
 			}
 		}
-		return "upstream publication failed"
+		return "steps passed, upstream publication failed"
 	}
 	step := run.FailedStep
 	if step == "" {
