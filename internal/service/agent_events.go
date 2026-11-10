@@ -45,7 +45,8 @@ type AgentEventPolicy struct {
 	Retention int
 	// SyncRetention keeps this many newest native lock intervals.
 	SyncRetention int
-	// Interval is the sweep period for holds, lock waits and retries.
+	// Interval is the sweep period for lock waits and retries; holds have
+	// their own agentEventHoldInterval loop.
 	Interval time.Duration
 	// LockWait is how long a run waits on one lock before run.lock_wait.
 	LockWait time.Duration
@@ -68,6 +69,10 @@ const (
 	agentEventSummaryErrorLength   = 200
 	agentEventDataErrorLength      = 600
 	agentEventPendingNotifications = 1024
+	// agentEventHoldInterval is the period of the hold loop, which runs
+	// beside the sweep so a slow prune read or Workflow GET in the sweep
+	// cannot delay run.held: the hold sweep's own settlement tick.
+	agentEventHoldInterval = 5 * time.Second
 )
 
 // Effective applies defaults and clamps.
@@ -102,7 +107,11 @@ type agentEventRecorder struct {
 	wakeMu  sync.Mutex
 	wake    chan struct{}
 	// memo skips keys this process already recorded; bounded and reset.
-	memo map[string]bool
+	// The sweep and the hold loop both emit, so it is guarded.
+	memoMu sync.Mutex
+	memo   map[string]bool
+	// holdInterval is the hold loop's period (agentEventHoldInterval).
+	holdInterval time.Duration
 	// snapshot is the last native lock observation, for sync_status.
 	snapshotMu sync.Mutex
 	snapshot   syncSnapshot
@@ -120,7 +129,8 @@ func newAgentEventRecorder(base *API, store AgentEventStore, policy AgentEventPo
 		return nil
 	}
 	recorder := &agentEventRecorder{base: base, store: store, policy: policy.Effective(), now: time.Now,
-		pending: make(chan agentNotification, agentEventPendingNotifications), wake: make(chan struct{}), memo: map[string]bool{}}
+		pending: make(chan agentNotification, agentEventPendingNotifications), wake: make(chan struct{}), memo: map[string]bool{},
+		holdInterval: agentEventHoldInterval}
 	base.signals.Observe(recorder.notify)
 	return recorder
 }
@@ -162,6 +172,13 @@ func (service *API) StartAgentEvents(ctx context.Context) error {
 			defer service.background.Done()
 			recorder.run(ctx)
 		}()
+		if !service.startBackground() {
+			return
+		}
+		go func() {
+			defer service.background.Done()
+			recorder.runHolds(ctx)
+		}()
 	})
 	return nil
 }
@@ -183,6 +200,63 @@ func (recorder *agentEventRecorder) run(ctx context.Context) {
 			recorder.sweep(ctx)
 		}
 	}
+}
+
+// runHolds is the fast path for run.held. The recorder's sweep is one
+// goroutine whose prune upstream read and Workflow GETs share one budget
+// (up to 30 s), so holds are observed here instead, every
+// agentEventHoldInterval, with only a run list and one Pod list per held
+// run.
+func (recorder *agentEventRecorder) runHolds(ctx context.Context) {
+	ticker := time.NewTicker(recorder.holdInterval)
+	defer ticker.Stop()
+	for {
+		recorder.sweepHolds(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-recorder.base.lifetime.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (recorder *agentEventRecorder) sweepHolds(ctx context.Context) {
+	if recorder.base.history == nil {
+		return
+	}
+	sweepCtx, cancel := context.WithTimeout(ctx, max(recorder.holdInterval, 10*time.Second))
+	defer cancel()
+	active, err := recorder.base.history.ListActiveRuns(sweepCtx, model.RunListFilter{})
+	if err != nil {
+		return
+	}
+	recorder.observeHeldRuns(sweepCtx, active)
+}
+
+// observeHeldRuns records run.held for every running assisted run.
+func (recorder *agentEventRecorder) observeHeldRuns(ctx context.Context, runs []model.Run) {
+	for _, run := range runs {
+		if run.Status == model.RunRunning && run.WorkflowName != "" && run.AssistRequested {
+			recorder.observeHolds(ctx, run)
+		}
+	}
+}
+
+func (recorder *agentEventRecorder) recorded(key string) bool {
+	recorder.memoMu.Lock()
+	defer recorder.memoMu.Unlock()
+	return recorder.memo[key]
+}
+
+func (recorder *agentEventRecorder) remember(key string) {
+	recorder.memoMu.Lock()
+	defer recorder.memoMu.Unlock()
+	if len(recorder.memo) >= agentEventMemoLimit {
+		recorder.memo = map[string]bool{}
+	}
+	recorder.memo[key] = true
 }
 
 func (recorder *agentEventRecorder) handle(ctx context.Context, notification agentNotification) {
@@ -247,7 +321,7 @@ func (recorder *agentEventRecorder) sweep(ctx context.Context) {
 
 // emit records one event and wakes push streams and run_wait observers.
 func (recorder *agentEventRecorder) emit(ctx context.Context, event model.AgentEvent) {
-	if recorder.memo[event.Key] {
+	if recorder.recorded(event.Key) {
 		return
 	}
 	if event.Repo == "" && event.RepoID != 0 {
@@ -258,10 +332,7 @@ func (recorder *agentEventRecorder) emit(ctx context.Context, event model.AgentE
 		log.Printf("WARN: agent event %s not recorded", event.Kind)
 		return
 	}
-	if len(recorder.memo) >= agentEventMemoLimit {
-		recorder.memo = map[string]bool{}
-	}
-	recorder.memo[event.Key] = true
+	recorder.remember(event.Key)
 	if !inserted {
 		return
 	}
@@ -294,7 +365,7 @@ func (recorder *agentEventRecorder) observeRun(ctx context.Context, run model.Ru
 		return
 	}
 	key := model.AgentEventRunFinished + ":" + run.ID
-	if recorder.memo[key] {
+	if recorder.recorded(key) {
 		return
 	}
 	shown := recorder.base.presentationRun(ctx, run)
@@ -353,7 +424,7 @@ func (recorder *agentEventRecorder) observeActive(ctx context.Context, active []
 			continue
 		}
 		if run.AssistRequested {
-			recorder.observeHolds(ctx, run)
+			// run.held comes from the hold loop (runHolds), not this sweep.
 			recorder.observeAbandons(ctx, run)
 		}
 		if observer == nil {
@@ -536,7 +607,7 @@ func (recorder *agentEventRecorder) observePromotion(ctx context.Context, promot
 		return
 	}
 	key := model.AgentEventPromotionFinished + ":" + promotion.ID
-	if recorder.memo[key] {
+	if recorder.recorded(key) {
 		return
 	}
 	// A prune_source request is settled before the lookback applies: a
@@ -603,7 +674,7 @@ func (recorder *agentEventRecorder) observeAbandons(ctx context.Context, run mod
 			continue
 		}
 		key := model.AgentEventRunHoldAbandoned + ":" + run.ID + ":" + event.Pod
-		if recorder.memo[key] {
+		if recorder.recorded(key) {
 			continue
 		}
 		if repo == "" {

@@ -86,7 +86,8 @@ agentEvents:
   retention: 10000
   # Newest native lock holder/waiter intervals kept (1-1000000).
   syncRetention: 20000
-  # Sweep period for retry holds, lock waits and publication retries (2s-5m).
+  # Sweep period for lock waits and publication retries (2s-5m); retry holds
+  # have their own 5s loop.
   interval: 10s
   # A run waiting this long on one native lock emits run.lock_wait.
   lockWaitThreshold: 60s

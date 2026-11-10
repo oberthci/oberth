@@ -1227,7 +1227,7 @@ Usage of serve:
   -agent-events-heartbeat duration
         keepalive interval of MCP streams (1s-5m) (default 20s)
   -agent-events-interval duration
-        sweep period for retry holds, native lock waits and publication retries (2s-5m) (default 10s)
+        sweep period for native lock waits and publication retries; retry holds have their own 5s loop (2s-5m) (default 10s)
   -agent-events-lock-wait-threshold duration
         how long a run waits on one native Argo lock before a run.lock_wait event (default 1m0s)
   -agent-events-max-backlog int

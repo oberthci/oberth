@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -137,8 +138,8 @@ func TestAgentEventRunHeldPayload(t *testing.T) {
 		{Pod: "wf-held-test-1", Step: "test", Attempt: 1, HeldSince: since, PatchCapable: true},
 		{Pod: "wf-held-lint-1", Step: "lint", Attempt: 1, HeldSince: since},
 	}
-	f.recorder.observeActive(t.Context(), []model.Run{run})
-	f.recorder.observeActive(t.Context(), []model.Run{run})
+	f.recorder.observeHeldRuns(t.Context(), []model.Run{run})
+	f.recorder.observeHeldRuns(t.Context(), []model.Run{run})
 	page := f.events(t, agentActor, map[string]any{"kinds": []string{model.AgentEventRunHeld}})
 	if len(page.Events) != 2 {
 		t.Fatalf("held events = %+v", page.Events)
@@ -504,4 +505,69 @@ func TestAgentEventRunHoldAbandoned(t *testing.T) {
 		data["held_since"] != held.UTC().Format(time.RFC3339) || data["failed_exit_code"] != float64(1) || !strings.Contains(page.Events[0].Summary, "exited 1") {
 		t.Fatalf("abandon event = %+v", page.Events[0])
 	}
+}
+
+type lockedHoldOperator struct {
+	fakeHoldOperator
+	mu sync.Mutex
+}
+
+func (f *lockedHoldOperator) ListAssistHolds(context.Context, string) ([]model.AssistHold, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]model.AssistHold(nil), f.holds...), nil
+}
+
+type stuckSyncObserver struct {
+	fakeSyncObserver
+	release chan struct{}
+}
+
+func (f *stuckSyncObserver) ObserveSynchronization(context.Context, model.Run) (*model.SyncObservation, error) {
+	<-f.release
+	return &model.SyncObservation{}, nil
+}
+
+// run.held does not wait for the recorder's sweep: with the sweep stuck on a
+// Workflow GET (a slow API server), a hold that parks is recorded by the
+// hold loop well inside 10 s.
+func TestAgentEventRunHeldNotDelayedBySlowSweep(t *testing.T) {
+	f := newAgentFixture(t)
+	holds := &lockedHoldOperator{}
+	observer := &stuckSyncObserver{release: make(chan struct{})}
+	f.service.assistHolds, f.service.schedulingObserver = holds, observer
+	enqueued := f.enqueue(t, "land/held-fast", "a", true)
+	claimed, err := f.store.ClaimNextRun(t.Context())
+	if err != nil || claimed.ID != enqueued.ID {
+		t.Fatalf("claim = %+v %v", claimed, err)
+	}
+	if _, err := f.store.SetRunWorkflowName(t.Context(), claimed.ID, "wf-held-fast"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(func() {
+		close(observer.release)
+		cancel()
+		shutdown, done := context.WithTimeout(context.Background(), 10*time.Second)
+		defer done()
+		_ = f.service.Shutdown(shutdown)
+	})
+	if err := f.service.StartAgentEvents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // the sweep is now stuck in ObserveSynchronization
+	holds.mu.Lock()
+	holds.holds = []model.AssistHold{{Pod: "wf-held-fast-test-1", Step: "test", Attempt: 1, HeldSince: f.now}}
+	holds.mu.Unlock()
+	parked := time.Now()
+	for time.Since(parked) < 10*time.Second {
+		if page := f.events(t, agentActor, map[string]any{"kinds": []string{model.AgentEventRunHeld}}); len(page.Events) == 1 {
+			if page.Events[0].Data["pod"] != "wf-held-fast-test-1" {
+				t.Fatalf("held event = %+v", page.Events[0])
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("run.held was not recorded within 10 s while the sweep was stuck")
 }

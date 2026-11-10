@@ -30,8 +30,10 @@ an agent names the right `step` for `run_hold_*` when a run holds two.
 
 Oberth records events from the existing run and promotion change signals and
 from a sweep every `agentEvents.interval` (default 10 s) for what has no
-signal: parked holds, lock waits, parallelism postponement and publication
-retries. It starts after
+signal: lock waits, parallelism postponement and publication retries.
+Parked holds have their own loop every 5 s (the hold sweep's tick) beside
+that sweep, so a slow pending-prune upstream read or Workflow GET in the
+sweep (up to 30 s) never delays `run.held`. It starts after
 owner recovery and only reads Kubernetes: one Workflow GET per running run
 (at most 64 per sweep) and the existing hold Pod list for assisted runs.
 

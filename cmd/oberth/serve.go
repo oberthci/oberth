@@ -262,7 +262,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.assist.PatchMaxFiles, "assist-patch-max-files", argojob.DefaultAssistPatchMaxFiles, "most files one run_hold_patch diff may touch (at most 1024)")
 	flags.IntVar(&options.agentEvents.Retention, "agent-events-retention", service.DefaultAgentEventRetention, "newest agent events kept for events_since and push replay (1-1000000; Helm agentEvents.retention)")
 	flags.IntVar(&options.agentEvents.SyncRetention, "agent-events-sync-retention", service.DefaultAgentSyncRetention, "newest native Argo lock holder/waiter intervals kept for sync_status (1-1000000)")
-	flags.DurationVar(&options.agentEvents.Interval, "agent-events-interval", service.DefaultAgentEventInterval, "sweep period for retry holds, native lock waits and publication retries (2s-5m)")
+	flags.DurationVar(&options.agentEvents.Interval, "agent-events-interval", service.DefaultAgentEventInterval, "sweep period for native lock waits and publication retries; retry holds have their own 5s loop (2s-5m)")
 	flags.DurationVar(&options.agentEvents.LockWait, "agent-events-lock-wait-threshold", service.DefaultAgentEventLockWait, "how long a run waits on one native Argo lock before a run.lock_wait event")
 	flags.IntVar(&options.agentEventStreams, "agent-events-max-streams-per-token", 4, "open MCP push streams (GET /mcp) allowed per bearer credential (1-64)")
 	flags.IntVar(&options.agentEventBacklog, "agent-events-max-backlog", 500, "agent events replayed to one MCP push stream on connect; older ones are left to events_since (1-10000)")
