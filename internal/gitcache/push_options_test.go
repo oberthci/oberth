@@ -23,6 +23,8 @@ func TestPriorityPushOptionsSurviveReceiveAndReplay(t *testing.T) {
 	packet("oberth.priority=highest")
 	packet("oberth.supersede=true")
 	packet("oberth.assist=1")
+	packet("oberth.priority_reason=urgent repair")
+	packet("oberth.priorty=high")
 	input.WriteString("0000")
 	emptyPack := []byte{'P', 'A', 'C', 'K', 0, 0, 0, 2, 0, 0, 0, 0}
 	checksum := sha1.Sum(emptyPack)
@@ -35,8 +37,11 @@ func TestPriorityPushOptionsSurviveReceiveAndReplay(t *testing.T) {
 	if !errors.Is(err, deliveryFailure) {
 		t.Fatalf("receive: %v\n%s", err, output.String())
 	}
-	if live.ActorFingerprint != "SHA256:original-key" || live.Priority != "highest" || !live.Supersede || !live.Assist || live.Actor != "original-requester" || live.PriorityReason != "git push priority request" {
+	if live.ActorFingerprint != "SHA256:original-key" || live.Priority != "highest" || !live.Supersede || !live.Assist || live.Actor != "original-requester" || live.PriorityReason != "urgent repair" {
 		t.Fatalf("lost push options: %+v", live)
+	}
+	if !strings.Contains(output.String(), "ignored unknown push option oberth.priorty") {
+		t.Fatalf("unknown push option was ignored silently:\n%s", output.String())
 	}
 	restarted := newTestCacheAt(t, cache.root, repository.upstream)
 	var replay ReceiveEvent
@@ -50,22 +55,56 @@ func TestPriorityPushOptionsSurviveReceiveAndReplay(t *testing.T) {
 
 func TestPriorityPushOptionsInvalidRequestsDoNotRejectPush(t *testing.T) {
 	for _, options := range [][]string{{"oberth.priority="}, {"oberth.priority=high", "oberth.priority=highest"}, {"oberth.priority=" + strings.Repeat("x", 1024)}} {
-		p, reason, _, _ := parsePushOptions(options)
-		if p != "invalid" || reason == "" {
-			t.Fatalf("invalid request lost: %q %q", p, reason)
+		parsed := parsePushOptions(options)
+		if parsed.priority != "invalid" || parsed.reason == "" {
+			t.Fatalf("invalid request lost: %q %q", parsed.priority, parsed.reason)
 		}
 	}
-	p, _, supersede, assist := parsePushOptions([]string{"oberth.priority=high", "oberth.supersede=false", "oberth.assist=0"})
-	if assist {
+	parsed := parsePushOptions([]string{"oberth.priority=high", "oberth.supersede=false", "oberth.assist=0"})
+	if parsed.assist {
 		t.Fatal("oberth.assist=0 asked for assistance")
 	}
-	if _, _, _, assist := parsePushOptions([]string{"oberth.assist=1"}); !assist {
+	if len(parsed.notices) != 0 {
+		t.Fatalf("explicit false values are known options: %q", parsed.notices)
+	}
+	if !parsePushOptions([]string{"oberth.assist=1"}).assist {
 		t.Fatal("oberth.assist=1 ignored")
 	}
-	if _, _, _, assist := parsePushOptions([]string{"oberth.assist=true"}); !assist {
+	if !parsePushOptions([]string{"oberth.assist=true"}).assist {
 		t.Fatal("oberth.assist=true ignored")
 	}
-	if p != "high" || supersede {
+	if parsed.priority != "high" || parsed.supersede {
 		t.Fatal("false supersede enabled cancellation")
+	}
+}
+
+// docs/release-priority.md documents oberth.priority_reason; it reaches the
+// run as the request's reason.
+func TestPriorityReasonPushOptionIsRead(t *testing.T) {
+	parsed := parsePushOptions([]string{"oberth.priority=high", "oberth.priority_reason=urgent repair"})
+	if parsed.priority != "high" || parsed.reason != "urgent repair" || len(parsed.notices) != 0 {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+	for _, bad := range []string{"oberth.priority_reason=", "oberth.priority_reason=" + strings.Repeat("x", 513), "oberth.priority_reason=a\x01b"} {
+		parsed := parsePushOptions([]string{"oberth.priority=high", bad})
+		if parsed.reason != "git push priority request" || len(parsed.notices) != 1 {
+			t.Fatalf("%q: parsed = %+v", bad, parsed)
+		}
+	}
+	if parsed := parsePushOptions([]string{"oberth.priority_reason=why"}); parsed.priority != "" || len(parsed.notices) != 1 {
+		t.Fatalf("a reason without a priority must be noticed: %+v", parsed)
+	}
+}
+
+func TestUnknownOberthPushOptionsAreNoticed(t *testing.T) {
+	parsed := parsePushOptions([]string{"oberth.priorty=high", "oberth.supersede=yes", "ci.skip", "oberth.\x1bbad"})
+	if len(parsed.notices) != 3 || parsed.priority != "" || parsed.supersede {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+	if !strings.Contains(parsed.notices[0], "oberth.priorty") || !strings.Contains(parsed.notices[0], "oberth.priority_reason") {
+		t.Fatalf("notice does not name the option and the known ones: %q", parsed.notices[0])
+	}
+	if strings.ContainsRune(parsed.notices[2], '\x1b') {
+		t.Fatalf("control characters reached the pusher: %q", parsed.notices[2])
 	}
 }

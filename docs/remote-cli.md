@@ -290,6 +290,31 @@ non-nil exit status is always shown. `--raw` keeps the prefix and every
 executor line, and `--json` returns the server's payload unchanged. The
 dashboard folds the same lines behind a "▸ N Argo executor lines" toggle.
 
+## Push options
+
+`git push -o <option>` passes these to Oberth; each push may carry up to 32:
+
+| Option | Effect |
+| --- | --- |
+| `oberth.priority=<low\|standard\|promotion\|high>` | Requests an execution class; see [release priority](release-priority.md). |
+| `oberth.priority_reason=<text>` | Explains the priority request (1..512 bytes, no control characters). |
+| `oberth.supersede=true` | Lets this push supersede protected (prioritised) work on the branch; replacing it requires its requester or an unscoped admin. See [release priority](release-priority.md). |
+| `oberth.assist=1` (or `true`) | Asks for agent-assisted retry holds; see [assisted continuation](assisted-continuation.md). |
+
+An unknown `oberth.*` option, or a known one with an unrecognised value, never
+refuses the push: it is ignored and the push prints one line such as
+`remote: oberth: ignored unknown push option oberth.priorty (known: ...)`.
+Options outside the `oberth.` namespace are left alone.
+
+If creating the run fails after Git accepted the refs, the push exits non-zero
+with `oberth: refs accepted, but creating the run for <ref> failed: <cause>`.
+The record stays in the receive journal and is delivered again by the next push
+to that repository or a server restart. While it is stuck, later pushes to the
+repository are refused before any ref moves, naming the record. An unscoped
+admin inspects it with `oberth outbox show <upstream/org/repo>` and retries it
+with `oberth outbox retry <upstream/org/repo>` (or abandons it with `--id` and
+`--reason`).
+
 ## Local or remote
 
 `artifacts` reads either. **If `OBERTH_BASE_URL` is set it reads the server;

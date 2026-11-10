@@ -31,7 +31,9 @@ const branchUsage = "Usage: oberth branch prune <repository> [--merged-into <def
 	"classed default-branch, tag, unreachable or not-commit; with a selection it plans their deletion,\n" +
 	"and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream)."
 
-const outboxUsage = "Usage: oberth outbox list|show|retry|abandon [<upstream/org/repo>] [--id <record-id>] [--reason <text>]\n" +
+const outboxUsage = "Usage: oberth outbox list\n" +
+	"       oberth outbox show|retry <upstream/org/repo>\n" +
+	"       oberth outbox abandon <upstream/org/repo> --id <record-id> --reason <text>\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
 	"Repair a receive record that blocks its repository: show it, retry delivery, or abandon it\n" +
 	"(moved aside under abandoned/, audited). Unscoped admin only."

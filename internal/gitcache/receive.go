@@ -76,7 +76,7 @@ func (c *Cache) receiveWithTransport(ctx context.Context, input, actor, protocol
 	// refresh public refs from upstream; otherwise unrelated upstream movement
 	// could be misattributed to the prior actor's crash window.
 	if err := c.replayRepoSerialized(ctx, identity, path, handler); err != nil {
-		return fmt.Errorf("replay earlier receive for %s: %w", identity, err)
+		return earlierReceiveError(identity, err)
 	}
 	lock := c.repoLock(path)
 	if err := lock.LockContext(ctx); err != nil {
@@ -122,7 +122,7 @@ func (c *Cache) receiveTransactionSerialized(
 	handler ReceiveHandler,
 ) error {
 	if err := c.replayRepoSerialized(ctx, identity, path, handler); err != nil {
-		return fmt.Errorf("replay earlier receive for %s: %w", identity, err)
+		return earlierReceiveError(identity, err)
 	}
 
 	lock := c.repoLock(path)
@@ -427,7 +427,7 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, identity, path string,
 			ReleaseAdmission: reservation.ReleaseAdmission,
 		}
 		if err := handler.HandleReceive(ctx, event); err != nil {
-			return fmt.Errorf("deliver receive event %s: %w", event.ID, err)
+			return &ReceiveDeliveryError{Repo: identity, EventID: event.ID, Ref: event.Update.Ref, Err: err}
 		}
 		reservation.Next++
 		if reservation.Next == len(reservation.Updates) {
@@ -653,6 +653,44 @@ func newReceiveID() (string, error) {
 		return "", fmt.Errorf("generate receive reservation id: %w", err)
 	}
 	return hex.EncodeToString(value[:]), nil
+}
+
+// ReceiveDeliveryError reports an accepted receive whose refs are published
+// and whose event is durable in the outbox, but whose callback (run creation)
+// failed. The event stays in the outbox: the next push to the repository, a
+// server restart or `oberth outbox retry` delivers it again. Earlier is set
+// when the stuck event belongs to an earlier push that now blocks this one.
+type ReceiveDeliveryError struct {
+	Repo, EventID, Ref string
+	Earlier            bool
+	Err                error
+}
+
+func (e *ReceiveDeliveryError) Error() string {
+	return fmt.Sprintf("deliver receive event %s: %v", e.EventID, e.Err)
+}
+
+func (e *ReceiveDeliveryError) Unwrap() error { return e.Err }
+
+// ReceiveBlockedError is a receive refused before its transport because an
+// earlier receive record of Repo could not be recovered.
+type ReceiveBlockedError struct {
+	Repo string
+	Err  error
+}
+
+func (e *ReceiveBlockedError) Error() string {
+	return fmt.Sprintf("replay earlier receive for %s: %v", e.Repo, e.Err)
+}
+
+func (e *ReceiveBlockedError) Unwrap() error { return e.Err }
+
+func earlierReceiveError(identity string, err error) error {
+	var delivery *ReceiveDeliveryError
+	if errors.As(err, &delivery) {
+		delivery.Earlier = true
+	}
+	return &ReceiveBlockedError{Repo: identity, Err: err}
 }
 
 // ErrCorruptReceiveReservation is repository-local. No caller may mutate that

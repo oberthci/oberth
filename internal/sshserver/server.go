@@ -420,7 +420,11 @@ func (s *Server) handleSession(
 				if request.WantReply {
 					_ = request.Reply(true, nil)
 				}
-				_, _ = io.WriteString(channel.Stderr(), "oberth: "+err.Error()+"\n")
+				text, internal := gitFailureText(err)
+				if internal {
+					s.logger.Printf("git %s for %s failed: %v", command.service, actor.identity, err)
+				}
+				_, _ = io.WriteString(channel.Stderr(), text)
 				sendExitStatus(channel, 1)
 				return
 			}
@@ -448,7 +452,11 @@ func (s *Server) handleSession(
 			defer idle.stop()
 			if err := s.runGit(sessionCtx, actor, protocol, command, idle); err != nil {
 				complete()
-				_, _ = io.WriteString(channel.Stderr(), "oberth: "+err.Error()+"\n")
+				text, internal := gitFailureText(err)
+				if internal {
+					s.logger.Printf("git %s for %s failed: %v", command.service, actor.identity, err)
+				}
+				_, _ = io.WriteString(channel.Stderr(), text)
 				sendExitStatus(channel, 1)
 				return
 			}
@@ -461,6 +469,47 @@ func (s *Server) handleSession(
 			}
 		}
 	}
+}
+
+// gitFailureText is what the Git client prints for a failed session. Receive
+// failures after the refs were accepted name what happened to the push and
+// the repair command; their full error chain goes to the server log only
+// (internal is true). Every other failure keeps its existing one-line text.
+func gitFailureText(err error) (text string, internal bool) {
+	if errors.Is(err, gitcache.ErrCorruptReceiveReservation) {
+		repo := "<upstream/org/repo>"
+		var blocked *gitcache.ReceiveBlockedError
+		if errors.As(err, &blocked) && blocked.Repo != "" {
+			repo = blocked.Repo
+		}
+		return "oberth: push refused: this repository's receive journal is quarantined and needs admin repair.\n" +
+			"oberth: an admin runs: oberth outbox show " + repo + "\n", true
+	}
+	var delivery *gitcache.ReceiveDeliveryError
+	if !errors.As(err, &delivery) {
+		return "oberth: " + err.Error() + "\n", false
+	}
+	cause := boundedCause(delivery.Err)
+	if delivery.Earlier {
+		return fmt.Sprintf("oberth: push refused: an earlier accepted push to %s (%s, record %s) has not created its run yet: %s\n"+
+			"oberth: nothing from this push was applied. Push again to retry that delivery first; if it keeps failing,\n"+
+			"oberth: an admin runs: oberth outbox show %s, then oberth outbox retry %s (or abandon it with --id and --reason)\n",
+			delivery.Repo, delivery.Ref, delivery.EventID, cause, delivery.Repo, delivery.Repo), true
+	}
+	return fmt.Sprintf("oberth: refs accepted, but creating the run for %s failed: %s\n"+
+		"oberth: the push is kept (record %s) and is delivered again by the next push to %s or a server restart;\n"+
+		"oberth: an admin can inspect it with: oberth outbox show %s, and retry it with: oberth outbox retry %s\n",
+		delivery.Ref, cause, delivery.EventID, delivery.Repo, delivery.Repo, delivery.Repo), true
+}
+
+// boundedCause is the innermost readable reason on one line, at most 200
+// runes; the pusher sees the cause, the server log keeps the whole chain.
+func boundedCause(err error) string {
+	text := strings.Join(strings.Fields(err.Error()), " ")
+	if runes := []rune(text); len(runes) > 200 {
+		text = string(runes[:199]) + "…"
+	}
+	return text
 }
 
 func minimumDeadline(left, right time.Time) time.Time {

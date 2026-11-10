@@ -35,7 +35,7 @@ func ReceiveHookInvocation(ctx context.Context, arguments []string, input io.Rea
 		} else {
 			err = cache.nativePreReceive(ctx, input)
 			if err == nil {
-				err = recordNativePushOptions()
+				err = recordNativePushOptions(diagnostics)
 			}
 		}
 	} else if len(arguments) != 4 {
