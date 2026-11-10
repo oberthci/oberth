@@ -455,7 +455,7 @@ Usage of install:
   -tls-remove-ip value
         remove a permitted IP; refused while the served certificate contains it (repeatable)
   -upgrade
-        force helm upgrade of existing releases even when already up to date (re-runs auto-upgrade when a newer chart is targeted; this flag forces reconciliation)
+        force helm reconciliation of existing releases at the installed Oberth version; version changes of an existing Oberth release are refused here and go through oberth upgrade
   -uplink-identity string
         workstation identity
   -upstream-key-file string

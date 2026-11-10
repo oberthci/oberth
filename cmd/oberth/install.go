@@ -36,8 +36,8 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed even for non-local clusters")
 	flags.BoolVar(&cfg.Upgrade, "upgrade", false,
-		"force helm upgrade of existing releases even when already up to date "+
-			"(re-runs auto-upgrade when a newer chart is targeted; this flag forces reconciliation)")
+		"force helm reconciliation of existing releases at the installed Oberth version; "+
+			"version changes of an existing Oberth release are refused here and go through oberth upgrade")
 	flags.BoolVar(&cfg.InstallSecretStore, "install-secretstore", false,
 		"also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, "+
 			"root token and unseal key printed once) and configure it as Oberth's release secret store")

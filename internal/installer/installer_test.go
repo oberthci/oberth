@@ -1362,9 +1362,10 @@ func TestInstallOberthUpgradeFromLegacyValuesPinsManagedTransitIdentity(t *testi
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
 			case "list":
-				// v0.10.92 predates the transit.mount/key chart values. Helm's
-				// --reuse-values therefore supplies neither on this upgrade.
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.92"}]`), nil
+				// The stored values come from v0.10.92, which predates the
+				// transit.mount/key chart values; a same-version --upgrade
+				// reconcile reuses them, so Helm supplies neither.
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.93"}]`), nil
 			case "show":
 				return []byte(fakeChartValuesYAML), nil
 			case "upgrade":
@@ -2664,50 +2665,58 @@ func TestInstallOberthHintsWhenNewerChartPublished(t *testing.T) {
 	}
 }
 
-func TestInstallOberthUpgradesWhenNewerChartTargeted(t *testing.T) {
+func TestInstallOberthRefusesVersionMoves(t *testing.T) {
 	t.Parallel()
-
-	var helmCalls [][]string
-	var buf bytes.Buffer
-	deps := Deps{
-		Output: &buf,
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			helmCalls = append(helmCalls, slices.Clone(args))
-			switch args[0] {
-			case "list":
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.57"}]`), nil
-			case "show":
-				return []byte(fakeChartValuesYAML), nil
+	for _, tc := range []struct {
+		name, installed, target, want string
+		upgrade                       bool
+	}{
+		{"newer CLI rerun", "0.10.57", "v0.10.58", "go through oberth upgrade", false},
+		{"newer CLI --upgrade", "0.10.57", "v0.10.58", "go through oberth upgrade", true},
+		// P1-2: an older CLI with --upgrade used to downgrade the server.
+		{"older CLI --upgrade", "0.20.1", "v0.17.62", "refusing to downgrade", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var helmCalls [][]string
+			deps := Deps{
+				Output: io.Discard,
+				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+					helmCalls = append(helmCalls, slices.Clone(args))
+					switch args[0] {
+					case "list":
+						return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-` + tc.installed + `"}]`), nil
+					case "show":
+						return []byte(fakeChartValuesYAML), nil
+					}
+					return nil, nil
+				},
 			}
-			return nil, nil
-		},
+			_, err := InstallOberth(context.Background(), Config{ChartVersion: tc.target, Upgrade: tc.upgrade}, deps, OpenBaoResult{}, RekorResult{})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+			for _, call := range helmCalls {
+				if call[0] == "upgrade" || call[0] == "install" {
+					t.Fatalf("refused version move still ran helm %v", call)
+				}
+			}
+			// The same refusal runs before Run installs anything else.
+			if err := preflightInstallVersionMove(context.Background(), Config{ChartVersion: tc.target, Upgrade: tc.upgrade}, deps); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("preflight error = %v, want %q", err, tc.want)
+			}
+		})
 	}
-
-	result, err := InstallOberth(context.Background(), Config{ChartVersion: "v0.10.58"}, deps, OpenBaoResult{}, RekorResult{})
-	if err != nil {
-		t.Fatal(err)
+	// An older CLI without --upgrade leaves the newer release untouched, and a
+	// local chart (the dev loop) is never refused.
+	deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.20.1"}]`), nil
+	}}
+	if err := preflightInstallVersionMove(context.Background(), Config{ChartVersion: "v0.17.62"}, deps); err != nil {
+		t.Fatalf("older rerun without --upgrade skips, got %v", err)
 	}
-	if !result.Upgraded {
-		t.Fatal("newer targeted chart should upgrade the existing release")
-	}
-	if result.AlreadyInstalled {
-		t.Fatal("upgraded release must not be reported as already installed")
-	}
-	var upgrade []string
-	for _, call := range helmCalls {
-		if call[0] == "upgrade" {
-			upgrade = call
-		}
-	}
-	if upgrade == nil {
-		t.Fatalf("expected a helm upgrade call, got %v", helmCalls)
-	}
-	joined := strings.Join(upgrade, " ")
-	if !strings.Contains(joined, "--version 0.10.58") || !strings.Contains(joined, "--reuse-values") {
-		t.Fatalf("upgrade args missing version pin or --reuse-values: %q", joined)
-	}
-	if !strings.Contains(buf.String(), "Oberth v0.10.57 installed, v0.10.58 available. Upgrading...") {
-		t.Fatalf("expected upgrade progress message, got %q", buf.String())
+	if err := preflightInstallVersionMove(context.Background(), Config{ChartVersion: "v0.17.62", Upgrade: true, ChartPath: "./charts/oberth"}, deps); err != nil {
+		t.Fatalf("local chart is not a version move, got %v", err)
 	}
 }
 
@@ -4965,7 +4974,7 @@ func TestInstallOberthPinsChartDefaultImageRef(t *testing.T) {
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
 			case "list":
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.13.42"}]`), nil
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.2"}]`), nil
 			case "show":
 				return []byte("image:\n  ref: " + chartImageRef + "\n"), nil
 			case "upgrade":
@@ -5004,7 +5013,7 @@ func TestInstallOberthExplicitImageSkipsChartResolution(t *testing.T) {
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
 			case "list":
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.13.42"}]`), nil
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.2"}]`), nil
 			case "show":
 				showCalled = true
 			case "upgrade":

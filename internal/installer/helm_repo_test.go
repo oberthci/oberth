@@ -22,7 +22,16 @@ func TestChartConsumersRefreshHelmRepo(t *testing.T) {
 		run                       func(context.Context, Deps) error
 	}{
 		{"install", oberthRepoName, OberthHelmRepoURL, "upgrade", false, func(ctx context.Context, deps Deps) error {
-			_, err := InstallOberth(ctx, Config{ChartVersion: version}, deps, OpenBaoResult{}, RekorResult{})
+			// install --upgrade reconciles at the installed version; version
+			// moves are oberth upgrade's (the next case).
+			run := deps.RunHelm
+			deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
+				if args[0] == "list" {
+					return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-` + version + `"}]`), nil
+				}
+				return run(ctx, args)
+			}
+			_, err := InstallOberth(ctx, Config{ChartVersion: version, Upgrade: true}, deps, OpenBaoResult{}, RekorResult{})
 			return err
 		}},
 		{"upgrade", oberthRepoName, OberthHelmRepoURL, "upgrade", false, func(ctx context.Context, deps Deps) error {

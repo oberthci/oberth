@@ -808,6 +808,12 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	if cfg.DryRun {
 		return printDryRunPlan(cfg, deps.Output, cluster)
 	}
+	// Before any release is touched: a version change of an existing Oberth
+	// release belongs to oberth upgrade, and an older installer must never
+	// force-bump the Argo, OpenBao or Rekor releases on its way to refusing.
+	if err := preflightInstallVersionMove(ctx, cfg, deps); err != nil {
+		return err
+	}
 	// Helm --create-namespace cannot attach PSA labels. Create only missing
 	// server/pipeline namespaces ourselves, with the required policy explicit.
 	if err := preflightPodSecurity(ctx, cfg, deps, true); err != nil {
@@ -1542,6 +1548,11 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		cfg.ChartVersion = result.InstalledVersion
 		result.TargetVersion = result.InstalledVersion
 		action = actionUpgrade
+	}
+	if action == actionUpgrade && exists && strings.TrimSpace(cfg.ChartPath) == "" {
+		if err := refuseInstallVersionMove(result.InstalledVersion, cfg.ChartVersion); err != nil {
+			return result, err
+		}
 	}
 	if action == actionSkip {
 		result.AlreadyInstalled = true
