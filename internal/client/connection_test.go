@@ -175,3 +175,54 @@ func TestEnvFileTokenCommandNeedsAFileOnlyTheUserCanChange(t *testing.T) {
 		t.Fatalf("group-writable env = %v", err)
 	}
 }
+
+// OBERTH_BASE_URL and OBERTH_MCP_URL can name two servers; the saved token
+// goes to neither unless both are the server the files name.
+func TestSavedCredentialNeverFollowsASplitAddress(t *testing.T) {
+	directory := isolate(t)
+	write(t, filepath.Join(directory, "env"), "export OBERTH_BASE_URL=\"https://a.example.test:30443\"\n", 0o600)
+	write(t, filepath.Join(directory, "token"), "token-of-a", 0o600)
+	t.Setenv("OBERTH_BASE_URL", "https://a.example.test:30443")
+	t.Setenv("OBERTH_MCP_URL", "https://b.example.test/mcp")
+	connection, err := ResolveConnection(ConnectionFlags{})
+	if err == nil || connection.Token != "" || !strings.Contains(err.Error(), "never sent to another server") {
+		t.Fatalf("split address = %+v %v", connection, err)
+	}
+	t.Setenv("OBERTH_MCP_URL", "https://a.example.test:30443/mcp")
+	if connection, err = ResolveConnection(ConnectionFlags{}); err != nil || connection.Token != "token-of-a" {
+		t.Fatalf("both the files' server = %+v %v", connection, err)
+	}
+}
+
+func TestSameServer(t *testing.T) {
+	const saved = "https://a.example.test:30443"
+	for _, same := range []string{
+		saved, saved + "/", saved + "/mcp", saved + "/mcp/", "HTTPS://A.Example.Test:30443/mcp", "https://user@a.example.test:30443",
+	} {
+		if !SameServer(same, saved) {
+			t.Errorf("%s is the saved server", same)
+		}
+	}
+	for _, other := range []string{
+		"https://a.example.test", "https://a.example.test:443", "https://a.example.test:30444", "http://a.example.test:30443",
+		"https://a.example.test.:30443", "https://a.example.test:30443@b.example.test", "https://a.example.test:30443.b.example.test",
+		"https://b.example.test:30443", "https://a.example.test:30443/prefix", "https://xn--a-0ga.example.test:30443", "a.example.test:30443", "",
+	} {
+		if SameServer(other, saved) {
+			t.Errorf("%s is not the saved server", other)
+		}
+	}
+	for left, right := range map[string]string{
+		"https://a.example.test":      "https://a.example.test:443/mcp",
+		"http://localhost:80":         "http://LOCALHOST/",
+		"https://[::1]:443":           "https://[::1]",
+		"https://[2001:DB8::1]:30443": "https://[2001:db8::1]:30443/mcp",
+	} {
+		if !SameServer(left, right) {
+			t.Errorf("%s and %s are one server", left, right)
+		}
+	}
+	if SameServer("https://[::1]:30443", "https://[0:0:0:0:0:0:0:1]:30443") || SameServer("https://a.example.test:80", "https://a.example.test") {
+		t.Error("another spelling or a non-default port read as the same server")
+	}
+}

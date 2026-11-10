@@ -76,8 +76,22 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 		return setup, nil, errors.New("no server address: pass --url https://<host>:<port>/mcp, or set OBERTH_BASE_URL")
 	}
 
+	// The saved token source and CA belong to the server the client files
+	// name; an address that names another server gets neither.
+	saved := client.SavedServer(root)
+	otherServer := saved != "" && !client.SameServer(setup.URL, saved)
+	if otherServer {
+		written = map[string]string{}
+	}
+	savedFile := func(name string) string {
+		if otherServer {
+			return ""
+		}
+		return existingFile(filepath.Join(root, name))
+	}
+
 	// CA.
-	for _, candidate := range []string{flags.CAFile, environment.CACert, written["OBERTH_CA_CERT"], existingFile(filepath.Join(root, "ca.crt"))} {
+	for _, candidate := range []string{flags.CAFile, environment.CACert, written["OBERTH_CA_CERT"], savedFile("ca.crt")} {
 		if candidate = strings.TrimSpace(candidate); candidate != "" {
 			setup.CAFile, err = filepath.Abs(candidate)
 			if err != nil {
@@ -103,7 +117,10 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 		setup.TokenCommand = environment.TokenCommand
 	case written["OBERTH_TOKEN_COMMAND"] != "":
 		setup.TokenCommand = written["OBERTH_TOKEN_COMMAND"]
-	case existingFile(filepath.Join(root, "token")) != "":
+	case otherServer:
+		return setup, nil, fmt.Errorf("no token source for %s: the one saved in %s belongs to %s and is never registered for another server; "+
+			"pass --token-command or --token-file for this address", setup.URL, displayPath(root), saved)
+	case savedFile("token") != "":
 		if _, err := ownerOnlyTokenFile(filepath.Join(root, "token")); err != nil {
 			return setup, nil, err
 		}

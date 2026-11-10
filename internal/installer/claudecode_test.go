@@ -519,8 +519,20 @@ func TestResolveClaudeCodeSetupUsesTheCLIConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if setup.URL != "https://other.example/mcp" || !setup.ExplicitToken || setup.TokenCommand != "cat "+shellQuote(filepath.Join(root, "token")) {
-		t.Fatalf("flags = %+v", setup)
+	if setup.URL != "https://other.example/mcp" || !setup.ExplicitToken || setup.TokenCommand != "cat "+shellQuote(filepath.Join(root, "token")) || setup.CAFile != "" {
+		t.Fatalf("flags = %+v (the saved CA belongs to the saved server)", setup)
+	}
+	// The saved token source is never registered for another server.
+	for name, configure := range map[string]func() ClientSetupFlags{
+		"flag": func() ClientSetupFlags { return ClientSetupFlags{URL: "https://other.example/mcp"} },
+		"variable": func() ClientSetupFlags {
+			t.Setenv("OBERTH_MCP_URL", "https://other.example/mcp")
+			return ClientSetupFlags{}
+		},
+	} {
+		if setup, _, err = ResolveClaudeCodeSetup(configure()); err == nil || !strings.Contains(err.Error(), "never registered for another server") {
+			t.Fatalf("%s: other server = %+v %v", name, setup, err)
+		}
 	}
 }
 

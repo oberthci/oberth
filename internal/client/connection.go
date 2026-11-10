@@ -170,13 +170,7 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 	// that server and to no other.
 	filesAddress := ""
 	if rootErr == nil {
-		filesAddress = written["OBERTH_MCP_URL"]
-		if written["OBERTH_BASE_URL"] != "" {
-			filesAddress = written["OBERTH_BASE_URL"]
-		}
-		if filesAddress == "" {
-			filesAddress = ConfigMCPURL(configured("mcp.json"))
-		}
+		filesAddress = SavedServer(root)
 	}
 	switch {
 	case strings.TrimSpace(flags.URL) != "":
@@ -200,7 +194,9 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 	// A saved token or CA never follows a different address: a flag or
 	// variable naming another server than the client files gets neither,
 	// and needs its own credential.
-	filesServer := filesAddress != "" && sameServer(connection.BaseURL, filesAddress)
+	// Both addresses are compared: OBERTH_BASE_URL and OBERTH_MCP_URL can
+	// name two servers, and the MCP commands send the token to the second.
+	filesServer := filesAddress != "" && SameServer(connection.BaseURL, filesAddress) && SameServer(connection.MCPURL, filesAddress)
 	if !filesServer {
 		written = map[string]string{}
 		configured = func(string) string { return "" }
@@ -257,16 +253,37 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 	return connection, nil
 }
 
-// sameServer compares two addresses by scheme, host and base path, with
-// the /mcp endpoint and a trailing slash ignored.
-func sameServer(left, right string) bool {
+// SavedServer returns the address the client files in root name: the env
+// file's OBERTH_BASE_URL, else its OBERTH_MCP_URL, else mcp.json's url. The
+// saved token, token command and CA belong to that server.
+func SavedServer(root string) string {
+	written := ReadConfigEnv(filepath.Join(root, "env"))
+	if address := written["OBERTH_BASE_URL"]; address != "" {
+		return address
+	}
+	if address := written["OBERTH_MCP_URL"]; address != "" {
+		return address
+	}
+	return ConfigMCPURL(filepath.Join(root, "mcp.json"))
+}
+
+// SameServer compares two addresses by scheme, host, port and base path,
+// with the /mcp endpoint, a trailing slash, letter case of scheme and host,
+// user information and the scheme's default port ignored. Anything else
+// that differs (another spelling of an IP address, a trailing dot, Unicode
+// against punycode) reads as another server.
+func SameServer(left, right string) bool {
 	normal := func(address string) string {
 		base, _ := addressPair(address)
 		parsed, err := url.Parse(base)
-		if err != nil {
+		if err != nil || parsed.Host == "" {
 			return base
 		}
-		return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host) + strings.TrimRight(parsed.Path, "/")
+		scheme, host := strings.ToLower(parsed.Scheme), strings.ToLower(parsed.Host)
+		if port := parsed.Port(); (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+			host = strings.TrimSuffix(host, ":"+port)
+		}
+		return scheme + "://" + host + strings.TrimRight(parsed.Path, "/")
 	}
 	return normal(left) == normal(right)
 }
