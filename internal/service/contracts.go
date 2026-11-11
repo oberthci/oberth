@@ -299,6 +299,8 @@ type WorkspaceGit interface {
 
 type CIRequest struct {
 	model.PriorityRequest
+	// RefKind defaults to branch; ordinary tags retain their tag object identity.
+	RefKind model.RefKind
 	// Assist asks for agent-assisted retry holds on this run.
 	Assist        bool
 	Reason        string

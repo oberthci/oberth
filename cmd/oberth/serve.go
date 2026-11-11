@@ -1129,8 +1129,17 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	pushes, err := service.NewPushIngestor(service.PushConfig{
+		ReleaseTagRoute: argoJobs.ReleaseTagRoute,
+		Repositories:    database, Discoverer: upstreams, Git: git, Receives: database,
+		Branches: scheduler, Releases: scheduler, Auditor: database,
+		DeletionQueued: branchDeletions.Notify,
+	})
+	if err != nil {
+		return err
+	}
 	controlAPI, err := service.NewAPI(withAgentEvents(options, database, service.APIConfig{
-		BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
+		Tags: pushes, BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
 		ResourceDeclarations: argoJobs,
 		ReleasePreflight:     argoJobs,
 		ClientCertificates:   &service.ClientCertIssuer{Authority: clientAuthority, Store: database},
@@ -1225,14 +1234,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	pushes, err := service.NewPushIngestor(service.PushConfig{
-		Repositories: database, Discoverer: upstreams, Git: git, Receives: database,
-		Branches: scheduler, Releases: scheduler, Auditor: database,
-		DeletionQueued: branchDeletions.Notify,
-	})
-	if err != nil {
-		return err
-	}
+
 	receiveHandler, err := service.NewReceiveHandler(pushes)
 	if err != nil {
 		return err

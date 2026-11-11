@@ -70,3 +70,8 @@ func (jobs *ArgoJobs) noRunPipelineError(err error, request service.WorkflowRequ
 	}
 	return noPipelineError(err, trigger, request.Repository.Name)
 }
+
+// ReleaseTagRoute exposes only the immutable administrator routing decision.
+func (jobs *ArgoJobs) ReleaseTagRoute(repo, tag string) (bool, error) {
+	return jobs.config.ReleaseTagRoutes.Matches(repo, tag)
+}

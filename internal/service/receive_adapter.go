@@ -102,8 +102,11 @@ func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 		return fmt.Sprintf("%s %s deleted on the mirror · upstream deletion queued — no run", kind, name)
 	case result.Run != nil:
 		line := fmt.Sprintf("ref accepted · run %s queued (%s)", shortRunID(result.Run.ID), target)
-		if kind == "tag" {
+		if kind == "tag" && result.Run.Release {
 			line = fmt.Sprintf("release tag accepted · release run %s queued (%s)", shortRunID(result.Run.ID), target)
+		}
+		if kind == "tag" && !result.Run.Release {
+			line = fmt.Sprintf("tag accepted · CI run %s queued (%s)", shortRunID(result.Run.ID), target)
 		}
 		if result.Run.PriorityRefusal != "" {
 			line += " · " + result.Run.PriorityRefusal

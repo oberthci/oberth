@@ -224,21 +224,24 @@ prune.
 
 ## Tag after promotion
 
-`tag_after` refuses release-version names beginning `v<major>.<minor>.<patch>`, including prereleases and build suffixes. Push release tags through Oberth so release CI runs.
+`tag_after` refuses release-version names beginning `v<major>.<minor>.<patch>`, including prereleases and build suffixes, and explicit administrator release routes. Push release tags through Oberth so release CI runs.
 
 `promote` with `tag_after: {name, message}` (single source or train) records
 the request with the promotion; a malformed name, an empty message or a tag
 that already exists is refused before admission. It needs an admin uplink: a
 promotion grant or a repository's promotion policy covers the promotion, not
 a new upstream tag. The tag is pushed straight to the upstream; it is not a
-release and starts no tag run in Oberth. When the promotion is
+release. Its verified publication starts an ordinary tag CI run through the
+normal tag admission path, with `release=false` and `.oberth/build.yaml`. When the promotion is
 terminal Oberth:
 
 1. pushes nothing unless the promotion **passed**;
-2. reads the upstream target and pushes nothing unless it **equals the
-   promotion's result SHA**;
+2. reads the upstream target and pushes nothing unless it **contains the
+   promotion's result SHA**, and also verifies fresh upstream default-branch ancestry;
 3. creates an annotated tag (tagger `Oberth <oberth@localhost>`) on the result
-   commit and pushes `refs/tags/<name>` without force, verifying the remote ref.
+   commit and pushes `refs/tags/<name>` without force, verifying the remote ref;
+4. records the tag receive and queues its CI run atomically. A stable event ID
+   preserves one run through retries and a crash during settlement.
 
 A transient upstream failure retries on the publication schedule
 (`pushretry`: at most 5 attempts, backing off from 2 minutes); a tag of that
@@ -248,7 +251,9 @@ the tag object, or `failed` with the reason) is audited as
 `promotion.tag_after.pushed|failed`, shown in `promote_status` as `tag_after`,
 and carried by the `promotion.finished` event, which waits for it. Use it for
 workflows that act on a tag pushed after merge, instead of a client-side
-script that polls the promotion and then tags:
+script that polls the promotion and then tags. The `pushed` outcome means the
+tag exists and CI was admitted, not that this new CI run has passed; its run ID
+is in the reason line. See [tag run behavior](tag-runs.md):
 
 ```json
 {"repo": "github/acme/infra", "branch": "main", "sha": "<tested sha>",

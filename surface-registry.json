@@ -504,9 +504,9 @@
       "doc_anchor": "docs/installer-resume.md#resume-a-partial-install",
       "test_ref": "internal/installer/resume_secrets_test.go TestResumeInstallReadsPrivateRootWithoutOutput"
     },
-    "env:PATH": {
-      "doc_anchor": "docs/client-certificates.md",
-      "test_ref": "internal/installer/client_cert_test.go TestExplicitBearerSetupClearsClientCertificate"
+    "value:ordinary-tag-ci": {
+      "doc_anchor": "docs/tag-runs.md#ordinary-tag-runs-and-release-tags",
+      "test_ref": "internal/service/tag_ci_test.go TestPromotionTagRealPublisherEnqueuesOrdinaryTagRun"
     }
   }
 }

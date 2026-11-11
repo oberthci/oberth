@@ -14,7 +14,7 @@ import (
 
 // RunTrigger is what started a durable run, finer than the trust-tier
 // pipeline.Trigger: build.yaml runs for a branch push, a promotion candidate,
-// or a schedule, and release.yaml for a tag. The vocabulary is closed. The
+// a schedule, or an ordinary tag; release tags run release.yaml. The vocabulary is closed. The
 // server derives the value from the durable run record, never from the
 // document or a caller.
 type RunTrigger string
@@ -41,13 +41,13 @@ func (trigger RunTrigger) Valid() bool {
 	}
 }
 
-// Tier returns the trust tier, and so the pipeline document, a run trigger
-// executes under: tag runs read release.yaml, every other run build.yaml.
-func (trigger RunTrigger) Tier() pipeline.Trigger {
-	if trigger == RunTriggerTag {
-		return pipeline.TriggerRelease
+// AllowsTier keeps event identity separate from release authority. A tag may
+// run ordinary CI or an explicitly admitted release; other events are CI only.
+func (trigger RunTrigger) AllowsTier(tier pipeline.Trigger) bool {
+	if !trigger.Valid() || !tier.Valid() {
+		return false
 	}
-	return pipeline.TriggerCI
+	return tier == pipeline.TriggerCI || trigger == RunTriggerTag
 }
 
 const (

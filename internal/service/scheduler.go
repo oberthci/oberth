@@ -245,13 +245,20 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 	if trigger == "" {
 		trigger = "branch"
 	}
-	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, model.RefBranch, request.Branch,
-		request.OldSHA, request.SHA, request.SHA, "queued")
+	kind := request.RefKind
+	if kind == "" {
+		kind = model.RefBranch
+	}
+	if !kind.Valid() || ((kind == model.RefTag) != (trigger == "tag")) || (kind == model.RefTag && fire != nil) {
+		return model.ScheduleEnqueueResult{}, fmt.Errorf("%w: CI ref kind and trigger differ", ErrInvalidInput)
+	}
+	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, kind, request.Branch,
+		request.OldSHA, request.SHA, testedSHA, "queued")
 	spec := model.RunSpec{
 		PriorityRequest: request.PriorityRequest,
 		Assist:          request.Assist,
 		Reason:          request.Reason,
-		RepoID:          request.Repository.ID, RefKind: model.RefBranch, Ref: request.Branch,
+		RepoID:          request.Repository.ID, RefKind: kind, Ref: request.Branch,
 		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, ScheduleEntry: request.ScheduleEntry, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
 	}
 	var result model.ScheduleEnqueueResult

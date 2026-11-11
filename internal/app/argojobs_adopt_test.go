@@ -139,9 +139,9 @@ func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 func TestTagAdoptionDoesNotInferReleaseCapability(t *testing.T) {
 	controller := &adoptingArgoControl{found: true}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
-	run := model.Run{ID: "legacy-tag", WorkflowName: "legacy-tag-job", RefKind: model.RefTag, Ref: "v1", Trigger: "tag"}
-	if _, _, err := jobs.Adopt(context.Background(), run); err == nil || len(jobs.intents) != 0 || controller.request.Name != "" {
-		t.Fatal("historical tag inferred release authority")
+	run := model.Run{ID: "ordinary-tag", WorkflowName: "ordinary-tag-job", RefKind: model.RefTag, Ref: "deploy-1", Trigger: "tag"}
+	if _, found, err := jobs.Adopt(context.Background(), run); err != nil || !found || controller.request.Trigger != pipeline.TriggerCI || controller.request.RunTrigger != argoworkflow.RunTriggerTag {
+		t.Fatal("ordinary tag did not retain CI authority")
 	}
 }
 

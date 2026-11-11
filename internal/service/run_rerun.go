@@ -26,6 +26,7 @@ const (
 
 // releaseRerunWarning is recorded with forced tag/release reruns.
 const releaseRerunWarning = "release rerun re-executes release.yaml at the same tag: anything the failed run's Workflow already published stays published and must tolerate being published again; Oberth itself publishes the tag object at most once"
+const tagCIRerunWarning = "tag CI rerun re-executes build.yaml at the same immutable tag; previously started CI work must tolerate being repeated"
 
 // authorizeRunRerun keeps actor/trigger authorization independent of replay
 // evidence. Safe tag/release reruns still require an admin.
@@ -50,9 +51,16 @@ func RunRerunPolicy(run model.Run, admin, force, safe bool) (string, error) {
 	}
 	if run.Release || run.RefKind == model.RefTag {
 		if !force && !safe {
-			return "", fmt.Errorf("%w: run %s is a %s run with started or unknown credentialed/publication work; repeat with force to re-execute release.yaml (anything already published stays published)", ErrInvalidInput, run.ID, run.Trigger)
+			file := "build.yaml"
+			if run.Release {
+				file = "release.yaml"
+			}
+			return "", fmt.Errorf("%w: run %s is a %s run with started or unknown credentialed/publication work; repeat with force to re-execute %s (anything already published stays published)", ErrInvalidInput, run.ID, run.Trigger, file)
 		}
 		if force {
+			if !run.Release {
+				return tagCIRerunWarning, nil
+			}
 			return releaseRerunWarning, nil
 		}
 	}

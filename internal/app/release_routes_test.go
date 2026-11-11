@@ -180,6 +180,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	git(work, "init", "-b", "main")
 	writePipeline(t, work, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "example.com/tier: M", "example.com/tier: XL"))
 	writePipeline(t, work, "deploy.yaml", groupedPipeline(""))
+	writePipeline(t, work, "build.yaml", groupedPipeline(""))
 	git(work, "add", ".")
 	git(work, "commit", "-m", "release workflows")
 	git(work, "init", "--bare", bare)
@@ -221,7 +222,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pushes, err := service.NewPushIngestor(service.PushConfig{Repositories: db, Discoverer: registeredRouteDiscovery{}, Git: cache, Receives: db, Releases: scheduler})
+	pushes, err := service.NewPushIngestor(service.PushConfig{ReleaseTagRoute: jobs.ReleaseTagRoute, Repositories: db, Discoverer: registeredRouteDiscovery{}, Git: cache, Receives: db, Branches: scheduler, Releases: scheduler})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +238,8 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	for _, tc := range []struct {
 		tag, file string
 		size      pipeline.Size
-	}{{"deploy-1", ".oberth/deploy.yaml", pipeline.M}, {"v1", ".oberth/release.yaml", pipeline.M}} {
+		release   bool
+	}{{"deploy-1", ".oberth/deploy.yaml", pipeline.M, true}, {"v1.2.3", ".oberth/release.yaml", pipeline.M, true}, {"test-1", ".oberth/build.yaml", pipeline.M, false}} {
 		git(work, "tag", "-a", tc.tag, "-m", tc.tag)
 		object := git(work, "rev-parse", "refs/tags/"+tc.tag)
 		commit := git(work, "rev-parse", "refs/tags/"+tc.tag+"^{commit}")
@@ -271,7 +273,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if run.SHA != object || run.TestedSHA != commit || run.Trigger != "tag" || !run.Release || run.Actor != "admin" {
+		if run.SHA != object || run.TestedSHA != commit || run.Trigger != "tag" || run.Release != tc.release || run.Actor != "admin" {
 			t.Fatalf("lost tag provenance: %+v", run)
 		}
 
@@ -282,14 +284,19 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		if size, err := jobs.PipelineSize(ctx, request); err != nil || size != tc.size {
 			t.Fatalf("%s size=%s err=%v", tc.tag, size, err)
 		}
-		if err := jobs.CreateRelease(ctx, request); err != nil {
+		if tc.release {
+			err = jobs.CreateRelease(ctx, request)
+		} else {
+			err = jobs.CreateWorkflow(ctx, request)
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 		if control.request.Ref != tc.tag || control.request.PipelineFile != tc.file {
 			t.Fatalf("wrong submission: %+v", control.request)
 		}
 		request.Run.RefKind = model.RefBranch
-		if _, err := jobs.PipelineSize(ctx, request); err == nil {
+		if _, err := jobs.PipelineSize(ctx, request); tc.release && err == nil {
 			t.Fatal("branch kind accepted for release routing")
 		}
 	}

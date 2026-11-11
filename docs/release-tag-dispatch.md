@@ -1,8 +1,10 @@
 # Administrator-configured release tag dispatch
 
-Default behavior is unchanged: admitted tags run `.oberth/release.yaml`;
-branches, promotions and schedules run `.oberth/build.yaml`. Files and patterns
-in repository YAML cannot alter dispatch or grant release credentials.
+Release-version tags (`v<major>.<minor>.<patch>` with any suffix) run
+`.oberth/release.yaml`. Ordinary tags, branches, promotions and schedules run
+`.oberth/build.yaml`. Explicit administrator routes also classify matching
+non-version tags as releases. Repository YAML cannot grant release authority.
+See [ordinary tag runs](tag-runs.md).
 
 An administrator can configure `argo.releaseTagRoutes` in Helm values:
 
@@ -26,8 +28,8 @@ Patterns use Go path glob syntax (`*`, `?`, character classes), matched against
 the durable bare tag name, guarded by `Run.RefKind == tag`, never a branch
 with the same spelling. Receive handling strips `refs/tags/` before admission. `*` does not cross `/`.
 Backslash escapes, spaces, tabs, CR/LF and `refs/` prefixes are disallowed. A tag matching
-more than one entry is refused; list order never decides authority. An unmatched
-tag uses the usual release file. Repository keys include upstream, organization
+more than one entry is refused; list order never decides authority. An unmatched release-version
+tag uses the usual release file; an unmatched non-version tag uses build CI. Repository keys include upstream, organization
 and repository; another upstream or sibling repository cannot inherit a route.
 
 Files must be clean `.oberth/<DNS-label>.yaml` paths. Build, fragment, schedule and tests contract

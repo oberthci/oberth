@@ -32,7 +32,9 @@ Website: [oberth.ci](https://oberth.ci)
   Parked sources always run merged-tree CI; green branch sources rerun CI when
   needed. The push never forces. A moved target fails the promotion; records
   are append-only.
-- **Release** — a tag runs the release burn only if its commit is reachable
+- **Tags** — ordinary tags run `.oberth/build.yaml`. Version tags beginning
+  `v<major>.<minor>.<patch>` and administrator release routes run release CI.
+- **Release** — a release tag runs the release burn only if its commit is reachable
   from the default branch, with exactly the secrets the repository declares,
   intersected with the administrator allowlist. After every burn is green,
   Oberth publishes the exact admitted tag object upstream.
@@ -407,10 +409,10 @@ oberth mcp call size_grant_get '{"repo":"example"}'
 `size_grant` (any accepted maximum).
 
 To skip heavy work on a branch run, guard it with the server-set
-`oberth-trigger` workflow parameter (`branch`, `promotion` or `schedule` in
-build.yaml, `tag` in release.yaml). Declaring the parameter with a default
-keeps the document valid on servers that predate it (they never set it, so the
-default decides):
+`oberth-trigger` workflow parameter (`branch`, `promotion`, `schedule` or
+ordinary `tag` in build.yaml, and `tag` in release.yaml). The server replaces
+the declared default with the durable event identity. That parameter never
+grants release authority:
 
 ```yaml
 spec:
@@ -642,7 +644,7 @@ kubectl get pods -n oberth --watch \
 
 Oberth is its own CI authority: this repository carries
 [`.oberth/build.yaml`](.oberth/build.yaml) and
-[`.oberth/release.yaml`](.oberth/release.yaml), and an admitted tag runs the
+[`.oberth/release.yaml`](.oberth/release.yaml), and an admitted release tag runs the
 release workflow that builds, signs, publishes, and reads back every artifact.
 Those workflows hold no upstream-forge mutation credential; Oberth publishes
 the exact annotated tag only after the run is green.
