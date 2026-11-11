@@ -100,12 +100,15 @@ func resolveOberthTLSBootstrapImage(ctx context.Context, cfg Config, deps Deps) 
 	if deps.RunHelm == nil {
 		return "", errors.New("OpenBao TLS bootstrap requires Helm")
 	}
+	cleanupRelease, err := verifyInstallRelease(ctx, &cfg, deps)
+	if err != nil {
+		return "", err
+	}
+	defer cleanupRelease()
 	if deps.KindClusterName != "" {
 		if err := prepareKindImagesForCluster(ctx, cfg, deps, deps.KindClusterName); err != nil {
 			return "", fmt.Errorf("prepare Oberth TLS bootstrap image for kind: %w", err)
 		}
-	} else if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
-		return "", fmt.Errorf("add Oberth helm repo before TLS bootstrap: %w", err)
 	}
 	valuesYAML, err := deps.RunHelm(ctx, oberthChartValuesArgs(cfg))
 	if err != nil {

@@ -17,6 +17,8 @@ Explicit settings are reconciled even when the installed chart version matches t
 
 Since v0.21.0 `oberth install` (with or without `--upgrade`) never changes the chart version of an existing Oberth release. When the CLI is newer than the release it stops before touching any release and points at `oberth upgrade`; when the CLI is older it refuses to downgrade the server, whose newer database the older binary cannot open, and asks for a newer CLI. Same-version reconciliation (a secret store, Rekor, TLS names, Argo limits with `--argo-parallelism` / `--argo-sync-limit`) stays with `install --upgrade`. A local `--chart` is not a version move.
 
+Every Oberth chart the CLI deploys is verified first, the same way `oberth upgrade` does in step 2 below: a fresh `oberth install`, a same-version `oberth install --upgrade` (at the installed version), and the Helm upgrade `oberth restore` applies when the backup's compatibility values differ (at the version the release runs). The chart never comes from a Helm repository. Without `--chart`, `oberth install --image` must name the server image the signed record pins; a different image is a development install and needs `--chart`. `--release-dir`, `--release-origin` and `--chart-repository` choose the source on all three commands, and a development build (no release version) needs `--chart`.
+
 Version changes go through one command:
 
 ```sh

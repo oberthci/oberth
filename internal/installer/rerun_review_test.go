@@ -157,6 +157,7 @@ func TestSameVersionExplicitInstallValuesAreApplied(t *testing.T) {
 		}
 		return nil, nil
 	}}
+	withSignedRelease(t, &deps, "0.17.62", "example.invalid/oberth@sha256:"+strings.Repeat("1", 64))
 	_, err := InstallOberth(t.Context(), Config{ChartVersion: "v0.17.62", PushBannerURL: "https://new.example/runs", ImageRef: "example.invalid/oberth@sha256:" + strings.Repeat("1", 64)}, deps, OpenBaoResult{}, RekorResult{})
 	if err != nil || writes != 1 {
 		t.Fatalf("explicit same-version change was skipped: %v writes=%d", err, writes)

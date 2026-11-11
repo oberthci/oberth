@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -80,18 +81,32 @@ func testReleaseObjects(t testing.TB, key *ecdsa.PrivateKey, version, imageRef s
 // record pins imageRef, under a test key it trusts.
 func withSignedRelease(t testing.TB, deps *Deps, version, imageRef string) {
 	t.Helper()
+	deps.ReleaseGetter, deps.releaseKey = signedReleaseServer(t, version, imageRef)
+}
+
+// signedReleaseServer serves a signed release of version whose record pins
+// imageRef, and returns the test key that trusts it.
+func signedReleaseServer(t testing.TB, version, imageRef string) (releaseverify.Getter, *ecdsa.PublicKey) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	objects := testReleaseObjects(t, key, version, imageRef)
-	deps.releaseKey = &key.PublicKey
-	deps.ReleaseGetter = func(_ context.Context, url string, _ int64) ([]byte, error) {
+	return func(_ context.Context, url string, _ int64) ([]byte, error) {
 		if body, ok := objects[url]; ok {
 			return body, nil
 		}
 		return nil, fmt.Errorf("fetch %s: HTTP 404", url)
-	}
+	}, &key.PublicKey
+}
+
+var verifiedChartPathPattern = regexp.MustCompile(`\S*/oberth-release-[^/\s]+/(oberth-[^/\s]+\.tgz)`)
+
+// normalizeVerifiedChart rewrites the private file a verified release chart
+// was written to as "<verified oberth-X.tgz>", the name dry-run plans use.
+func normalizeVerifiedChart(text string) string {
+	return verifiedChartPathPattern.ReplaceAllString(text, "<verified $1>")
 }
 
 // isVerifiedChartArg reports whether a Helm chart argument is the private

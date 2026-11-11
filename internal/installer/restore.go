@@ -54,9 +54,12 @@ type RestoreConfig struct {
 	Input        string
 	PrivateKey   string
 	// ChartPath is the local chart used when compatibility values must be
-	// set on the release; empty selects the published chart at the version
-	// the release already runs.
+	// set on the release (development; not verified); empty selects the
+	// signed release at the version the release already runs, verified
+	// before Helm sees it.
 	ChartPath string
+	// Release is where that signed release is read from.
+	Release ReleaseSource
 	// Only limits the restore to these parts (RestorePartHistory,
 	// RestorePartSecrets); empty restores everything the archive holds.
 	Only []string
@@ -628,20 +631,18 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 		if target.ChartVersion == "" {
 			return nil, errors.New("cannot tell which chart version release oberth runs; pass --chart with the chart it was installed from")
 		}
-		if err := refreshHelmRepo(ctx, deps.Deps, oberthRepoName, OberthHelmRepoURL); err != nil {
-			return nil, fmt.Errorf("refresh the Oberth chart repository (or pass --chart): %w", err)
+		// The chart is verified and written into the private working
+		// directory now: the upgrade runs after the server is stopped and
+		// the database swapped, too late to find a missing or forged chart.
+		signed, err := verifySignedRelease(ctx, target.ChartVersion, cfg.Release, deps.Deps, work)
+		if err != nil {
+			return nil, fmt.Errorf("%w (or pass --chart with the chart release oberth was installed from)", err)
 		}
-		args = append(args, oberthRepoName+"/oberth", "--version", helmChartVersion(target.ChartVersion))
-	} else {
-		args = append(args, chart)
+		chart = signed.chartPath
 	}
-	// Prove the chart resolves now: the upgrade runs after the server is
-	// stopped and the database swapped, too late to find a missing chart.
-	show := []string{"show", "chart", args[2]}
-	if chart == "" {
-		show = append(show, "--version", helmChartVersion(target.ChartVersion))
-	}
-	if _, err := deps.RunHelm(ctx, show); err != nil {
+	args = append(args, chart)
+	// Prove the chart resolves now, for the same reason.
+	if _, err := deps.RunHelm(ctx, []string{"show", "chart", chart}); err != nil {
 		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
 	return append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile), nil

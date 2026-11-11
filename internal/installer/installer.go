@@ -239,7 +239,15 @@ type Config struct {
 	// ImageRef overrides the server image the chart deploys (--image), for the
 	// same loop. A tag that exists only in the node's image store is the normal
 	// case here, so the chart's IfNotPresent pull policy is what makes it work.
+	// Without ChartPath it must be the server image the signed release pins.
 	ImageRef string
+	// Release is where the signed release is read from when ChartPath is
+	// empty; the chart is deployed only after it verified.
+	Release ReleaseSource
+	// verifiedChart and verifiedImage are the private chart file of the
+	// verified signed release and the server image its record pins.
+	verifiedChart string
+	verifiedImage string
 	// UtilityImage overrides the chart file-tool image; empty preserves values files and chart defaults.
 	UtilityImage  string
 	Timeout       time.Duration
@@ -827,6 +835,14 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	if err := preflightInstallVersionMove(ctx, cfg, deps); err != nil {
 		return err
 	}
+	// Verify the signed release before anything is installed: every Helm
+	// call below (preview, TLS bootstrap image, the install itself) uses
+	// the verified chart file, never the chart repository.
+	cleanupRelease, err := verifyInstallRelease(ctx, &cfg, deps)
+	if err != nil {
+		return err
+	}
+	defer cleanupRelease()
 	// Helm --create-namespace cannot attach PSA labels. Create only missing
 	// server/pipeline namespaces ourselves, with the required policy explicit.
 	if err := preflightPodSecurity(ctx, cfg, deps, true); err != nil {
@@ -1572,6 +1588,11 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		maybeHintNewerOberthChart(ctx, deps, result)
 		return result, nil
 	}
+	cleanupRelease, err := verifyInstallRelease(ctx, &cfg, deps)
+	if err != nil {
+		return result, err
+	}
+	defer cleanupRelease()
 	switch {
 	case strings.TrimSpace(cfg.ChartPath) != "":
 		// A local chart resolves from disk, so there is no repository to add.
@@ -1585,27 +1606,17 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		if err := prepareKindImagesForCluster(ctx, cfg, deps, deps.KindClusterName); err != nil {
 			return result, fmt.Errorf("prepare kind images: %w", err)
 		}
-	default:
-		if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
-			return result, fmt.Errorf("add Oberth helm repo: %w", err)
-		}
 	}
 
-	// Pin the chart's default image.ref when no explicit --image was given
-	// and we are using a published chart (not --chart). --reuse-values
-	// carries the previous release's image.ref forward verbatim, so without
-	// this pin a chart upgrade deploys the old image under the new chart
-	// version — the deploy "succeeds" while deploying nothing (#466).
-	// Kind clusters are excluded: prepareKindImagesForCluster already
-	// loaded the image into the node's containerd, and kind charts use
-	// tag-based refs from the local daemon that are not digest-pinned.
-	if strings.TrimSpace(cfg.ImageRef) == "" && strings.TrimSpace(cfg.ChartPath) == "" && deps.KindClusterName == "" {
-		chart := oberthRepoName + "/oberth"
-		imageRef, _, err := resolveChartImageRef(ctx, deps, chart, cfg.ChartVersion, false)
-		if err != nil {
-			return result, fmt.Errorf("resolve chart default image for install: %w", err)
-		}
-		cfg.ImageRef = imageRef
+	// Pin the server image the signed release record names when no --image
+	// was given (an explicit one was already checked against the record).
+	// --reuse-values carries the previous release's image.ref forward
+	// verbatim, so without this pin a chart upgrade deploys the old image
+	// under the new chart version (#466). Kind clusters are excluded:
+	// prepareKindImagesForCluster already loaded the chart's image into the
+	// node's containerd.
+	if strings.TrimSpace(cfg.ImageRef) == "" && cfg.verifiedImage != "" && deps.KindClusterName == "" {
+		cfg.ImageRef = cfg.verifiedImage
 	}
 
 	switch action {
@@ -1663,13 +1674,8 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	chart := oberthRepoName + "/oberth"
-	if local := strings.TrimSpace(cfg.ChartPath); local != "" {
-		chart = local
-	}
-
 	args := []string{
-		"upgrade", "--install", "oberth", chart,
+		"upgrade", "--install", "oberth", oberthChart(cfg),
 		"-n", ns, "--create-namespace",
 	}
 	// Before every --set below, so the installer's own values take precedence,
@@ -1775,10 +1781,6 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	// Override the live network policy only for an explicit choice or a fresh install.
 	if cfg.NetworkPolicy == "true" || cfg.NetworkPolicy == "false" {
 		args = append(args, "--set", "networkPolicy.enabled="+cfg.NetworkPolicy)
-	}
-	// --version selects a published chart; a local path already IS the version.
-	if cfg.ChartVersion != "" && strings.TrimSpace(cfg.ChartPath) == "" {
-		args = append(args, "--version", helmChartVersion(cfg.ChartVersion))
 	}
 	// Idempotent re-runs and upgrades must not reset values a user set on a
 	// previous install (OBERTH-RELEASE-024) — in particular an existing
@@ -2168,7 +2170,15 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		step++
 	}
 
-	oberthRepoAdded := false
+	releaseVerified := strings.TrimSpace(cfg.ChartPath) != ""
+	printReleaseVerification := func() {
+		if releaseVerified {
+			return
+		}
+		releaseVerified = true
+		_, _ = fmt.Fprintf(w, "     Verify the signed release %s (release.json, chart and their signature bundles, %s) against the compiled-in release key; refuse on any mismatch\n",
+			displayVersion(cfg.ChartVersion), releaseSourceText(cfg.Release))
+	}
 	if cluster.Engine == "kind" {
 		clusterName := KindClusterName
 		if parsed, ok := kindNameFromContext(cluster.Context); ok {
@@ -2176,9 +2186,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		}
 		showArgs := oberthChartValuesArgs(cfg)
 		_, _ = fmt.Fprintf(w, "\n  %d. Resolve, pull, and load the chart images into kind\n", step)
-		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
-		_, _ = fmt.Fprintf(w, "     helm repo update %s\n", oberthRepoName)
-		oberthRepoAdded = true
+		printReleaseVerification()
 		_, _ = fmt.Fprintf(w, "     helm %s\n", strings.Join(showArgs, " "))
 		_, _ = fmt.Fprintln(w, "     # Set OBERTH_IMAGE_REF from image.ref above. Job pods pull their own")
 		_, _ = fmt.Fprintln(w, "     # repository-declared golang images at run time; only the server image loads here.")
@@ -2203,11 +2211,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		}
 		if cfg.InstallSecretStore {
 			_, _ = fmt.Fprintf(w, "  %d. Stage verified OpenBao TLS before any listener exists\n", step)
-			if !oberthRepoAdded {
-				_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
-				_, _ = fmt.Fprintf(w, "     helm repo update %s\n", oberthRepoName)
-				oberthRepoAdded = true
-			}
+			printReleaseVerification()
 			_, _ = fmt.Fprintf(w, "     helm %s\n", strings.Join(oberthChartValuesArgs(cfg), " "))
 			_, _ = fmt.Fprintf(w, "     Pre-create or adopt PVC %s/%s (10Gi, ReadWriteOnce)\n", ns, openBaoTLSDataClaimName)
 			_, _ = fmt.Fprintln(w, "     Run the credential-free, digest-pinned TLS bootstrap Pod against that PVC")
@@ -2304,10 +2308,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		oberthNS = DefaultNamespace
 	}
 	_, _ = fmt.Fprintf(w, "  %d. Install Oberth into namespace %q\n", step, oberthNS)
-	if !oberthRepoAdded {
-		_, _ = fmt.Fprintf(w, "     helm repo add --force-update %s %s\n", oberthRepoName, OberthHelmRepoURL)
-		_, _ = fmt.Fprintf(w, "     helm repo update %s\n", oberthRepoName)
-	}
+	printReleaseVerification()
 	openbao := OpenBaoResult{ServiceAddress: openbaoAddr}
 	if cfg.InstallSecretStore {
 		openbao.CACertPEM = "<installer-managed-public-ca-pem>"

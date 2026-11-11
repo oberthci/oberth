@@ -39,9 +39,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed without confirmation for non-local targets")
 	flags.StringVar(&cfg.ChartOverride, "chart", "", "deploy this chart instead of the signed release (development only: not verified)")
-	flags.StringVar(&cfg.ReleaseDir, "release-dir", "", "read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from `DIR` instead of fetching it")
-	flags.StringVar(&cfg.ReleaseOrigin, "release-origin", "", "fetch release.json from this HTTPS origin instead of "+releaseverify.DefaultReleaseOrigin)
-	flags.StringVar(&cfg.ChartRepository, "chart-repository", "", "fetch the chart from this HTTPS origin instead of "+releaseverify.DefaultChartRepository)
+	addReleaseSourceFlags(flags, &cfg.ReleaseDir, &cfg.ReleaseOrigin, &cfg.ChartRepository)
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
 	flags.Var(&userValues, "f", "alias for --values")
 	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")
@@ -172,6 +170,14 @@ func takePreUpgradeBackup(ctx context.Context, dir, kubeContext, namespace strin
 	return installer.UpgradeBackup{Path: archive}, nil
 }
 
+// addReleaseSourceFlags registers where a signed release is read from; the
+// verification against the compiled-in key is the same for every source.
+func addReleaseSourceFlags(flags *flag.FlagSet, dir, origin, repository *string) {
+	flags.StringVar(dir, "release-dir", "", "read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from `DIR` instead of fetching it")
+	flags.StringVar(origin, "release-origin", "", "fetch release.json from this HTTPS origin instead of "+releaseverify.DefaultReleaseOrigin)
+	flags.StringVar(repository, "chart-repository", "", "fetch the chart from this HTTPS origin instead of "+releaseverify.DefaultChartRepository)
+}
+
 // runUpgradeRollback rolls back one recorded upgrade; a restore of the
 // pre-upgrade backup runs through oberth restore --only history.
 func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg installer.UpgradeConfig, forceRecord bool, timeout time.Duration, input io.Reader, output io.Writer) error {
@@ -196,6 +202,7 @@ func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg ins
 			PrivateKey:       key,
 			Only:             []string{installer.RestorePartHistory},
 			InterruptQueued:  true,
+			Release:          installer.ReleaseSource{Dir: cfg.ReleaseDir, Origin: cfg.ReleaseOrigin, ChartRepository: cfg.ChartRepository},
 			Yes:              true,
 			Timeout:          timeout,
 		}, installer.InstallDeps{Output: output, Input: input})

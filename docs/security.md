@@ -233,5 +233,7 @@ entry. Their signatures remain valid, but only against the pinned key: add
 `--insecure-ignore-tlog` to the `cosign` commands above for those versions
 only, and expect cosign's warning that the check proves no publication time or
 log inclusion. A release after v0.17.95 whose signature fails without that
-flag must be treated as unverified. `oberth upgrade` does not run cosign, so
-upgrading from v0.17.95 is unaffected.
+flag must be treated as unverified. `oberth install`, `oberth upgrade` and
+`oberth restore` do not run cosign: they verify the signed record and the
+chart offline against the compiled-in key (the transparency-log entry is not
+consulted), so upgrading from v0.17.95 is unaffected.

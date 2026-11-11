@@ -248,7 +248,7 @@ func TestInstallOpenBaoProductionBootstrapsTLSBeforeHelm(t *testing.T) {
 				actions = append(actions, "release-check")
 				return []byte("[]"), nil
 			case len(args) >= 3 && args[0] == "repo" && args[2] == oberthRepoName:
-				actions = append(actions, "oberth-repo")
+				t.Errorf("the TLS bootstrap image came from the chart repository: %v", args)
 			case len(args) >= 2 && args[0] == "show":
 				actions = append(actions, "image-resolve")
 				return []byte("image:\n  ref: " + digestImage + "\n"), nil
@@ -258,10 +258,12 @@ func TestInstallOpenBaoProductionBootstrapsTLSBeforeHelm(t *testing.T) {
 			return nil, nil
 		},
 	}
+	withSignedRelease(t, &deps, "0.17.16", digestImage)
 	result, err := InstallOpenBao(context.Background(), Config{
 		InstallSecretStore:  true,
 		OpenBaoNamespace:    "openbao",
 		OpenBaoChartVersion: DefaultOpenBaoChartVersion,
+		ChartVersion:        "v0.17.16",
 		Timeout:             time.Second,
 	}, deps)
 	if err != nil {
@@ -356,10 +358,12 @@ func TestInstallOpenBaoMigratesExistingHTTPListenerBeforeReturning(t *testing.T)
 			return nil, nil
 		},
 	}
+	withSignedRelease(t, &deps, "0.17.16", digestImage)
 	result, err := InstallOpenBao(context.Background(), Config{
 		InstallSecretStore:  true,
 		OpenBaoNamespace:    "openbao",
 		OpenBaoChartVersion: DefaultOpenBaoChartVersion,
+		ChartVersion:        "v0.17.16",
 		Timeout:             time.Second,
 	}, deps)
 	if err != nil {
