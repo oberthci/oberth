@@ -49,6 +49,10 @@ func runRestriction(filter model.RunListFilter) (string, []any) {
 		restriction += " AND actor = ?"
 		args = append(args, filter.Actor)
 	}
+	if filter.RefGlob != "" {
+		restriction += " AND oberth_ref_glob(?, ref)"
+		args = append(args, filter.RefGlob)
+	}
 	return restriction, args
 }
 
@@ -58,6 +62,9 @@ func normalizeUplinkScopes(scopes []string) ([]string, error) {
 	}
 	out := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
+		if scope == model.MetricsScope && len(scopes) > 1 {
+			return nil, fmt.Errorf("%w: the %s scope reads only /metrics and cannot be combined with another scope", ErrInvalid, model.MetricsScope)
+		}
 		if !scopeName.MatchString(scope) {
 			return nil, fmt.Errorf("%w: uplink scope %q is not an upstream name", ErrInvalid, scope)
 		}
@@ -69,8 +76,9 @@ func normalizeUplinkScopes(scopes []string) ([]string, error) {
 	return out, nil
 }
 
-// ResolveUplinkScopes checks that every scope names a registered upstream
-// and returns them deduplicated and sorted.
+// ResolveUplinkScopes checks that every scope names a registered upstream,
+// or is the reserved metrics-only scope alone, and returns them deduplicated
+// and sorted.
 func (s *Store) ResolveUplinkScopes(ctx context.Context, inputs []string) ([]string, error) {
 	upstreams, err := s.ListUpstreams(ctx)
 	if err != nil {
@@ -83,6 +91,11 @@ func (s *Store) ResolveUplinkScopes(ctx context.Context, inputs []string) ([]str
 	resolved := make([]string, 0, len(inputs))
 	for _, input := range inputs {
 		name := strings.TrimSpace(input)
+		if name == model.MetricsScope {
+			// Reserved (#1534): the metrics-only scope, never an upstream.
+			resolved = append(resolved, name)
+			continue
+		}
 		if !slices.Contains(known, name) {
 			return nil, fmt.Errorf("%w: scope %q: no upstream by that name; a scope is an upstream name (%s)",
 				ErrInvalid, input, strings.Join(known, ", "))
@@ -179,6 +192,9 @@ func (s *Store) SetUplinkScope(ctx context.Context, actor, identity, fingerprint
 			ErrAmbiguous, identity, len(matches), strings.Join(fingerprints, ", "))
 	}
 	value := matches[0]
+	if value.Admin && model.MetricsOnly(normalized) {
+		return model.Uplink{}, fmt.Errorf("%w: a %s-scoped uplink reads only /metrics and cannot be an admin", ErrInvalid, model.MetricsScope)
+	}
 	previous, err := loadUplinkScopes(ctx, tx, value.ID)
 	if err != nil {
 		return model.Uplink{}, err

@@ -7,7 +7,7 @@ executors qualify once cleanup is settled. Release/tag, promotion, plan, apply,
 user/admin cancellation and failed steps never qualify, including
 infrastructure-classified step failures. Execution deadlines qualify only before
 any step started or passed. The administrator
-setting `autoRetryInfrastructure` defaults on; its fixed budget is one retry.
+setting `autoRetryInfrastructureBudget` defaults to two retries per lineage.
 See [configuration and upgrade behavior](infrastructure-retries.md).
 
 Only fresh dispatch initializes an explicit empty progress journal, before

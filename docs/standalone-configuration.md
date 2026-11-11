@@ -71,11 +71,11 @@ commands such as `sync`.
 
 ## Automatic infrastructure recovery
 
-`autoRetryInfrastructure` defaults to true in Helm; the server equivalent is
-`--auto-retry-infrastructure=true`. Failed steps, including infrastructure-classified
-step failures, and execution deadlines after any step started or passed are
-excluded. Eligible branch infrastructure failures get
-one fresh attempt at their original admission position and priority. The budget
-cannot be raised beyond one retry. Set the value to false in administrator-owned
-upgrade values for manual-only recovery. See [eligibility, audit records and
+`autoRetryInfrastructureBudget` defaults to 2 in Helm; the server equivalent is
+`--auto-retry-infrastructure-budget=2`. Failed steps, including infrastructure-classified
+step failures, execution deadlines after any step started or passed, and any
+failure whose `retry_hint` class is `code` are excluded. Eligible branch
+infrastructure failures get up to that many fresh attempts per lineage, each at
+the original admission position and priority. Set it to 0 in
+administrator-owned upgrade values for manual-only recovery; at most 5. See [eligibility, audit records and
 upgrade behavior](infrastructure-retries.md).

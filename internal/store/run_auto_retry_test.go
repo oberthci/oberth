@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 )
 
 func autoRetryResult() model.RunResult {
-	return model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "workflow unavailable", AutoRetryInfrastructure: true}
+	return model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "workflow unavailable", AutoRetryBudget: 1}
 }
 func autoRetrySource(t *testing.T, s *Store, repoID int64, ref string) model.Run {
 	t.Helper()
@@ -48,6 +49,60 @@ func TestAutoRetryInfrastructureIsAtomicAuditedAndOnlyOnce(t *testing.T) {
 	var count int
 	if err := s.db.QueryRow(`SELECT count(*) FROM runs`).Scan(&count); err != nil || count != 2 {
 		t.Fatal("wrong attempt count", count, err)
+	}
+}
+
+// A budget of two retries one lineage twice (#1524): each original's reason
+// links to its rerun, every rerun names the origin, the audit numbers the
+// attempts, and a manual rerun inherits the spent budget.
+func TestAutoRetryBudgetSpansTheLineage(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	source := autoRetrySource(t, s, repo.ID, "feature/budget")
+	result := autoRetryResult()
+	result.AutoRetryBudget = 2
+	current := source
+	var chain []model.Run
+	for attempt := 1; attempt <= 3; attempt++ {
+		finished, err := s.FinishRun(t.Context(), current.ID, result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		chain = append(chain, finished)
+		if attempt == 3 {
+			if finished.AutoRetriedBy != "" || finished.AutoRetryOf != source.ID {
+				t.Fatalf("retried past the budget: %+v", finished)
+			}
+			break
+		}
+		if finished.AutoRetriedBy == "" || finished.Reason != "infra error, retried as "+finished.AutoRetriedBy {
+			t.Fatalf("attempt %d not retried with a link: %+v", attempt, finished)
+		}
+		next, err := s.Run(t.Context(), finished.AutoRetriedBy)
+		if err != nil || next.AutoRetryOf != source.ID || !strings.HasPrefix(next.Reason, "automatic retry of "+source.ID+" after infrastructure failure: ") {
+			t.Fatalf("attempt %d successor: %+v %v", attempt, next, err)
+		}
+		var recorded int
+		if err := s.db.QueryRow(`SELECT json_extract(details,'$.attempt') FROM audit_actions WHERE action='run.retry.auto' AND resource_id=?`, next.ID).Scan(&recorded); err != nil || recorded != attempt {
+			t.Fatalf("attempt %d audited as %d: %v", attempt, recorded, err)
+		}
+		if _, err := s.db.Exec(`UPDATE runs SET status='running' WHERE id=?`, next.ID); err != nil {
+			t.Fatal(err)
+		}
+		current = next
+	}
+	// A manual rerun of the middle attempt keeps the spent budget.
+	rerun, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: chain[1].ID, Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rerun.Enqueued.AutoRetryOf != source.ID {
+		t.Fatalf("rerun lost the lineage: %+v", rerun.Enqueued.Run)
+	}
+	terminal, err := s.FinishRun(t.Context(), rerun.Enqueued.ID, result)
+	if err != nil || terminal.AutoRetriedBy != "" {
+		t.Fatalf("rerun reset the budget: %+v %v", terminal, err)
 	}
 }
 
@@ -135,6 +190,7 @@ func TestAutoRetryLineageSurvivesRestartAndCancelledManualReplay(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			now = now.Add(automaticRetryDelay)
 			child, err := s.ClaimNextRun(t.Context())
 			if err != nil || child.ID != failed.AutoRetriedBy {
 				t.Fatal(err, child)
@@ -186,5 +242,39 @@ func TestAutoRetryAuditFailureRollsBackFailureAndEnqueueTogether(t *testing.T) {
 	var count int
 	if err := s.db.QueryRow(`SELECT count(*) FROM runs`).Scan(&count); err != nil || count != 1 {
 		t.Fatal("orphan retry committed", count, err)
+	}
+}
+
+func TestAutomaticRetryPreservesAssistAndWaitsBeforeClaim(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	source, err := s.EnqueueRun(t.Context(), model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/assist", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "branch", Assist: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.FinishRun(t.Context(), source.ID, autoRetryResult())
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.Run(t.Context(), failed.AutoRetriedBy)
+	if err != nil || !next.AssistRequested {
+		t.Fatalf("assist lost: %+v %v", next, err)
+	}
+	if _, err := s.ClaimNextRun(t.Context()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("claimed during retry delay: %v", err)
+	}
+	if _, err := s.NextQueuedRun(t.Context()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("offered during retry delay: %v", err)
+	}
+	other := autoRetrySource(t, s, repo.ID, "feature/other")
+	claimed, err := s.ClaimNextRun(t.Context())
+	if err != nil || claimed.ID != other.ID {
+		t.Fatalf("delay blocked unrelated work: %+v %v", claimed, err)
+	}
+	now = now.Add(automaticRetryDelay)
+	claimed, err = s.ClaimNextRun(t.Context())
+	if err != nil || claimed.ID != next.ID || !claimed.AssistRequested {
+		t.Fatalf("retry did not become eligible: %+v %v", claimed, err)
 	}
 }

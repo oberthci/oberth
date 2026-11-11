@@ -10,10 +10,12 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 func TestInfrastructureRetryTrustedPolicyDeadlineKeepsQueuePosition(t *testing.T) {
-	f := newControlFixture(t)
+	now := time.Now()
+	f := newControlFixtureWithOptions(t, store.Options{Now: func() time.Time { return now }})
 	f.scheduler.git = &policyTestGit{controlGit: f.git, baselineErr: fmt.Errorf("%w: refresh upstream trusted test policy: %w", gitcache.ErrPolicyUpstreamUnavailable, context.DeadlineExceeded)}
 	f.scheduler.policyWaitTimeout = time.Millisecond
 	f.scheduler.capacityWait = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
@@ -42,19 +44,39 @@ func TestInfrastructureRetryTrustedPolicyDeadlineKeepsQueuePosition(t *testing.T
 	if err != nil || json.Unmarshal([]byte(action.Details), &details) != nil || details["reason"] != reason {
 		t.Fatalf("retry audit: %+v %v", action, err)
 	}
+	// The default budget allows a second retry of the same lineage (#1524):
+	// the first retry's reason links to it, the second names the origin.
+	now = now.Add(5 * time.Second)
 	if err = f.scheduler.ProcessNext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	exhausted, err := f.store.Run(t.Context(), retry.ID)
+	retried, err := f.store.Run(t.Context(), retry.ID)
+	if err != nil || retried.Status != model.RunFailed || retried.AutoRetriedBy == "" || retried.Reason != "infra error, retried as "+retried.AutoRetriedBy {
+		t.Fatalf("retry was not next or not retried again: %+v %v", retried, err)
+	}
+	second, err := f.store.Run(t.Context(), retried.AutoRetriedBy)
+	if err != nil || second.AutoRetryOf != source.ID || second.AdmissionSequence != source.AdmissionSequence {
+		t.Fatalf("second retry lineage: %+v %v", second, err)
+	}
+	action, err = f.store.LatestAuditActionByType(t.Context(), "run.retry.auto", "run")
+	details = nil
+	if err != nil || json.Unmarshal([]byte(action.Details), &details) != nil || details["attempt"] != float64(2) || details["origin_run_id"] != source.ID || details["budget"] != float64(model.DefaultInfrastructureAutoRetryBudget) {
+		t.Fatalf("second retry audit: %+v %v", action, err)
+	}
+	now = now.Add(5 * time.Second)
+	if err = f.scheduler.ProcessNext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	exhausted, err := f.store.Run(t.Context(), second.ID)
 	if err != nil || exhausted.Status != model.RunFailed || exhausted.AutoRetriedBy != "" {
-		t.Fatalf("retry was not next or exceeded cap: %+v %v", exhausted, err)
+		t.Fatalf("retry was not next or exceeded the budget: %+v %v", exhausted, err)
 	}
 	untouched, err := f.store.Run(t.Context(), other.ID)
 	if err != nil || untouched.Status != model.RunQueued {
 		t.Fatalf("retry went to back of queue: %+v %v", untouched, err)
 	}
 	runs, err := f.store.ListRecentRuns(t.Context(), model.RunListFilter{RepoID: f.repo.ID, Limit: 10})
-	if err != nil || len(runs) != 3 {
+	if err != nil || len(runs) != 4 {
 		t.Fatalf("attempt count: %d %v", len(runs), err)
 	}
 }

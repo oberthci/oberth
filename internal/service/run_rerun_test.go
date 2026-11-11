@@ -366,6 +366,7 @@ func (s stubRefResolver) TagObjectSHA(ctx context.Context, repo, tag string) (st
 
 func TestRunRerunKeepsOperatorReasonInAutomaticLineage(t *testing.T) {
 	harness := newRerunHarness(t, infraFailure, infraFailure)
+	harness.scheduler.infrastructureAutoRetryBudget = 1 // spend the lineage's whole budget
 	first, err := harness.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "manual-reason", Repository: harness.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "operator"})
 	if err != nil {
 		t.Fatal(err)

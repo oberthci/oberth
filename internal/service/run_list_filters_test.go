@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -92,5 +93,49 @@ func TestRunListOwnAndHeldFilters(t *testing.T) {
 		if _, err := f.runList(t, arguments); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("held with %s = %v", name, err)
 		}
+	}
+}
+
+// run_list {ref_glob, latest:true} is the newest run of each matching ref
+// (#1524); a malformed pattern is refused.
+func TestRunListLatestPerRefGlob(t *testing.T) {
+	f := newAgentFixture(t)
+	f.enqueue(t, "land/a", "a", true)
+	newestA := f.enqueue(t, "land/a", "b", true)
+	landB := f.enqueue(t, "land/b", "c", true)
+	f.enqueue(t, "feature/x", "d", true)
+	runs, err := f.runList(t, map[string]any{"ref_glob": "land/*", "latest": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := runIDs(runs)
+	if len(ids) != 2 || !slices.Contains(ids, newestA.ID) || !slices.Contains(ids, landB.ID) {
+		t.Fatalf("latest land/* = %v", ids)
+	}
+	if _, err := f.runList(t, map[string]any{"ref_glob": "land/[", "latest": true}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("malformed glob: %v", err)
+	}
+	if _, err := f.runList(t, map[string]any{"held": true, "latest": true}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("held latest: %v", err)
+	}
+}
+
+func TestRunListLatestRefGlobRespectsUpstreamScope(t *testing.T) {
+	f := newScopeFixture(t)
+	value, err := f.call(scopedActor, "run_list", map[string]any{"ref_glob": "feature/*", "latest": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.assertNoLeak(t, "run_list", value, err, "")
+	encoded, err := json.Marshal(value.(api.RunListResponse).Runs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runs []model.Run
+	if err := json.Unmarshal(encoded, &runs); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != len(f.runs["github"]) {
+		t.Fatalf("scoped count: %d", len(runs))
 	}
 }

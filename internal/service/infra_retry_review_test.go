@@ -127,7 +127,7 @@ func TestInfrastructureRetryExecutionDeadlineUsesEveryStartEvidence(t *testing.T
 					result.ObservedStepStart = true
 				}
 				want := !deadline || evidence == "empty" || evidence == "queued"
-				if got := (&Scheduler{logs: logs}).infrastructureAutoRetry(run, result); got != want {
+				if got := (&Scheduler{logs: logs}).infrastructureAutoRetryEligible(run, result); got != want {
 					t.Fatalf("retry=%v want=%v", got, want)
 				}
 			})
@@ -138,7 +138,7 @@ func TestInfrastructureRetryExecutionDeadlineUsesEveryStartEvidence(t *testing.T
 func TestManualRetryOfAutomaticAttemptHasManualPresentation(t *testing.T) {
 	f := newRecoveryFixture(t)
 	source := f.enqueueAndClaim(t, "feature/manual-after-auto", strings.Repeat("c", 40))
-	failed, err := f.store.FinishRun(t.Context(), source.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "executor unavailable", AutoRetryInfrastructure: true})
+	failed, err := f.store.FinishRun(t.Context(), source.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "executor unavailable", AutoRetryBudget: 1})
 	if err != nil || failed.AutoRetriedBy == "" {
 		t.Fatal(failed, err)
 	}

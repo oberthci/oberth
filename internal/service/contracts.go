@@ -634,6 +634,9 @@ type PromotionWaitResponse struct {
 	// PruneSource is the promote prune_source request and its outcome
 	// (#1514); absent when none was requested.
 	PruneSource *model.PromotionPrune `json:"prune_source,omitempty"`
+	// TagAfter is the promote tag_after request and its outcome (#1524);
+	// absent when none was requested.
+	TagAfter *model.PromotionTag `json:"tag_after,omitempty"`
 }
 
 // RepoView is the enriched repository response for the /api/repos dashboard

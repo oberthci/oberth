@@ -1268,6 +1268,8 @@ Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]
 Usage: oberth run resources [flags]
 
 Flags:
+  -anonymize
+        hash repository, ref, step names, SHAs and run IDs with a fresh per-export salt (never printed), to share usage data
   -burn string
         optional burn
   -ca-file string
@@ -1317,10 +1319,14 @@ Usage: oberth runs [flags]
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -json
         emit {"runs":[...],"next_before":N}; --active emits {"runs":[...]}
+  -latest
+        one row per repository and ref: its newest run, across every repository the uplink reaches
   -limit int
         runs per page (at most 100) (default 20)
   -ref string
         only this branch or tag
+  -ref-glob string
+        only refs matching this shell-style pattern, e.g. 'land/*' (* never crosses a slash)
   -repo string
         only this repository; use upstream/org/name when ambiguous
   -token-file string
@@ -1633,8 +1639,8 @@ Flags:
         optional PEM file containing pinned TSA trust roots
   -audit-tsa-url string
         RFC 3161 timestamp authority HTTPS URL (empty disables external timestamps)
-  -auto-retry-infrastructure
-        automatically retry eligible infrastructure failures once at their original queue position (default true)
+  -auto-retry-infrastructure-budget int
+        automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most 5) (default 2)
   -ci-cache-root string
         CI host cache root (default "/var/cache/oberth/ci")
   -data string
@@ -1882,7 +1888,7 @@ Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -scope value
-        limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)
+        limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository); metrics alone: read only /metrics
   -tls-cert string
         HTTPS certificate path (in-pod; requires the live admin daemon) (default "/run/oberth-identities/server/tls.crt")
   -ttl string

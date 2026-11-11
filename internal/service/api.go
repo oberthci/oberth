@@ -400,6 +400,11 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if strings.TrimSpace(actor.Identity) == "" {
 		return nil, errors.New("service: acting uplink identity is required")
 	}
+	if actor.MetricsOnly() {
+		// The HTTP layer already refuses it; no tool is ever served to a
+		// metrics-scoped uplink, whatever the caller (#1534).
+		return nil, refuse(ErrForbidden, "a metrics-scoped token may read only GET /metrics")
+	}
 	// An admin may repair an issue's scope even when its own uplink has a
 	// narrower read scope. An ordinary title/body edit keeps that scope.
 	adminScopeMove := false
@@ -1045,6 +1050,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			View       string                `json:"view"`
 			Own        bool                  `json:"own"`
 			Held       bool                  `json:"held"`
+			RefGlob    string                `json:"ref_glob"`
+			Latest     bool                  `json:"latest"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -1054,6 +1061,9 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			owner = actor.Identity
 		}
 		if arguments.Held {
+			if arguments.Latest || arguments.RefGlob != "" {
+				return nil, fmt.Errorf("%w: held:true is one unpaged list; it takes no latest or ref_glob", ErrInvalidInput)
+			}
 			if arguments.Superseded {
 				return nil, fmt.Errorf("%w: held:true and superseded:true select different runs; pass one", ErrInvalidInput)
 			}
@@ -1074,6 +1084,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			limit = 100
 		}
 		runs, err := service.Runs(ctx, actor, api.RunFilter{Status: arguments.Status, Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
+			RefGlob: strings.TrimSpace(arguments.RefGlob), LatestPerRef: arguments.Latest,
 			Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID, View: arguments.View, Actor: owner})
 		if err != nil {
 			return nil, err
@@ -1134,7 +1145,10 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if filter.Before < 0 || service.scope != nil && filter.Before > 0 && filter.BeforeRun == "" {
 		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
 	}
-	storeFilter := model.RunListFilter{Status: filter.Status, Superseded: filter.Superseded, LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory, Actor: filter.Actor}
+	if err := validRefGlob(filter.RefGlob); err != nil {
+		return nil, err
+	}
+	storeFilter := model.RunListFilter{Status: filter.Status, Superseded: filter.Superseded, LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, RefGlob: filter.RefGlob, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory, Actor: filter.Actor}
 	if strings.TrimSpace(filter.BeforeRun) != "" {
 		// A cursor that is both a sequence and a run-ID spelling is a run
 		// first; an unscoped caller falls back to the sequence (#073).
@@ -2831,6 +2845,9 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 		if service.agentEvents != nil {
 			if request, err := service.agentEvents.store.PromotionPrune(ctx, promotion.ID); err == nil {
 				response.PruneSource = &request
+			}
+			if tag, err := service.agentEvents.store.PromotionTag(ctx, promotion.ID); err == nil {
+				response.TagAfter = &tag
 			}
 		}
 		return response, nil

@@ -592,7 +592,7 @@ func (service *API) dispatchTool(ctx context.Context, actor api.Actor, name stri
 	return service.callTool(ctx, actor, name, raw)
 }
 
-// promoteTool is the promote tool, with prune_source.
+// promoteTool is the promote tool, with prune_source and tag_after.
 func (service *API) promoteTool(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	var arguments promotionArguments
 	if err := decodeTool(raw, &arguments); err != nil {
@@ -603,6 +603,11 @@ func (service *API) promoteTool(ctx context.Context, actor api.Actor, raw json.R
 	}
 	if arguments.PruneSource {
 		if err := service.checkPruneSource(ctx, arguments); err != nil {
+			return nil, err
+		}
+	}
+	if arguments.TagAfter != nil {
+		if err := service.checkTagAfter(ctx, actor, arguments); err != nil {
 			return nil, err
 		}
 	}
@@ -619,6 +624,9 @@ func (service *API) promoteTool(ctx context.Context, actor api.Actor, raw json.R
 	response := api.PromoteResponse{ID: promotion.ID}
 	if arguments.PruneSource {
 		response.PruneSource = service.requestPromotionPrune(ctx, actor, promotion)
+	}
+	if arguments.TagAfter != nil {
+		response.TagAfter = service.requestPromotionTag(ctx, actor, promotion, *arguments.TagAfter)
 	}
 	return response, nil
 }

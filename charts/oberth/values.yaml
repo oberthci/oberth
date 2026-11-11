@@ -40,9 +40,10 @@ replicaCount: 1
 # pipeline Workflows run at once is the argo-workflows release's
 # controller.parallelism, and shared step limits are the ConfigMap
 # oberth-sync-limits that release renders. Oberth submits every run at once.
-# One fresh attempt for eligible infrastructure failures; retains queue position.
-# The automatic retry budget is fixed at one and cannot be increased.
-autoRetryInfrastructure: true
+# Automatic retries per lineage for eligible branch infrastructure failures
+# (retry_hint class infrastructure, never code); each retains the original
+# queue position and is audited. 0 disables, at most 5.
+autoRetryInfrastructureBudget: 2
 
 # Release runs of every repository, one at a time. When true, every release
 # run carries the native Argo workflow-level mutex `oberth-release`; a second
@@ -110,9 +111,10 @@ agentEvents:
 platformProtection:
   enabled: false
 
-# Prometheus Operator scrape of the server's /metrics (default off). The
-# endpoint answers only an unscoped admin bearer token: create a Secret holding
-# one in the release namespace and name it here. The scrape verifies the server
+# Prometheus Operator scrape of the server's /metrics (default off). Mint a
+# metrics-scoped token (oberth uplink add --scope metrics), which reads
+# /metrics and nothing else, put it in a Secret in the release namespace and
+# name it here; never an admin token. The scrape verifies the server
 # certificate against the CA in the named ConfigMap (the CA clients pin, e.g.
 # ~/.config/oberth/ca.crt); serverName defaults to <fullname>.<namespace>.svc,
 # a name the server certificate always carries. See docs/metrics.md.

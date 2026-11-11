@@ -1,8 +1,12 @@
 # Automatic infrastructure retries
 
-Oberth queues one fresh attempt when an eligible branch run fails in the
+Oberth queues a fresh attempt when an eligible branch run fails in the
 `infrastructure` or workflow-level `job` class accepted by `run_retry`, without
-a failed step. Every failed step excludes automatic retry, including steps whose
+a failed step, and its `retry_hint` class is `infrastructure`. A failure the
+hint classifies as `code` (for example an eviction for the step's own
+ephemeral-storage limit) is never retried. Each lineage gets a bounded budget
+of automatic retries (default 2): a retry that fails the same way is retried
+again until the budget is spent. Every failed step excludes automatic retry, including steps whose
 failure is classified as infrastructure. This includes a trusted-policy-refresh
 deadline, a lost executor after cleanup, and a workflow-level failure without a
 failed step. An execution deadline qualifies only before any step started or
@@ -17,40 +21,42 @@ because an infrastructure attempt failed. Existing priority classes, admission
 limits and protected-work rules still apply. A newer ordinary push supersedes
 stale work; an automatic retry cannot displace it.
 
-The existing message/reason line records:
+The original's reason line links to its rerun, and the rerun's reason line
+names the lineage's origin and the cause:
 
 ```text
-automatic retry of <id> after infrastructure failure: <reason>
+infra error, retried as <rerun-id>
+automatic retry of <origin-id> after infrastructure failure: <reason>
 ```
 
-The same text and source/retry IDs are recorded in `run.retry.auto`, along with
-attempt 1, source error, admission sequence and priority. Failure, retry, lineage
+The same text and source/retry/origin IDs are recorded in `run.retry.auto`,
+along with the attempt number, the budget, source error, admission sequence
+and priority. Failure, retry, lineage
 and audit commit in one writer transaction. An audit/enqueue failure creates no
 partial successor. Existing statuses and presentation remain unchanged.
 
 ## Administration
 
-The Helm setting is enabled by default:
+The Helm setting is the budget per lineage:
 
 ```yaml
-autoRetryInfrastructure: true
+autoRetryInfrastructureBudget: 2
 ```
 
-Set it to `false` to disable automatic infrastructure retries. The server flag
-is `--auto-retry-infrastructure=false`; its default is true. This is a boot-time
-administrator setting, applied by the normal server rollout. The budget is
-fixed at **one retry** (two total attempts); there is no setting to increase it.
-Disabling it affects future terminal decisions, not an already queued successor.
+Set it to `0` to disable automatic infrastructure retries, at most `5`. The
+server flag is `--auto-retry-infrastructure-budget`; its default is 2. This is
+a boot-time administrator setting, applied by the normal server rollout.
+Changing it affects future terminal decisions, not an already queued successor.
 Manual `run_retry` remains available under its existing authorization rules.
 It creates a fresh manual request at the normal queue position, with the
 requesting actor and ordinary presentation. It does not inherit the automatic
-retry reason or lineage; that new request may itself receive one eligible
-automatic retry.
+retry reason or lineage; that new request starts its own budget.
 
 Automatic retry never applies to a user/admin cancellation, test or step failure,
 promotion, plan, apply, release/tag run, or an attempt whose automatic retry
-budget was already used. The spent budget survives restart recovery and the
-existing `run_rerun` replay lineage. An explicit `run_retry` or a separate new
+budget is spent. The spent budget survives restart recovery and the
+existing `run_rerun` replay lineage: a manual rerun inherits what its lineage
+already spent. An explicit `run_retry` or a separate new
 push starts a new work item.
 
 A manual `run_rerun` in that lineage keeps the operator's reason. Its existing
@@ -75,19 +81,14 @@ A fresh attempt re-earns current policy, credential and resource admission.
 
 ## Upgrade behavior
 
-This expands the previous pre-execution-only retry policy and is **on by
-default** when the new setting is absent. Administrators who want manual-only
-infrastructure recovery should include `autoRetryInfrastructure: false` in their
-reviewed upgrade values. The chart handles an absent value during `--reuse-values`
-upgrades and preserves an explicit false value.
-
-No migration is added: the existing admission sequence, reason and audit lineage
-are reused; the base schema remains 53. Legacy automatic-retry reasons remain
-readable and retain their spent budget. Existing terminal runs are not scanned
-or replayed on upgrade; only newly finalized eligible failures are considered.
-Other restart and publication recovery mechanisms keep their existing contracts.
-See [standalone configuration](standalone-configuration.md) for upgrade values
-and [recovery semantics](rca-run-recovery.md) for the existing run-list behavior.
+The budget is **2 by default** when the setting is absent; the chart renders
+the default during `--reuse-values` upgrades and preserves an explicit value.
+No migration is added: the existing admission sequence, reason and audit
+lineage are reused, and attempt numbers live in the `run.retry.auto` audit
+entries. Existing terminal runs are not scanned or replayed on upgrade; only
+newly finalized eligible failures are considered. See
+[standalone configuration](standalone-configuration.md) for upgrade values and
+[recovery semantics](rca-run-recovery.md) for the run-list behavior.
 
 ## Assisted continuation
 
@@ -96,3 +97,5 @@ compounds with the automatic infrastructure retry: the injected in-Workflow
 `retryStrategy` retries only a command that exited nonzero, a deadline-killed
 or evicted attempt is never held, and a hold that expires is a retained failed
 step, which this retry refuses as before.
+
+Automatic retries retain the assist request and wait five seconds before becoming eligible for dispatch. The wait survives server restarts and does not block unrelated queued work.

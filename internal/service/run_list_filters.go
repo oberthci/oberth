@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -79,4 +80,19 @@ func (service *API) heldRuns(ctx context.Context, filter api.RunFilter) (any, er
 		return nil, err
 	}
 	return service.stripScopedSequences(held), nil
+}
+
+// validRefGlob checks a run list ref_glob (#1524): the agent events'
+// refs_glob syntax (path.Match, * never crosses a slash) and size bound.
+func validRefGlob(pattern string) error {
+	if pattern == "" {
+		return nil
+	}
+	if len(pattern) > maxEventGlobBytes {
+		return fmt.Errorf("%w: ref_glob is at most %d bytes", ErrInvalidInput, maxEventGlobBytes)
+	}
+	if _, err := path.Match(pattern, ""); err != nil {
+		return fmt.Errorf("%w: ref_glob %q is not a valid pattern: %w", ErrInvalidInput, pattern, err)
+	}
+	return nil
 }

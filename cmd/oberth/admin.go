@@ -1380,7 +1380,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; default and maximum come from the live server)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
 	var scope []string
-	flags.Func("scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)", func(value string) error { scope = append(scope, splitScope(value)...); return nil })
+	flags.Func("scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository); metrics alone: read only /metrics", func(value string) error { scope = append(scope, splitScope(value)...); return nil })
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -1448,6 +1448,9 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		if scopes, err = database.ResolveUplinkScopes(ctx, scope); err != nil {
 			return err
 		}
+	}
+	if *isAdmin && model.MetricsOnly(scopes) {
+		return fmt.Errorf("%w: --scope %s reads only /metrics and cannot be combined with --admin", errUsage, model.MetricsScope)
 	}
 	tokens := gatedAdminTokens{Store: database, Gate: gate, Policy: policy}
 	issuer := auth.Issuer{

@@ -84,7 +84,7 @@ func TestInfrastructureAutoRetryUsesAllFailureEvidence(t *testing.T) {
 				run.Trigger = kind
 			}
 			want := kind == "empty" || kind == "queued" || kind == "started" || kind == "earlier-start-then-queued" || kind == "result-started" || kind == "observation-started" || kind == "earlier-workflow-attempt"
-			if got := scheduler.infrastructureAutoRetry(run, result); got != want {
+			if got := scheduler.infrastructureAutoRetryEligible(run, result); got != want {
 				t.Fatal("infrastructure retry eligibility", kind, got, want)
 			}
 		})

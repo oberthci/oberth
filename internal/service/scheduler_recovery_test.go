@@ -71,8 +71,13 @@ type recoveryFixture struct {
 
 func newRecoveryFixture(t *testing.T) *recoveryFixture {
 	t.Helper()
+	return newRecoveryFixtureWithOptions(t, store.Options{})
+}
+
+func newRecoveryFixtureWithOptions(t *testing.T, options store.Options) *recoveryFixture {
+	t.Helper()
 	root := t.TempDir()
-	database, err := openTestStore(t, context.Background(), filepath.Join(root, "oberth.sqlite"), store.Options{})
+	database, err := openTestStore(t, context.Background(), filepath.Join(root, "oberth.sqlite"), options)
 	if err != nil {
 		t.Fatal(err)
 	}

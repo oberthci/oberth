@@ -250,9 +250,16 @@ DELETE FROM schema_migrations WHERE id='20261108232919-assisted-runs-2c8c05259f2
 
 // PostAgentEventsDowngrade removes the MCP agent loop tables (#1514) from
 // disposable historical fixtures.
-const PostAgentEventsDowngrade = `
+const PostAgentEventsDowngrade = PostPromotionTagsDowngrade + `
 DROP TABLE IF EXISTS agent_events;
 DROP TABLE IF EXISTS sync_intervals;
 DROP TABLE IF EXISTS promotion_prunes;
 DELETE FROM schema_migrations WHERE id='20261109220004-agent-events-5a27b69187397087ddb6d1f52bd68403';
+`
+
+// PostPromotionTagsDowngrade removes promote tag_after requests (#1524) from
+// disposable historical fixtures.
+const PostPromotionTagsDowngrade = `
+DROP TABLE IF EXISTS promotion_tags;
+DELETE FROM schema_migrations WHERE id='20261111132749-promotion-tags-c5ec022389eceac5d4f1120521ed20ef';
 `

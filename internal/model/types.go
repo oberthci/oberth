@@ -220,8 +220,10 @@ type RunResult struct {
 	// The complete error stays in Error. It never changes terminal status.
 	FailureCause string `json:"-"`
 
-	// AutoRetryInfrastructure is set only by the scheduler after workload settlement and failure checks.
-	AutoRetryInfrastructure bool `json:"-"`
+	// AutoRetryBudget is set only by the scheduler after workload settlement
+	// and failure checks: the automatic infrastructure retries the run's whole
+	// lineage may spend (#1524). Zero never retries.
+	AutoRetryBudget int `json:"-"`
 
 	TerminalObservation *RunTerminalObservation
 	Status              RunStatus
@@ -242,7 +244,9 @@ type RunListFilter struct {
 	LatestPerRef bool
 	RepoID       int64
 	Ref          string
-	Limit        int
+	// RefGlob keeps runs whose ref matches this path.Match pattern (#1524).
+	RefGlob string
+	Limit   int
 	// Before is an exclusive QueueSequence cursor: zero starts at the newest
 	// run, a page's last QueueSequence fetches the next older page.
 	Before int64

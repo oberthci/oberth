@@ -50,6 +50,38 @@ func TestLatestRefHeadsCountAllAttemptsAndDoNotResurrectOnOlderPages(t *testing.
 	}
 }
 
+// ref_glob with latest (#1524): one newest run per matching ref, with
+// path.Match semantics (* never crosses a slash), under the caller's scope.
+func TestLatestRefHeadsFilterByRefGlob(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	autoRetrySource(t, s, repo.ID, "land/a")
+	newestA := autoRetrySource(t, s, repo.ID, "land/a")
+	landB := autoRetrySource(t, s, repo.ID, "land/b")
+	autoRetrySource(t, s, repo.ID, "land/nested/c")
+	autoRetrySource(t, s, repo.ID, "feature/land")
+	heads, err := s.ListRecentRuns(t.Context(), model.RunListFilter{LatestPerRef: true, RefGlob: "land/*", Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, head := range heads {
+		got[head.Ref] = head.ID
+	}
+	if len(got) != 2 || got["land/a"] != newestA.ID || got["land/b"] != landB.ID {
+		t.Fatalf("latest land/* heads = %v", got)
+	}
+	flat, err := s.ListRecentRuns(t.Context(), model.RunListFilter{RefGlob: "land/*", Limit: 100})
+	if err != nil || len(flat) != 3 {
+		t.Fatalf("flat land/* = %d %v", len(flat), err)
+	}
+	hidden, err := s.ListRecentRuns(t.Context(), model.RunListFilter{LatestPerRef: true, RefGlob: "land/*", RepoIDs: []int64{}, Limit: 100})
+	if err != nil || len(hidden) != 0 {
+		t.Fatalf("scope leaked: %v %v", hidden, err)
+	}
+}
+
 func TestLatestRefHeadsRetainGlobalQueuePosition(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)

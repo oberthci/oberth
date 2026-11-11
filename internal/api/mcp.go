@@ -75,6 +75,9 @@ type PromoteResponse struct {
 	// PruneSource is "pending" when prune_source was recorded (#1514); the
 	// outcome arrives in promote_status and the promotion.finished event.
 	PruneSource string `json:"prune_source,omitempty"`
+	// TagAfter is "pending" when tag_after was recorded (#1524); the outcome
+	// arrives in promote_status tag_after and the promotion.finished event.
+	TagAfter string `json:"tag_after,omitempty"`
 }
 
 // PromoteRetryResponse identifies the new promotion that re-runs a failed or
@@ -867,6 +870,8 @@ func toolDefinitions() []map[string]any {
 			"superseded": map[string]any{"type": "boolean", "description": "Only branch runs with newer queued or running work for the same repository, ref and schedule entry; tags and promotion attempts never qualify. Priority-protected runs and runs with pending publications can still match. False or omitted leaves the list unfiltered. Read only; review before explicit admin run_cancel."},
 			"status":     map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": 10}}, "description": "Filter by one existing display status or a list: queued, running, passed, failed, cancelled, superseded, infra-retried. Paging is unchanged; repeat the same filters on later pages."},
 			"ref":        stringProperty("Filter by branch or tag ref"),
+			"ref_glob":   stringProperty("Shell-style pattern on the ref, e.g. land/* (* never crosses a slash); empty: every ref"),
+			"latest":     map[string]any{"type": "boolean", "description": "One row per matching repository and ref: its newest run, across every repository the caller's uplink scope reaches (all view only). Combine with ref_glob, e.g. {ref_glob:\"land/*\", latest:true}"},
 			"own":        map[string]any{"type": "boolean", "description": "Only runs this uplink pushed or triggered (actor is the caller's identity); paging is unchanged"},
 			"held":       map[string]any{"type": "boolean", "description": "Only running assisted runs with a parked retry attempt (hold) that no action released: one unpaged list, no before; service each with run_hold_list and run_hold_* before its abandon_at"},
 			"limit":      integerProperty("Maximum terminal runs per page (default 50, max 100); the first page also carries every queued and running run"),
@@ -966,6 +971,12 @@ func promotionInputSchema() map[string]any {
 			"sources":          map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Sources in merge order; optional ref must match the tested branch", "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"sha"}, "properties": map[string]any{"sha": map[string]any{"type": "string"}, "ref": map[string]any{"type": "string"}}}},
 			"skip_conflicting": map[string]any{"type": "boolean", "description": "Train only: drop conflicting sources and keep their paths in the promotion reason"},
 			"prune_source":     map[string]any{"type": "boolean", "description": "Single source into the default branch only: after the promotion passed and the upstream target equals its result, delete the source branch (head still the promoted SHA) on the mirror and queue its upstream deletion. Any other outcome keeps the branch with a recorded reason, shown in promote_status prune_source and the promotion.finished event"},
+			"tag_after": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "message"},
+				"description": "After the promotion passed and the upstream target equals its result, push an annotated tag (tagger Oberth) on the result commit, without force, with publication retries. The outcome (pushed or failed, with a reason) is in promote_status tag_after and the promotion.finished event. Admin uplinks only. Release-version names (v<major>.<minor>.<patch> with any suffix) are refused; push them through release CI. Refused when the tag already exists",
+				"properties": map[string]any{
+					"name":    map[string]any{"type": "string", "description": "Tag name without refs/tags/, e.g. deploy/2026-11-11"},
+					"message": map[string]any{"type": "string", "description": "Annotated tag message, 1..4096 bytes"},
+				}},
 		},
 	}
 	return schema
@@ -990,7 +1001,7 @@ func agentLoopToolDefinitions(tool func(string, string, map[string]any) map[stri
 			"id":    stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"until": map[string]any{"type": "string", "enum": []string{"finished", "held", "any"}, "description": "finished (default): terminal status; held: a parked retry hold or terminal; any: any change of status, phase, failed step, error, assist record or holds"},
 		}, map[string]any{"type": "integer", "minimum": 1, "maximum": 600, "description": "Wait bound in seconds (default 600)"}), "id")),
-		tool("events_subscribe", "Set which agent events this MCP session receives as server push: a notifications/claude/channel message on the session's GET event stream (Claude Code shows it only in an interactive session started with --dangerously-load-development-channels server:<name>; otherwise use run_wait and events_since), and notifications/resources/updated for run://<id> resources the session subscribed. Kinds: run.finished (status, failed step, reason, retry_hint), run.held (step, pod, held_since, abandon_at, holds_in_run), run.hold_abandoned (step, pod, reason ttl, cap or the agent, held_since, abandoned_at, failed attempt and exit code), run.lock_wait (a native Argo lock wait past agentEvents.lockWaitThreshold, with the lock and its holders; lock Parallelism/workflow-controller with postponed true is a Workflow the Argo controller postponed for its parallelism), promotion.finished (with the prune_source outcome), release.published and publication.failed (final, or an automatic retry attempt). Without a call a session receives every kind for every repository in its uplink scope. Events carry a monotonically increasing id; delivery is at-least-once; after a reconnect resume with events_since. Read-only.", object(map[string]any{
+		tool("events_subscribe", "Set which agent events this MCP session receives as server push: a notifications/claude/channel message on the session's GET event stream (Claude Code shows it only in an interactive session started with --dangerously-load-development-channels server:<name>; otherwise use run_wait and events_since), and notifications/resources/updated for run://<id> resources the session subscribed. Kinds: run.finished (status, failed step, reason, retry_hint), run.held (step, pod, held_since, abandon_at, holds_in_run), run.hold_abandoned (step, pod, reason ttl, cap or the agent, held_since, abandoned_at, failed attempt and exit code), run.lock_wait (a native Argo lock wait past agentEvents.lockWaitThreshold, with the lock and its holders; lock Parallelism/workflow-controller with postponed true is a Workflow the Argo controller postponed for its parallelism), promotion.finished (with the prune_source and tag_after outcomes), release.published and publication.failed (final, or an automatic retry attempt). Without a call a session receives every kind for every repository in its uplink scope. Events carry a monotonically increasing id; delivery is at-least-once; after a reconnect resume with events_since. Read-only.", object(map[string]any{
 			"repos":     map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Repositories (qualified or unique names) in scope; empty: all"},
 			"refs_glob": stringProperty("Shell-style pattern on the ref, e.g. land/*; empty: all"),
 			"kinds":     map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"run.finished", "run.held", "run.hold_abandoned", "run.lock_wait", "promotion.finished", "release.published", "publication.failed"}}, "description": "Event kinds; empty: all"},

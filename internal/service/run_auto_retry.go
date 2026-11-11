@@ -9,11 +9,30 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
-// Call only once a Workflow is terminal, never submitted, or ownership-checked
-// cleanup has settled. The store rechecks durable cancellation, publication,
-// preflight cleanup, failed-step evidence and lineage atomically with enqueue.
-func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobResult) bool {
-	if scheduler.disableInfrastructureAutoRetry || run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || !model.IsInfrastructureRunFailure(result.Status, result.Phase, result.FailedStep) || result.FailedStage != "" || pushretry.PublicationFailure(result.Error) || upstreamConfigurationFailure(result.Error) {
+// infrastructureAutoRetry returns the automatic retry budget for a failed
+// branch run, or zero when it must not be retried (#1524). Call only once a
+// Workflow is terminal, never submitted, or ownership-checked cleanup has
+// settled. The store rechecks durable cancellation, publication, preflight
+// cleanup, failed-step evidence and the lineage's spent budget atomically
+// with enqueue.
+func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobResult) int {
+	if !scheduler.infrastructureAutoRetryEligible(run, result) {
+		return 0
+	}
+	if scheduler.infrastructureAutoRetryBudget <= 0 {
+		return model.DefaultInfrastructureAutoRetryBudget
+	}
+	return scheduler.infrastructureAutoRetryBudget
+}
+
+func (scheduler *Scheduler) infrastructureAutoRetryEligible(run model.Run, result JobResult) bool {
+	if scheduler.disableInfrastructureAutoRetry || run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetriedBy != "" || !model.IsInfrastructureRunFailure(result.Status, result.Phase, result.FailedStep) || result.FailedStage != "" || pushretry.PublicationFailure(result.Error) || upstreamConfigurationFailure(result.Error) {
+		return false
+	}
+	// Never for a failure the retry hint classifies as code (#1524).
+	failed := run
+	failed.Status, failed.Phase, failed.Error, failed.FailedStep, failed.FailedStage = result.Status, result.Phase, result.Error, result.FailedStep, result.FailedStage
+	if hint := runRetryHint(failed, nil); hint == nil || hint.Class != model.RetryInfrastructure {
 		return false
 	}
 	eviction := result.Phase == "infrastructure" && result.TerminalObservation.EvictionOnly() && (run.WorkflowName != "" && result.TerminalObservation.WorkflowName == run.WorkflowName)

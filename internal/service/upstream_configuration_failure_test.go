@@ -24,7 +24,7 @@ func TestUpstreamDefaultBranchFailureIsConfigurationNotInfrastructure(t *testing
 	if hint == nil || hint.Class != model.RetryCode || hint.Cause != "upstream_configuration" {
 		t.Fatalf("hint = %+v", hint)
 	}
-	// The scheduler retries an otherwise identical transport failure once,
+	// The scheduler retries an otherwise identical transport failure within budget,
 	// and never the configuration failure.
 	logs, err := runlog.Open(t.TempDir())
 	if err != nil {
@@ -36,11 +36,11 @@ func TestUpstreamDefaultBranchFailureIsConfigurationNotInfrastructure(t *testing
 	}
 	scheduler := &Scheduler{logs: logs}
 	result := JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: "prepare repository: connect to upstream: connection refused"}
-	if !scheduler.infrastructureAutoRetry(run, result) {
+	if scheduler.infrastructureAutoRetry(run, result) == 0 {
 		t.Fatal("a transport failure outside any step is not auto-retried; the fixture proves nothing")
 	}
 	result.Error = message
-	if scheduler.infrastructureAutoRetry(run, result) {
+	if scheduler.infrastructureAutoRetry(run, result) != 0 {
 		t.Fatal("an upstream configuration failure was auto-retried")
 	}
 }

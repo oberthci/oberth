@@ -46,6 +46,10 @@ var ReservedUpstreamNames = map[string]bool{
 	"sys":            true,
 	"metadata":       true,
 	"receive-outbox": true,
+	// The metrics-only uplink scope (#1534) shares the scope namespace with
+	// upstream names: an upstream of this name would turn its scoped uplinks
+	// into /metrics readers.
+	"metrics": true,
 }
 
 // NormalizeRepo accepts the canonical SSH spellings /repo and repo.git while

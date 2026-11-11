@@ -612,6 +612,9 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 	// Re-registering a key without a scope keeps the one it has: a re-add or
 	// onboarding must never widen a scoped uplink (#073). Only uplink scope
 	// --clear widens it.
+	if spec.Admin && (model.MetricsOnly(scopes) || len(scopes) == 0 && model.MetricsOnly(previous)) {
+		return model.Uplink{}, fmt.Errorf("%w: a %s-scoped uplink reads only /metrics and cannot be an admin", ErrInvalid, model.MetricsScope)
+	}
 	if len(scopes) == 0 {
 		scopes = previous
 	} else if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
