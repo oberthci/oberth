@@ -400,6 +400,10 @@ func TestRollbackRecordStands(t *testing.T) {
 			oberthRevision: 9, history: `[{"revision":7,"description":"Upgrade complete"},{"revision":8,"description":"Rollback to 6"},{"revision":9,"description":"Rollback to 6"}]`,
 			want: []string{"restore", "verify"},
 		},
+		"an interrupted rollback of this record": {
+			oberthRevision: 8, history: `[{"revision":7,"status":"superseded","description":"Upgrade complete"},{"revision":8,"status":"pending-rollback","description":"Rollback to 6"}]`,
+			wantErr: "record is stale",
+		},
 		"an unrelated upgrade after the recorded one": {
 			oberthRevision: 8, history: `[{"revision":7,"description":"Upgrade complete"},{"revision":8,"description":"Upgrade complete"}]`,
 			wantErr: "record is stale",

@@ -412,6 +412,7 @@ func onlyRollbacksTo(ctx context.Context, deps Deps, name, namespace string, rec
 	}
 	var history []struct {
 		Revision    int    `json:"revision"`
+		Status      string `json:"status"`
 		Description string `json:"description"`
 	}
 	if err := json.Unmarshal(raw, &history); err != nil {
@@ -423,7 +424,10 @@ func onlyRollbacksTo(ctx context.Context, deps Deps, name, namespace string, rec
 		if entry.Revision <= recorded+1 || entry.Revision > deployed {
 			continue
 		}
-		if entry.Description != want {
+		// Helm writes the description when a rollback starts: one that was
+		// interrupted stays pending-rollback under the same text, with the
+		// release only partly rolled back.
+		if entry.Description != want || strings.HasPrefix(entry.Status, "pending") {
 			return false, nil
 		}
 		seen++
