@@ -403,6 +403,30 @@
     "env:KUBECONFIG": {
       "doc_anchor": "docs/install-answers.md#cluster-plan-and-preflight",
       "test_ref": "internal/installer/cluster_plan_test.go TestMultifileKubeconfigKeepsExplicitContext"
+    },
+    "flag:age-identity": {
+      "doc_anchor": "deploy/systemd/README.md#private-recovery",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsCredentialsOnStdin"
+    },
+    "flag:seal-to-tpm2": {
+      "doc_anchor": "deploy/systemd/README.md#private-recovery",
+      "test_ref": "internal/installer/unseal_test.go TestTPMUnsealRefusesUnsupportedHosts"
+    },
+    "flag:acknowledge-host-risk": {
+      "doc_anchor": "deploy/systemd/README.md#private-recovery",
+      "test_ref": "internal/installer/unseal_test.go TestTPMUnsealRefusesUnsupportedHosts"
+    },
+    "flag:pod": {
+      "doc_anchor": "deploy/systemd/README.md#private-recovery",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsCredentialsOnStdin"
+    },
+    "flag:namespace": {
+      "doc_anchor": "deploy/systemd/README.md#private-recovery",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsCredentialsOnStdin"
+    },
+    "env:PATH": {
+      "doc_anchor": "deploy/systemd/README.md#private-recovery",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealSubprocessDoesNotExposeCredentials"
     }
   }
 }

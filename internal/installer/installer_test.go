@@ -3344,7 +3344,7 @@ func TestSetupProductionSecretStoreSealedRerunFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("sealed already-initialized store must fail with unseal guidance")
 	}
-	if !strings.Contains(err.Error(), "bao operator unseal") || !strings.Contains(err.Error(), "re-run oberth install") {
+	if !strings.Contains(err.Error(), "oberth unseal --context") || !strings.Contains(err.Error(), "re-run oberth install") {
 		t.Fatalf("error missing unseal guidance: %v", err)
 	}
 }

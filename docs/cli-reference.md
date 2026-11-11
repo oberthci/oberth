@@ -532,6 +532,28 @@ Flags:
         confirm the reviewed install on the selected kubeconfig context
 ```
 
+## oberth unseal
+
+```text
+Usage: oberth unseal [flags]
+
+Flags:
+  -acknowledge-host-risk
+        accept that anyone who boots this disk on this machine gets the secrets
+  -age-identity string
+        age identity file used to decrypt an encrypted secrets file
+  -context string
+        Kubernetes context chosen by the user (required)
+  -namespace string
+        OpenBao namespace (default "openbao")
+  -pod string
+        OpenBao pod (default "openbao-0")
+  -seal-to-tpm2 string
+        create a new TPM2-bound systemd credential file instead of unsealing
+  -secrets-file string
+        owner-only installer secrets file; contents are never displayed
+```
+
 ## oberth issues
 
 ```text

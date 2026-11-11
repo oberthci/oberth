@@ -148,6 +148,9 @@ func TestClaudePluginManifests(t *testing.T) {
 			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "OBERTH_INSTALL_DIR", "trust on first",
 			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "exactly as printed", "--replace-client-files",
 		},
+		"unseal": {
+			"name: unseal", "description:", "--secrets-file", "--age-identity", "--context", "Never read, cat, grep, source or preview", "TPM2 is mandatory",
+		},
 		"connect": {
 			"name: connect", "description:", `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" connect --url`,
 			"${user_config.url}", "${user_config.ca_pin}", "$ARGUMENTS", "no trust on first use", "restart Claude Code once",
@@ -442,7 +445,7 @@ func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
 					}
 				}
 
-				// A second run changes nothing, and the session hint is quiet.
+				// A second run changes nothing; the hint still explains sealed recovery.
 				out, err = runTrust(t, shell, claudeDir, nil, "connect", "--url", address, "--pin", pin)
 				if err != nil || !strings.Contains(out, "not changed") {
 					t.Fatalf("second connect: %v\n%s", err, out)
@@ -451,7 +454,7 @@ func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
 					t.Errorf("a second connect rewrote the settings:\n%s", again)
 				}
 				hint, err := runTrust(t, shell, claudeDir, []string{"CLAUDE_PLUGIN_OPTION_URL=" + address, "CLAUDE_PLUGIN_OPTION_CA_PIN=" + pin}, "hint")
-				if err != nil || hint != "" {
+				if err != nil || !strings.Contains(hint, "sealed: run /oberth:unseal") {
 					t.Errorf("hint after connect = %q %v", hint, err)
 				}
 			})
@@ -564,7 +567,7 @@ func TestPluginSessionHint(t *testing.T) {
 				t.Fatalf("hint with a malformed pin = %q", out)
 			}
 			// Without a pin the server has a publicly trusted certificate.
-			if out := hint(""); out != "" {
+			if out := hint(""); !strings.Contains(out, "sealed: run /oberth:unseal") {
 				t.Fatalf("hint without a pin = %q", out)
 			}
 			// An unconfigured plugin has nothing to connect to.
@@ -579,10 +582,10 @@ func TestPluginSessionHint(t *testing.T) {
 			if _, err := ensureSettingsCATrust(paths, authority.pem, []*x509.Certificate{authority.certificate}, pin, false); err != nil {
 				t.Fatal(err)
 			}
-			if out := hint(pin); out != "" {
+			if out := hint(pin); !strings.Contains(out, "sealed: run /oberth:unseal") {
 				t.Fatalf("hint with trust = %q", out)
 			}
-			if out := hint(strings.ToUpper(pin)); out != "" {
+			if out := hint(strings.ToUpper(pin)); !strings.Contains(out, "sealed: run /oberth:unseal") {
 				t.Fatalf("hint with the pin in upper case = %q", out)
 			}
 			// Another pin (a rotated CA) is not the stored one.

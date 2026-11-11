@@ -74,7 +74,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, client, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, unseal, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, client, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -113,6 +113,7 @@ Commands:
   init          Write a starter .oberth/build.yaml workflow
   validate      Validate a repository's .oberth pipeline
   install       Install or upgrade Oberth on a cluster
+  unseal        Unseal OpenBao from a private secrets file
   setup         Interactive setup wizard
   upgrade       Upgrade an existing Oberth deployment
   wait-idle     Wait for the live daemon queue to empty (in-pod)
@@ -223,6 +224,8 @@ Commands:
 		return runPreflight(ctx, arguments[1:], output)
 	case "install":
 		return runInstall(ctx, arguments[1:], input, output)
+	case "unseal":
+		return runUnseal(ctx, arguments[1:], output)
 	case "setup":
 		return runSetup(ctx, arguments[1:], input, output)
 	case "wait-idle":

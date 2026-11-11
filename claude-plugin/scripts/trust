@@ -309,6 +309,7 @@ hint() {
 		echo "Oberth plugin: no Oberth server is configured, so the oberth MCP tools are not connected. Do not bring this up unless the user asks about Oberth or CI. Then offer two ways: to install a new Oberth on the Kubernetes cluster their KUBECONFIG names, run /oberth:install; to use an existing one, ask their Oberth admin for the MCP URL, an uplink token and the CA pin (oberth client pin), enter them with /plugin configure oberth@oberthci (the user types the token there, never into the chat), then run /oberth:connect."
 		exit 0
 	fi
+	echo "Oberth plugin: if system_status reports sealed or credentials are unavailable after reboot, sealed: run /oberth:unseal. Give it only the installer secrets-file path; never read or paste the key."
 	given=${CLAUDE_PLUGIN_OPTION_CA_PIN:-}
 	# Without a pin the server has a publicly trusted certificate.
 	[ -n "$given" ] || exit 0

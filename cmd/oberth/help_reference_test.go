@@ -45,6 +45,7 @@ fragments show
 git-ssh
 init
 install
+unseal
 issues
 issues update
 log
