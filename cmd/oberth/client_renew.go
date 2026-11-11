@@ -47,7 +47,7 @@ func runClientRenew(ctx context.Context, arguments []string, output io.Writer) e
 	managed := false
 	if filepath.Dir(keyPath) == parent && filepath.Base(parent) == "current" {
 		if info, err := os.Lstat(parent); err == nil && info.Mode()&os.ModeSymlink != 0 {
-			marker, readErr := os.ReadFile(filepath.Join(parent, ".oberth-client-identity")) // #nosec G304 -- operator-selected client directory; only the fixed public marker is read.
+			marker, readErr := os.ReadFile(filepath.Join(parent, ".oberth-client-identity")) //nolint:gosec // G304: operator-selected client directory; only the fixed public marker is read.
 			managed = readErr == nil && string(marker) == "oberth-client-identity-v1\n"
 		}
 	}
