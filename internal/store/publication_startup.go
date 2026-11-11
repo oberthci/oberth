@@ -45,7 +45,7 @@ func readStartupPublicationRepairs(ctx context.Context, tx *sql.Tx) ([]model.Pub
 		if err != nil {
 			return nil, err
 		}
-		if action.details != expected {
+		if !publicationAuditDetailsMatch(action.details, expected) {
 			return nil, strictErr
 		}
 		repairs = append(repairs, pub)

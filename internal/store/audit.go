@@ -514,7 +514,7 @@ func verifyPendingPublicationSnapshot(pending []model.Publication, latest map[st
 		if err != nil {
 			return err
 		}
-		if action.details != expected {
+		if !publicationAuditDetailsMatch(action.details, expected) {
 			return fmt.Errorf("pending publication %s differs from its chained audit intent", publication.ID)
 		}
 	}

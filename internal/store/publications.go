@@ -464,11 +464,40 @@ ORDER BY id DESC LIMIT 1`, publication.ID).Scan(&actor, &action, &details); err 
 		if err != nil {
 			return err
 		}
-		if details != expected {
+		if !publicationAuditDetailsMatch(details, expected) {
 			return fmt.Errorf("pending publication %s differs from its chained audit intent", publication.ID)
 		}
 	}
 	return nil
+}
+
+// publicationAuditDetailsMatch compares a chained publication audit record with
+// the details rebuilt from the publication row. appendAuditAction adds the
+// request's auth_method to every record written for an authenticated request,
+// so that one server-owned field is set aside before the exact comparison;
+// every other byte must still match.
+func publicationAuditDetailsMatch(stored, expected string) bool {
+	if stored == expected {
+		return true
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stored), &fields); err != nil || fields == nil {
+		return false
+	}
+	method, ok := fields["auth_method"]
+	if !ok {
+		return false
+	}
+	var value string
+	if err := json.Unmarshal(method, &value); err != nil || (value != "bearer" && value != "cert") {
+		return false
+	}
+	delete(fields, "auth_method")
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return false
+	}
+	return string(encoded) == expected
 }
 
 // safeAuditTime keeps audit ordering aligned with the state transition without

@@ -830,3 +830,71 @@ func TestRestartTerminalizesFastForwardPromotionWithoutPublicationIntent(t *test
 		t.Fatalf("orphan fast-forward promotion = %#v", recovered)
 	}
 }
+
+func TestAuditStateAcceptsPublicationIntentWrittenByAuthenticatedRequest(t *testing.T) {
+	for _, method := range []string{"bearer", "cert"} {
+		t.Run(method, func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Date(2026, 11, 11, 21, 39, 0, 0, time.UTC)
+			s := testStore(t, &now)
+			repo := createRepo(t, s)
+			run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/authenticated-intent", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.ClaimNextRun(ctx); err != nil {
+				t.Fatal(err)
+			}
+			// A promotion requested over MCP/REST records the request's auth
+			// method in every audit record it writes, including the intent.
+			authenticated := model.WithAuthMethod(ctx, method)
+			publication, err := s.BeginPublication(authenticated, model.PublicationSpec{
+				RepoID: repo.ID, RunID: run.ID, RefKind: model.RefBranch, Ref: run.Ref,
+				PreviousSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ResultSHA: run.SHA, Actor: run.Actor,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.VerifyAuditState(ctx); err != nil {
+				t.Fatalf("authenticated pending publication audit state: %v", err)
+			}
+			// This fixture has no signed checkpoint, so the mutation gate may
+			// still refuse for that reason; it must not refuse the intent.
+			if _, _, err := s.VerifyAuditMutationState(ctx, nil, nil, acceptAuditMutationState); err != nil && strings.Contains(err.Error(), "chained audit intent") {
+				t.Fatalf("authenticated pending publication mutation state: %v", err)
+			}
+
+			if _, err := s.db.ExecContext(ctx, `DROP TRIGGER publications_guard_update`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.db.ExecContext(ctx, `
+UPDATE publications SET result_sha = 'cccccccccccccccccccccccccccccccccccccccc'
+WHERE id = ?`, publication.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.VerifyAuditState(ctx); err == nil || !strings.Contains(err.Error(), "differs from its chained audit intent") {
+				t.Fatalf("tampered authenticated publication audit state error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPublicationAuditDetailsMatchSetsAsideOnlyTheServerAuthMethod(t *testing.T) {
+	expected := `{"error":"","ref":"main"}`
+	for _, tc := range []struct {
+		stored string
+		want   bool
+	}{
+		{`{"error":"","ref":"main"}`, true},
+		{`{"auth_method":"bearer","error":"","ref":"main"}`, true},
+		{`{"auth_method":"cert","error":"","ref":"main"}`, true},
+		{`{"auth_method":"session","error":"","ref":"main"}`, false},
+		{`{"auth_method":"bearer","error":"","ref":"other"}`, false},
+		{`{"auth_method":"bearer","error":"","ref":"main","extra":"x"}`, false},
+		{`not json`, false},
+	} {
+		if got := publicationAuditDetailsMatch(tc.stored, expected); got != tc.want {
+			t.Errorf("publicationAuditDetailsMatch(%s) = %v, want %v", tc.stored, got, tc.want)
+		}
+	}
+}
