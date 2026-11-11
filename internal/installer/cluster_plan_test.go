@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -149,7 +150,7 @@ func TestExecuteRefusesUnknownNetworkPolicyBeforeHelm(t *testing.T) {
 	node.Annotations = nil
 	kube := fake.NewClientset(node, preflightStorage())
 	deps := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-		return kube, &rest.Config{Host: "https://api.example.test"}, "chosen", nil
+		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
 	}, RunCommand: preflightStats, RunHelm: func(context.Context, []string) ([]byte, error) {
 		t.Fatal("Helm ran without network-policy enforcement")
 		return nil, nil
@@ -172,6 +173,80 @@ func TestVerifyRequiresUpstreamAuthentication(t *testing.T) {
 	} {
 		if verifiedUpstreams([]byte(test.raw)) != test.ok {
 			t.Fatal("upstream authentication result was misclassified")
+		}
+	}
+}
+
+func TestPolicyPreflightReadsControllerConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name, controller string
+		args             []string
+		config           map[string]string
+		ready            int32
+		nodeCount        int
+		want             bool
+	}{
+		{name: "cilium enabled", controller: "cilium", config: map[string]string{"enable-policy": "default"}, ready: 1, want: true},
+		{name: "cilium disabled", controller: "cilium", config: map[string]string{"enable-policy": "never"}, ready: 1},
+		{name: "cilium audit only", controller: "cilium", config: map[string]string{"policy-audit-mode": "true"}, ready: 1},
+		{name: "cilium k8s policies disabled", controller: "cilium", config: map[string]string{"enable-k8s-networkpolicy": "false"}, ready: 1},
+		{name: "cilium argument overrides config", controller: "cilium", args: []string{"--enable-policy", "never"}, config: map[string]string{"enable-policy": "default"}, ready: 1},
+		{name: "router firewall enabled", controller: "kube-router", args: []string{"--run-firewall=true"}, ready: 1, want: true},
+		{name: "router firewall disabled", controller: "kube-router", args: []string{"--run-firewall=false"}, ready: 1},
+		{name: "router split disabled flag", controller: "kube-router", args: []string{"--run-firewall", "false"}, ready: 1},
+		{name: "controller does not cover nodes", controller: "kube-router", ready: 1, nodeCount: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			node := preflightNode()
+			node.Annotations = nil
+			ds := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: test.controller, Namespace: "networking", Generation: 1},
+				Spec:   appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: test.controller, Args: test.args}}}}},
+				Status: appsv1.DaemonSetStatus{ObservedGeneration: 1, DesiredNumberScheduled: test.ready, NumberReady: test.ready, UpdatedNumberScheduled: test.ready}}
+			config := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cilium-config", Namespace: "networking"}, Data: test.config}
+			kube := fake.NewClientset(node, preflightStorage(), ds, config)
+			if test.nodeCount > 1 {
+				other := node.DeepCopy()
+				other.Name = "node-two"
+				if _, err := kube.CoreV1().Nodes().Create(context.Background(), other, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result := InstallResult{OK: true}
+			inspectClusterPreflight(context.Background(), &Config{}, Deps{KubeClient: kube, RunCommand: preflightStats}, &ClusterIdentity{}, &result)
+			if result.OK != test.want {
+				t.Fatalf("preflight ok=%t, want %t", result.OK, test.want)
+			}
+		})
+	}
+}
+
+func TestAllInstallModesRefuseUntrustedClusterBeforeAccess(t *testing.T) {
+	ca := newTestServerCA([]string{"api.example.test"})
+	for _, config := range []*rest.Config{
+		{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca, Insecure: true}},
+		{Host: "https://api.example.test"},
+		{Host: "http://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca}},
+	} {
+		kube := fake.NewClientset()
+		deps := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil },
+			LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) { return kube, config, "chosen", nil },
+			RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+				t.Fatal("subprocess contacted an untrusted cluster")
+				return nil, nil
+			},
+			RunHelm: func(context.Context, []string) ([]byte, error) {
+				t.Fatal("Helm contacted an untrusted cluster")
+				return nil, nil
+			}}
+		cfg := Config{ContextName: "chosen"}
+		if PlanInstall(context.Background(), cfg, deps).OK || VerifyInstall(context.Background(), cfg, deps).OK {
+			t.Fatal("read-only mode accepted an untrusted cluster")
+		}
+		if err := Execute(context.Background(), cfg, deps); !errors.Is(err, errInstallPreflight) || !strings.Contains(err.Error(), "cluster_ca:") {
+			t.Fatal("install bypassed the plan's trust check")
+		}
+		if len(kube.Actions()) != 0 {
+			t.Fatal("credentials could have been sent before refusing untrusted cluster")
 		}
 	}
 }
