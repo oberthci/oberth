@@ -1,0 +1,40 @@
+{{- /*
+Prometheus Operator ServiceMonitor for the server's /metrics (off by default).
+/metrics answers only an unscoped admin bearer token, so the scrape reads one
+from a Secret the operator creates in the release namespace, and verifies the
+server certificate against a CA the operator provides: no insecureSkipVerify.
+*/ -}}
+{{- $monitor := (.Values.metrics | default dict).serviceMonitor | default dict -}}
+{{- if $monitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "oberth.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+    {{- with $monitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "oberth.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: https
+      path: /metrics
+      scheme: https
+      interval: {{ $monitor.interval | quote }}
+      bearerTokenSecret:
+        name: {{ $monitor.bearerTokenSecretName | quote }}
+        key: {{ $monitor.bearerTokenSecretKey | quote }}
+      tlsConfig:
+        serverName: {{ $monitor.serverName | default (printf "%s.%s.svc" (include "oberth.fullname" .) .Release.Namespace) | quote }}
+        ca:
+          configMap:
+            name: {{ $monitor.caConfigMapName | quote }}
+            key: {{ $monitor.caConfigMapKey | quote }}
+{{- end }}

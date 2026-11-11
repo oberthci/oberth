@@ -23,7 +23,7 @@ The sampler logs the first retained deadline after each successful sample,
 including sample age and database wait, while counting every retained deadline.
 `/readyz` logs a stale transition even while the sampler is stuck, once per
 transition. These logs contain fixed reason classes, not database/credential
-error details. The authenticated administrator-only `/metrics` endpoint exports
+error details. The authenticated administrator-only `/metrics` endpoint ([metrics](metrics.md)) exports
 `oberth_readiness_sample_present`, `oberth_readiness_sample_age_seconds` and
 `oberth_readiness_retained_deadlines_total` without storage I/O.
 

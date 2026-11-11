@@ -192,3 +192,12 @@ is a name a public CA issues for in a deployment like this one. */ -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- $monitor := (.Values.metrics | default dict).serviceMonitor | default dict -}}
+{{- if $monitor.enabled -}}
+{{- if not $monitor.bearerTokenSecretName -}}
+{{- fail "metrics.serviceMonitor.enabled needs metrics.serviceMonitor.bearerTokenSecretName: /metrics answers only an unscoped admin bearer token, read from that Secret" -}}
+{{- end -}}
+{{- if not $monitor.caConfigMapName -}}
+{{- fail "metrics.serviceMonitor.enabled needs metrics.serviceMonitor.caConfigMapName: the scrape verifies the server certificate against that CA (no insecureSkipVerify)" -}}
+{{- end -}}
+{{- end -}}
