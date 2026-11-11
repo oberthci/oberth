@@ -11,11 +11,14 @@
 #       CA. The CA is stored as oberth/ca.crt in Claude Code's directory and
 #       env.NODE_EXTRA_CA_CERTS in settings.json is made to hold it; every
 #       other setting and an existing bundle are kept. The operating
-#       system's trust store is never touched.
+#       system's trust store is never touched. A CA without critical name
+#       constraints is stored with a warning: Claude Code then trusts it
+#       for every host.
 #
 #   trust hint
-#       The SessionStart hook: prints one paragraph for Claude when the CA
-#       is not trusted yet, and nothing otherwise. It never fails a session.
+#       The SessionStart hook: prints one paragraph for Claude when a pin
+#       is configured and the CA is not trusted yet, and nothing otherwise.
+#       It never fails a session.
 #
 # Needs sh, awk and openssl. No token is read, and nothing is logged.
 set -eu
@@ -46,6 +49,19 @@ normal_pin() {
 # fingerprint prints the SHA-256 of the first certificate of a PEM file.
 fingerprint() {
 	openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//' | tr -d ':\r\n' | tr 'A-F' 'a-f'
+}
+
+# constrained reports whether the certificate of a PEM file carries critical
+# name constraints that permit DNS names: only then is trusting it limited
+# to those names.
+constrained() {
+	openssl x509 -in "$1" -noout -text 2>/dev/null | awk '
+		/^[ \t]*X509v3 Name Constraints:/ { section = ($0 ~ /critical/) ? 1 : 0; permitted = 0; next }
+		/^[ \t]*X509v3 [A-Za-z ]+:/ { section = 0 }
+		section && /^[ \t]*Permitted:/ { permitted = 1; next }
+		section && /^[ \t]*Excluded:/ { permitted = 0; next }
+		section && permitted && /^[ \t]*DNS:/ { found = 1 }
+		END { exit found ? 0 : 1 }'
 }
 
 # shown is an address as a message prints it: without user information.
@@ -82,7 +98,8 @@ holds() {
 # settings reads or sets env.NODE_EXTRA_CA_CERTS of a settings.json without
 # reformatting it: "get" prints the current value (nothing when unset), "set"
 # prints the whole file with the value in OBERTH_TRUST_VALUE. The file must
-# be one JSON object (or empty); anything else is refused.
+# be one valid JSON object (or empty); anything else is refused, as `oberth
+# client setup` refuses it.
 settings() {
 	awk -v mode="$1" -v key="$variable" '
 		function refuse(message) { print "oberth: settings.json: " message > "/dev/stderr"; failed = 1; exit 2 }
@@ -118,7 +135,70 @@ settings() {
 			}
 			return out
 		}
-		BEGIN { RS = "\001" }
+		# text_end and value_end return the position after the JSON string or
+		# value that starts at p, or 0 when it is not valid JSON.
+		function text_end(p,   d) {
+			p++
+			while (p <= n) {
+				d = substr(s, p, 1)
+				if (d == "\"") return p + 1
+				if (d == "\\") {
+					d = substr(s, p + 1, 1)
+					if (d == "u") {
+						if (substr(s, p + 2, 4) !~ /^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/) return 0
+						p += 6
+						continue
+					}
+					if (d == "" || !index("\"\\/bfnrt", d)) return 0
+					p += 2
+					continue
+				}
+				if (index(control, d)) return 0
+				p++
+			}
+			return 0
+		}
+		function value_end(p,   d) {
+			p = space(p)
+			d = substr(s, p, 1)
+			if (d == "\"") return text_end(p)
+			if (d == "{") {
+				p = space(p + 1)
+				if (substr(s, p, 1) == "}") return p + 1
+				while (1) {
+					if (substr(s, p, 1) != "\"") return 0
+					if (!(p = text_end(p))) return 0
+					p = space(p)
+					if (substr(s, p, 1) != ":") return 0
+					if (!(p = value_end(p + 1))) return 0
+					p = space(p)
+					d = substr(s, p, 1)
+					if (d == "}") return p + 1
+					if (d != ",") return 0
+					p = space(p + 1)
+				}
+			}
+			if (d == "[") {
+				p = space(p + 1)
+				if (substr(s, p, 1) == "]") return p + 1
+				while (1) {
+					if (!(p = value_end(p))) return 0
+					p = space(p)
+					d = substr(s, p, 1)
+					if (d == "]") return p + 1
+					if (d != ",") return 0
+					p++
+				}
+			}
+			if (substr(s, p, 4) == "true" || substr(s, p, 4) == "null") return p + 4
+			if (substr(s, p, 5) == "false") return p + 5
+			if (match(substr(s, p, 400), /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?/)) return p + RLENGTH
+			return 0
+		}
+		BEGIN {
+			RS = "\001"
+			for (code = 1; code < 32; code++) control = control sprintf("%c", code)
+		}
 		{ s = s (NR > 1 ? "\001" : "") $0 }
 		END {
 			if (failed) exit 2
@@ -130,6 +210,9 @@ settings() {
 				exit 0
 			}
 			if (substr(s, i, 1) != "{") refuse("is not a JSON object")
+			stop = value_end(i)
+			if (!stop) refuse("is not valid JSON")
+			if (space(stop) <= n) refuse("has data after the object")
 			top = i; depth = 0; finished = 0; inside = 0
 			environment = 0; from = 0; to = 0
 			while (i <= n) {
@@ -223,12 +306,10 @@ hint() {
 	url=$(shown "${CLAUDE_PLUGIN_OPTION_URL:-}")
 	[ -n "$url" ] || exit 0
 	given=${CLAUDE_PLUGIN_OPTION_CA_PIN:-}
+	# Without a pin the server has a publicly trusted certificate.
+	[ -n "$given" ] || exit 0
 	pin=$(normal_pin "$given")
 	if trusted "$pin"; then
-		exit 0
-	fi
-	if [ -z "$given" ]; then
-		echo "Oberth plugin: no CA pin is configured for $url. This is right only when that server has a publicly trusted certificate. If the oberth MCP server fails to connect with a certificate error, offer the user /oberth:connect <CA SHA-256 pin> (the pin comes from their Oberth admin: oberth client pin); otherwise do not bring this up."
 		exit 0
 	fi
 	if [ -z "$pin" ]; then
@@ -270,6 +351,10 @@ connect() {
 	case "$url" in
 	https://*) ;;
 	*) fail "the server URL must start with https:// (set it with /plugin configure oberth). Nothing was changed." ;;
+	esac
+	# Nothing a shell reads as syntax is accepted in the address.
+	case "$url" in
+	*[!]A-Za-z0-9._~:/%@[-]*) fail "the server URL may hold only letters, digits and . _ ~ : / % @ [ ] - (correct it with /plugin configure oberth). Nothing was changed." ;;
 	esac
 	authority=${url#https://}
 	authority=${authority%%[/?#]*}
@@ -345,6 +430,9 @@ connect() {
 	fi
 	openssl x509 -in "$anchor" -noout -text 2>/dev/null | grep -q 'CA:TRUE' ||
 		fail "refused: the pinned certificate is not a CA certificate. Nothing was changed."
+	warning=
+	constrained "$anchor" ||
+		warning="Warning: this CA has no critical name constraints: after the restart Claude Code trusts the certificates it issues for every host, not only for the Oberth server."
 	# The server must hold a certificate this CA issued.
 	# Whatever else it presented may complete the path; the leaf itself keeps
 	# the file from being empty.
@@ -429,6 +517,7 @@ connect() {
 		echo "$settings_file: env.$variable already names $want; not changed"
 	fi
 	[ -z "$note" ] || echo "Note: $note"
+	[ -z "$warning" ] || echo "$warning"
 	echo "Restart Claude Code once: it reads its CA trust only when it starts. The operating system's trust store was not touched."
 }
 

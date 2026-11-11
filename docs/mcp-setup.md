@@ -139,7 +139,11 @@ there) then:
 The operating system's trust store is never touched. The command needs `sh`,
 `awk` and `openssl`, reads no token and prints none. The Oberth CA is
 name-constrained to the server's own names, so trusting it in Claude Code
-cannot vouch for any other site.
+cannot vouch for any other site. A pinned CA without critical name
+constraints is still stored, with a warning: Claude Code then trusts the
+certificates it issues for every host. `oberth client setup` prints the same
+warning. The URL may hold only letters, digits and `. _ ~ : / % @ [ ] -`,
+and settings that are not valid JSON are refused and left as they are.
 
 The server presents its CA in the handshake. When the CA is at hand as a
 file instead, pass it; it is checked against the same pin:
@@ -172,9 +176,6 @@ It is CA trust plus the plugin, and nothing else:
   or another git source), enables it when it is disabled, and sets its URL
   and CA pin with `claude plugin configure oberth@oberthci --values-stdin`.
   No user-scope MCP server is registered: the plugin's entry is the only one.
-  An entry named `oberth` that Claude Code still holds outside the plugin
-  would offer every tool twice, so the command names it and the
-  `claude mcp remove` line that deletes it.
 - **The token.** When this machine has one (`--token-file`, `OBERTH_TOKEN`,
   `OBERTH_TOKEN_COMMAND`, or the token saved in `~/.config/oberth` for the
   same server), it is handed to Claude Code's credential store on standard

@@ -200,8 +200,6 @@ func configureClaudeCodeFromInstall(ctx context.Context, deps Deps, tw *tableWri
 			tw.AppendRow("Claude Code plugin", change.Action, "✓ ready", false)
 		case strings.HasPrefix(change.Target, "Claude Code CA trust"):
 			tw.AppendRow("Claude Code CA", change.Action, "✓ ready", false)
-		case change.Action == "manual":
-			tw.AppendRow("Claude Code", "another MCP entry named "+claudeCodeServerName+": run oberth client setup --dry-run", "⚠ manual", false)
 		}
 	}
 	if err != nil {

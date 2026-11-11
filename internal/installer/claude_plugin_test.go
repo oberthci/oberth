@@ -144,6 +144,7 @@ func TestClaudePluginManifests(t *testing.T) {
 		"connect": {
 			"name: connect", "description:", `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" connect --url`,
 			"${user_config.url}", "${user_config.ca_pin}", "$ARGUMENTS", "no trust on first use", "restart Claude Code once",
+			"Check both values before any command is written", "exactly 64 hex digits", "`. _ ~ : / % @ [ ] -`", "run nothing", "`Warning:`",
 		},
 	} {
 		body, err := os.ReadFile(pluginPath(t, "skills", skill, "SKILL.md"))
@@ -260,7 +261,12 @@ func TestPluginConnectRefusesWithoutAMatchingPin(t *testing.T) {
 			"CA file of another CA":   {[]string{"--url", address, "--pin", pin, "--ca-file", otherFile}, "refused: no certificate in"},
 			"plain http":              {[]string{"--url", strings.Replace(address, "https://", "http://", 1), "--pin", pin}, "must start with https://"},
 			"no server":               {[]string{"--url", "https://localhost:1/mcp", "--pin", pin}, "no certificate was read"},
-			"an option for the shell": {[]string{"--url", "https://-oProxyCommand=x/mcp", "--pin", pin}, "no usable host"},
+			"an option for the shell": {[]string{"--url", "https://-oProxyCommand/mcp", "--pin", pin}, "no usable host"},
+			"a quote in the URL":      {[]string{"--url", address + "'; touch x; '", "--pin", pin}, "may hold only letters"},
+			"a command in the URL":    {[]string{"--url", "https://$(touch x)/mcp", "--pin", pin}, "may hold only letters"},
+			"a space in the URL":      {[]string{"--url", "https://localhost /mcp", "--pin", pin}, "may hold only letters"},
+			"a query in the URL":      {[]string{"--url", address + "?a=b&c", "--pin", pin}, "may hold only letters"},
+			"a command in the pin":    {[]string{"--url", address, "--pin", pin[:32] + "$(touch x)" + pin[32:]}, "no CA pin"},
 		} {
 			t.Run(shell+" "+name, func(t *testing.T) {
 				claudeDir := filepath.Join(t.TempDir(), ".claude")
@@ -455,12 +461,22 @@ func TestPluginConnectRefusesSettingsItCannotMerge(t *testing.T) {
 	address := servePresenting(t, key, leaf, authority.certificate.Raw)
 	pin := CertificatePin(authority.certificate)
 	for name, settings := range map[string]string{
-		"an array":              "[1]\n",
-		"env is an array":       "{\"env\": []}\n",
-		"the value is a number": "{\"env\": {\"NODE_EXTRA_CA_CERTS\": 5}}\n",
-		"truncated":             "{\"model\": \"opus\", \"env\": {",
-		"trailing data":         "{} {}\n",
-		"an unreadable bundle":  "{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"/nonexistent/bundle.pem\"}}\n",
+		"an array":                     "[1]\n",
+		"env is an array":              "{\"env\": []}\n",
+		"the value is a number":        "{\"env\": {\"NODE_EXTRA_CA_CERTS\": 5}}\n",
+		"truncated":                    "{\"model\": \"opus\", \"env\": {",
+		"trailing data":                "{} {}\n",
+		"a comment":                    "{\n  // note\n  \"model\": \"opus\"\n}\n",
+		"a trailing comma":             "{\"model\": \"opus\",}\n",
+		"a trailing comma in a list":   "{\"list\": [1,], \"env\": {}}\n",
+		"a word that is no value":      "{\"model\": tru}\n",
+		"a missing colon":              "{\"model\" \"opus\"}\n",
+		"brackets out of order":        "{\"list\": [}]}\n",
+		"a raw tab in a string":        "{\"model\": \"a\tb\"}\n",
+		"an unknown escape":            "{\"model\": \"a\\xb\"}\n",
+		"a number with a leading zero": "{\"n\": 01}\n",
+		"single quotes":                "{'model': 'opus'}\n",
+		"an unreadable bundle":         "{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"/nonexistent/bundle.pem\"}}\n",
 	} {
 		for _, shell := range trustShells() {
 			t.Run(shell+" "+name, func(t *testing.T) {
@@ -540,7 +556,8 @@ func TestPluginSessionHint(t *testing.T) {
 			if out := hint("not-a-pin"); !strings.Contains(out, "not a SHA-256 fingerprint") {
 				t.Fatalf("hint with a malformed pin = %q", out)
 			}
-			if out := hint(""); !strings.Contains(out, "no CA pin is configured") || !strings.Contains(out, "otherwise do not bring this up") {
+			// Without a pin the server has a publicly trusted certificate.
+			if out := hint(""); out != "" {
 				t.Fatalf("hint without a pin = %q", out)
 			}
 			// An unconfigured plugin has nothing to connect to.
@@ -702,6 +719,49 @@ func TestCATrustKeepsASymbolicLinkToTheSettings(t *testing.T) {
 			}
 			if merged.Model != "opus" || merged.Env["NODE_EXTRA_CA_CERTS"] != filepath.Join(claudeDir, "oberth", "ca.crt") {
 				t.Fatalf("the linked file = %+v", merged)
+			}
+		})
+	}
+}
+
+// A CA without critical name constraints is trusted by Claude Code for
+// every host: /oberth:connect and `oberth client setup` both store it and
+// say so in the same line. The Oberth server CA, which is constrained to
+// the server's names, gets no warning.
+func TestCATrustWarnsAboutACAWithoutNameConstraints(t *testing.T) {
+	requireOpenSSL(t)
+	for name, test := range map[string]struct {
+		authority testAuthority
+		warned    bool
+	}{
+		"constrained":   {newTestAuthorityFor(t, "Oberth test CA", "localhost"), false},
+		"unconstrained": {newTestAuthority(t, "Any CA"), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			leaf, key := test.authority.issue(t)
+			address := servePresenting(t, key, leaf, test.authority.certificate.Raw)
+			claudeDir := filepath.Join(t.TempDir(), ".claude")
+			out, err := runTrust(t, "sh", claudeDir, nil, "connect", "--url", address, "--pin", CertificatePin(test.authority.certificate))
+			if err != nil {
+				t.Fatalf("connect: %v\n%s", err, out)
+			}
+			if got := strings.Contains(out, UnconstrainedCAWarning+"\n"); got != test.warned || strings.Contains(out, "Warning:") != test.warned {
+				t.Errorf("connect warned = %v, want %v:\n%s", got, test.warned, out)
+			}
+			if stored := parsePEMCertificates(mustRead(t, filepath.Join(claudeDir, "oberth", "ca.crt"))); len(stored) != 1 {
+				t.Fatal("the CA was not stored")
+			}
+
+			reference := t.TempDir()
+			paths := claudeCodeFiles{settings: filepath.Join(reference, "settings.json"), store: filepath.Join(reference, "oberth")}
+			for _, run := range []string{"first", "again"} {
+				change, _, err := ensureClaudeCodeCATrust(paths, ClaudeCodeSetup{CA: string(test.authority.pem)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := strings.Contains(change.String(), UnconstrainedCAWarning); got != test.warned {
+					t.Errorf("client setup (%s) warned = %v, want %v:\n%s", run, got, test.warned, change.String())
+				}
 			}
 		})
 	}

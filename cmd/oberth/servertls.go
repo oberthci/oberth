@@ -207,6 +207,10 @@ func renewServedLeaf(ctx context.Context, served *servedCertificate, issue func(
 	return issued, err
 }
 
+// materializeServerIdentity writes the renewed identity files; a test
+// replaces it, since the identity directory is a tmpfs of the deployment.
+var materializeServerIdentity = func(files map[string][]byte) error { return materializeIdentity("server", files) }
+
 func replaceServedLeaf(files map[string][]byte, served *servedCertificate) error {
 	pair, err := tls.X509KeyPair(files["tls.crt"], files["tls.key"])
 	if err != nil {
@@ -219,7 +223,7 @@ func replaceServedLeaf(files map[string][]byte, served *servedCertificate) error
 		}
 	}
 	presentAuthority(&pair, files["ca.crt"])
-	if err := materializeIdentity("server", files); err != nil {
+	if err := materializeServerIdentity(files); err != nil {
 		return err
 	}
 	served.current.Store(&pair)

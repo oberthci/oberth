@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -121,5 +122,91 @@ func TestServedCertificatePresentsItsAuthority(t *testing.T) {
 	presentAuthority(&pair, identity.ca)
 	if len(pair.Certificate) != 2 {
 		t.Fatalf("a chain that already ends in the CA grew to %d certificates", len(pair.Certificate))
+	}
+}
+
+// A renewal goes through replaceServedLeaf: the served chain becomes the new
+// leaf followed by the CA that issued it, also when the CA itself changed,
+// and a renewal whose identity files cannot be written keeps the chain that
+// was served.
+func TestReplaceServedLeafPresentsTheAuthority(t *testing.T) {
+	first := newTestIdentity(t, "Oberth test CA")
+	directory := t.TempDir()
+	certPath, keyPath := filepath.Join(directory, "tls.crt"), filepath.Join(directory, "tls.key")
+	for path, body := range map[string][]byte{certPath: first.leaf, keyPath: first.key} {
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	served, err := loadServedCertificate(certPath, keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written map[string][]byte
+	var writeErr error
+	original := materializeServerIdentity
+	materializeServerIdentity = func(files map[string][]byte) error {
+		written = files
+		return writeErr
+	}
+	t.Cleanup(func() { materializeServerIdentity = original })
+
+	presented := func() []*x509.Certificate {
+		t.Helper()
+		server := httptest.NewUnstartedServer(http.NotFoundHandler())
+		server.TLS = &tls.Config{GetCertificate: served.getCertificate, MinVersion: tls.VersionTLS13}
+		server.StartTLS()
+		defer server.Close()
+		connection, err := tls.Dial("tcp", server.Listener.Addr().String(), &tls.Config{InsecureSkipVerify: true, ServerName: "localhost"}) //nolint:gosec // G402: the test reads the presented chain; nothing is trusted.
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = connection.Close() }()
+		return connection.ConnectionState().PeerCertificates
+	}
+	leafOf := func(identity testIdentity) *x509.Certificate {
+		t.Helper()
+		block, _ := pem.Decode(identity.leaf)
+		leaf, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return leaf
+	}
+	if chain := presented(); len(chain) != 1 {
+		t.Fatalf("before the renewal the server presented %d certificates", len(chain))
+	}
+
+	// The same CA issues a new leaf.
+	renewed := newTestIdentity(t, "Oberth test CA")
+	files := map[string][]byte{"tls.crt": renewed.leaf, "tls.key": renewed.key, "ca.crt": renewed.ca}
+	if err := replaceServedLeaf(files, served); err != nil {
+		t.Fatal(err)
+	}
+	if len(written) != 3 {
+		t.Fatalf("the renewal wrote %d identity files", len(written))
+	}
+	chain := presented()
+	if len(chain) != 2 || !chain[0].Equal(leafOf(renewed)) || !chain[1].Equal(renewed.authority) {
+		t.Fatalf("after the renewal the server presented %d certificates, want the new leaf and its CA", len(chain))
+	}
+
+	// A renewal that cannot write its files changes nothing.
+	failing := newTestIdentity(t, "Another CA")
+	writeErr = errors.New("identity directory is not writable")
+	if err := replaceServedLeaf(map[string][]byte{"tls.crt": failing.leaf, "tls.key": failing.key, "ca.crt": failing.ca}, served); err == nil {
+		t.Fatal("a renewal that wrote nothing was served")
+	}
+	if chain = presented(); len(chain) != 2 || !chain[1].Equal(renewed.authority) {
+		t.Fatal("a failed renewal changed the served chain")
+	}
+
+	// A CA file that did not issue the leaf is not presented.
+	writeErr = nil
+	if err := replaceServedLeaf(map[string][]byte{"tls.crt": failing.leaf, "tls.key": failing.key, "ca.crt": renewed.ca}, served); err != nil {
+		t.Fatal(err)
+	}
+	if chain = presented(); len(chain) != 1 || !chain[0].Equal(leafOf(failing)) {
+		t.Fatalf("a CA that did not issue the leaf was presented: %d certificates", len(chain))
 	}
 }

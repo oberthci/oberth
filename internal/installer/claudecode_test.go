@@ -182,6 +182,13 @@ type testAuthority struct {
 
 func newTestAuthority(t *testing.T, name string) testAuthority {
 	t.Helper()
+	return newTestAuthorityFor(t, name)
+}
+
+// newTestAuthorityFor makes a CA; with names it carries critical name
+// constraints that permit those DNS names, as the Oberth server CA does.
+func newTestAuthorityFor(t *testing.T, name string, permitted ...string) testAuthority {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +202,10 @@ func newTestAuthority(t *testing.T, name string) testAuthority {
 		BasicConstraintsValid: true,
 		MaxPathLenZero:        true,
 		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	if len(permitted) > 0 {
+		template.PermittedDNSDomainsCritical = true
+		template.PermittedDNSDomains = permitted
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
@@ -545,28 +556,6 @@ func TestClaudeCodeSetupKeepsAnExistingCABundle(t *testing.T) {
 	}
 	if !bytes.Equal(before, mustRead(t, fixture.settings)) {
 		t.Fatal("settings naming an unreadable bundle were changed")
-	}
-}
-
-// An MCP entry named oberth outside the plugin would offer every tool twice:
-// it is reported with the command that removes it, and not touched.
-func TestClaudeCodeSetupReportsAnMCPEntryBesidesThePlugin(t *testing.T) {
-	fixture := newClaudeCodeFixture(t)
-	config := filepath.Join(fixture.home, ".claude.json")
-	body := `{"mcpServers": {"oberth": {"type": "http", "url": "https://oberth.example:30443/mcp"}}, "projects": {"/work/app": {"mcpServers": {"oberth": {}}}}}`
-	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	changes, err := SetupClaudeCode(t.Context(), fixture.claude.deps(), fixture.setup(false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	last := changes[len(changes)-1]
-	if last.Action != "manual" || last.Changed() || !inOrder(last.String(), []string{"claude mcp remove oberth --scope user", "/work/app", "--scope local"}) {
-		t.Fatalf("change = %+v", last)
-	}
-	if string(mustRead(t, config)) != body {
-		t.Fatal("Claude Code's configuration was changed")
 	}
 }
 

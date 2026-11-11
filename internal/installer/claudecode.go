@@ -95,8 +95,8 @@ type ClaudeCodeSetup struct {
 type ClaudeCodeChange struct {
 	// Target names what was configured, for example the plugin.
 	Target string
-	// Action is "no change", "installed", "configured", "set", "manual",
-	// or the same prefixed with "would be " on a dry run.
+	// Action is "no change", "installed", "configured", "set", or the same
+	// prefixed with "would be " on a dry run.
 	Action string
 	// Details are the individual differences, in order.
 	Details []string
@@ -105,7 +105,7 @@ type ClaudeCodeChange struct {
 // Changed reports whether the change wrote (or on a dry run would write)
 // anything.
 func (change ClaudeCodeChange) Changed() bool {
-	return change.Action != "no change" && change.Action != "manual"
+	return change.Action != "no change"
 }
 
 // String renders the change as the lines `oberth client setup` prints.
@@ -174,79 +174,31 @@ func SetupClaudeCode(ctx context.Context, deps Deps, setup ClaudeCodeSetup) ([]C
 	if plugin.Target != "" {
 		changes = append(changes, plugin)
 	}
-	if duplicate := duplicateClaudeCodeServers(paths.userConfig); duplicate.Target != "" {
-		changes = append(changes, duplicate)
-	}
 	return changes, errors.Join(problems...)
 }
 
-// claudeCodeFiles are Claude Code's user configuration (where user-scope MCP
-// servers live), its user settings, and the directory the Oberth CA is
-// stored in.
+// claudeCodeFiles are Claude Code's user settings and the directory the
+// Oberth CA is stored in.
 type claudeCodeFiles struct {
-	userConfig string
-	settings   string
-	store      string
+	settings string
+	store    string
 }
 
 // claudeCodePaths follows Claude Code's own layout: CLAUDE_CONFIG_DIR holds
-// both files when it is set, otherwise ~/.claude.json and
-// ~/.claude/settings.json. The CA store is oberth/ next to the settings.
+// settings.json when it is set, otherwise ~/.claude does. The CA store is
+// oberth/ next to the settings.
 func claudeCodePaths() (claudeCodeFiles, error) {
 	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		return claudeCodeFiles{userConfig: filepath.Join(dir, ".claude.json"), settings: filepath.Join(dir, "settings.json"), store: filepath.Join(dir, "oberth")}, nil
+		return claudeCodeFiles{settings: filepath.Join(dir, "settings.json"), store: filepath.Join(dir, "oberth")}, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return claudeCodeFiles{}, err
 	}
 	return claudeCodeFiles{
-		userConfig: filepath.Join(home, ".claude.json"),
-		settings:   filepath.Join(home, ".claude", "settings.json"),
-		store:      filepath.Join(home, ".claude", "oberth"),
+		settings: filepath.Join(home, ".claude", "settings.json"),
+		store:    filepath.Join(home, ".claude", "oberth"),
 	}, nil
-}
-
-// duplicateClaudeCodeServers names MCP entries called oberth that Claude Code
-// holds outside the plugin. The plugin's entry is the one to use; a second
-// one offers every tool twice. The file is Claude Code's own: it is only
-// read here, and the operator removes the entries through its CLI.
-func duplicateClaudeCodeServers(path string) ClaudeCodeChange {
-	body, err := os.ReadFile(path) //nolint:gosec // G304: Claude Code's user configuration file.
-	if err != nil {
-		return ClaudeCodeChange{}
-	}
-	var document struct {
-		MCPServers map[string]json.RawMessage `json:"mcpServers"`
-		Projects   map[string]struct {
-			MCPServers map[string]json.RawMessage `json:"mcpServers"`
-		} `json:"projects"`
-	}
-	if err := json.Unmarshal(body, &document); err != nil {
-		return ClaudeCodeChange{}
-	}
-	var details []string
-	if _, ok := document.MCPServers[claudeCodeServerName]; ok {
-		details = append(details, "user scope: run `claude mcp remove "+claudeCodeServerName+" --scope user`")
-	}
-	var projects []string
-	for project, settings := range document.Projects {
-		if _, ok := settings.MCPServers[claudeCodeServerName]; ok {
-			projects = append(projects, project)
-		}
-	}
-	sort.Strings(projects)
-	for _, project := range projects {
-		details = append(details, "local scope of "+project+": run `claude mcp remove "+claudeCodeServerName+" --scope local` there")
-	}
-	if len(details) == 0 {
-		return ClaudeCodeChange{}
-	}
-	return ClaudeCodeChange{
-		Target:  "Claude Code MCP entries named " + claudeCodeServerName + " besides the plugin's (" + displayPath(path) + ")",
-		Action:  "manual",
-		Details: details,
-	}
 }
 
 // pluginRunner runs the claude CLI.
@@ -423,7 +375,26 @@ func ensureClaudeCodeCATrust(paths claudeCodeFiles, setup ClaudeCodeSetup) (Clau
 	}
 	pin := CertificatePin(authority[0])
 	change, err := ensureSettingsCATrust(paths, body, authority, pin, setup.DryRun)
+	if err == nil {
+		for _, certificate := range authority {
+			if !nameConstrained(certificate) {
+				change.Details = append(change.Details, UnconstrainedCAWarning)
+				break
+			}
+		}
+	}
 	return change, pin, err
+}
+
+// UnconstrainedCAWarning is what CA trust says about a CA that is not
+// limited to the server's names; /oberth:connect prints the same line.
+const UnconstrainedCAWarning = "Warning: this CA has no critical name constraints: after the restart Claude Code trusts the certificates it issues for every host, not only for the Oberth server."
+
+// nameConstrained reports whether a CA certificate carries critical name
+// constraints that permit DNS names. Only such a CA is limited, once Claude
+// Code trusts it, to the names of the Oberth server.
+func nameConstrained(certificate *x509.Certificate) bool {
+	return certificate.PermittedDNSDomainsCritical && len(certificate.PermittedDNSDomains) > 0
 }
 
 // CertificatePin is the SHA-256 fingerprint of a certificate, in lowercase
