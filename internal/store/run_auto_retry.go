@@ -31,33 +31,45 @@ func automaticRetrySuccessor(reason string) string {
 	return successor
 }
 
-func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous model.Run, next *model.Run) error {
-	origin := previous.AutoRetryOf
-	if origin == "" && previous.AutoRetriedBy != "" {
-		origin = previous.ID
+// autoRetryLineageTx returns the origin of run's automatic-retry lineage and
+// how many automatic retries that lineage has spent (#1524). The immutable
+// run.auto-retry-lineage receipt names the origin even after a later reason
+// (a further retry, a cancellation or supersession) replaced the human
+// line; each run.retry.auto entry records its attempt number. A run with no
+// lineage is its own origin with nothing spent.
+func autoRetryLineageTx(ctx context.Context, tx *sql.Tx, run model.Run) (string, int, error) {
+	var saved sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT json_extract(details,'$.origin_run_id') FROM audit_actions WHERE action='run.auto-retry-lineage' AND resource_type='run' AND resource_id=? ORDER BY id DESC LIMIT 1`, run.ID).Scan(&saved)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", 0, err
 	}
-	if origin == "" && previous.Status == model.RunInterrupted {
-		// Cancellation/supersession may replace the human reason. The immutable
-		// lineage receipt survives that overwrite, so replay cannot reset the cap.
-		var saved sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT json_extract(details,'$.origin_run_id') FROM audit_actions WHERE action='run.auto-retry-lineage' AND resource_type='run' AND resource_id=? ORDER BY id DESC LIMIT 1`, previous.ID).Scan(&saved)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		origin = saved.String
+	origin, inherited := saved.String, saved.String != ""
+	if origin == "" && run.AutoRetryOf != "" {
+		origin, inherited = run.AutoRetryOf, true
 	}
 	if origin == "" {
-		return nil
+		origin = run.ID
 	}
-	var cause string
-	if err := tx.QueryRowContext(ctx, `SELECT error FROM runs WHERE id=?`, origin).Scan(&cause); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+	var spent int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(COALESCE(json_extract(details,'$.attempt'),1)),0) FROM audit_actions
+WHERE action='run.retry.auto' AND resource_type='run' AND (json_extract(details,'$.origin_run_id')=? OR json_extract(details,'$.source_run_id')=?)`, origin, origin).Scan(&spent); err != nil {
+		return "", 0, err
 	}
+	if spent == 0 && (inherited || run.AutoRetriedBy != "") {
+		spent = 1 // a receipt older than attempt numbers spent one retry
+	}
+	return origin, spent, nil
+}
+
+// recordAutoRetryLineageTx makes next a member of origin's lineage: its
+// reason line names the origin and the cause, and an immutable receipt keeps
+// the spent budget across reason rewrites, restarts and manual reruns.
+func (s *Store) recordAutoRetryLineageTx(ctx context.Context, tx *sql.Tx, origin, cause string, spent int, next *model.Run) error {
 	next.AutoRetryOf, next.Reason = origin, autoRetryOfPrefix+origin+autoRetryCauseSeparator+cause
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason=? WHERE id=?`, next.Reason, next.ID); err != nil {
 		return err
 	}
-	body, err := json.Marshal(map[string]string{"origin_run_id": origin})
+	body, err := json.Marshal(map[string]any{"origin_run_id": origin, "spent": spent})
 	if err != nil {
 		return err
 	}
@@ -65,10 +77,31 @@ func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous mod
 	return err
 }
 
+// inheritAutoRetryTx carries previous's lineage, and its spent budget, to a
+// manual rerun: replaying a retried run never resets the budget.
+func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous model.Run, next *model.Run) error {
+	origin, spent, err := autoRetryLineageTx(ctx, tx, previous)
+	if err != nil || spent == 0 {
+		return err
+	}
+	var cause string
+	if err := tx.QueryRowContext(ctx, `SELECT error FROM runs WHERE id=?`, origin).Scan(&cause); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return s.recordAutoRetryLineageTx(ctx, tx, origin, cause, spent, next)
+}
+
 // Failure, retry, lineage and audit commit together. This is never a second
 // attempt at publication or tag-tier execution, and never supersedes newer work.
-func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, source model.Run, observation *model.RunTerminalObservation, now int64) (model.Run, error) {
-	if !model.IsInfrastructureRunFailure(source.Status, source.Phase, source.FailedStep) || pushretry.PublicationFailure(source.Error) || source.FailedStage != "" || source.RefKind != model.RefBranch || source.Release || source.AutoRetryOf != "" || source.AutoRetriedBy != "" || source.SupersededBy != "" || (source.Trigger != "branch" && source.Trigger != "push" && source.Trigger != "schedule" && source.Trigger != "manual") {
+func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, source model.Run, observation *model.RunTerminalObservation, now int64, budget int) (model.Run, error) {
+	if budget <= 0 || !model.IsInfrastructureRunFailure(source.Status, source.Phase, source.FailedStep) || pushretry.PublicationFailure(source.Error) || source.FailedStage != "" || source.RefKind != model.RefBranch || source.Release || source.AutoRetriedBy != "" || source.SupersededBy != "" || (source.Trigger != "branch" && source.Trigger != "push" && source.Trigger != "schedule" && source.Trigger != "manual") {
+		return source, nil
+	}
+	origin, spent, err := autoRetryLineageTx(ctx, tx, source)
+	if err != nil {
+		return source, err
+	}
+	if spent >= budget {
 		return source, nil
 	}
 	eviction := source.Phase == "infrastructure" && observation.EvictionOnly() && observation.WorkflowName == source.WorkflowName
@@ -98,7 +131,7 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 		return source, err
 	}
 	var eligible bool
-	err := tx.QueryRowContext(ctx, `SELECT
+	err = tx.QueryRowContext(ctx, `SELECT
   (? OR (
     NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND queue_sequence>?)
     AND NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND status IN ('queued','running'))
@@ -128,14 +161,17 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 	if err != nil {
 		return source, err
 	}
+	// The original's reason line links to the rerun; the rerun's names the
+	// lineage origin and this attempt's cause.
 	source.AutoRetriedBy, source.Reason = next.ID, autoRetriedByPrefix+next.ID
 	if _, err = tx.ExecContext(ctx, `UPDATE runs SET reason=? WHERE id=?`, source.Reason, source.ID); err != nil {
 		return source, err
 	}
-	if err = s.inheritAutoRetryTx(ctx, tx, source, &next.Run); err != nil {
+	attempt := spent + 1
+	if err = s.recordAutoRetryLineageTx(ctx, tx, origin, source.Error, attempt, &next.Run); err != nil {
 		return source, err
 	}
-	details, err := json.Marshal(map[string]any{"source_run_id": source.ID, "run_id": next.ID, "reason": next.Reason, "failure_reason": source.Error, "admission_sequence": source.AdmissionSequence, "priority": next.Priority, "automatic": true, "attempt": 1, "sha": source.SHA, "ref": source.Ref})
+	details, err := json.Marshal(map[string]any{"source_run_id": source.ID, "origin_run_id": origin, "run_id": next.ID, "reason": next.Reason, "failure_reason": source.Error, "admission_sequence": source.AdmissionSequence, "priority": next.Priority, "automatic": true, "attempt": attempt, "budget": budget, "sha": source.SHA, "ref": source.Ref})
 	if err != nil {
 		return source, err
 	}

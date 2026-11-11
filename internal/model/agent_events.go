@@ -152,6 +152,30 @@ const (
 	PromotionPruneKept    = "kept"
 )
 
+// PromotionTag is the durable tag_after request of one promotion (#1524): an
+// annotated tag pushed on the promotion result once the upstream target
+// equals it. Attempts and NextRetryAt follow the publication retry policy.
+type PromotionTag struct {
+	PromotionID string     `json:"promotion_id"`
+	Actor       string     `json:"actor"`
+	Name        string     `json:"name"`
+	Message     string     `json:"message"`
+	Status      string     `json:"status"`
+	Reason      string     `json:"reason,omitempty"`
+	ObjectSHA   string     `json:"object_sha,omitempty"`
+	Attempts    int        `json:"attempts"`
+	NextRetryAt *time.Time `json:"next_retry_at,omitempty"`
+	RequestedAt time.Time  `json:"requested_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// Promotion tag states.
+const (
+	PromotionTagPending = "pending"
+	PromotionTagPushed  = "pushed"
+	PromotionTagFailed  = "failed"
+)
+
 // Retry hint classes (#1514): infrastructure failures are safe to retry
 // unchanged; code failures need a change; unknown needs a reader.
 const (

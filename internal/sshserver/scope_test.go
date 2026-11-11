@@ -2,7 +2,9 @@ package sshserver
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 
@@ -124,5 +126,31 @@ func TestScopedKeyServesTheCanonicalPath(t *testing.T) {
 	}
 	if got, err := server.authorizeScope(sessionActor{identity: "owner@example-node"}, "oberth"); err != nil || got != "oberth" {
 		t.Errorf("unscoped path rewritten to %q, %v", got, err)
+	}
+}
+
+// A metrics-only uplink key never authenticates for git (#1534).
+func TestMetricsScopedKeyIsRefused(t *testing.T) {
+	t.Parallel()
+	clientSigner := newSigner(t)
+	fingerprint := ssh.FingerprintSHA256(clientSigner.PublicKey())
+	server, err := New(Config{
+		HostSigner: newSigner(t), Resolver: scopedResolver{fingerprint: fingerprint, scope: []string{"metrics"}},
+		Git: &fakeGit{refs: map[string]string{"refs/heads/main": shaA}}, OnUpdate: noOpUpdateHandler(), QualifyInScope: scopeQualify,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx, listener) }()
+	defer func() { cancel(); <-done }()
+	if client, err := ssh.Dial("tcp", listener.Addr().String(), clientConfig(clientSigner)); err == nil {
+		_ = client.Close()
+		t.Fatal("a metrics-only key authenticated over SSH")
 	}
 }

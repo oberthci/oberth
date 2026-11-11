@@ -142,3 +142,9 @@ func (o *RunTerminalObservation) EvictedAttempt(stage, step string, started, fin
 	}
 	return false
 }
+
+// Automatic infrastructure retry budget (#1524): retries per lineage.
+const (
+	DefaultInfrastructureAutoRetryBudget = 2
+	MaxInfrastructureAutoRetryBudget     = 5
+)

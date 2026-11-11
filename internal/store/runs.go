@@ -978,8 +978,8 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.Run{}, fmt.Errorf("finish run: %w", err)
 	}
-	if result.AutoRetryInfrastructure {
-		value, err = s.autoRetryInfrastructureTx(ctx, tx, value, result.TerminalObservation, now)
+	if result.AutoRetryBudget > 0 {
+		value, err = s.autoRetryInfrastructureTx(ctx, tx, value, result.TerminalObservation, now, result.AutoRetryBudget)
 		if err != nil {
 			return model.Run{}, err
 		}

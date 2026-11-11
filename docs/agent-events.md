@@ -194,7 +194,12 @@ unaffected.
   `agentEvents.interval`. The history keeps the newest
   `agentEvents.syncRetention` intervals. A scoped uplink sees only its own
   runs.
-- `promote {..., prune_source: true}`: see below.
+- `promote {..., prune_source: true}` and `promote {..., tag_after: {name, message}}`: see below.
+- `run_list {ref_glob: "land/*", latest: true}` (CLI `oberth runs --ref-glob 'land/*' --latest`):
+  one row per matching repository and ref, its newest run, across every
+  repository the caller's uplink scope reaches. `ref_glob` uses the same
+  pattern syntax as `refs_glob` (`*` never crosses a slash) and also narrows
+  the ordinary list.
 - `run_get` (summary by default) and `run_get {summary: false}` include `retry_hint`.
 
 ## Safe land: promote with prune_source
@@ -216,6 +221,33 @@ The outcome (`pruned` or `kept` with the reason) is audited as
 `prune_source`, and carried by the `promotion.finished` event, which is
 emitted only after the decision. A failed promotion can never be followed by a
 prune.
+
+## Tag after promotion
+
+`promote` with `tag_after: {name, message}` (single source or train) records
+the request with the promotion; a malformed name, an empty message or a tag
+that already exists is refused before admission. When the promotion is
+terminal Oberth:
+
+1. pushes nothing unless the promotion **passed**;
+2. reads the upstream target and pushes nothing unless it **equals the
+   promotion's result SHA**;
+3. creates an annotated tag (tagger `Oberth <oberth@localhost>`) on the result
+   commit and pushes `refs/tags/<name>` without force, verifying the remote ref.
+
+A transient upstream failure retries on the publication schedule
+(`pushretry`: at most 5 attempts, backing off from 2 minutes); a tag that
+already exists at another commit is never moved. The outcome (`pushed` with
+the tag object, or `failed` with the reason) is audited as
+`promotion.tag_after.pushed|failed`, shown in `promote_status` as `tag_after`,
+and carried by the `promotion.finished` event, which waits for it. Use it for
+workflows that act on a tag pushed after merge, instead of a client-side
+script that polls the promotion and then tags:
+
+```json
+{"repo": "github/acme/infra", "branch": "main", "sha": "<tested sha>",
+ "tag_after": {"name": "apply/2026-11-11", "message": "apply the promoted plan"}}
+```
 
 `branch_delete_many` (CLI `oberth branch prune`) keeps refusing unmerged
 branches unless `allow_unmerged` is set, and now also needs a `reason`

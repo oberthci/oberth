@@ -1,0 +1,148 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/gitssh"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
+)
+
+// taggingGit records annotated tag pushes over the fixed upstream head.
+type taggingGit struct {
+	*upstreamGit
+	pushes []string
+	err    error
+}
+
+func (g *taggingGit) PublishAnnotatedTag(_ context.Context, _, tag, commit, _ string) (string, error) {
+	g.pushes = append(g.pushes, tag+"@"+commit)
+	if g.err != nil {
+		return "", g.err
+	}
+	return strings.Repeat("e", 40), nil
+}
+
+func newTagPromotionFixture(t *testing.T) (*pruneFixture, *taggingGit) {
+	t.Helper()
+	f, upstream := newPrunePromotionFixture(t)
+	git := &taggingGit{upstreamGit: upstream}
+	service, err := NewAPI(APIConfig{
+		Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store,
+		Enqueues: f.scheduler, Git: git, Logs: f.logs, Auditor: f.store,
+		BranchPrune: f.cache, BranchDeletions: f.store, DeletionQueued: func() { f.queued++ },
+		AgentEvents: f.store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service = service
+	return f, git
+}
+
+func (f *pruneFixture) taggedPromotion(t *testing.T, status model.PromotionStatus, result string) (model.Promotion, model.PromotionTag) {
+	t.Helper()
+	promotion, err := f.store.AppendPromotion(t.Context(), model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/tag", SourceSHA: f.initial, TargetRef: "main", Actor: "dev@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RequestPromotionTag(t.Context(), promotion.ID, "dev@host", "deploy/1", "apply it"); err != nil {
+		t.Fatal(err)
+	}
+	request, err := f.store.PromotionTag(t.Context(), promotion.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promotion.Status, promotion.ResultSHA = status, result
+	return promotion, request
+}
+
+// tag_after pushes only after a passed promotion whose result is the
+// upstream target, retries transient failures on the publication schedule
+// and records every other outcome as failed with a reason (#1524).
+func TestPromotionTagAfterOnlyAfterVerifiedPromotion(t *testing.T) {
+	f, git := newTagPromotionFixture(t)
+	now := time.Now()
+	settle := func(promotion model.Promotion, request model.PromotionTag, at time.Time) model.PromotionTag {
+		return f.service.settlePromotionTag(t.Context(), f.store, promotion, request, at)
+	}
+	failed, request := f.taggedPromotion(t, model.PromotionFailed, "")
+	if got := settle(failed, request, now); got.Status != model.PromotionTagFailed || !strings.Contains(got.Reason, "promotion failed") || len(git.pushes) != 0 {
+		t.Fatalf("failed promotion = %+v", got)
+	}
+	git.head = f.unmerged
+	moved, request := f.taggedPromotion(t, model.PromotionPassed, f.initial)
+	if got := settle(moved, request, now); got.Status != model.PromotionTagFailed || !strings.Contains(got.Reason, "not the promotion result") || len(git.pushes) != 0 {
+		t.Fatalf("target differs = %+v", got)
+	}
+
+	git.head = f.initial
+	git.err = fmt.Errorf("push: %w", gitssh.ErrTransportUnavailable)
+	flaky, request := f.taggedPromotion(t, model.PromotionPassed, f.initial)
+	at := now
+	for attempt := 1; attempt < pushretry.MaxAttempts; attempt++ {
+		request = settle(flaky, request, at)
+		if request.Status != model.PromotionTagPending || request.Attempts != attempt || request.NextRetryAt == nil {
+			t.Fatalf("attempt %d = %+v", attempt, request)
+		}
+		if early := settle(flaky, request, at); early.Attempts != attempt {
+			t.Fatalf("retried before next_retry_at: %+v", early)
+		}
+		at = request.NextRetryAt.Add(time.Second)
+	}
+	if got := settle(flaky, request, at); got.Status != model.PromotionTagFailed || !strings.Contains(got.Reason, "gave up after") || got.Attempts != pushretry.MaxAttempts {
+		t.Fatalf("exhausted retries = %+v", got)
+	}
+
+	git.err = fmt.Errorf("%w: upstream refs/tags/deploy/1", gitcache.ErrTagExists)
+	taken, request := f.taggedPromotion(t, model.PromotionPassed, f.initial)
+	if got := settle(taken, request, now); got.Status != model.PromotionTagFailed || !strings.Contains(got.Reason, "never moved") {
+		t.Fatalf("existing tag = %+v", got)
+	}
+
+	git.err, git.pushes = nil, nil
+	passed, request := f.taggedPromotion(t, model.PromotionPassed, f.initial)
+	got := settle(passed, request, now)
+	if got.Status != model.PromotionTagPushed || got.ObjectSHA != strings.Repeat("e", 40) || len(git.pushes) != 1 || git.pushes[0] != "deploy/1@"+f.initial {
+		t.Fatalf("pushed = %+v %v", got, git.pushes)
+	}
+	actions, _, err := f.store.ListAuditActions(t.Context(), model.AuditListFilter{ActionPrefix: "promotion.tag_after.pushed", Limit: 20})
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("audit = %d %v", len(actions), err)
+	}
+}
+
+// The recorder settles the request and promotion.finished carries it.
+func TestPromotionTagAfterInPromotionFinished(t *testing.T) {
+	f, git := newTagPromotionFixture(t)
+	git.head = f.initial
+	promotion, _ := f.taggedPromotion(t, model.PromotionPassed, f.initial)
+	f.service.agentEvents.started = time.Now()
+	f.service.agentEvents.observePromotion(t.Context(), promotion)
+	events, err := f.store.AgentEvents(t.Context(), model.AgentEventFilter{Kinds: []string{model.AgentEventPromotionFinished}})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events = %+v %v", events, err)
+	}
+	tag, _ := events[0].Data["tag_after"].(map[string]any)
+	if tag["status"] != model.PromotionTagPushed || tag["name"] != "deploy/1" || !strings.Contains(events[0].Summary, "tag deploy/1 pushed") {
+		t.Fatalf("promotion.finished = %+v", events[0])
+	}
+}
+
+// promote refuses a malformed tag_after before anything is admitted.
+func TestPromoteTagAfterRefusals(t *testing.T) {
+	f, _ := newTagPromotionFixture(t)
+	for _, tag := range []map[string]any{{"name": "bad..name", "message": "m"}, {"name": "refs/tags/x", "message": "m"}, {"name": "ok", "message": " "}, {"name": "ok", "message": strings.Repeat("m", 4097)}} {
+		raw, _ := json.Marshal(map[string]any{"repo": f.repo.Name, "branch": "main", "sha": f.initial, "tag_after": tag})
+		if _, err := f.service.CallTool(t.Context(), pruneAdmin, "promote", raw); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("tag_after %v = %v", tag, err)
+		}
+	}
+}

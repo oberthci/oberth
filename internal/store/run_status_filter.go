@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql/driver"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -31,6 +32,20 @@ func init() {
 		}
 		run.AutoRetriedBy = automaticRetrySuccessor(run.Reason)
 		return model.DisplayRunStatus(run), nil
+	})
+	// The run list's ref_glob (#1524) uses the same path.Match semantics as
+	// the agent events' refs_glob: * never crosses a slash.
+	sqlite.MustRegisterDeterministicScalarFunction("oberth_ref_glob", 2, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		pattern, ok := args[0].(string)
+		ref, refOK := args[1].(string)
+		if !ok || !refOK {
+			return int64(0), nil
+		}
+		matched, err := path.Match(pattern, ref)
+		if err != nil || !matched {
+			return int64(0), nil
+		}
+		return int64(1), nil
 	})
 }
 

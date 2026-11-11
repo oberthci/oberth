@@ -26,6 +26,13 @@ type promotionArguments struct {
 	// PruneSource deletes the source branch once the promotion passed and
 	// the upstream target equals its result (#1514).
 	PruneSource bool `json:"prune_source"`
+	// TagAfter pushes an annotated tag on the promotion result once the
+	// upstream target equals it (#1524).
+	TagAfter *promotionTagArgument `json:"tag_after"`
+}
+type promotionTagArgument struct {
+	Name    string `json:"name"`
+	Message string `json:"message"`
 }
 type promotionTrainGit interface {
 	PreparePromotionTrain(context.Context, string, []model.PromotionSource, string, string, bool) (gitcache.PromotionTrainCandidate, error)

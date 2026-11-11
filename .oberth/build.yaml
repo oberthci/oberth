@@ -167,7 +167,8 @@ spec:
         template: build-darwin-arm64
         depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
 
-  # Refuse retired branding in every tracked file, including fixtures and docs.
+  # Refuse retired branding in every tracked file, including fixtures and docs,
+  # and check the store migration sequence (latest+1, no ID collisions).
   - name: generic-names
     activeDeadlineSeconds: 183 # remeasure: max(60s censored cap, 63s pod span) x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
@@ -179,7 +180,7 @@ spec:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/sh", "-ec"]
-      args: ["/usr/bin/python3 -I -B hack/test-new-migration.py; /usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
+      args: ["/usr/bin/python3 -I -B hack/test-new-migration.py; /usr/bin/python3 -I -B .oberth/test_check_migration_sequence.py; /usr/bin/python3 -I -B .oberth/check-migration-sequence.py; /usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
       # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
       # Observed CPU avg max 894.1m, memory peak 142.6Mi, pod storage 0.1Mi.
       # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.

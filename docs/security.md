@@ -201,7 +201,7 @@ are scheduling hints; malformed/unavailable PSI fails open and never changes
 running-workflow authority or execution verdicts. Scoped status, reservation and
 run views omit host PSI numbers while retaining a non-numeric pressure cause,
 as they omit aggregate capacity. Non-admin and MCP run reasons also omit
-pressure percentages and timing details. The existing unscoped admin metrics authorization remains in force.
+pressure percentages and timing details. `/metrics` answers only a metrics-scoped token or an unscoped admin ([metrics](metrics.md)).
 
 ## Release signature verification
 

@@ -185,11 +185,11 @@ spec:
             the Deployment could not be applied with the chart's own defaults.
             */}}
             - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
-            {{- $autoRetryInfrastructure := true }}
-            {{- if hasKey .Values "autoRetryInfrastructure" }}
-            {{- $autoRetryInfrastructure = .Values.autoRetryInfrastructure }}
+            {{- $autoRetryBudget := 2 }}
+            {{- if hasKey .Values "autoRetryInfrastructureBudget" }}
+            {{- $autoRetryBudget = int .Values.autoRetryInfrastructureBudget }}
             {{- end }}
-            - --auto-retry-infrastructure={{ $autoRetryInfrastructure }}
+            - --auto-retry-infrastructure-budget={{ $autoRetryBudget }}
             {{- $releases := .Values.releases | default dict }}
             {{- if $releases.serialize }}
             - --serialize-releases=true

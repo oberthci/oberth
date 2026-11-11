@@ -647,7 +647,7 @@ containing CI and real workload qualification remain separately required.
   `admission.diskFloorBytes`, `releases.serialize`
   (`--serialize-releases`, off),
   `admission.stallTimeout` (`--admission-stall-timeout`, 10m),
-  `admission.stepStartupAllowance`, `autoRetryInfrastructure`,
+  `admission.stepStartupAllowance`, `autoRetryInfrastructureBudget`,
   `assist.{enabled,holdTTL,maxConcurrentHolds,execTimeout,execOutputBytes,patchMaxBytes,patchMaxFiles}`
   (`--assist-*`, default off, 20m, 2, 1m, 64Ki, 1Mi, 64),
   `argo.workflowTimeout`, `argo.defaultWorkflowTimeout`
@@ -3448,9 +3448,10 @@ compiled in this topic and included in its bundle.
 
 
 **RCA recovery / run-list UX:** eligible branch failures in the infrastructure or
-workflow-level job classes accepted by `run_retry` receive one atomic, audited
-retry by default. `--auto-retry-infrastructure=false` / Helm
-`autoRetryInfrastructure: false` disables it; the budget is fixed at one.
+workflow-level job classes accepted by `run_retry`, whose `retry_hint` class is
+`infrastructure` (never `code`), receive atomic, audited retries up to a budget
+per lineage (default 2). `--auto-retry-infrastructure-budget` / Helm
+`autoRetryInfrastructureBudget` sets it, 0 disables, at most 5.
 Trusted-policy-refresh deadlines, lost executors and step-free workflow failures
 qualify after terminal observation or cleanup. Missing/corrupt progress history,
 any retained failed step (including infrastructure-classified failures),

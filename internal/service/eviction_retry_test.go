@@ -13,14 +13,14 @@ import (
 )
 
 func evictionResult(name string, at time.Time) JobResult {
-	return JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: "Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 512Mi.",
+	return JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: "Evicted: The node was low on resource: ephemeral-storage.",
 		Steps:               []model.StepResult{{Stage: "ci", Step: "install-helm", Status: model.StepFailed, DeclaredSize: "M", StartedAt: &at, FinishedAt: &at}},
 		TerminalObservation: &model.RunTerminalObservation{Version: 1, WorkflowName: name, Nodes: 2, Steps: []model.RunObservedStep{{Stage: "ci", Step: "install-helm", Status: model.StepFailed, Started: true, Evicted: true, StartedAt: &at, FinishedAt: &at}}},
 	}
 }
 
 func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
-	for _, kind := range []string{"eviction", "real failure", "earlier failure", "other step", "unknown attempt", "incomplete", "wrong workflow", "empty workflow", "already retried"} {
+	for _, kind := range []string{"eviction", "storage limit", "real failure", "earlier failure", "other step", "unknown attempt", "incomplete", "wrong workflow", "empty workflow", "already retried"} {
 		t.Run(kind, func(t *testing.T) {
 			at := time.Now().UTC()
 			result := evictionResult("workflow", at)
@@ -49,13 +49,16 @@ func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
 				result.TerminalObservation.WorkflowName = "foreign"
 			case "empty workflow":
 				run.WorkflowName = ""
+			case "storage limit":
+				// The retry hint classifies the step's own limit as code (#1524).
+				result.Error = "Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 512Mi."
 			case "already retried":
-				run.AutoRetryOf = "previous"
+				run.AutoRetriedBy = "next"
 			}
 			if err := logs.AppendStepProgress(run.ID, event); err != nil {
 				t.Fatal(err)
 			}
-			got := (&Scheduler{logs: logs}).infrastructureAutoRetry(run, result)
+			got := (&Scheduler{logs: logs}).infrastructureAutoRetryEligible(run, result)
 			if got != (kind == "eviction") {
 				t.Fatalf("retry=%v", got)
 			}
@@ -63,10 +66,10 @@ func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
 	}
 }
 
-func TestEvictedStepAutomaticallyRetriesOnce(t *testing.T) {
+func TestEvictedStepAutomaticallyRetriesWithinBudget(t *testing.T) {
 	f := newRecoveryFixture(t)
 	run := f.enqueueAndClaim(t, "feature/eviction", strings.Repeat("b", 40))
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt <= model.DefaultInfrastructureAutoRetryBudget; attempt++ {
 		name, err := deterministicWorkflowName(f.repo.Name, run.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -87,14 +90,14 @@ func TestEvictedStepAutomaticallyRetriesOnce(t *testing.T) {
 		if err != nil || len(steps) != 1 || steps[0].Status != model.StepFailed {
 			t.Fatalf("lost failed-step evidence: %+v %v", steps, err)
 		}
-		if attempt == 1 {
+		if attempt == model.DefaultInfrastructureAutoRetryBudget {
 			if failed.AutoRetriedBy != "" || failed.AutoRetryOf == "" {
-				t.Fatalf("retried twice: %+v", failed)
+				t.Fatalf("retried past the budget: %+v", failed)
 			}
 			break
 		}
 		if failed.AutoRetriedBy == "" {
-			t.Fatal("eviction not retried")
+			t.Fatalf("eviction not retried at attempt %d", attempt)
 		}
 		run, err = f.store.ClaimNextRun(t.Context())
 		if err != nil || run.ID != failed.AutoRetriedBy {
@@ -166,7 +169,7 @@ func TestPreparationRetryOnlyRejectsExplicitDeterministicRefusals(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRecoveryFixture(t)
 			run := f.enqueueAndClaim(t, "feature/"+tc.name, strings.Repeat("c", 40))
-			for attempt := 0; attempt < 2; attempt++ {
+			for attempt := 0; attempt <= model.DefaultInfrastructureAutoRetryBudget; attempt++ {
 				jobs := &rcaCreateFailure{createErr: &preparationRetryFailure{cause: tc.cause}}
 				if err := f.scheduler(t, jobs).executeAndCleanup(t.Context(), run); err != nil {
 					t.Fatal(err)
@@ -175,7 +178,7 @@ func TestPreparationRetryOnlyRejectsExplicitDeterministicRefusals(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				if (failed.AutoRetriedBy != "") != (tc.retry && attempt == 0) {
+				if (failed.AutoRetriedBy != "") != (tc.retry && attempt < model.DefaultInfrastructureAutoRetryBudget) {
 					t.Fatalf("attempt %d: %+v", attempt, failed)
 				}
 				if failed.AutoRetriedBy == "" {

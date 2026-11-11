@@ -17,8 +17,9 @@ import (
 // promotion change signals and sweeps on an interval for what has no signal:
 // parked retry holds, native Argo lock waits and publication retries. Every
 // event is deduplicated by a key, so a restart or a second observation never
-// records one fact twice. It reads and records only; the one action it takes
-// is a promotion's prune_source request, which its promoter asked for.
+// records one fact twice. It reads and records only; the actions it takes are
+// a promotion's prune_source and tag_after requests, which its promoter asked
+// for.
 
 // AgentEventStore is the durable side of the recorder.
 type AgentEventStore interface {
@@ -31,6 +32,11 @@ type AgentEventStore interface {
 	PromotionPrune(context.Context, string) (model.PromotionPrune, error)
 	PendingPromotionPrunes(context.Context, int) ([]model.PromotionPrune, error)
 	FinishPromotionPrune(context.Context, string, string, string, string) (model.PromotionPrune, error)
+	RequestPromotionTag(context.Context, string, string, string, string) error
+	PromotionTag(context.Context, string) (model.PromotionTag, error)
+	PendingPromotionTags(context.Context, int) ([]model.PromotionTag, error)
+	RetryPromotionTag(context.Context, string, int, time.Time, string) (model.PromotionTag, error)
+	FinishPromotionTag(context.Context, string, string, string, string, int) (model.PromotionTag, error)
 }
 
 // SynchronizationObserver reads one run's native Argo lock state.
@@ -306,6 +312,13 @@ func (recorder *agentEventRecorder) sweep(ctx context.Context) {
 		}
 		if prunes, err := recorder.store.PendingPromotionPrunes(sweepCtx, 20); err == nil {
 			for _, request := range prunes {
+				if promotion, err := base.promotions.Promotion(sweepCtx, request.PromotionID); err == nil {
+					recorder.observePromotion(sweepCtx, promotion)
+				}
+			}
+		}
+		if tags, err := recorder.store.PendingPromotionTags(sweepCtx, 20); err == nil {
+			for _, request := range tags {
 				if promotion, err := base.promotions.Promotion(sweepCtx, request.PromotionID); err == nil {
 					recorder.observePromotion(sweepCtx, promotion)
 				}
@@ -620,7 +633,15 @@ func (recorder *agentEventRecorder) observePromotion(ctx context.Context, promot
 			return // Retried on the next sweep; the event carries the outcome.
 		}
 	}
-	if requestErr != nil && !promotion.UpdatedAt.IsZero() && promotion.UpdatedAt.Before(recorder.started.Add(-agentEventLookback)) {
+	// tag_after (#1524) is settled the same way, with publication retries.
+	tag, tagErr := recorder.store.PromotionTag(ctx, promotion.ID)
+	if tagErr == nil && tag.Status == model.PromotionTagPending {
+		tag = recorder.base.settlePromotionTag(ctx, recorder.store, promotion, tag, recorder.now())
+		if tag.Status == model.PromotionTagPending {
+			return
+		}
+	}
+	if requestErr != nil && tagErr != nil && !promotion.UpdatedAt.IsZero() && promotion.UpdatedAt.Before(recorder.started.Add(-agentEventLookback)) {
 		return
 	}
 	data := map[string]any{"status": string(promotion.Status), "source_branch": promotion.SourceBranch, "source_sha": promotion.SourceSHA,
@@ -640,6 +661,13 @@ func (recorder *agentEventRecorder) observePromotion(ctx context.Context, promot
 		summary += "; source " + request.Status
 		if request.Reason != "" {
 			summary += ": " + boundedText(request.Reason, agentEventSummaryErrorLength)
+		}
+	}
+	if tagErr == nil {
+		data["tag_after"] = map[string]any{"name": tag.Name, "status": tag.Status, "reason": tag.Reason, "object_sha": tag.ObjectSHA, "attempts": tag.Attempts}
+		summary += "; tag " + strings.ReplaceAll(tag.Name, "%", "%%") + " " + tag.Status
+		if tag.Status != model.PromotionTagPushed && tag.Reason != "" {
+			summary += ": " + strings.ReplaceAll(boundedText(tag.Reason, agentEventSummaryErrorLength), "%", "%%")
 		}
 	}
 	if promotion.Status != model.PromotionPassed && promotion.Error != "" {

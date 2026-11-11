@@ -104,7 +104,7 @@ type serveOptions struct {
 	runLogLimitBytes        int64
 	retentionInterval       time.Duration
 	retentionKeepNewest     int
-	autoRetryInfrastructure bool
+	autoRetryBudget         int
 	admissionDiskFloorBytes int64
 	admissionPressure       service.AdmissionPressureConfig
 	admissionStallTimeout   time.Duration
@@ -242,7 +242,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 
-	flags.BoolVar(&options.autoRetryInfrastructure, "auto-retry-infrastructure", true, "automatically retry eligible infrastructure failures once at their original queue position")
+	flags.IntVar(&options.autoRetryBudget, "auto-retry-infrastructure-budget", model.DefaultInfrastructureAutoRetryBudget, fmt.Sprintf("automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most %d)", model.MaxInfrastructureAutoRetryBudget))
 	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
@@ -357,6 +357,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if flags.NArg() != 0 {
 		return serveOptions{}, fmt.Errorf("%w: serve accepts flags only", errUsage)
+	}
+	if options.autoRetryBudget < 0 || options.autoRetryBudget > model.MaxInfrastructureAutoRetryBudget {
+		return serveOptions{}, fmt.Errorf("%w: --auto-retry-infrastructure-budget must be 0..%d", errUsage, model.MaxInfrastructureAutoRetryBudget)
 	}
 	activeStaleExplicit := false
 	flags.Visit(func(f *flag.Flag) {
@@ -893,13 +896,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"),
-		DisableInfrastructureAutoRetry: !options.autoRetryInfrastructure,
-		MaxRunLogBytes:                 options.runLogLimitBytes,
-		MutationGate:                   anchors.AllowMutation,
-		AdmissionDiskFloorBytes:        options.admissionDiskFloorBytes,
-		AdmissionPressure:              options.admissionPressure,
-		StalledRunTimeout:              options.admissionStallTimeout,
-		RestoredRunsFile:               filepath.Join(options.dataRoot, service.RestoredRunsFile),
+		DisableInfrastructureAutoRetry: options.autoRetryBudget == 0, InfrastructureAutoRetryBudget: options.autoRetryBudget,
+		MaxRunLogBytes:          options.runLogLimitBytes,
+		MutationGate:            anchors.AllowMutation,
+		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
+		AdmissionPressure:       options.admissionPressure,
+		StalledRunTimeout:       options.admissionStallTimeout,
+		RestoredRunsFile:        filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})
 	if err != nil {
 		return err

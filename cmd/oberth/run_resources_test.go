@@ -85,3 +85,25 @@ func TestRunResourcesCLIRendersAdviceWithoutDeadline(t *testing.T) {
 		}
 	}
 }
+
+// --anonymize hashes names client-side with a per-export salt (#1524).
+func TestRunResourcesAnonymize(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(measured.Report{Repository: "github/acme/widgets", Ref: "land/x", Steps: []measured.Step{{Stage: "verify", Template: "compile-all", OwnerRepository: "github/acme/widgets", Runs: 3}}})
+	}))
+	defer server.Close()
+	t.Setenv("OBERTH_BASE_URL", server.URL)
+	t.Setenv("OBERTH_TOKEN", "fixture")
+	var out strings.Builder
+	if err := runRunResources(t.Context(), []string{"--repo=github/acme/widgets", "--anonymize"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"acme", "widgets", "land/x", "verify", "compile-all"} {
+		if strings.Contains(out.String(), name) {
+			t.Fatalf("--anonymize kept %q: %s", name, out.String())
+		}
+	}
+	if !strings.Contains(out.String(), `"runs": 3`) || !strings.Contains(out.String(), `"repository": "repo-`) {
+		t.Fatal(out.String())
+	}
+}

@@ -16,7 +16,15 @@ oberth run resources --repo repo-01 --last 30
 oberth run resources --repo repo-01 --ref any --last 100 --include-failed --yaml
 oberth run resources --run <id> --include-failed --yaml
 oberth run resources --repo repo-01 --burn step-abc12345 --step step-abc12345 --yaml
+oberth run resources --repo repo-01 --last 30 --anonymize > usage.json
 ```
+
+`--anonymize` replaces repository, ref, burn and step names, commit SHAs and
+run IDs with keyed hashes (`repo-…`, `step-…`) so usage data can be shared.
+The CLI draws a fresh random salt for each export and never prints it: names
+stay comparable within one export, two exports cannot be joined, and a list of
+likely names cannot be checked against the tokens. Measurements, flags and
+advice text are unchanged; the report names no container image.
 
 MCP agents use `run_resources` with the same arguments (`id`, `repo`, `ref`,
 `last`, `burn`, `step`, `include_failed`, `format`). Authenticated HTTP clients

@@ -35,6 +35,14 @@ class MigrationGeneratorTests(unittest.TestCase):
             self.assertNotEqual(first, second)
             self.assertEqual(first.read_text(), "already committed\n")
 
+    def test_sequence_appends_the_new_id(self):
+        with tempfile.TemporaryDirectory() as root:
+            sequence = Path(root) / "migration-sequence.txt"
+            sequence.write_text("20261104022000-migration-ids\n")
+            migration = MODULE.create_migration(Path(root) / "migrations", "add-index")
+            MODULE.append_sequence(sequence, migration)
+            self.assertEqual(sequence.read_text().splitlines(), ["20261104022000-migration-ids", migration.stem])
+
     def test_invalid_slugs_make_no_files(self):
         for slug in ("", "../escape", "x/y", "54", "Upper", "two words", "-leading", "trailing-", "a--b", "x" * 41):
             with self.subTest(slug=slug), tempfile.TemporaryDirectory() as root:

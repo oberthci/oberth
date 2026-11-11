@@ -37,6 +37,10 @@ type Actor struct {
 // Scoped reports whether the actor is limited to some upstreams.
 func (actor Actor) Scoped() bool { return len(actor.Scope) > 0 }
 
+// MetricsOnly reports whether the actor's uplink may read only GET /metrics
+// (#1534). requireAuth refuses such an actor on every other route.
+func (actor Actor) MetricsOnly() bool { return model.MetricsOnly(actor.Scope) }
+
 // SeesUpstream reports whether the actor may see repositories of upstream.
 func (actor Actor) SeesUpstream(upstream string) bool {
 	return model.ScopeCovers(actor.Scope, upstream)
@@ -60,7 +64,10 @@ type RunFilter struct {
 	LatestPerRef bool
 	Repository   string
 	Ref          string
-	Limit        int
+	// RefGlob keeps runs whose ref matches this path.Match pattern, e.g.
+	// land/* (#1524); empty matches every ref.
+	RefGlob string
+	Limit   int
 	// Before pages to runs older than this QueueSequence (exclusive).
 	Before int64
 	// BeforeRun pages to runs older than this run, by ID: the cursor a
@@ -351,6 +358,11 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "invalid bearer token"})
 			return
 		}
+		if actor.MetricsOnly() && (request.Method != http.MethodGet || request.URL.Path != "/metrics") {
+			// A metrics-scoped token reads /metrics and nothing else (#1534).
+			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "a metrics-scoped token may read only GET /metrics"})
+			return
+		}
 		next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), contextKey{}, actor)))
 	})
 }
@@ -377,6 +389,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		Repository:   query.Get("repo"),
 		LatestPerRef: query.Get("latest_per_ref") == "1",
 		Ref:          query.Get("ref"),
+		RefGlob:      query.Get("ref_glob"),
 		Limit:        queryLimit(request, 100, 100),
 		View:         query.Get("view"),
 	}
@@ -807,8 +820,8 @@ func (server *Server) handleStatus(writer http.ResponseWriter, request *http.Req
 
 func (server *Server) handleUplinks(writer http.ResponseWriter, request *http.Request) {
 	actor := actorFrom(request.Context())
-	if !actor.Admin || actor.Scoped() {
-		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "unscoped admin required"})
+	if !actor.MetricsOnly() && (!actor.Admin || actor.Scoped()) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "a metrics-scoped token (oberth uplink add --scope metrics) or an unscoped admin required"})
 		return
 	}
 	value, err := server.tools.CallTool(request.Context(), actor, "uplink_list", json.RawMessage(`{}`))
@@ -817,8 +830,8 @@ func (server *Server) handleUplinks(writer http.ResponseWriter, request *http.Re
 
 func (server *Server) handleMetrics(writer http.ResponseWriter, request *http.Request) {
 	actor := actorFrom(request.Context())
-	if !actor.Admin || actor.Scoped() {
-		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "unscoped admin required"})
+	if !actor.MetricsOnly() && (!actor.Admin || actor.Scoped()) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "a metrics-scoped token (oberth uplink add --scope metrics) or an unscoped admin required"})
 		return
 	}
 	if server.metrics == nil {

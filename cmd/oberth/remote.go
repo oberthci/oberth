@@ -152,6 +152,8 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	setRemoteUsage(flags)
 	repo := flags.String("repo", "", "only this repository; use upstream/org/name when ambiguous")
 	ref := flags.String("ref", "", "only this branch or tag")
+	refGlob := flags.String("ref-glob", "", "only refs matching this shell-style pattern, e.g. 'land/*' (* never crosses a slash)")
+	latest := flags.Bool("latest", false, "one row per repository and ref: its newest run, across every repository the uplink reaches")
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
 	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")
 	all := flags.Bool("all", false, "follow pages to the oldest run")
@@ -181,15 +183,15 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		return fmt.Errorf("%w: --before must be a positive run sequence or a run ID", errUsage)
 	}
 	if *active {
-		if *before != "" || *all {
-			return fmt.Errorf("%w: --active is one unpaged list; it takes no --before or --all", errUsage)
+		if *before != "" || *all || *latest {
+			return fmt.Errorf("%w: --active is one unpaged list; it takes no --before, --all or --latest", errUsage)
 		}
 		// The first page of the default view carries every queued and
 		// running run; the one terminal row it adds is dropped.
 		var page struct {
 			Runs []json.RawMessage `json:"runs"`
 		}
-		if err := api.Get(ctx, "/api/runs", map[string]string{"repo": *repo, "ref": *ref, "limit": "1"}, &page); err != nil {
+		if err := api.Get(ctx, "/api/runs", map[string]string{"repo": *repo, "ref": *ref, "ref_glob": *refGlob, "limit": "1"}, &page); err != nil {
 			return err
 		}
 		rows := make([]json.RawMessage, 0, len(page.Runs))
@@ -208,7 +210,10 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		}
 		return renderActiveRuns(output, runs, time.Now())
 	}
-	query := map[string]string{"repo": *repo, "ref": *ref, "limit": fmt.Sprint(*limit)}
+	query := map[string]string{"repo": *repo, "ref": *ref, "ref_glob": *refGlob, "limit": fmt.Sprint(*limit)}
+	if *latest {
+		query["latest_per_ref"] = "1"
+	}
 	if *before != "" {
 		query["before"] = *before
 	}

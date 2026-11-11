@@ -25,6 +25,7 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	format := flags.String("format", "json", "json or yaml")
 	asYAML := flags.Bool("yaml", false, "YAML report with paste-ready resources")
 	asJSON := flags.Bool("json", false, "JSON report (default)")
+	anonymize := flags.Bool("anonymize", false, "hash repository, ref, step names, SHAs and run IDs with a fresh per-export salt (never printed), to share usage data")
 	transport := registerTransportFlags(flags)
 	if e := parseCommandFlags(flags, arguments); e != nil {
 		if errors.Is(e, flag.ErrHelp) {
@@ -59,6 +60,13 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	var report measured.Report
 	if e = api.Get(ctx, "/api/run-resources", query, &report); e != nil {
 		return e
+	}
+	if *anonymize {
+		anonymizer, err := measured.NewAnonymizer()
+		if err != nil {
+			return err
+		}
+		report = anonymizer.Report(report)
 	}
 	if *format == "yaml" {
 		_, e = io.WriteString(output, measured.YAML(report))

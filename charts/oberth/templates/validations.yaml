@@ -149,7 +149,7 @@ is a name a public CA issues for in a deployment like this one. */ -}}
 {{- $monitor := (.Values.metrics | default dict).serviceMonitor | default dict -}}
 {{- if $monitor.enabled -}}
 {{- if not $monitor.bearerTokenSecretName -}}
-{{- fail "metrics.serviceMonitor.enabled needs metrics.serviceMonitor.bearerTokenSecretName: /metrics answers only an unscoped admin bearer token, read from that Secret" -}}
+{{- fail "metrics.serviceMonitor.enabled needs metrics.serviceMonitor.bearerTokenSecretName: that Secret holds a metrics-scoped token (oberth uplink add --scope metrics)" -}}
 {{- end -}}
 {{- if not $monitor.caConfigMapName -}}
 {{- fail "metrics.serviceMonitor.enabled needs metrics.serviceMonitor.caConfigMapName: the scrape verifies the server certificate against that CA (no insecureSkipVerify)" -}}

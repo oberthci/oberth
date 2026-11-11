@@ -25,11 +25,12 @@ func startupDeadlineResult(runID, name string, at time.Time) JobResult {
 }
 
 // #1499: a startup-deadline kill is infrastructure, keeps its own reason
-// (never "Execution deadline exceeded"), and is retried automatically once.
-func TestStartupDeadlineStepAutomaticallyRetriesOnce(t *testing.T) {
+// (never "Execution deadline exceeded"), and is retried automatically within
+// the budget (#1524).
+func TestStartupDeadlineStepAutomaticallyRetriesWithinBudget(t *testing.T) {
 	f := newRecoveryFixture(t)
 	run := f.enqueueAndClaim(t, "feature/startup-deadline", strings.Repeat("b", 40))
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt <= model.DefaultInfrastructureAutoRetryBudget; attempt++ {
 		name, err := deterministicWorkflowName(f.repo.Name, run.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -49,9 +50,9 @@ func TestStartupDeadlineStepAutomaticallyRetriesOnce(t *testing.T) {
 		if failed.Status != model.RunFailed || failed.Phase != "infrastructure" || failed.FailedStep != "" || model.IsExecutionDeadlineReason(failed.Error) || !model.IsStartupDeadlineReason(failed.Error) {
 			t.Fatalf("startup deadline reported as a step deadline: %+v", failed)
 		}
-		if attempt == 1 {
+		if attempt == model.DefaultInfrastructureAutoRetryBudget {
 			if failed.AutoRetriedBy != "" || failed.AutoRetryOf == "" {
-				t.Fatalf("retried twice: %+v", failed)
+				t.Fatalf("retried past the budget: %+v", failed)
 			}
 			break
 		}
@@ -71,7 +72,7 @@ func TestStepDeadlineWithoutStartupEvidenceIsNotRetried(t *testing.T) {
 	result := startupDeadlineResult(strings.Repeat("a", 32), "workflow", at)
 	result.TerminalObservation.Steps[0].StartupDeadline = false
 	run := model.Run{ID: strings.Repeat("a", 32), RefKind: model.RefBranch, Trigger: "branch", WorkflowName: "workflow"}
-	if (&Scheduler{}).infrastructureAutoRetry(run, result) {
+	if (&Scheduler{}).infrastructureAutoRetryEligible(run, result) {
 		t.Fatal("step failure without startup evidence retried")
 	}
 }

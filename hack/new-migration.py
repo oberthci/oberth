@@ -10,6 +10,13 @@ import secrets
 SLUG = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 
 
+def append_sequence(sequence, migration):
+    """Append the new ID to .oberth/migration-sequence.txt (#1524)."""
+    sequence = Path(sequence)
+    with sequence.open("a", encoding="utf-8", newline="\n") as output:
+        output.write(migration.stem + "\n")
+
+
 def create_migration(directory, slug):
     if len(slug) > 40 or SLUG.fullmatch(slug) is None:
         raise ValueError("slug must be 1..40 lowercase letters/digits separated by hyphens, starting with a letter")
@@ -36,10 +43,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("slug", help="short description, e.g. add-run-index")
     args = parser.parse_args()
+    root = Path(__file__).resolve().parent.parent
     try:
-        path = create_migration(Path(__file__).resolve().parent.parent / "internal/store/migrations", args.slug)
+        path = create_migration(root / "internal/store/migrations", args.slug)
     except ValueError as error:
         parser.error(str(error))
+    append_sequence(root / ".oberth/migration-sequence.txt", path)
     print(path)
 
 

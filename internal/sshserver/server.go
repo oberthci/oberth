@@ -18,6 +18,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 const (
@@ -198,6 +199,10 @@ func New(config Config) (*Server, error) {
 			identity = strings.TrimSpace(identity)
 			if !found || identity == "" {
 				return nil, errors.New("public key is not registered")
+			}
+			if model.MetricsOnly(scope) {
+				// A metrics-scoped uplink reads only /metrics: never git (#1534).
+				return nil, errors.New("public key is a metrics-only uplink")
 			}
 			extensions := map[string]string{identityExtension: identity, fingerprintExtension: fingerprint}
 			if len(scope) > 0 {
