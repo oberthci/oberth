@@ -174,18 +174,47 @@ func TestFirstBackupAsksToStoreTheKey(t *testing.T) {
 	}
 }
 
+// Without a terminal a backup never creates the key (nobody would learn it
+// exists); with an existing, unconfirmed key it warns on stderr and goes on
+// until backup key --stored records a copy.
 func TestBackupWithoutATerminalWarnsOnStderr(t *testing.T) {
-	isolatedHome(t)
+	home := isolatedHome(t)
 	var warning bytes.Buffer
 	previous := backupStderr
 	backupStderr = &warning
 	t.Cleanup(func() { backupStderr = previous })
+	key := filepath.Join(home, ".config", "oberth", "backup", "recipient.key")
 	err := runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "oberth backup keygen") || !strings.Contains(err.Error(), "oberth backup key --stored") {
+		t.Fatalf("first non-interactive backup = %v", err)
+	}
+	if _, statErr := os.Stat(key); statErr == nil {
+		t.Fatal("a non-interactive backup created the key")
+	}
+
+	if err := runCLI(context.Background(), []string{"backup", "keygen"}, strings.NewReader(""), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	err = runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &bytes.Buffer{})
 	if err != nil && strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("a non-interactive backup was cancelled: %v", err)
 	}
-	if !strings.Contains(warning.String(), "!! Backup key") || !strings.Contains(warning.String(), "Not confirmed") {
+	if !strings.Contains(warning.String(), "!! Backup key") || !strings.Contains(warning.String(), "oberth backup key --stored") {
 		t.Fatalf("stderr warning = %q", warning.String())
+	}
+
+	var out bytes.Buffer
+	if err := runCLI(context.Background(), []string{"backup", "key", "--stored"}, strings.NewReader(""), &out); err != nil || !strings.Contains(out.String(), "Recorded") {
+		t.Fatalf("backup key --stored = %v\n%s", err, out.String())
+	}
+	warning.Reset()
+	_ = runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &bytes.Buffer{})
+	if strings.Contains(warning.String(), "!! Backup key") {
+		t.Fatalf("warned again for a recorded key: %q", warning.String())
+	}
+	out.Reset()
+	if err := runCLI(context.Background(), []string{"backup", "key"}, strings.NewReader(""), &out); err != nil || !strings.Contains(out.String(), "you confirmed a copy exists") {
+		t.Fatalf("backup key after --stored = %v\n%s", err, out.String())
 	}
 }
 

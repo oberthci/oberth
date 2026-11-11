@@ -266,16 +266,22 @@ and deleting `~/.config/oberth` deletes it. Until you confirm a copy exists,
 every `oberth backup` that uses the default key shows the key's path and, on
 a terminal, asks you to type `stored` before it reads anything; the
 confirmation is recorded per key (`recipient.stored`, the certificate's
-SHA-256), so a new key asks again. A backup without a terminal (a script or
-cron) prints the same warning to stderr and proceeds, every time, until the
-key has been confirmed once on a terminal; `oberth backup key` says whether it
-has. Backups with `--recipient CERT` are encrypted to a key you manage
-yourself and do not ask.
+SHA-256), so a new key asks again. A backup without a terminal (a script,
+cron, or an unattended `oberth upgrade`) never creates the key: with none yet
+it refuses and points at `oberth backup keygen`. With an existing key it
+prints the same warning to stderr and proceeds, every time, until a copy is
+confirmed, on a terminal or with `oberth backup key --stored`; `oberth backup
+key` says whether it is. Backups with `--recipient CERT` are encrypted to a
+key you manage yourself and do not ask.
 
 ```sh
 oberth backup key            # where the key is, which certificate, whether a copy is confirmed
 oberth backup key --print    # the private key, to paste into a password manager (terminal only)
+oberth backup key --stored   # record that a copy is off this machine (no terminal needed)
 ```
+
+On a host without a terminal: `oberth backup keygen`, copy `recipient.key`
+off the machine, `oberth backup key --stored`, then schedule the backups.
 
 Every backup summary names the certificate it is encrypted to (issuer and
 serial), and so does `oberth restore --inspect`: that is how to tell which of

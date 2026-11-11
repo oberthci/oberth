@@ -95,7 +95,9 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 
 // defaultBackupRecipient returns the default backup certificate, creating
 // the key pair on the first real backup and asking once, on a terminal, that
-// a copy of the key is kept off this machine.
+// a copy of the key is kept off this machine. Without a terminal it never
+// creates the key: nobody would see that a key exists that every backup
+// depends on until the machine and the key are gone.
 func defaultBackupRecipient(dryRun bool, input io.Reader, output io.Writer) (string, error) {
 	keyPath, certPath, err := installer.BackupRecipientPaths()
 	if err != nil {
@@ -113,6 +115,10 @@ func defaultBackupRecipient(dryRun bool, input io.Reader, output io.Writer) (str
 	if certErr != nil {
 		if dryRun {
 			_, _ = fmt.Fprintf(output, "No backup key yet: a real backup creates %s first.\n", displayHomePath(keyPath))
+		} else if !backupInputIsTerminal(input) {
+			return "", fmt.Errorf("no backup key yet, and there is no terminal to confirm that a copy of a new one is kept off this machine: "+
+				"create it with oberth backup keygen, copy %s off this machine, record that with oberth backup key --stored, then run the backup again "+
+				"(or encrypt to a certificate you manage with --recipient CERT)", displayHomePath(keyPath))
 		} else {
 			if _, _, err := installer.GenerateBackupRecipient(filepath.Dir(keyPath)); err != nil {
 				return "", err
@@ -148,11 +154,12 @@ the cluster changes.
     oberth restore                   # later, on a fresh install: restores the newest backup here
 
 The file is encrypted to ~/.config/oberth/backup/recipient.key, created by
-the first backup. Keep a copy of that key OFF this machine: no backup can be
-restored without it.
+the first backup on a terminal (without one: oberth backup keygen). Keep a
+copy of that key OFF this machine: no backup can be restored without it.
 
 Also:
-    oberth backup key [--print]           where the backup key is; --print shows it to store in a password manager
+    oberth backup key [--print|--stored]  where the backup key is; --print shows it to store in a password manager,
+                                          --stored records that a copy is off this machine
     oberth backup export-secrets [FILE]   the secrets as plain JSON any OpenBao/Vault can import
     oberth backup keygen [--dir DIR]      create the key pair ahead of time
 
@@ -189,7 +196,7 @@ func confirmBackupKeyStored(keyPath, certPath string, created bool, input io.Rea
        oberth backup key --print
 `, displayHomePath(keyPath), state, displayHomePath(filepath.Dir(filepath.Dir(keyPath))))
 	if !backupInputIsTerminal(input) {
-		_, _ = fmt.Fprint(backupStderr, warning+"   (Not confirmed: there is no terminal to answer on. Run oberth backup once on a terminal to confirm.)\n\n")
+		_, _ = fmt.Fprint(backupStderr, warning+"   (Not confirmed: there is no terminal to answer on. Once a copy is off this machine, record it: oberth backup key --stored)\n\n")
 		return nil
 	}
 	_, _ = fmt.Fprint(output, warning)
@@ -218,14 +225,16 @@ func runBackupKey(arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("backup key", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	show := flags.Bool("print", false, "print the private key (PEM) to store it in a password manager; refuses anything but a terminal")
+	stored := flags.Bool("stored", false, "record that a copy of the key is kept off this machine (what typing stored at the backup prompt records), for hosts without a terminal")
 	positional, help, err := parseOperatorFlags(flags, arguments)
 	if help {
-		_, _ = fmt.Fprint(output, `Usage: oberth backup key [--print]
+		_, _ = fmt.Fprint(output, `Usage: oberth backup key [--print | --stored]
 
 Show the key every backup on this machine is encrypted to, which certificate
 it belongs to (what oberth restore --inspect names), and whether you
 confirmed a copy exists off this machine. --print shows the private key so
 you can paste it into a password manager; it prints only to a terminal.
+--stored records that a copy is kept off this machine, for this key only.
 Restoring needs that file back as ~/.config/oberth/backup/recipient.key, or
 next to the backup, or passed with --key.
 
@@ -237,7 +246,10 @@ next to the backup, or passed with --key.
 		return err
 	}
 	if len(positional) != 0 {
-		return fmt.Errorf("%w: backup key accepts only --print", errUsage)
+		return fmt.Errorf("%w: backup key accepts only --print or --stored", errUsage)
+	}
+	if *show && *stored {
+		return fmt.Errorf("%w: backup key takes --print or --stored, not both", errUsage)
 	}
 	keyPath, certPath, err := installer.BackupRecipientPaths()
 	if err != nil {
@@ -245,6 +257,13 @@ next to the backup, or passed with --key.
 	}
 	if _, err := os.Stat(keyPath); err != nil {
 		return fmt.Errorf("%w: no backup key at %s yet; the first oberth backup creates it (or: oberth backup keygen)", errUsage, displayHomePath(keyPath))
+	}
+	if *stored {
+		if err := installer.MarkBackupKeyStored(certPath); err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(output, "Recorded: a copy of %s is kept off this machine; oberth backup will not ask again for this key.\n", displayHomePath(keyPath))
+		return nil
 	}
 	if *show {
 		if file, ok := output.(*os.File); !ok || !term.IsTerminal(int(file.Fd())) {
@@ -267,7 +286,7 @@ next to the backup, or passed with --key.
 	if installer.BackupKeyStored(certPath) {
 		_, _ = fmt.Fprintln(output, "Copy         you confirmed a copy exists off this machine")
 	} else {
-		_, _ = fmt.Fprintln(output, "Copy         not confirmed yet: the next oberth backup on a terminal asks")
+		_, _ = fmt.Fprintln(output, "Copy         not confirmed yet: the next oberth backup on a terminal asks (or: oberth backup key --stored)")
 	}
 	_, _ = fmt.Fprintln(output, "\nEvery backup made here needs this file to be restored. Store it off this machine:\n    oberth backup key --print")
 	return nil

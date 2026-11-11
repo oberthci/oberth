@@ -12,6 +12,10 @@
       "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
       "test_ref": "internal/installer/argo_nonroot_test.go TestNonrootReuseAcknowledgesReviewedValues"
     },
+    "flag:stored": {
+      "doc_anchor": "docs/backup-restore.md#the-backup-key",
+      "test_ref": "cmd/oberth/backup_key_test.go TestBackupWithoutATerminalWarnsOnStderr"
+    },
     "flag:argo-parallelism": {
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
