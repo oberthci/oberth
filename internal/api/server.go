@@ -669,7 +669,7 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 			cancel()
 			original := actorFrom(request.Context())
 			if authErr != nil || strings.TrimSpace(fresh.Identity) == "" || fresh.Identity != original.Identity || fresh.Fingerprint != original.Fingerprint || fresh.Admin != original.Admin || !slices.Equal(fresh.Scope, original.Scope) {
-				_ = write("event: auth_error\ndata: {\"error\":\"stream authorization changed or expired; reconnect with a current bearer token\"}\n\n")
+				_ = write("event: auth_error\ndata: {\"error\":\"stream authorization changed or expired; reconnect with current credentials\"}\n\n")
 				return
 			}
 			lastAuth = time.Now()
