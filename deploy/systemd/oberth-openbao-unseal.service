@@ -1,17 +1,16 @@
-# Keeps the installer-managed production OpenBao unsealed across pod restarts.
+# Unseals installer-managed OpenBao once at boot; restart after later pod restarts.
 # See deploy/systemd/README.md for the trade-off and installation.
 [Unit]
-Description=Oberth: keep OpenBao unsealed
+Description=Oberth: unseal OpenBao with a TPM2-bound credential
 After=k3s.service network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 ExecStart=/usr/local/libexec/oberth-openbao-unseal
-Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-LoadCredential=unseal-key:/etc/oberth/openbao-unseal-key
-Restart=always
+LoadCredentialEncrypted=unseal-key:/etc/oberth/openbao-unseal-key.cred
+Restart=on-failure
 RestartSec=10
 NoNewPrivileges=yes
 PrivateTmp=yes

@@ -373,8 +373,21 @@ func TestHealthProbeReportsSealed(t *testing.T) {
 	if status.SecretStore == nil || status.SecretStore.Probe != "sealed" {
 		t.Fatalf("secret store probe = %+v, want sealed", status.SecretStore)
 	}
+	if status.SecretStore.Remedy != "sealed: run /oberth:unseal" {
+		t.Fatal("sealed status lacks recovery remedy")
+	}
 	if !status.SecretStore.Sealed {
 		t.Fatal("SecretStore.Sealed = false, want true")
+	}
+	health.SecretStore = status.SecretStore
+	health.SecretStoreProbe = func(context.Context) error { return nil }
+	value, err = health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered := value.(HealthStatus)
+	if recovered.SecretStore.Sealed || recovered.SecretStore.Remedy != "" {
+		t.Fatal("successful probe retained stale sealed recovery guidance")
 	}
 }
 

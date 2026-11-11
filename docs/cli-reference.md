@@ -1824,6 +1824,31 @@ Usage: oberth status [flags]
         server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
+## oberth unseal
+
+```text
+Usage: oberth unseal --secrets-file FILE [--age-identity FILE] [--context NAME]
+Read the saved key privately and unseal OpenBao. --status reads only seal status.
+  -age-identity string
+        owner-only age identity file for encrypted recovery
+  -context string
+        selected kubeconfig context
+  -json
+        print only initialized/sealed status as JSON
+  -kubeconfig string
+        Kubernetes config file (default: KUBECONFIG or ~/.kube/config)
+  -openbao-namespace string
+        OpenBao namespace (default "openbao")
+  -seal-to-host string
+        write a TPM2-bound systemd credential to a new file on this single Linux node; anyone booting its disk here gets the secrets
+  -secrets-file string
+        owner-only installer recovery file; never printed
+  -status
+        read seal status only; do not read recovery material
+  -yes
+        accept the host-bound auto-unseal risk shown by --seal-to-host
+```
+
 ## oberth upgrade
 
 ```text
