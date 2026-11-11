@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/oberthci/oberth/internal/client"
 )
@@ -132,8 +133,13 @@ func runClientRenew(ctx context.Context, arguments []string, output io.Writer) e
 	if err := os.WriteFile(certFile, []byte(issued.Certificate), 0600); err != nil {
 		return err
 	}
-	if _, err := client.LoadClientCertificate(certFile, keyFile); err != nil {
+	pair, err := client.LoadClientCertificate(certFile, keyFile)
+	if err != nil {
 		return err
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil || leaf.IsCA || len(leaf.ExtKeyUsage) != 1 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth || time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
+		return errors.New("renewal returned a certificate that is not currently usable for client authentication")
 	}
 	// Publish only the complete validated pair. Existing connections and old
 	// pins remain valid while the next handshake loads this pair.

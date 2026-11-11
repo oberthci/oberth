@@ -82,6 +82,10 @@ func configureClaudeMCP(ctx context.Context, setup ClaudeCodeSetup) (ClaudeCodeC
 			return change, err
 		}
 		delete(entry, "headersHelper")
+	} else if setup.Token != nil {
+		if err := configureClaudeCertificate(paths, "", ""); err != nil {
+			return change, err
+		}
 	}
 	encoded, err := json.Marshal(entry)
 	if err != nil {
@@ -114,8 +118,10 @@ func configureClaudeMCP(ctx context.Context, setup ClaudeCodeSetup) (ClaudeCodeC
 }
 
 func configureClaudeCertificate(paths claudeCodeFiles, cert, key string) error {
-	if _, err := client.LoadClientCertificate(cert, key); err != nil {
-		return err
+	if cert != "" || key != "" {
+		if _, err := client.LoadClientCertificate(cert, key); err != nil {
+			return err
+		}
 	}
 	data, err := os.ReadFile(paths.settings)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -130,6 +136,10 @@ func configureClaudeCertificate(paths claudeCodeFiles, cert, key string) error {
 		return err
 	}
 	for name, value := range map[string]string{"CLAUDE_CODE_CLIENT_CERT": cert, "CLAUDE_CODE_CLIENT_KEY": key} {
+		if value == "" {
+			env.remove(name)
+			continue
+		}
 		raw, err := json.Marshal(value)
 		if err != nil {
 			return err

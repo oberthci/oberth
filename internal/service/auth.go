@@ -55,5 +55,5 @@ func (a *Authenticator) AuthenticateCertificate(ctx context.Context, cert *x509.
 	if err != nil {
 		return api.Actor{}, err
 	}
-	return api.Actor{Identity: u.Identity, Fingerprint: u.Fingerprint, Admin: u.Admin, Scope: u.Scope, AuthMethod: "cert"}, nil
+	return api.Actor{Identity: u.Identity, Fingerprint: u.Fingerprint, TokenCredentialID: u.TokenCredentialID, Admin: u.Admin, Scope: u.Scope, AuthMethod: "cert"}, nil
 }

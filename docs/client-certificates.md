@@ -13,6 +13,10 @@ requires the same uplink, admin status and scopes. An empty `Authorization:
 Bearer ` is ignored only when a valid certificate authenticates. An unknown pin
 never falls back to a bearer.
 
+Clients connect using DNS names (`localhost`, the host name, or `<host>.local`),
+never IP addresses. The server CA keeps its DNS-only name constraints; IP name
+constraints are deferred until Bun releases a compatible fix.
+
 ## Enrollment
 
 Generate an EC P-256 or Ed25519 private key locally, mode 0600, and send only its
@@ -72,7 +76,9 @@ Certificate mode has no Authorization header. An explicitly selected bearer
 setup passes a 0600 token file as configure's second argument; only the HTTP
 transport invokes `bearer-headers`, never an agent shell call. `oberth client
 setup --client-cert <file> --client-key <file>` also merges the client settings;
-`--token-file` selects a private bearer file and header helper instead.
+`--token-file` selects a private bearer file and header helper instead. Explicit
+bearer setup removes the previous client certificate/key settings while keeping
+other environment settings.
 
 ## CLI and renewal
 

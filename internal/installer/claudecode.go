@@ -670,6 +670,16 @@ func (object *jsonObject) set(key string, value json.RawMessage) {
 	object.values[key] = value
 }
 
+func (object *jsonObject) remove(key string) {
+	delete(object.values, key)
+	for i, candidate := range object.keys {
+		if candidate == key {
+			object.keys = append(object.keys[:i], object.keys[i+1:]...)
+			return
+		}
+	}
+}
+
 func (object *jsonObject) marshal() ([]byte, error) {
 	var compact bytes.Buffer
 	compact.WriteByte('{')
