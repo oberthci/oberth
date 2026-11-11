@@ -75,6 +75,9 @@ func writeTPMCredential(ctx context.Context, path string, key []byte, run Comman
 	if err := file.file.Sync(); err != nil {
 		return errors.New("cannot sync TPM2 credential")
 	}
+	if err := file.file.Close(); err != nil {
+		return errors.New("cannot close TPM2 credential")
+	}
 	committed = true
 	return nil
 }

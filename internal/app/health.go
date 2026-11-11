@@ -333,6 +333,8 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		// callers never mutate the shared Health.SecretStore pointer.
 		storeCopy := *health.SecretStore
 		storeCopy.Probe = probe
+		storeCopy.Sealed = false
+		storeCopy.Remedy = ""
 		if probe == "sealed" {
 			storeCopy.Sealed = true
 			storeCopy.Remedy = "sealed: run /oberth:unseal"

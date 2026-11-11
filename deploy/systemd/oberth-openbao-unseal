@@ -1,4 +1,6 @@
 #!/bin/sh
 # systemd decrypts the TPM2 credential into private runtime memory.
 set -eu
-exec /usr/local/bin/oberth unseal --secrets-file "${CREDENTIALS_DIRECTORY:?run under systemd}/unseal-key" --json
+: "${OPENBAO_CONTEXT:?set the chosen context in the service drop-in}"
+exec /usr/local/bin/oberth unseal --secrets-file "${CREDENTIALS_DIRECTORY:?run under systemd}/unseal-key" \
+ --context "$OPENBAO_CONTEXT" --openbao-namespace "${OPENBAO_NAMESPACE:-openbao}" --json

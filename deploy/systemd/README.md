@@ -16,13 +16,12 @@ The Oberth CLI must already be installed at `/usr/local/bin/oberth`.
 
 ```sh
 install -d -m 0700 /etc/oberth
-oberth unseal --kubeconfig /etc/rancher/k3s/k3s.yaml \
+oberth unseal --kubeconfig /etc/oberth/kubeconfig --context '<chosen context>' \
   --secrets-file '<root-owned recovery file>' \
   --seal-to-host /etc/oberth/openbao-unseal-key.cred --yes
 install -m 0755 deploy/systemd/oberth-openbao-unseal /usr/local/libexec/
 install -m 0644 deploy/systemd/oberth-openbao-unseal.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now oberth-openbao-unseal
+systemctl edit oberth-openbao-unseal
 ```
 
 The setup command writes only a new encrypted credential and never overwrites
@@ -41,3 +40,18 @@ See [systemd credential encryption](https://www.freedesktop.org/software/systemd
 Hardware qualification requires a TPM-capable VM or physical node. The isolated
 unit tests exercise no-fallback behavior and refusal; they do not establish
 successful TPM encryption or a reboot round trip on real hardware.
+
+In the service drop-in, specify the same public coordinates used at setup:
+
+```ini
+[Service]
+Environment=KUBECONFIG=/etc/oberth/kubeconfig
+Environment=OPENBAO_CONTEXT=<chosen context>
+Environment=OPENBAO_NAMESPACE=openbao
+```
+
+Copy the selected kubeconfig securely to that operator-chosen location with
+mode 0600 before setup. Then run `systemctl daemon-reload` and
+`systemctl enable --now oberth-openbao-unseal`. The boot script requires an
+explicit context; it never silently chooses a different current context.
+After a later OpenBao pod restart, start the unit again.

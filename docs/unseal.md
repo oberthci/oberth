@@ -23,9 +23,8 @@ does not collect multiple Shamir shares interactively.
 
 `/oberth:unseal` uses the same command and asks only for file paths. Never paste
 the unseal key into a session. `system_status` reports the remedy
-`sealed: run /oberth:unseal`. The plugin's SessionStart hint checks status through
-the local CLI when available; when the CLI or a usable kubeconfig is absent,
-it cannot detect a sealed store. The server may itself be unable to start while
+`sealed: run /oberth:unseal`. The plugin's SessionStart hint gives conditional recovery guidance for a
+configured server; it does not probe an unrelated default kubeconfig context. The server may itself be unable to start while
 sealed, so MCP status is not the recovery transport.
 
 Optional [TPM2 boot unseal](../deploy/systemd/README.md) is explicit and off by

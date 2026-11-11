@@ -67,8 +67,9 @@ func ExecuteUnseal(ctx context.Context, cfg UnsealConfig, host InstallDeps) (Sea
 		}
 		deps.KubeClient, deps.RestConfig, deps.ContextName = kube, rest, name
 	}
-	if deps.RestConfig != nil && deps.RestConfig.Insecure {
-		return SealStatus{}, errors.New("unseal requires a kubeconfig with TLS verification enabled")
+	identity := publicClusterIdentity(Config{KubeconfigPath: cfg.KubeconfigPath}, deps.RestConfig, deps.ContextName)
+	if !checkClusterTrust(deps.RestConfig, identity, &InstallResult{}) {
+		return SealStatus{}, errors.New("unseal requires an HTTPS kubeconfig with an explicit trusted cluster CA and TLS verification enabled")
 	}
 	deps.RunCommand = run
 	if cfg.OpenBaoNamespace == "" {
@@ -124,7 +125,7 @@ func unsealWithDeps(ctx context.Context, cfg UnsealConfig, deps Deps) (SealStatu
 }
 
 func readSealStatus(ctx context.Context, client openBaoExec) (SealStatus, error) {
-	out, _ := client.bao(ctx, nil, "status", "-format=json")
+	out, commandErr := client.bao(ctx, nil, "status", "-format=json")
 	defer clear(out)
 	var state struct {
 		Initialized *bool `json:"initialized"`
@@ -132,6 +133,10 @@ func readSealStatus(ctx context.Context, client openBaoExec) (SealStatus, error)
 	}
 	if json.Unmarshal(out, &state) != nil || state.Initialized == nil || state.Sealed == nil {
 		return SealStatus{}, errors.New("cannot read OpenBao seal status")
+	}
+	// bao status exits nonzero while sealed; an unsealed result must succeed.
+	if !*state.Sealed && commandErr != nil {
+		return SealStatus{}, errors.New("cannot confirm OpenBao unsealed status")
 	}
 	return SealStatus{Initialized: *state.Initialized, Sealed: *state.Sealed}, nil
 }

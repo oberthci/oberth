@@ -18,3 +18,13 @@ func TestUnsealHelpAndRecoveryGates(t *testing.T) {
 		}
 	}
 }
+
+func TestUnsealParseErrorsDoNotEchoArguments(t *testing.T) {
+	for _, args := range [][]string{{"--unknown=private-input"}, {"--yes=private-input"}, {"--age-identity", "--private-input"}} {
+		var out bytes.Buffer
+		err := runUnseal(t.Context(), args, &out)
+		if err == nil || bytes.Contains([]byte(err.Error()), []byte("private-input")) || out.Len() != 0 {
+			t.Fatal("unseal parsing echoed supplied data")
+		}
+	}
+}

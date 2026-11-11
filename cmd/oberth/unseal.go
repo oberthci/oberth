@@ -31,7 +31,7 @@ func runUnseal(ctx context.Context, args []string, output io.Writer) error {
 		return nil
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: invalid unseal arguments; see oberth unseal --help", errUsage)
 	}
 	if len(positional) != 0 {
 		return fmt.Errorf("%w: unseal takes no positional arguments", errUsage)

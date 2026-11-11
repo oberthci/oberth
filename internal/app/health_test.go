@@ -379,6 +379,16 @@ func TestHealthProbeReportsSealed(t *testing.T) {
 	if !status.SecretStore.Sealed {
 		t.Fatal("SecretStore.Sealed = false, want true")
 	}
+	health.SecretStore = status.SecretStore
+	health.SecretStoreProbe = func(context.Context) error { return nil }
+	value, err = health.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered := value.(HealthStatus)
+	if recovered.SecretStore.Sealed || recovered.SecretStore.Remedy != "" {
+		t.Fatal("successful probe retained stale sealed recovery guidance")
+	}
 }
 
 func TestHealthProbeReportsLoginDetailWhenSealStatusErrors(t *testing.T) {

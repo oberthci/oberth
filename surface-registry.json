@@ -435,6 +435,14 @@
     "value:SHA256SUMS.sig": {
       "doc_anchor": "docs/plugin-bootstrap.md#release-verification",
       "test_ref": "internal/argojob/release_public_test.go TestPublicChecksumProofsRefuseDisagreement"
+    },
+    "env:OPENBAO_CONTEXT": {
+      "doc_anchor": "deploy/systemd/README.md#tpm2-bound-openbao-auto-unseal",
+      "test_ref": "internal/installer/unseal_review_test.go TestBootUnsealRequiresAndPreservesSelectedContext"
+    },
+    "env:OPENBAO_NAMESPACE": {
+      "doc_anchor": "deploy/systemd/README.md#tpm2-bound-openbao-auto-unseal",
+      "test_ref": "internal/installer/unseal_review_test.go TestBootUnsealRequiresAndPreservesSelectedContext"
     }
   }
 }

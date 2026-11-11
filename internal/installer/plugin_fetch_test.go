@@ -210,7 +210,7 @@ cp "$FIXTURE_RELEASE/$name" "$out"
 }
 
 func TestPluginCommandsOnlyAllowOwnScripts(t *testing.T) {
-	for skill, script := range map[string]string{"install": "fetch-oberth", "connect": "trust"} {
+	for skill, script := range map[string]string{"install": "fetch-oberth", "connect": "trust", "unseal": "unseal"} {
 		body := string(mustRead(t, pluginPath(t, "skills", skill, "SKILL.md")))
 		want := `allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/` + script + `" *)`
 		if skill == "install" {

@@ -451,7 +451,7 @@ func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
 					t.Errorf("a second connect rewrote the settings:\n%s", again)
 				}
 				hint, err := runTrust(t, shell, claudeDir, []string{"CLAUDE_PLUGIN_OPTION_URL=" + address, "CLAUDE_PLUGIN_OPTION_CA_PIN=" + pin}, "hint")
-				if err != nil || hint != "" {
+				if err != nil || !strings.Contains(hint, "sealed: run /oberth:unseal") {
 					t.Errorf("hint after connect = %q %v", hint, err)
 				}
 			})
@@ -564,7 +564,7 @@ func TestPluginSessionHint(t *testing.T) {
 				t.Fatalf("hint with a malformed pin = %q", out)
 			}
 			// Without a pin the server has a publicly trusted certificate.
-			if out := hint(""); out != "" {
+			if out := hint(""); !strings.Contains(out, "sealed: run /oberth:unseal") {
 				t.Fatalf("hint without a pin = %q", out)
 			}
 			// An unconfigured plugin has nothing to connect to.
@@ -579,10 +579,10 @@ func TestPluginSessionHint(t *testing.T) {
 			if _, err := ensureSettingsCATrust(paths, authority.pem, []*x509.Certificate{authority.certificate}, pin, false); err != nil {
 				t.Fatal(err)
 			}
-			if out := hint(pin); out != "" {
+			if out := hint(pin); !strings.Contains(out, "sealed: run /oberth:unseal") {
 				t.Fatalf("hint with trust = %q", out)
 			}
-			if out := hint(strings.ToUpper(pin)); out != "" {
+			if out := hint(strings.ToUpper(pin)); !strings.Contains(out, "sealed: run /oberth:unseal") {
 				t.Fatalf("hint with the pin in upper case = %q", out)
 			}
 			// Another pin (a rotated CA) is not the stored one.
