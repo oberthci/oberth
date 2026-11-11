@@ -14,6 +14,12 @@ with every credential in a secrets file instead of the session.
 
 ## 1. Create an uplink
 
+For Claude Code, use [client certificate enrollment](client-certificates.md):
+the private key stays local, and `--admin-csr` creates the install's first
+admin without a bearer token. The steps below describe optional bearer setups
+for automation or clients without certificate support.
+
+
 Run inside the Oberth pod:
 
 ```bash
@@ -36,7 +42,7 @@ the command on a terminal, or redirect it into a new owner-only file
 log or an AI transcript. `oberth install --secrets-file` writes the first
 uplink's token to its secrets file for the same reason.
 
-The token is the only credential. Clients trust the server through its CA,
+Both bearer and certificate clients trust the server through its CA,
 not through a fingerprint printed here: `oberth client pin` prints the CA's
 SHA-256 pin (step 2) from `~/.config/oberth/ca.crt`, which `oberth install`
 writes on the installing machine. On another machine, copy that file from
@@ -93,10 +99,9 @@ sequence number.
 
 ## 2. Configure Claude Code
 
-Claude Code connects through the Oberth plugin. It needs three values (the
-server's MCP URL, an uplink token and the SHA-256 pin of the server's CA) and
-one restart. Nothing else is installed on the machine, and no token is
-written to a file of Oberth's.
+Claude Code connects over mutual TLS after local CSR enrollment, CA pin
+verification and one restart. See [the complete certificate flow](client-certificates.md).
+No bearer token is created in the default install flow.
 
 ### The plugin
 
@@ -110,14 +115,10 @@ claude plugin install oberth@oberthci
 
 or `/plugin install oberth@oberthci` inside Claude Code. The plugin carries:
 
-- the MCP server entry: `type: http`, the URL and an `Authorization: Bearer`
-  header taken from the plugin's options, and `timeout: 630000`;
-- three options Claude Code asks for when the plugin is enabled (change them
-  later with `/plugin configure oberth@oberthci`): the MCP URL, for example
-  `https://oberth.example.test:30443/mcp`; the uplink token, which is marked
-  sensitive, so Claude Code masks it and keeps it in its own credential store
-  (the system keychain, or `~/.claude/.credentials.json` with mode 0600 where
-  there is none); and the CA pin;
+- two public options: the MCP URL and CA pin;
+- local key/CSR generation and certificate settings through `scripts/trust`;
+- an MCP entry created only after `/oberth:connect` configures an endpoint,
+  with no Authorization header in certificate mode and `timeout: 630000`;
 - the `oberth-agent-loop` skill: one `events_wait` kept open while runs are
   in flight, holds serviced before `abandon_at`, assisted runs never taken as
   evidence (see [agent events](agent-events.md#claude-code));
@@ -131,7 +132,7 @@ that for a running session, so trust is one command and one restart.
 
 The admin reads the pin on a machine that has the Oberth CLI and the CA
 (`~/.config/oberth/ca.crt` after `oberth install`), and gives it to the user
-together with the URL and the token:
+together with the URL and CSR enrollment instructions:
 
 ```bash
 oberth client pin
@@ -158,7 +159,9 @@ there) then:
    plus the Oberth CA (the origin is recorded in `bundle.source`) and the
    setting names the copy. Run the command again when the original bundle
    changes;
-5. says that Claude Code needs one restart.
+5. generates the local key/CSR, enrolls it with the admin, merges the client
+   certificate/key paths into settings env, registers the configured endpoint
+   and requests one restart.
 
 The operating system's trust store is never touched. The command needs `sh`,
 `awk` and `openssl`, reads no token and prints none. The Oberth CA is
@@ -175,7 +178,7 @@ file instead, pass it; it is checked against the same pin:
 
 While the plugin has a pin and the CA is not trusted yet, the session-start
 hook tells Claude so, and Claude offers `/oberth:connect`. With trust in
-place the hook prints nothing. Leave the pin empty only for a server behind a
+place the hook also checks for a missing certificate or expiry within 30 days. Leave the pin empty only for a server behind a
 publicly trusted certificate.
 
 ### `oberth client setup`
@@ -187,7 +190,7 @@ On a machine that has the Oberth CLI and the deployment's CA (the files
 oberth client setup --url https://localhost:30443/mcp
 ```
 
-It is CA trust plus the plugin, and nothing else:
+It configures trust, the plugin and the selected authentication method:
 
 - **CA trust.** The same layout as `/oberth:connect`: the CA goes to
   `~/.claude/oberth/ca.crt`, `env.NODE_EXTRA_CA_CERTS` in
@@ -199,14 +202,14 @@ It is CA trust plus the plugin, and nothing else:
   oberthci/oberth` when the plugin is missing (`--marketplace` names a path
   or another git source), enables it when it is disabled, and sets its URL
   and CA pin with `claude plugin configure oberth@oberthci --values-stdin`.
-  No user-scope MCP server is registered: the plugin's entry is the only one.
-- **The token.** When this machine has one (`--token-file`, `OBERTH_TOKEN`,
-  `OBERTH_TOKEN_COMMAND`, or the token saved in `~/.config/oberth` for the
-  same server), it is handed to Claude Code's credential store on standard
-  input: it reaches no argument list, no output and no file of Oberth's. A
-  token the plugin already holds is kept unless `--token-file` is given.
-  Without a token the command says so and the plugin asks for it in Claude
-  Code.
+  A user MCP entry is registered only when credentials are configured.
+- **Authentication.** `--client-cert` and `--client-key` merge Claude Code's
+  mTLS env settings and create the entry without an Authorization header.
+  Explicit bearer setups resolve `--token-file`, the environment or saved
+  client files, and store the bearer privately under `~/.claude/oberth/` for
+  a header helper. Nothing secret enters arguments or output. Existing bearer
+  files are kept unless `--token-file` explicitly requests replacement.
+  Without credentials, enroll with `/oberth:connect`.
 - **What it changes is printed**, one line per target with each difference;
   `--dry-run` prints the same and changes nothing. Running it again prints
   `no change`. Restart Claude Code once afterwards.
@@ -220,7 +223,7 @@ It is CA trust plus the plugin, and nothing else:
   itself.
 
 `oberth install` uses the same path for the machine it runs on when you choose
-MCP access (the plugin then asks for the token in Claude Code), and also
+MCP access, and also
 writes a server entry to `~/.config/oberth/mcp.json` for other MCP clients.
 
 The plugin's `"timeout"` is required for long waits: Claude Code's default
@@ -401,6 +404,8 @@ one with a non-admin token is still answered with the server's refusal.
 | `issue_unlock` | Admin-only audited lock break, scoped to visible issues |
 | `issue_close_many` | Admin-only closure of 1..50 unique IDs with a reason and per-ID results; honors locks |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
+| `uplink_cert` | Issue a clientAuth certificate from a local CSR; unscoped admin only. |
+| `client_renew` | Renew this uplink using its current client certificate and a new local CSR. |
 | `uplink_list` | Unscoped-admin-only public credential lifecycle metadata for all registrations |
 | `uplink_revoke` | Unscoped admin-only audited SSH and bearer revocation; protects the last active admin |
 | `uplink_rotate` | Unscoped admin-only handoff to an already-issued matching replacement key, atomically revoking the old key |
@@ -1126,7 +1131,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **93 tools**, including administrator-only
+The current MCP surface has **95 tools**, including administrator-only
 `publication_abandon`; a non-admin token's `tools/list` omits the
 administrator-only ones.
 

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Invoked only by Claude Code's HTTP transport, never by an agent shell call.
+# The file is an explicit bearer setup; certificate setups have no helper.
+set -eu
+[ "$#" -eq 1 ] && [ -f "$1" ] && [ ! -L "$1" ] || exit 1
+# Refuse group/other access without printing the file's contents.
+mode=$(stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1")
+[ "$mode" = 600 ] || exit 1
+token=$(cat "$1")
+case "$token" in oberth_*) ;; *) exit 1;; esac
+case "$token" in *[!A-Za-z0-9_-]*) exit 1;; esac
+[ "${#token}" -eq 50 ] || exit 1
+printf '{"Authorization":"Bearer %s"}\n' "$token"

@@ -37,7 +37,7 @@ func TestAdminOnlyToolsRefuseNonAdmins(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_, err = fixture.service.CallTool(ctx, api.Actor{Identity: "agent@example-node"}, name, raw)
+		_, err = fixture.service.CallTool(ctx, api.Actor{Identity: "agent@example-node", TokenCredentialID: "fixture-credential", AuthMethod: "cert"}, name, raw)
 		return err
 	}
 	for _, name := range api.ToolNames() {

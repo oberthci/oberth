@@ -28,6 +28,8 @@ const (
 )
 
 type Config struct {
+	ClientCert   string
+	ClientKey    string
 	BaseURL      string
 	Token        string
 	TokenCommand string
@@ -36,6 +38,8 @@ type Config struct {
 
 func FromEnv() Config {
 	return Config{
+		ClientCert:   strings.TrimSpace(os.Getenv("OBERTH_CLIENT_CERT")),
+		ClientKey:    strings.TrimSpace(os.Getenv("OBERTH_CLIENT_KEY")),
 		BaseURL:      strings.TrimSpace(os.Getenv("OBERTH_BASE_URL")),
 		Token:        strings.TrimSpace(os.Getenv("OBERTH_TOKEN")),
 		TokenCommand: strings.TrimSpace(os.Getenv("OBERTH_TOKEN_COMMAND")),
@@ -48,6 +52,9 @@ func FromEnv() Config {
 func (config Config) ResolveToken(ctx context.Context) (string, error) {
 	if config.Token != "" {
 		return config.Token, nil
+	}
+	if config.TokenCommand == "" && config.ClientCert != "" && config.ClientKey != "" {
+		return "", nil
 	}
 	if config.TokenCommand == "" {
 		return "", errors.New("client: set OBERTH_TOKEN, or OBERTH_TOKEN_COMMAND naming a command that prints one")
@@ -87,11 +94,18 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if config.ClientCert != "" && base.Scheme != "https" {
+		return nil, errors.New("client certificate authentication requires https")
+	}
 	token, err := config.ResolveToken(ctx)
 	if err != nil {
 		return nil, err
 	}
 	transport, err := newTransport(config.CACert)
+	if err != nil {
+		return nil, err
+	}
+	transport, err = WithClientCertificate(transport, config.ClientCert, config.ClientKey)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +209,9 @@ func (client *Client) newGetRequest(ctx context.Context, path string, query map[
 	if err != nil {
 		return nil, fmt.Errorf("client: build request for %s: %w", path, err)
 	}
-	request.Header.Set("Authorization", "Bearer "+client.token)
+	if client.token != "" {
+		request.Header.Set("Authorization", "Bearer "+client.token)
+	}
 	return request, nil
 }
 

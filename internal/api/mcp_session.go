@@ -425,7 +425,7 @@ func (server *Server) handleMCPEventStream(writer http.ResponseWriter, request *
 		}
 		if time.Since(lastAuth) >= mcpEventStreamReauth {
 			if !server.reauthorizeStream(request, actor) {
-				_ = write(channelFrame(0, "agent event stream authorization changed or expired; reconnect with a current bearer token", map[string]string{"kind": "events.auth_error"}))
+				_ = write(channelFrame(0, "agent event stream authorization changed or expired; reconnect with current credentials", map[string]string{"kind": "events.auth_error"}))
 				return
 			}
 			lastAuth = time.Now()
@@ -433,16 +433,12 @@ func (server *Server) handleMCPEventStream(writer http.ResponseWriter, request *
 	}
 }
 
-// reauthorizeStream re-checks the bearer token so a revoked or narrowed
+// reauthorizeStream re-checks the request credentials so a revoked or narrowed
 // credential cannot keep receiving events on an old stream.
 func (server *Server) reauthorizeStream(request *http.Request, original Actor) bool {
-	token, ok := bearerToken(request.Header.Values("Authorization"))
-	if !ok {
-		return false
-	}
 	authCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
 	defer cancel()
-	fresh, err := server.auth.Authenticate(authCtx, token)
+	fresh, err := server.authenticateRequest(authCtx, request)
 	return err == nil && strings.TrimSpace(fresh.Identity) != "" && fresh.Identity == original.Identity && fresh.Fingerprint == original.Fingerprint &&
 		fresh.Admin == original.Admin && slices.Equal(fresh.Scope, original.Scope)
 }

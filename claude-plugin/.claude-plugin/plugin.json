@@ -16,12 +16,6 @@
       "title": "Oberth MCP URL",
       "description": "MCP endpoint of your Oberth server, for example https://oberth.example.test:30443/mcp. Leave empty until a server exists: the plugin then guides you to install one (/oberth:install) or to connect to one."
     },
-    "token": {
-      "type": "string",
-      "title": "Uplink token",
-      "description": "Bearer token of your Oberth uplink. Kept in Claude Code's credential store. Leave empty until you have one.",
-      "sensitive": true
-    },
     "ca_pin": {
       "type": "string",
       "title": "CA SHA-256 pin",

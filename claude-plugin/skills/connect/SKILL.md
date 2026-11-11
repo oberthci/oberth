@@ -46,7 +46,24 @@ Arguments given to the command: `$ARGUMENTS`
    The command checks both again. When the user has the CA certificate as a
    file, add `--ca-file '<path>'` under the same rule for the path (no quote
    and no other shell syntax in it); it is checked against the same pin.
-4. Report what the command printed.
+4. Generate the local TLS key and CSR with
+   `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" keygen`. The key is 0600 under
+   `~/.claude/oberth/`; never display or upload it. Give only `current/client.csr` to
+   the admin, who issues `oberth uplink cert <identity> --csr <file>` (or the
+   `uplink_cert` MCP tool). The SSH public key must already be registered on
+   that uplink. Save the returned public certificate as `current/client.csr.crt`.
+   Invite redemption will use the same CSR issuance path when available;
+   do not invent an invite command before that feature is installed.
+5. Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" credentials` to validate
+   the key pair and merge `CLAUDE_CODE_CLIENT_CERT` and
+   `CLAUDE_CODE_CLIENT_KEY` into settings.json env beside NODE_EXTRA_CA_CERTS.
+   Then run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" configure '<server URL>'`.
+   This creates the MCP entry with no Authorization header. No entry exists
+   before configuration. For an explicitly requested bearer setup, skip
+   keygen/credentials and pass an existing 0600 token file as configure's
+   second argument. Never read the token file or invoke bearer-headers in
+   the agent shell; only Claude Code's transport invokes that helper.
+6. Report what the command printed.
    - On success it stored the CA under Claude Code's own directory
      (`oberth/ca.crt`) and made `env.NODE_EXTRA_CA_CERTS` in `settings.json`
      hold it. Tell the user to restart Claude Code once; the oberth tools
@@ -66,3 +83,9 @@ Arguments given to the command: `$ARGUMENTS`
 - Do not retry with a fingerprint the command printed under `seen`: that
   would be trust on first use.
 - The command reads no token and prints none.
+
+For a certificate expiring within 30 days, run
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" renew`. It uses the saved public
+connection settings, generates a new local key/CSR, authenticates renewal with
+the current certificate and atomically switches the `current` identity. No
+restart is needed; an expired certificate requires admin enrollment again.

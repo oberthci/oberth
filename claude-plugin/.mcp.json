@@ -1,12 +1,1 @@
-{
-  "mcpServers": {
-    "oberth": {
-      "type": "http",
-      "url": "${user_config.url}",
-      "headers": {
-        "Authorization": "Bearer ${user_config.token}"
-      },
-      "timeout": 630000
-    }
-  }
-}
+{"mcpServers": {}}

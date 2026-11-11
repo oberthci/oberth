@@ -62,6 +62,7 @@ type APIConfig struct {
 	ResourceDeclarations      ResourceDeclarationReader
 	Resources                 ResourceUsageReader
 	ReleasePreflight          ReleasePreflighter
+	ClientCertificates        *ClientCertIssuer
 	UplinkLifecycle           UplinkLifecycle
 	DeclarationDismissal      DeclarationDismissal
 	IssueLifecycle            IssueLifecycle
@@ -147,6 +148,7 @@ type API struct {
 	resources                 ResourceUsageReader
 	promotionProgress         *sync.Map
 	releasePreflight          ReleasePreflighter
+	clientCertificates        *ClientCertIssuer
 	uplinkLifecycle           UplinkLifecycle
 	declarationDismissal      DeclarationDismissal
 	issueLifecycle            IssueLifecycle
@@ -279,8 +281,9 @@ func NewAPI(config APIConfig) (*API, error) {
 	created := &API{
 		branchPrune: config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
 		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
-		releasePreflight: config.ReleasePreflight,
-		uplinkLifecycle:  config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
+		releasePreflight:   config.ReleasePreflight,
+		clientCertificates: config.ClientCertificates,
+		uplinkLifecycle:    config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		queueDemands:      &queueDemandCache{},
@@ -377,6 +380,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 			}
 		}()
 	}
+	ctx = model.WithAuthMethod(ctx, actor.AuthMethod)
 	copy := *service
 	copy.redactPressure = true
 	service = &copy
@@ -435,6 +439,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "admission_hold":
 		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).
+	case "uplink_cert", "client_renew":
+		return service.clientCertTool(ctx, actor, name, raw)
 	case "uplink_list", "uplink_revoke", "uplink_rotate":
 		return service.uplinkLifecycleTool(ctx, actor, name, raw)
 	case "access_dismiss":
@@ -3184,7 +3190,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 // use it to prove their automatic reconnect allowlist holds no mutation.
 func MutatingTool(name string) bool {
 	switch name {
-	case "uplink_revoke", "uplink_rotate", "access_dismiss":
+	case "uplink_cert", "client_renew", "uplink_revoke", "uplink_rotate", "access_dismiss":
 		return true
 	case "issue_unlock", "issue_close_many":
 		return true

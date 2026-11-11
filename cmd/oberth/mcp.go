@@ -48,6 +48,8 @@ const (
 
 // mcpConfig holds resolved MCP client configuration.
 type mcpConfig struct {
+	ClientCert   string
+	ClientKey    string
 	URL          string
 	Token        string
 	TokenCommand string
@@ -377,6 +379,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		return result, err
 	}
 	result.URL, result.CAFile = connection.MCPURL, connection.CACert
+	result.ClientCert, result.ClientKey = connection.ClientCert, connection.ClientKey
 	result.Token, result.TokenCommand, result.TokenEnv = connection.Token, connection.TokenCommand, connection.TokenFromEnvironment
 
 	result.Version = version
@@ -408,7 +411,7 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
-	cfg.Token, err = (client.Config{Token: cfg.Token, TokenCommand: cfg.TokenCommand}).ResolveToken(ctx)
+	cfg.Token, err = (client.Config{Token: cfg.Token, TokenCommand: cfg.TokenCommand, ClientCert: cfg.ClientCert, ClientKey: cfg.ClientKey}).ResolveToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +421,7 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 		}
 	}()
 
-	httpClient, err := mcpHTTPClientFunc(cfg.CAFile)
+	httpClient, err := certificateMCPClient(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +511,9 @@ func mcpRequestOnce(ctx context.Context, cfg mcpFlagResult, body []byte, request
 	httpReq.Header.Set("Content-Type", mcpContentTypeJSON)
 	httpReq.Header.Set("Accept", mcpAcceptStreamable)
 	httpReq.Header.Set("MCP-Protocol-Version", mcpProtocolVersion)
-	httpReq.Header.Set("Authorization", "Bearer "+cfg.Token)
+	if cfg.Token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+cfg.Token)
+	}
 	ua := "oberth-cli/" + cfg.Version
 	httpReq.Header.Set("User-Agent", ua)
 
@@ -652,4 +657,30 @@ func classifyMCPTransport(err error) error {
 		return fmt.Errorf("request timed out: %w", context.DeadlineExceeded)
 	}
 	return fmt.Errorf("connection failed: %w", err)
+}
+
+func certificateMCPClient(cfg mcpFlagResult) (*http.Client, error) {
+	if cfg.ClientCert != "" {
+		address, err := client.ValidateServerURL(cfg.URL)
+		if err != nil {
+			return nil, err
+		}
+		if address.Scheme != "https" {
+			return nil, errors.New("client certificate authentication requires https")
+		}
+	}
+	base, err := mcpHTTPClientFunc(cfg.CAFile)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.ClientCert == "" && cfg.ClientKey == "" {
+		return base, nil
+	}
+	transport, err := client.WithClientCertificate(base.Transport, cfg.ClientCert, cfg.ClientKey)
+	if err != nil {
+		return nil, err
+	}
+	copy := *base
+	copy.Transport = transport
+	return &copy, nil
 }

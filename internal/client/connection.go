@@ -18,14 +18,18 @@ import (
 // --ca-file. Empty fields fall back to the environment, then to the client
 // files oberth install writes (ConfigDir).
 type ConnectionFlags struct {
-	URL       string
-	TokenFile string
-	CAFile    string
+	ClientCert string
+	ClientKey  string
+	URL        string
+	TokenFile  string
+	CAFile     string
 }
 
 // Connection is one resolved server connection, shared by the REST commands
 // and the MCP client so both reach the same server with the same credential.
 type Connection struct {
+	ClientCert string
+	ClientKey  string
 	// BaseURL is the server's address for /api/* reads.
 	BaseURL string
 	// MCPURL is the MCP endpoint.
@@ -42,7 +46,7 @@ type Connection struct {
 
 // Config converts the connection to the REST client configuration.
 func (connection Connection) Config() Config {
-	return Config{BaseURL: connection.BaseURL, Token: connection.Token, TokenCommand: connection.TokenCommand, CACert: connection.CACert}
+	return Config{ClientCert: connection.ClientCert, ClientKey: connection.ClientKey, BaseURL: connection.BaseURL, Token: connection.Token, TokenCommand: connection.TokenCommand, CACert: connection.CACert}
 }
 
 // ErrNotConfigured reports that no flag, variable or client file names a
@@ -228,6 +232,20 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 		}
 	}
 
+	for _, pair := range [][2]string{{flags.ClientCert, flags.ClientKey}, {environment.ClientCert, environment.ClientKey}, {written["OBERTH_CLIENT_CERT"], written["OBERTH_CLIENT_KEY"]}, {regularFile(configured("client.crt")), regularFile(configured("client.key"))}} {
+		if pair[0] != "" || pair[1] != "" {
+			if pair[0] == "" || pair[1] == "" {
+				return connection, errors.New("both client certificate and key are required")
+			}
+			connection.ClientCert = pair[0]
+			connection.ClientKey = pair[1]
+			break
+		}
+	}
+	// Explicit certificate selection does not pick up a saved bearer implicitly.
+	if connection.ClientCert != "" && flags.TokenFile == "" {
+		return connection, nil
+	}
 	switch {
 	case strings.TrimSpace(flags.TokenFile) != "":
 		token, err := ReadOwnerOnlyTokenFile(flags.TokenFile)
@@ -270,7 +288,7 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 // owned by the user, or is writable by its group or by others. Missing files
 // pass.
 func TrustClientFiles(root string) error {
-	for _, path := range []string{root, filepath.Join(root, "env"), filepath.Join(root, "mcp.json"), filepath.Join(root, "token"), filepath.Join(root, "ca.crt")} {
+	for _, path := range []string{root, filepath.Join(root, "env"), filepath.Join(root, "mcp.json"), filepath.Join(root, "token"), filepath.Join(root, "ca.crt"), filepath.Join(root, "client.crt"), filepath.Join(root, "client.key")} {
 		if _, err := os.Lstat(path); err != nil {
 			continue
 		}

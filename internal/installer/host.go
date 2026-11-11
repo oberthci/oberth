@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/yaml"
 
+	"github.com/oberthci/oberth/internal/clientcert"
 	"github.com/oberthci/oberth/internal/mdnsdial"
 	"github.com/oberthci/oberth/internal/releaseverify"
 )
@@ -409,6 +410,33 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 }
 
 func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) error {
+	if cfg.AdminCSRPath != "" {
+		if cfg.AdminSSHPublicKeyPath == "" {
+			return errors.New("--admin-csr requires --admin-ssh-public-key")
+		}
+		file, err := os.Open(cfg.AdminCSRPath)
+		if err != nil {
+			return errors.New("cannot open admin CSR")
+		}
+		raw, err := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+		_ = file.Close()
+		if err != nil {
+			return errors.New("cannot read admin CSR")
+		}
+		if _, err := clientcert.ParseCSR(raw); err != nil {
+			return err
+		}
+		cfg.adminCSR = raw
+		if _, err := os.Lstat(cfg.AdminCSRPath + ".crt"); err == nil {
+			return errors.New("admin certificate output already exists; choose a new CSR path")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if cfg.AdminBearer && cfg.AdminCSRPath == "" {
+		return errors.New("--admin-bearer requires --admin-csr")
+	}
+
 	if cfg.AdminSSHPublicKeyPath != "" {
 		if cfg.SSHPublicKeyPath != "" && cfg.SSHPublicKeyPath != cfg.AdminSSHPublicKeyPath {
 			return errors.New("choose --admin-ssh-public-key or --ssh-public-key")

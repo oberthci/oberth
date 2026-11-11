@@ -42,6 +42,8 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	options.plan = flags.Bool("plan", false, "inspect the selected cluster and preflight checks without installing")
 	options.verify = flags.Bool("verify", false, "check an existing installation without changing it")
 	options.jsonOutput = flags.Bool("json", false, "emit the public install result and verification checks as JSON")
+	flags.StringVar(&cfg.AdminCSRPath, "admin-csr", "", "local client CSR for the first admin; certificate written to <CSR>.crt, no bearer by default")
+	flags.BoolVar(&cfg.AdminBearer, "admin-bearer", false, "also mint a bearer token with --admin-csr")
 	flags.StringVar(&cfg.AdminSSHPublicKeyPath, "admin-ssh-public-key", "", "local SSH public key for the first admin uplink (file or - for stdin; never a private key)")
 	flags.StringVar(&cfg.SecretsAgeRecipient, "secrets-age-recipient", "", "age recipient for encrypting --secrets-file; requires age on PATH")
 	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "kubeconfig file for an existing cluster")

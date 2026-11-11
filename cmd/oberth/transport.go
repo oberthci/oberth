@@ -22,6 +22,8 @@ func registerTransportFlags(flags *flag.FlagSet) *client.ConnectionFlags {
 	var connection client.ConnectionFlags
 	flags.StringVar(&connection.URL, "url", "", transportURLUsage)
 	flags.StringVar(&connection.TokenFile, "token-file", "", transportTokenFileUsage)
+	flags.StringVar(&connection.ClientCert, "client-cert", "", "PEM client certificate (default: OBERTH_CLIENT_CERT or client files)")
+	flags.StringVar(&connection.ClientKey, "client-key", "", "owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)")
 	flags.StringVar(&connection.CAFile, "ca-file", "", transportCAFileUsage)
 	return &connection
 }

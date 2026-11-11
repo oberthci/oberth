@@ -12,6 +12,8 @@ import (
 // ClientSetupFlags are `oberth client setup`'s flags. Every empty field falls
 // back to the CLI's existing configuration on this machine.
 type ClientSetupFlags struct {
+	ClientCert  string
+	ClientKey   string
 	URL         string
 	CAFile      string
 	TokenFile   string
@@ -38,7 +40,7 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 	if !validCATrust(setup.CATrust) {
 		return setup, nil, fmt.Errorf("--ca-trust must be one of %s", strings.Join(CATrustChoices, ", "))
 	}
-	connection, err := client.ResolveConnection(client.ConnectionFlags{URL: flags.URL, TokenFile: flags.TokenFile, CAFile: flags.CAFile})
+	connection, err := client.ResolveConnection(client.ConnectionFlags{ClientCert: flags.ClientCert, ClientKey: flags.ClientKey, URL: flags.URL, TokenFile: flags.TokenFile, CAFile: flags.CAFile})
 	if connection.MCPURL == "" {
 		if err == nil {
 			err = client.ErrNotConfigured
@@ -50,6 +52,10 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 	}
 	setup.URL = connection.MCPURL
 	setup.CA = connection.CACert
+	setup.ClientCert, setup.ClientKey = connection.ClientCert, connection.ClientKey
+	if err == nil && connection.ClientCert != "" {
+		return setup, notes, nil
+	}
 	switch {
 	case err != nil && strings.TrimSpace(flags.TokenFile) != "":
 		return setup, nil, err

@@ -49,7 +49,7 @@ func TestClientSetupDryRunPrintsAndChangesNothing(t *testing.T) {
 	for _, want := range []string{
 		"Dry run: nothing is changed.", "would be set", "NODE_EXTRA_CA_CERTS: unset -> " + filepath.Join(home, ".claude", "oberth", "ca.crt"),
 		"Claude Code plugin oberth@oberthci: would be installed or configured", "claude plugin install oberth --marketplace oberthci/oberth",
-		"url: https://oberth.example:30443/mcp", "ca_pin: " + testClientCAPin, "/plugin configure oberth@oberthci", "Note: no token is saved for the plugin",
+		"url: https://oberth.example:30443/mcp", "ca_pin: " + testClientCAPin, "/oberth:connect", "Note: no token is saved for the plugin",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, &out)

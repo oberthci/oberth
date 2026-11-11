@@ -624,6 +624,9 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 		value.Scope = scopes
 	}
 	if displacedCredentialID != "" && displacedCredentialID != spec.TokenCredentialID {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM uplink_client_pins WHERE uplink_id=?`, existingID); err != nil {
+			return model.Uplink{}, err
+		}
 		if _, err := revokeTokenCredentialTx(ctx, tx, displacedCredentialID, now); err != nil {
 			return model.Uplink{}, fmt.Errorf("revoke displaced credential: %w", err)
 		}

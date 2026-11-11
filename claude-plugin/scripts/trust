@@ -233,10 +233,13 @@ settings() {
 					if ((depth == 1 || (depth == 2 && inside)) && index(name, "\\")) refuse("has a key with an escape this command does not read")
 					v = space(k + 1)
 					if (depth == 1 && name == "env") {
+						if (environment) refuse("has duplicate env objects")
 						if (substr(s, v, 1) != "{") refuse("env is not an object")
 						environment = v; from = 0; to = 0
 					} else if (depth == 2 && inside && name == key) {
+						if (from) refuse("has duplicate env." key)
 						if (substr(s, v, 1) != "\"") refuse("env." key " is not a string")
+						member_start = i
 						from = v; to = closing(v)
 						if (!to) refuse("has an unterminated string")
 					}
@@ -257,6 +260,19 @@ settings() {
 			if (!finished) refuse("is not a complete JSON object")
 			if (mode == "get") {
 				if (from) printf "%s", decoded(substr(s, from + 1, to - from - 1))
+				exit 0
+			}
+			if (mode == "unset") {
+				if (!from) { printf "%s", s; exit 0 }
+				after = space(to + 1)
+				if (substr(s, after, 1) == ",") {
+					printf "%s", substr(s, 1, member_start - 1) substr(s, after + 1)
+				} else {
+					before = member_start - 1
+					while (before > environment && index(" \t\r\n", substr(s, before, 1))) before--
+					if (substr(s, before, 1) == ",") member_start = before
+					printf "%s", substr(s, 1, member_start - 1) substr(s, to + 1)
+				}
 				exit 0
 			}
 			if (from) {
@@ -305,8 +321,19 @@ hint() {
 	claude=$(claude_directory) || exit 0
 	store="$claude/oberth"
 	url=$(shown "${CLAUDE_PLUGIN_OPTION_URL:-}")
+ if [ -z "$url" ] && [ -r "$store/url" ]; then url=$(shown "$(cat "$store/url")"); fi
+ if [ -n "$url" ]; then
+  variable=CLAUDE_CODE_CLIENT_CERT
+  cert=$(current_trust "$claude/settings.json" 2>/dev/null) || cert=
+  variable=NODE_EXTRA_CA_CERTS
+  if [ -z "$cert" ] || [ ! -r "$cert" ]; then
+   echo "Oberth plugin: no client certificate is configured. Use /oberth:connect for certificate enrollment, or configure an explicit bearer setup."
+  elif ! openssl x509 -in "$cert" -checkend 2592000 -noout >/dev/null 2>&1; then
+   echo "Oberth plugin: client certificate is missing, expired or expires within 30 days. Run the plugin scripts/trust renew command (oberth client renew with the configured connection paths) before expiry; expired certificates require admin enrollment."
+  fi
+ fi
 	if [ -z "$url" ]; then
-		echo "Oberth plugin: no Oberth server is configured, so the oberth MCP tools are not connected. Do not bring this up unless the user asks about Oberth or CI. Then offer two ways: to install a new Oberth on the Kubernetes cluster their KUBECONFIG names, run /oberth:install; to use an existing one, ask their Oberth admin for the MCP URL, an uplink token and the CA pin (oberth client pin), enter them with /plugin configure oberth@oberthci (the user types the token there, never into the chat), then run /oberth:connect."
+		echo "Oberth plugin: no Oberth server is configured, so the oberth MCP tools are not connected. Do not bring this up unless the user asks about Oberth or CI. Then offer two ways: to install a new Oberth on the Kubernetes cluster their KUBECONFIG names, run /oberth:install; to use an existing one, ask their Oberth admin for the MCP URL, a client certificate enrollment and the CA pin (oberth client pin), enter them with /plugin configure oberth@oberthci (public configuration only), then run /oberth:connect."
 		exit 0
 	fi
 	echo "Oberth plugin: if system_status reports sealed or credentials are unavailable after reboot, sealed: run /oberth:unseal. Give it only the installer secrets-file path; never read or paste the key."
@@ -526,7 +553,110 @@ connect() {
 	echo "Restart Claude Code once: it reads its CA trust only when it starts. The operating system's trust store was not touched."
 }
 
+# Generate a local client key once. Reuse it only with its matching CSR.
+keygen() {
+ claude=$(claude_directory); store="$claude/oberth"
+ mkdir -p "$store"; chmod 700 "$store"
+ if [ -L "$store/current" ]; then
+  [ "$(cat "$store/current/.oberth-client-identity" 2>/dev/null)" = oberth-client-identity-v1 ] || fail "current directory is not a managed client identity"
+  [ -f "$store/current/client.key" ] && [ -f "$store/current/client.csr" ] || fail "incomplete client key/CSR pair"
+  openssl req -in "$store/current/client.csr" -verify -noout >/dev/null 2>&1 || fail "invalid client CSR"
+  csrpub=$(openssl req -in "$store/current/client.csr" -pubkey -noout 2>/dev/null) || fail "invalid client CSR"
+  keypub=$(openssl pkey -in "$store/current/client.key" -pubout 2>/dev/null) || fail "invalid client key"
+  [ "$csrpub" = "$keypub" ] || fail "client CSR does not match local key"
+ else
+  [ ! -e "$store/current" ] || fail "current identity must be a symlink"
+  work=$(mktemp -d "$store/identity-XXXXXX")
+  printf 'oberth-client-identity-v1\n' >"$work/.oberth-client-identity"
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out "$work/client.key" 2>/dev/null || fail "cannot generate client key"
+  chmod 600 "$work/client.key"
+  openssl req -new -sha256 -key "$work/client.key" -subj /CN=oberth-client -out "$work/client.csr" 2>/dev/null || fail "cannot generate CSR"
+  ln -s "$work" "$store/current" || fail "client identity already exists"
+ fi
+ chmod 600 "$store/current/client.key"
+ echo "Local client key and public CSR ready: $store/current/client.csr"
+}
+
+credentials() {
+ claude=$(claude_directory); store="$claude/oberth"
+ cert=${1:-$store/current/client.csr.crt}; key=${2:-$store/current/client.key}
+ [ -f "$key" ] && [ ! -L "$key" ] || fail "client key must be a regular file"
+ openssl x509 -in "$cert" -checkend 0 -noout >/dev/null 2>&1 || fail "missing, invalid or expired client certificate"
+ certpub=$(openssl x509 -in "$cert" -pubkey -noout 2>/dev/null) || fail "invalid client certificate"
+ keypub=$(openssl pkey -in "$key" -pubout 2>/dev/null) || fail "invalid client key"
+ [ "$certpub" = "$keypub" ] || fail "client certificate does not match local key"
+ chmod 600 "$key"
+ mkdir -p "$claude"
+ settings_file="$claude/settings.json"
+ work=$(mktemp -d "$claude/.client-settings.XXXXXX")
+ trap 'rm -rf "$work"' EXIT
+ if [ -e "$settings_file" ]; then cp "$settings_file" "$work/one"; else printf '{}\n' >"$work/one"; fi
+ variable=CLAUDE_CODE_CLIENT_CERT; OBERTH_TRUST_VALUE="$cert"; export OBERTH_TRUST_VALUE
+ settings set "$work/one" >"$work/two" || fail "settings unchanged"
+ variable=CLAUDE_CODE_CLIENT_KEY; OBERTH_TRUST_VALUE="$key"; export OBERTH_TRUST_VALUE
+ settings set "$work/two" >"$work/three" || fail "settings unchanged"
+ chmod 600 "$work/three"; write_file "$settings_file" "$work/three"
+ echo "Claude Code client certificate configured; existing environment settings kept."
+}
+
+renew() {
+ claude=$(claude_directory); store="$claude/oberth"
+ [ -r "$store/url" ] || fail "no configured endpoint; run /oberth:connect"
+ url=$(cat "$store/url")
+ variable=CLAUDE_CODE_CLIENT_CERT; cert=$(current_trust "$claude/settings.json")
+ variable=CLAUDE_CODE_CLIENT_KEY; key=$(current_trust "$claude/settings.json")
+ variable=NODE_EXTRA_CA_CERTS; ca=$(current_trust "$claude/settings.json")
+ command -v oberth >/dev/null 2>&1 || fail "oberth CLI is needed for renewal"
+ oberth client renew --url "$url" --ca-file "$ca" --client-cert "$cert" --client-key "$key"
+}
+
+clear_client_credentials() {
+ claude=$(claude_directory); settings_file="$claude/settings.json"
+ [ -e "$settings_file" ] || return 0
+ work=$(mktemp -d "$claude/.client-settings.XXXXXX")
+ trap 'rm -rf "$work"' EXIT
+ variable=CLAUDE_CODE_CLIENT_CERT
+ settings unset "$settings_file" >"$work/one" || fail "settings unchanged"
+ variable=CLAUDE_CODE_CLIENT_KEY
+ settings unset "$work/one" >"$work/two" || fail "settings unchanged"
+ chmod 600 "$work/two"; write_file "$settings_file" "$work/two"
+}
+
+# Register only a configured endpoint. No empty MCP server exists at plugin install.
+configure() {
+ url=${1:-}; token_file=${2:-}
+ case "$url" in https://*) ;; *) fail "MCP URL must use https://";; esac
+ case "$url" in *[!]A-Za-z0-9._~:/%[-]*) fail "invalid MCP URL";; esac
+ command -v claude >/dev/null 2>&1 || fail "Claude Code CLI is required"
+ if [ -n "$token_file" ]; then
+  # The helper, not an argv value, supplies the bearer to Claude Code.
+  case "$token_file" in *[!A-Za-z0-9/@._-]*) fail "token file path must contain only letters, digits, / . _ -";; esac
+  source_helper=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/bearer-headers
+  helper_store=$(claude_directory)/oberth
+  mkdir -p "$helper_store"; chmod 700 "$helper_store"
+  cp "$source_helper" "$helper_store/bearer-headers.new"
+  chmod 700 "$helper_store/bearer-headers.new"
+  mv -f "$helper_store/bearer-headers.new" "$helper_store/bearer-headers"
+  helper="$helper_store/bearer-headers"
+  case "$helper" in *[!A-Za-z0-9/@._-]*) fail "plugin path cannot be quoted safely";; esac
+  config=$(printf '{"type":"http","url":"%s","timeout":630000,"headersHelper":"sh %s %s"}' "$url" "$helper" "$token_file")
+  clear_client_credentials
+ else
+  config=$(printf '{"type":"http","url":"%s","timeout":630000}' "$url")
+ fi
+ # Configure explicitly replaces only the user-scope Oberth entry.
+ claude mcp remove --scope user oberth >/dev/null 2>&1 || true
+ claude mcp add-json --scope user oberth "$config" >/dev/null || fail "could not register configured MCP server; inspect the existing oberth entry with claude mcp get oberth"
+ claude=$(claude_directory);mkdir -p "$claude/oberth"
+ printf '%s\n' "$url" >"$claude/oberth/url"
+ echo "Oberth MCP endpoint configured. Restart Claude Code once after initial trust and certificate setup."
+}
+
 case "${1:-}" in
+keygen) shift; keygen "$@" ;;
+renew) shift; renew "$@" ;;
+credentials) shift; credentials "$@" ;;
+configure) shift; configure "$@" ;;
 connect)
 	shift
 	connect "$@"

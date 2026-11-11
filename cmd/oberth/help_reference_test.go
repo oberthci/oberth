@@ -57,6 +57,7 @@ mcp tools
 client
 client setup
 client pin
+client renew
 outbox
 preflight
 preflight drift
@@ -121,6 +122,7 @@ unseal
 upgrade
 uplink
 uplink add
+uplink cert
 uplink list
 uplink remove
 uplink rotate

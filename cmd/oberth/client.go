@@ -19,6 +19,7 @@ Configure this machine's MCP client (Claude Code) for an Oberth server.
 
 Commands:
   setup   trust the server's CA in Claude Code and install the Oberth plugin
+  renew   renew with the current certificate and rotate the local key
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
 Use oberth client <command> --help for its flags.`
@@ -29,11 +30,10 @@ Make Claude Code trust the Oberth server's CA and install the Oberth plugin.
 The CA is stored as oberth/ca.crt in Claude Code's directory (~/.claude) and
 env.NODE_EXTRA_CA_CERTS in its settings.json is made to hold it; other keys
 and an existing bundle are kept, and the operating system's trust store is
-never touched. The plugin (` + installer.ClaudePluginID + `) carries the MCP server entry, the
-agent-loop skill and /oberth:connect; no user-scope MCP server is registered.
-Its options are set to the server's MCP URL and the CA pin. A token this
-machine already holds is passed to Claude Code's credential store on
-standard input; without one the plugin asks for it in Claude Code.
+never touched. The plugin (` + installer.ClaudePluginID + `) carries the
+agent-loop skill and /oberth:connect. The configured user MCP entry uses the
+client certificate and key, or an explicit bearer credential in a private
+file read by a header helper. Unconfigured plugins create no MCP entry.
 
 Unset flags fall back to OBERTH_MCP_URL, OBERTH_BASE_URL, OBERTH_CA_CERT,
 OBERTH_TOKEN, OBERTH_TOKEN_COMMAND and the files oberth install writes in
@@ -61,6 +61,8 @@ func runClient(ctx context.Context, arguments []string, output io.Writer) error 
 		return err
 	case "setup":
 		return runClientSetup(ctx, arguments[1:], output)
+	case "renew":
+		return runClientRenew(ctx, arguments[1:], output)
 	case "pin":
 		return runClientPin(arguments[1:], output)
 	default:
@@ -71,9 +73,11 @@ func runClient(ctx context.Context, arguments []string, output io.Writer) error 
 func runClientSetup(ctx context.Context, arguments []string, output io.Writer) error {
 	var options installer.ClientSetupFlags
 	flags := flag.NewFlagSet("client setup", flag.ContinueOnError)
+	flags.StringVar(&options.ClientCert, "client-cert", "", "PEM client certificate")
+	flags.StringVar(&options.ClientKey, "client-key", "", "owner-only PEM client private key")
 	flags.StringVar(&options.URL, "url", "", "server MCP endpoint or base address, e.g. https://localhost:30443/mcp")
 	flags.StringVar(&options.CAFile, "ca-file", "", "the deployment's CA certificate (PEM)")
-	flags.StringVar(&options.TokenFile, "token-file", "", "owner-only (0600) file holding the bearer token; it replaces the token the plugin holds")
+	flags.StringVar(&options.TokenFile, "token-file", "", "owner-only (0600) file holding the bearer token; it replaces the private bearer file used by Claude Code")
 	flags.StringVar(&options.CATrust, "ca-trust", installer.CATrustSettings, "how Claude Code trusts the CA: "+strings.Join(installer.CATrustChoices, ", "))
 	flags.StringVar(&options.Marketplace, "marketplace", "", "plugin marketplace source: owner/repo, a git URL or a path (default "+installer.DefaultClaudePluginMarketplace+")")
 	flags.BoolVar(&options.DryRun, "dry-run", false, "print what would change and change nothing")
