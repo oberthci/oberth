@@ -47,4 +47,9 @@ the chart changes, and the cluster needs the Prometheus Operator CRDs.
 The chart refuses an enabled monitor without the token Secret or the CA: the
 scrape always verifies the server certificate. The admin token in that Secret
 can do everything an administrator can; whoever can read Secrets in the
-release namespace can read it.
+release namespace can read it. The Prometheus Operator also copies it into
+the configuration Secret of every Prometheus that selects this monitor, so
+whoever can read Secrets in that Prometheus's namespace, or exec into its
+Pod, holds it too: enable the monitor only where that is acceptable. The
+token expires like any other uplink token (`uplinkTokens.defaultTTL`); the
+scrape then fails with 401 until the Secret holds a new one.
