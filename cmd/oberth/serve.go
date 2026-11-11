@@ -911,7 +911,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return fmt.Errorf("load HTTPS identity: %w", err)
 	}
-	health := configuredHealth(options)
+	health := configuredHealth(options, hostKey)
 	health.WriterReady = writerProgress.ProbeError
 	health.Store = database
 	health.Audit = anchors.Ready
@@ -2323,8 +2323,14 @@ func shutdownHTTP(ctx context.Context, server *http.Server) error {
 }
 
 // configuredHealth carries deployment configuration into both status views.
-func configuredHealth(options serveOptions) app.Health {
-	return app.Health{SecretStore: secretStoreStatus(options), PipelineNetworkPolicyEnabled: options.pipelineNetworkPolicyEnabled}
+// The server's SSH host public key rides along so clients can pin the Git
+// endpoint from the CA-verified status API.
+func configuredHealth(options serveOptions, hostKey []byte) app.Health {
+	health := app.Health{SecretStore: secretStoreStatus(options), PipelineNetworkPolicyEnabled: options.pipelineNetworkPolicyEnabled}
+	if signer, err := sshserver.ParseHostSigner(hostKey); err == nil {
+		health.SSHHostKey = signer.PublicKey()
+	}
+	return health
 }
 
 // warnRetiredCapacityOverride logs a run ceiling an older server stored with

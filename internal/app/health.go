@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -52,6 +54,10 @@ type Health struct {
 	// Identity optionally reports the SSH public-key fingerprint used for
 	// upstream Git authentication (never the private key).
 	Identity func(context.Context) (string, error)
+	// SSHHostKey is this server's own SSH host public key (authorized-key
+	// form), published on both status views so Git clients can pin it from
+	// the CA-verified HTTPS API instead of trusting it on first use.
+	SSHHostKey ssh.PublicKey
 	// SecretStore optionally summarizes the configured OpenBao connection.
 	// It carries configuration only — never a token or secret value.
 	SecretStore *SecretStoreStatus
@@ -142,9 +148,13 @@ type HealthStatus struct {
 	Version                 string                                    `json:"version,omitempty"`
 	UpstreamInfo            []UpstreamStatus                          `json:"upstream_info,omitempty"`
 	SSHIdentity             string                                    `json:"ssh_identity,omitempty"`
-	SecretStore             *SecretStoreStatus                        `json:"secret_store,omitempty"`
-	AuditChain              *AuditChainStatus                         `json:"audit_chain,omitempty"`
-	LastBackup              *model.BackupStatus                       `json:"last_backup,omitempty"`
+	// SSHHostKey and SSHHostKeyFingerprint describe the server's own SSH
+	// endpoint (git push/clone), not an upstream identity.
+	SSHHostKey            string              `json:"ssh_host_key,omitempty"`
+	SSHHostKeyFingerprint string              `json:"ssh_host_key_fingerprint,omitempty"`
+	SecretStore           *SecretStoreStatus  `json:"secret_store,omitempty"`
+	AuditChain            *AuditChainStatus   `json:"audit_chain,omitempty"`
+	LastBackup            *model.BackupStatus `json:"last_backup,omitempty"`
 	// LastBackupWarning explains an omitted last_backup when the latest
 	// backup record exists but cannot be read.
 	LastBackupWarning string `json:"last_backup_warning,omitempty"`
@@ -245,6 +255,7 @@ func (health Health) pipelineNetworkPolicyDetail() string {
 
 func (health Health) Status(ctx context.Context) (any, error) {
 	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", ClusterDetail: health.pipelineNetworkPolicyDetail(), Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
+	status.SSHHostKey, status.SSHHostKeyFingerprint = health.hostKey()
 	if health.DatabaseRetries != nil {
 		status.DatabaseRetries = health.DatabaseRetries()
 	}
@@ -358,11 +369,19 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	return status, nil
 }
 
+func (health Health) hostKey() (string, string) {
+	if health.SSHHostKey == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(health.SSHHostKey))), ssh.FingerprintSHA256(health.SSHHostKey)
+}
+
 // ScopedStatus is the status an upstream-scoped uplink sees (#073): only its
 // upstreams and their repositories are counted and shown. The audit chain
 // and the secret store describe the whole installation, so they are left out.
 func (health Health) ScopedStatus(ctx context.Context, actor api.Actor) (any, error) {
 	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", ClusterDetail: health.pipelineNetworkPolicyDetail(), Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version}
+	status.SSHHostKey, status.SSHHostKeyFingerprint = health.hostKey()
 	if health.Store == nil {
 		return status, nil
 	}
