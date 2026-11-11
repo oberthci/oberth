@@ -55,16 +55,8 @@ ORDER BY r.queue_sequence LIMIT ?`, cutoff, unixNano(s.now()), keepNewest, keepN
 	if err != nil {
 		return 0, err
 	}
-	var selected []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return 0, err
-		}
-		selected = append(selected, id)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+	selected, err := scanRunTimingCandidates(rows)
+	if err != nil {
 		return 0, err
 	}
 	var pruned int64
@@ -78,6 +70,21 @@ ORDER BY r.queue_sequence LIMIT ?`, cutoff, unixNano(s.now()), keepNewest, keepN
 		selected = selected[len(batch):]
 	}
 	return pruned, nil
+}
+
+// scanRunTimingCandidates reads the selection and closes it before the
+// prune batches take the writer.
+func scanRunTimingCandidates(rows *sql.Rows) ([]string, error) {
+	defer func() { _ = rows.Close() }()
+	var selected []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		selected = append(selected, id)
+	}
+	return selected, rows.Err()
 }
 
 func (s *Store) pruneRunTimingBatch(ctx context.Context, ids []string, keepNewest int) (int64, error) {

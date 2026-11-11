@@ -38,6 +38,18 @@ func (scheduler *Scheduler) deferRefusedDeletions(ctx context.Context, runID str
 	return nil
 }
 
+// settlePodJournal prunes a terminal run's pod-log journal once its log
+// projection is indexed: now when the Workflow is settled, or by the dispatch
+// pass that deletes it when the worker deferred that deletion.
+func (scheduler *Scheduler) settlePodJournal(ctx context.Context, runID, logPath string, projectionReady, workflowSettled, deletionDeferred bool) {
+	switch {
+	case projectionReady && workflowSettled:
+		scheduler.pruneTerminalPodJournal(ctx, runID, logPath)
+	case projectionReady && deletionDeferred:
+		scheduler.deferPodJournalPrune(ctx, runID, logPath)
+	}
+}
+
 // deferPodJournalPrune hands a deferred run's pod-log journal to the dispatch
 // pass that deletes its Workflow. When that pass already completed the run's
 // obligation, the journal is pruned here instead; either way exactly once.

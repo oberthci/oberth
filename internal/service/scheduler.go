@@ -1138,11 +1138,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		if progressLog.journal != nil {
 			_ = progressLog.journal.Close()
 		}
-		if projectionReady && workflowSettled {
-			scheduler.pruneTerminalPodJournal(ctx, run.ID, logFile.Name())
-		} else if projectionReady && journalDeferred {
-			scheduler.deferPodJournalPrune(ctx, run.ID, logFile.Name())
-		}
+		scheduler.settlePodJournal(ctx, run.ID, logFile.Name(), projectionReady, workflowSettled, journalDeferred)
 	}()
 
 	// The plan is recorded here: after the pipeline object exists, so a run
@@ -1241,8 +1237,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			if err := scheduler.completePendingCancellationsWithGate(finalizeCtx, require); err != nil {
 				reservation.retain()
 				err = scheduler.deferRefusedDeletions(finalizeCtx, run.ID, err)
-				// The pass that later deletes the Workflow prunes the journal.
-				journalDeferred = err == nil
+				journalDeferred = err == nil // the pass that deletes the Workflow prunes the journal
 				return err
 			}
 			workflowSettled = true
