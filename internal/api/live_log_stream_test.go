@@ -293,7 +293,7 @@ func TestLiveLogStreamRevalidatesCredentialAndAuthority(t *testing.T) {
 					t.Fatalf("credential check unbounded: %s", elapsed)
 				}
 				body := response.Body.String()
-				if authCalls != 2 || reads == 0 || strings.Count(body, "event: auth_error\n") != 1 || !strings.Contains(body, "reconnect with a current bearer token") || strings.Contains(body, "private credential") || strings.Contains(body, "event: chunk") {
+				if authCalls != 2 || reads == 0 || strings.Count(body, "event: auth_error\n") != 1 || !strings.Contains(body, "reconnect with current credentials") || strings.Contains(body, "private credential") || strings.Contains(body, "event: chunk") {
 					t.Fatalf("auth=%d reads=%d body=%s", authCalls, reads, body)
 				}
 			})
