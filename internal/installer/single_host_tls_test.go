@@ -1,6 +1,8 @@
 package installer
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"slices"
@@ -9,6 +11,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 func TestSingleHostNamesFollowSelectedNode(t *testing.T) {
@@ -68,5 +73,28 @@ func TestExistingIPConstrainedCANeverDowngrades(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "cannot preserve") {
 			t.Fatal("IP-constrained CA could be replaced by DNS-only generator")
 		}
+	}
+}
+
+func TestInstallJSONKeepsDiscoveredNamesAfterPreflightRefusal(t *testing.T) {
+	var output bytes.Buffer
+	kube := fake.NewClientset(preflightNode(), preflightStorage())
+	deps := InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil },
+		LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+			return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
+		}, RunCommand: preflightStats,
+		RunHelm: func(context.Context, []string) ([]byte, error) {
+			t.Fatal("Helm ran after failed preflight")
+			return nil, nil
+		}}
+	if err := ExecuteJSON(t.Context(), Config{ContextName: "chosen", NetworkPolicy: "false"}, deps); err == nil {
+		t.Fatal("disabled isolation was accepted")
+	}
+	var result InstallResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.OK || result.Review == nil || !slices.Contains(result.Review.DNSNames, "node.local") || !slices.Contains(result.Review.IPs, "::1") {
+		t.Fatal("JSON discarded the cluster's discovered certificate names")
 	}
 }
