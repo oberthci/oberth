@@ -445,8 +445,8 @@
       "test_ref": "internal/installer/unseal_review_test.go TestBootUnsealRequiresAndPreservesSelectedContext"
     },
     "env:PATH": {
-      "doc_anchor": "docs/unseal.md",
-      "test_ref": "internal/installer/unseal_review_test.go TestUnsealSubprocessDoesNotExposeCredentials"
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/installer/client_cert_test.go TestExplicitBearerSetupClearsClientCertificate"
     },
     "flag:bearer": {
       "doc_anchor": "docs/client-certificates.md",
@@ -504,9 +504,17 @@
       "doc_anchor": "docs/installer-resume.md#resume-a-partial-install",
       "test_ref": "internal/installer/resume_secrets_test.go TestResumeInstallReadsPrivateRootWithoutOutput"
     },
-    "env:PATH": {
-      "doc_anchor": "docs/client-certificates.md",
-      "test_ref": "internal/installer/client_cert_test.go TestExplicitBearerSetupClearsClientCertificate"
+    "flag:consent": {
+      "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",
+      "test_ref": "internal/installer/plugin_add_repo_test.go TestAddRepoConfiguresOnlyTheRepositoryWithConsent"
+    },
+    "value:plugin.add-repo": {
+      "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",
+      "test_ref": "internal/installer/claude_plugin_test.go TestClaudePluginManifests"
+    },
+    "value:plugin.add-repo.actions": {
+      "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",
+      "test_ref": "internal/installer/plugin_add_repo_test.go TestAddRepoDeployKeyConsentAndManualFallback"
     }
   }
 }

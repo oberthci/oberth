@@ -107,7 +107,7 @@ func TestClaudePluginManifests(t *testing.T) {
 	if _, err := os.Stat(pluginPath(t, "scripts", "bearer-headers")); err != nil {
 		t.Fatal(err)
 	}
-	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 5 || entries[0].Name() != "bearer-headers" || entries[1].Name() != "fetch-oberth" || entries[2].Name() != "install" || entries[3].Name() != "trust" || entries[4].Name() != "unseal" {
+	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 6 || entries[0].Name() != "add-repo" || entries[1].Name() != "bearer-headers" || entries[2].Name() != "fetch-oberth" || entries[3].Name() != "install" || entries[4].Name() != "trust" || entries[5].Name() != "unseal" {
 		t.Fatalf("scripts = %v %v", entries, err)
 	}
 
@@ -140,6 +140,9 @@ func TestClaudePluginManifests(t *testing.T) {
 			"name: install", "description:", "$ARGUMENTS", "--secrets-file", "--context", "--expected-host-fingerprint",
 			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "scripts/fetch-oberth", "allowed-tools:", "trust on first",
 			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "exactly as printed", "--replace-client-files",
+		},
+		"add-repo": {
+			"name: add-repo", "allowed-tools:", "--consent", "push.pushOption=oberth.assist=1", "Never set assist globally", "settings URL", "Never overwrite", "events_wait", "run_wait", "No token",
 		},
 		"connect": {
 			"name: connect", "description:", `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" connect --url`,
