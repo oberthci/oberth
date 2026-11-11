@@ -443,6 +443,10 @@
     "env:OPENBAO_NAMESPACE": {
       "doc_anchor": "deploy/systemd/README.md#tpm2-bound-openbao-auto-unseal",
       "test_ref": "internal/installer/unseal_review_test.go TestBootUnsealRequiresAndPreservesSelectedContext"
+    },
+    "env:PATH": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_review_test.go TestUnsealSubprocessDoesNotExposeCredentials"
     }
   }
 }
