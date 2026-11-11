@@ -1308,7 +1308,7 @@ spec:
     - name: store-test-tmp
       emptyDir:
         medium: Memory
-        sizeLimit: 768Mi
+        sizeLimit: 1Gi
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src

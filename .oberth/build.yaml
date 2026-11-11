@@ -1279,7 +1279,7 @@ spec:
     - name: store-test-tmp
       emptyDir:
         medium: Memory
-        sizeLimit: 768Mi
+        sizeLimit: 1Gi
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1339,7 +1339,7 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # The 4Gi envelope includes up to 768Mi of store fixtures on tmpfs;
+      # The 4Gi envelope includes up to 1Gi of store fixtures on tmpfs (two workers, each backup test reserves 256Mi);
       # leave room above the 2GiB Go heap target for the race detector.
       # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
       # Observed CPU avg max 1950.3m, memory peak 929.7Mi, pod storage 245.8Mi.
