@@ -156,9 +156,6 @@ func seed(ctx context.Context, path string) {
 	}
 	pipeline := fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1
 kind: Workflow
-metadata:
-  annotations:
-    oberth.ci/size: M
 spec:
   entrypoint: trivial
   activeDeadlineSeconds: 600

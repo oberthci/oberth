@@ -24,7 +24,12 @@ func TestServePressureHardValveDefaultsAndValidation(t *testing.T) {
 }
 
 func TestChartPressureRendersOnlyHardValve(t *testing.T) {
-	for _, set := range []string{"admission.pressure.mode=retired", "admission.pressure.hardCpu=29", "admission.pressure.cpuSomeAvg10=101"} {
+	for _, removed := range []string{"admission.pressure.mode=observe", "admission.pressure.cpuSomeAvg10=101"} {
+		if output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", removed).CombinedOutput(); err == nil {
+			t.Fatalf("removed pressure value rendered: %s %s", removed, output)
+		}
+	}
+	for _, set := range []string{"admission.pressure.hardCpu=29"} {
 		output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", set).CombinedOutput()
 		if err != nil {
 			t.Fatalf("retired knob affected rendering: %v %s", err, output)

@@ -281,10 +281,7 @@ func (service *API) prepareRunWait(ctx context.Context, raw json.RawMessage) (fu
 	if service.history == nil {
 		return nil, refuse(ErrUnavailable, "run history")
 	}
-	seconds, err := arguments.seconds()
-	if err != nil {
-		return nil, err
-	}
+	seconds := arguments.seconds()
 	duration, err := service.waitDuration(seconds)
 	if err != nil {
 		return nil, err

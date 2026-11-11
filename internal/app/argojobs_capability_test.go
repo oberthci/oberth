@@ -14,7 +14,7 @@ import (
 const appCapabilityWorkflow = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  annotations: {oberth.ci/size: M}
+  annotations: {example.com/tier: M}
 spec:
   entrypoint: main
   activeDeadlineSeconds: 300

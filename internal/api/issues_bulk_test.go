@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -24,7 +23,7 @@ func TestIssueBulkMCPEncodingBoundAndFullRecords(t *testing.T) {
 		if len(encoded) > IssueGetManyMaximumBytes {
 			t.Fatal("fixture exceeds structured budget")
 		}
-		result := toolSuccess(context.Background(), payload)
+		result := toolSuccess(payload)
 		envelope, err := json.Marshal(result)
 		if err != nil {
 			t.Fatal(err)

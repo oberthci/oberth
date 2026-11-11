@@ -23,7 +23,6 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: L
     oberth.ci/secret-paths: myproject/data/release/registry-token,myproject/data/release/cosign-key
 spec:
   entrypoint: release

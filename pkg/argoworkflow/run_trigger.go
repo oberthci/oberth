@@ -51,24 +51,6 @@ func (trigger RunTrigger) Tier() pipeline.Trigger {
 }
 
 const (
-	// SizeByTriggerAnnotation declares the admission weight per run trigger,
-	// as comma-separated trigger=size pairs:
-	//
-	//	oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"
-	//
-	// Triggers are branch, promotion, and schedule in build.yaml and tag in
-	// release.yaml; sizes are S, M, L, and XL. A trigger the annotation does
-	// not name falls back to oberth.ci/size (and that to M). Like
-	// oberth.ci/size it is read statically from the run's own immutable
-	// document before admission; an unknown trigger or size, a duplicate, or a
-	// trigger the document can never run for refuses the run.
-	//
-	// It exists so a repository whose full gate is heavy (a kernel matrix, say)
-	// can keep that gate on promotion and nightly runs without making every
-	// branch push drain the host. Pair it with a `when:` guard over the
-	// oberth-trigger workflow parameter so the skipped work actually skips.
-	SizeByTriggerAnnotation = "oberth.ci/size-by-trigger"
-
 	// TriggerParameter is the server-owned workflow parameter carrying the
 	// run's RunTrigger, readable in templates and `when:` guards as
 	// {{workflow.parameters.oberth-trigger}}. The server sets it from the
@@ -80,87 +62,13 @@ const (
 	TriggerParameter = "oberth-trigger"
 )
 
-// DeclaredSizesByTrigger parses the size-by-trigger annotation. An absent or
-// blank annotation yields nil.
-func DeclaredSizesByTrigger(workflow *wfv1.Workflow) (map[RunTrigger]pipeline.Size, error) {
-	if workflow == nil {
-		return nil, errors.New("argoworkflow: no Workflow to read")
-	}
-	declared, ok := workflow.Annotations[SizeByTriggerAnnotation]
-	if !ok || strings.TrimSpace(declared) == "" {
-		return nil, nil
-	}
-	sizes := map[RunTrigger]pipeline.Size{}
-	for index, entry := range strings.Split(declared, ",") {
-		key, value, found := strings.Cut(entry, "=")
-		trigger := RunTrigger(strings.TrimSpace(key))
-		size := pipeline.Size(strings.TrimSpace(value))
-		if !found || trigger == "" || size == "" {
-			return nil, fmt.Errorf("argoworkflow: annotation %s entry %d %q is not trigger=size",
-				SizeByTriggerAnnotation, index, strings.TrimSpace(entry))
-		}
-		if !trigger.Valid() {
-			return nil, fmt.Errorf("argoworkflow: annotation %s declares unknown trigger %q; triggers are %s",
-				SizeByTriggerAnnotation, trigger, quotedTriggers())
-		}
-		switch size {
-		case pipeline.S, pipeline.M, pipeline.L, pipeline.XL:
-		default:
-			return nil, fmt.Errorf("argoworkflow: annotation %s declares unknown size %q for %s; sizes are %q, %q, %q, and %q",
-				SizeByTriggerAnnotation, size, trigger, pipeline.S, pipeline.M, pipeline.L, pipeline.XL)
-		}
-		if _, duplicate := sizes[trigger]; duplicate {
-			return nil, fmt.Errorf("argoworkflow: annotation %s declares %s more than once", SizeByTriggerAnnotation, trigger)
-		}
-		sizes[trigger] = size
-	}
-	return sizes, nil
-}
-
-// AdmitSizeDeclarations checks both size annotations against the document
-// tier: every size and trigger is from its closed vocabulary, and every
-// trigger named is one this document can run for (tag only in release.yaml,
-// the others only in build.yaml). It is the check `oberth validate` and the
-// server share.
-func AdmitSizeDeclarations(workflow *wfv1.Workflow, tier pipeline.Trigger) error {
-	if _, err := DeclaredSize(workflow); err != nil {
-		return err
-	}
-	sizes, err := DeclaredSizesByTrigger(workflow)
-	if err != nil {
-		return err
-	}
-	file, err := TriggerFile(tier)
-	if err != nil {
-		return err
-	}
-	for _, trigger := range RunTriggers() {
-		if _, named := sizes[trigger]; named && trigger.Tier() != tier {
-			return fmt.Errorf("argoworkflow: annotation %s names %s, but %s never runs for a %s run",
-				SizeByTriggerAnnotation, trigger, file, trigger)
-		}
-	}
-	return nil
-}
-
-// DeclaredSizeFor returns the admission weight the document requests for one
-// run trigger: its size-by-trigger entry when present, otherwise
-// oberth.ci/size, otherwise M.
-func DeclaredSizeFor(workflow *wfv1.Workflow, trigger RunTrigger) (pipeline.Size, error) {
+// DeclaredSizeFor returns the size recorded with a run of this trigger. Size
+// annotations are removed, so every run records M.
+func DeclaredSizeFor(_ *wfv1.Workflow, trigger RunTrigger) (pipeline.Size, error) {
 	if !trigger.Valid() {
 		return "", fmt.Errorf("argoworkflow: run trigger %q is invalid", trigger)
 	}
-	if err := AdmitSizeDeclarations(workflow, trigger.Tier()); err != nil {
-		return "", err
-	}
-	sizes, err := DeclaredSizesByTrigger(workflow)
-	if err != nil {
-		return "", err
-	}
-	if size, named := sizes[trigger]; named {
-		return size, nil
-	}
-	return DeclaredSize(workflow)
+	return pipeline.M, nil
 }
 
 // admitTriggerParameter refuses a document-declared oberth-trigger parameter

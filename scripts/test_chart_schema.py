@@ -42,24 +42,16 @@ class ArgoSchemaTests(unittest.TestCase):
                     values.write_text(json.dumps({'sourceAccess': invalid}))
                     self.assert_schema_refuses({}, '-f', str(values))
 
-    def test_retired_secret_settings_are_optional_and_inert(self):
-        baseline = self.render({})
-        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+    def test_removed_secret_settings_are_refused(self):
         for settings in (
-            ['--set', 'secretCreatePolicy=null'],
-            ['--set', 'upstream.createSecrets=null', '--set', 'upstream.keySecret=null',
-             '--set', 'upstream.knownHostsSecret=null', '--set', 'auditAnchor.rootsKey=null'],
             ['--set', 'auditAnchor.rootsKey=old-roots.pem'],
-            ['--set', 'secretCreatePolicy.enabled=true'],
-            ['--set', 'upstream.keySecret=legacy', '--set', 'upstream.knownHostsSecret=legacy'],
+            ['--set', 'secretCreatePolicy.enabled=false'],
+            ['--set', 'upstream.createSecrets=false'],
+            ['--set', 'upstream.keySecret=old'],
+            ['--set', 'upstream.knownHostsSecret=old'],
         ):
             with self.subTest(settings=settings):
-                result = self.render({}, *settings)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, baseline.stdout)
-
-    def test_secret_creation_stays_disabled(self):
-        self.assert_schema_refuses({}, '--set', 'upstream.createSecrets=true')
+                self.assert_schema_refuses({}, *settings)
 
     def render(self, argo, *overrides):
         with tempfile.TemporaryDirectory() as directory:
@@ -128,9 +120,8 @@ class ArgoSchemaTests(unittest.TestCase):
             with self.subTest(argo=argo):
                 self.assert_schema_refuses(argo)
 
-    def test_valid_boundaries_and_legacy_values_render(self):
-        cases = [{}, {'enabled': True}, {'enabled': False}, {'ciSecrets': None}, {'ciServiceAccount': 'legacy-pipeline'},
-                 {'ciSecretsServiceAccount': ''}, {'vault': {'ciSecretsRole': ''}},
+    def test_valid_boundaries_render(self):
+        cases = [{}, {'ciSecrets': None},
                  {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'},
                   'controllerProfile': 'nonroot-static-v1', 'resourceSampler': SAMPLER},
                  {'resourceSampler': dict(SAMPLER, nodes={
@@ -148,37 +139,28 @@ class ArgoSchemaTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_empty_ci_secret_names_are_refused(self):
-        for ci_secrets in ({'serviceAccount': ''}, {'vaultRole': ''},
-                           {'serviceAccount': '', 'vaultRole': ''}):
+        for ci_secrets in ({'serviceAccount': ''}, {'vaultRole': ''}):
             with self.subTest(ciSecrets=ci_secrets):
-                result = self.render({'ciSecrets': ci_secrets})
-                self.assertNotEqual(result.returncode, 0, f'Helm accepted empty CI secret names: {ci_secrets}')
+                self.assert_schema_refuses({'ciSecrets': ci_secrets})
 
-    def test_retired_vm_keys_accept_and_ignore_saved_values(self):
+    def test_removed_vm_keys_are_refused(self):
         schema = json.loads((ROOT / 'charts/oberth/values.schema.json').read_text())
         argo = schema['properties']['argo']
         self.assertIs(argo['additionalProperties'], False)
-        saved = {'kubevirtCeiling': {'maxVMs': 2, 'maxCores': 6, 'maxMemory': '12Gi'},
-                 'vmLauncherServiceAccount': 'legacy-vm-launcher',
-                 'containerDiskPrefixes': ['registry.example.com/disks/']}
-        result = self.render(saved)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        baseline = self.render({})
-        self.assertEqual(baseline.returncode, 0, baseline.stderr)
-        self.assertEqual(result.stdout, baseline.stdout, 'retired values must not change resources')
-        for key in saved:
+        for key, value in (('kubevirtCeiling', {'maxVMs': 2}),
+                           ('vmLauncherServiceAccount', 'old-vm-launcher'),
+                           ('containerDiskPrefixes', ['registry.example.com/disks/'])):
             with self.subTest(key=key):
-                description = argo['properties'][key]['description'].lower()
-                self.assertIn('removed', description)
-                self.assertIn('accept and ignore historical values', description)
-
-    def test_retired_aliases_still_report_migration(self):
-        for argo in ({'ciSecretsServiceAccount': 'retired-account'},
-                     {'vault': {'ciSecretsRole': 'retired-role'}}):
-            with self.subTest(argo=argo):
-                result = self.render(argo)
+                self.assertNotIn(key, argo['properties'])
+                result = self.render({key: value})
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('retired', result.stderr.lower(), result.stderr)
+                self.assertIn(key, result.stderr)
+
+    def test_removed_aliases_are_refused(self):
+        for argo in ({'ciSecretsServiceAccount': 'old-account'}, {'vault': {'ciSecretsRole': 'old-role'}},
+                     {'ciServiceAccount': 'old-pipeline'}, {'enabled': True}):
+            with self.subTest(argo=argo):
+                self.assert_schema_refuses(argo)
 
 
 if __name__ == '__main__':

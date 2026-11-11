@@ -416,10 +416,6 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if err != nil {
 		return nil, err
 	}
-	raw, err = normalizeRunIDArgument(name, raw)
-	if err != nil {
-		return nil, err
-	}
 	value, err = service.dispatchTool(ctx, actor, name, raw)
 	return service.stripScopedSequences(value), toolSelectorError(raw, err)
 }
@@ -466,7 +462,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		var arguments struct {
-			RunID string `json:"run_id"`
+			RunID string `json:"id"`
 			Force bool   `json:"force"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
@@ -586,10 +582,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		timeout, err := arguments.seconds()
-		if err != nil {
-			return nil, err
-		}
+		timeout := arguments.seconds()
 		return service.execRunHold(ctx, actor, arguments.ID, arguments.Step, arguments.Argv, arguments.Stdin, timeout)
 	case "run_hold_patch":
 		var arguments struct {
@@ -1071,15 +1064,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			}
 			return api.RunListResponse{Runs: runs}, nil
 		}
-		if arguments.View == api.RunViewActive {
-			// One bounded, unpaged list: no limit or cursor applies.
-			runs, err := service.Runs(ctx, actor, api.RunFilter{Status: arguments.Status, Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, View: arguments.View,
-				Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID, Actor: owner})
-			if err != nil {
-				return nil, err
-			}
-			return api.RunListResponse{Runs: runs}, nil
-		}
 		limit := arguments.Limit
 		if limit <= 0 {
 			limit = 50
@@ -1141,15 +1125,12 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	if !api.ValidRunView(filter.View) {
-		return nil, fmt.Errorf("%w: view must be all, active or history", ErrInvalidInput)
+		return nil, fmt.Errorf("%w: view must be all or history", ErrInvalidInput)
 	}
 	if filter.LatestPerRef && filter.View != "" && filter.View != api.RunViewAll {
 		return nil, fmt.Errorf("%w: latest_per_ref requires all view", ErrInvalidInput)
 	}
 
-	if filter.View == api.RunViewActive {
-		return service.activeRuns(ctx, filter)
-	}
 	if filter.Before < 0 || service.scope != nil && filter.Before > 0 && filter.BeforeRun == "" {
 		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
 	}
@@ -2441,12 +2422,9 @@ func (service *API) waitStatus(ctx context.Context, repositoryName, selector, tr
 	return service.statusForRun(ctx, repository, run)
 }
 
-// normalizeTrigger maps accepted trigger aliases to their persisted form.
-// The MCP schema documents ci and release; persisted pushes use branch and tag.
+// normalizeTrigger maps the release trigger to its persisted tag form.
 func normalizeTrigger(trigger string) string {
 	switch trigger {
-	case "ci":
-		return "branch"
 	case "release":
 		return "tag"
 	default:

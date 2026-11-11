@@ -39,7 +39,7 @@ func TestSecretStoreVerifyAuthorizationAndInputs(t *testing.T) {
 	for _, input := range []string{
 		`{"address":"https://attacker.invalid"}`, `{"role":"root"}`, `{"ca_cert":"/tmp/ca"}`,
 		`{"sa_token":"/tmp/token"}`, `{"insecure_http":true}`, `{"kv_mount":"sys"}`,
-		`{"timeout":-1}`, `{"timeout":121}`, `{"tier":"admin"}`,
+		`{"timeout_s":-1}`, `{"timeout_s":121}`, `{"timeout":45}`, `{"tier":"admin"}`,
 		`{"repo":"upstream/org/repo"}`, `{"release_tier":true,"repo":"upstream//repo"}`,
 		`{"release_tier":true,"repo":"upstream/org/.."}`, `{"release_tier":true,"repo":"bare"}`,
 		`{"tier":"ci","release_tier":true}`, `{"release_tier":true,"keys":true}`,
@@ -76,7 +76,7 @@ func TestSecretStoreVerifyHonorsCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(20*time.Millisecond))
 	defer cancel()
-	_, err = control.CallTool(ctx, api.Actor{Identity: "admin@host", Admin: true}, "secretstore_verify", json.RawMessage(`{"timeout":120}`))
+	_, err = control.CallTool(ctx, api.Actor{Identity: "admin@host", Admin: true}, "secretstore_verify", json.RawMessage(`{"timeout_s":120}`))
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("parent deadline was not propagated: %v", err)
 	}

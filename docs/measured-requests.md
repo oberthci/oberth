@@ -18,18 +18,15 @@ oberth run resources --run <id> --include-failed --yaml
 oberth run resources --repo repo-01 --burn step-abc12345 --step step-abc12345 --yaml
 ```
 
-MCP agents use `run_resources` with the same arguments (`run`, `repo`, `ref`,
-`last`, `burn`, `step`, `include_failed`, `resource_only`, `format`). Authenticated HTTP clients
-use `GET /api/run-resources` with those query parameters, or
+MCP agents use `run_resources` with the same arguments (`id`, `repo`, `ref`,
+`last`, `burn`, `step`, `include_failed`, `format`). Authenticated HTTP clients
+use `GET /api/run-resources` with those query parameters (the run as `run`), or
 `GET /api/runs/{id}/resources`. Default output is JSON; `format=yaml` includes a
 `paste_ready` mapping per suggested step. Copy its `resources` into that template
 in git, not the surrounding report. Deadline advice is withheld; keep the
-declared `activeDeadlineSeconds` until Pod lifetime has been measured.
-Resource-only suggestions require the `resource_only=true` caller capability
-(HTTP query parameter or MCP boolean argument). Updated CLIs send it automatically.
-Older callers receive `suggested: null`, preserving measurements and a refusal
-reason, so their integer decoder cannot fabricate a zero deadline. See the
-[upgrade and compatibility policy](api-compatibility.md#resource-deadline-safety-exception).
+declared `activeDeadlineSeconds` until Pod lifetime has been measured; a
+suggestion omits the deadline rather than reporting zero. See
+[resource advice](api-compatibility.md#resource-advice).
 Bearer token scope is checked through the same repo/run lookups as `run_get`
 before raw usage or git declarations are read. Responses contain resource
 numbers, identifiers and fixed explanations; never logs, commands, environment,

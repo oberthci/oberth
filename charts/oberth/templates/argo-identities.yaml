@@ -1,19 +1,5 @@
 {{- $namespace := required "argo.namespace is required" .Values.argo.namespace }}
-{{- /*
-The former aliases argo.ciSecretsServiceAccount and argo.vault.ciSecretsRole
-named the RELEASE-tier credentialed identity. Since the branch tier gained its
-own separate ci-secrets identity (issue #200), silently reading either alias
-could bind a branch-tier name onto the release-tier role — the exact trust
-collapse the split removes — so a values file still carrying one refuses to
-render instead.
-*/}}
-{{- if .Values.argo.ciSecretsServiceAccount }}
-{{- fail "argo.ciSecretsServiceAccount is retired: it aliased the RELEASE-tier credentialed ServiceAccount. Set argo.credentialedServiceAccount for the release tier; the separate branch-tier identity is argo.ciSecrets.serviceAccount" }}
-{{- end }}
-{{- if (.Values.argo.vault).ciSecretsRole }}
-{{- fail "argo.vault.ciSecretsRole is retired: it aliased the RELEASE-tier argo.vault.credentialedRole. Set argo.vault.credentialedRole for the release tier; the separate branch-tier role is argo.ciSecrets.vaultRole" }}
-{{- end }}
-{{- $pipeline := .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
+{{- $pipeline := .Values.argo.pipelineServiceAccount | default "oberth-argo-pipeline" }}
 {{- $credentialed := .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
 {{- $ciSecrets := (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
 {{- $executor := .Values.argo.executorServiceAccount }}

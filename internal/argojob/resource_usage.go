@@ -293,42 +293,8 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 	return errors.Join(flush(), ctx.Err())
 }
 
-// Read only the verified Workflow's existing declaration and server-bound
-// trigger parameter. Never use progress/termination messages as class evidence.
-// A size-by-trigger declaration without an unambiguous bound trigger is unknown.
-func observedResourceWorkflowSize(wf *wfv1.Workflow) pipeline.Size {
-	byTrigger, err := argoworkflow.DeclaredSizesByTrigger(wf)
-	if err != nil {
-		return ""
-	}
-	if len(byTrigger) == 0 {
-		size, err := argoworkflow.DeclaredSize(wf)
-		if err != nil {
-			return ""
-		}
-		return size
-	}
-	var trigger argoworkflow.RunTrigger
-	seen := false
-	for _, parameter := range wf.Spec.Arguments.Parameters {
-		if parameter.Name != argoworkflow.TriggerParameter {
-			continue
-		}
-		if seen || parameter.Value == nil || parameter.ValueFrom != nil {
-			return ""
-		}
-		seen = true
-		trigger = argoworkflow.RunTrigger(parameter.Value.String())
-	}
-	if !seen || !trigger.Valid() {
-		return ""
-	}
-	size, err := argoworkflow.DeclaredSizeFor(wf, trigger)
-	if err != nil {
-		return ""
-	}
-	return size
-}
+// observedResourceWorkflowSize is the size every run records: M.
+func observedResourceWorkflowSize(*wfv1.Workflow) pipeline.Size { return pipeline.M }
 
 func resourceContainerKey(podUID, containerID string) string { return podUID + "\x00" + containerID }
 

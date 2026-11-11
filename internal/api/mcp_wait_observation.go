@@ -162,7 +162,7 @@ func (server *Server) handleMCPLongPoll(writer http.ResponseWriter, request *htt
 	if err != nil {
 		response.Result = server.classifyWaitFailure(err, trace)
 	} else {
-		response.Result = toolSuccess(request.Context(), result)
+		response.Result = toolSuccess(result)
 	}
 	if server.draining.Load() {
 		response.Result = nil

@@ -35,7 +35,7 @@ func TestCompactReadInputSchemas(t *testing.T) {
 				good = []string{`{"ids":[1,2]}`, `{"ids":[1,2],"fields":["id","title"],"body_limit":4096}`}
 				bad = []string{`{"ids":[1],"fields":["Body"]}`, `{"ids":[1],"fields":[]}`, `{"ids":[1],"body_limit":-1}`}
 			case "run_list":
-				good = []string{`{}`, `{"superseded":true}`, `{"superseded":false,"repo":"oberth","view":"active"}`}
+				good = []string{`{}`, `{"superseded":true}`, `{"superseded":false,"repo":"oberth","view":"history"}`}
 				bad = []string{`{"superseded":"true"}`, `{"superseded":1}`}
 			case "run_get":
 				good = []string{`{"id":"12345678"}`, `{"id":"12345678","summary":true}`, `{"id":"12345678","summary":false}`}

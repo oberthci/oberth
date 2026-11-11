@@ -29,13 +29,13 @@ func (service *API) queueCapConfig(ctx context.Context, actor api.Actor, raw jso
 		return nil, refuse(ErrUnavailable, "queue cap")
 	}
 	var args struct {
-		MaxNotStarted *int `json:"maxNotStarted"`
+		MaxNotStarted *int `json:"max_not_started"`
 	}
 	if err := decodeTool(raw, &args); err != nil {
 		return nil, err
 	}
 	if args.MaxNotStarted == nil || *args.MaxNotStarted < 0 {
-		return nil, refuse(ErrInvalidInput, "nonnegative maxNotStarted is required; use 0 to disable")
+		return nil, refuse(ErrInvalidInput, "nonnegative max_not_started is required; use 0 to disable")
 	}
 	value, err := service.queueCap.SetQueueCap(ctx, actor.Identity, *args.MaxNotStarted)
 	if err != nil {

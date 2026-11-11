@@ -281,37 +281,19 @@ func writeValidateRepo(t *testing.T, files map[string]string) string {
 	return root
 }
 
-func TestValidatePrintsAndChecksPerTriggerSizes(t *testing.T) {
+// Removed size annotations fail validation with what replaced them, as
+// server admission does.
+func TestValidateRefusesRemovedSizeAnnotations(t *testing.T) {
 	t.Parallel()
-	perTrigger := strings.Replace(buildYAMLDemo, "    oberth.ci/size: S\n",
-		"    oberth.ci/size: XL\n    oberth.ci/size-by-trigger: branch=M,promotion=XL\n", 1)
-	if perTrigger == buildYAMLDemo {
-		t.Fatal("demo document no longer declares oberth.ci/size: S")
-	}
-	var output bytes.Buffer
-	if err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{"build.yaml": perTrigger})}, &output); err != nil {
-		t.Fatalf("per-trigger build.yaml rejected: %v\n%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "ok  size branch=M promotion=XL schedule=XL") {
-		t.Fatalf("output does not show resolved sizes:\n%s", output.String())
-	}
-
-	for name, document := range map[string]string{
-		"tag in build.yaml": strings.Replace(perTrigger, "promotion=XL", "tag=XL", 1),
-		"unknown trigger":   strings.Replace(perTrigger, "promotion=XL", "pull-request=XL", 1),
-		"unknown size":      strings.Replace(perTrigger, "promotion=XL", "promotion=XXL", 1),
-	} {
-		output.Reset()
-		if err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{"build.yaml": document})}, &output); err == nil {
-			t.Fatalf("%s: validate passed:\n%s", name, output.String())
+	for _, annotation := range []string{"oberth.ci/size: S", "oberth.ci/size-by-trigger: branch=M"} {
+		document := strings.Replace(buildYAMLDemo, "kind: Workflow\n", "kind: Workflow\nmetadata:\n  annotations:\n    "+annotation+"\n", 1)
+		if document == buildYAMLDemo {
+			t.Fatal("demo document lost kind: Workflow")
 		}
-	}
-
-	release := strings.Replace(buildYAMLDemo, "    oberth.ci/size: S\n", "    oberth.ci/size-by-trigger: promotion=L\n", 1)
-	output.Reset()
-	if err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{
-		"build.yaml": buildYAMLDemo, "release.yaml": release,
-	})}, &output); err == nil || !strings.Contains(output.String(), "names promotion") {
-		t.Fatalf("release.yaml naming promotion: %v\n%s", err, output.String())
+		var output bytes.Buffer
+		err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{"build.yaml": document})}, &output)
+		if err == nil || !strings.Contains(output.String(), "is removed") || !strings.Contains(output.String(), "resources block") {
+			t.Fatalf("%s: %v\n%s", annotation, err, output.String())
+		}
 	}
 }

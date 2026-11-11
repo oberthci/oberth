@@ -156,9 +156,8 @@ unaffected.
   event. One loop of `events_wait` with the returned cursor covers every run
   and hold of a worker, in sessions that receive no pushed events too. CLI:
   `oberth events --since <id> --wait`, and `oberth run wait <id>` for one run.
-- Every blocking tool documents its bound as `timeout_s` and accepts
-  `timeout` and `timeout_seconds` as aliases; different values under two
-  spellings are refused.
+- Every blocking tool takes its bound as `timeout_s`; no other spelling is
+  accepted.
 - `run_list {own: true}` keeps the caller's own runs; `run_list {held: true}`
   lists the running assisted runs with a parked hold no action released.
 - `sync_status {lock?, since?, limit?}` returns, per native Argo lock key

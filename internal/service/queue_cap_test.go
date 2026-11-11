@@ -21,21 +21,21 @@ func TestQueueCapAdminToolIsStrictAndGated(t *testing.T) {
 	ctx := t.Context()
 	admin := api.Actor{Identity: "admin", Admin: true}
 	for _, actor := range []api.Actor{{Identity: "dev"}, {Identity: "scoped", Admin: true, Scope: []string{"codeberg"}}} {
-		if _, err := control.CallTool(ctx, actor, "queue_cap_config", json.RawMessage(`{"maxNotStarted":1}`)); !errors.Is(err, ErrForbidden) {
+		if _, err := control.CallTool(ctx, actor, "queue_cap_config", json.RawMessage(`{"max_not_started":1}`)); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("unauthorized cap config: %v", err)
 		}
 	}
-	if _, err := control.CallTool(ctx, admin, "queue_cap_config", json.RawMessage(`{"maxNotStarted":1}`)); err != nil {
+	if _, err := control.CallTool(ctx, admin, "queue_cap_config", json.RawMessage(`{"max_not_started":1}`)); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{`{}`, `{"maxNotStarted":-1}`, `{"maxNotStarted":1.5}`, `{"maxNotStarted":null}`, `{"maxNotStarted":1,"extra":true}`} {
+	for _, raw := range []string{`{}`, `{"max_not_started":-1}`, `{"max_not_started":1.5}`, `{"max_not_started":null}`, `{"max_not_started":1,"extra":true}`} {
 		if _, err := control.CallTool(ctx, admin, "queue_cap_config", json.RawMessage(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
 	denied := errors.New("audit gate refused")
 	control.mutationGate = func(_ context.Context) error { return denied }
-	if _, err := control.CallTool(ctx, admin, "queue_cap_config", json.RawMessage(`{"maxNotStarted":0}`)); !errors.Is(err, denied) {
+	if _, err := control.CallTool(ctx, admin, "queue_cap_config", json.RawMessage(`{"max_not_started":0}`)); !errors.Is(err, denied) {
 		t.Fatalf("cap bypassed gate: %v", err)
 	}
 	if !MutatingTool("queue_cap_config") {

@@ -19,100 +19,15 @@ func decodeAdmissible(t *testing.T, annotations map[string]string) *wfv1.Workflo
 	return workflow
 }
 
-func TestDeclaredSizeForResolvesPerTriggerThenFallback(t *testing.T) {
-	workflow := decodeAdmissible(t, map[string]string{
-		SizeAnnotation:          "XL",
-		SizeByTriggerAnnotation: " branch = M , promotion=XL",
-	})
-	for trigger, want := range map[RunTrigger]pipeline.Size{
-		RunTriggerBranch:    pipeline.M,
-		RunTriggerPromotion: pipeline.XL,
-		// Not named: falls back to oberth.ci/size, not to M.
-		RunTriggerSchedule: pipeline.XL,
-	} {
-		got, err := DeclaredSizeFor(workflow, trigger)
-		if err != nil || got != want {
-			t.Fatalf("%s size = %q, %v; want %q", trigger, got, err, want)
+// Every run records size M; an invalid trigger is still refused.
+func TestDeclaredSizeForIsM(t *testing.T) {
+	for _, trigger := range RunTriggers() {
+		if got, err := DeclaredSizeFor(decodeAdmissible(t, nil), trigger); err != nil || got != pipeline.M {
+			t.Fatalf("%s = %s, %v", trigger, got, err)
 		}
-	}
-
-	// Neither annotation: every trigger is M, exactly as before.
-	bare := decodeAdmissible(t, nil)
-	for _, trigger := range []RunTrigger{RunTriggerBranch, RunTriggerPromotion, RunTriggerSchedule} {
-		if got, err := DeclaredSizeFor(bare, trigger); err != nil || got != pipeline.M {
-			t.Fatalf("undeclared %s size = %q, %v; want M", trigger, got, err)
-		}
-	}
-
-	// Only the per-trigger annotation: unnamed triggers are M.
-	only := decodeAdmissible(t, map[string]string{SizeByTriggerAnnotation: "promotion=L"})
-	if got, err := DeclaredSizeFor(only, RunTriggerBranch); err != nil || got != pipeline.M {
-		t.Fatalf("unnamed branch size = %q, %v; want M", got, err)
-	}
-	if got, err := DeclaredSizeFor(only, RunTriggerPromotion); err != nil || got != pipeline.L {
-		t.Fatalf("promotion size = %q, %v; want L", got, err)
-	}
-
-	// A release document keys its one trigger as tag.
-	release := decodeAdmissible(t, map[string]string{SizeAnnotation: "S", SizeByTriggerAnnotation: "tag=L"})
-	if got, err := DeclaredSizeFor(release, RunTriggerTag); err != nil || got != pipeline.L {
-		t.Fatalf("tag size = %q, %v; want L", got, err)
-	}
-}
-
-func TestSizeByTriggerRefusesOutsideTheClosedVocabulary(t *testing.T) {
-	for value, expect := range map[string]string{
-		"branch=M,pr=XL":           `unknown trigger "pr"`,
-		"Branch=M":                 `unknown trigger "Branch"`,
-		"branch=XXL":               `unknown size "XXL"`,
-		"branch=m":                 `unknown size "m"`,
-		"branch=M,branch=XL":       "branch more than once",
-		"branch=M,":                "is not trigger=size",
-		"branch":                   "is not trigger=size",
-		"=M":                       "is not trigger=size",
-		"branch=M;promotion=XL":    `unknown size "M;promotion=XL"`,
-		"branch:M":                 "is not trigger=size",
-		"branch=M,promotion=XL=XL": `unknown size "XL=XL"`,
-	} {
-		workflow := decodeAdmissible(t, map[string]string{SizeByTriggerAnnotation: value})
-		if _, err := DeclaredSizesByTrigger(workflow); err == nil || !strings.Contains(err.Error(), expect) {
-			t.Fatalf("%q: error %v does not mention %q", value, err, expect)
-		}
-		// The document-agnostic gate `oberth validate` and server admission
-		// both run refuses it too, and so does the scheduler's size read.
-		if err := Admit(workflow, Policy{}); err == nil || !strings.Contains(err.Error(), expect) {
-			t.Fatalf("%q: Admit error %v does not mention %q", value, err, expect)
-		}
-		if _, err := DeclaredSizeFor(workflow, RunTriggerBranch); err == nil {
-			t.Fatalf("%q: scheduler size read accepted it", value)
-		}
-	}
-	// A malformed fallback is refused by Admit as well, which it was not before.
-	workflow := decodeAdmissible(t, map[string]string{SizeAnnotation: "huge"})
-	if err := Admit(workflow, Policy{}); err == nil || !strings.Contains(err.Error(), `unknown size "huge"`) {
-		t.Fatalf("Admit accepted oberth.ci/size: huge: %v", err)
-	}
-}
-
-func TestSizeByTriggerRefusesTriggersTheDocumentNeverRuns(t *testing.T) {
-	build := decodeAdmissible(t, map[string]string{SizeByTriggerAnnotation: "branch=M,tag=XL"})
-	if err := AdmitSizeDeclarations(build, pipeline.TriggerCI); err == nil || !strings.Contains(err.Error(), "names tag") {
-		t.Fatalf("build.yaml naming tag: %v", err)
-	}
-	// Even a branch run of that document is refused: half-obeying a
-	// declaration the server knows to be wrong would hide the mistake.
-	if _, err := DeclaredSizeFor(build, RunTriggerBranch); err == nil {
-		t.Fatal("branch size read accepted a build.yaml that names tag")
-	}
-	release := decodeAdmissible(t, map[string]string{SizeByTriggerAnnotation: "promotion=XL"})
-	if err := AdmitSizeDeclarations(release, pipeline.TriggerRelease); err == nil || !strings.Contains(err.Error(), "names promotion") {
-		t.Fatalf("release.yaml naming promotion: %v", err)
-	}
-	if _, err := DeclaredSizeFor(release, RunTriggerTag); err == nil {
-		t.Fatal("tag size read accepted a release.yaml that names promotion")
 	}
 	if _, err := DeclaredSizeFor(decodeAdmissible(t, nil), RunTrigger("push")); err == nil {
-		t.Fatal("an unknown run trigger resolved a size")
+		t.Fatal("invalid trigger accepted")
 	}
 }
 

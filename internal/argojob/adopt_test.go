@@ -25,8 +25,6 @@ func adoptionWorkflow() (*wfv1.Workflow, AdoptionRequest) {
 	wf.UID = "workflow-uid"
 	wf.Annotations[identityAnnotation] = strings.Repeat("a", 64)
 	wf.Annotations[refAnnotation] = "feature/adopt"
-	wf.Annotations[argoworkflow.SizeAnnotation] = "L"
-	wf.Annotations[argoworkflow.RetiredConcurrencyGroupAnnotation] = "build" // a v0.19 Workflow still adopts
 	wf.Labels = map[string]string{"oberth.ci/sha": strings.Repeat("b", 40), "oberth.ci/trigger": string(pipeline.TriggerCI)}
 	return wf, AdoptionRequest{Name: wf.Name, RunID: wf.Annotations[runIDAnnotation], Ref: "feature/adopt", SHA: strings.Repeat("b", 40), Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
 }
@@ -44,7 +42,6 @@ func TestAdoptionBindsDurableRunAndSubmittedResources(t *testing.T) {
 		{"foreign-ref", func(wf *wfv1.Workflow) { wf.Annotations[refAnnotation] = "main" }},
 		{"foreign-sha", func(wf *wfv1.Workflow) { wf.Labels["oberth.ci/sha"] = "other" }},
 		{"foreign-trigger", func(wf *wfv1.Workflow) { wf.Labels["oberth.ci/trigger"] = "release" }},
-		{"bad-size", func(wf *wfv1.Workflow) { wf.Annotations[argoworkflow.SizeAnnotation] = "unbounded" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			candidate := wf.DeepCopy()
@@ -52,7 +49,7 @@ func TestAdoptionBindsDurableRunAndSubmittedResources(t *testing.T) {
 			controller := &Controller{workflows: &staticWorkflowClient{workflow: candidate}, config: Config{Namespace: wf.Namespace}}
 			binding, found, err := controller.Adopt(context.Background(), request)
 			if test.name == "valid" {
-				if err != nil || !found || binding.Size != pipeline.L || binding.UID != wf.UID || binding.Identity != wf.Annotations[identityAnnotation] {
+				if err != nil || !found || binding.Size != pipeline.M || binding.UID != wf.UID || binding.Identity != wf.Annotations[identityAnnotation] {
 					t.Fatalf("adoption = %#v, %v, %v", binding, found, err)
 				}
 			} else if err == nil || !errors.Is(err, ErrAdoptionRefused) {
@@ -178,7 +175,7 @@ func TestAdoptionAcceptsActualServerBuiltWorkflow(t *testing.T) {
 	workflow.UID = "server-assigned-uid"
 	controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: testConfig()}
 	binding, found, err := controller.Adopt(context.Background(), AdoptionRequest{Name: request.Name, RunID: request.RunID, Ref: request.Ref, SHA: request.SHA, Trigger: request.Trigger, RunTrigger: argoworkflow.RunTriggerBranch})
-	if err != nil || !found || binding.Size != pipeline.L {
+	if err != nil || !found || binding.Size != pipeline.M {
 		t.Fatalf("built Workflow adoption = %#v %v %v", binding, found, err)
 	}
 }

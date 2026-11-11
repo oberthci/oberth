@@ -1,5 +1,5 @@
 # NOTE: these identities are now shipped by the chart
-# (charts/oberth/templates/argo-identities.yaml) whenever argo.enabled is true,
+# (charts/oberth/templates/argo-identities.yaml),
 # with guardrails that refuse a rendering where any two of the three are the
 # same or the pipeline namespace equals the server's. Prefer the chart.
 #

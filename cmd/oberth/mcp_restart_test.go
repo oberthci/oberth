@@ -132,7 +132,7 @@ func TestMCPReconnectShrinksLongPollTimeout(t *testing.T) {
 					t.Error(err)
 				}
 				if calls.Add(1) == 1 {
-					if string(request.Params.Arguments) != `{"sha":"abc","timeout":600}` {
+					if string(request.Params.Arguments) != `{"sha":"abc","timeout_s":600}` {
 						t.Errorf("first request changed: %s", request.Params.Arguments)
 					}
 					w.WriteHeader(http.StatusServiceUnavailable)
@@ -147,13 +147,13 @@ func TestMCPReconnectShrinksLongPollTimeout(t *testing.T) {
 			defer server.Close()
 			defer withTestMCPClient(t, server)()
 			cfg := mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "fixture-token"}, timeout: test.timeout}
-			_, err := mcpRequest(t.Context(), cfg, mcpMethodToolsCall, toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"sha":"abc","timeout":600}`)})
+			_, err := mcpRequest(t.Context(), cfg, mcpMethodToolsCall, toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"sha":"abc","timeout_s":600}`)})
 			if err != nil || calls.Load() != 2 {
 				t.Fatalf("err=%v calls=%d", err, calls.Load())
 			}
 			var seconds int64
-			if err := json.Unmarshal(retried["timeout"], &seconds); err != nil || !test.want(seconds) {
-				t.Fatalf("retried timeout = %s (%v)", retried["timeout"], err)
+			if err := json.Unmarshal(retried["timeout_s"], &seconds); err != nil || !test.want(seconds) {
+				t.Fatalf("retried timeout_s = %s (%v)", retried["timeout_s"], err)
 			}
 			if string(retried["sha"]) != `"abc"` || len(retried) != 2 {
 				t.Fatalf("retry changed the target: %v", retried)
@@ -163,21 +163,21 @@ func TestMCPReconnectShrinksLongPollTimeout(t *testing.T) {
 }
 
 func TestMCPRetryParamsKeepFittingAndOtherTools(t *testing.T) {
-	read := toolsCallParams{Name: "run_get", Arguments: json.RawMessage(`{"id":"run","timeout":5}`)}
+	read := toolsCallParams{Name: "run_get", Arguments: json.RawMessage(`{"id":"run","timeout_s":5}`)}
 	if got := mcpRetryParams(read, 5*time.Second, time.Second); !slices.Equal(got.(toolsCallParams).Arguments, read.Arguments) {
 		t.Fatalf("non-long-poll arguments changed: %s", got.(toolsCallParams).Arguments)
 	}
-	fits := toolsCallParams{Name: "promote_status", Arguments: json.RawMessage(`{"id":"p","timeout":60}`)}
+	fits := toolsCallParams{Name: "promote_status", Arguments: json.RawMessage(`{"id":"p","timeout_s":60}`)}
 	if got := mcpRetryParams(fits, time.Minute, 10*time.Minute); !slices.Equal(got.(toolsCallParams).Arguments, fits.Arguments) {
 		t.Fatalf("fitting arguments changed: %s", got.(toolsCallParams).Arguments)
 	}
 	omitted := toolsCallParams{Name: "promote_status", Arguments: json.RawMessage(`{"id":"p"}`)}
-	if got := mcpRetryParams(omitted, service.DefaultMaximumWait, 100*time.Second); string(got.(toolsCallParams).Arguments) != `{"id":"p","timeout":70}` {
+	if got := mcpRetryParams(omitted, service.DefaultMaximumWait, 100*time.Second); string(got.(toolsCallParams).Arguments) != `{"id":"p","timeout_s":70}` {
 		t.Fatalf("omitted timeout not bounded: %s", got.(toolsCallParams).Arguments)
 	}
-	alias := toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"id":"r","timeout_s":600}`)}
-	if got := mcpRetryParams(alias, service.DefaultMaximumWait, 100*time.Second); string(got.(toolsCallParams).Arguments) != `{"id":"r","timeout_s":70}` {
-		t.Fatalf("the caller's spelling not kept: %s", got.(toolsCallParams).Arguments)
+	given := toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"id":"r","timeout_s":600}`)}
+	if got := mcpRetryParams(given, service.DefaultMaximumWait, 100*time.Second); string(got.(toolsCallParams).Arguments) != `{"id":"r","timeout_s":70}` {
+		t.Fatalf("timeout_s not shrunk: %s", got.(toolsCallParams).Arguments)
 	}
 	runWait := toolsCallParams{Name: "run_wait", Arguments: json.RawMessage(`{"id":"r"}`)}
 	if got := mcpRetryParams(runWait, service.DefaultMaximumWait, 100*time.Second); string(got.(toolsCallParams).Arguments) != `{"id":"r","timeout_s":70}` {

@@ -68,9 +68,8 @@ type RunFilter struct {
 	BeforeRun string
 	// View selects the list: "" or "all" lists the queue (the run admitted
 	// next at its top), then running runs newest start first, then
-	// terminal runs newest finish first; "history" keeps the old
-	// terminal-only paging; "active" is the unpaged compatibility view of
-	// non-terminal runs.
+	// terminal runs newest finish first; "history" lists terminal runs
+	// only.
 	View string
 	// Actor keeps only runs whose actor is this uplink identity: run_list
 	// own:true sets it to the caller.
@@ -80,14 +79,13 @@ type RunFilter struct {
 // Run list views accepted by RunFilter.View.
 const (
 	RunViewAll     = "all"
-	RunViewActive  = "active"
 	RunViewHistory = "history"
 )
 
 // ValidRunView reports whether view names a run list view; empty is "all".
 func ValidRunView(view string) bool {
 	switch view {
-	case "", RunViewAll, RunViewActive, RunViewHistory:
+	case "", RunViewAll, RunViewHistory:
 		return true
 	}
 	return false
@@ -254,10 +252,6 @@ func (server *Server) Handler() http.Handler {
 		if request.URL.Path != "/healthz" && request.URL.Path != "/livez" && server.refuseDuringDrain(writer) {
 			return
 		}
-		if goFieldNamesRequested(request) {
-			writer.Header().Set(GoFieldNamesHeader, "1")
-			request = request.WithContext(withGoFieldNames(request.Context()))
-		}
 		if request.Method == http.MethodGet {
 			ctx, cancel := context.WithCancel(request.Context())
 			stop := context.AfterFunc(server.drainContext, cancel)
@@ -409,11 +403,9 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	// ?view=history is terminal runs only, paged like the default list;
-	// ?view=active is the unpaged non-terminal list in scheduling order.
-	// Without view the body and its paging are unchanged.
+	// ?view=history is terminal runs only, paged like the default list.
 	if !ValidRunView(filter.View) {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "view must be all, active or history"})
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "view must be all or history"})
 		return
 	}
 	if raw := query.Get("before"); raw != "" {
@@ -435,9 +427,8 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		}
 	}
 	value, err := server.views.Runs(request.Context(), actorFrom(request.Context()), filter)
-	// The body remains a plain array. The default first page also carries
-	// every queued and running run, so only its terminal portion counts
-	// against the page limit.
+	// The default first page also carries every queued and running run, so
+	// only its terminal portion counts against the page limit.
 	if runs, ok := value.([]model.Run); ok && err == nil && RunPageFull(runs, filter) {
 		last := runs[len(runs)-1]
 		cursor := last.ID
@@ -453,7 +444,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 // default and latest-per-ref lists carry every queued and running run in
 // addition to their page of terminal runs, so only terminal rows count.
 func RunPageFull(runs []model.Run, filter RunFilter) bool {
-	if len(runs) == 0 || filter.View == RunViewActive {
+	if len(runs) == 0 {
 		return false
 	}
 	if filter.View == RunViewHistory {
@@ -707,17 +698,16 @@ func validRunSelector(value string) bool {
 func (server *Server) handleRepos(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Repositories(request.Context(), actorFrom(request.Context()))
 	if err == nil && request.URL.Query().Get("view") == "summary" {
-		value, err = repositorySummaries(value, goFieldNames(request.Context()))
+		value, err = repositorySummaries(value)
 	}
 	server.writeCollectionView(writer, request, "repositories", value, err)
 }
 
 // repositorySummaries is ?view=summary of /api/repos: each repository record
 // without its latest runs. The runs page polls it for names and archive state
-// only; the full view carries a dozen runs per repository. goNames keeps the
-// Go-style names of an opted-in request (X-Oberth-Go-Field-Names).
-func repositorySummaries(value any, goNames bool) (any, error) {
-	raw, err := marshalCompatible(value, goNames)
+// only; the full view carries a dozen runs per repository.
+func repositorySummaries(value any) (any, error) {
+	raw, err := marshalRecords(value)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +716,6 @@ func repositorySummaries(value any, goNames bool) (any, error) {
 		return nil, err
 	}
 	for _, row := range rows {
-		delete(row, "LatestRuns")
 		delete(row, "latest_runs")
 	}
 	if rows == nil {
@@ -899,8 +888,7 @@ func strictUnmarshal(raw json.RawMessage, value any) error {
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
-	// Handler marks an opted-in request on its response headers.
-	raw, err := marshalCompatible(value, writer.Header().Get(GoFieldNamesHeader) == "1")
+	raw, err := marshalRecords(value)
 	if err != nil {
 		status = http.StatusInternalServerError
 		raw = []byte(`{"error":"internal error"}`)
@@ -913,10 +901,7 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 		writer.Header().Set("Cache-Control", "private, no-cache")
 	}
 	if status == http.StatusOK {
-		// The digest is of the shape actually sent, so the snake_case-only and
-		// Go-field-names responses of one view never share a validator.
 		writer.Header().Set("ETag", jsonETag(body))
-		writer.Header().Add("Vary", GoFieldNamesHeader)
 	}
 	writer.WriteHeader(status)
 	// Compression is decided on the first Write; keep the complete JSON body in one write.

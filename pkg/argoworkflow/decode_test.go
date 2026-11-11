@@ -3,8 +3,6 @@ package argoworkflow
 import (
 	"strings"
 	"testing"
-
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestDecodeRejectsNonWorkflowKinds(t *testing.T) {
@@ -71,30 +69,6 @@ func TestDecodeRejectsEmptyAndOversizedInput(t *testing.T) {
 	}
 	if _, err := Decode(oversized); err == nil {
 		t.Fatal("expected oversized input to be refused")
-	}
-}
-
-func TestDeclaredSize(t *testing.T) {
-	workflow, err := Decode([]byte(admissibleDocument))
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	size, err := DeclaredSize(workflow)
-	if err != nil || size != pipeline.M {
-		t.Fatalf("undeclared size = %q,%v; want M", size, err)
-	}
-	for declared, expected := range map[string]pipeline.Size{
-		"S": pipeline.S, "M": pipeline.M, "L": pipeline.L, "XL": pipeline.XL,
-	} {
-		workflow.Annotations = map[string]string{SizeAnnotation: declared}
-		size, err := DeclaredSize(workflow)
-		if err != nil || size != expected {
-			t.Fatalf("size %q = %q,%v", declared, size, err)
-		}
-	}
-	workflow.Annotations = map[string]string{SizeAnnotation: "XXL"}
-	if _, err := DeclaredSize(workflow); err == nil {
-		t.Fatal("expected an unknown size to be refused")
 	}
 }
 

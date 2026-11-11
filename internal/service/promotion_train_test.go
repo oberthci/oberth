@@ -110,7 +110,7 @@ func TestPromotionTrainAdmissionQueueAndRetry(t *testing.T) {
 	if !strings.Contains(string(data), `"source_count":2`) {
 		t.Fatalf("list = %s", data)
 	}
-	status, err := c.CallTool(ctx, actor, "promote_status", json.RawMessage(fmt.Sprintf(`{"id":%q,"timeout":0}`, first.ID)))
+	status, err := c.CallTool(ctx, actor, "promote_status", json.RawMessage(fmt.Sprintf(`{"id":%q,"timeout_s":0}`, first.ID)))
 	if err != nil {
 		t.Fatal(err)
 	}

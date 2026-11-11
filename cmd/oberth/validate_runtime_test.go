@@ -27,7 +27,7 @@ func TestValidateRuntimeAdmissionParity(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: S
+    example.com/tier: S
 spec:
   entrypoint: unit
   activeDeadlineSeconds: 600

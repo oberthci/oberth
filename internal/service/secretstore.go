@@ -44,7 +44,7 @@ func validateSecretStoreVerifyArguments(arguments *api.SecretStoreVerifyRequest)
 		arguments.Timeout = 45
 	}
 	if arguments.Timeout < 1 || arguments.Timeout > 120 {
-		return fmt.Errorf("timeout must be between 1 and 120 seconds")
+		return fmt.Errorf("timeout_s must be between 1 and 120 seconds")
 	}
 	if arguments.Tier == "" {
 		arguments.Tier = "release"

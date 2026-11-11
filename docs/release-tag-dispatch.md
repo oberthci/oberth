@@ -37,15 +37,11 @@ commit. A missing, unreadable or invalid selected file fails the run, with no
 fallback to release.yaml. Routing does not change the fresh default-branch
 reachability gate for tags or the release capability checks.
 
-Each selected document declares its own scheduler weight and normal resource
-contract. For example `.oberth/demo-deploy.yaml` can declare:
+Each selected document declares its own resource contract. For example `.oberth/demo-deploy.yaml` can declare:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
-metadata:
-  annotations:
-    oberth.ci/size: M
 spec:
   entrypoint: deploy
   activeDeadlineSeconds: 600
@@ -56,10 +52,8 @@ spec:
       command: ["deploy"]
 ```
 
-The static size, planned steps, credential detection, VM
-resource inspection, admission audit and actual execution all select this same
-file. Existing `oberth.ci/size-by-trigger` supports `tag=...` for release files.
-No route-level size override bypasses the document's normal resource admission.
+The planned steps, credential detection, VM resource inspection, admission audit and actual execution all select this same
+file. No route-level override bypasses the document's normal resource admission.
 The audit records the selected `pipeline_file` alongside the executed commit.
 
 Release preflight and the read-only release identity plan include the default

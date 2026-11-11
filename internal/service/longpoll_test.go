@@ -30,7 +30,7 @@ func TestPreparedLongPollValidatesBeforeObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := api.Actor{Identity: "agent@host"}
-	for _, raw := range []string{`{"sha":"main"}`, `{"sha":"aaaaaaaa","unknown":true}`, `{"sha":"aaaaaaaa","timeout":601}`, `{"sha":"aaaaaaaa","timeout":-1}`} {
+	for _, raw := range []string{`{"sha":"main"}`, `{"sha":"aaaaaaaa","unknown":true}`, `{"sha":"aaaaaaaa","timeout_s":601}`, `{"sha":"aaaaaaaa","timeout_s":-1}`, `{"sha":"aaaaaaaa","timeout":1}`} {
 		if prepared, err := control.PrepareLongPoll(context.Background(), actor, "wait", json.RawMessage(raw)); err == nil || prepared != nil {
 			t.Fatalf("invalid arguments accepted: %s", raw)
 		}

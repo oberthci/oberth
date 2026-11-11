@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/releaseverify"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 
 	"golang.org/x/mod/semver"
 	appsv1 "k8s.io/api/apps/v1"
@@ -30,7 +29,6 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
-	AllowRetiredExecution bool          // explicit acceptance of retired workload/resource risk
 	OwnershipHandoff      string        // operator-verified connector/site handoff receipt
 	WaitTimeout           time.Duration // independent queue-observation limit
 	WaitFor               string        // all or critical; a nonempty selection enables waiting
@@ -73,8 +71,7 @@ type UpgradeConfig struct {
 	verifiedChart bool
 	// defaultPins keep previously rendered values of changed chart defaults
 	// (upgrade_defaults.go); the operator's --values/--set still win.
-	defaultPins  []string
-	storedValues string // internal schema-validated snapshot with retired keys stripped
+	defaultPins []string
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -126,7 +123,6 @@ type UpgradeResult struct {
 	TargetVersion   string
 	AlreadyUpToDate bool
 	Upgraded        bool
-	Migrated        string // legacy key/value stripped from stored configuration
 	RecordPath      string // rollback record written before the first change
 }
 
@@ -276,7 +272,13 @@ func validateUserSetAgainstValues(valuesYAML []byte, userSet []string) error {
 		if err != nil {
 			return err
 		}
-		if !argoworkflow.RetiredValue(key) && !keyPathExists(values, key) {
+		if clearsRemovedValue(kv) {
+			continue
+		}
+		if removed, ok := removedChartValue(key); ok {
+			return removedValuesError(map[string]string{removed: "--set " + key})
+		}
+		if !keyPathExists(values, key) {
 			return &ErrSchemaValidation{Detail: fmt.Sprintf("key %q does not exist in the chart values; check for typos", key)}
 		}
 	}
@@ -365,8 +367,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		result.AlreadyUpToDate = upToDate
 		return result, err
 	}
-	targetCanonical := canonicalChartVersion(targetVersion)
-
 	// Validate user overrides early (no network needed).
 	if err := checkPinnedKeyConflicts(cfg.UserSet, cfg.UserValues); err != nil {
 		return result, err
@@ -375,15 +375,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
 	}
-	if semver.Compare(targetCanonical, "v0.17.83-0") >= 0 {
-		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
-			return result, err
-		}
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps, currentVersion); err != nil {
-			return result, err
-		}
-	}
-
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
 		return result, err
@@ -404,20 +395,14 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err != nil {
 			return result, err
 		}
-		warnRetiredUpgradeValues(w, cfg, values)
+		if err := checkRemovedUpgradeValues(cfg, values); err != nil {
+			return result, err
+		}
 		if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 			return result, err
 		}
 		if _, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values); err != nil {
 			return result, err
-		}
-		result.Migrated, err = migrateUpgradeShadow(values)
-		if err != nil {
-			return result, err
-		}
-		if result.Migrated != "" {
-			cfg.storedValues = "<cleaned-deployed-values.json>"
-			_, _ = fmt.Fprintf(w, "Would strip stored legacy %s from deployed revision %s before applying the cleaned snapshot.\n", result.Migrated, revision)
 		}
 		if profile != nil {
 			profile.describe(w, cfg.Timeout)
@@ -468,15 +453,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	defaults, err := reconcileChangedDefaults(ctx, cfg, deps, prepared.revision, valuesYAML)
 	if err != nil {
-		prepared.cleanup()
 		return result, err
 	}
 	cfg.defaultPins = defaults.args
 	defaults.print(w)
 
-	defer prepared.cleanup()
-	cfg.storedValues = prepared.storedValues
-	result.Migrated = prepared.migrated
 	compatibility := prepared.compatibility
 	pki := prepared.pki
 	pki.configure(&cfg)
@@ -504,14 +485,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	// Recheck after preview/drain, immediately before the first live write.
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
-	}
-	if semver.Compare(targetCanonical, "v0.17.83-0") >= 0 {
-		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
-			return result, err
-		}
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps, currentVersion); err != nil {
-			return result, err
-		}
 	}
 
 	// The backup and the rollback record come last before the first write,
@@ -586,9 +559,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	result.Upgraded = true
 	deps.Output = w
 	details := map[string]any{"from": currentVersion, "to": targetVersion}
-	if result.Migrated != "" {
-		details["migrated"] = result.Migrated
-	}
 	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
 	_, _ = fmt.Fprintf(w, "\nReady — Oberth deployment in namespace %s (context %s)\n", cfg.Namespace, deps.ContextName)
 	return result, nil
@@ -757,12 +727,8 @@ func resolveChartImageRef(ctx context.Context, deps Deps, chart, targetVersion s
 // operator must fix forward with a new 'oberth upgrade'.
 func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility backupCompatibility) (prefix, flags []string) {
 	prefix = []string{"upgrade", "oberth", chart, "-n", cfg.Namespace}
-	// Merge new defaults below stored configuration and user overrides. When
-	// migrating shadow, reuse the validated snapshot so Helm cannot resurrect it.
+	// Merge new defaults below stored configuration and user overrides.
 	args := []string{"--reset-then-reuse-values"}
-	if cfg.storedValues != "" {
-		args = []string{"--reset-values", "--values", cfg.storedValues}
-	}
 	args = append(args,
 		"--set-string", "image.ref="+imageRef,
 		"--set-string", "compatibility.schemaIdentity="+compatibility.SchemaIdentity,

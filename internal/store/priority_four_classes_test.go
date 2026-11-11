@@ -36,7 +36,7 @@ func TestFourClassesDurableQueueOrderAndAuthority(t *testing.T) {
 	standard2 := enqueue("standard2", "standard", &ordinary, false)
 	low2 := enqueue("low2", "low", &ordinary, false)
 	promotion2 := enqueue("promotion2", "", &ordinary, true)
-	high2 := enqueue("high2", "highest", &admin, false) // legacy authenticated client
+	high2 := enqueue("high2", "high", &admin, false)
 	refused := enqueue("refused", "high", &ordinary, false)
 	if refused.Priority != "standard" || refused.PriorityRefusal == "" {
 		t.Errorf("unauthorized high=%+v", refused)
@@ -118,7 +118,7 @@ func TestFourClassesLegacyGrantProjectionAndCappedAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	ordinary := false
-	for _, class := range []model.RunPriority{"promotion", "high", "highest"} {
+	for _, class := range []model.RunPriority{"promotion", "high"} {
 		spec := testRunSpec(repo.ID, string(class), strings.Repeat("a", 40))
 		spec.Actor = "worker"
 		spec.PriorityRequest = model.PriorityRequest{Priority: class, PriorityReason: "delegated work", UnscopedAdmin: &ordinary}
@@ -133,6 +133,12 @@ func TestFourClassesLegacyGrantProjectionAndCappedAuthority(t *testing.T) {
 		} else if got.Priority != "standard" || !strings.Contains(got.PriorityRefusal, "exceeds") {
 			t.Fatalf("grant silently acquired urgent high: %+v", got.Run)
 		}
+	}
+	spec := testRunSpec(repo.ID, "removed-alias", strings.Repeat("a", 40))
+	spec.PriorityRequest = model.PriorityRequest{Priority: "highest", PriorityReason: "removed alias", UnscopedAdmin: &ordinary}
+	got, err := s.EnqueueRun(t.Context(), spec)
+	if err != nil || got.Priority != "standard" || !strings.Contains(got.PriorityRefusal, "choose low, standard, promotion or high") {
+		t.Fatalf("removed alias highest: %+v %v", got.Run, err)
 	}
 }
 

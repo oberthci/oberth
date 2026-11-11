@@ -81,9 +81,6 @@ type preparedUpgradeValues struct {
 	pki           *upgradeServerPKI
 	revision      string
 	compatibility backupCompatibility
-	storedValues  string // cleaned user snapshot; empty keeps ordinary Helm reuse
-	migrated      string // stripped legacy key/value, empty when no migration is needed
-	cleanup       func()
 }
 
 func readUpgradeStoredValues(ctx context.Context, namespace, revision string, deps Deps) (map[string]any, error) {
@@ -103,26 +100,6 @@ func readUpgradeStoredValues(ctx context.Context, namespace, revision string, de
 	return values, nil
 }
 
-func migrateUpgradeShadow(values map[string]any) (string, error) {
-	// Only the retired boolean is migrated. Other administrator keys still
-	// reach the target schema unchanged; malformed shadow values are refused.
-	migrated := ""
-	if cache, ok := values["gitcache"].(map[string]any); ok {
-		if shadow, present := cache["shadow"]; present {
-			value, ok := shadow.(bool)
-			if !ok {
-				return "", &ErrSchemaValidation{Detail: "stored gitcache.shadow must be a legacy boolean; no upgrade applied"}
-			}
-			delete(cache, "shadow")
-			if len(cache) == 0 {
-				delete(values, "gitcache")
-			}
-			migrated = fmt.Sprintf("gitcache.shadow=%t", value)
-		}
-	}
-	return migrated, nil
-}
-
 // Helm owns schema evaluation (including local refs and additionalProperties).
 // Validate only reused USER configuration here, not old defaults for keys that
 // no longer exist. Unknown keys are reported and refused; never silently prune
@@ -140,15 +117,14 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
-	warnRetiredUpgradeValues(deps.Output, cfg, values)
+	if err := checkRemovedUpgradeValues(cfg, values); err != nil {
+		return preparedUpgradeValues{}, err
+	}
+	dropClearedRemovedValues(cfg, values)
 	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 		return preparedUpgradeValues{}, err
 	}
 	pki, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values)
-	if err != nil {
-		return preparedUpgradeValues{}, err
-	}
-	migrated, err := migrateUpgradeShadow(values)
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
@@ -160,26 +136,17 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
-	cleanup := func() { _ = os.RemoveAll(directory) }
-	keepSnapshot := false
-	defer func() {
-		if !keepSnapshot {
-			cleanup()
-		}
-	}()
+	defer func() { _ = os.RemoveAll(directory) }()
 	path := filepath.Join(directory, "stored-values.json")
 	if err := os.WriteFile(path, body, 0600); err != nil {
 		return preparedUpgradeValues{}, err
-	}
-	if migrated != "" {
-		cfg.storedValues = path
 	}
 	_, flags := upgradeHelmArgs(cfg, chart, imageRef, compat)
 	args := []string{"template", "oberth", chart, "-n", cfg.Namespace, "--is-upgrade", "--values", path}
 	// Use the exact upgrade pins and operator overrides, in the same order.
 	for i := 0; i < len(flags); i++ {
 		switch flags[i] {
-		case "--reset-then-reuse-values", "--reset-values", "--wait":
+		case "--reset-then-reuse-values", "--wait":
 		case "--timeout":
 			i++
 		case "--values":
@@ -188,7 +155,11 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 			}
 			i++
 		case "--set", "--set-string", "--set-json", "--version":
-			args = append(args, flags[i], flags[i+1])
+			// A cleared removed value is already gone from the snapshot;
+			// rendering its null would keep the key Helm's merge drops.
+			if flags[i] != "--set" || !clearsRemovedValue(flags[i+1]) {
+				args = append(args, flags[i], flags[i+1])
+			}
 			i++
 		default:
 			return preparedUpgradeValues{}, fmt.Errorf("unexpected generated upgrade flag %q", flags[i])
@@ -197,13 +168,5 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
 	}
-	prepared := preparedUpgradeValues{pki: pki, revision: revision, compatibility: compat, migrated: migrated, cleanup: cleanup}
-	if migrated != "" {
-		prepared.storedValues = path
-		if deps.Output != nil {
-			_, _ = fmt.Fprintf(deps.Output, "Dropped stored inert legacy %s for this upgrade; the prior Helm revision retains its original value for inspection.\n", migrated)
-		}
-	}
-	keepSnapshot = true
-	return prepared, nil
+	return preparedUpgradeValues{pki: pki, revision: revision, compatibility: compat}, nil
 }

@@ -92,7 +92,7 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 	}
 	admin := api.Actor{Identity: "admin@host", Admin: true}
 	for _, actor := range []api.Actor{{Identity: "dev"}, {Identity: "scoped-admin", Admin: true, Scope: []string{"codeberg"}}} {
-		for tool, raw := range map[string]string{"queue_priority_config": `{"rc_patterns":["rc/*"]}`, "queue_priority_get": `{}`, "run_priority": `{"run_id":"` + run.ID + `","priority":"highest","reason":"release blocker"}`} {
+		for tool, raw := range map[string]string{"queue_priority_config": `{"rc_patterns":["rc/*"]}`, "queue_priority_get": `{}`, "run_priority": `{"id":"` + run.ID + `","priority":"high","reason":"release blocker"}`} {
 			if _, err = control.CallTool(ctx, actor, tool, json.RawMessage(raw)); !errors.Is(err, ErrForbidden) {
 				t.Fatalf("%s by %+v = %v", tool, actor, err)
 			}
@@ -108,12 +108,12 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 	if _, err = control.CallTool(ctx, admin, "queue_priority_config", json.RawMessage(`{}`)); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("missing patterns=%v", err)
 	}
-	value, err := control.CallTool(ctx, admin, "run_priority", json.RawMessage(`{"run_id":"`+run.ID+`","priority":"highest","reason":"release blocker"}`))
+	value, err := control.CallTool(ctx, admin, "run_priority", json.RawMessage(`{"id":"`+run.ID+`","priority":"high","reason":"release blocker"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	shown := value.(model.Run)
-	if shown.Priority != model.PriorityHighest || shown.DisplayReason != "in line" || !strings.Contains(shown.PriorityReason, "release blocker") {
+	if shown.Priority != model.PriorityHigh || shown.DisplayReason != "in line" || !strings.Contains(shown.PriorityReason, "release blocker") {
 		t.Fatalf("bump display=%+v", shown)
 	}
 	denied := errors.New("audit gate refused")
@@ -261,7 +261,7 @@ func TestQueuePriorityToolRefusesGrantedBeforeStartIsPersisted(t *testing.T) {
 	if run.StartedAt != nil {
 		t.Fatal("test needs a grant without durable started_at")
 	}
-	_, err = control.CallTool(ctx, api.Actor{Identity: "admin", Admin: true}, "run_priority", json.RawMessage(`{"run_id":"`+run.ID+`","priority":"highest","reason":"too late"}`))
+	_, err = control.CallTool(ctx, api.Actor{Identity: "admin", Admin: true}, "run_priority", json.RawMessage(`{"id":"`+run.ID+`","priority":"high","reason":"too late"}`))
 	if !errors.Is(err, store.ErrInvalidState) {
 		t.Fatalf("granted run bump=%v", err)
 	}

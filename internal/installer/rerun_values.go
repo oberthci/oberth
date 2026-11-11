@@ -28,6 +28,9 @@ func resolveInstallRerunValues(ctx context.Context, cfg *Config, deps Deps, clus
 			if err != nil {
 				return err
 			}
+			if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
+				return err
+			}
 		}
 	}
 	if cfg.NetworkPolicy == "auto" {

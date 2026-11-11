@@ -37,11 +37,11 @@ func TestRunResourcesRouteAuthenticatesAndUsesSharedTool(t *testing.T) {
 		if strings.Contains(path, "last=7") && (a["last"] != float64(7) || a["include_failed"] != true) {
 			t.Fatal(a)
 		}
-		if a["resource_only"] != strings.Contains(path, "resource_only=true") {
-			t.Fatalf("resource-only capability not forwarded: %v", a)
+		if _, removed := a["resource_only"]; removed {
+			t.Fatalf("resource_only forwarded: %v", a)
 		}
 	}
-	for _, query := range []string{"last=no", "include_failed=maybe", "resource_only=maybe"} {
+	for _, query := range []string{"last=no", "include_failed=maybe"} {
 		r := httptest.NewRequest(http.MethodGet, "/api/run-resources?"+query, nil)
 		r.Header.Set("Authorization", "Bearer valid-token")
 		w := httptest.NewRecorder()

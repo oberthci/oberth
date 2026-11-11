@@ -7,20 +7,31 @@ set -eu
 chart=${1:-charts/oberth}
 helm_tool=${HELM:-helm}
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-fixture=$script_dir/testdata/chart-values-v0.17.53.yaml
+historical=$script_dir/testdata/chart-values-v0.17.53.yaml
 utility_image=${2:-$(awk '$1 == "utilityImage:" { print $2 }' "$chart/values.yaml")}
 test -n "$utility_image"
-if grep -Eq '^utilityImage:' "$fixture"; then
+if grep -Eq '^utilityImage:' "$historical"; then
   echo 'historical values fixture must predate scratch-image settings' >&2
   exit 1
 fi
 work=$(mktemp -d)
 trap 'find "$work" -delete' EXIT
+server_image=example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+# The chart schema refuses the values the chart removed, as it must.
+if "$helm_tool" template oberth "$chart" --namespace oberth --values "$historical" \
+  --set-string "image.ref=$server_image" >/dev/null 2>"$work/error.txt"; then
+  echo 'removed chart values rendered' >&2
+  exit 1
+fi
+grep -Fq 'additional properties' "$work/error.txt"
+# Every other historical value still renders: the upgrade refuses stored
+# removed values, so a reused release no longer carries them.
+fixture=$work/chart-values-v0.17.53.yaml
+awk -f "$script_dir/strip-removed-chart-values.awk" "$historical" >"$fixture"
 legacy_chart=$work/legacy-values-chart
 cp -R -- "$chart" "$legacy_chart"
 chmod -R u+w "$legacy_chart"
 cp -- "$fixture" "$legacy_chart/values.yaml"
-server_image=example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
 mirror=example.invalid/busybox@sha256:2222222222222222222222222222222222222222222222222222222222222222
 
 check_default() {
@@ -35,20 +46,9 @@ check_default() {
   fi
 }
 
-# The v0.17 fixture carries that release's default run ceiling of 3. Since
-# v0.20.0 the ceiling is the Argo controller's parallelism, so a reused 3
-# fails with the replacement named instead of being dropped silently; the
-# renders below clear it the way the upgrade notes say.
-if "$helm_tool" template oberth "$legacy_chart" --is-upgrade --namespace oberth \
-  --set-string "image.ref=$server_image" >"$work/rendered.yaml" 2>"$work/error.txt"; then
-  echo 'a reused run ceiling rendered without the v0.20.0 migration' >&2
-  exit 1
-fi
-grep -Fq 'oberth install --argo-parallelism' "$work/error.txt"
-
 # Direct Helm --reuse-values compatibility: neither new key is present.
 "$helm_tool" template oberth "$legacy_chart" --is-upgrade --namespace oberth \
-  --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" >"$work/rendered.yaml"
+  --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 check_default
 # New policy defaults must also apply when old --reuse-values omit their keys.
 grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$work/rendered.yaml"
@@ -56,7 +56,7 @@ grep -Fq 'name: oberth-pipeline-ingress' "$work/rendered.yaml"
 
 # The reset-then-reuse path merges new defaults with the old release's values.
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
-  --values "$fixture" --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" >"$work/rendered.yaml"
+  --values "$fixture" --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 check_default
 
 # A previously stored utility mirror choice
@@ -64,30 +64,13 @@ check_default
 cp -- "$fixture" "$work/stored-values.yaml"
 printf '\nutilityImage: %s\n' "$mirror" >>"$work/stored-values.yaml"
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
-  --values "$work/stored-values.yaml" --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" >"$work/rendered.yaml"
+  --values "$work/stored-values.yaml" --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
 
 # Operator mirrors retain precedence.
 for source in "$legacy_chart" "$chart"; do
   "$helm_tool" template oberth "$source" --is-upgrade --namespace oberth \
-    --values "$fixture" --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" \
+    --values "$fixture" --set-string "image.ref=$server_image" \
     --set-string "utilityImage=$mirror" >"$work/rendered.yaml"
   grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
 done
-
-# Retired backend/shadow configuration must be migrated explicitly.
-for retired in gitBackend=go-git gitcache.shadow=true; do
-  if "$helm_tool" template oberth "$chart" --set-string "image.ref=$server_image" \
-    --set "$retired" >"$work/rendered.yaml" 2>/dev/null; then
-    echo "retired setting accepted: $retired" >&2
-    exit 1
-  fi
-done
-
-# Safe historical defaults remain accepted but have no runtime wiring.
-"$helm_tool" template oberth "$chart" --set-string "image.ref=$server_image" \
-  --set gitBackend=cli --set gitcache.shadow=false >"$work/rendered.yaml"
-if grep -Eq -- '--git-backend|OBERTH_GITCACHE_SHADOW' "$work/rendered.yaml"; then
-  echo 'legacy configuration reactivated a removed backend' >&2
-  exit 1
-fi

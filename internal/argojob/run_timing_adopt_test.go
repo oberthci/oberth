@@ -104,8 +104,6 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	terminal.Annotations[runIDAnnotation] = run.ID
 	terminal.Annotations[identityAnnotation] = strings.Repeat("a", 64)
 	terminal.Annotations[refAnnotation] = "feature/adopt"
-	terminal.Annotations[argoworkflow.SizeAnnotation] = "L"
-	terminal.Annotations[argoworkflow.RetiredConcurrencyGroupAnnotation] = "build" // a v0.19 Workflow still adopts
 	terminal.Labels = map[string]string{"oberth.ci/sha": sha, "oberth.ci/trigger": string(pipeline.TriggerCI)}
 	terminal.Spec.Entrypoint = "dag"
 	terminal.Spec.Templates = []wfv1.Template{

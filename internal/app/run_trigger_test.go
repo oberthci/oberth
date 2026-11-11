@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -50,8 +49,7 @@ const perTriggerBuild = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: XL
-    oberth.ci/size-by-trigger: "branch=M, promotion=XL"
+    example.com/tier: XL
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600
@@ -72,20 +70,6 @@ func writeBuild(t *testing.T, document string) string {
 		t.Fatal(err)
 	}
 	return dir
-}
-
-func TestPipelineSizeRefusesAMisdeclaredTrigger(t *testing.T) {
-	dir := writeBuild(t, perTriggerBuild)
-	if err := os.WriteFile(filepath.Join(dir, ".oberth", "build.yaml"),
-		[]byte(strings.Replace(perTriggerBuild, "promotion=XL", "nightly=XL", 1)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	if _, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
-		Run: model.Run{Ref: "feature/x", Trigger: "branch"}, Repository: model.Repository{Name: "ebpf"}, SourceDir: dir,
-	}); err == nil {
-		t.Fatal("PipelineSize admitted an unknown trigger")
-	}
 }
 
 func TestCreateWorkflowStampsTheRunsOwnTrigger(t *testing.T) {

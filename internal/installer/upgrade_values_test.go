@@ -1,17 +1,13 @@
 package installer
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-
-	"k8s.io/client-go/rest"
 )
 
 func TestUpgradeRequiresSupportedHelm(t *testing.T) {
@@ -167,7 +163,6 @@ func TestUpgradeSchemaPreflightUsesOnlyStoredOverridesAndCleansFiles(t *testing.
 				if prepared.compatibility != testUpgradeCompatibility {
 					t.Fatal(prepared.compatibility)
 				}
-				prepared.cleanup()
 			}
 			if temporary != "" {
 				if _, err := os.Stat(filepath.Dir(temporary)); !errors.Is(err, os.ErrNotExist) {
@@ -181,206 +176,77 @@ func TestUpgradeSchemaPreflightUsesOnlyStoredOverridesAndCleansFiles(t *testing.
 	}
 }
 
-func TestUpgradeMigratesOnlyStoredBooleanShadow(t *testing.T) {
-	for _, raw := range []string{
-		`{"gitcache":{"shadow":true},"pushBannerURL":"","retention":{"keepNewestPerRef":0},"argo":{"enabled":false}}`,
-		`{"gitcache":{"shadow":false},"podLabels":{"arbitrary.example/key":"kept"},"retention":{"keepNewestPerRef":9007199254740993}}`,
-	} {
-		t.Run(raw, func(t *testing.T) {
-			var output bytes.Buffer
-			deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-				if args[0] == "history" {
-					out, _ := testUpgradeValuePreflight(args)
-					return out, nil
-				}
-				if args[0] == "get" {
-					if slices.Contains(args, "--all") {
-						out, _ := testUpgradeValuePreflight(args)
-						return out, nil
-					}
-					return []byte(raw), nil
-				}
-				if args[0] != "template" {
-					t.Fatalf("preflight mutated release: %v", args)
-				}
-				body, err := os.ReadFile(args[slices.Index(args, "--values")+1])
-				if err != nil {
-					t.Fatal(err)
-				}
-				var got, want map[string]any
-				gotDecoder := json.NewDecoder(bytes.NewReader(body))
-				gotDecoder.UseNumber()
-				if err := gotDecoder.Decode(&got); err != nil {
-					t.Fatal(err)
-				}
-				decoder := json.NewDecoder(strings.NewReader(raw))
-				decoder.UseNumber()
-				if err := decoder.Decode(&want); err != nil {
-					t.Fatal(err)
-				}
-				delete(want, "gitcache")
-				gotJSON, _ := json.Marshal(got)
-				wantJSON, _ := json.Marshal(want)
-				if !bytes.Equal(gotJSON, wantJSON) {
-					t.Fatalf("migration changed other stored values: got %s want %s", gotJSON, wantJSON)
-				}
-				return nil, nil
-			}}
-			cfg := UpgradeConfig{Namespace: "chosen"}
-			prepared, err := prepareUpgradeValues(t.Context(), cfg, deps, "chart", "image")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer prepared.cleanup()
-			if prepared.storedValues == "" || !strings.Contains(output.String(), "Dropped stored inert legacy gitcache.shadow") {
-				t.Fatal("migration snapshot or explicit deviation missing")
-			}
-			cfg.storedValues = prepared.storedValues
-			_, flags := upgradeHelmArgs(cfg, "chart", "image", prepared.compatibility)
-			if !slices.Contains(flags, "--reset-values") || slices.Contains(flags, "--reset-then-reuse-values") || flags[slices.Index(flags, "--values")+1] != prepared.storedValues {
-				t.Fatalf("apply would resurrect stored shadow: %v", flags)
-			}
-			if _, err := os.Stat(prepared.storedValues); err != nil {
-				t.Fatalf("snapshot removed before apply: %v", err)
-			}
-			prepared.cleanup()
-			if _, err := os.Stat(prepared.storedValues); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("snapshot leaked: %v", err)
-			}
-		})
+// Removed chart values are refused wherever they are set, never stripped:
+// stored values, --values files and --set. --set <key>=null drops a stored
+// one, and the offline render then sees it gone, as Helm's merge does.
+func TestUpgradeRefusesRemovedChartValues(t *testing.T) {
+	stored := map[string]any{"trustedTests": map[string]any{"runtime": "old"}, "vm": nil, "admission": map[string]any{"sizeWeights": map[string]any{"XL": 8}, "diskFloorBytes": 1}, "pushBannerURL": ""}
+	file := filepath.Join(t.TempDir(), "values.yaml")
+	if err := os.WriteFile(file, []byte("maxConcurrentJobs: 3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := checkRemovedUpgradeValues(UpgradeConfig{UserValues: []string{file}, UserSet: []string{"argo.kubevirtCeiling.maxVMs=4"}}, stored)
+	want := "chart schema validation failed: chart values that no longer exist are set: admission.sizeWeights (stored release values), argo.kubevirtCeiling (--set argo.kubevirtCeiling.maxVMs), maxConcurrentJobs (--values " + file + "), trustedTests (stored release values); no upgrade applied. " +
+		"Delete them from any --values file and re-run the upgrade with --set admission.sizeWeights=null --set argo.kubevirtCeiling=null --set maxConcurrentJobs=null --set trustedTests=null (Helm drops a null value from the stored release values)"
+	var schemaErr *ErrSchemaValidation
+	if !errors.As(err, &schemaErr) || err.Error() != want {
+		t.Fatalf("refusal = %v", err)
+	}
+	cfg := UpgradeConfig{UserSet: []string{"trustedTests=null", "admission.sizeWeights=null"}}
+	if err := checkRemovedUpgradeValues(cfg, stored); err != nil {
+		t.Fatalf("cleared values still refused: %v", err)
+	}
+	// A clear of a value that is not stored is refused: Helm would keep the
+	// null and the chart schema would refuse it after the preflight.
+	for _, set := range []string{"gitBackend=null", "vm=null", "admission.maxHeadWait=null"} {
+		err := checkRemovedUpgradeValues(UpgradeConfig{UserSet: append([]string{set}, cfg.UserSet...)}, stored)
+		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "--set "+set+" clears a removed chart value the stored release values do not set; no upgrade applied") {
+			t.Fatalf("%s for an unstored value accepted: %v", set, err)
+		}
+	}
+	// Only the exact removed key set to null clears it.
+	for _, set := range []string{"trustedTests.runtime=null", "trustedTests=", "trustedTests=false"} {
+		if err := checkRemovedUpgradeValues(UpgradeConfig{UserSet: []string{set, "admission.sizeWeights=null"}}, stored); !errors.As(err, &schemaErr) {
+			t.Fatalf("%s cleared a removed value: %v", set, err)
+		}
+	}
+	dropClearedRemovedValues(cfg, stored)
+	admission := stored["admission"].(map[string]any)
+	if _, kept := stored["trustedTests"]; kept || admission["sizeWeights"] != nil || admission["diskFloorBytes"] != 1 || stored["pushBannerURL"] != "" {
+		t.Fatalf("drop changed other values: %+v", stored)
+	}
+	chartValues := []byte("admission:\n  diskFloorBytes: 1\n")
+	if err := validateUserSetAgainstValues(chartValues, cfg.UserSet); err != nil {
+		t.Fatalf("clearing --set refused: %v", err)
+	}
+	if err := validateUserSetAgainstValues(chartValues, []string{"vm.kvm.enabled=true"}); !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "vm (--set vm.kvm.enabled)") || !strings.Contains(err.Error(), "--set vm=null") {
+		t.Fatalf("removed --set not named: %v", err)
 	}
 }
 
-// Stop at the Helm boundary: the real command path must apply the exact
-// validated migration snapshot, then erase it even if applying fails.
-func TestRunUpgradeRetriesFailedShadowMigration(t *testing.T) {
-	for name, dryRun := range map[string]bool{"apply": false, "dry-run": true} {
-		t.Run(name, func(t *testing.T) {
-			stop := errors.New("stop at Helm apply")
-			var output bytes.Buffer
-			reads, histories, applies, previews := 0, 0, 0, 0
-			snapshot := ""
-			deps := Deps{
-				Output:     &output,
-				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-					switch args[0] {
-					case "list":
-						return []byte(`[{"name":"oberth","revision":"8","status":"failed","chart":"oberth-0.17.63"}]`), nil
-					case "history":
-						histories++
-						return []byte(`[{"revision":7,"status":"deployed"},{"revision":8,"status":"failed"}]`), nil
-					case "get":
-						reads++
-						i := slices.Index(args, "--revision")
-						if i < 0 {
-							// The latest failed attempt already has a cleaned Config.
-							return []byte(`{}`), nil
-						}
-						if args[i+1] != "7" {
-							t.Fatalf("read values from wrong revision: %v", args)
-						}
-						if slices.Contains(args, "--all") {
-							raw, _ := testUpgradeValuePreflight(args)
-							return raw, nil
-						}
-						return []byte(`{"gitcache":{"shadow":true}}`), nil
-					case "show":
-						return []byte("image:\n  ref: example.invalid/oberth@sha256:" + strings.Repeat("1", 64) + "\n"), nil
-					case "template":
-						snapshot = args[slices.Index(args, "--values")+1]
-						body, err := os.ReadFile(snapshot)
-						if err != nil || string(body) != `{}` {
-							t.Fatalf("unclean preflight snapshot %s: %v", body, err)
-						}
-						return nil, nil
-					case "upgrade":
-						if slices.Contains(args, "--dry-run=server") {
-							previews++
-							return []byte(`{"config":{}}`), nil
-						}
-						applies++
-						if dryRun || !slices.Contains(args, "--reset-values") || slices.Contains(args, "--reset-then-reuse-values") || args[slices.Index(args, "--values")+1] != snapshot {
-							t.Fatalf("retry would reuse deployed shadow: %v", args)
-						}
-						return nil, stop
-					default:
-						if raw, ok := testUpgradeValuePreflight(args); ok {
-							return raw, nil
-						}
-						t.Fatalf("unexpected Helm call: %v", args)
-						return nil, nil
-					}
-				},
-			}
-			result, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true}, deps)
-			if histories != 1 || result.AlreadyUpToDate || result.Upgraded || result.Migrated != "gitcache.shadow=true" {
-				t.Fatalf("retry result=%+v histories=%d err=%v", result, histories, err)
-			}
-			if dryRun {
-				if err != nil || reads != 1 || applies != 0 || !strings.Contains(output.String(), "Would strip stored legacy gitcache.shadow=true from deployed revision 7") || !strings.Contains(output.String(), "--reset-values --values <cleaned-deployed-values.json>") || strings.Contains(output.String(), "--reset-then-reuse-values") {
-					t.Fatalf("incorrect migration preview: %s; reads=%d applies=%d err=%v", output.String(), reads, applies, err)
-				}
-			} else {
-				// Three reads prepare the snapshot; two (stored and rendered,
-				// same revision) decide the changed-default pins.
-				if !errors.Is(err, stop) || reads != 5 || applies != 1 || previews != 1 {
-					t.Fatalf("retry did not apply migration: reads=%d applies=%d err=%v", reads, applies, err)
-				}
-				if _, err := os.Stat(snapshot); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("retry leaked snapshot: %v", err)
-				}
-			}
-		})
+// The chart test scripts strip the same removed values the upgrade refuses.
+func TestStripScriptListsEveryRemovedChartValue(t *testing.T) {
+	body, err := os.ReadFile("../../hack/strip-removed-chart-values.awk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `split("` + strings.Join(removedChartValues, " ") + `", list, " ")`
+	if !strings.Contains(string(body), want) {
+		t.Fatalf("hack/strip-removed-chart-values.awk lists other keys than removedChartValues: want %s", want)
 	}
 }
 
-// The exact snapshot validated by preflight must also reach Helm apply.
-func TestRunUpgradeAppliesValidatedShadowMigrationSnapshot(t *testing.T) {
-	stop := errors.New("stop before applying release")
-	var validated []byte
-	var snapshot string
-	applied := false
-	deps := Deps{
-		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if args[0] == "get" && !slices.Contains(args, "--all") {
-				return []byte(`{"gitcache":{"shadow":true},"pushBannerURL":""}`), nil
-			}
-			if out, ok := testUpgradeValuePreflight(args); ok && args[0] != "template" {
-				return out, nil
-			}
-			switch args[0] {
-			case "list":
-				return []byte(`[{"name":"oberth","status":"deployed","chart":"oberth-0.17.62"}]`), nil
-			case "show":
-				return []byte("image:\n  ref: example.invalid/oberth@sha256:" + strings.Repeat("1", 64) + "\n"), nil
-			case "template":
-				snapshot = args[slices.Index(args, "--values")+1]
-				var err error
-				validated, err = os.ReadFile(snapshot)
-				return nil, err
-			case "upgrade":
-				applied = true
-				if !slices.Contains(args, "--reset-values") || slices.Contains(args, "--reset-then-reuse-values") || args[slices.Index(args, "--values")+1] != snapshot {
-					t.Fatalf("wrong apply values: %v", args)
-				}
-				body, err := os.ReadFile(snapshot)
-				if err != nil || !bytes.Equal(body, validated) || string(body) != `{"pushBannerURL":""}` {
-					t.Fatalf("apply differed from validation: %s: %v", body, err)
-				}
-				return nil, stop
-			default:
-				t.Fatalf("unexpected Helm command: %v", args)
-				return nil, nil
-			}
-		},
+// Install re-runs and restores reuse the installed values; removed ones are
+// refused there with the same names, pointing at oberth upgrade.
+func TestReuseValuesPathsRefuseRemovedChartValues(t *testing.T) {
+	installed := map[string]any{"auditAnchor": map[string]any{"rootsKey": "roots.pem"}, "upstream": map[string]any{"keySecret": "k", "name": "github"}, "vm": nil}
+	err := refuseRemovedReleaseValues(installed, "oberth restore")
+	want := "chart schema validation failed: the installed release values set chart values that no longer exist: auditAnchor.rootsKey, upstream.keySecret; oberth restore changed nothing. " +
+		"Run oberth upgrade first: it names each stored one with the --set <key>=null flag that drops it, and replaces the installed chart's defaults"
+	if err == nil || err.Error() != want {
+		t.Fatalf("refusal = %v", err)
 	}
-	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.63", ChartOverride: "fixture", NoBackup: true}, deps)
-	if !errors.Is(err, stop) || !applied {
-		t.Fatalf("did not reach apply with migration: %v", err)
-	}
-	if _, err := os.Stat(snapshot); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("failed upgrade leaked private snapshot: %v", err)
+	if err := refuseRemovedReleaseValues(map[string]any{"upstream": map[string]any{"name": "github"}}, "oberth install"); err != nil {
+		t.Fatal(err)
 	}
 }

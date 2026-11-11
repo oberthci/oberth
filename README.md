@@ -157,9 +157,7 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
 
 `oberth upgrade` keeps stored release configuration and merges new chart defaults
 for keys that were absent, then applies `--values`/`--set` overrides. It uses
-Helm's `--reset-then-reuse-values` mode. The chart also supports direct
-`--reuse-values` upgrades from v0.17.53: missing `utilityImage` falls back to the pinned BusyBox helper. Custom
-utility-image mirrors are preserved. Native Git is the only source backend.
+Helm's `--reset-then-reuse-values` mode. Native Git is the only source backend.
 
 Upgrades require Helm 3.14 or newer. Before applying changes, the CLI reads
 `helm get values --all` and pins the installed `compatibility.schemaIdentity`,
@@ -174,6 +172,19 @@ manager can use the [explicit Role ownership migration](docs/argo-role-migration
 before an upgrade. It preserves permissions and unrelated ownership. PVC update
 and list remain required for source-claim adoption and cleanup.
 
+Chart values that no longer exist are refused, never ignored or stripped:
+`gitBackend`, `gitcache`, `maxConcurrentJobs`, `argoSync`, `trustedTests`, `vm`,
+`argo.vmLauncherServiceAccount`, `argo.containerDiskPrefixes`,
+`argo.kubevirtCeiling` and `admission.` `exclusiveClasses`, `sizeWeights`,
+`maxHeadWait`, `declaredResources`, `legacyResources` and `runtimeCapacity`.
+When the stored release values, a `--values` file or a `--set` still sets one,
+`oberth upgrade` names each key with its source and stops before any write.
+Delete the keys from your values files and re-run the upgrade with
+`--set <key>=null` for each named key, for example
+`oberth upgrade --set trustedTests=null --set vm=null`. Helm's
+`--reset-then-reuse-values` merge drops a stored key that an override sets to
+null, so the key is gone from the stored values from then on.
+
 When a target chart removes a configured key, export the installed values,
 remove or migrate the unsupported keys in an explicit values file, and reconcile
 with `helm upgrade ... --reset-values --values cleaned.yaml` before retrying.
@@ -186,8 +197,9 @@ matching database backup before it can run.
 Re-running `oberth install` and restoring a backup intentionally retain
 `--reuse-values`: these paths preserve installed chart defaults, while restore
 sets only the database identities it needs. Every newly introduced value must
-therefore have a template fallback. The v0.17.53 raw-values render and actual
-Helm install/restore tests cover the `utilityImage` fallback.
+therefore have a template fallback. The v0.17.53 raw-values render (without
+the removed values) and actual Helm install/restore tests cover the
+`utilityImage` fallback.
 
 ## How it works
 
@@ -278,9 +290,10 @@ native Argo `synchronization` against the ConfigMap `oberth-sync-limits` the
 argo-workflows release renders, and `releases.serialize` runs releases one at
 a time with a native mutex. Oberth submits every admitted run at once and keeps
 only host safety that reads nothing from a workflow: the hard CPU/IO PSI valve
-and the disk-space floor. The historical `oberth.ci/size`,
-`oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit` annotations
-are accepted and unused. Missing requests receive the documented defaults;
+and the disk-space floor. The removed `oberth.ci/size`,
+`oberth.ci/size-by-trigger`, `oberth.ci/concurrency-group`,
+`oberth.ci/concurrency-limit` and `oberth.ci/exclusive` annotations are refused
+at admission, naming their replacement. Missing requests receive the documented defaults;
 explicit requests and limits remain owned by the workflow in git. See
 [admission and native synchronization](docs/native-synchronization.md) and
 [measured resource advice](docs/measured-requests.md).
@@ -330,9 +343,8 @@ spec:
         when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"
 ```
 
-The historical `oberth.ci/size` and `oberth.ci/size-by-trigger` annotations are
-accepted and unused for admission; the resource report still groups
-measurements by them.
+The `oberth.ci/size` and `oberth.ci/size-by-trigger` annotations are removed
+and refused at admission.
 
 Numeric resource ceilings use `oberth resource grant/get/revoke` or MCP
 `resource_grant`, `resource_grant_get`, `resource_revoke`. Migration 40 copies
@@ -351,7 +363,7 @@ tools (a call to one is still refused by the server); available operations are:
 | `status` | Return concise CI status for a full SHA, short SHA, or branch, including the failed step. |
 | `logs` | Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: counts are lower bounds unless scan_complete is true; continue has_more pages with next_byte_offset as byte_offset and offset:0. |
 | `run_get` | Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default (summary): id/repo/ref/sha, queue_position when available, superseded, status/phase/failed_burn/failed_step/error, display_status/display_reason and compact steps (burn, name, status, started_at, finished_at). display_status is one of queued, running, passed, failed, infra-retried, superseded or cancelled; display_reason names the cause. Set summary:false for the full record: step results with diagnostics, versioned retained timing (missing timing is unknown; unavailable=pruned once the run is older than the retained timing window), the repository record and Scheduling. |
-| `run_resources` | Read captured per-template resource history and numeric declarations at the newest selected SHA. Git remains the source of truth. Each step reports sizing_acceptance: five comparable terminal runs must contain complete CPU/memory/storage/duration and known limits together. Suggestions use p95/max; incomplete, mixed-condition or censored history gets no suggestion. Resource-only suggestions require resource_only=true, declaring that the caller preserves missing deadlines in JSON and YAML; other callers still receive measurements and a refusal reason. YAML includes paste-ready ordinary pod resources. Main-container duration does not measure Pod active lifetime through finalization, so no activeDeadlineSeconds is suggested. No logs, commands, environment or image details. |
+| `run_resources` | Read captured per-template resource history and numeric declarations at the newest selected SHA. Git remains the source of truth. Each step reports sizing_acceptance: five comparable terminal runs must contain complete CPU/memory/storage/duration and known limits together. Suggestions use p95/max; incomplete, mixed-condition or censored history gets no suggestion. Suggestions omit an absent deadline in JSON and YAML; it is never zero. YAML includes paste-ready ordinary pod resources. Main-container duration does not measure Pod active lifetime through finalization, so no activeDeadlineSeconds is suggested. No logs, commands, environment or image details. |
 | `run_retry` | Queue a fresh attempt for the newest interrupted or infrastructure-failed run, retaining repository, ref, SHA and release admission. Workflow-level failures without a failed step qualify. Tag/release retries require an admin, an unchanged tag object and complete credential-aware terminal observations for the entire tag history (or proof of no Workflow intent). Started secret-store/WIF work, old plans, missing evidence, a moved tag or an older source need run_rerun with force. Pending Workflow deletion is refused even with force. Test failures, older runs, promotion/plan/apply runs, published tags and refs with an active run are refused. The caller is recorded as actor. |
 | `publication_abandon` | Abandon one pending upstream publication by its full publication ID. Requires an unscoped admin uplink and a reason. Atomically marks the publication abandoned and its run failed/abandoned (and its promotion failed), with the administrator in the audit chain. Never pushes; earlier pushes may already be visible upstream. Abandoned intents cannot be retried with publish_retry. An in-flight delivery settles before this operation; terminal publications are refused. |
 | `run_cancel` | Cancel one queued or running run (a claimed run that has not started is queued). The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited. |
@@ -399,7 +411,7 @@ tools (a call to one is still refused by the server); available operations are:
 | `size_grant` | Raise (or set) the largest admission size a repository's branch, promotion and schedule runs may declare. The default without a grant is L; XL reserves the whole host and makes every other repository wait for a full drain. Re-enables automatic tag priority: only the oldest waiting tag per repository qualifies, and only within this size maximum. Ungranted repositories default to enabled within L. Admin uplink required; audited. |
 | `size_revoke` | Return a repository to maximum L and disable its automatic tag priority, even if never granted. Explicit admin overrides, promotions and 60-minute aging of standard runs into promotion still apply; running work continues. Admin uplink required; audited. |
 | `size_grant_get` | Read legacy admission size and priority policy, plus the independent numeric resource ceiling. Use resource_grant to change request/limit ceilings. |
-| `queue_cap_config` | Set the branch queue cap with maxNotStarted (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap (queueCap is a legacy alias for one more release). |
+| `queue_cap_config` | Set the branch queue cap with max_not_started (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap. |
 | `release_wif_list` | Read the release WIF capability map: boot default from Helm/flags, runtime overrides, the effective map used by preflight and admission, configured role names and any stored grant left inactive. Public data only. Unscoped admin only. |
 | `release_wif_grant` | Grant or replace one registered repository's release WIF entry at runtime (#1497): its release service_account_name and template-to-role map. Roles, namespace and dedicated step identities stay Helm configuration. Validated against the boot map; applies to the next preflight and tag admission without restart. Unscoped admin only; audited, reason required. |
 | `release_wif_revoke` | Revoke a repository's release WIF entry at runtime, including a Helm-configured entry or one for a retired, unregistered upstream/org/repo. New release admissions refuse its WIF leaves. Unscoped admin only; audited, reason required. |
@@ -409,7 +421,7 @@ tools (a call to one is still refused by the server); available operations are:
 | `priority_grant` | Allow an identity to request submission priority up to max_class until expires (RFC3339). Unscoped admin only; audited. |
 | `priority_grant_list` | List submission priority grants, including expiry. Unscoped admin only. |
 | `priority_grant_revoke` | Revoke an identity's submission priority grant. Accepted runs keep their priority. Unscoped admin only; audited. |
-| `run_priority` | Set and pin a waiting run to low, standard, promotion or high, including explicit lowering. Legacy normal/highest inputs map to standard/high. Cannot preempt admitted work. Unscoped admin only; audited, reason required. |
+| `run_priority` | Set and pin a waiting run to low, standard, promotion or high, including explicit lowering. Cannot preempt admitted work. Unscoped admin only; audited, reason required. |
 | `admission_hold` | Hold new admission except allowed tag/release/promotion classes. Unscoped admin only; audited, reason required. Existing grants are untouched. Default allow is tag+release; [] holds all. Expires after duration (default 2h, maximum 12h), including across restart. Read current hold in system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release: typically a granted reservation still held for a run that is already terminal because its owner hung or was lost (also an ungranted one of a terminal run, or a retained one while a stopping scheduler drains). A live run's reservation is refused (use run_cancel). The run's Workflow is deleted first as proof; a granted run with no recorded Workflow (a trusted preflight) needs force, as does a failed deletion. Admin uplink required, unscoped only; audited. system_status lists every reservation. |
 | `repo_usage` | Report bounded outside-step kubelet/cAdvisor usage by repository and step: per-container app/init/helper/VM launcher p50/p95/max, pod storage peaks and per-run pod overlap; requests, paired used/request ratios and per-step peaks grouped by observed Workflow size class (S/M/L/XL or unknown). Peaks are sampled lower bounds; missing/killed samples remain unknown. Does not change admission. |

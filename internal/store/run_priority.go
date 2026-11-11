@@ -163,7 +163,6 @@ func (s *Store) SetQueuePriorityPatterns(ctx context.Context, actor string, patt
 // this call; the durable state change and audit are atomic.
 func (s *Store) BumpRunPriority(ctx context.Context, actor, id string, priority model.RunPriority, reason string) (model.Run, error) {
 	reason = strings.TrimSpace(reason)
-	priority = priority.Canonical()
 	if strings.TrimSpace(actor) == "" || id == "" || !priority.Valid() || reason == "" || len(reason) > 512 || strings.IndexFunc(reason, unicode.IsControl) >= 0 {
 		return model.Run{}, fmt.Errorf("%w: actor, run ID, low/standard/promotion/high priority and reason (1..512 bytes) required", ErrInvalid)
 	}

@@ -2,7 +2,6 @@ package argoworkflow
 
 import (
 	"errors"
-	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 )
@@ -18,14 +17,4 @@ func RefuseRetiredWorkflow(w *wfv1.Workflow) error {
 		}
 	}
 	return nil
-}
-
-// RetiredValue accepts historical chart values solely so upgrades can ignore them.
-func RetiredValue(key string) bool {
-	for _, prefix := range []string{"trustedTests", "vm", "argo.vmLauncherServiceAccount", "argo.containerDiskPrefixes", "argo.kubevirtCeiling"} {
-		if key == prefix || strings.HasPrefix(key, prefix+".") || strings.HasPrefix(key, prefix+"[") {
-			return true
-		}
-	}
-	return false
 }

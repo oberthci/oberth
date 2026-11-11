@@ -47,11 +47,10 @@ that repository.
 ## Queue depth cap
 
 An unscoped administrator can call `queue_cap_config` with
-`{"maxNotStarted":8}` to set the branch queue cap. The default is 0, which
+`{"max_not_started":8}` to set the branch queue cap. The default is 0, which
 disables the cap. This setting lives in the database and survives restart.
 Use `system_status.queue_cap` to read `max_not_started`, `not_started`,
-`deferred` and the current `reason`. The legacy `queueCap` response remains
-for one more release.
+`deferred` and the current `reason`.
 
 At the cap, branch pushes are accepted into Oberth's Git cache, with the reason
 `branch run deferred: queue at N/M`; their CI runs are created later. Deferred

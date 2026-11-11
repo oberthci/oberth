@@ -90,16 +90,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
 		problems = append(problems, err)
 	}
-	// The same holds for both size declarations. Which triggers a document
-	// may name depends on whether it is build.yaml or release.yaml, which
-	// this document-agnostic gate cannot know; AdmitSizeDeclarations adds that
-	// check where the tier is known.
-	if _, err := DeclaredSize(workflow); err != nil {
-		problems = append(problems, err)
-	}
-	if _, err := DeclaredSizesByTrigger(workflow); err != nil {
-		problems = append(problems, err)
-	}
 	problems = append(problems, admitTriggerParameter(&workflow.Spec)...)
 	problems = append(problems, admitScheduleParameter(&workflow.Spec)...)
 	return errors.Join(problems...)
@@ -124,6 +114,11 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	}
 	if len(workflow.Finalizers) != 0 {
 		problems = append(problems, errors.New("argoworkflow: metadata.finalizers must be omitted"))
+	}
+	for name := range workflow.Annotations {
+		if _, removed := removedAnnotations[name]; removed {
+			problems = append(problems, removedAnnotation("metadata", name))
+		}
 	}
 	return problems
 }
@@ -802,10 +797,8 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 			if value != "none" {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must be none", location, name))
 			}
-		case RetiredExclusiveAnnotation:
-			// Inert since v0.18.0: accepted and ignored so documents that
-			// still carry it keep running. Native Argo synchronization
-			// (semaphores, mutexes) replaces it; see docs/native-synchronization.md.
+		case "oberth.ci/exclusive":
+			problems = append(problems, removedAnnotation(location, name))
 		default:
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
 		}

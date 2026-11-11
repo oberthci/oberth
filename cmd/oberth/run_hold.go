@@ -103,7 +103,7 @@ func runRunHold(ctx context.Context, arguments []string, output io.Writer) error
 			toolArguments["stdin"] = string(content)
 		}
 		if options.timeout > 0 {
-			toolArguments["timeout_seconds"] = options.timeout
+			toolArguments["timeout_s"] = options.timeout
 		}
 	case "patch":
 		if options.diffFile == "" {

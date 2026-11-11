@@ -39,18 +39,3 @@ Enabling the Rekor witness on an existing deployment? Read the current audit
 chain head first:
 kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- /usr/local/bin/oberth audit head
 Then set auditAnchor.acceptWitnessGenesis to that exact value for one restart.
-
-{{- if hasKey .Values "watchTunnel" }}
-WARNING: retired watchTunnel values are ignored. The connector must be managed
-outside Oberth. This upgrade removes the chart connector and its cloudflared
-PriorityClass. BEFORE upgrading an owning release, annotate needed live objects
-helm.sh/resource-policy=keep and verify the annotations. The external connector
-must already own ingress and use an
-externally managed PriorityClass or omit priorityClassName. See the staged
-rollout procedure in docs/ownership-handoff.md. The checked upgrade path requires
---ownership-handoff proof before removing core ownership.
-{{- end }}
-
-{{- if or (hasKey .Values "trustedTests") (hasKey .Values "vm") (hasKey .Values.argo "vmLauncherServiceAccount") (hasKey .Values.argo "containerDiskPrefixes") (hasKey .Values.argo "kubevirtCeiling") }}
-WARNING: retired trustedTests, vm and VM-specific argo values are ignored. Migrate pipelines to a workflow capability grant with allowlisted resource kinds and extended resources.
-{{- end }}

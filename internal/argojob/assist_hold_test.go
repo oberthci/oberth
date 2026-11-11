@@ -29,7 +29,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600
@@ -175,7 +175,7 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 }
 
 func TestBuildAssistSkipsCredentialedWorkflows(t *testing.T) {
-	document := strings.Replace(assistDocument, "oberth.ci/size: M", "oberth.ci/size: M\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/token", 1)
+	document := strings.Replace(assistDocument, "example.com/tier: M", "example.com/tier: M\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/token", 1)
 	request := assistRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/token": true}
 	request.StepGrants = map[string]map[string]bool{"oberth/upstream/acme/oberth/token": {"*": true}}
@@ -243,7 +243,7 @@ func TestBuildRefusesRepositoryAssistAnnotations(t *testing.T) {
 	if _, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, document)); err == nil || !strings.Contains(err.Error(), "annotations is assigned by Oberth") {
 		t.Fatalf("repository hold annotation admitted: %v", err)
 	}
-	authored := strings.Replace(assistDocument, "oberth.ci/size: M", "oberth.ci/size: M\n    oberth.ci/assist: \"1\"", 1)
+	authored := strings.Replace(assistDocument, "example.com/tier: M", "example.com/tier: M\n    oberth.ci/assist: \"1\"", 1)
 	request := assistRequest(pipeline.TriggerCI, authored)
 	request.Assist = false
 	wf, err := Build(assistConfig(), request)

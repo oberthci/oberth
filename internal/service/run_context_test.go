@@ -81,7 +81,7 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 		t.Helper()
 		assertNames(t, row, false, summary)
 	}
-	for _, view := range []string{"all", "active"} {
+	for _, view := range []string{"all"} {
 		t.Run("MCP/"+view, func(t *testing.T) {
 			value, err := reader.CallTool(ctx, api.Actor{Identity: "reader"}, "run_list", json.RawMessage(fmt.Sprintf(`{"view":%q}`, view)))
 			if err != nil {
@@ -113,7 +113,7 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/api/runs", "/api/runs?view=active", "/api/runs/" + old.ID} {
+	for _, path := range []string{"/api/runs", "/api/runs/" + old.ID} {
 		t.Run(path, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, path, nil)
 			request.Header.Set("Authorization", "Bearer token")
@@ -126,7 +126,7 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil {
 				t.Fatal(err)
 			}
-			if rows, ok := value.([]any); ok {
+			if rows, ok := value.(map[string]any)["runs"].([]any); ok {
 				if len(rows) != 2 {
 					t.Fatalf("run count=%d, want 2", len(rows))
 				}
@@ -177,7 +177,7 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("b", 40), Actor: "reader", Trigger: "push"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, view := range []string{"all", "active", "history"} {
+	for _, view := range []string{"all", "history"} {
 		value, err := f.call(scopedActor, "run_list", map[string]any{"superseded": true, "view": view})
 		f.assertNoLeak(t, "run context filter", value, err)
 		if err != nil {
@@ -251,7 +251,6 @@ func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 		status, count int
 	}{
 		{"?superseded=true", 200, 1},
-		{"?superseded=true&view=active", 200, 1},
 		{"?superseded=true&repo=" + f.repo.Name + "&ref=feature/context", 200, 1},
 		{"?superseded=true&ref=other", 200, 0},
 		{"?superseded=true&view=history", 200, 0},
@@ -271,10 +270,13 @@ func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 			if tc.status != 200 {
 				return
 			}
-			var rows []map[string]any
-			if err := json.Unmarshal(response.Body.Bytes(), &rows); err != nil {
+			var page struct {
+				Runs []map[string]any `json:"runs"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
 				t.Fatal(err)
 			}
+			rows := page.Runs
 			if len(rows) != tc.count {
 				t.Fatalf("filtered rows: %s", response.Body)
 			}

@@ -27,7 +27,7 @@ func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
 	}
 	service := f.api(t)
 	actor := api.Actor{Identity: "scoped", Scope: []string{"codeberg"}}
-	for _, view := range []string{"", api.RunViewActive} {
+	for _, view := range []string{""} {
 		value, err := service.Runs(t.Context(), actor, api.RunFilter{Ref: seventh.Ref, View: view})
 		if err != nil {
 			t.Fatal(err)
@@ -36,10 +36,6 @@ func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
 		switch value := value.(type) {
 		case []model.Run:
 			rows = value
-		case []ActiveRun:
-			for _, entry := range value {
-				rows = append(rows, entry.Run)
-			}
 		}
 		if len(rows) != 1 || rows[0].DisplayReason != "in line" || rows[0].QueuePosition != 0 {
 			t.Fatalf("scoped queue invented head: %+v", rows)
@@ -55,7 +51,7 @@ func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
 }
 
 func TestRunListsObserveOnlyBeforeAnyStepStart(t *testing.T) {
-	for _, view := range []string{"", api.RunViewActive} {
+	for _, view := range []string{""} {
 		t.Run(view, func(t *testing.T) {
 			f := newControlFixture(t)
 			runs := make([]model.Run, 0, 6)
@@ -118,10 +114,6 @@ func TestRunListsObserveOnlyBeforeAnyStepStart(t *testing.T) {
 				switch value := value.(type) {
 				case []model.Run:
 					rows = value
-				case []ActiveRun:
-					for _, entry := range value {
-						rows = append(rows, entry.Run)
-					}
 				}
 				if len(rows) != len(runs) {
 					t.Fatalf("list has %d rows", len(rows))

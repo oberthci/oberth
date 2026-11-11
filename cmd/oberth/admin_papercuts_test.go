@@ -100,8 +100,8 @@ func papercutCall(t *testing.T, tool string, args any) (string, error) {
 func TestAdminPapercutPriorityCLIAndReadback(t *testing.T) {
 	f := newPapercutFixture(t)
 	run := f.run(t, "feature/priority")
-	for _, priority := range []string{"low", "standard", "promotion", "high", "normal", "highest"} {
-		args := map[string]any{"run_id": run.ID[:8], "priority": priority, "reason": "let the queue move"}
+	for _, priority := range []string{"low", "standard", "promotion", "high"} {
+		args := map[string]any{"id": run.ID[:8], "priority": priority, "reason": "let the queue move"}
 		output, err := papercutCall(t, "run_priority", args)
 		if err != nil || !strings.Contains(output, "let the queue move") {
 			t.Fatalf("priority CLI=%s %v", output, err)
@@ -116,7 +116,7 @@ func TestAdminPapercutPriorityCLIAndReadback(t *testing.T) {
 		}
 	}
 	t.Setenv("OBERTH_TOKEN", "reader")
-	if _, err := papercutCall(t, "run_priority", map[string]any{"run_id": run.ID, "priority": "low", "reason": "not authorized"}); err == nil {
+	if _, err := papercutCall(t, "run_priority", map[string]any{"id": run.ID, "priority": "low", "reason": "not authorized"}); err == nil {
 		t.Fatal("non-admin lowered priority")
 	}
 }
@@ -134,12 +134,15 @@ func TestAdminPapercutRunListCLIAndREST(t *testing.T) {
 			t.Fatalf("list CLI=%s %v", output, err)
 		}
 	}
-	for _, view := range []string{"all", "active", "history"} {
+	for _, view := range []string{"all", "history"} {
 		reply := f.rest("/api/runs?status=queued&repo=project&ref=feature%2Fqueue&view=" + view)
-		var runs []model.Run
-		if err := json.Unmarshal(reply.Body.Bytes(), &runs); err != nil {
+		var page struct {
+			Runs []model.Run `json:"runs"`
+		}
+		if err := json.Unmarshal(reply.Body.Bytes(), &page); err != nil {
 			t.Fatal(err)
 		}
+		runs := page.Runs
 		want := 1
 		if view == "history" {
 			want = 0

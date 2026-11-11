@@ -108,7 +108,7 @@ func TestGetSendsTheBearerTokenAndDecodes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seenAuth, seenPath = r.Header.Get("Authorization"), r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ID":"run-1","Status":"passed"}`))
+		_, _ = w.Write([]byte(`{"id":"run-1","status":"passed"}`))
 	}))
 	defer server.Close()
 
@@ -245,7 +245,7 @@ func TestNoFailurePathEverEchoesTheToken(t *testing.T) {
 
 func TestAnUntrustedCertificateIsRefusedUntilItsAnchorIsSupplied(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"ID":"run-1"}`))
+		_, _ = w.Write([]byte(`{"id":"run-1"}`))
 	}))
 	defer server.Close()
 
@@ -659,7 +659,7 @@ func TestARedirectWithinHTTPSIsStillFollowed(t *testing.T) {
 	})
 	mux.HandleFunc("/api/runs/run-1-moved", func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&served, 1)
-		_, _ = w.Write([]byte(`{"ID":"run-1"}`))
+		_, _ = w.Write([]byte(`{"id":"run-1"}`))
 	})
 
 	anchor := filepath.Join(t.TempDir(), "ca.pem")
@@ -699,7 +699,7 @@ func TestClassifyTransportExplainsUnresolvedLocalNames(t *testing.T) {
 // proves it.
 func TestALocalServerNameFallsBackToTheSystemResolver(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"ID":"run-1"}`))
+		_, _ = w.Write([]byte(`{"id":"run-1"}`))
 	}))
 	defer server.Close()
 	_, port, _ := net.SplitHostPort(server.Listener.Addr().String())

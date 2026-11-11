@@ -25,8 +25,8 @@ func TestAdminPriorityLoweringToolAndReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, priority := range []string{"normal", "low"} {
-		raw := json.RawMessage(`{"run_id":"` + run.ID[:8] + `","priority":"` + priority + `","reason":"operator queue correction"}`)
+	for _, priority := range []string{"standard", "low"} {
+		raw := json.RawMessage(`{"id":"` + run.ID[:8] + `","priority":"` + priority + `","reason":"operator queue correction"}`)
 		if _, err = control.CallTool(t.Context(), api.Actor{Identity: "dev"}, "run_priority", raw); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("non-admin lower=%v", err)
 		}
@@ -44,7 +44,7 @@ func TestAdminPriorityLoweringToolAndReservation(t *testing.T) {
 		}
 	}
 	for _, reason := range []string{"", "  "} {
-		raw, _ := json.Marshal(map[string]any{"run_id": run.ID, "priority": "low", "reason": reason})
+		raw, _ := json.Marshal(map[string]any{"id": run.ID, "priority": "low", "reason": reason})
 		if _, err = control.CallTool(t.Context(), api.Actor{Identity: "admin", Admin: true}, "run_priority", raw); !errors.Is(err, store.ErrInvalid) {
 			t.Fatalf("missing reason accepted: %v", err)
 		}

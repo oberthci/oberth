@@ -29,7 +29,7 @@ func configure(t *testing.T, server *httptest.Server) {
 	t.Setenv("OBERTH_CA_CERT", "")
 }
 
-const runsPayload = `[{"ID":"run-abc","Ref":"main","SHA":"0123456789abcdef","Status":"failed","Trigger":"schedule"}]`
+const runsPayload = `{"runs":[{"id":"run-abc","ref":"main","sha":"0123456789abcdef","status":"failed","trigger":"schedule"}]}`
 
 func TestRunsRendersTheServersRows(t *testing.T) {
 	configure(t, remoteServer(t, runsPayload))
@@ -51,7 +51,7 @@ func TestRunsJSONEmitsTheServerPayload(t *testing.T) {
 	if err := runRuns(context.Background(), []string{"--json"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"Trigger": "schedule"`) {
+	if !strings.Contains(out.String(), `"trigger": "schedule"`) {
 		t.Fatalf("json output is not the server's own shape:\n%s", out.String())
 	}
 	if strings.Contains(out.String(), "RUN ") {
@@ -80,8 +80,8 @@ func TestRunDetailMarksTheFailingStep(t *testing.T) {
 }
 
 func TestRunDetailShowsCapacityWait(t *testing.T) {
-	payload := `{"Run":{"ID":"run-abc","Status":"waiting","Ref":"main","SHA":"0123456789abcdef"},` +
-		`"Scheduling":{"state":"waiting","message":"At the head of the run queue (6 runs running); every later run waits behind it.",` +
+	payload := `{"run":{"id":"run-abc","status":"waiting","ref":"main","sha":"0123456789abcdef"},` +
+		`"scheduling":{"state":"waiting","message":"At the head of the run queue (6 runs running); every later run waits behind it.",` +
 		`"admission":{"state":"waiting","used":6,"capacity":6,"position":1}}}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer
@@ -96,7 +96,7 @@ func TestRunDetailShowsCapacityWait(t *testing.T) {
 }
 
 func TestReposLists(t *testing.T) {
-	configure(t, remoteServer(t, `[{"ID":1,"Name":"alpha","DefaultBranch":"main"}]`))
+	configure(t, remoteServer(t, `{"repositories":[{"id":1,"name":"alpha","default_branch":"main"}]}`))
 	var out bytes.Buffer
 	if err := runRepos(context.Background(), nil, &out); err != nil {
 		t.Fatal(err)
@@ -300,7 +300,7 @@ func TestJSONPreservesInt64Precision(t *testing.T) {
 	// RepoID is int64; decoding through any turns it into float64, which
 	// loses precision above 2^53. json.Indent on the raw bytes preserves
 	// the original representation.
-	payload := `[{"ID":"run-x","RepoID":9007199254740993,"SHA":"abc","Status":"ok"}]`
+	payload := `{"runs":[{"id":"run-x","repo_id":9007199254740993,"sha":"abc","status":"ok"}]}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer
 	if err := runRuns(context.Background(), []string{"--json"}, &out); err != nil {
@@ -369,7 +369,7 @@ func TestStatusJSONEmitsRawPayload(t *testing.T) {
 }
 
 func TestIssuesRendersTableWithoutJSON(t *testing.T) {
-	payload := `{"Issues":[{"ID":42,"State":"open","Kind":"ci","Title":"lint failed"}],"NextBefore":41,"total":93}`
+	payload := `{"issues":[{"id":42,"state":"open","kind":"ci","title":"lint failed"}],"next_before":41,"total":93}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer
 	if err := runIssues(context.Background(), nil, &out); err != nil {
@@ -387,7 +387,7 @@ func TestIssuesRendersTableWithoutJSON(t *testing.T) {
 }
 
 func TestIssuesEmptyShowsNoIssues(t *testing.T) {
-	configure(t, remoteServer(t, `{"Issues":[]}`))
+	configure(t, remoteServer(t, `{"issues":[]}`))
 	var out bytes.Buffer
 	if err := runIssues(context.Background(), nil, &out); err != nil {
 		t.Fatal(err)
@@ -512,9 +512,9 @@ func TestRunsAllFollowsPages(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("before") {
 		case "":
-			_, _ = w.Write([]byte(`[{"ID":"run-3","QueueSequence":3,"Status":"passed"},{"ID":"run-2","QueueSequence":2,"Status":"passed"}]`))
+			_, _ = w.Write([]byte(`{"runs":[{"id":"run-3","queue_sequence":3,"status":"passed"},{"id":"run-2","queue_sequence":2,"status":"passed"}],"next_before":2}`))
 		case "2":
-			_, _ = w.Write([]byte(`[{"ID":"run-1","QueueSequence":1,"Status":"failed"}]`))
+			_, _ = w.Write([]byte(`{"runs":[{"id":"run-1","queue_sequence":1,"status":"failed"}]}`))
 		default:
 			t.Errorf("unexpected cursor %q", r.URL.Query().Get("before"))
 		}
@@ -550,7 +550,7 @@ func TestRunsRunningRowsDoNotFillThePage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"ID":"run-3","QueueSequence":3,"Status":"running","StartedAt":"2026-11-03T10:00:00Z"},{"ID":"run-2","QueueSequence":2,"Status":"passed","FinishedAt":"2026-11-03T09:00:00Z"}]`))
+		_, _ = w.Write([]byte(`{"runs":[{"id":"run-3","queue_sequence":3,"status":"running","started_at":"2026-11-03T10:00:00Z"},{"id":"run-2","queue_sequence":2,"status":"passed","finished_at":"2026-11-03T09:00:00Z"}]}`))
 	}))
 	defer server.Close()
 	configure(t, server)
@@ -566,36 +566,17 @@ func TestRunsRunningRowsDoNotFillThePage(t *testing.T) {
 	}
 }
 
-// Against a server older than paging, which ignores ?before and repeats the
-// newest page, --all must stop instead of duplicating rows. Short-ID reads
-// go directly to the server and do not enumerate any page.
-func TestRunPagingStopsWhenServerIgnoresCursor(t *testing.T) {
+// Short-ID reads go directly to the server and do not enumerate any page.
+func TestShortRunIDLogReadIsOneRequest(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path != "/api/runs" {
-			_, _ = w.Write([]byte(`{"run_id":"abcdef1234567890abcdef1234567890","burn":"ci","step":"test","output":"ok\n","total_lines":1}`))
-			return
-		}
-		var page []string
-		for i := 0; i < 100; i++ {
-			page = append(page, fmt.Sprintf(`{"ID":"%032x","QueueSequence":%d,"Status":"passed"}`, 1000-i, 1000-i))
-		}
-		page[5] = `{"ID":"abcdef1234567890abcdef1234567890","QueueSequence":995,"Status":"passed"}`
-		_, _ = w.Write([]byte("[" + strings.Join(page, ",") + "]"))
+		_, _ = w.Write([]byte(`{"run_id":"abcdef1234567890abcdef1234567890","burn":"ci","step":"test","output":"ok\n","total_lines":1}`))
 	}))
 	defer server.Close()
 	configure(t, server)
-
 	var out bytes.Buffer
-	if err := runRuns(context.Background(), []string{"--limit", "100", "--all"}, &out); err != nil {
-		t.Fatal(err)
-	}
-	if requests > 3 || strings.Count(out.String(), "abcdef1234567890abcdef1234567890") != 1 {
-		t.Fatalf("--all against an old server: %d requests", requests)
-	}
-	requests = 0
 	if err := runRemoteLog(context.Background(), []string{"--burn", "ci", "--step", "test", "abcdef12"}, &out); err != nil {
 		t.Fatalf("short ID must be passed through once: %v", err)
 	}
@@ -604,16 +585,16 @@ func TestRunPagingStopsWhenServerIgnoresCursor(t *testing.T) {
 	}
 }
 
-// --active asks for the active view and prints the server's order with the
-// queue position and wait reason of each queued run.
+// --active reads the first page of the default view, drops its terminal row,
+// and prints the server's order with each queued run's position and reason.
 func TestRunsActivePrintsTheQueue(t *testing.T) {
 	var query string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"ID":"run-started","Ref":"main","Status":"running","StartedAt":"2026-10-20T11:59:00Z"},` +
-			`{"ID":"run-head","Ref":"feature/xl","Status":"waiting","display_reason":"20 of 20 runs running","Scheduling":{"state":"waiting","queue_position":4,"message":"20 of 20 runs running","admission":{"state":"waiting","position":4,"used":20,"capacity":20}}},` +
-			`{"ID":"run-queued","Ref":"feature/q","Status":"queued","Scheduling":{"state":"queued","message":"Awaiting scheduler claim.","queue_position":7}},{"ID":"run-scoped","Status":"queued","Scheduling":{"state":"queued"}}]`))
+		_, _ = w.Write([]byte(`{"runs":[{"id":"run-started","ref":"main","status":"running","started_at":"2026-10-20T11:59:00Z"},` +
+			`{"id":"run-head","ref":"feature/xl","status":"waiting","display_reason":"20 of 20 runs running","scheduling":{"state":"waiting","queue_position":4,"message":"20 of 20 runs running","admission":{"state":"waiting","position":4,"used":20,"capacity":20}}},` +
+			`{"id":"run-queued","ref":"feature/q","status":"queued","scheduling":{"state":"queued","message":"Awaiting scheduler claim.","queue_position":7}},{"id":"run-scoped","status":"queued","scheduling":{"state":"queued"}},{"id":"run-finished","status":"passed"}],"next_before":1}`))
 	}))
 	defer server.Close()
 	configure(t, server)
@@ -621,7 +602,7 @@ func TestRunsActivePrintsTheQueue(t *testing.T) {
 	if err := runRuns(context.Background(), []string{"--active", "--repo", "oberth"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(query, "view=active") || !strings.Contains(query, "repo=oberth") || strings.Contains(query, "limit=") {
+	if strings.Contains(query, "view=") || !strings.Contains(query, "repo=oberth") || !strings.Contains(query, "limit=1") || strings.Contains(out.String(), "run-finished") {
 		t.Fatalf("query = %s", query)
 	}
 	body := out.String()
@@ -647,9 +628,9 @@ func TestRunsAllCountsDatedRowsAndPrintsDisplayReason(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch before {
 		case "":
-			_, _ = w.Write([]byte(`[{"ID":"queued","Status":"queued","QueueSequence":9},{"ID":"claimed","Status":"running","QueueSequence":10},{"ID":"passed-release","Status":"passed","Release":true,"QueueSequence":1},{"ID":"cancelled","Status":"interrupted","display_status":"cancelled","display_reason":"cancelled by owner: obsolete","QueueSequence":2}]`))
+			_, _ = w.Write([]byte(`{"runs":[{"id":"queued","status":"queued","queue_sequence":9},{"id":"claimed","status":"running","queue_sequence":10},{"id":"passed-release","status":"passed","release":true,"queue_sequence":1},{"id":"cancelled","status":"interrupted","display_status":"cancelled","display_reason":"cancelled by owner: obsolete","queue_sequence":2}],"next_before":2}`))
 		case "2":
-			_, _ = w.Write([]byte(`[{"ID":"older","Status":"passed","QueueSequence":3}]`))
+			_, _ = w.Write([]byte(`{"runs":[{"id":"older","status":"passed","queue_sequence":3}]}`))
 		default:
 			t.Errorf("unexpected cursor %q", before)
 		}
@@ -668,20 +649,20 @@ func TestRunsAllCountsDatedRowsAndPrintsDisplayReason(t *testing.T) {
 func TestLogSummaryReportsIncompleteCountsAndContinuation(t *testing.T) {
 	exact, incomplete := true, false
 	log := remoteLog{ReturnedLines: 2, TotalLines: 10, MatchedLines: 3, Bytes: 1000,
-		ScanComplete: &incomplete, BytesExact: &exact, HasMore: true, NextByteOffset: 500, WithheldLines: 8, WithheldBytes: 900, TotalScannedBytes: 512, ScanLimitBytes: 4 << 20}
+		ScanComplete: incomplete, BytesExact: exact, HasMore: true, NextByteOffset: 500, WithheldLines: 8, WithheldBytes: 900, TotalScannedBytes: 512, ScanLimitBytes: 4 << 20}
 	text := log.readSummary()
 	for _, want := range []string{"at least 10 lines", "at least 3 matched", "1000 bytes", "withheld at least 8 lines / 900 bytes", "byte_offset=500", "offset=0", "scanned 512 of 4194304 byte scan budget"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}
 	}
-	if strings.Contains((remoteLog{TotalLines: 3}).readSummary(), "at least") {
-		t.Fatal("old server counts changed meaning")
+	if strings.Contains((remoteLog{TotalLines: 3, ScanComplete: true, BytesExact: true}).readSummary(), "at least") {
+		t.Fatal("complete counts qualified")
 	}
 }
 
 func TestRunDetailShowsDeadlineAndFinalizationLag(t *testing.T) {
-	payload := `{"Run":{"ID":"deadline","Status":"running","display_status":"running","display_reason":"Execution deadline exceeded.","SHA":"abc","Ref":"main"},"Steps":[],"Scheduling":{"message":"Execution deadline exceeded.","execution":{"phase":"Failed","reconciliation_lag_seconds":3080,"deadline":{"budget_seconds":5400,"clock":"workflow_started_at","expires_at":"2026-10-30T10:33:37Z","remaining_seconds":0,"elapsed":true}}}}`
+	payload := `{"run":{"id":"deadline","status":"running","display_status":"running","display_reason":"Execution deadline exceeded.","sha":"abc","ref":"main"},"steps":[],"scheduling":{"message":"Execution deadline exceeded.","execution":{"phase":"Failed","reconciliation_lag_seconds":3080,"deadline":{"budget_seconds":5400,"clock":"workflow_started_at","expires_at":"2026-10-30T10:33:37Z","remaining_seconds":0,"elapsed":true}}}}`
 	configure(t, remoteServer(t, payload))
 	var output bytes.Buffer
 	if err := runRunDetail(t.Context(), []string{"deadline"}, &output); err != nil {
@@ -708,7 +689,7 @@ func TestIssuesStateDefaultsOpenAndAppliesToRequests(t *testing.T) {
 				if r.URL.Query().Get("state") != wanted {
 					t.Errorf("state=%q want=%q", r.URL.Query().Get("state"), wanted)
 				}
-				_, _ = w.Write([]byte(`{"Issues":[]}`))
+				_, _ = w.Write([]byte(`{"issues":[]}`))
 			}))
 			defer server.Close()
 			configure(t, server)
@@ -725,7 +706,7 @@ func TestIssuesStateDefaultsOpenAndAppliesToRequests(t *testing.T) {
 }
 
 func TestRunDetailSizesColumnsAndLinksFailedStep(t *testing.T) {
-	payload := `{"Run":{"ID":"run-abc","Status":"failed","FailedBurn":"ci","FailedStep":"test","DisplayReason":"Workflow failed","Reason":"Workflow failed","Error":"Workflow failed"},"Steps":[{"Burn":"ci","Step":"test","Status":"failed"},{"Burn":"very-long-burn-name","Step":"a-very-long-step-name-over-twenty","Status":"passed"}]}`
+	payload := `{"run":{"id":"run-abc","status":"failed","failed_burn":"ci","failed_step":"test","display_reason":"Workflow failed","reason":"Workflow failed","error":"Workflow failed"},"steps":[{"burn":"ci","step":"test","status":"failed"},{"burn":"very-long-burn-name","step":"a-very-long-step-name-over-twenty","status":"passed"}]}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer
 	if err := runRunDetail(t.Context(), []string{"run-abc"}, &out); err != nil {
@@ -747,7 +728,7 @@ func TestRunDetailSizesColumnsAndLinksFailedStep(t *testing.T) {
 }
 
 func TestRunDetailJSONRetainsFullDiagnostics(t *testing.T) {
-	payload := `{"Run":{"ID":"run-abc"},"Timing":{"Version":1},"Steps":[{"MeasuredUsage":[{}],"MeasuredSizeComparison":[{}],"Termination":{}}]}`
+	payload := `{"run":{"id":"run-abc"},"timing":{"version":1},"steps":[{"measured_usage":[{}],"measured_size_comparison":[{}],"termination":{}}]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("view") != "" {
 			t.Errorf("CLI requested compact view: %s", r.URL)
@@ -761,7 +742,7 @@ func TestRunDetailJSONRetainsFullDiagnostics(t *testing.T) {
 	if err := runRunDetail(t.Context(), []string{"run-abc", "--json"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"Timing", "MeasuredUsage", "MeasuredSizeComparison", "Termination"} {
+	for _, field := range []string{"timing", "measured_usage", "measured_size_comparison", "termination"} {
 		if !strings.Contains(output.String(), field) {
 			t.Fatalf("CLI lost %s: %s", field, output.String())
 		}

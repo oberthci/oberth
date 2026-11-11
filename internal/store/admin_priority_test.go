@@ -13,7 +13,7 @@ import (
 )
 
 func TestAdminPriorityLoweringPersistsAndCapsAging(t *testing.T) {
-	for _, priority := range []model.RunPriority{"normal", "low"} {
+	for _, priority := range []model.RunPriority{"standard", "low"} {
 		t.Run(string(priority), func(t *testing.T) {
 			now := time.Now()
 			s := testStore(t, &now)

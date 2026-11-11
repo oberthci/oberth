@@ -78,9 +78,8 @@ var jsonUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
 
 // Unmarshal decodes an API response (snake_case record names) into a
 // Go record whose fields carry no json tags (model.Run and friends): each
-// snake_case wire name is mapped back to its Go field name first. Responses
-// that still carry the Go-style names (the go_field_names opt-in, older servers) decode
-// unchanged, so clients work against either shape.
+// snake_case wire name is mapped back to its field name first. Any other
+// spelling in the response (ID, RepoID, activeDeadlineSeconds) is ignored.
 func Unmarshal(data []byte, into any) error {
 	target := reflect.TypeOf(into)
 	if target == nil || target.Kind() != reflect.Pointer {
@@ -123,7 +122,13 @@ func restoreRecordNames(document any, typ reflect.Type) bool {
 				changed = restoreRecordNames(object, fieldType) || changed
 				continue
 			}
-			if _, exists := object[field.Name]; !exists && field.Alias != field.Name {
+			if field.Alias != field.Name {
+				// Only the snake_case spelling is read; another spelling
+				// in the document (ID, activeDeadlineSeconds) is dropped.
+				if _, exists := object[field.Name]; exists {
+					delete(object, field.Name)
+					changed = true
+				}
 				if item, aliased := object[field.Alias]; aliased {
 					object[field.Name] = item
 					changed = true

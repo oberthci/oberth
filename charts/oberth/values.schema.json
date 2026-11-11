@@ -67,26 +67,6 @@
         }
       }
     },
-    "gitBackend": {
-      "type": "string",
-      "enum": [
-        "cli"
-      ],
-      "description": "Accepted and ignored for legacy chart reuse; Git CLI is the only backend."
-    },
-    "gitcache": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "shadow": {
-          "type": "boolean",
-          "enum": [
-            false
-          ]
-        }
-      },
-      "description": "Accepted and ignored for legacy chart reuse; shadow execution is removed."
-    },
     "utilityImage": {
       "type": "string",
       "minLength": 1,
@@ -171,31 +151,6 @@
         "heartbeat": {"type": "string", "pattern": "^[0-9]+(s|m)$", "description": "Keepalive interval, 1s..5m."}
       }
     },
-    "maxConcurrentJobs": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 64,
-      "description": "Not used since v0.20.0. Accepted only at its former default 0 so --reuse-values upgrades render; any other value fails validation. Set the Argo controller parallelism instead (oberth install --argo-parallelism)."
-    },
-    "argoSync": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Not used since v0.20.0. Accepted only empty so --reuse-values upgrades render; any limit fails validation. The ConfigMap oberth-sync-limits is rendered by the argo-workflows release (oberth install --argo-sync-limit).",
-      "properties": {
-        "semaphores": {
-          "type": ["object", "null"],
-          "maxProperties": 64,
-          "propertyNames": {
-            "pattern": "^[A-Za-z0-9]([-._A-Za-z0-9]{0,251}[A-Za-z0-9])?$"
-          },
-          "additionalProperties": {
-            "type": ["integer", "string"],
-            "pattern": "^[1-9][0-9]{0,5}$",
-            "minimum": 1
-          }
-        }
-      }
-    },
     "terminationGracePeriodSeconds": {
       "type": "integer",
       "minimum": 60,
@@ -205,44 +160,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "exclusiveClasses": {
-          "type": "object",
-          "description": "Not used since v0.18.0. Accepted only empty so --reuse-values upgrades render; any class fails validation. Define the limit in the ConfigMap oberth-sync-limits (oberth install --argo-sync-limit) and declare synchronization.semaphores on the step instead."
-        },
-        "sizeWeights": {
-          "type": "object",
-          "description": "Not used since v0.18.0. Accepted only at its former default (S 1, M 2, L 3, XL 0) so --reuse-values upgrades render; any other value fails validation. Pods are placed by their resources."
-        },
-        "maxHeadWait": {
-          "type": "string",
-          "description": "Not used since v0.18.0. Accepted only at its former default 20m so --reuse-values upgrades render; any other value fails validation."
-        },
-        "declaredResources": {
-          "type": "object",
-          "description": "Not used since v0.18.0. Accepted only at its former defaults so --reuse-values upgrades render; any other value fails validation."
-        },
-        "legacyResources": {
-          "type": "object",
-          "description": "Not used since v0.18.0. Accepted only empty so --reuse-values upgrades render; any entry fails validation."
-        },
-        "runtimeCapacity": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Not used since v0.20.0. Accepted only at its former defaults (enabled true, maxConcurrentJobs null or 0) so --reuse-values upgrades render; anything else fails validation.",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "maxConcurrentJobs": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 0,
-              "maximum": 64
-            }
-          }
-        },
         "diskFloorBytes": {
           "type": "integer",
           "minimum": 0,
@@ -272,12 +189,6 @@
             "enabled": {
               "type": "boolean"
             },
-            "cpuSomeAvg10": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "ioSomeAvg10": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
             "hardCpu": {
               "type": "number",
               "exclusiveMinimum": 10,
@@ -287,24 +198,6 @@
               "type": "number",
               "exclusiveMinimum": 10,
               "maximum": 100
-            },
-            "maxWaitSeconds": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "mode": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "ioFullAvg60Max": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "cpuSomeAvg60Max": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "hysteresis": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "maxDefer": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
             }
           }
         }
@@ -411,10 +304,6 @@
         },
         "rootsSecret": {
           "$ref": "#/definitions/optionalKubernetesName"
-        },
-        "rootsKey": {
-          "$ref": "#/definitions/secretDataKey",
-          "description": "Ignored legacy value; retained for upgrade compatibility."
         },
         "rekorCA": {
           "type": "string",
@@ -594,21 +483,8 @@
           "type": "string",
           "pattern": "^ssh://[^\\s]+$"
         },
-        "createSecrets": {
-          "type": "boolean",
-          "description": "Ignored legacy value; retained for upgrade compatibility.",
-          "const": false
-        },
-        "keySecret": {
-          "$ref": "#/definitions/kubernetesName",
-          "description": "Ignored legacy value; retained for upgrade compatibility."
-        },
         "keyFile": {
           "$ref": "#/definitions/secretDataKey"
-        },
-        "knownHostsSecret": {
-          "$ref": "#/definitions/kubernetesName",
-          "description": "Ignored legacy value; retained for upgrade compatibility."
         },
         "knownHostsKey": {
           "$ref": "#/definitions/secretDataKey"
@@ -636,9 +512,6 @@
     "resources": {
       "$ref": "#/definitions/resources"
     },
-    "watchTunnel": {
-      "description": "Retired compatibility key. Ignored; connectors are managed outside Oberth."
-    },
     "podAnnotations": {
       "type": "object",
       "additionalProperties": {
@@ -649,19 +522,6 @@
       "type": "object",
       "additionalProperties": {
         "type": "string"
-      }
-    },
-    "secretCreatePolicy": {
-      "description": "Retired compatibility key: accepted and ignored. Kubernetes Secret creation is not supported.",
-      "type": [
-        "object",
-        "null"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
       }
     },
     "networkPolicy": {
@@ -749,10 +609,6 @@
           "properties": {
             "enabled": {"type": "boolean", "default": true}
           }
-        },
-        "enabled": {
-          "type": "boolean",
-          "description": "Retired compatibility setting, accepted for stored values and ignored. Pipelines always use Argo Workflows."
         },
         "releaseTagRoutes": {
           "type": "object",
@@ -1036,13 +892,6 @@
             }
           ]
         },
-        "ciServiceAccount": {
-          "$ref": "#/definitions/optionalKubernetesName"
-        },
-        "ciSecretsServiceAccount": {
-          "type": "string",
-          "description": "Retired; nonempty values are refused by the template. Use ciSecrets.serviceAccount."
-        },
         "namespace": {
           "type": "string",
           "description": "Namespace pipelines run in. Must differ from the release namespace: Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs."
@@ -1063,15 +912,6 @@
           "type": "string",
           "minLength": 1,
           "description": "Positive Kubernetes quantity for per-Pod emissary scratch on nonroot leaves. Defaults to 1Gi; the server validates the quantity at startup."
-        },
-        "vmLauncherServiceAccount": {
-          "description": "Removed; retained only to accept and ignore historical values."
-        },
-        "containerDiskPrefixes": {
-          "description": "Removed; retained only to accept and ignore historical values."
-        },
-        "kubevirtCeiling": {
-          "description": "Removed; retained only to accept and ignore historical values."
         },
         "workflowTimeout": {
           "type": "string"
@@ -1097,10 +937,6 @@
         "vault": {
           "type": "object",
           "properties": {
-            "ciSecretsRole": {
-              "type": "string",
-              "description": "Retired; nonempty values are refused by the template. Use ciSecrets.vaultRole."
-            },
             "address": {
               "type": "string",
               "description": "OpenBao API base URL injected into credentialed containers as VAULT_ADDR. HTTPS required."
@@ -1210,9 +1046,6 @@
           "maxLength": 253
         }
       }
-    },
-    "vm": {
-      "description": "Removed; retained only to accept and ignore historical values."
     },
     "branches": {
       "type": "object",
@@ -1405,9 +1238,6 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
         }
       }
-    },
-    "trustedTests": {
-      "description": "Removed; retained only to accept and ignore historical values."
     },
     "retention": {
       "type": "object",

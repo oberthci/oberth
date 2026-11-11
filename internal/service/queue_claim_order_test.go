@@ -54,7 +54,7 @@ func TestHTTPAndMCPQueuedGroupsFollowClaimOrder(t *testing.T) {
 		}
 	}
 	for _, actor := range []api.Actor{{Identity: "agent@host"}, {Identity: "scoped@host", Scope: []string{"codeberg"}}} {
-		for _, view := range []string{"all", "active"} {
+		for _, view := range []string{"all"} {
 			value, err := reader.CallTool(ctx, actor, "run_list", json.RawMessage(fmt.Sprintf(`{"view":%q,"limit":1}`, view)))
 			if err != nil {
 				t.Fatal(err)
@@ -66,7 +66,7 @@ func TestHTTPAndMCPQueuedGroupsFollowClaimOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, query := range []string{"", "&latest_per_ref=1", "&view=active"} {
+	for _, query := range []string{"", "&latest_per_ref=1"} {
 		request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=1"+query, nil)
 		request.Header.Set("Authorization", "Bearer token")
 		response := httptest.NewRecorder()
@@ -74,6 +74,12 @@ func TestHTTPAndMCPQueuedGroupsFollowClaimOrder(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("HTTP %d: %s", response.Code, response.Body)
 		}
-		check(json.RawMessage(response.Body.Bytes()))
+		var page struct {
+			Runs json.RawMessage `json:"runs"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		check(page.Runs)
 	}
 }

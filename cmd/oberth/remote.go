@@ -156,7 +156,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")
 	all := flags.Bool("all", false, "follow pages to the oldest run")
 	active := flags.Bool("active", false, "only queued and running runs, in scheduling order, with queue position and wait reason")
-	asJSON := flags.Bool("json", false, `emit {"runs":[...],"next_before":N}; --active emits the server's array unchanged`)
+	asJSON := flags.Bool("json", false, `emit {"runs":[...],"next_before":N}; --active emits {"runs":[...]}`)
 	transport := registerTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -184,13 +184,27 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		if *before != "" || *all {
 			return fmt.Errorf("%w: --active is one unpaged list; it takes no --before or --all", errUsage)
 		}
-		query := map[string]string{"repo": *repo, "ref": *ref, "view": "active"}
-		if *asJSON {
-			return emitJSON(ctx, api, "/api/runs", query, output)
+		// The first page of the default view carries every queued and
+		// running run; the one terminal row it adds is dropped.
+		var page struct {
+			Runs []json.RawMessage `json:"runs"`
 		}
-		var runs []remoteActiveRun
-		if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
+		if err := api.Get(ctx, "/api/runs", map[string]string{"repo": *repo, "ref": *ref, "limit": "1"}, &page); err != nil {
 			return err
+		}
+		rows := make([]json.RawMessage, 0, len(page.Runs))
+		runs := make([]remoteActiveRun, 0, len(page.Runs))
+		for _, row := range page.Runs {
+			var run remoteActiveRun
+			if err := recordjson.Unmarshal(row, &run); err != nil {
+				return fmt.Errorf("decode run: %w", err)
+			}
+			if model.RunStatus(run.Status).Active() {
+				rows, runs = append(rows, row), append(runs, run)
+			}
+		}
+		if *asJSON {
+			return emitRunPage(output, rows, "")
 		}
 		return renderActiveRuns(output, runs, time.Now())
 	}
@@ -200,7 +214,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 	// The server returns at most one bounded page; --all walks the cursor
 	// to the oldest run instead of stopping at the newest page (#050).
-	rows, next, err := collectRunPages(ctx, api, query, *limit, *all)
+	rows, next, err := collectRunPages(ctx, api, query, *all)
 	if err != nil {
 		return err
 	}
@@ -235,37 +249,23 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 
 // collectRunPages reads one page, or every page with all, and returns the
 // raw rows and the cursor for the next page ("" after the oldest run).
-func collectRunPages(ctx context.Context, api *client.Client, query map[string]string, limit int, all bool) ([]json.RawMessage, string, error) {
+func collectRunPages(ctx context.Context, api *client.Client, query map[string]string, all bool) ([]json.RawMessage, string, error) {
 	var rows []json.RawMessage
 	next := ""
 	for {
-		var page []json.RawMessage
-		headers, err := api.GetWithHeaders(ctx, "/api/runs", query, &page)
-		if err != nil {
+		var page struct {
+			Runs       []json.RawMessage `json:"runs"`
+			NextBefore int64             `json:"next_before"`
+			NextCursor string            `json:"next_cursor"`
+		}
+		if err := api.Get(ctx, "/api/runs", query, &page); err != nil {
 			return nil, "", err
 		}
-		previous := next
-		next = headers.Get("X-Oberth-Next-Before")
-		if next == "" && len(page) > 0 {
-			decoded := make([]remoteRun, 0, len(page))
-			for _, row := range page {
-				var run remoteRun
-				if err := recordjson.Unmarshal(row, &run); err != nil {
-					return nil, "", fmt.Errorf("decode run: %w", err)
-				}
-				decoded = append(decoded, run)
-			}
-			if datedRunCount(decoded) == limit {
-				next = runCursor(decoded[len(decoded)-1])
-			}
+		next = page.NextCursor
+		if page.NextBefore > 0 {
+			next = strconv.FormatInt(page.NextBefore, 10)
 		}
-		// A server older than paging ignores ?before and returns the newest
-		// page again: a cursor that does not move backwards ends the walk
-		// instead of looping forever.
-		if previous != "" && !cursorMovedBack(previous, next) {
-			return rows, "", nil
-		}
-		rows = append(rows, page...)
+		rows = append(rows, page.Runs...)
 		if !all || next == "" {
 			return rows, next, nil
 		}
@@ -292,19 +292,6 @@ func emitRunPage(output io.Writer, rows []json.RawMessage, next string) error {
 	encoder := json.NewEncoder(output)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(document)
-}
-
-// datedRunCount counts the rows that count against the page limit: terminal
-// runs only, as the server's RunPageFull does. Queued and running rows ride
-// along on the first page and never make it full.
-func datedRunCount(runs []remoteRun) int {
-	count := 0
-	for _, run := range runs {
-		if run.Status == "passed" || run.Status == "failed" || run.Status == "interrupted" {
-			count++
-		}
-	}
-	return count
 }
 
 func displayRunReason(run remoteRun) string { return run.DisplayReason }
@@ -365,22 +352,6 @@ func displayRunStatus(run remoteRun) string {
 		return string(model.RunQueued)
 	}
 	return run.Status
-}
-
-// runCursor is the before value for the page after run: its sequence, or its
-// ID when the server withholds sequences from a scoped uplink (#073).
-func runCursor(run remoteRun) string {
-	if run.QueueSequence > 0 {
-		return strconv.FormatInt(run.QueueSequence, 10)
-	}
-	return run.ID
-}
-
-// cursorMovedBack accepts a different cursor as progress. The default list
-// pages terminal runs by end time, so its queue sequence can increase across
-// older pages; a repeated cursor still detects an older server without paging.
-func cursorMovedBack(previous, next string) bool {
-	return next != previous
 }
 
 // resolveRemoteRunID leaves lookup and ambiguity detection to the server.
@@ -573,8 +544,8 @@ type remoteLog struct {
 	ReturnedLines     int    `json:"returned_lines"`
 	Truncated         bool   `json:"truncated"`
 	Bytes             int64  `json:"bytes"`
-	ScanComplete      *bool  `json:"scan_complete"`
-	BytesExact        *bool  `json:"bytes_exact"`
+	ScanComplete      bool   `json:"scan_complete"`
+	BytesExact        bool   `json:"bytes_exact"`
 	HasMore           bool   `json:"has_more"`
 	NextByteOffset    int64  `json:"next_byte_offset"`
 	WithheldLines     int    `json:"withheld_lines"`
@@ -694,19 +665,16 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	return err
 }
 
-// Missing completeness flags preserve compatibility with older servers.
 func (log remoteLog) readSummary() string {
 	lineQualifier, byteQualifier := "", ""
-	if log.ScanComplete != nil && !*log.ScanComplete {
+	if !log.ScanComplete {
 		lineQualifier = "at least "
 	}
-	if log.BytesExact != nil && !*log.BytesExact {
+	if !log.BytesExact {
 		byteQualifier = "at least "
 	}
 	summary := fmt.Sprintf("%d of %s%d lines returned, %s%d matched, %s%d bytes in the step", log.ReturnedLines, lineQualifier, log.TotalLines, lineQualifier, log.MatchedLines, byteQualifier, log.Bytes)
-	if log.ScanComplete != nil {
-		summary += fmt.Sprintf("; withheld %s%d lines / %s%d bytes; %d oversized lines omitted", lineQualifier, log.WithheldLines, byteQualifier, log.WithheldBytes, log.OmittedLongLines)
-	}
+	summary += fmt.Sprintf("; withheld %s%d lines / %s%d bytes; %d oversized lines omitted", lineQualifier, log.WithheldLines, byteQualifier, log.WithheldBytes, log.OmittedLongLines)
 	if log.ScanLimitBytes > 0 {
 		summary += fmt.Sprintf("; scanned %d of %d byte scan budget", log.TotalScannedBytes, log.ScanLimitBytes)
 	}
@@ -771,11 +739,13 @@ func runRepos(ctx context.Context, arguments []string, output io.Writer) error {
 	if *asJSON {
 		return emitJSON(ctx, api, "/api/repos", nil, output)
 	}
-	var repositories []remoteRepository
-	if err := api.Get(ctx, "/api/repos", nil, &repositories); err != nil {
+	var page struct {
+		Repositories []remoteRepository `json:"repositories"`
+	}
+	if err := api.Get(ctx, "/api/repos", nil, &page); err != nil {
 		return err
 	}
-	for _, repository := range repositories {
+	for _, repository := range page.Repositories {
 		if _, err := fmt.Fprintf(output, "%-32s %s\n", repository.Name, repository.DefaultBranch); err != nil {
 			return err
 		}

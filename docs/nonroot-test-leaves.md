@@ -153,7 +153,7 @@ values, verifies the exact upstream Argo chart1.0.24 archive digest, and applies
 only the built-in public profile overlay to the existing Argo release. It waits
 for the same strict live controller/configuration proof used by submission
 admission before upgrading Oberth and setting `argo.controllerProfile`.
-Unrelated identities stay in reused values. Retired execution settings are ignored. Final success requires the controller proof and Oberth profile value
+Unrelated identities stay in reused values. Final success requires the controller proof and Oberth profile value
 and serving flag to agree after rollout.
 
 This is a two-release forward transition, not an atomic transaction. Failure

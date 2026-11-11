@@ -23,10 +23,6 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 	if err != nil {
 		return nil, err
 	}
-	raw, err = normalizeRunIDArgument(name, raw)
-	if err != nil {
-		return nil, err
-	}
 	switch name {
 	case "wait":
 		var arguments struct {
@@ -39,10 +35,7 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		timeout, err := arguments.seconds()
-		if err != nil {
-			return nil, err
-		}
+		timeout := arguments.seconds()
 		if strings.TrimSpace(arguments.ID) == "" && strings.TrimSpace(arguments.SHA) == "" {
 			return nil, fmt.Errorf("%w: id, or sha, is required", ErrInvalidInput)
 		}
@@ -70,10 +63,7 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		timeout, err := arguments.seconds()
-		if err != nil {
-			return nil, err
-		}
+		timeout := arguments.seconds()
 		prepared, err := service.prepareWaitPromotion(ctx, arguments.ID, timeout)
 		if err != nil {
 			return nil, err

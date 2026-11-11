@@ -21,13 +21,12 @@ type ResourceDeclarationReader interface {
 func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a struct {
 		Repo          string `json:"repo"`
-		Run           string `json:"run"`
+		Run           string `json:"id"`
 		Stage         string `json:"burn"`
 		Step          string `json:"step"`
 		Ref           string `json:"ref"`
 		Last          int    `json:"last"`
 		IncludeFailed bool   `json:"include_failed"`
-		ResourceOnly  bool   `json:"resource_only"`
 		Format        string `json:"format"`
 	}
 	if e := decodeTool(raw, &a); e != nil {
@@ -40,7 +39,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 		a.Format = "json"
 	}
 	if a.Last < 1 || a.Last > measured.MaxRuns || len(a.Stage) > 253 || len(a.Step) > 253 || len(a.Ref) > 1024 || a.Format != "json" && a.Format != "yaml" || a.Repo == "" && a.Run == "" || a.Run != "" && a.Ref != "" {
-		return nil, refuse(ErrInvalidInput, "run_resources: repo or run required; last 1..100; format json or yaml; run and ref are exclusive")
+		return nil, refuse(ErrInvalidInput, "run_resources: repo or id required; last 1..100; format json or yaml; id and ref are exclusive")
 	}
 	if s.repositories == nil || s.history == nil || s.runResources == nil {
 		return nil, refuse(ErrUnavailable, "resource history")
@@ -161,12 +160,6 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 		}
 		if r.Truncated {
 			step.RefuseSizing("history row limit reached; narrow the run selection")
-		}
-		// Previous typed clients turn an absent deadline in a non-null
-		// suggestion into zero, including in copyable YAML. Only callers
-		// advertising an omission-safe renderer may receive resource advice.
-		if !a.ResourceOnly && step.Suggested != nil {
-			step.RefuseSizing("resource-only advice requires resource_only=true and a compatible renderer; Pod deadline advice is unavailable")
 		}
 		r.Steps = append(r.Steps, step)
 	}

@@ -33,7 +33,6 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.OwnershipHandoff, "ownership-handoff", "", "verified connector/site ownership handoff receipt required before retirement")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
 	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
-	flags.BoolVar(&cfg.AllowRetiredExecution, "allow-retired-execution", false, "override retired resource/repository checks; accept orphaned resources and refused legacy runs")
 	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for all queued/running runs before upgrading (advisory, not an admission freeze)")
 	flags.DurationVar(&cfg.WaitTimeout, "wait-timeout", installer.DefaultUpgradeWaitTimeout, "maximum queue wait, independent of --timeout")
 	flags.StringVar(&cfg.WaitFor, "wait-for", "", "enable waiting for all or critical (tag/promotion/plan/apply/unknown) runs")

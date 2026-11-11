@@ -51,10 +51,7 @@ func (service *API) prepareEventsWait(ctx context.Context, actor api.Actor, raw 
 	if len(arguments.RunIDs) > maxEventsWaitRuns {
 		return nil, fmt.Errorf("%w: at most %d run_ids", ErrInvalidInput, maxEventsWaitRuns)
 	}
-	seconds, err := arguments.seconds()
-	if err != nil {
-		return nil, err
-	}
+	seconds := arguments.seconds()
 	duration, err := service.waitDuration(seconds)
 	if err != nil {
 		return nil, err

@@ -23,7 +23,7 @@ func TestRunDetailKeepsFullEvidenceBesideConciseReason(t *testing.T) {
 	id := strings.Repeat("a", 32)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"Run":{"ID":"` + id + `","Status":"failed","Phase":"test","display_reason":"test/unit-tests failed","Error":"full unabridged controller evidence","Reason":"full operator provenance","resource_message":"detail resource advice"},"Steps":[]}`))
+		_, _ = w.Write([]byte(`{"run":{"id":"` + id + `","status":"failed","phase":"test","display_reason":"test/unit-tests failed","error":"full unabridged controller evidence","reason":"full operator provenance","resource_message":"detail resource advice"},"steps":[]}`))
 	}))
 	defer server.Close()
 	configure(t, server)

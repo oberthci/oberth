@@ -26,9 +26,6 @@
 #
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
-metadata:
-  annotations:
-    oberth.ci/size: L
 spec:
   entrypoint: ci
   activeDeadlineSeconds: 3600

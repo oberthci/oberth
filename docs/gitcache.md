@@ -20,14 +20,9 @@ failure does not indicate that the client key needs to be registered again.
 Git CLI is the only backend. There is no in-process Git implementation,
 comparison background task or shadow telemetry. Retired `--git-backend`,
 `--gitcache-shadow` and OBERTH_GITCACHE_SHADOW settings have no runtime role.
-For upgrade/install/restore value reuse, the chart accepts and ignores exactly
-`gitBackend: cli` and `gitcache.shadow: false`. `go-git`, newly supplied
-`shadow: true` and unknown fields remain refused.
-`oberth upgrade` migrates an already stored boolean `gitcache.shadow` by
-removing that key from a private snapshot used for both schema preflight and
-application, with an explicit diagnostic. All other user configuration remains
-subject to the target schema; the original Helm revision remains untouched
-for exact rollback. This migration does not enable a shadow background task.
+The chart values `gitBackend` and `gitcache` no longer exist; `oberth upgrade`
+refuses stored ones until they are dropped with `--set gitBackend=null` and
+`--set gitcache=null`.
 
 The scratch server image contains static Git 2.56.0 (zlib only), static Oberth,
 `oberth-git-ssh -> oberth`, and the pinned Alpine CA bundle. It has no shell,

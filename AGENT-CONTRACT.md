@@ -543,8 +543,8 @@ containing CI and real workload qualification remain separately required.
   `oberth-release`) and while an assisted retry hold parks it. Kubernetes
   places step Pods by their requests. Oberth reads nothing from a workflow document to decide
   whether a run may start: there are no size weights, declared budgets,
-  exclusive classes or backfill. Historical `oberth.ci/size` and
-  `oberth.ci/size-by-trigger` are accepted and unused. Explicit requests and
+  exclusive classes or backfill. The removed `oberth.ci/size` and
+  `oberth.ci/size-by-trigger` annotations are refused. Explicit requests and
   limits remain in git. Missing requests use the documented per-container
   defaults. See [admission and native synchronization](docs/native-synchronization.md).
 - Execution priority has four canonical classes: `low < standard < promotion < high`.
@@ -556,7 +556,7 @@ containing CI and real workload qualification remain separately required.
   A promotion-only grant cannot authorize high. SSH checks the exact authenticated
   key fingerprint, never an identity alias; scoped admins need a grant.
   Low is deliberate background work and never ages. Every explicit admin override
-  pins its class. `run_priority {run_id, priority, reason}` sets any waiting class,
+  pins its class. `run_priority {id, priority, reason}` sets any waiting class,
   including lowering high to promotion/standard/low; it cannot preempt admitted work.
   Audit records retain actor, prior/selected class and reason. Admission FIFO,
   pressure, per-container resource, group and hold checks, and bounded dispatch
@@ -574,13 +574,12 @@ containing CI and real workload qualification remain separately required.
   every priority class. The latest explicit admin override carries to the new
   head, with its actor and reason but a fresh FIFO place. Running work retains
   requester/admin supersession protection. Publication/cleanup guards remain.
-  Legacy input normal maps to standard; authorized high/highest requests, overrides
-  and grants map to high. Automatic legacy high/highest protection rows with an
-  empty requested field confer no high authority. The timestamp migration
+  Requests take only the four names; `normal` and `highest` are refused. Stored
+  normal/highest rows read as standard/high. Automatic high/highest protection
+  rows with an empty requested field confer no high authority. The timestamp migration
   `20261104190000-priority-four-classes` extends CHECK vocabularies and preserves
   raw historical rows and audit chains. Shipped migration 39 and admin-lowering SQL
-  remain unchanged. Canonical API/CLI/MCP/dashboard output uses only the four names;
-  MCP accepts deprecated normal/highest input aliases for current clients.
+  remain unchanged. API/CLI/MCP/dashboard input and output use only the four names.
   No run status or layout changes. See [release-priority.md](docs/release-priority.md)
   for the exact compatibility, resource and fairness rules.
 - Waiting admission uses run slots, the enabled PSI hard-limit valve and
@@ -634,8 +633,8 @@ containing CI and real workload qualification remain separately required.
   evaluates); this server replaces that value. `valueFrom`, `default`,
   `enum`, a duplicate, or an out-of-vocabulary value is refused. A document
   that never mentions the parameter is submitted byte-identical to before.
-  The retired `oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit`
-  annotations are accepted and ignored since v0.20.0; a run that must not
+  The removed `oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit`
+  annotations are refused at admission; a run that must not
   overlap another declares a native Argo mutex or semaphore. The
   `concurrency_groups` tool, `oberth admission groups` and
   `system_status.admission.groups` are gone; the `runs.concurrency_group`,
@@ -665,8 +664,8 @@ containing CI and real workload qualification remain separately required.
   refusal, no scoping, no allowlist. Limits are operator-owned keys of the
   ConfigMap `oberth-sync-limits` in the pipeline namespace, rendered by the
   argo-workflows release (`oberth install --argo-sync-limit`) since v0.20.0;
-  the Oberth chart refuses `argoSync.semaphores`, `maxConcurrentJobs` and
-  `admission.runtimeCapacity` except at their former defaults, and refuses to
+  `argoSync`, `maxConcurrentJobs` and `admission.runtimeCapacity` are removed
+  chart values that the schema and `oberth upgrade` refuse, and the chart refuses to
   upgrade while the live ConfigMap still belongs to its release without
   `helm.sh/resource-policy: keep`. The Argo controller queues waiters
   (priority, then creation) and re-reads the ConfigMap. A Workflow or step Pending behind a
@@ -676,7 +675,7 @@ containing CI and real workload qualification remain separately required.
   controller's lock-key grammar. `releases.serialize` adds the workflow-level
   mutex `oberth-release` to every release run by trigger, merged with the
   document's own synchronization. A held retry keeps its template lock. The
-  retired `oberth.ci/exclusive` annotation is accepted and ignored. No status,
+  removed `oberth.ci/exclusive` annotation is refused at admission. No status,
   label or layout is added. See [native synchronization](docs/native-synchronization.md).
 - Server-owned helper operations (secret-store delivery, trusted plan
   capture/acknowledge/deliver/load) are exec'd through the same
@@ -1328,7 +1327,7 @@ containing CI and real workload qualification remain separately required.
   process's in-memory gate, never durable evidence. A scoped uplink sees only
   its repositories' reservations, without the run count, positions or the
   blocker. Admin-only, unscoped MCP
-  `admission_release {run_id, force}` (CLI `oberth admission release`,
+  `admission_release {id, force}` (CLI `oberth admission release`,
   remote only; `oberth admission` prints the view) releases a reservation no
   owner will release. The practical case is a granted reservation still held
   for a run that is already terminal because its owner hung or was lost; an
@@ -1364,9 +1363,8 @@ containing CI and real workload qualification remain separately required.
   scoped uplinks see no global position (#073). `started_at` is recorded when
   workflow admission is granted.
   Workflow submission preserves the admission time. `view=history` retains its
-  terminal-only sequence paging; `view=active` remains an unpaged, bounded
-  deprecated compatibility view. Repository/ref filters and uplink scope apply
-  to both. `run_list.status` accepts one existing display status or a non-empty
+  terminal-only sequence paging. Repository/ref filters and uplink scope apply
+  to both views. `run_list.status` accepts one existing display status or a non-empty
   list (REST: repeated/comma-separated `status` query values). Filter before the
   page bound using the same display classifier as presentation; preserve queue
   positions, cursor formats, and latest-per-ref head selection. Never resurrect
@@ -2878,9 +2876,8 @@ commit, reflected by `updated_at`/`UpdatedAt`. Reads never finalize a publicatio
 ## Operator-owned external ingress
 
 The chart and installer manage Oberth and its CI dependencies. Operators own
-external ingress and connectors separately. Retired `watchTunnel` values are
-accepted for upgrade compatibility, ignored, and reported in Helm notes.
-Before upgrading a release that formerly managed a connector, annotate needed
+external ingress and connectors separately. The `watchTunnel` value is
+removed; an upgrade refuses stored values that still set it. Before upgrading a release that formerly managed a connector, annotate needed
 live resources `helm.sh/resource-policy=keep`, verify their retention and
 complete the [external ownership handoff](docs/ownership-handoff.md). The push banner remains an optional, display-only dashboard URL.
 
@@ -3590,17 +3587,14 @@ workflow capability migration message, and legacy Helm values warn and are
 ignored. Pipelines own resource creation, test gates and cleanup through the
 operator identity. See [workflow capabilities](docs/workflow-capabilities.md).
 
-## Additive HTTP/MCP compatibility (v0.17.x)
+## HTTP/MCP wire names
 
-Public typed records retain legacy keys and add snake_case aliases after
-redaction. Primary run records/control responses accept or expose `run_id`
-alongside their existing ID spelling; conflicting input aliases are refused.
-HTTP collection arrays remain the default; `envelope=1` opts into the matching
-MCP collection object. `/api/issues` explicitly removes body and internal
-list fields for privacy; all other existing names and envelopes remain.
-Any removal requires a later major version after an announced deprecation
-window of at least 90 days and one stable minor release. No removal date is
-announced here. See [the compatibility policy](docs/api-compatibility.md).
+Public typed records use snake_case names only, after redaction. Every tool
+that selects one run takes it as `id`. HTTP collections are objects
+(`{"runs": [...]}`, `{"repositories": [...]}`, `{"grants": [...]}`), the shape
+MCP returns. Oberth is pre-launch: removed names are not kept as aliases, and
+each removal is a breaking change in the release notes. See
+[the wire names](docs/api-compatibility.md).
 
 ### Ordered promotion trains
 

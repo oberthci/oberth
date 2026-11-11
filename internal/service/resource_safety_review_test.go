@@ -174,7 +174,7 @@ func TestReviewResourceSafetyThroughStoreAndAPI(t *testing.T) {
 				}
 			}
 			for _, mode := range []string{"omitted", "false", "true"} {
-				args := map[string]any{"repo": repo.Name, "resource_only": true}
+				args := map[string]any{"repo": repo.Name}
 				if mode != "omitted" {
 					args["include_failed"] = mode == "true"
 				}

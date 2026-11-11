@@ -72,6 +72,12 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 			c, r := wifControllerInput(t, shape)
 			var input wfv1.Workflow
 			decode(t, shape+"-workflow.json", &input)
+			// The captured bytes carry their own identity; only then may the
+			// removed annotation be renamed and the identity follow it.
+			capturedIdentity, err := specIdentity(&input)
+			if err != nil || input.Annotations[identityAnnotation] != capturedIdentity {
+				t.Fatal("captured workflow lost its spec identity")
+			}
 			// These authenticated historical Pods predate v2 and v3. Recovery of
 			// their policy must reproduce the captured Workflow exactly.
 			if input.Annotations[helperStorageAnnotation] != legacyHelperStoragePolicy {
@@ -79,6 +85,14 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 			}
 			if err := recoverHelperStorage(&input, &r); err != nil {
 				t.Fatal(err)
+			}
+			if _, renamed := input.Annotations["oberth.ci/size"]; renamed {
+				renameRemovedSizeAnnotation(&input)
+				identity, err := specIdentity(&input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.Annotations[identityAnnotation] = identity
 			}
 			current, err := Build(c, r)
 			if err != nil {
@@ -168,5 +182,21 @@ func assertWIFPodIsolation(t *testing.T, shape string, spec corev1.PodSpec) {
 	}
 	if !main || !executor {
 		t.Fatal("observation lost main or independent executor")
+	}
+}
+
+// renameRemovedSizeAnnotation moves a captured Workflow's removed
+// oberth.ci/size annotation to the inert key the current fixture documents
+// carry instead. Controller behaviour never read it, so the captured proof
+// stays pinned; only this metadata key and the spec identity follow.
+func renamedSpecIdentity(workflow *wfv1.Workflow) (string, error) {
+	renameRemovedSizeAnnotation(workflow)
+	return specIdentity(workflow)
+}
+
+func renameRemovedSizeAnnotation(workflow *wfv1.Workflow) {
+	if size, ok := workflow.Annotations["oberth.ci/size"]; ok {
+		delete(workflow.Annotations, "oberth.ci/size")
+		workflow.Annotations["example.com/tier"] = size
 	}
 }

@@ -187,7 +187,7 @@ func TestCreateRelease_Success(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600
@@ -270,7 +270,7 @@ func TestPlannedSteps_ValidDocument(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: S
+    example.com/tier: S
 spec:
   entrypoint: main
   templates:
@@ -1064,7 +1064,7 @@ func TestPipelineSize_ReleaseFile(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: main
   templates:
@@ -1090,8 +1090,8 @@ spec:
 	if err != nil {
 		t.Fatalf("PipelineSize: %v", err)
 	}
-	if size != pipeline.L {
-		t.Fatalf("size = %s, want L", size)
+	if size != pipeline.M {
+		t.Fatalf("size = %s, want M", size)
 	}
 }
 
@@ -1164,7 +1164,7 @@ func TestPlannedSteps_StepFieldMapping(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: S
+    example.com/tier: S
 spec:
   entrypoint: main
   templates:
@@ -1206,7 +1206,7 @@ func TestPlannedSteps_MarksSecretSteps(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: S
+    example.com/tier: S
     oberth.ci/secret-paths: kv/ci/token
 spec:
   entrypoint: main

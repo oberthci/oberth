@@ -25,9 +25,9 @@ const (
 	TagReleasePriorityReason = "tag/release run: oldest waiting server-classified tag ref"
 )
 
-// Canonical accepts the two legacy input names without emitting them.
-// Explicit legacy high/highest authority maps to high. Automatic historical
-// protection rows are classified separately by the store, never as urgency.
+// Canonical reads the class names stored database rows still carry (normal,
+// highest) as standard and high. Requests take the canonical names only; see
+// Valid.
 func (p RunPriority) Canonical() RunPriority {
 	switch p {
 	case "normal":
@@ -39,8 +39,9 @@ func (p RunPriority) Canonical() RunPriority {
 	}
 }
 
+// Valid reports one of the four request classes, spelled canonically.
 func (p RunPriority) Valid() bool {
-	switch p.Canonical() {
+	switch p {
 	case PriorityLow, PriorityStandard, PriorityPromotion, PriorityHigh:
 		return true
 	default:

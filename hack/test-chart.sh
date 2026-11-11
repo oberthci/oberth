@@ -418,8 +418,6 @@ fi
 if render --set upstream.keyFile=. >/dev/null 2>&1; then
   exit 1
 fi
-# Retired Secret names are inert compatibility values, including equal names.
-render --set upstream.keySecret=shared --set upstream.knownHostsSecret=shared >/dev/null
 if render --set persistence.size=9Gi >/dev/null 2>&1; then
   exit 1
 fi
@@ -580,31 +578,31 @@ if grep -Fq -- '--admission-disk-floor-bytes=' "$admission_legacy_manifest"; the
 fi
 rm -f "$admission_legacy_manifest"
 
-# Run limits live in Argo since v0.20.0: the chart renders no limits
-# ConfigMap, no runtime-capacity ConfigMap and no run-ceiling flag.
-# releases.serialize renders the one flag only when set. The retired keys
-# render at their former stock defaults (a --reuse-values upgrade carries
-# them) and fail with the replacement named at any other value.
+# Run limits live in Argo: the chart renders no limits ConfigMap,
+# no runtime-capacity ConfigMap and no run-ceiling flag.
+# releases.serialize renders the one flag only when set.
 sync_manifest=$(mktemp)
 render --set releases.serialize=true >"$sync_manifest"
 grep -q -- '--serialize-releases=true' "$sync_manifest"
-render --set maxConcurrentJobs=0 --set admission.runtimeCapacity.enabled=true --set admission.runtimeCapacity.maxConcurrentJobs=null --set argoSync.semaphores=null >"$sync_manifest"
+render >"$sync_manifest"
 if grep -q 'oberth-sync-limits\|--serialize-releases\|max-concurrent-jobs\|runtime-capacity' "$sync_manifest"; then
   exit 1
 fi
-for retired in maxConcurrentJobs=3 admission.runtimeCapacity.enabled=false admission.runtimeCapacity.maxConcurrentJobs=2 argoSync.semaphores.kvm=1; do
-  if render --set "$retired" >/dev/null 2>&1; then exit 1; fi
-done
-render --set maxConcurrentJobs=3 2>&1 >/dev/null | grep -q 'oberth install --argo-parallelism'
-render --set argoSync.semaphores.kvm=1 2>&1 >/dev/null | grep -q 'oberth install --argo-sync-limit'
-# Removed admission keys: the former stock defaults still render (a
-# --reuse-values upgrade carries them); any deliberate value fails with the
-# replacement named.
-render --set-string admission.maxHeadWait=20m --set admission.sizeWeights.S=1 --set admission.sizeWeights.M=2 --set admission.sizeWeights.L=3 --set admission.sizeWeights.XL=0 --set admission.declaredResources.ioRuns=0 --set admission.declaredResources.cpuMillis=8000 >/dev/null
-for removed in admission.exclusiveClasses.kvm=1 admission.sizeWeights.XL=8 admission.maxHeadWait=45m admission.declaredResources.ioRuns=2 admission.legacyResources.L.cpu_milli=1; do
-  if render --set "$removed" >/dev/null 2>&1; then exit 1; fi
-done
 rm -f "$sync_manifest"
+# Removed values are refused by the schema at any value, stock or not.
+for removed in maxConcurrentJobs=0 argoSync.semaphores.kvm=1 admission.runtimeCapacity.enabled=true \
+  admission.exclusiveClasses.kvm=1 admission.sizeWeights.XL=0 admission.maxHeadWait=20m \
+  admission.declaredResources.ioRuns=0 admission.legacyResources.L.cpu_milli=1 gitBackend=cli gitcache.shadow=false \
+  vm.kvm.enabled=false trustedTests.runtime=old argo.vmLauncherServiceAccount=old \
+  argo.containerDiskPrefixes[0]=example argo.kubevirtCeiling.maxVMs=16 watchTunnel.enabled=true \
+  upstream.keySecret=shared upstream.knownHostsSecret=shared upstream.createSecrets=false auditAnchor.rootsKey=roots.pem \
+  secretCreatePolicy.enabled=false argo.enabled=true argo.ciServiceAccount=old argo.ciSecretsServiceAccount=old \
+  argo.vault.ciSecretsRole=old admission.pressure.mode=observe argo.ciSecrets.serviceAccount= argo.ciSecrets.vaultRole=; do
+  if render --set "$removed" >/dev/null 2>&1; then
+    echo "removed value accepted: $removed" >&2
+    exit 1
+  fi
+done
 
 # Executor scratch keeps a safe default for reused values and accepts overrides.
 grep -q -- '--argo-executor-scratch-size-limit=1Gi' "$manifest"
@@ -654,11 +652,6 @@ test "$(grep -c 'resources: \["serviceaccounts"\]' "$argo_vault_manifest")" -eq 
 grep -A1 'resources: \["serviceaccounts"\]' "$argo_vault_manifest" | \
   grep -q 'verbs: \["get"\]'
 
-# Retired instance connector settings are inert, including malformed old values.
-for retired in 'watchTunnel.enabled=true' 'watchTunnel.enabled=invalid' 'watchTunnel=invalid'; do
-  render --set "$retired" >"$package_dir/retired-connector.yaml"
-  if grep -q 'cloudflared' "$package_dir/retired-connector.yaml"; then exit 1; fi
-done
 
 helm package "$chart" --destination "$package_dir" >/dev/null
 set -- "$package_dir"/oberth-*.tgz
@@ -737,17 +730,6 @@ render --set promotion=null >"$promotion_manifest"
 grep -Fq -- '--promotion-grant-max-lifetime=24h' "$promotion_manifest"
 rm -f "$promotion_manifest"
 
-# Historical VM values are accepted but cannot restore removed runtime or RBAC.
-render --set vm.kvm.enabled=true --set trustedTests.runtime=legacy --set trustedTests.kvmSupplementalGroup=0 \
-  --set argo.vmLauncherServiceAccount=legacy --set argo.kubevirtCeiling.maxVMs=16 >"$manifest"
-if grep -Ei 'kubevirt|kvm|trusted-tests|vm-launcher|vmi-reservation' "$manifest"; then
-  echo "retired values restored execution or permissions" >&2
-  exit 1
-fi
-render --set trustedTests=null --set vm=null >"$manifest"
-helm template oberth "$notes_chart" --set "image.ref=$server_image" \
-  --set trustedTests.runtime=legacy --show-only templates/notes-contract.yaml >"$notes"
-grep -Fq 'values are ignored. Migrate pipelines to a workflow capability grant' "$notes"
 
 
 # Retention defaults keep logs by age, bound them to a 2 GiB budget and keep
