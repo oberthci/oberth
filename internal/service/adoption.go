@@ -102,7 +102,7 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 	if current.Preempted() {
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
 			reservation.retain()
-			return scheduler.deferRefusedDeletions(ctx, err)
+			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 		}
 		return nil
 	}

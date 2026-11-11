@@ -26,13 +26,48 @@ func (e *pendingJobDeletionError) Unwrap() error { return e.error }
 // it through releaseDeletedRun; if the pass already completed it, the
 // reservation is released and retain is a no-op, so the slot is released
 // exactly once.
-func (scheduler *Scheduler) deferRefusedDeletions(ctx context.Context, err error) error {
+func (scheduler *Scheduler) deferRefusedDeletions(ctx context.Context, runID string, err error) error {
 	if err == nil || !onlyPendingJobDeletions(err) || ctx.Err() != nil {
 		return err
 	}
 	log.Printf("WARN: scheduler worker cancellation deletion_pending=true retry=dispatch_pass error=%q", err)
 	scheduler.signalQueue()
+	// The run is already preempted in the store; waiters see it now rather
+	// than at the next unrelated run signal.
+	scheduler.signals.NotifyRun(runID)
 	return nil
+}
+
+// deferPodJournalPrune hands a deferred run's pod-log journal to the dispatch
+// pass that deletes its Workflow. When that pass already completed the run's
+// obligation, the journal is pruned here instead; either way exactly once.
+func (scheduler *Scheduler) deferPodJournalPrune(ctx context.Context, runID, logPath string) {
+	scheduler.deferredJournalMu.Lock()
+	if scheduler.deferredJournals == nil {
+		scheduler.deferredJournals = map[string]string{}
+	}
+	scheduler.deferredJournals[runID] = logPath
+	scheduler.deferredJournalMu.Unlock()
+	pending, err := scheduler.database().PendingRunCancellations(context.WithoutCancel(ctx))
+	if err != nil {
+		return // the pass, or evidence retention, prunes it later
+	}
+	for _, cancellation := range pending {
+		if cancellation.RunID == runID {
+			return
+		}
+	}
+	scheduler.pruneDeferredPodJournal(ctx, runID)
+}
+
+func (scheduler *Scheduler) pruneDeferredPodJournal(ctx context.Context, runID string) {
+	scheduler.deferredJournalMu.Lock()
+	logPath, ok := scheduler.deferredJournals[runID]
+	delete(scheduler.deferredJournals, runID)
+	scheduler.deferredJournalMu.Unlock()
+	if ok {
+		scheduler.pruneTerminalPodJournal(ctx, runID, logPath)
+	}
 }
 
 // cancellationRetryMaximum caps the steady-state cancellation pass backoff.

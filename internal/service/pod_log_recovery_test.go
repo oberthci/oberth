@@ -338,4 +338,12 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("terminal DB row with live cleanup lost recovery journal", err)
 	}
+	// The dispatch pass that later deletes the Workflow prunes the journal.
+	jobs.deleteErr = nil
+	if err := scheduler.completePendingCancellationsWithGate(context.Background(), scheduler.requireMutation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("journal kept after the deferred deletion completed", err)
+	}
 }

@@ -92,6 +92,10 @@ type Scheduler struct {
 	deliveryPermit     chan struct{}
 	capacityWait       func(context.Context) error
 	policyWaitTimeout  time.Duration // tests may shorten the fixed production limit
+	// deferredJournals holds the pod-log journal of a run whose worker left
+	// its Workflow deletion to the dispatch pass; that pass prunes it.
+	deferredJournalMu sync.Mutex
+	deferredJournals  map[string]string
 	// promotionRetrier re-promotes a promotion whose delivery found its
 	// target moved (#1097); nil leaves such a promotion failed.
 	promotionRetrier atomic.Pointer[promotionRetrierHook]
@@ -413,6 +417,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
 		}
 		scheduler.admission.releaseDeletedRun(cancellation.RunID)
+		scheduler.pruneDeferredPodJournal(ctx, cancellation.RunID)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		cleanupErr := scheduler.workspaces.cleanupRunDeferred(cleanupCtx, cancellation.RunID)
 		cancelCleanup()
@@ -849,7 +854,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if current.Preempted() {
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return scheduler.deferRefusedDeletions(ctx, err)
+			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -880,7 +885,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		// gone, so settle the cancellation like the pre-admission check does.
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return scheduler.deferRefusedDeletions(ctx, err)
+			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -899,7 +904,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		if current.Preempted() {
 			_ = logFile.Close()
 			if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-				return scheduler.deferRefusedDeletions(ctx, err)
+				return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 			}
 			scheduler.signals.NotifyRun(run.ID)
 			return nil
@@ -927,7 +932,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if current.Preempted() {
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return scheduler.deferRefusedDeletions(ctx, err)
+			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -973,7 +978,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	} else if fresh.Preempted() {
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return scheduler.deferRefusedDeletions(ctx, err)
+			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -1128,13 +1133,15 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			observation.retained = info.Size()
 		}
 	}
-	projectionReady, workflowSettled := false, false
+	projectionReady, workflowSettled, journalDeferred := false, false, false
 	defer func() {
 		if progressLog.journal != nil {
 			_ = progressLog.journal.Close()
 		}
 		if projectionReady && workflowSettled {
 			scheduler.pruneTerminalPodJournal(ctx, run.ID, logFile.Name())
+		} else if projectionReady && journalDeferred {
+			scheduler.deferPodJournalPrune(ctx, run.ID, logFile.Name())
 		}
 	}()
 
@@ -1233,7 +1240,10 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		if current, lookupErr := scheduler.database().Run(finalizeCtx, run.ID); lookupErr == nil && current.Preempted() {
 			if err := scheduler.completePendingCancellationsWithGate(finalizeCtx, require); err != nil {
 				reservation.retain()
-				return scheduler.deferRefusedDeletions(finalizeCtx, err)
+				err = scheduler.deferRefusedDeletions(finalizeCtx, run.ID, err)
+				// The pass that later deletes the Workflow prunes the journal.
+				journalDeferred = err == nil
+				return err
 			}
 			workflowSettled = true
 			scheduler.signals.NotifyRun(run.ID)

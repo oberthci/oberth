@@ -260,13 +260,20 @@ func TestDeferRefusedDeletionsWakesDispatchRetry(t *testing.T) {
 		{"nil", context.Background(), nil, nil, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			scheduler := &Scheduler{wake: make(chan struct{}, 1)}
-			got := scheduler.deferRefusedDeletions(tc.ctx, tc.err)
+			var notified []string
+			signals := NewSignals()
+			signals.Observe(func(_, id string) { notified = append(notified, id) })
+			scheduler := &Scheduler{wake: make(chan struct{}, 1), signals: signals}
+			got := scheduler.deferRefusedDeletions(tc.ctx, "run", tc.err)
 			if (got == nil) != (tc.want == nil) {
 				t.Fatalf("deferRefusedDeletions = %v, want error=%t", got, tc.want != nil)
 			}
 			if len(scheduler.wake) != tc.wakeups {
 				t.Fatalf("dispatch wakeups = %d, want %d", len(scheduler.wake), tc.wakeups)
+			}
+			// A deferred run is already preempted; its waiters are told now.
+			if len(notified) != tc.wakeups || (tc.wakeups == 1 && notified[0] != "run") {
+				t.Fatalf("run notifications = %v, want %d", notified, tc.wakeups)
 			}
 		})
 	}
