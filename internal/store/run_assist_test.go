@@ -54,7 +54,7 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 		t.Fatalf("unknown action accepted: %v", err)
 	}
 	refused := errors.New("not yours")
-	if _, err := s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Authorize: func(model.Run) error { return refused }, Event: model.RunAssistEvent{Actor: "other", Step: "test", Kind: model.RunAssistExec}}); !errors.Is(err, refused) {
+	if _, err := s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Authorize: func(model.Run, string) error { return refused }, Event: model.RunAssistEvent{Actor: "other", Step: "test", Kind: model.RunAssistExec}}); !errors.Is(err, refused) {
 		t.Fatalf("authorize ignored: %v", err)
 	}
 	exitCode := 1

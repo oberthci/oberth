@@ -301,8 +301,9 @@ func shortDigest(digest string) string {
 type RunAssistRequest struct {
 	RunID string
 	Event RunAssistEvent
-	// Authorize runs inside the writer transaction against the current run.
-	Authorize func(Run) error
+	// Authorize runs inside the writer transaction against the current run
+	// and the name of the upstream its repository belongs to now.
+	Authorize func(run Run, upstream string) error
 }
 
 // AssistHold is one parked retry attempt as the engine sees it.

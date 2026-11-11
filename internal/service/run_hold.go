@@ -273,7 +273,7 @@ func (service *API) heldStep(ctx context.Context, run model.Run, step string) (m
 
 func (service *API) recordAssist(ctx context.Context, actor api.Actor, run model.Run, event model.RunAssistEvent) (model.Run, error) {
 	event.Actor = actor.Identity
-	updated, err := service.runAssists.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: event, Authorize: func(current model.Run) error {
+	updated, err := service.runAssists.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: event, Authorize: func(current model.Run, upstream string) error {
 		if !current.Status.Active() && event.Kind != model.RunAssistAbandon {
 			return fmt.Errorf("%w: run %s is %s", store.ErrInvalidState, shortRunID(current.ID), current.Status)
 		}
@@ -282,6 +282,12 @@ func (service *API) recordAssist(ctx context.Context, actor api.Actor, run model
 		}
 		if err := service.authorizeHoldServicer(actor, current); err != nil {
 			return err
+		}
+		// The scope view was resolved at call start; the repository's upstream
+		// is read again in this transaction, so a repository moved out of the
+		// caller's scope since then is refused.
+		if !actor.Admin && current.Actor != actor.Identity && actor.Scoped() && !actor.SeesUpstream(upstream) {
+			return refuse(ErrForbidden, "hold actions on run %s need an uplink whose scope covers its repository, or an admin", shortRunID(current.ID))
 		}
 		return nil
 	}})

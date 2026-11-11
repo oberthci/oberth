@@ -34,12 +34,18 @@ func (history holdHistory) ResolveRunID(_ context.Context, id string) (model.Run
 type holdAssistStore struct {
 	history holdHistory
 	events  []model.RunAssistEvent
+	// upstream is the run repository's current upstream ("codeberg" if unset).
+	upstream string
 }
 
 func (s *holdAssistStore) AppendRunAssist(_ context.Context, request model.RunAssistRequest) (model.Run, error) {
 	run := s.history.runs[request.RunID]
 	if request.Authorize != nil {
-		if err := request.Authorize(run); err != nil {
+		upstream := s.upstream
+		if upstream == "" {
+			upstream = "codeberg"
+		}
+		if err := request.Authorize(run, upstream); err != nil {
 			return model.Run{}, err
 		}
 	}
@@ -349,9 +355,16 @@ func TestRunHoldScopedServicerNeedsTheRunRepository(t *testing.T) {
 	if got := assists.events[len(assists.events)-1]; got.Actor != "uplink-c" || got.Kind != model.RunAssistPatch {
 		t.Fatalf("last assist event = %+v, want a patch by uplink-c", got)
 	}
+	// The repository moved to an upstream outside the scope after the scope
+	// view was resolved: the in-transaction check refuses.
+	assists.upstream = "github"
+	before := len(operator.execs)
+	if _, err := covering.execRunHold(ctx, scopedActor, run.ID, "", []string{"true"}, "", 0); !errors.Is(err, ErrForbidden) || len(operator.execs) != before {
+		t.Fatalf("exec after the repository left the scope = %v, execs %d", err, len(operator.execs)-before)
+	}
+	assists.upstream = ""
 	elsewhere := *service
 	elsewhere.scope = &repoScope{actor: scopedActor, repos: map[int64]model.Repository{run.RepoID + 1: {ID: run.RepoID + 1}}}
-	before := len(operator.execs)
 	for name, call := range map[string]func() error{
 		"exec": func() error {
 			_, err := elsewhere.execRunHold(ctx, scopedActor, run.ID, "", []string{"true"}, "", 0)

@@ -44,7 +44,11 @@ func (s *Store) AppendRunAssist(ctx context.Context, request model.RunAssistRequ
 		return model.Run{}, fmt.Errorf("%w: run %s did not ask for assisted continuation", ErrInvalidState, current.ID)
 	}
 	if request.Authorize != nil {
-		if err := request.Authorize(current); err != nil {
+		var upstream string
+		if err := tx.QueryRowContext(ctx, `SELECT u.name FROM repositories r JOIN upstreams u ON u.id=r.upstream_id WHERE r.id=?`, current.RepoID).Scan(&upstream); err != nil {
+			return model.Run{}, fmt.Errorf("load run repository for assist: %w", err)
+		}
+		if err := request.Authorize(current, upstream); err != nil {
 			return model.Run{}, err
 		}
 	}
