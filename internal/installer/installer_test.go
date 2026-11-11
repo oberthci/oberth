@@ -36,6 +36,10 @@ import (
 // RunHelm handlers when the test exercises a code path that resolves the
 // chart's default image.ref (e.g. install --upgrade with no --image).
 const fakeChartImageRef = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+// testLocalChart is a --chart development chart: never verified.
+const testLocalChart = "/charts/oberth"
+
 const fakeChartValuesYAML = "image:\n  ref: " + fakeChartImageRef + "\n"
 
 func TestKindClusterConfigMapsPortsAndCaches(t *testing.T) {
@@ -111,9 +115,8 @@ func TestExecuteDarwinDryRunPrintsKindAndHelmCommands(t *testing.T) {
 		"containerPort: 30022",
 		"hostPort: 30443",
 		"OBERTH_KIND_CONFIG",
-		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
-		"helm repo update oberth-charts",
-		"helm show values oberth-charts/oberth --version 0.10.55",
+		"Verify the signed release v0.10.55 (release.json, chart and their signature bundles, fetch from https://releases.oberth.ci and https://charts.oberth.ci)",
+		"helm show values <verified oberth-0.10.55.tgz>",
 		`docker manifest inspect "$OBERTH_IMAGE_REF"`,
 		`docker pull "$OBERTH_IMAGE_CHILD_REF"`,
 		`docker tag "$OBERTH_IMAGE_CHILD_REF" "$OBERTH_IMAGE_LOCAL_TAG"`,
@@ -121,21 +124,22 @@ func TestExecuteDarwinDryRunPrintsKindAndHelmCommands(t *testing.T) {
 		`docker exec oberth-control-plane ctr --namespace=k8s.io images tag --force "$OBERTH_IMAGE_LOCAL_TAG" "$OBERTH_IMAGE_REF"`,
 		"helm repo add --force-update openbao https://openbao.github.io/openbao-helm",
 		"helm repo update openbao",
-		"helm upgrade --install oberth oberth-charts/oberth",
+		"helm upgrade --install oberth <verified oberth-0.10.55.tgz>",
 	})
 	for _, count := range []struct {
 		command string
 		want    int
 	}{
 		{command: "cat <<'OBERTH_KIND_CONFIG' | kind create cluster --name oberth --config=-", want: 1},
-		{command: "helm repo add --force-update oberth-charts https://charts.oberth.ci", want: 1},
-		{command: "helm show values oberth-charts/oberth --version 0.10.55", want: 2},
+		{command: "Verify the signed release v0.10.55", want: 1},
+		{command: "helm repo add --force-update oberth-charts", want: 0},
+		{command: "helm show values <verified oberth-0.10.55.tgz>", want: 2},
 		{command: `docker manifest inspect "$OBERTH_IMAGE_REF"`, want: 1},
 		{command: `docker pull "$OBERTH_IMAGE_CHILD_REF"`, want: 1},
 		{command: `docker tag "$OBERTH_IMAGE_CHILD_REF" "$OBERTH_IMAGE_LOCAL_TAG"`, want: 1},
 		{command: `kind load docker-image --name oberth "$OBERTH_IMAGE_LOCAL_TAG"`, want: 1},
 		{command: `docker exec oberth-control-plane ctr --namespace=k8s.io images tag --force "$OBERTH_IMAGE_LOCAL_TAG" "$OBERTH_IMAGE_REF"`, want: 1},
-		{command: "helm upgrade --install oberth oberth-charts/oberth", want: 1},
+		{command: "helm upgrade --install oberth <verified oberth-0.10.55.tgz>", want: 1},
 	} {
 		if got := strings.Count(text, count.command); got != count.want {
 			t.Errorf("%q count = %d, want %d:\n%s", count.command, got, count.want, text)
@@ -375,8 +379,8 @@ func TestPrepareKindImagesResolvesDigestRefsAndAliasesNodes(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			events = append(events, "helm "+strings.Join(args, " "))
-			if strings.Join(args, " ") == "show values oberth-charts/oberth --version 0.10.55" {
+			events = append(events, normalizeVerifiedChart("helm "+strings.Join(args, " ")))
+			if normalizeVerifiedChart(strings.Join(args, " ")) == "show values <verified oberth-0.10.55.tgz>" {
 				return []byte("image:\n  ref: " + serverImage + "\n"), nil
 			}
 			return nil, nil
@@ -402,13 +406,15 @@ func TestPrepareKindImagesResolvesDigestRefsAndAliasesNodes(t *testing.T) {
 		},
 	}
 
+	withSignedRelease(t, &deps, "0.10.55", serverImage)
 	if err := prepareKindImagesForCluster(context.Background(), Config{ChartVersion: "v0.10.55"}, deps, KindClusterName); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
-		"helm repo update oberth-charts",
-		"helm show values oberth-charts/oberth --version 0.10.55",
+		// Once to check the verified chart's image against the record, once
+		// to read the images to load.
+		"helm show values <verified oberth-0.10.55.tgz>",
+		"helm show values <verified oberth-0.10.55.tgz>",
 		"docker image inspect " + serverLocal,
 		"docker version --format {{.Server.Arch}}",
 		"docker manifest inspect " + serverImage,
@@ -432,7 +438,7 @@ func TestPrepareKindImagesTagRefsKeepDirectLoad(t *testing.T) {
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			events = append(events, "helm "+strings.Join(args, " "))
-			if strings.Join(args, " ") == "show values oberth-charts/oberth --version 0.10.55" {
+			if strings.Join(args, " ") == "show values "+testLocalChart {
 				return []byte("image:\n  ref: " + serverImage + "\n"), nil
 			}
 			return nil, nil
@@ -447,13 +453,11 @@ func TestPrepareKindImagesTagRefsKeepDirectLoad(t *testing.T) {
 		},
 	}
 
-	if err := prepareKindImagesForCluster(context.Background(), Config{ChartVersion: "v0.10.55"}, deps, KindClusterName); err != nil {
+	if err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
-		"helm repo update oberth-charts",
-		"helm show values oberth-charts/oberth --version 0.10.55",
+		"helm show values " + testLocalChart,
 		"docker image inspect " + serverImage,
 		"docker pull " + serverImage,
 		"kind load docker-image --name oberth " + serverImage,
@@ -486,13 +490,11 @@ func TestPrepareKindImagesExistingLocalRefsSkipPullButStillLoad(t *testing.T) {
 		},
 	}
 
-	if err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName); err != nil {
+	if err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName); err != nil {
 		t.Fatal(err)
 	}
 	assertSliceEqual(t, events, []string{
-		"helm repo add --force-update oberth-charts https://charts.oberth.ci",
-		"helm repo update oberth-charts",
-		"helm show values oberth-charts/oberth",
+		"helm show values " + testLocalChart,
 		"docker image inspect " + serverImage,
 		"kind load docker-image --name oberth " + serverImage,
 	})
@@ -545,7 +547,7 @@ func TestPrepareKindImagesRetryAfterPullFailureLoadsImage(t *testing.T) {
 		},
 	}
 
-	err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName)
+	err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName)
 	if err == nil || !strings.Contains(err.Error(), "injected pull failure") {
 		t.Fatalf("first attempt error = %v, want injected pull failure", err)
 	}
@@ -553,7 +555,7 @@ func TestPrepareKindImagesRetryAfterPullFailureLoadsImage(t *testing.T) {
 		t.Error("failed pull must not load anything into kind")
 	}
 
-	if err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName); err != nil {
+	if err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 	if !nodeImages[serverImage] {
@@ -609,14 +611,14 @@ func TestPrepareKindImagesClusterRecreationReloadsHostCachedImages(t *testing.T)
 		},
 	}
 
-	if err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName); err != nil {
+	if err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
 	// kind delete cluster && rerun: node containerd is empty, host cache warm.
 	clear(nodeImages)
 
-	if err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName); err != nil {
+	if err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName); err != nil {
 		t.Fatalf("rerun after cluster recreation: %v", err)
 	}
 	if !nodeImages[serverImage] {
@@ -660,7 +662,7 @@ func TestPrepareKindImagesCachedDigestSkipsResolutionAndPullButLoadsAndAliases(t
 		},
 	}
 
-	if err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName); err != nil {
+	if err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName); err != nil {
 		t.Fatal(err)
 	}
 	assertSliceEqual(t, events, []string{
@@ -706,7 +708,7 @@ func TestPrepareKindImagesInspectFailureFallsBackToPinnedRef(t *testing.T) {
 		},
 	}
 
-	if err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName); err != nil {
+	if err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
@@ -752,7 +754,7 @@ func TestPrepareKindImagesMissingPlatformVariantFails(t *testing.T) {
 		},
 	}
 
-	err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName)
+	err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName)
 	if err == nil {
 		t.Fatal("expected missing-platform error")
 	}
@@ -844,6 +846,8 @@ func TestExecuteDarwinNodeListFailureStillLoadsKindImages(t *testing.T) {
 		return true, nil, errors.New("node discovery unavailable")
 	})
 
+	serverImage := testServerRepo + "@" + testServerIndexDigest
+	serverLocal := planKindDigestImage(serverImage).loadRef
 	var hostCommands []string
 	deps := InstallDeps{
 		Output: io.Discard,
@@ -861,11 +865,10 @@ func TestExecuteDarwinNodeListFailureStillLoadsKindImages(t *testing.T) {
 				return []byte(KindClusterName + "\n"), nil
 			case "docker inspect oberth-control-plane":
 				return compatibleKindInspectJSON(t, "/Users/alice/Library/Caches"), nil
-			case "docker image inspect private.example/oberth:latest":
-				return nil, errors.New("image not found")
-			case "docker pull private.example/oberth:latest",
-				"kind load docker-image --name oberth private.example/oberth:latest":
+			case "kind load docker-image --name oberth " + serverLocal:
 				hostCommands = append(hostCommands, command)
+			case "kind get nodes --name oberth":
+				return []byte("oberth-control-plane\n"), nil
 			}
 			if name == "kubectl" && strings.Contains(command, "upstream list") {
 				// One upstream is already registered, so the finish path waits
@@ -888,21 +891,19 @@ func TestExecuteDarwinNodeListFailureStillLoadsKindImages(t *testing.T) {
 			switch {
 			case strings.Contains(command, "list -n "):
 				return []byte("[]"), nil
-			case strings.Contains(command, "show values oberth-charts/oberth"):
-				return []byte("image:\n  ref: private.example/oberth:latest\n"), nil
+			case strings.Contains(command, "show values "):
+				return []byte("image:\n  ref: " + serverImage + "\n"), nil
 			default:
 				return nil, nil
 			}
 		},
 	}
 
+	deps.ReleaseGetter, deps.releaseKey = signedReleaseServer(t, "0.10.55", serverImage)
 	if err := Execute(context.Background(), Config{BinaryVersion: "v0.10.55"}, deps); err != nil {
 		t.Fatal(err)
 	}
-	assertSliceEqual(t, hostCommands, []string{
-		"docker pull private.example/oberth:latest",
-		"kind load docker-image --name oberth private.example/oberth:latest",
-	})
+	assertSliceEqual(t, hostCommands, []string{"kind load docker-image --name oberth " + serverLocal})
 }
 
 func TestPrepareKindImagesExplainsGARAuthentication(t *testing.T) {
@@ -927,7 +928,7 @@ func TestPrepareKindImagesExplainsGARAuthentication(t *testing.T) {
 		},
 	}
 
-	err := prepareKindImagesForCluster(context.Background(), Config{}, deps, KindClusterName)
+	err := prepareKindImagesForCluster(context.Background(), Config{ChartPath: testLocalChart}, deps, KindClusterName)
 	if err == nil {
 		t.Fatal("expected private image pull error")
 	}
@@ -1341,14 +1342,14 @@ func TestOberthHelmArgs(t *testing.T) {
 			t.Parallel()
 			args := OberthHelmArgs(test.cfg, test.openbao, RekorResult{})
 			want := []string{
-				"upgrade", "--install", "oberth", "oberth-charts/oberth",
+				"upgrade", "--install", "oberth", "<verified oberth-0.10.54.tgz>",
 				"-n", "oberth", "--create-namespace",
 				// The execution engine binding is unconditional: Argo is how
 				// every pipeline runs, not an optional integration.
 				"--set", "argo.namespace=oberth-argo",
 			}
 			want = append(want, test.settings...)
-			want = append(want, "--version", "0.10.54", "--reuse-values")
+			want = append(want, "--reuse-values")
 			assertSliceEqual(t, args, want)
 		})
 	}
@@ -1374,6 +1375,7 @@ func TestInstallOberthUpgradeFromLegacyValuesPinsManagedTransitIdentity(t *testi
 			return nil, nil
 		},
 	}
+	withSignedRelease(t, &deps, "0.10.93", fakeChartImageRef)
 	result, err := InstallOberth(context.Background(), Config{
 		Namespace:          "oberth",
 		ChartVersion:       "v0.10.93",
@@ -1489,13 +1491,12 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 	cfg := Config{Namespace: "oberth", ChartVersion: "v0.10.54"}
 	args := OberthHelmArgs(cfg, OpenBaoResult{}, RekorResult{})
 	want := []string{
-		"upgrade", "--install", "oberth", "oberth-charts/oberth",
+		"upgrade", "--install", "oberth", "<verified oberth-0.10.54.tgz>",
 		"-n", "oberth", "--create-namespace",
 		"--set", "argo.namespace=oberth-argo",
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--version", "0.10.54",
 		"--reuse-values",
 	}
 	assertSliceEqual(t, args, want)
@@ -1516,7 +1517,7 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 	}
 	args := OberthHelmArgs(cfg, OpenBaoResult{}, rekor)
 	want := []string{
-		"upgrade", "--install", "oberth", "oberth-charts/oberth",
+		"upgrade", "--install", "oberth", "<verified oberth-0.10.54.tgz>",
 		"-n", "oberth", "--create-namespace",
 		"--set", "argo.namespace=oberth-argo",
 		// Go module proxy pins (#662).
@@ -1525,7 +1526,6 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-		"--version", "0.10.54",
 		"--reuse-values",
 	}
 	assertSliceEqual(t, args, want)
@@ -2454,6 +2454,7 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				},
 			}
 
+			withSignedRelease(t, &deps, tc.installedVersion, fakeChartImageRef)
 			result, err := InstallOberth(context.Background(), Config{
 				ChartVersion: "v0.10.58",
 				InstallRekor: true,
@@ -2465,7 +2466,7 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				t.Fatalf("Rekor reconciliation result = %+v, want an existing-release upgrade", result)
 			}
 			want := []string{
-				"upgrade", "--install", "oberth", "oberth-charts/oberth",
+				"upgrade", "--install", "oberth", "<verified oberth-" + tc.installedVersion + ".tgz>",
 				"-n", "oberth", "--create-namespace",
 				"--set-string", "image.ref=" + fakeChartImageRef,
 				"--set", "argo.namespace=oberth-argo",
@@ -2475,9 +2476,9 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 				"--set", "auditAnchor.rekorInsecureHTTP=true",
 				"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-				"--version", tc.installedVersion,
 				"--reuse-values",
 			}
+			upgradeArgs[3] = normalizeVerifiedChart(upgradeArgs[3])
 			assertSliceEqual(t, upgradeArgs, want)
 		})
 	}
@@ -2502,6 +2503,7 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 		},
 	}
 
+	withSignedRelease(t, &deps, "0.10.59", fakeChartImageRef)
 	result, err := InstallOberth(context.Background(), Config{
 		ChartVersion:       "v0.10.58",
 		InstallSecretStore: true,
@@ -2516,9 +2518,9 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 	if !result.Upgraded || result.AlreadyInstalled {
 		t.Fatalf("secret store reconciliation result = %+v, want values reconciliation", result)
 	}
-	joined := strings.Join(upgradeArgs, " ")
+	joined := normalizeVerifiedChart(strings.Join(upgradeArgs, " "))
 	for _, want := range []string{
-		"--version 0.10.59",
+		"<verified oberth-0.10.59.tgz>",
 		"secretstore.address=https://openbao.openbao.svc:8200",
 		"secretstore.caCert=" + caPEM,
 		"secretstore.insecureHTTPForDev=false",
@@ -2527,7 +2529,7 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 			t.Fatalf("secret store reconciliation missing %q: %q", want, joined)
 		}
 	}
-	if strings.Contains(joined, "--version 0.10.58") || strings.Contains(joined, "secretstore.address=http://") {
+	if strings.Contains(joined, "oberth-0.10.58") || strings.Contains(joined, "secretstore.address=http://") {
 		t.Fatalf("secret store reconciliation downgraded chart or transport: %q", joined)
 	}
 }
@@ -2605,6 +2607,7 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		},
 	}
 
+	withSignedRelease(t, &deps, "0.10.58", fakeChartImageRef)
 	result, err := InstallOberth(context.Background(), Config{
 		ChartVersion: "v0.10.58",
 		InstallRekor: true,
@@ -2620,7 +2623,7 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		t.Fatalf("forced Rekor reconciliation result = %+v, want upgrade", result)
 	}
 	want := []string{
-		"upgrade", "--install", "oberth", "oberth-charts/oberth",
+		"upgrade", "--install", "oberth", "<verified oberth-0.10.58.tgz>",
 		"-n", "oberth", "--create-namespace",
 		"--set-string", "image.ref=" + fakeChartImageRef,
 		"--set", "argo.namespace=oberth-argo",
@@ -2630,9 +2633,9 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-		"--version", "0.10.58",
 		"--reuse-values",
 	}
+	upgradeArgs[3] = normalizeVerifiedChart(upgradeArgs[3])
 	assertSliceEqual(t, upgradeArgs, want)
 }
 
@@ -3273,7 +3276,8 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 	}
 	// SecretStoreUndecided is false (default), so the prompt must not fire
 	// even though no secret-store flag is set.
-	cfg := Config{Timeout: time.Second}
+	withSignedRelease(t, &deps, "0.17.16", fakeChartImageRef)
+	cfg := Config{Timeout: time.Second, ChartVersion: "v0.17.16"}
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
@@ -4963,8 +4967,9 @@ func TestUpstreamOrgsFromIdentitiesEmpty(t *testing.T) {
 // --- #466 image.ref pinning ---
 
 // TestInstallOberthPinsChartDefaultImageRef proves that install --upgrade
-// with no --image resolves the chart's default image.ref and pins it with
-// --set-string, preventing --reuse-values from silently keeping the old image.
+// with no --image deploys the verified release chart and pins the server
+// image its signed record names, preventing --reuse-values from silently
+// keeping the old image (#466).
 func TestInstallOberthPinsChartDefaultImageRef(t *testing.T) {
 	t.Parallel()
 	const chartImageRef = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
@@ -4975,6 +4980,8 @@ func TestInstallOberthPinsChartDefaultImageRef(t *testing.T) {
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.2"}]`), nil
+			case "repo":
+				t.Errorf("install consulted the chart repository: %v", args)
 			case "show":
 				return []byte("image:\n  ref: " + chartImageRef + "\n"), nil
 			case "upgrade":
@@ -4983,6 +4990,7 @@ func TestInstallOberthPinsChartDefaultImageRef(t *testing.T) {
 			return nil, nil
 		},
 	}
+	withSignedRelease(t, &deps, "0.16.2", chartImageRef)
 	_, err := InstallOberth(context.Background(), Config{
 		Namespace:    "oberth",
 		ChartVersion: "v0.16.2",
@@ -4993,50 +5001,66 @@ func TestInstallOberthPinsChartDefaultImageRef(t *testing.T) {
 	}
 
 	joined := strings.Join(upgradeArgs, " ")
+	if len(upgradeArgs) < 4 || !isVerifiedChartArg(upgradeArgs[3], "0.16.2") || slices.Contains(upgradeArgs, "--version") {
+		t.Fatalf("install must deploy the verified release chart file, args:\n%s", joined)
+	}
 	if !strings.Contains(joined, "--set-string image.ref="+chartImageRef) {
-		t.Fatalf("install --upgrade with no --image must pin image.ref from chart defaults, args:\n%s", joined)
+		t.Fatalf("install --upgrade with no --image must pin the record's image.ref, args:\n%s", joined)
 	}
 	if !strings.Contains(joined, "--reuse-values") {
 		t.Fatalf("install --upgrade must still use --reuse-values, args:\n%s", joined)
 	}
 }
 
-// TestInstallOberthExplicitImageSkipsChartResolution proves that --image
-// uses the user-supplied ref as-is without calling helm show values.
-func TestInstallOberthExplicitImageSkipsChartResolution(t *testing.T) {
+// TestInstallOberthImageMustBeTheSignedRecords proves that --image without
+// --chart is held to the server image the signed release pins, that a
+// forged release refuses before Helm installs anything, and that --chart is
+// the explicit unverified development override.
+func TestInstallOberthImageMustBeTheSignedRecords(t *testing.T) {
 	t.Parallel()
-	const explicitImage = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:0000000000000000000000000000000000000000000000000000000000000000"
-	showCalled := false
-	var upgradeArgs []string
-	deps := Deps{
-		Output: io.Discard,
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			switch args[0] {
-			case "list":
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.2"}]`), nil
-			case "show":
-				showCalled = true
-			case "upgrade":
-				upgradeArgs = slices.Clone(args)
-			}
-			return nil, nil
-		},
+	const recordImage = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	const otherImage = "registry.example/oberth@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	run := func(cfg Config, signed bool) ([]string, error) {
+		var upgradeArgs []string
+		deps := Deps{
+			Output: io.Discard,
+			RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				switch args[0] {
+				case "list":
+					return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.2"}]`), nil
+				case "show":
+					return []byte("image:\n  ref: " + recordImage + "\n"), nil
+				case "upgrade":
+					upgradeArgs = slices.Clone(args)
+				}
+				return nil, nil
+			},
+		}
+		if signed {
+			withSignedRelease(t, &deps, "0.16.2", recordImage)
+		} else {
+			// Signed, but by a key the installer does not trust.
+			deps.ReleaseGetter, _ = signedReleaseServer(t, "0.16.2", recordImage)
+		}
+		cfg.Namespace, cfg.ChartVersion, cfg.Upgrade = "oberth", "v0.16.2", true
+		_, err := InstallOberth(context.Background(), cfg, deps, OpenBaoResult{}, RekorResult{})
+		return upgradeArgs, err
 	}
-	_, err := InstallOberth(context.Background(), Config{
-		Namespace:    "oberth",
-		ChartVersion: "v0.16.2",
-		ImageRef:     explicitImage,
-		Upgrade:      true,
-	}, deps, OpenBaoResult{}, RekorResult{})
-	if err != nil {
-		t.Fatal(err)
+
+	if args, err := run(Config{ImageRef: otherImage}, true); err == nil || !strings.Contains(err.Error(), "is not the server image the signed release") || args != nil {
+		t.Fatalf("--image outside the signed record = %v (helm upgrade %v)", err, args)
 	}
-	if showCalled {
-		t.Fatal("explicit --image must not trigger chart values resolution")
+	if args, err := run(Config{}, false); err == nil || !strings.Contains(err.Error(), "refusing unverified release") || args != nil {
+		t.Fatalf("release under an untrusted key = %v (helm upgrade %v)", err, args)
 	}
-	joined := strings.Join(upgradeArgs, " ")
-	if !strings.Contains(joined, "--set-string image.ref="+explicitImage) {
-		t.Fatalf("explicit --image must be pinned as-is, args:\n%s", joined)
+	args, err := run(Config{ImageRef: recordImage}, true)
+	if err != nil || !strings.Contains(strings.Join(args, " "), "--set-string image.ref="+recordImage) {
+		t.Fatalf("--image equal to the signed record = %v, args %v", err, args)
+	}
+	// --chart: development override, nothing fetched or verified.
+	args, err = run(Config{ChartPath: testLocalChart, ImageRef: otherImage}, false)
+	if err != nil || args[3] != testLocalChart || !strings.Contains(strings.Join(args, " "), "--set-string image.ref="+otherImage) {
+		t.Fatalf("--chart with --image = %v, args %v", err, args)
 	}
 }
 

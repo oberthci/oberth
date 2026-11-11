@@ -28,13 +28,17 @@ func TestChartValuesArgsReadTheLocalChartWhenOneWasGiven(t *testing.T) {
 	}
 }
 
-// Without --chart nothing changes: the published chart at the requested version.
-func TestChartValuesArgsStillReadThePublishedChart(t *testing.T) {
+// Without --chart the values come from the verified chart of the signed
+// release, never from a chart repository.
+func TestChartValuesArgsReadTheVerifiedReleaseChart(t *testing.T) {
 	t.Parallel()
 
-	args := strings.Join(oberthChartValuesArgs(Config{ChartVersion: "v0.13.24"}), " ")
-	if !strings.Contains(args, oberthRepoName+"/oberth") || !strings.Contains(args, "--version 0.13.24") {
-		t.Errorf("published chart lookup changed: %s", args)
+	args := strings.Join(oberthChartValuesArgs(Config{ChartVersion: "v0.13.24", verifiedChart: "/private/oberth-0.13.24.tgz"}), " ")
+	if args != "show values /private/oberth-0.13.24.tgz" {
+		t.Errorf("chart values lookup = %s", args)
+	}
+	if args := strings.Join(oberthChartValuesArgs(Config{ChartVersion: "v0.13.24"}), " "); strings.Contains(args, oberthRepoName) {
+		t.Errorf("unverified plan reads the chart repository: %s", args)
 	}
 }
 

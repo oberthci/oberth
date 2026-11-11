@@ -247,12 +247,15 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		return fmt.Errorf("the release runs %s, neither the upgrade's target %s nor its source %s; it moved since this record, refusing to roll back",
 			displayVersion(current), displayVersion(record.To), displayVersion(record.From))
 	}
-	// Bind the record to the revisions its upgrade left: one helm upgrade
-	// after the recorded one, or two once a rollback of it already ran. Any
-	// later change to the release makes the record stale.
-	if err := checkRecordRevision("oberth", record.Namespace, record.OberthRevision, release, cfg.ForceRecord); err != nil {
+	// Bind the record to the revisions its upgrade left: the recorded one
+	// (the upgrade failed before reaching the release), the one the upgrade
+	// made, or later ones that are all rollbacks to the recorded revision.
+	// Any other change to the release makes the record stale.
+	oberthStand, err := recordRevisionStand(ctx, deps, "oberth", record.Namespace, record.OberthRevision, release, cfg.ForceRecord)
+	if err != nil {
 		return err
 	}
+	argoStand := standUntouched
 	if record.ArgoRevision > 0 {
 		argo, found, err := findHelmRelease(ctx, deps, "argo-workflows", record.ArgoNamespace)
 		if err != nil {
@@ -261,11 +264,12 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		if !found {
 			return fmt.Errorf("no argo-workflows Helm release in namespace %s", record.ArgoNamespace)
 		}
-		if err := checkRecordRevision("argo-workflows", record.ArgoNamespace, record.ArgoRevision, argo, cfg.ForceRecord); err != nil {
+		if argoStand, err = recordRevisionStand(ctx, deps, "argo-workflows", record.ArgoNamespace, record.ArgoRevision, argo, cfg.ForceRecord); err != nil {
 			return err
 		}
 	}
-	needRestore := record.migrates()
+	// A server the upgrade never reached never migrated the database.
+	needRestore := record.migrates() && oberthStand != standUntouched
 	if needRestore && record.Backup == "" {
 		return fmt.Errorf("the upgrade from %s to %s migrated (or may have migrated) the database and took no backup (--no-backup): "+
 			"the previous server cannot open the migrated database; fix forward with oberth upgrade instead", displayVersion(record.From), displayVersion(record.To))
@@ -283,14 +287,22 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	_, _ = fmt.Fprintf(w, "Rollback of the upgrade %s -> %s in namespace %s (context %s):\n", displayVersion(record.From), displayVersion(record.To), record.Namespace, deps.ContextName)
 	step := 1
 	if record.ArgoRevision > 0 {
-		_, _ = fmt.Fprintf(w, "  %d. helm rollback argo-workflows %d -n %s --wait\n", step, record.ArgoRevision, record.ArgoNamespace)
+		if argoStand == standUpgraded {
+			_, _ = fmt.Fprintf(w, "  %d. helm rollback argo-workflows %d -n %s --wait\n", step, record.ArgoRevision, record.ArgoNamespace)
+		} else {
+			_, _ = fmt.Fprintf(w, "  %d. argo-workflows in %s: %s; no helm rollback\n", step, record.ArgoNamespace, argoStand.describe(record.ArgoRevision))
+		}
 		step++
 	}
 	oberthArgs := []string{"rollback", "oberth", strconv.Itoa(record.OberthRevision), "-n", record.Namespace, "--timeout", cfg.Timeout.String()}
 	if !needRestore {
 		oberthArgs = append(oberthArgs, "--wait")
 	}
-	_, _ = fmt.Fprintf(w, "  %d. helm %s\n", step, strings.Join(oberthArgs, " "))
+	if oberthStand == standUpgraded {
+		_, _ = fmt.Fprintf(w, "  %d. helm %s\n", step, strings.Join(oberthArgs, " "))
+	} else {
+		_, _ = fmt.Fprintf(w, "  %d. oberth in %s: %s; no helm rollback\n", step, record.Namespace, oberthStand.describe(record.OberthRevision))
+	}
 	step++
 	if needRestore {
 		_, _ = fmt.Fprintf(w, "  %d. restore the history of %s (schema %d; the database was migrated to %d): oberth restore %s --only history --yes\n",
@@ -314,16 +326,18 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		return errors.New("the rollback needs a restore of the backup, and no restore is configured")
 	}
 
-	if record.ArgoRevision > 0 {
+	if record.ArgoRevision > 0 && argoStand == standUpgraded {
 		if _, err := deps.RunHelm(ctx, []string{"rollback", "argo-workflows", strconv.Itoa(record.ArgoRevision), "-n", record.ArgoNamespace, "--wait", "--timeout", cfg.Timeout.String()}); err != nil {
 			return fmt.Errorf("helm rollback argo-workflows: %w", err)
 		}
 		_, _ = fmt.Fprintf(w, "argo-workflows rolled back to revision %d\n", record.ArgoRevision)
 	}
-	if _, err := deps.RunHelm(ctx, oberthArgs); err != nil {
-		return fmt.Errorf("helm rollback oberth: %w", err)
+	if oberthStand == standUpgraded {
+		if _, err := deps.RunHelm(ctx, oberthArgs); err != nil {
+			return fmt.Errorf("helm rollback oberth: %w", err)
+		}
+		_, _ = fmt.Fprintf(w, "oberth rolled back to revision %d\n", record.OberthRevision)
 	}
-	_, _ = fmt.Fprintf(w, "oberth rolled back to revision %d\n", record.OberthRevision)
 	if needRestore {
 		if err := cfg.Restore(ctx, restore); err != nil {
 			return fmt.Errorf("restore the pre-upgrade backup: %w", err)
@@ -339,17 +353,86 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	return nil
 }
 
-// checkRecordRevision refuses a record when the release's deployed revision
-// is not the one the recorded upgrade made (recorded+1), or the one a
-// rollback of it made (recorded+2), unless force.
-func checkRecordRevision(name, namespace string, recorded int, release helmRelease, force bool) error {
-	deployed := helmRevisionNumber(release.Revision)
-	if deployed == recorded+1 || deployed == recorded+2 || force {
-		return nil
+// releaseStand is where one release stands relative to a recorded upgrade.
+type releaseStand int
+
+const (
+	// standUntouched: still at the recorded revision, so the upgrade failed
+	// before it reached this release.
+	standUntouched releaseStand = iota
+	// standUpgraded: at the revision the recorded upgrade made (or any
+	// revision, with --force-record); a helm rollback undoes it.
+	standUpgraded
+	// standRolledBack: every revision after the upgrade's is a rollback to
+	// the recorded one (an earlier rollback of this record already ran).
+	standRolledBack
+)
+
+func (s releaseStand) describe(recorded int) string {
+	if s == standRolledBack {
+		return fmt.Sprintf("already rolled back to revision %d", recorded)
 	}
-	return fmt.Errorf("release %s in %s is at revision %d, but this record's upgrade started from revision %d: "+
+	return fmt.Sprintf("still at revision %d, the upgrade did not reach it", recorded)
+}
+
+// recordRevisionStand refuses a record when the release's deployed revision
+// is neither the recorded one, the one the recorded upgrade made
+// (recorded+1), nor a later one reached only by rollbacks to the recorded
+// revision (helm history says so), unless force.
+func recordRevisionStand(ctx context.Context, deps Deps, name, namespace string, recorded int, release helmRelease, force bool) (releaseStand, error) {
+	deployed := helmRevisionNumber(release.Revision)
+	switch {
+	case deployed == recorded+1:
+		return standUpgraded, nil
+	case deployed == recorded:
+		return standUntouched, nil
+	case deployed > recorded+1:
+		rolledBack, err := onlyRollbacksTo(ctx, deps, name, namespace, recorded, deployed)
+		if err != nil {
+			return 0, err
+		}
+		if rolledBack {
+			return standRolledBack, nil
+		}
+	}
+	if force {
+		return standUpgraded, nil
+	}
+	return 0, fmt.Errorf("release %s in %s is at revision %d, but this record's upgrade started from revision %d: "+
 		"the release changed after that upgrade, so the record is stale; refusing to roll back (--force-record overrides after checking helm history %s -n %s)",
 		name, namespace, deployed, recorded, name, namespace)
+}
+
+// onlyRollbacksTo reports whether every revision after recorded+1 up to
+// deployed is a Helm rollback to the recorded revision.
+func onlyRollbacksTo(ctx context.Context, deps Deps, name, namespace string, recorded, deployed int) (bool, error) {
+	raw, err := deps.RunHelm(ctx, []string{"history", name, "-n", namespace, "--max", strconv.Itoa(deployed - recorded), "-o", "json"})
+	if err != nil {
+		return false, fmt.Errorf("read helm history of %s in %s: %w", name, namespace, err)
+	}
+	var history []struct {
+		Revision    int    `json:"revision"`
+		Status      string `json:"status"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &history); err != nil {
+		return false, fmt.Errorf("parse helm history of %s in %s: %w", name, namespace, err)
+	}
+	want := fmt.Sprintf("Rollback to %d", recorded)
+	seen := 0
+	for _, entry := range history {
+		if entry.Revision <= recorded+1 || entry.Revision > deployed {
+			continue
+		}
+		// Helm writes the description when a rollback starts: one that was
+		// interrupted stays pending-rollback under the same text, with the
+		// release only partly rolled back.
+		if entry.Description != want || strings.HasPrefix(entry.Status, "pending") {
+			return false, nil
+		}
+		seen++
+	}
+	return seen == deployed-recorded-1, nil
 }
 
 // readFileWithin reads one regular file of at most limit bytes, opened

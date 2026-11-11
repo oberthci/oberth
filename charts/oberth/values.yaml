@@ -30,7 +30,8 @@ runnerImagePrefixes:
   - "aquasec/trivy:"
 
 uplinkTokens:
-  # New bearer tokens only. Existing tokens are never assigned an expiry.
+  # New bearer tokens only: an existing token keeps the expiry it was minted
+  # with, and one without an expiry is reported hourly until it is rotated.
   defaultTTL: 2160h # 90 days
   maxTTL: 8760h # 365-day hard ceiling; may be lowered
 
@@ -110,6 +111,23 @@ agentEvents:
 # overlays are based on one idle sample, unmeasured under load.
 platformProtection:
   enabled: false
+
+# Prometheus Operator scrape of the server's /metrics (default off). The
+# endpoint answers only an unscoped admin bearer token: create a Secret holding
+# one in the release namespace and name it here. The scrape verifies the server
+# certificate against the CA in the named ConfigMap (the CA clients pin, e.g.
+# ~/.config/oberth/ca.crt); serverName defaults to <fullname>.<namespace>.svc,
+# a name the server certificate always carries. See docs/metrics.md.
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 60s
+    additionalLabels: {}
+    bearerTokenSecretName: ""
+    bearerTokenSecretKey: token
+    caConfigMapName: ""
+    caConfigMapKey: ca.crt
+    serverName: ""
 
 # Per-client API limits with headroom for eight concurrent jobs and
 # workflow polling. Admission retries read failures without exiting.
@@ -421,9 +439,7 @@ argo:
   # oberth/data/upstream/* only and never receives approval-table grants.
   # `oberth install --install-secretstore` and setup-secretstore.sh create
   # the matching OpenBao policy and role under these default names.
-  # Deprecated: explicit empty serviceAccount/vaultRole strings select the
-  # defaults for this release only. Before the next chart release, omit those
-  # overrides or set oberth-argo-ci-secrets explicitly.
+  # Empty strings are refused: omit a key for its default.
   ciSecrets:
     serviceAccount: "oberth-argo-ci-secrets"
     vaultRole: "oberth-argo-ci-secrets"

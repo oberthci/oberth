@@ -1,0 +1,67 @@
+suite: optional ServiceMonitor for /metrics
+templates:
+  - servicemonitor.yaml
+  - validations.yaml
+set:
+  image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+tests:
+  - it: renders nothing by default
+    template: servicemonitor.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: scrapes /metrics over verified TLS with the admin token Secret
+    template: servicemonitor.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.bearerTokenSecretName: oberth-metrics-token
+      metrics.serviceMonitor.caConfigMapName: oberth-ca
+      metrics.serviceMonitor.additionalLabels:
+        release: prometheus
+    release:
+      name: oberth
+      namespace: ci
+    asserts:
+      - isKind:
+          of: ServiceMonitor
+      - equal:
+          path: metadata.labels.release
+          value: prometheus
+      - equal:
+          path: spec.endpoints[0].path
+          value: /metrics
+      - equal:
+          path: spec.endpoints[0].scheme
+          value: https
+      - equal:
+          path: spec.endpoints[0].bearerTokenSecret
+          value:
+            name: oberth-metrics-token
+            key: token
+      - equal:
+          path: spec.endpoints[0].tlsConfig
+          value:
+            serverName: oberth.ci.svc
+            ca:
+              configMap:
+                name: oberth-ca
+                key: ca.crt
+      - equal:
+          path: spec.namespaceSelector.matchNames
+          value: [ci]
+  - it: refuses a scrape without the token Secret
+    template: validations.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.caConfigMapName: oberth-ca
+    asserts:
+      - failedTemplate:
+          errorPattern: needs metrics.serviceMonitor.bearerTokenSecretName
+  - it: refuses a scrape without the CA
+    template: validations.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.bearerTokenSecretName: oberth-metrics-token
+    asserts:
+      - failedTemplate:
+          errorPattern: needs metrics.serviceMonitor.caConfigMapName

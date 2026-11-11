@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/mdnsdial"
+	"github.com/oberthci/oberth/internal/releaseverify"
 )
 
 const (
@@ -75,6 +77,10 @@ type InstallDeps struct {
 	// events for TUI progress tracking. Step names are stable identifiers
 	// matched by the TUI's stepNameToIndex map.
 	StepProgressSink func(step, status string)
+	// ReleaseGetter fetches the signed release (default: HTTPS).
+	ReleaseGetter releaseverify.Getter
+	// releaseKey replaces the compiled-in release key in tests.
+	releaseKey *ecdsa.PublicKey
 }
 
 func (deps InstallDeps) withDefaults() InstallDeps {
@@ -297,6 +303,8 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		MakeRaw:          makeRaw,
 		CredentialSink:   deps.CredentialSink,
 		StepProgressSink: deps.StepProgressSink,
+		ReleaseGetter:    deps.ReleaseGetter,
+		releaseKey:       deps.releaseKey,
 	})
 }
 
@@ -635,9 +643,11 @@ func prepareKindImagesForCluster(ctx context.Context, cfg Config, deps Deps, clu
 		deps.Output = io.Discard
 	}
 
-	if err := refreshHelmRepo(ctx, deps, oberthRepoName, OberthHelmRepoURL); err != nil {
-		return fmt.Errorf("add Oberth helm repo before resolving kind images: %w", err)
+	cleanupRelease, err := verifyInstallRelease(ctx, &cfg, deps)
+	if err != nil {
+		return err
 	}
+	defer cleanupRelease()
 	showArgs := oberthChartValuesArgs(cfg)
 	valuesYAML, err := deps.RunHelm(ctx, showArgs)
 	if err != nil {
@@ -859,14 +869,7 @@ func oberthChartValuesArgs(cfg Config) []string {
 	// from there. Reading the published chart instead makes --chart a half
 	// promise, and fails outright when the binary's version is not a published
 	// chart version, which is true of every fork build.
-	if local := strings.TrimSpace(cfg.ChartPath); local != "" {
-		return []string{"show", "values", local}
-	}
-	args := []string{"show", "values", oberthRepoName + "/oberth"}
-	if cfg.ChartVersion != "" {
-		args = append(args, "--version", helmChartVersion(cfg.ChartVersion))
-	}
-	return args
+	return []string{"show", "values", oberthChart(cfg)}
 }
 
 func kindNameFromContext(contextName string) (string, bool) {

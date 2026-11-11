@@ -52,8 +52,11 @@ func TestFirstBackupCreatesTheKey(t *testing.T) {
 	previous := backupStderr
 	backupStderr = &bytes.Buffer{}
 	t.Cleanup(func() { backupStderr = previous })
+	previousTerminal := backupInputIsTerminal
+	backupInputIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { backupInputIsTerminal = previousTerminal })
 	var out bytes.Buffer
-	err := runCLI(context.Background(), []string{"backup"}, strings.NewReader(""), &out)
+	err := runCLI(context.Background(), []string{"backup"}, strings.NewReader("stored\n"), &out)
 	// No cluster here (and on CI no kubectl either): the backup itself
 	// fails, after creating the key.
 	if err == nil {

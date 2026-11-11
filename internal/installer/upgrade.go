@@ -44,6 +44,7 @@ type UpgradeConfig struct {
 	UserValues            []string // --values/-f: repeatable values file paths
 	UserSet               []string // --set: repeatable key=value pairs
 	ArgoControllerProfile string   // explicit supported controller transition; empty preserves existing profile
+	ArgoValuesReviewed    string   // --argo-values-reviewed: SHA-256 of the reviewed stored Argo values
 	BinarySchemaVersion   int      // set by the caller to store.LatestMigrationVersion()
 	TLSExtraDNSNames      []string
 	TLSExtraIPs           []string
@@ -431,7 +432,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	// Resolve the chart: the verified chart of the signed release for this
 	// CLI's version, or an explicit --chart (development; unverified).
 	chart := cfg.ChartOverride
-	var signed *verifiedUpgradeRelease
+	var signed *verifiedRelease
 	if chart == "" {
 		signed, err = verifyUpgradeRelease(ctx, cfg, deps)
 		if err != nil {
@@ -995,10 +996,7 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 		_, _, chartName, _ := releaseverify.Names(canonicalChartVersion(cfg.BinaryVersion))
 		chart = "<verified " + chartName + ">"
 		cfg.verifiedChart = true
-		source := "fetch from " + displayOr(cfg.ReleaseOrigin, releaseverify.DefaultReleaseOrigin) + " and " + displayOr(cfg.ChartRepository, releaseverify.DefaultChartRepository)
-		if cfg.ReleaseDir != "" {
-			source = "read from " + cfg.ReleaseDir
-		}
+		source := releaseSourceText(ReleaseSource{Dir: cfg.ReleaseDir, Origin: cfg.ReleaseOrigin, ChartRepository: cfg.ChartRepository})
 		_, _ = fmt.Fprintf(w, "  %d. Verify the signed release %s (%s): release.json and the chart against the compiled-in release key,\n", step, displayVersion(cfg.BinaryVersion), source)
 		_, _ = fmt.Fprintln(w, "     the chart against the record's digest, and pin the record's server image digest")
 		_, _ = fmt.Fprintln(w)

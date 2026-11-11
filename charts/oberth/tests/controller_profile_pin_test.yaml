@@ -1,0 +1,18 @@
+suite: a profile ConfigMap pin needs the profile
+templates:
+  - validations.yaml
+set:
+  image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+tests:
+  - it: refuses a pin without the profile
+    set:
+      argo.controllerProfileConfigMap: oberth-argo-nr-5f121f7f0000000000000000000000000000000000000000
+    asserts:
+      - failedTemplate:
+          errorPattern: has no effect without argo.controllerProfile
+  - it: accepts the pin with the profile
+    set:
+      argo.controllerProfile: nonroot-static-v1
+      argo.controllerProfileConfigMap: oberth-argo-nr-5f121f7f0000000000000000000000000000000000000000
+    asserts:
+      - notFailedTemplate: {}

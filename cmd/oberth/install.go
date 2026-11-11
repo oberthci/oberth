@@ -60,14 +60,16 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		"namespace pipelines execute in; must differ from --namespace (default: oberth-argo)")
 	flags.StringVar(&cfg.ChartVersion, "chart-version", "", "Oberth chart version (default: binary version)")
 	flags.StringVar(&cfg.ChartPath, "chart", "",
-		"install the Oberth chart from this local directory or archive instead of the published repository")
+		"install the Oberth chart from this local directory or archive instead of the signed release (development only: not verified)")
+	addReleaseSourceFlags(flags, &cfg.Release.Dir, &cfg.Release.Origin, &cfg.Release.ChartRepository)
 	flags.StringVar(&cfg.UtilityImage, "utility-image", "", "file-tool image for cache preparation and database helpers (air-gapped mirror)")
 	flags.StringVar(&cfg.ImageRef, "image", "",
-		"server image the chart deploys, overriding the chart default (used with --chart for local iteration)")
+		"server image the chart deploys, overriding the chart default (used with --chart for local iteration; without --chart it must be the signed release's image)")
 	flags.StringVar(&cfg.OpenBaoChartVersion, "openbao-chart-version", "", "OpenBao chart version")
 	flags.StringVar(&cfg.RekorChartVersion, "rekor-chart-version", "", "Rekor chart version")
 	flags.StringVar(&cfg.ArgoChartVersion, "argo-chart-version", "", "argo-workflows chart version")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)")
+	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
 	flags.StringVar(&cfg.ArgoVaultAddress, "argo-vault-address", "",
 		"OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)")
 	flags.StringVar(&cfg.PushBannerURL, "push-banner-url", "", "push feedback URL; omitted preserves the live URL, explicit empty clears it")

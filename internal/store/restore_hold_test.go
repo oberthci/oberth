@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,9 +48,9 @@ func TestPlaceRestoreHoldHoldsQueuedWork(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	path := restoredDatabase(t, true)
-	placed, hold, previous, err := store.PlaceRestoreHold(ctx, path, store.Options{}, "oberth upgrade --rollback", "restored by oberth upgrade --rollback", 12*time.Hour)
-	if err != nil || !placed || !hold.On || len(hold.Allow) != 0 || previous.On {
-		t.Fatalf("placed=%v hold=%+v previous=%+v err=%v", placed, hold, previous, err)
+	result, err := store.PlaceRestoreHold(ctx, path, store.Options{}, "oberth upgrade --rollback", "restored by oberth upgrade --rollback", 12*time.Hour)
+	if err != nil || !result.Placed || !result.Hold.On || len(result.Hold.Allow) != 0 || result.Previous.On {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	if info, err := os.Stat(path + "-wal"); err == nil && info.Size() != 0 {
 		t.Fatalf("WAL not folded into the main file: %d bytes", info.Size())
@@ -63,8 +64,13 @@ func TestPlaceRestoreHoldHoldsQueuedWork(t *testing.T) {
 	if err != nil || !current.On || current.Reason != "restored by oberth upgrade --rollback" {
 		t.Fatalf("hold = %+v, %v", current, err)
 	}
-	if _, err := database.VerifyAuditChain(ctx); err != nil {
+	head, err := database.VerifyAuditChain(ctx)
+	if err != nil {
 		t.Fatalf("audit chain after the restore hold: %v", err)
+	}
+	// The head it reports is the restored database's, the hold's action.
+	if head.ID != result.AuditHead.ID || !bytes.Equal(head.SHA256, result.AuditHead.SHA256) {
+		t.Fatalf("reported audit head %d:%x, database head %d:%x", result.AuditHead.ID, result.AuditHead.SHA256, head.ID, head.SHA256)
 	}
 	if run, err := database.ClaimNextRun(ctx); err == nil {
 		t.Fatalf("held database dispatched %s", run.ID)
@@ -92,9 +98,9 @@ func TestPlaceRestoreHoldReplacesAWeakerHoldAndCountsRunningRuns(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	placed, hold, previous, err := store.PlaceRestoreHold(ctx, path, store.Options{}, "oberth upgrade --rollback", "restored", 12*time.Hour)
-	if err != nil || !placed || len(hold.Allow) != 0 || previous.Reason != "maintenance" || len(previous.Allow) != 2 {
-		t.Fatalf("placed=%v hold=%+v previous=%+v err=%v", placed, hold, previous, err)
+	result, err := store.PlaceRestoreHold(ctx, path, store.Options{}, "oberth upgrade --rollback", "restored", 12*time.Hour)
+	if err != nil || !result.Placed || len(result.Hold.Allow) != 0 || result.Previous.Reason != "maintenance" || len(result.Previous.Allow) != 2 {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	database, err = storetest.Open(ctx, path, store.Options{})
 	if err != nil {
@@ -113,8 +119,8 @@ func TestPlaceRestoreHoldReplacesAWeakerHoldAndCountsRunningRuns(t *testing.T) {
 func TestPlaceRestoreHoldSkipsWithoutQueuedWork(t *testing.T) {
 	t.Parallel()
 	path := restoredDatabase(t, false)
-	placed, hold, _, err := store.PlaceRestoreHold(t.Context(), path, store.Options{}, "oberth upgrade --rollback", "reason", time.Hour)
-	if err != nil || placed || hold.On {
-		t.Fatalf("placed=%v hold=%+v err=%v", placed, hold, err)
+	result, err := store.PlaceRestoreHold(t.Context(), path, store.Options{}, "oberth upgrade --rollback", "reason", time.Hour)
+	if err != nil || result.Placed || result.Hold.On {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }

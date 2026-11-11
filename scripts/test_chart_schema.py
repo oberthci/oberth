@@ -147,15 +147,12 @@ class ArgoSchemaTests(unittest.TestCase):
                 result = self.render(argo)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_empty_ci_secret_names_preserve_defaults_for_one_release(self):
-        default = self.render({})
-        self.assertEqual(default.returncode, 0, default.stderr)
+    def test_empty_ci_secret_names_are_refused(self):
         for ci_secrets in ({'serviceAccount': ''}, {'vaultRole': ''},
                            {'serviceAccount': '', 'vaultRole': ''}):
             with self.subTest(ciSecrets=ci_secrets):
                 result = self.render({'ciSecrets': ci_secrets})
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, default.stdout)
+                self.assertNotEqual(result.returncode, 0, f'Helm accepted empty CI secret names: {ci_secrets}')
 
     def test_retired_vm_keys_accept_and_ignore_saved_values(self):
         schema = json.loads((ROOT / 'charts/oberth/values.schema.json').read_text())

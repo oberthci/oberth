@@ -54,9 +54,12 @@ type RestoreConfig struct {
 	Input        string
 	PrivateKey   string
 	// ChartPath is the local chart used when compatibility values must be
-	// set on the release; empty selects the published chart at the version
-	// the release already runs.
+	// set on the release (development; not verified); empty selects the
+	// signed release at the version the release already runs, verified
+	// before Helm sees it.
 	ChartPath string
+	// Release is where that signed release is read from.
+	Release ReleaseSource
 	// Only limits the restore to these parts (RestorePartHistory,
 	// RestorePartSecrets); empty restores everything the archive holds.
 	Only []string
@@ -159,6 +162,22 @@ type restoreArchive struct {
 	SkippedIdentities int
 	// Contents counts what the archived database holds.
 	Contents store.ContentSummary
+	// RestoredHeadID and RestoredHeadSHA256 are the audit head of the
+	// database the server starts on: the manifest's, or one action past it
+	// when the restore placed an admission hold.
+	RestoredHeadID     int64
+	RestoredHeadSHA256 string
+}
+
+func (a restoreArchive) restoredHeadID() int64 {
+	if a.RestoredHeadSHA256 != "" {
+		return a.RestoredHeadID
+	}
+	return a.Manifest.Database.AuditHeadID
+}
+
+func (a restoreArchive) restoredHeadSHA256() string {
+	return displayOr(a.RestoredHeadSHA256, a.Manifest.Database.AuditHeadSHA256)
 }
 
 // loadRestoreArchive decrypts the archive, checks every member hash, and
@@ -240,6 +259,11 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 }
 
 // restoreTarget is what the plan learned about the target installation.
+// previousFiles is where the swap moves the target's previous database.
+func (t restoreTarget) previousFiles() string {
+	return fmt.Sprintf("/data/pre-restore-%s/ on PVC %s", t.Timestamp, t.Server.ClaimName)
+}
+
 type restoreTarget struct {
 	Server       serverDeployment
 	Pod          string
@@ -490,6 +514,20 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			return err
 		}
 	}
+	if parts.History {
+		var err error
+		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
+			return err
+		}
+		// A stopped server's schema is known only once the restore pod
+		// starts; swapDatabase rehearses the migration then.
+		if target.Schema > 0 {
+			if err := preflightRestoreMigration(ctx, archive, target.Schema, target.previousFiles(), w); err != nil {
+				return err
+			}
+		}
+	}
+
 	if parts.Secrets {
 		_, _ = fmt.Fprintln(w, "Restoring OpenBao...")
 		written, err := restoreOpenBao(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles)
@@ -522,17 +560,10 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 				err, cfg.Namespace, replicas)
 		}
 		return fmt.Errorf("%w\nThe restore stopped with deploy/oberth scaled to 0 and the RESTORED database already in place "+
-			"(the previous files are in /data/pre-restore-%s/ on PVC %s). Fix the cause and rerun oberth restore. "+
+			"(the previous files are in %s). Fix the cause and rerun oberth restore. "+
 			"Scaling up now runs the restored database, which needs the restored compatibility values; "+
 			"to return to the previous state instead, move those files back to /data first",
-			err, target.Timestamp, target.Server.ClaimName)
-	}
-
-	if parts.History {
-		var err error
-		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
-			return err
-		}
+			err, target.previousFiles())
 	}
 
 	_, _ = fmt.Fprintln(w, "Stopping the server...")
@@ -550,7 +581,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			return stopped(err)
 		}
 		swapped = true
-		_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in /data/pre-restore-%s/ on PVC %s\n", target.Timestamp, target.Server.ClaimName)
+		_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in %s\n", target.previousFiles())
 	}
 
 	if parts.Secrets && archive.Grants.Present {
@@ -594,12 +625,15 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 	if err := waitForPodReady(ctx, deps.Deps, cfg.Namespace, target.Server.Selector, cfg.Timeout); err != nil {
 		_, _ = fmt.Fprintf(w, "  ⚠ the server is not ready yet (%v); check: kubectl -n %s logs deploy/oberth\n", err, cfg.Namespace)
+		if parts.History {
+			_, _ = fmt.Fprintf(w, "    If it cannot open or migrate the restored database, scale it to 0 and move the previous files back from %s to /data\n", target.previousFiles())
+		}
 	} else {
 		_, _ = fmt.Fprintln(w, "  ✓ server ready")
 		if pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, target.Server.Selector); err == nil && pod != "" {
 			recordServerAudit(ctx, deps.Deps, cfg.Namespace, pod, "restore.completed", map[string]any{
 				"archive_sha256": archive.CipherSHA, "history": parts.History, "secrets": parts.Secrets,
-				"from_audit_head_id": archive.Manifest.Database.AuditHeadID, "from_audit_head_sha256": archive.Manifest.Database.AuditHeadSHA256,
+				"from_audit_head_id": archive.restoredHeadID(), "from_audit_head_sha256": archive.restoredHeadSHA256(),
 			})
 		}
 	}
@@ -628,20 +662,18 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 		if target.ChartVersion == "" {
 			return nil, errors.New("cannot tell which chart version release oberth runs; pass --chart with the chart it was installed from")
 		}
-		if err := refreshHelmRepo(ctx, deps.Deps, oberthRepoName, OberthHelmRepoURL); err != nil {
-			return nil, fmt.Errorf("refresh the Oberth chart repository (or pass --chart): %w", err)
+		// The chart is verified and written into the private working
+		// directory now: the upgrade runs after the server is stopped and
+		// the database swapped, too late to find a missing or forged chart.
+		signed, err := verifySignedRelease(ctx, target.ChartVersion, cfg.Release, deps.Deps, work)
+		if err != nil {
+			return nil, fmt.Errorf("%w (or pass --chart with the chart release oberth was installed from)", err)
 		}
-		args = append(args, oberthRepoName+"/oberth", "--version", helmChartVersion(target.ChartVersion))
-	} else {
-		args = append(args, chart)
+		chart = signed.chartPath
 	}
-	// Prove the chart resolves now: the upgrade runs after the server is
-	// stopped and the database swapped, too late to find a missing chart.
-	show := []string{"show", "chart", args[2]}
-	if chart == "" {
-		show = append(show, "--version", helmChartVersion(target.ChartVersion))
-	}
-	if _, err := deps.RunHelm(ctx, show); err != nil {
+	args = append(args, chart)
+	// Prove the chart resolves now, for the same reason.
+	if _, err := deps.RunHelm(ctx, []string{"show", "chart", chart}); err != nil {
 		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
 	return append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile), nil
@@ -777,6 +809,13 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		}
 		if schema < archive.Manifest.Database.Schema {
 			return fmt.Errorf("the target server image writes schema %d but the backup holds schema %d; upgrade the target first", schema, archive.Manifest.Database.Schema)
+		}
+		output := deps.Output
+		if output == nil {
+			output = io.Discard
+		}
+		if err := preflightRestoreMigration(ctx, archive, schema, target.previousFiles(), output); err != nil {
+			return err
 		}
 	}
 
@@ -1091,7 +1130,8 @@ func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreAr
 	}
 	compat := archive.Manifest.Compatibility
 	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}}
-	placed, hold, previous, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
+	placed, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
+	hold, previous := placed.Hold, placed.Previous
 	switch {
 	case errors.Is(err, store.ErrNoAdmissionHold):
 		_, _ = fmt.Fprintf(w, "WARNING: the backup predates the admission hold; release %s may dispatch the backup's queued runs again: check its queue once it starts.\n",
@@ -1099,9 +1139,10 @@ func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreAr
 		return archive, nil
 	case err != nil:
 		return archive, fmt.Errorf("hold admission in the restored database: %w", err)
-	case !placed:
+	case !placed.Placed:
 		return archive, nil
 	}
+	archive.RestoredHeadID, archive.RestoredHeadSHA256 = placed.AuditHead.ID, hex.EncodeToString(placed.AuditHead.SHA256)
 	if archive.Database.MainSHA256, err = fileSHA256(archive.Database.Main); err != nil {
 		return archive, err
 	}

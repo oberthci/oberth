@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"encoding/hex"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,6 +86,15 @@ func TestRollbackRestoreHoldsAdmissionForOlderReleases(t *testing.T) {
 			hold, err := database.AdmissionHold(t.Context())
 			if err != nil || hold.On != tc.hold || (tc.hold && hold.Reason != rollbackHoldReason) {
 				t.Fatalf("hold = %+v, %v", hold, err)
+			}
+			// restore.completed names the head the server starts on: the
+			// hold's audit action when one was placed, else the manifest's.
+			head, err := database.VerifyAuditChain(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.hold != (got.restoredHeadID() == head.ID && got.restoredHeadSHA256() == hex.EncodeToString(head.SHA256)) {
+				t.Fatalf("restored head %d:%s, database head %d:%x (hold %v)", got.restoredHeadID(), got.restoredHeadSHA256(), head.ID, head.SHA256, tc.hold)
 			}
 		})
 	}

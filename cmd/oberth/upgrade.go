@@ -32,6 +32,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
 	flags.StringVar(&cfg.OwnershipHandoff, "ownership-handoff", "", "verified connector/site ownership handoff receipt required before retirement")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
+	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
 	flags.BoolVar(&cfg.AllowRetiredExecution, "allow-retired-execution", false, "override retired resource/repository checks; accept orphaned resources and refused legacy runs")
 	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for all queued/running runs before upgrading (advisory, not an admission freeze)")
 	flags.DurationVar(&cfg.WaitTimeout, "wait-timeout", installer.DefaultUpgradeWaitTimeout, "maximum queue wait, independent of --timeout")
@@ -39,9 +40,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed without confirmation for non-local targets")
 	flags.StringVar(&cfg.ChartOverride, "chart", "", "deploy this chart instead of the signed release (development only: not verified)")
-	flags.StringVar(&cfg.ReleaseDir, "release-dir", "", "read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from `DIR` instead of fetching it")
-	flags.StringVar(&cfg.ReleaseOrigin, "release-origin", "", "fetch release.json from this HTTPS origin instead of "+releaseverify.DefaultReleaseOrigin)
-	flags.StringVar(&cfg.ChartRepository, "chart-repository", "", "fetch the chart from this HTTPS origin instead of "+releaseverify.DefaultChartRepository)
+	addReleaseSourceFlags(flags, &cfg.ReleaseDir, &cfg.ReleaseOrigin, &cfg.ChartRepository)
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
 	flags.Var(&userValues, "f", "alias for --values")
 	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")
@@ -172,6 +171,18 @@ func takePreUpgradeBackup(ctx context.Context, dir, kubeContext, namespace strin
 	return installer.UpgradeBackup{Path: archive}, nil
 }
 
+// argoValuesReviewedHelp documents the acknowledgment of stored Argo values
+// the nonroot profile's allowlist does not cover.
+const argoValuesReviewedHelp = "keep stored argo-workflows values the nonroot profile does not know: `sha256:DIGEST` of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)"
+
+// addReleaseSourceFlags registers where a signed release is read from; the
+// verification against the compiled-in key is the same for every source.
+func addReleaseSourceFlags(flags *flag.FlagSet, dir, origin, repository *string) {
+	flags.StringVar(dir, "release-dir", "", "read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from `DIR` instead of fetching it")
+	flags.StringVar(origin, "release-origin", "", "fetch release.json from this HTTPS origin instead of "+releaseverify.DefaultReleaseOrigin)
+	flags.StringVar(repository, "chart-repository", "", "fetch the chart from this HTTPS origin instead of "+releaseverify.DefaultChartRepository)
+}
+
 // runUpgradeRollback rolls back one recorded upgrade; a restore of the
 // pre-upgrade backup runs through oberth restore --only history.
 func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg installer.UpgradeConfig, forceRecord bool, timeout time.Duration, input io.Reader, output io.Writer) error {
@@ -196,6 +207,7 @@ func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg ins
 			PrivateKey:       key,
 			Only:             []string{installer.RestorePartHistory},
 			InterruptQueued:  true,
+			Release:          installer.ReleaseSource{Dir: cfg.ReleaseDir, Origin: cfg.ReleaseOrigin, ChartRepository: cfg.ChartRepository},
 			Yes:              true,
 			Timeout:          timeout,
 		}, installer.InstallDeps{Output: output, Input: input})

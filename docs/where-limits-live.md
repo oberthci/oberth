@@ -75,6 +75,24 @@ server still holds the pin); afterwards it does not recur. A name set in
 runs now (the value an earlier installer wrote) and prints that it did; a
 pin naming another profile is left as set.
 
+The profile is layered over the argo-workflows release's stored values only
+when they are ones it knows: its own keys, the limits, the controller's
+`priorityClassName`, `resources.requests`, `nodeSelector` and `tolerations`.
+Anything else refuses the profile or limits run, because the installer cannot
+tell whether it changes what the controller runs. To keep such values, review
+them and acknowledge exactly those bytes:
+
+```sh
+helm get values argo-workflows -n oberth-argo -o json        # review
+helm get values argo-workflows -n oberth-argo -o json | sha256sum
+oberth install --upgrade --argo-parallelism 6 --argo-values-reviewed sha256:<that digest>
+```
+
+`--argo-values-reviewed` (also on `oberth upgrade --argo-controller-profile`)
+binds the review to those values: any later change refuses again. The
+controller's image, arguments, environment and mounts are verified against
+the profile after the upgrade either way.
+
 **Default: half the cluster's CPUs.** Since v0.21.0 a fresh `oberth install`
 that creates the argo-workflows release sets `parallelism` to half the
 cluster's allocatable CPUs, at least 2 (it prints the number). An explicit

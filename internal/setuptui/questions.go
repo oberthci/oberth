@@ -637,7 +637,7 @@ func buildQuestions() []*question {
 		{
 			id: "cluster.network", step: stepCluster, heading: "Restrict CI network egress?",
 			explain: func(*WizardState) string {
-				return "A NetworkPolicy can firewall what CI jobs reach. k3s's built-in kube-router mishandles it, which is why auto leaves it off there."
+				return "A NetworkPolicy firewalls what CI jobs reach. auto enforces it on a fresh install, k3s included, and keeps the live setting on a rerun."
 			},
 			options: func(*WizardState) []option {
 				return []option{

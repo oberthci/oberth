@@ -13,6 +13,10 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+// The Oberth chart itself never comes from a Helm repository: install,
+// kind image loading and the TLS bootstrap read the verified chart of the
+// signed release (TestInstallOberthPinsChartDefaultImageRef). The repository
+// is consulted only for the newer-chart hint.
 func TestChartConsumersRefreshHelmRepo(t *testing.T) {
 	t.Parallel()
 	const version = "0.17.16"
@@ -21,32 +25,12 @@ func TestChartConsumersRefreshHelmRepo(t *testing.T) {
 		bestEffort                bool
 		run                       func(context.Context, Deps) error
 	}{
-		{"install", oberthRepoName, OberthHelmRepoURL, "upgrade", false, func(ctx context.Context, deps Deps) error {
-			// install --upgrade reconciles at the installed version; version
-			// moves are oberth upgrade's (the next case).
-			run := deps.RunHelm
-			deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
-				if args[0] == "list" {
-					return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-` + version + `"}]`), nil
-				}
-				return run(ctx, args)
-			}
-			_, err := InstallOberth(ctx, Config{ChartVersion: version, Upgrade: true}, deps, OpenBaoResult{}, RekorResult{})
-			return err
-		}},
 		{"openbao", openBaoRepoName, OpenBaoHelmRepoURL, "upgrade", false, func(ctx context.Context, deps Deps) error {
 			_, err := InstallOpenBao(ctx, Config{OpenBaoChartVersion: version}, deps)
 			return err
 		}},
 		{"argo", argoRepoName, ArgoHelmRepoURL, "upgrade", false, func(ctx context.Context, deps Deps) error {
 			_, err := InstallArgoWorkflows(ctx, Config{ArgoChartVersion: version}, deps)
-			return err
-		}},
-		{"kind images", oberthRepoName, OberthHelmRepoURL, "show", false, func(ctx context.Context, deps Deps) error {
-			return prepareKindImagesForCluster(ctx, Config{ChartVersion: version}, deps, "oberth")
-		}},
-		{"TLS bootstrap", oberthRepoName, OberthHelmRepoURL, "show", false, func(ctx context.Context, deps Deps) error {
-			_, err := resolveOberthTLSBootstrapImage(ctx, Config{ChartVersion: version}, deps)
 			return err
 		}},
 		{"newer chart hint", oberthRepoName, OberthHelmRepoURL, "search", true, func(ctx context.Context, deps Deps) error {

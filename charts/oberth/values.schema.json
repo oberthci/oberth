@@ -41,10 +41,31 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "default": true
+          "default": false
         }
       },
       "description": "Opt-in platform PriorityClasses; external Argo/OpenBao releases require their own values overlays."
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional Prometheus Operator ServiceMonitor for the admin-only /metrics endpoint.",
+      "properties": {
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean", "default": false},
+            "interval": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$", "default": "60s"},
+            "additionalLabels": {"type": "object", "additionalProperties": {"type": "string"}},
+            "bearerTokenSecretName": {"type": "string", "description": "Secret in the release namespace holding an unscoped admin bearer token."},
+            "bearerTokenSecretKey": {"type": "string", "minLength": 1, "default": "token"},
+            "caConfigMapName": {"type": "string", "description": "ConfigMap in the release namespace holding the CA the server certificate chains to."},
+            "caConfigMapKey": {"type": "string", "minLength": 1, "default": "ca.crt"},
+            "serverName": {"type": "string", "description": "TLS server name; empty is <fullname>.<namespace>.svc."}
+          }
+        }
+      }
     },
     "gitBackend": {
       "type": "string",
@@ -928,13 +949,13 @@
           "additionalProperties": false,
           "properties": {
             "serviceAccount": {
-              "$ref": "#/definitions/optionalKubernetesName",
-              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
+              "$ref": "#/definitions/kubernetesName",
+              "description": "Branch-tier credentialed ServiceAccount; omit the key for oberth-argo-ci-secrets."
             },
             "vaultRole": {
               "type": "string",
-              "pattern": "^$|^[A-Za-z0-9._-]+$",
-              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "description": "Branch-tier Vault role; omit the key for oberth-argo-ci-secrets."
             }
           }
         },

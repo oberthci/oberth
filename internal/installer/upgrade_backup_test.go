@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -369,5 +370,82 @@ func TestRollbackRefusals(t *testing.T) {
 	}
 	if !strings.Contains(fixture.output.String(), "helm rollback oberth 6") {
 		t.Fatalf("plan: %s", fixture.output.String())
+	}
+}
+
+// A record binds to where its upgrade left each release: an upgrade that
+// failed before reaching oberth leaves it at the recorded revision (only
+// argo is rolled back, nothing migrated, nothing restored), and a revision
+// past the upgrade's is accepted only when helm history shows nothing but
+// rollbacks to the recorded revision (no second helm rollback; the restore
+// still runs).
+func TestRollbackRecordStands(t *testing.T) {
+	t.Parallel()
+	archive := filepath.Join(t.TempDir(), "backup.tar.gz.enc")
+	if err := os.WriteFile(archive, []byte("archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		oberthRevision int
+		history        string
+		argo           bool
+		want           []string
+		wantErr        string
+	}{
+		"upgrade failed after the argo transition": {
+			oberthRevision: 6, argo: true,
+			want: []string{"rollback argo-workflows 3 -n oberth-argo --wait --timeout 1m0s", "verify"},
+		},
+		"a rollback of this record already ran": {
+			oberthRevision: 9, history: `[{"revision":7,"description":"Upgrade complete"},{"revision":8,"description":"Rollback to 6"},{"revision":9,"description":"Rollback to 6"}]`,
+			want: []string{"restore", "verify"},
+		},
+		"an interrupted rollback of this record": {
+			oberthRevision: 8, history: `[{"revision":7,"status":"superseded","description":"Upgrade complete"},{"revision":8,"status":"pending-rollback","description":"Rollback to 6"}]`,
+			wantErr: "record is stale",
+		},
+		"an unrelated upgrade after the recorded one": {
+			oberthRevision: 8, history: `[{"revision":7,"description":"Upgrade complete"},{"revision":8,"description":"Upgrade complete"}]`,
+			wantErr: "record is stale",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newUpgradeFixture(t, "0.20.1", "0.20.1", "73")
+			base := fixture.deps.RunHelm
+			fixture.deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
+				switch {
+				case args[0] == "history":
+					return []byte(tc.history), nil
+				case args[0] == "list" && !slices.Contains(args, "oberth-argo"):
+					*fixture.calls = append(*fixture.calls, strings.Join(args, " "))
+					return json.Marshal([]helmRelease{{Name: "oberth", Namespace: "oberth", Status: "deployed", Chart: "oberth-0.20.1", Revision: json.RawMessage(strconv.Itoa(tc.oberthRevision))}})
+				}
+				return base(ctx, args)
+			}
+			record := UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0",
+				OberthRevision: 6, SchemaBefore: 73, SchemaAfter: 74, Backup: archive}
+			if tc.argo {
+				record.ArgoNamespace, record.ArgoRevision = "oberth-argo", 3
+			}
+			restore := func(context.Context, RollbackRestore) error {
+				*fixture.calls = append(*fixture.calls, "restore")
+				return nil
+			}
+			err := RunRollback(t.Context(), RollbackConfig{Record: writeTestRecord(t, record), Yes: true, Timeout: time.Minute, Restore: restore}, fixture.deps)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := slices.DeleteFunc(slices.Clone(*fixture.calls), func(call string) bool { return strings.HasPrefix(call, "list") })
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("rollback sequence = %v, want %v\n%s", got, tc.want, fixture.output.String())
+			}
+		})
 	}
 }

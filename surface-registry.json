@@ -8,6 +8,46 @@
       "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
       "test_ref": "internal/installer/argo_profile_render_test.go TestArgoParallelismOnANonrootReleaseKeepsTheProfile"
     },
+    "flag:argo-values-reviewed": {
+      "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
+      "test_ref": "internal/installer/argo_nonroot_test.go TestNonrootReuseAcknowledgesReviewedValues"
+    },
+    "flag:stored": {
+      "doc_anchor": "docs/backup-restore.md#the-backup-key",
+      "test_ref": "cmd/oberth/backup_key_test.go TestBackupWithoutATerminalWarnsOnStderr"
+    },
+    "value:metrics": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
+    "value:serviceMonitor": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
+    "value:additionalLabels": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
+    "value:bearerTokenSecretName": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
+    "value:bearerTokenSecretKey": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
+    "value:caConfigMapName": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
+    "value:caConfigMapKey": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
+    "value:serverName": {
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
+    },
     "flag:argo-parallelism": {
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"

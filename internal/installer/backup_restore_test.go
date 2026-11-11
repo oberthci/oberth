@@ -338,15 +338,20 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 }
 
 func (c *fakeBackupCluster) deps(output *bytes.Buffer) backupDeps {
+	deps := Deps{
+		Output:       output,
+		KubeClient:   c.client,
+		ContextName:  "test-context",
+		RunCommand:   c.run,
+		RunHelm:      c.helm,
+		PollInterval: time.Millisecond,
+	}
+	// The Helm upgrade a restore applies deploys only a verified chart.
+	if version := chartVersionFromRelease(c.chart, "oberth"); version != "" {
+		withSignedRelease(c.t, &deps, version, fakeChartImageRef)
+	}
 	return backupDeps{
-		Deps: Deps{
-			Output:       output,
-			KubeClient:   c.client,
-			ContextName:  "test-context",
-			RunCommand:   c.run,
-			RunHelm:      c.helm,
-			PollInterval: time.Millisecond,
-		},
+		Deps:      deps,
 		runStdout: c.run,
 		runIO: func(ctx context.Context, input io.Reader, w io.Writer, name string, args ...string) error {
 			var body []byte
@@ -836,8 +841,8 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 	}
 
 	// Only the compatibility values went onto the release.
-	if !slices.Contains(target.helmUpgrade, "--reuse-values") || !slices.Contains(target.helmUpgrade, "oberth-charts/oberth") ||
-		!slices.Contains(target.helmUpgrade, "0.17.28") {
+	if !slices.Contains(target.helmUpgrade, "--reuse-values") || len(target.helmUpgrade) < 3 ||
+		filepath.Base(target.helmUpgrade[2]) != "oberth-0.17.28.tgz" || slices.Contains(target.helmUpgrade, "--version") {
 		t.Fatalf("helm upgrade args = %v", target.helmUpgrade)
 	}
 	compat, _ := target.helmValues["compatibility"].(map[string]any)
