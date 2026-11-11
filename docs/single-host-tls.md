@@ -16,25 +16,27 @@ review the full name set and pass `--reissue-server-ca` with the install or
 upgrade. The CA pin changes and clients must refresh their trust. An existing
 CA with IP constraints is never replaced by the DNS-only generator.
 
-## Blocked production IP-constraint acceptance
+## DNS-only client connections
 
-The complete #1530 requirement is **blocked**, not satisfied by issuing-role
-restrictions. The pinned OpenBao 2.6.1 generation API exposes
+The owner decision for #1530 (2026-11-11) defers CA-level IP name constraints
+until Bun releases a fix. Keep the production CA's DNS constraints. Clients
+connect by DNS name: `localhost` on the node, the host name, or `host.local`
+when that name resolves from the client. Set `--client-host` to that DNS name;
+do not use `127.0.0.1`, `::1`, or a LAN IP in an HTTPS/MCP client URL. The
+DNS name must be covered by the server certificate and the CA constraints.
+IP discovery and IP SANs do not authorize using an IP as a client endpoint.
+TLS verification and the explicit CA pin remain required.
+
+The pinned OpenBao 2.6.1 generation API exposes
 [`permitted_dns_domains` only](https://raw.githubusercontent.com/openbao/openbao/v2.6.1/builtin/logical/pki/fields.go).
-It cannot generate the requested CA-level `/32` and `/128` IP constraints with
-its internal, non-exportable key. Oberth's issuing role limits issued IP SANs,
-but that is not equivalent to a constraint in the trusted CA certificate.
-This branch retains the production CA implementation and does not send an
-unsupported parameter that OpenBao would ignore. Backend support is required
-before that acceptance criterion can pass.
+It cannot generate CA-level `/32` and `/128` IP constraints with its internal,
+non-exportable key. Issuing-role restrictions on IP SANs are not CA-level
+constraints. A future IP-connection change therefore needs both backend
+support and a released [Bun fix](https://github.com/oven-sh/bun/pull/45236),
+followed by verification with the actual client. These are deferred scope,
+not release gates for the approved DNS-only connection path.
 
-There is a separate client blocker as of 2026-11-11: affected Bun runtimes,
-including the runtime reported in Claude Code, reject valid chains with IP
-name constraints. The upstream [Bun fix remains open](https://github.com/oven-sh/bun/pull/45236).
-Do not disable TLS verification or remove constraints to claim this works.
-
-The existing self-signed server anchor does carry critical DNS and exact IPv4
-and IPv6 constraints. Tests verify allowed addresses and reject a child
-certificate for another DNS name or IP. These tests do not establish that the
-production OpenBao CA carries IP constraints or that affected Claude runtimes
-can trust it.
+The existing self-signed server anchor's tests exercise critical DNS and
+exact IPv4/IPv6 constraints. They do not establish production OpenBao IP
+constraints or affected Bun client support and do not change the DNS-only
+client connection policy.
