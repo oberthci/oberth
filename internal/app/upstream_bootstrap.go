@@ -13,12 +13,14 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
+	hostkeys "github.com/skeema/knownhosts"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
@@ -87,6 +89,31 @@ type UpstreamSSHBootstrap struct {
 	NoWait                  bool
 	AutoYes                 bool
 	ExpectedHostFingerprint string
+	// Repin replaces this endpoint's persisted host-key pins with a fresh
+	// scan, accepted through the same trust rules as a first pin (published
+	// forge fingerprints, ExpectedHostFingerprint or an interactive "yes").
+	// Pins for other endpoints in the bundle are kept.
+	Repin bool
+	// CheckRepository, when set, names a repository that must already exist
+	// under the base URL; after authentication Ensure proves the forge serves
+	// it (RepositoryProbe, ProbeSSHRepository by default), so a wrong
+	// organization path fails at registration rather than at the first clone.
+	CheckRepository string
+	RepositoryProbe func(context.Context, string, string, []byte, []byte) error
+}
+
+func (bootstrap UpstreamSSHBootstrap) checkRepository(ctx context.Context, baseURL string, privateKey, knownHosts []byte) error {
+	if bootstrap.CheckRepository == "" {
+		return nil
+	}
+	probe := bootstrap.RepositoryProbe
+	if probe == nil {
+		probe = ProbeSSHRepository
+	}
+	if err := probe(ctx, baseURL, bootstrap.CheckRepository, privateKey, knownHosts); err != nil {
+		return fmt.Errorf("app: upstream repository check failed: %w", err)
+	}
+	return nil
 }
 
 // UpstreamSSHIdentity is safe to display. It deliberately contains no private
@@ -127,12 +154,15 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 
 	projectedPrivate, projectedPrivateErr := readPrivateIdentityFile(bootstrap.PrivateKeyPath)
 	projectedHosts, projectedHostsErr := readKnownHostsFile(bootstrap.KnownHostsPath, address)
-	if projectedPrivateErr == nil && projectedHostsErr == nil && len(projectedHosts.keys) > 0 {
+	if !bootstrap.Repin && projectedPrivateErr == nil && projectedHostsErr == nil && len(projectedHosts.keys) > 0 {
 		if err := bootstrap.Probe(ctx, baseURL, projectedPrivate.privateKey, projectedHosts.body); err != nil {
 			if displayErr := bootstrap.printPersistedIdentity(projectedPrivate, host, port); displayErr != nil {
 				return UpstreamSSHIdentity{}, displayErr
 			}
 			return UpstreamSSHIdentity{}, fmt.Errorf("app: upstream SSH authentication probe failed: %w", err)
+		}
+		if err := bootstrap.checkRepository(ctx, baseURL, projectedPrivate.privateKey, projectedHosts.body); err != nil {
+			return UpstreamSSHIdentity{}, err
 		}
 		return projectedPrivate.publicIdentity(false), nil
 	}
@@ -153,7 +183,13 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 		return UpstreamSSHIdentity{}, err
 	}
 
-	knownHosts, hostKeys, err := selectKnownHosts(projectedHosts, projectedHostsErr, persisted.knownHosts, address)
+	var knownHosts []byte
+	var hostKeys []ssh.PublicKey
+	if bootstrap.Repin {
+		knownHosts, err = repinBase(projectedHosts, projectedHostsErr, persisted.knownHosts, address)
+	} else {
+		knownHosts, hostKeys, err = selectKnownHosts(projectedHosts, projectedHostsErr, persisted.knownHosts, address)
+	}
 	if err != nil {
 		return UpstreamSSHIdentity{}, err
 	}
@@ -198,6 +234,9 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 			return UpstreamSSHIdentity{}, err
 		}
 		if bootstrap.waitForRegistration(ctx, baseURL, host, port, identity.privateKey, knownHosts) {
+			if err := bootstrap.checkRepository(ctx, baseURL, identity.privateKey, knownHosts); err != nil {
+				return UpstreamSSHIdentity{}, err
+			}
 			return identity.publicIdentity(true), nil
 		}
 		return identity.publicIdentity(true), fmt.Errorf("%w: register the printed public key with the upstream, then rerun upstream add", ErrUpstreamBootstrapIncomplete)
@@ -221,6 +260,9 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 		if !bootstrap.waitForRegistration(ctx, baseURL, host, port, identity.privateKey, knownHosts) {
 			return UpstreamSSHIdentity{}, fmt.Errorf("%w: the persisted key was not accepted in time (%w); register it, then rerun upstream add", ErrUpstreamBootstrapIncomplete, err)
 		}
+	}
+	if err := bootstrap.checkRepository(ctx, baseURL, identity.privateKey, knownHosts); err != nil {
+		return UpstreamSSHIdentity{}, err
 	}
 	return identity.publicIdentity(false), nil
 }
@@ -406,6 +448,26 @@ func selectKnownHosts(projected knownHostsMaterial, projectedErr error, persiste
 		return append([]byte(nil), projected.body...), nil, nil
 	}
 	return nil, nil, nil
+}
+
+// repinBase returns the known_hosts bundle without this endpoint's pins. The
+// persisted bundle is the authority; its projected file is used only when the
+// store holds none.
+func repinBase(projected knownHostsMaterial, projectedErr error, persisted []byte, address string) ([]byte, error) {
+	base := persisted
+	if len(base) == 0 {
+		if projectedErr != nil && !errors.Is(projectedErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("app: configured upstream known_hosts is invalid; refusing to replace it: %w", projectedErr)
+		}
+		base = projected.body
+	}
+	if len(base) == 0 {
+		return nil, nil
+	}
+	if _, err := knownHostKeys(base, address); err != nil {
+		return nil, fmt.Errorf("app: persisted upstream known_hosts is invalid; refusing to replace it: %w", err)
+	}
+	return withoutKnownHostsAddress(base, address)
 }
 
 // wellKnownForges pins the SHA-256 SSH host-key fingerprints published by
@@ -684,6 +746,75 @@ func newKnownHostsCallback(body []byte) (ssh.HostKeyCallback, func(), error) {
 	return callback, cleanup, nil
 }
 
+// pinnedHostKeyAlgorithms lists the host-key algorithms that the pins for
+// address can verify, in the Git transport's order. SHA-1 ssh-rsa signatures
+// are never offered; an RSA pin is verified through rsa-sha2-*.
+func pinnedHostKeyAlgorithms(body []byte, address string) ([]string, error) {
+	if len(body) == 0 || len(body) > maximumBootstrapMaterialBytes {
+		return nil, errors.New("known_hosts must be non-empty and no larger than 1 MiB")
+	}
+	file, err := os.CreateTemp("", "oberth-known-hosts-")
+	if err != nil {
+		return nil, err
+	}
+	path := file.Name()
+	defer func() { _ = os.Remove(path) }()
+	_, writeErr := file.Write(body)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		return nil, errors.Join(writeErr, closeErr)
+	}
+	database, err := hostkeys.NewDB(path)
+	if err != nil {
+		return nil, err
+	}
+	algorithms := database.HostKeyAlgorithms(address)
+	for _, pin := range database.HostKeys(address) {
+		if pin.Cert {
+			algorithms = append(algorithms, ssh.CertAlgoED25519v01, ssh.CertAlgoECDSA256v01, ssh.CertAlgoECDSA384v01, ssh.CertAlgoECDSA521v01, ssh.CertAlgoRSASHA256v01, ssh.CertAlgoRSASHA512v01)
+			break
+		}
+	}
+	algorithms = slices.DeleteFunc(algorithms, func(a string) bool { return a == ssh.KeyAlgoRSA || a == ssh.CertAlgoRSAv01 })
+	if len(algorithms) == 0 {
+		return nil, fmt.Errorf("no pinned host key for %s", address)
+	}
+	return algorithms, nil
+}
+
+// withoutKnownHostsAddress drops the pins Oberth wrote for address (one
+// plain host pattern per line, as appendKnownHosts writes them) and keeps
+// every other line byte for byte. A hashed, wildcard, negated, marked or
+// multi-host line that also matches address is refused: Oberth did not write
+// it and cannot drop only this address from it.
+func withoutKnownHostsAddress(body []byte, address string) ([]byte, error) {
+	normalized := knownhosts.Normalize(address)
+	var kept []byte
+	for _, line := range bytes.SplitAfter(body, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 || trimmed[0] == '#' {
+			kept = append(kept, line...)
+			continue
+		}
+		marker, hosts, _, _, _, err := ssh.ParseKnownHosts(trimmed)
+		if err != nil {
+			return nil, err
+		}
+		if marker == "" && len(hosts) == 1 && hosts[0] == normalized {
+			continue
+		}
+		matches, err := knownHostKeys(trimmed, address)
+		if err != nil {
+			return nil, err
+		}
+		if len(matches) > 0 || marker != "" && slices.Contains(hosts, normalized) {
+			return nil, fmt.Errorf("app: the known_hosts bundle holds a hashed, pattern or multi-host entry for %s that Oberth did not write; remove it from the bundle before re-pinning", address)
+		}
+		kept = append(kept, line...)
+	}
+	return kept, nil
+}
+
 func appendKnownHosts(existing []byte, address string, keys []ssh.PublicKey) []byte {
 	result := append([]byte(nil), bytes.TrimSpace(existing)...)
 	if len(result) > 0 {
@@ -862,16 +993,29 @@ func probeSSHHostKey(ctx context.Context, address string, algorithms []string) (
 // opens no channels and executes no commands — the forge accepts the key if
 // the handshake completes. Write access is verified on the first publication.
 func ProbeSSHAuthentication(ctx context.Context, baseURL string, privateKey, knownHosts []byte) error {
-	if err := ValidateUpstreamBase(baseURL); err != nil {
+	probeCtx, cancel := context.WithTimeout(ctx, defaultSSHProbeTimeout)
+	defer cancel()
+	client, err := dialPinnedSSH(probeCtx, baseURL, privateKey, knownHosts)
+	if err != nil {
 		return err
+	}
+	_ = client.Close()
+	return nil
+}
+
+// dialPinnedSSH authenticates to the upstream with strict host-key checking.
+// The connection deadline follows ctx; the caller closes the client.
+func dialPinnedSSH(ctx context.Context, baseURL string, privateKey, knownHosts []byte) (*ssh.Client, error) {
+	if err := ValidateUpstreamBase(baseURL); err != nil {
+		return nil, err
 	}
 	_, _, address, err := sshEndpoint(baseURL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
-		return fmt.Errorf("parse SSH upstream for authentication probe: %w", err)
+		return nil, fmt.Errorf("parse SSH upstream for authentication probe: %w", err)
 	}
 	user := "git"
 	if parsed.User != nil && parsed.User.Username() != "" {
@@ -879,37 +1023,46 @@ func ProbeSSHAuthentication(ctx context.Context, baseURL string, privateKey, kno
 	}
 	signer, err := ssh.ParsePrivateKey(privateKey)
 	if err != nil {
-		return fmt.Errorf("parse SSH identity for authentication probe: %w", err)
+		return nil, fmt.Errorf("parse SSH identity for authentication probe: %w", err)
 	}
 	hostKeyCallback, cleanup, err := newKnownHostsCallback(knownHosts)
 	if err != nil {
-		return fmt.Errorf("load strict known_hosts for authentication probe: %w", err)
+		return nil, fmt.Errorf("load strict known_hosts for authentication probe: %w", err)
 	}
 	defer cleanup()
-
-	probeCtx, cancel := context.WithTimeout(ctx, defaultSSHProbeTimeout)
-	defer cancel()
-	connection, err := (&net.Dialer{}).DialContext(probeCtx, "tcp", address)
+	// Offer only the pinned key types, as the Git transport does: a forge
+	// with several host keys otherwise presents whichever type Go prefers
+	// (ECDSA before Ed25519), and a pin that holds only another type fails
+	// as a key mismatch although the pinned key is genuine.
+	algorithms, err := pinnedHostKeyAlgorithms(knownHosts, address)
 	if err != nil {
-		return fmt.Errorf("connect to SSH upstream: %w", err)
+		return nil, fmt.Errorf("load strict known_hosts for authentication probe: %w", err)
 	}
-	defer func() { _ = connection.Close() }()
-	if deadline, ok := probeCtx.Deadline(); ok {
+	connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("connect to SSH upstream: %w", err)
+	}
+	if deadline, ok := ctx.Deadline(); ok {
 		if err := connection.SetDeadline(deadline); err != nil {
-			return fmt.Errorf("bound SSH authentication probe: %w", err)
+			_ = connection.Close()
+			return nil, fmt.Errorf("bound SSH authentication probe: %w", err)
 		}
 	}
 	clientConnection, channels, requests, err := ssh.NewClientConn(connection, address, &ssh.ClientConfig{
-		User:            user,
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: hostKeyCallback,
+		User:              user,
+		Auth:              []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback:   hostKeyCallback,
+		HostKeyAlgorithms: algorithms,
 	})
 	if err != nil {
-		return fmt.Errorf("authenticate to SSH upstream: %w", err)
+		_ = connection.Close()
+		var mismatch *knownhosts.KeyError
+		if errors.As(err, &mismatch) && len(mismatch.Want) > 0 {
+			return nil, fmt.Errorf("authenticate to SSH upstream: %w (the host key differs from the pinned one: if the forge rotated its keys, verify the new fingerprints through a trusted channel, then rerun upstream add --repin)", err)
+		}
+		return nil, fmt.Errorf("authenticate to SSH upstream: %w", err)
 	}
-	client := ssh.NewClient(clientConnection, channels, requests)
-	_ = client.Close()
-	return nil
+	return ssh.NewClient(clientConnection, channels, requests), nil
 }
 
 type stringAddress string
