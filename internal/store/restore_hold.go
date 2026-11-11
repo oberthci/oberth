@@ -19,16 +19,17 @@ var ErrNoAdmissionHold = errors.New("store: database predates the admission hold
 // queued work again. It writes through the ordinary hold path, with its audit
 // action, at the file's own schema: nothing is migrated.
 //
-// It places nothing and returns placed=false when no run is queued or
-// running. A running run counts: a server older than the marker requeues one
-// whose Workflow is gone. A hold the database already has is replaced and
-// returned as previous: it may allow tag or release runs, or lapse minutes
-// after the restore, and the hold placed here allows nothing and outlasts it
-// (the audit action records the replaced hold).
-func PlaceRestoreHold(ctx context.Context, path string, opts Options, actor, reason string, duration time.Duration) (placed bool, hold, previous model.AdmissionHold, resultErr error) {
+// It places nothing (Placed false) when no run is queued or running. A
+// running run counts: a server older than the marker requeues one whose
+// Workflow is gone. A hold the database already has is replaced and returned
+// as Previous: it may allow tag or release runs, or lapse minutes after the
+// restore, and the hold placed here allows nothing and outlasts it (the
+// audit action records the replaced hold). AuditHead is the database's audit
+// head after the hold's action, one past the archived head.
+func PlaceRestoreHold(ctx context.Context, path string, opts Options, actor, reason string, duration time.Duration) (result RestoreHold, resultErr error) {
 	s, err := openCurrentUnverified(ctx, path, opts, false)
 	if err != nil {
-		return false, hold, previous, err
+		return result, err
 	}
 	defer func() {
 		// Fold the WAL into the main file so the caller ships one file.
@@ -40,31 +41,44 @@ func PlaceRestoreHold(ctx context.Context, path string, opts Options, actor, rea
 		resultErr = errors.Join(resultErr, s.db.Close())
 	}()
 	if err := s.verifyCurrentSchema(ctx); err != nil {
-		return false, hold, previous, err
+		return result, err
 	}
 	if err := s.verifyConfiguredProtocol(ctx); err != nil {
-		return false, hold, previous, err
+		return result, err
 	}
 	var tables int
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='admission_holds'`).Scan(&tables); err != nil {
-		return false, hold, previous, err
+		return result, err
 	}
 	if tables == 0 {
-		return false, hold, previous, ErrNoAdmissionHold
+		return result, ErrNoAdmissionHold
 	}
 	var active int
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE status IN ('queued','running')`).Scan(&active); err != nil {
-		return false, hold, previous, err
+		return result, err
 	}
 	if active == 0 {
-		return false, hold, previous, nil
+		return result, nil
 	}
-	if previous, err = s.AdmissionHold(ctx); err != nil {
-		return false, hold, previous, err
+	if result.Previous, err = s.AdmissionHold(ctx); err != nil {
+		return result, err
 	}
-	if !previous.On || !previous.ExpiresAt.After(s.now()) {
-		previous = model.AdmissionHold{}
+	if !result.Previous.On || !result.Previous.ExpiresAt.After(s.now()) {
+		result.Previous = model.AdmissionHold{}
 	}
-	hold, err = s.SetAdmissionHold(ctx, actor, model.AdmissionHoldRequest{On: true, Reason: reason, Allow: []string{}, Duration: duration})
-	return err == nil, hold, previous, err
+	if result.Hold, err = s.SetAdmissionHold(ctx, actor, model.AdmissionHoldRequest{On: true, Reason: reason, Allow: []string{}, Duration: duration}); err != nil {
+		return result, err
+	}
+	result.Placed = true
+	if result.AuditHead, err = readAuditHead(ctx, s.db); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// RestoreHold is what PlaceRestoreHold did.
+type RestoreHold struct {
+	Placed         bool
+	Hold, Previous model.AdmissionHold
+	AuditHead      model.AuditHead
 }

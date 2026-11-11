@@ -162,6 +162,22 @@ type restoreArchive struct {
 	SkippedIdentities int
 	// Contents counts what the archived database holds.
 	Contents store.ContentSummary
+	// RestoredHeadID and RestoredHeadSHA256 are the audit head of the
+	// database the server starts on: the manifest's, or one action past it
+	// when the restore placed an admission hold.
+	RestoredHeadID     int64
+	RestoredHeadSHA256 string
+}
+
+func (a restoreArchive) restoredHeadID() int64 {
+	if a.RestoredHeadSHA256 != "" {
+		return a.RestoredHeadID
+	}
+	return a.Manifest.Database.AuditHeadID
+}
+
+func (a restoreArchive) restoredHeadSHA256() string {
+	return displayOr(a.RestoredHeadSHA256, a.Manifest.Database.AuditHeadSHA256)
 }
 
 // loadRestoreArchive decrypts the archive, checks every member hash, and
@@ -602,7 +618,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		if pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, target.Server.Selector); err == nil && pod != "" {
 			recordServerAudit(ctx, deps.Deps, cfg.Namespace, pod, "restore.completed", map[string]any{
 				"archive_sha256": archive.CipherSHA, "history": parts.History, "secrets": parts.Secrets,
-				"from_audit_head_id": archive.Manifest.Database.AuditHeadID, "from_audit_head_sha256": archive.Manifest.Database.AuditHeadSHA256,
+				"from_audit_head_id": archive.restoredHeadID(), "from_audit_head_sha256": archive.restoredHeadSHA256(),
 			})
 		}
 	}
@@ -1092,7 +1108,8 @@ func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreAr
 	}
 	compat := archive.Manifest.Compatibility
 	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}}
-	placed, hold, previous, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
+	placed, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
+	hold, previous := placed.Hold, placed.Previous
 	switch {
 	case errors.Is(err, store.ErrNoAdmissionHold):
 		_, _ = fmt.Fprintf(w, "WARNING: the backup predates the admission hold; release %s may dispatch the backup's queued runs again: check its queue once it starts.\n",
@@ -1100,9 +1117,10 @@ func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreAr
 		return archive, nil
 	case err != nil:
 		return archive, fmt.Errorf("hold admission in the restored database: %w", err)
-	case !placed:
+	case !placed.Placed:
 		return archive, nil
 	}
+	archive.RestoredHeadID, archive.RestoredHeadSHA256 = placed.AuditHead.ID, hex.EncodeToString(placed.AuditHead.SHA256)
 	if archive.Database.MainSHA256, err = fileSHA256(archive.Database.Main); err != nil {
 		return archive, err
 	}
