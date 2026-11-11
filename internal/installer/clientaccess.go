@@ -49,12 +49,6 @@ func offerClientAccess(ctx context.Context, cfg Config, deps Deps, tw *tableWrit
 	// not among what it needs. Asking for more than it uses would make it
 	// untestable on its own and would skip silently in a session that could in
 	// fact answer. A choice made in advance needs no terminal at all.
-	if _, decided := clientAccessDecided(cfg); !decided && (deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil) {
-		// Say so: otherwise a non-interactive install ends with a server that
-		// no CLI or MCP client on this machine is configured to reach.
-		tw.AppendRow("Client access", "no terminal: see docs/mcp-setup.md", "⚠ manual", false)
-		return nil
-	}
 	if strings.TrimSpace(token) == "" {
 		// No token means no uplink was registered, so there is nothing either
 		// client could authenticate with.
@@ -79,9 +73,6 @@ func offerClientAccess(ctx context.Context, cfg Config, deps Deps, tw *tableWrit
 // reads one, they never hold it.
 func offerClientAccessToConfiguredDeployment(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) error {
 	refreshPinnedServerCA(ctx, cfg, deps, tw)
-	if _, decided := clientAccessDecided(cfg); !decided && (deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil) {
-		return nil
-	}
 	root, err := deps.clientConfigRoot()
 	if err != nil {
 		return nil
@@ -104,6 +95,11 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	color := isColor(deps)
 
 	choice, decided := clientAccessDecided(cfg)
+	if !decided && (deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil) {
+		// Without a terminal the offer takes its default, as Enter would:
+		// both clients. --client-access none declines in advance.
+		choice, decided = clientAccessBoth, true
+	}
 	var err error
 	if !decided {
 		choice, err = selectOption(ctx, deps, color, "Client access",
@@ -181,7 +177,7 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	}
 
 	tw.WriteFooter()
-	printClientAccessNotes(w, root, choice, tokenHint, freshToken)
+	printClientAccessNotes(w, root, choice, tokenHint, freshToken, cfg.SecretsFile)
 	return nil
 }
 
@@ -347,10 +343,16 @@ func displayPath(path string) string {
 	return "~" + strings.TrimPrefix(path, home)
 }
 
-func printClientAccessNotes(w io.Writer, root string, choice int, storeCommand string, freshToken bool) {
-	if freshToken {
+func printClientAccessNotes(w io.Writer, root string, choice int, storeCommand string, freshToken bool, secretsFile string) {
+	switch {
+	case freshToken && secretsFile != "":
+		// The token is in the secrets file, never on screen: name the line and
+		// a command that moves it without showing it.
+		_, _ = fmt.Fprintf(w, "\nStore the bearer token (line %s of %s) where the config expects it, without printing it:\n\n    %s\n",
+			SecretsFileTokenKey, secretsFile, storeFromSecretsFile(storeCommand, secretsFile))
+	case freshToken:
 		_, _ = fmt.Fprintf(w, "\nStore the bearer token above where the config expects it:\n\n    %s\n", storeCommand)
-	} else {
+	default:
 		// No token was minted on this path, so the instruction is conditional:
 		// the configuration is inert until one is there, and saying nothing
 		// would leave a first command that fails for a reason nobody named.
@@ -473,4 +475,23 @@ func refreshPinnedServerCA(ctx context.Context, cfg Config, deps Deps, tw *table
 		return
 	}
 	tw.AppendRow("Client CA", displayPath(caPath), "✓ refreshed", false)
+}
+
+// storeFromSecretsFile is the store command fed from the secrets file's token
+// line, so the token moves into the secret store without reaching a screen.
+// macOS security(1) takes the value only as an argument, never from stdin.
+func storeFromSecretsFile(storeCommand, secretsFile string) string {
+	read := "sed -n 's/^" + SecretsFileTokenKey + "=//p' " + shellQuoteWord(secretsFile)
+	if strings.HasSuffix(storeCommand, " -w") {
+		return storeCommand + ` "$(` + read + `)"`
+	}
+	return read + " | " + storeCommand
+}
+
+// shellQuoteWord quotes s for a POSIX shell unless it is plainly safe.
+func shellQuoteWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+:@") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }

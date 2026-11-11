@@ -26,6 +26,8 @@ func TestMain(m *testing.M) {
 		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
 		"KUBECONFIG":      "",
+		// Claude Code's settings follow CLAUDE_CONFIG_DIR before HOME.
+		"CLAUDE_CONFIG_DIR": "",
 	} {
 		if err := os.Setenv(key, value); err != nil {
 			fmt.Fprintln(os.Stderr, err)

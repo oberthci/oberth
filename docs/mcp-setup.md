@@ -7,6 +7,11 @@ Connect an AI agent (Claude Code or any MCP client) to Oberth.
 - Oberth is deployed and has at least one upstream registered
 - `kubectl` access to the Oberth namespace
 
+The Claude Code plugin (step 2) can be installed before that: its server
+options are optional, and without them its session-start note offers
+`/oberth:install`, which installs Oberth on the cluster your kubeconfig names
+with every credential in a secrets file instead of the session.
+
 ## 1. Create an uplink
 
 Run inside the Oberth pod:
@@ -18,15 +23,34 @@ kubectl exec -i -n oberth deploy/oberth -- \
 
 Replace `operator@host` with a descriptive identity for this uplink.
 
-The command prints three lines exactly once. Save both values:
+The command prints the token exactly once:
 
 ```
-TLS certificate fingerprint: SHA256:abc123...
 Uplink token for operator@host (shown once):
 oberth_xxxxxxxxxxxxxxxx
 ```
 
-The token is never stored or recoverable. If lost, create a new uplink.
+The token is never stored or recoverable. If lost, create a new uplink. Run
+the command on a terminal, or redirect it into a new owner-only file
+(`(umask 077 && kubectl exec ... > token)`), so the token does not land in a
+log or an AI transcript. `oberth install --secrets-file` writes the first
+uplink's token to its secrets file for the same reason.
+
+The token is the only credential. Clients trust the server through its CA,
+not through a fingerprint printed here: `oberth client pin` prints the CA's
+SHA-256 pin (step 2) from `~/.config/oberth/ca.crt`, which `oberth install`
+writes on the installing machine. On another machine, copy that file from
+there, or read it from the cluster:
+
+```bash
+(umask 077 && kubectl exec -n oberth deploy/oberth -c oberth -- \
+  oberth admin read-file /run/oberth-identities/server/ca.crt > ca.crt)
+```
+
+The CLI refuses a CA file that group or others can write, so create it with
+a restrictive umask as above.
+
+Check the pin against the installing machine's before you trust it.
 
 ### Limit an uplink to some upstreams
 
@@ -284,13 +308,13 @@ names, `localhost`, `127.0.0.1`, the address the installer advertises and every
 address is a hostname mismatch that no trust configuration repairs, so name
 the address first.
 
-Fetch the CA (an interactive install writes it to `~/.config/oberth/ca.crt`
-and later installs keep that file current):
+Fetch the CA (`oberth install` writes it to `~/.config/oberth/ca.crt`, with
+or without a terminal, and later installs keep that file current):
 
 ```bash
-kubectl exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth admin read-file \
+(umask 077 && kubectl exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth admin read-file \
   /run/oberth-identities/server/ca.crt /run/oberth-identities/server/tls.crt \
-  > ~/.config/oberth/ca.crt
+  > ~/.config/oberth/ca.crt)
 openssl x509 -in ~/.config/oberth/ca.crt -noout -fingerprint -sha256
 ```
 

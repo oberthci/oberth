@@ -83,8 +83,10 @@ func TestClaudePluginManifests(t *testing.T) {
 		t.Fatalf("userConfig = %+v", plugin.UserConfig)
 	}
 	for key, want := range map[string]option{
-		"url":    {Required: true},
-		"token":  {Required: true, Sensitive: true},
+		// Optional: the plugin is installed before any server exists, and its
+		// session hint then guides to /oberth:install.
+		"url":    {},
+		"token":  {Sensitive: true},
 		"ca_pin": {},
 	} {
 		got := plugin.UserConfig[key]
@@ -140,6 +142,10 @@ func TestClaudePluginManifests(t *testing.T) {
 			"name: oberth-agent-loop", "description:",
 			`events_wait {"kinds": ["run.held", "run.finished"], "own": true, "after_id": <cursor>, "timeout_s": 600}`,
 			"next_after_id", "at or below", "run_wait", "abandon_at", "never evidence", "/oberth:connect",
+		},
+		"install": {
+			"name: install", "description:", "$ARGUMENTS", "--secrets-file", "--context", "--expected-host-fingerprint",
+			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "OBERTH_INSTALL_DIR", "trust on first",
 		},
 		"connect": {
 			"name: connect", "description:", `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" connect --url`,
@@ -561,7 +567,9 @@ func TestPluginSessionHint(t *testing.T) {
 				t.Fatalf("hint without a pin = %q", out)
 			}
 			// An unconfigured plugin has nothing to connect to.
-			if out, err := runTrust(t, shell, claudeDir, nil, "hint"); err != nil || out != "" {
+			// Without a server the hint guides to an install or a connection,
+			// and asks for nothing secret in the chat.
+			if out, err := runTrust(t, shell, claudeDir, nil, "hint"); err != nil || !inOrder(out, []string{"no Oberth server is configured", "/oberth:install", "/plugin configure", "never into the chat", "/oberth:connect"}) {
 				t.Fatalf("hint without a URL = %q %v", out, err)
 			}
 

@@ -100,3 +100,15 @@ func WithServiceEndpoint(service *corev1.Service, namespace string, deps Deps) D
 	deps.ClientHost = clientReachableHost(deps)
 	return deps
 }
+
+// withClientPorts applies the client-visible ports the operator named
+// (--client-ssh-port, --client-https-port) over the Service's own.
+func withClientPorts(cfg Config, deps Deps) Deps {
+	if cfg.ClientSSHPort != "" {
+		deps.ClientSSHPort = cfg.ClientSSHPort
+	}
+	if cfg.ClientHTTPSPort != "" {
+		deps.ClientHTTPSPort = cfg.ClientHTTPSPort
+	}
+	return deps
+}

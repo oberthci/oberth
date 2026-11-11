@@ -108,6 +108,12 @@ func NextSteps(in NextStepsInput) []string {
 		"   "+exec(false, "upstream", "add", "--yes", other, otherURL),
 		"   upstream list --check shows which forges accept the key")
 
+	add("", "Promote green code to a target branch: an admin issues a single-use grant first (the uplinks above are not admins).",
+		"   Register an admin uplink for a person, with a key no agent holds (the token prints once, on that terminal):",
+		"   "+exec(true, "uplink", "add", "--admin", "-", "admin@host")+" < admin.pub",
+		"   then:  oberth mcp call --token-file <admin token file> promote_grant '{\"repo\":\"<upstream>/<org>/<repo>\",\"sha\":\"<green sha>\",\"branch\":\"main\"}'",
+		"   and the agent promotes that exact SHA with the promote tool (docs/mcp-setup.md)")
+
 	add("", "Give another machine or agent access (an uplink):",
 		"   1. there:  cat ~/.ssh/id_ed25519.pub   and copy it here as you@laptop.pub",
 		"   2. here:   "+exec(true, "uplink", "add", "-", "you@laptop")+" < you@laptop.pub",

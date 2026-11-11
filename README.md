@@ -76,6 +76,55 @@ curl -fsSL https://oberth.ci/install.sh | sh
 oberth install --install-secretstore
 ```
 
+The script verifies the release checksums and signature and installs to
+`/usr/local/bin`. Without root access, install into your home instead:
+
+```bash
+export OBERTH_INSTALL_DIR="$HOME/.local/bin"
+curl -fsSL https://oberth.ci/install.sh | sh
+```
+
+Any cluster your kubeconfig reaches is a valid target, local or remote: the
+install names the context and its API server before it changes anything.
+When the kubeconfig (`--kubeconfig`, else `KUBECONFIG`, else `~/.kube/config`)
+has more than one context, name the one to use with `--context`.
+
+### Without a terminal: scripts and AI agents
+
+The install creates credentials that are shown once: the OpenBao root token
+and unseal key, and the first uplink's bearer token. On a terminal they are
+shown in a box. When the output is a log or an AI transcript, they go to a
+secrets file instead, and the install refuses without one:
+
+```bash
+oberth install --context my-cluster --install-secretstore \
+  --secrets-file ~/oberth-install-secrets.txt \
+  --forge github --organization acme --client-host localhost
+```
+
+The secrets file must not exist yet and must lie outside any git worktree; it
+is written with mode 0600, and the output names only its path and SHA-256. A
+run that created nothing removes it again. Move it off the machine.
+
+Everything the interactive install asks is a flag. `--upstream-url
+ssh://git@forge.example.test:2222/acme` names any other forge; add
+`--expected-host-fingerprint SHA256:...` (the forge's SSH host-key fingerprint
+as its admin publishes it) so it is trusted without a prompt. The uplink
+identity defaults to `user@host`, and its key to `~/.ssh/id_ed25519.pub`
+(else the first key pair in `~/.ssh`, else a new `~/.ssh/oberth_ed25519`).
+This machine's client files (`~/.config/oberth`) and, when Claude Code is
+installed, its CA trust and the Oberth plugin are set up as on a terminal;
+`--client-access none` skips them. When clients reach the server on other
+ports than the NodePorts 30022/30443 (a port forward, a container runtime
+publishing them elsewhere), say so with `--client-ssh-port` and
+`--client-https-port`: the client files, the push banner and every printed
+command use them. `--assist` turns on
+[assisted continuation](docs/assisted-continuation.md).
+
+The Oberth plugin for Claude Code can come first: `/plugin install
+oberth@oberthci` works before any server exists, and `/oberth:install` then
+walks through these steps.
+
 ### First push
 
 If setup has not already registered them, add your upstream and this machine's
@@ -94,8 +143,30 @@ git push oberth HEAD:refs/heads/first-push
 # Open https://oberth.example:30443/runs in your browser.
 ```
 
-Save the uplink token and TLS fingerprint printed once by `uplink add`.
-The push banner links to the queued run when a dashboard URL is configured.
+`uplink add` prints the uplink's bearer token once; store it. Clients trust
+the server by its CA: `oberth client pin` prints the CA's SHA-256 pin from
+`~/.config/oberth/ca.crt`. The push banner links to the queued run when a
+dashboard URL is configured.
+
+### First promotion
+
+Green branch CI is the input to a promotion, which merges, tests and pushes a
+target branch such as `main`. The first uplink is not an admin, and a
+non-admin promotes a commit only with a single-use grant an admin issued for
+that exact repository, SHA and target. Register an admin uplink for a person,
+with a key no agent holds, and issue the grant with it:
+
+```bash
+kubectl exec -it -n oberth deploy/oberth -- \
+  oberth uplink add --admin - admin@host < admin.pub
+# Store the printed token in admin-token (mode 0600), then:
+oberth mcp call --token-file admin-token promote_grant \
+  '{"repo":"github/acme/my-repo","sha":"<green sha>","branch":"main"}'
+```
+
+The agent then promotes that SHA with the `promote` tool. A repository can
+also allow promotion of parked commits without a grant; see
+[park promotion](docs/park-promotion.md).
 
 Both the server namespace (`oberth` by default) and pipeline namespace
 (`oberth-argo`) require the Pod Security Admission `privileged` level, or no
@@ -138,8 +209,9 @@ in place; clients pin the CA. An init container
 prepares the cache directories; the pod stays `0/1 Running` — live, not
 ready — until the first upstream is registered. `upstream add` offers to mint
 a deploy key and prints it once for registration at your forge. `uplink add`
-prints the TLS fingerprint and a bearer token exactly once; wire it into your
-MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
+prints a bearer token exactly once; wire it into your MCP client, which pins
+the CA (`oberth client pin`; full walkthrough in
+[docs/mcp-setup.md](docs/mcp-setup.md)):
 
 ```json
 {

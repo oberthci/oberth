@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -129,18 +130,50 @@ func TestClientAccessSurvivesAClusterThatWillNotAnswer(t *testing.T) {
 	}
 }
 
-// Without a terminal there is nobody to answer, and a prompt that reads a
-// closed stdin is a hang rather than a default.
-func TestClientAccessIsSkippedWithoutATerminal(t *testing.T) {
-	deps, _, home := clientAccessDeps(t, "\n")
+// Without a terminal nobody answers the offer, so it takes the default Enter
+// would (both clients) without reading the closed stdin, and the CA is written
+// owner-only whatever the umask (#6, #10 of the fresh-install rehearsal).
+func TestClientAccessDefaultsToBothWithoutATerminal(t *testing.T) {
+	deps, out, home := clientAccessDeps(t, "")
 	deps.IsTerminal = func() bool { return false }
 	tw := newTableWriter(deps.Output, false)
+	old := syscall.Umask(0o002)
+	defer syscall.Umask(old)
 
 	if err := offerClientAccess(context.Background(), Config{}, deps, tw, testToken); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".config", "oberth", "env")); err == nil {
-		t.Error("a non-interactive install wrote client configuration nobody asked for")
+	root := filepath.Join(home, ".config", "oberth")
+	assertExists(t, filepath.Join(root, "env"), true)
+	assertExists(t, filepath.Join(root, "mcp.json"), true)
+	info, err := os.Stat(filepath.Join(root, "ca.crt"))
+	if err != nil || info.Mode().Perm()&0o022 != 0 {
+		t.Fatalf("ca.crt mode: %v %v", info, err)
+	}
+	if strings.Contains(out.String(), testToken) {
+		t.Fatal("the token reached the output")
+	}
+
+	// --client-access none still declines in advance.
+	deps, _, home = clientAccessDeps(t, "")
+	deps.IsTerminal = func() bool { return false }
+	if err := offerClientAccess(context.Background(), Config{ClientAccess: "none"}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	assertExists(t, filepath.Join(home, ".config", "oberth", "env"), false)
+}
+
+// With --secrets-file the token is never on screen: the notes name its line
+// and a command that moves it into the secret store unseen.
+func TestClientAccessNotesReadTheTokenFromTheSecretsFile(t *testing.T) {
+	var out bytes.Buffer
+	printClientAccessNotes(&out, "/srv/u/.config/oberth", clientAccessBoth, "secret-tool store --label=x service oberth", true, "/srv/u/oberth secrets.txt")
+	want := "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' '/srv/u/oberth secrets.txt' | secret-tool store --label=x service oberth"
+	if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "token above") {
+		t.Fatalf("notes:\n%s", out.String())
+	}
+	if got := storeFromSecretsFile("security add-generic-password -s oberth-token -a \"$USER\" -w", "/s"); !strings.HasSuffix(got, `-w "$(sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s)"`) {
+		t.Fatalf("macOS store command: %s", got)
 	}
 }
 

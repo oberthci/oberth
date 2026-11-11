@@ -424,6 +424,8 @@ Flags:
         OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
         Kubernetes-auth role credentialed pipelines log in with; bind it to exactly (--argo-namespace, the credentialed ServiceAccount)
+  -assist
+        enable agent-assisted continuation (chart value assist.enabled, off by default; later: oberth upgrade --set assist.enabled=true); see docs/assisted-continuation.md
   -chart string
         install the Oberth chart from this local directory or archive instead of the signed release (development only: not verified)
   -chart-repository string
@@ -434,6 +436,10 @@ Flags:
         write this machine's client files without asking: both, cli, mcp, or none
   -client-host string
         address clients use to reach this server, a DNS name or IP (default: the Kubernetes API host, or localhost); client files, SSH config and printed URLs use it and the certificate covers it
+  -client-https-port string
+        HTTPS port clients reach the server on, when it is not the Service's (default: the NodePort 30443, or the Service port); client files, the push banner and printed URLs use it
+  -client-ssh-port string
+        git SSH port clients reach the server on, when it is not the Service's (default: the NodePort 30022, or the Service port); client files, SSH config and printed commands use it
   -context string
         kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)
   -create-kind
@@ -442,6 +448,8 @@ Flags:
         full KV data path approved in the secret-access table (repeatable, exactly the string oberth access allow records, e.g. oberth/data/release/cosign-secret); synced into the RELEASE-tier credentialed Vault policy as an exact read grant when --install-secretstore reconciles the store — the branch-tier ci-secrets policy never receives grants
   -dry-run
         print plan without making changes
+  -expected-host-fingerprint string
+        SSH host-key fingerprint (SHA256:..., from ssh-keygen -lf or the forge's documentation) of the first upstream's host, so a non-interactive install trusts a forge whose key Oberth does not ship
   -f value
         shorthand for --values
   -forge string
@@ -451,7 +459,7 @@ Flags:
   -install-rekor
         also install a local Rekor transparency-log stack (MySQL + Trillian + Rekor) for the audit witness
   -install-secretstore
-        also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, root token and unseal key printed once) and configure it as Oberth's release secret store
+        also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, root token and unseal key shown once, on the terminal or in --secrets-file) and configure it as Oberth's release secret store
   -install-secretstore-dev
         also install a dev-mode OpenBao (in-memory, auto-unsealed, well-known root token) and configure it as Oberth's release secret store — evaluation only
   -kubeconfig string
@@ -476,12 +484,14 @@ Flags:
         read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
   -release-origin string
         fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
+  -secrets-file string
+        write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) to this new file (mode 0600; refused when it exists or lies in a git worktree) and print only its path and SHA-256; required when the output is not a terminal
   -service-type string
         Oberth Service type: NodePort (default for a fresh install; clients use NodePorts 30022/30443), LoadBalancer (on k3s, servicelb also takes host ports 2222 and 443 on the node) or ClusterIP; an upgrade keeps the release's current type unless this is set
   -skip-argo-workflows
         do not install the Argo Workflows controller, because this cluster already runs one watching --argo-namespace (the install still binds Oberth to it and still verifies it is ready)
   -ssh-public-key string
-        workstation SSH public key path
+        workstation SSH public key path (default without a terminal: ~/.ssh/id_ed25519.pub, else the first key pair in ~/.ssh, else a new ~/.ssh/oberth_ed25519)
   -timeout duration
         wait timeout for pod readiness (default 15m0s)
   -tls-extra-dns-name value
@@ -495,7 +505,7 @@ Flags:
   -upgrade
         force helm reconciliation of existing releases at the installed Oberth version; version changes of an existing Oberth release are refused here and go through oberth upgrade
   -uplink-identity string
-        workstation identity
+        workstation identity (default: user@host)
   -upstream-key-file string
         existing work SSH private key to import into OpenBao
   -upstream-url string
@@ -1802,6 +1812,8 @@ Flags:
         keep stored argo-workflows values the nonroot profile does not know: sha256:DIGEST of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)
   -backup-dir DIR
         write the pre-upgrade backup and the rollback record to DIR (default: the current directory)
+  -backup-recipient CERT
+        encrypt the pre-upgrade backup to this PEM CERT you manage instead of ~/.config/oberth/backup/recipient.pem: no backup key is created or confirmed here, so it needs no terminal
   -chart string
         deploy this chart instead of the signed release (development only: not verified)
   -chart-repository string

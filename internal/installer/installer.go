@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -294,6 +295,23 @@ type Config struct {
 	// same upstream key (--also-upstream, host/organization or an ssh:// URL),
 	// after the first one (#060).
 	AlsoUpstreams []string
+	// AssistEnabled turns on agent-assisted continuation (assist.enabled),
+	// which is off by default; see docs/assisted-continuation.md.
+	AssistEnabled bool
+	// ExpectedHostFingerprint pins the first upstream's SSH host key
+	// (SHA256:...) so a non-interactive onboarding can trust a forge whose
+	// key Oberth does not ship, without a prompt.
+	ExpectedHostFingerprint string
+	// ClientSSHPort and ClientHTTPSPort are the ports clients reach the
+	// server on when they differ from the Service's (a port forward, a
+	// container runtime publishing the NodePorts elsewhere). Client files, the
+	// push banner and printed commands use them; empty means the Service's.
+	ClientSSHPort   string
+	ClientHTTPSPort string
+	// SecretsFile receives the credentials the install creates once (OpenBao
+	// root token and unseal key, the first uplink's bearer token) instead of
+	// the output. It must be a new file outside any git worktree.
+	SecretsFile string
 }
 
 // wantsSecretStore reports whether either secret-store mode was requested.
@@ -614,6 +632,22 @@ func (cfg *Config) Validate() error {
 			return fmt.Errorf("--client-host %s: a kind cluster publishes ports 30022 and 30443 on 127.0.0.1 only, so other machines cannot reach it; use localhost, or install on a k3s or other cluster whose NodePorts listen on the node's addresses", host)
 		}
 		cfg.ClientHost = host
+	}
+	if fp := cfg.ExpectedHostFingerprint; fp != "" {
+		if cfg.ForgeURL == "" && cfg.ForgeType == "" {
+			return errors.New("--expected-host-fingerprint pins the first upstream's host key; pass it with --upstream-url or --forge")
+		}
+		if !strings.HasPrefix(fp, "SHA256:") || len(fp) < len("SHA256:")+43 || strings.ContainsAny(fp, " \t\r\n") {
+			return fmt.Errorf("--expected-host-fingerprint must be an SSH SHA256 fingerprint (SHA256:<43 characters>, as ssh-keygen -lf prints), got %q", fp)
+		}
+	}
+	for flagName, port := range map[string]string{"--client-ssh-port": cfg.ClientSSHPort, "--client-https-port": cfg.ClientHTTPSPort} {
+		if port == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+			return fmt.Errorf("%s must be a port number 1-65535, got %q", flagName, port)
+		}
 	}
 	for i, raw := range cfg.AlsoUpstreams {
 		_, baseURL, err := upstreamFromInput(strings.TrimSpace(raw))
@@ -1641,6 +1675,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	if image := strings.TrimSpace(cfg.ImageRef); image != "" {
 		args = append(args, "--set-string", "image.ref="+image)
 	}
+	if cfg.AssistEnabled {
+		args = append(args, "--set", "assist.enabled=true")
+	}
 	if cfg.UtilityImage != "" {
 		args = append(args, "--set-string", "utilityImage="+cfg.UtilityImage)
 	}
@@ -1668,7 +1705,11 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	if cfg.PushBannerURL != "" || cfg.PushBannerURLSet {
 		args = append(args, "--set-string", "pushBannerURL="+strings.ReplaceAll(strings.ReplaceAll(cfg.PushBannerURL, `\`, `\\`), ",", `\,`))
 	} else if !cfg.existingRelease && bannerHost != "" {
-		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+defaultClientHTTPSPort(cfg.ServiceType)+"/runs")
+		bannerPort := cfg.ClientHTTPSPort
+		if bannerPort == "" {
+			bannerPort = defaultClientHTTPSPort(cfg.ServiceType)
+		}
+		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+bannerPort+"/runs")
 	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)
 	if openbao.PKIEnabled || openbao.ServerCACertPEM != "" {
@@ -2064,7 +2105,7 @@ func PrintNextSteps(cfg Config, w io.Writer) error {
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	endpoint := WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType})
+	endpoint := withClientPorts(cfg, WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType}))
 	installed := "Oberth is installed."
 	if cfg.InstallSecretStore {
 		installed = "Oberth is installed and connected to OpenBao."
@@ -2082,7 +2123,8 @@ Next steps:
        kubectl exec -it -n %[1]s deploy/oberth -- \
          /usr/local/bin/oberth upstream add <name> ssh://git@<forge>/<org>
 
-  2. Add your first uplink (prints its bearer token and TLS fingerprint once):
+  2. Add your first uplink (prints its bearer token once; store it, and pin
+     the CA that oberth client pin prints):
 
        kubectl exec -i -n %[1]s deploy/oberth -- \
          /usr/local/bin/oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
@@ -2096,7 +2138,16 @@ Next steps:
        cd <repo>
        oberth init
        git add .oberth/ && git commit -m "add oberth pipeline"
-       git push origin main
+       git push origin my-branch
+
+  5. Promote green code to a target branch: a promotion needs a single-use
+     grant from an admin uplink, which the first uplink is not. Register one
+     for a person, with a key no agent holds, and issue the grant with it:
+
+       kubectl exec -it -n %[1]s deploy/oberth -- \
+         /usr/local/bin/oberth uplink add --admin - admin@host < admin.pub
+       oberth mcp call --token-file <admin token file> promote_grant \
+         '{"repo":"<upstream>/<org>/<repo>","sha":"<green sha>","branch":"main"}'
 
 `, ns, installed, URLHost(endpoint.ClientHost), endpoint.ClientSSHPort)
 	return err

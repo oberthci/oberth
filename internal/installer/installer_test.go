@@ -3626,6 +3626,7 @@ type fakeOberthHost struct {
 	listCalls    int
 	addCalls     int
 	addArgv      [][]string // argv of every `upstream add` invocation, in order
+	caReads      int        // reads of the server CA (client files)
 	// addResults scripts successive `upstream add` outcomes; when the script
 	// is exhausted the last entry repeats. Empty means every call prints the
 	// generated key and registers the upstream (probe accepted immediately).
@@ -3646,6 +3647,9 @@ type fakeAddResult struct {
 }
 
 const fakeDeployKeyLine = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINKAaSupc8 oberth"
+
+// testServerCAPEM stands in for the server CA the client files pin.
+const testServerCAPEM = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
 
 func (f *fakeOberthHost) run(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
 	f.t.Helper()
@@ -3680,6 +3684,9 @@ func (f *fakeOberthHost) run(_ context.Context, input []byte, name string, args 
 			out = fakeDeployKeyLine + "\n"
 		}
 		return []byte(out), result.err
+	case strings.HasSuffix(joined, "oberth admin read-file /run/oberth-identities/server/ca.crt"):
+		f.caReads++
+		return []byte(testServerCAPEM), nil
 	case strings.Contains(joined, "oberth uplink add"):
 		f.uplinkStdin = string(input)
 		f.uplinkArgv = append([]string{name}, args...)
@@ -3718,15 +3725,19 @@ func onboardingDeps(t *testing.T, host *fakeOberthHost, buf *bytes.Buffer, input
 	t.Helper()
 	testHome := t.TempDir()
 	deps := Deps{
-		UserHomeDir:  func() (string, error) { return testHome, nil },
-		Output:       buf,
-		Input:        input,
-		KubeClient:   fake.NewClientset(readyOberthPod()),
-		RestConfig:   &rest.Config{Host: "https://127.0.0.1:6443"},
-		ContextName:  "test-ctx",
-		RunCommand:   host.run,
-		IsTerminal:   func() bool { return interactive },
-		PollInterval: time.Millisecond,
+		UserHomeDir: func() (string, error) { return testHome, nil },
+		// Client files go to this test's own directory, and no host binary
+		// (the developer's real claude) is ever found.
+		ClientConfigRoot: func() (string, error) { return filepath.Join(testHome, ".config", "oberth"), nil },
+		LookPath:         func(string) (string, error) { return "", errors.New("not found in test") },
+		Output:           buf,
+		Input:            input,
+		KubeClient:       fake.NewClientset(readyOberthPod()),
+		RestConfig:       &rest.Config{Host: "https://127.0.0.1:6443"},
+		ContextName:      "test-ctx",
+		RunCommand:       host.run,
+		IsTerminal:       func() bool { return interactive },
+		PollInterval:     time.Millisecond,
 	}
 	if interactive {
 		deps.RunInteractive = func(context.Context, string, ...string) error { return nil }

@@ -280,3 +280,28 @@ func TestDisabledNetworkPolicyIsProminent(t *testing.T) {
 		})
 	}
 }
+
+// A null chart default that helm get values --all leaves out is not a planned
+// change (the unrequested secretstore.external in the fresh-install
+// rehearsal's upgrade plan); a real change next to it still is.
+func TestChangedValuePathsTreatsNullAsAbsent(t *testing.T) {
+	t.Parallel()
+	live := map[string]any{"secretstore": map[string]any{"address": "https://bao"}, "assist": map[string]any{"enabled": false}}
+	planned := map[string]any{"secretstore": map[string]any{"address": "https://bao", "external": nil}, "assist": map[string]any{"enabled": true}}
+	var changed []string
+	changedValuePaths(live, planned, "", &changed)
+	if len(changed) != 1 || changed[0] != "assist.enabled" {
+		t.Fatalf("changed = %q", changed)
+	}
+}
+
+func TestOberthHelmArgsEnablesAssist(t *testing.T) {
+	t.Parallel()
+	args := strings.Join(OberthHelmArgs(Config{Namespace: "oberth", AssistEnabled: true}, OpenBaoResult{}, RekorResult{}), " ")
+	if !strings.Contains(args, "--set assist.enabled=true") {
+		t.Fatalf("args: %s", args)
+	}
+	if strings.Contains(strings.Join(OberthHelmArgs(Config{Namespace: "oberth"}, OpenBaoResult{}, RekorResult{}), " "), "assist.enabled") {
+		t.Fatal("assist set without --assist")
+	}
+}

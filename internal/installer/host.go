@@ -62,9 +62,13 @@ type InstallDeps struct {
 	RunCommand     CommandRunner
 	RunInteractive InteractiveRunner
 	IsTerminal     func() bool
-	UserCacheDir   func() (string, error)
-	MkdirAll       func(string, fs.FileMode) error
-	LoadKubeConfig func(contextName string) (kubernetes.Interface, *rest.Config, string, error)
+	// OutputIsTerminal reports whether Output reaches a terminal (default:
+	// standard output is one). Credentials are shown only on a terminal;
+	// anywhere else they go to --secrets-file or the install refuses.
+	OutputIsTerminal func() bool
+	UserCacheDir     func() (string, error)
+	MkdirAll         func(string, fs.FileMode) error
+	LoadKubeConfig   func(contextName string) (kubernetes.Interface, *rest.Config, string, error)
 	// KubeContexts lists the contexts of the selected kubeconfig (an explicit
 	// path, else KUBECONFIG, else ~/.kube/config). Without --context an
 	// install needs exactly one; nil skips the check (tests that inject
@@ -110,6 +114,9 @@ func (deps InstallDeps) withDefaults() InstallDeps {
 	}
 	if deps.IsTerminal == nil {
 		deps.IsTerminal = StdinIsTerminal
+	}
+	if deps.OutputIsTerminal == nil {
+		deps.OutputIsTerminal = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
 	}
 	if deps.UserCacheDir == nil {
 		deps.UserCacheDir = os.UserCacheDir
@@ -177,6 +184,28 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		if err := CheckHostTools(deps.GOOS, deps.LookPath); err != nil {
 			return err
 		}
+	}
+
+	// Credentials shown once never go into a log or a transcript: without a
+	// terminal they go to --secrets-file, and without one the install refuses
+	// before anything exists that could be lost.
+	if !cfg.DryRun && deps.CredentialSink == nil {
+		switch {
+		case cfg.SecretsFile != "":
+			secrets, err := createSecretsFile(cfg.SecretsFile)
+			if err != nil {
+				return err
+			}
+			cfg.SecretsFile = secrets.path
+			deps.CredentialSink = secrets.add
+			defer secrets.finish(deps.Output)
+		case !deps.OutputIsTerminal() && cfg.mayCreateCredentials(deps.IsTerminal != nil && deps.IsTerminal()):
+			return errors.New("this install can create credentials that are shown once (the OpenBao root token and unseal key, " +
+				"the first uplink's bearer token), and its output is not a terminal: pass --secrets-file PATH " +
+				"(a new file outside any git worktree, written 0600; the output names only its path and SHA-256)")
+		}
+	} else if cfg.SecretsFile != "" && !cfg.DryRun {
+		return errors.New("--secrets-file cannot be combined with a caller that receives the credentials itself")
 	}
 
 	contextName := cfg.ContextName

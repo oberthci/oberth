@@ -12,6 +12,9 @@ package installer
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -54,6 +57,7 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	if endpointErr != nil {
 		return endpointErr
 	}
+	deps = withClientPorts(cfg, deps)
 	ns := cfg.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
@@ -89,24 +93,152 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		return waitAndAnnounceReady(ctx, cfg, deps)
 	}
 
-	if !isInteractive(deps) && !cfg.hasOnboardingConfig() {
-		_, _ = fmt.Fprintln(deps.Output, "The pod stays NotReady until an upstream is registered. Finish the setup manually:")
-		_ = PrintNextSteps(cfg, deps.Output)
-		printAlsoUpstreamCommands(deps.Output, cfg, deps, nil)
-		return ErrOnboardingPartial
+	if !isInteractive(deps) {
+		if cfg.ForgeURL == "" {
+			// Nothing to onboard without an upstream, but this machine can
+			// still be set up: the client files name a token command and the
+			// CA, never a token, so they need no uplink yet.
+			if err := runClientAccessOffer(ctx, cfg, deps, tw, false); err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(deps.Output, "\nThe pod stays NotReady until an upstream is registered. Rerun this install with --upstream-url "+
+				"(or --forge and --organization) and, for a forge whose SSH host key Oberth does not ship, --expected-host-fingerprint; "+
+				"or finish the setup manually:")
+			_ = PrintNextSteps(cfg, deps.Output)
+			printAlsoUpstreamCommands(deps.Output, cfg, deps, nil)
+			return ErrOnboardingPartial
+		}
+		if err := defaultOnboardingIdentity(&cfg, deps, tw); err != nil {
+			return err
+		}
 	}
 	return runOnboarding(ctx, cfg, deps, tw, creds)
 }
 
-func isInteractive(deps Deps) bool {
-	return deps.IsTerminal != nil && deps.IsTerminal() && deps.Input != nil && deps.RunInteractive != nil
+// generatedUplinkKeyName is the key pair a non-interactive install creates in
+// ~/.ssh when the machine has none to register as its uplink.
+const generatedUplinkKeyName = "oberth_ed25519"
+
+// defaultOnboardingIdentity fills the uplink answers a non-interactive
+// onboarding has no prompt for: the identity user@host, and this machine's
+// SSH public key (~/.ssh/id_ed25519.pub, else the first key pair in ~/.ssh,
+// else a new ed25519 pair generated here; its private key never leaves this
+// machine).
+func defaultOnboardingIdentity(cfg *Config, deps Deps, tw *tableWriter) error {
+	if cfg.UplinkIdentity == "" {
+		cfg.UplinkIdentity = defaultUplinkIdentity()
+	}
+	if err := validateUplinkIdentity(cfg.UplinkIdentity); err != nil {
+		return fmt.Errorf("uplink identity %q: %w; pass --uplink-identity", cfg.UplinkIdentity, err)
+	}
+	if cfg.SSHPublicKeyPath != "" {
+		return nil
+	}
+	homeDir := deps.UserHomeDir
+	if homeDir == nil {
+		homeDir = os.UserHomeDir
+	}
+	home, err := homeDir()
+	if err != nil {
+		return fmt.Errorf("find this machine's SSH key: %w; pass --ssh-public-key", err)
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	candidates := []string{filepath.Join(sshDir, "id_ed25519.pub")}
+	for _, key := range listSSHKeys(sshDir, true) {
+		candidates = append(candidates, filepath.Join(sshDir, strings.TrimPrefix(key, "~/.ssh/")))
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(privateKeyPath(candidate)); err == nil && isSSHKeyFile(candidate, true) {
+			cfg.SSHPublicKeyPath = candidate
+			return nil
+		}
+	}
+	path, err := generateUplinkKey(sshDir)
+	if err != nil {
+		return fmt.Errorf("no SSH key pair in %s to register as this machine's uplink, and generating one failed: %w; pass --ssh-public-key", sshDir, err)
+	}
+	tw.AppendRow("Uplink key", displayPath(path), "✓ generated", false)
+	cfg.SSHPublicKeyPath = path
+	return nil
 }
 
-// hasOnboardingConfig reports whether the Config carries pre-filled
-// onboarding data (from the TUI wizard), so a non-interactive session can
-// run onboarding without prompting.
-func (cfg Config) hasOnboardingConfig() bool {
-	return cfg.ForgeURL != "" && cfg.UplinkIdentity != "" && cfg.SSHPublicKeyPath != ""
+// generateUplinkKey writes a new ed25519 key pair to dir/oberth_ed25519
+// (private 0600, public 0644) and returns the public key path. An existing
+// file is never overwritten.
+func generateUplinkKey(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	privatePath := filepath.Join(dir, generatedUplinkKeyName)
+	publicPath := privatePath + ".pub"
+	for _, p := range []string{privatePath, publicPath} {
+		if _, err := os.Lstat(p); err == nil {
+			return "", fmt.Errorf("%s exists but is not a usable key pair", p)
+		}
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", err
+	}
+	comment := defaultUplinkIdentity()
+	block, err := ssh.MarshalPrivateKey(private, comment)
+	if err != nil {
+		return "", err
+	}
+	sshPublic, err := ssh.NewPublicKey(public)
+	if err != nil {
+		return "", err
+	}
+	encoded := pem.EncodeToMemory(block)
+	defer clear(encoded)
+	file, err := os.OpenFile(privatePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: a fixed name under the operator's own ~/.ssh
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := file.Write(encoded)
+	if closeErr := file.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		_ = os.Remove(privatePath)
+		return "", writeErr
+	}
+	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPublic))) + " " + comment + "\n"
+	if err := atomicWriteFile(publicPath, []byte(line), 0o644); err != nil {
+		return "", err
+	}
+	return publicPath, nil
+}
+
+// expectedFingerprintFor is --expected-host-fingerprint for an upstream on
+// the first upstream's host; another host has another key.
+func (cfg Config) expectedFingerprintFor(baseURL string) string {
+	if cfg.ExpectedHostFingerprint == "" || cfg.ForgeURL == "" {
+		return ""
+	}
+	_, first, err := upstreamFromInput(cfg.ForgeURL)
+	if err != nil {
+		return ""
+	}
+	firstURL, err1 := url.Parse(first)
+	otherURL, err2 := url.Parse(baseURL)
+	if err1 != nil || err2 != nil || firstURL.Host != otherURL.Host {
+		return ""
+	}
+	return cfg.ExpectedHostFingerprint
+}
+
+// upstreamAddArgs is the in-pod `upstream add` argv onboarding runs.
+func (cfg Config) upstreamAddArgs(name, baseURL string) []string {
+	args := []string{"upstream", "add", "--yes", "--no-wait"}
+	if fp := cfg.expectedFingerprintFor(baseURL); fp != "" {
+		args = append(args, "--expected-host-fingerprint", fp)
+	}
+	return append(args, name, baseURL)
+}
+
+func isInteractive(deps Deps) bool {
+	return deps.IsTerminal != nil && deps.IsTerminal() && deps.Input != nil && deps.RunInteractive != nil
 }
 
 func waitAndAnnounceReady(ctx context.Context, cfg Config, deps Deps) error {
@@ -391,7 +523,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		} else {
 			_, _ = fmt.Fprintf(w, "Retrieve the upstream public key, register it with your forge account, then verify the connection:\n")
 		}
-		_, _ = fmt.Fprintf(w, "\n    kubectl exec -n %s deploy/oberth -- /usr/local/bin/oberth upstream add --yes --no-wait %s %s\n", cfg.Namespace, name, baseURL)
+		_, _ = fmt.Fprintf(w, "\n    kubectl exec -n %s deploy/oberth -- /usr/local/bin/oberth %s\n", cfg.Namespace, strings.Join(cfg.upstreamAddArgs(name, baseURL), " "))
 		return ErrOnboardingPartial
 	}
 
@@ -859,7 +991,7 @@ func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL 
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	addArgs := []string{"upstream", "add", "--yes", "--no-wait", name, baseURL}
+	addArgs := cfg.upstreamAddArgs(name, baseURL)
 
 	// The admin socket (/run/oberth/admin.sock) is bound just before the
 	// server prints "ready for bootstrap". A pod that is Running but not
@@ -1636,7 +1768,9 @@ func sshHostFromServer(deps Deps) string {
 		return "localhost"
 	}
 	ip := net.ParseIP(host)
-	if ip != nil && ip.IsLoopback() {
+	// An API server bound to every address (0.0.0.0, as k3d publishes it) is
+	// reached on this machine as localhost.
+	if ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
 		return "localhost"
 	}
 	return host

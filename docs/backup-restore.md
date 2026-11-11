@@ -272,7 +272,8 @@ it refuses and points at `oberth backup keygen`. With an existing key it
 prints the same warning to stderr and proceeds, every time, until a copy is
 confirmed, on a terminal or with `oberth backup key --stored`; `oberth backup
 key` says whether it is. Backups with `--recipient CERT` are encrypted to a
-key you manage yourself and do not ask.
+key you manage yourself and do not ask; `oberth upgrade --backup-recipient
+CERT` does the same for the pre-upgrade backup.
 
 ```sh
 oberth backup key            # where the key is, which certificate, whether a copy is confirmed

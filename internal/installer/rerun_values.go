@@ -160,6 +160,12 @@ func changedValuePaths(before, after map[string]any, prefix string, changed *[]s
 		}
 		old, oldOK := before[key]
 		next, nextOK := after[key]
+		// A key whose value is null and an absent key are the same to Helm:
+		// helm get values --all drops a null chart default (such as
+		// secretstore.external) that the preview still carries, which listed
+		// it as a change nobody requested.
+		oldOK = oldOK && old != nil
+		nextOK = nextOK && next != nil
 		oldMap, oldIsMap := old.(map[string]any)
 		nextMap, nextIsMap := next.(map[string]any)
 		if oldIsMap && nextIsMap {
@@ -171,5 +177,5 @@ func changedValuePaths(before, after map[string]any, prefix string, changed *[]s
 }
 
 func explicitInstallValues(cfg Config) bool {
-	return cfg.PushBannerURLSet || cfg.PushBannerURL != "" || cfg.AcceptWitnessGenesisSet || cfg.AcceptWitnessGenesis != "" || cfg.ServiceType != "" || cfg.NetworkPolicy == "true" || cfg.NetworkPolicy == "false" || cfg.ArgoVaultCredentialedRole != "" || cfg.ArgoVaultAddress != "" || len(cfg.ValuesFiles) > 0
+	return cfg.PushBannerURLSet || cfg.PushBannerURL != "" || cfg.AcceptWitnessGenesisSet || cfg.AcceptWitnessGenesis != "" || cfg.ServiceType != "" || cfg.NetworkPolicy == "true" || cfg.NetworkPolicy == "false" || cfg.ArgoVaultCredentialedRole != "" || cfg.ArgoVaultAddress != "" || len(cfg.ValuesFiles) > 0 || cfg.AssistEnabled
 }

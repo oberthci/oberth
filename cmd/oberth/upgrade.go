@@ -43,6 +43,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.Var(&userValues, "f", "alias for --values")
 	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")
 	flags.BoolVar(&cfg.NoBackup, "no-backup", false, "upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)")
+	backupRecipient := flags.String("backup-recipient", "", "encrypt the pre-upgrade backup to this PEM `CERT` you manage instead of ~/.config/oberth/backup/recipient.pem: no backup key is created or confirmed here, so it needs no terminal")
 	backupDir := flags.String("backup-dir", "", "write the pre-upgrade backup and the rollback record to `DIR` (default: the current directory)")
 	flags.BoolVar(&cfg.AllowDowngrade, "allow-downgrade", false, "accept a CLI older than the installed release (a deliberate rollback within one database schema)")
 	forceRecord := flags.Bool("force-record", false, "DANGEROUS, with --rollback: accept a stale record although either release changed after its upgrade; later changes are undone and the database may be replaced by an old backup (check helm history first)")
@@ -65,6 +66,9 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	}
 	if cfg.Yes {
 		return fmt.Errorf("%w: --yes applies to --rollback only; an upgrade needs no confirmation flag", errUsage)
+	}
+	if cfg.NoBackup && *backupRecipient != "" {
+		return fmt.Errorf("%w: --backup-recipient and --no-backup contradict each other", errUsage)
 	}
 
 	if cfg.WaitTimeout <= 0 {
@@ -113,7 +117,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	}
 	if !cfg.NoBackup {
 		cfg.Backup = func(ctx context.Context) (installer.UpgradeBackup, error) {
-			return takePreUpgradeBackup(ctx, cfg.RecordDir, kubeContext, cfg.Namespace, input, output)
+			return takePreUpgradeBackup(ctx, cfg.RecordDir, *backupRecipient, kubeContext, cfg.Namespace, input, output)
 		}
 	}
 
@@ -151,10 +155,14 @@ func upgradeCompletionError(dryRun bool, result installer.UpgradeResult) error {
 
 // takePreUpgradeBackup is oberth backup --history-only, run by oberth upgrade
 // before its first change against the same context and namespace.
-func takePreUpgradeBackup(ctx context.Context, dir, kubeContext, namespace string, input io.Reader, output io.Writer) (installer.UpgradeBackup, error) {
-	recipient, err := defaultBackupRecipient(false, input, output)
-	if err != nil {
-		return installer.UpgradeBackup{}, err
+func takePreUpgradeBackup(ctx context.Context, dir, recipient, kubeContext, namespace string, input io.Reader, output io.Writer) (installer.UpgradeBackup, error) {
+	if recipient == "" {
+		var err error
+		if recipient, err = defaultBackupRecipient(false, input, output); err != nil {
+			return installer.UpgradeBackup{}, fmt.Errorf("%w; for this upgrade, --backup-recipient CERT encrypts the backup to a certificate you manage", err)
+		}
+	} else if _, err := os.Stat(recipient); err != nil {
+		return installer.UpgradeBackup{}, fmt.Errorf("--backup-recipient: %w", err)
 	}
 	archive := filepath.Join(dir, archivePrefix+time.Now().UTC().Format("20060102-150405")+archiveSuffix)
 	cfg := installer.BackupConfig{

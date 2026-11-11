@@ -11,6 +11,19 @@ an ordinary, unassisted run of a real commit.
 Off by default (`assist.enabled: false`). Branch CI only. Credential-free
 steps only. Opt-in per run.
 
+Turn it on at install time with `oberth install --assist`, or on an installed
+server with:
+
+```bash
+oberth upgrade --set assist.enabled=true
+```
+
+The upgrade takes its pre-upgrade history backup first. Without a terminal
+that backup needs a key decision made in advance: encrypt it to a
+certificate you manage (`--backup-recipient CERT`), or create the default key
+first (`oberth backup keygen`, copy the key off the machine, then
+`oberth backup key --stored`). `--no-backup` skips the backup.
+
 ## How a step is held
 
 Oberth runs pipelines on Argo Workflows v4.0.8 with the emissary executor.
