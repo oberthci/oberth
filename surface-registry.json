@@ -407,6 +407,14 @@
     "flag:reissue-server-ca": {
       "doc_anchor": "docs/single-host-tls.md",
       "test_ref": "internal/installer/single_host_tls_test.go TestExistingCARequiresExplicitReissue"
+    },
+    "value:plugin-fetch-oberth": {
+      "doc_anchor": "docs/plugin-bootstrap.md#verified-plugin-bootstrap",
+      "test_ref": "internal/installer/plugin_fetch_test.go TestPluginFetchVerifiedRelease"
+    },
+    "value:SHA256SUMS.sig": {
+      "doc_anchor": "docs/plugin-bootstrap.md#release-verification",
+      "test_ref": "internal/argojob/release_public_test.go TestPublicChecksumProofsRefuseDisagreement"
     }
   }
 }
