@@ -15,6 +15,7 @@ type installFlagOptions struct {
 	answersPath              *string
 	yes                      *bool
 	verify                   *bool
+	plan                     *bool
 	jsonOutput               *bool
 	timeout                  *time.Duration
 	argoParallelism          *int
@@ -37,6 +38,7 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	var options installFlagOptions
 	options.answersPath = flags.String("answers", "", "version 1 YAML/JSON install answers; explicit flags override scalar answers")
 	options.yes = flags.Bool("yes", false, "confirm the reviewed install on the selected kubeconfig context")
+	options.plan = flags.Bool("plan", false, "inspect the selected cluster and preflight checks without installing")
 	options.verify = flags.Bool("verify", false, "check an existing installation without changing it")
 	options.jsonOutput = flags.Bool("json", false, "emit the public install result and verification checks as JSON")
 	flags.StringVar(&cfg.AdminSSHPublicKeyPath, "admin-ssh-public-key", "", "local SSH public key for the first admin uplink (file or - for stdin; never a private key)")
@@ -237,6 +239,15 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	deps := installer.InstallDeps{Output: output, Input: input}
 	if *options.answersPath != "" {
 		deps.IsTerminal = func() bool { return false }
+	}
+	if *options.plan && *options.verify {
+		return usageError(errors.New("choose --plan or --verify"))
+	}
+	if *options.plan {
+		if err := cfg.Validate(); err != nil {
+			return usageError(err)
+		}
+		return installer.PrintPlan(ctx, *cfg, deps, *options.jsonOutput)
 	}
 	if *options.verify {
 		return installer.PrintVerification(ctx, *cfg, deps, *options.jsonOutput)

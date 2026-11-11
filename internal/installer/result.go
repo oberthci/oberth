@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -52,19 +53,20 @@ func PrintReviewJSON(w io.Writer, cfg Config) error {
 }
 
 type InstallResult struct {
-	SecretsValues []string       `json:"secrets_values,omitempty"`
-	Review        *InstallReview `json:"review,omitempty"`
-	Version       int            `json:"version"`
-	OK            bool           `json:"ok"`
-	Context       string         `json:"context"`
-	ServerURL     string         `json:"server_url,omitempty"`
-	MCPURL        string         `json:"mcp_url,omitempty"`
-	GitURL        string         `json:"git_url,omitempty"`
-	CAPin         string         `json:"ca_sha256,omitempty"`
-	FirstUplink   string         `json:"first_uplink,omitempty"`
-	SecretsFile   string         `json:"secrets_file,omitempty"`
-	SecretsSHA256 string         `json:"secrets_sha256,omitempty"`
-	Checks        []CheckResult  `json:"checks"`
+	Cluster       *ClusterIdentity `json:"cluster,omitempty"`
+	SecretsValues []string         `json:"secrets_values,omitempty"`
+	Review        *InstallReview   `json:"review,omitempty"`
+	Version       int              `json:"version"`
+	OK            bool             `json:"ok"`
+	Context       string           `json:"context"`
+	ServerURL     string           `json:"server_url,omitempty"`
+	MCPURL        string           `json:"mcp_url,omitempty"`
+	GitURL        string           `json:"git_url,omitempty"`
+	CAPin         string           `json:"ca_sha256,omitempty"`
+	FirstUplink   string           `json:"first_uplink,omitempty"`
+	SecretsFile   string           `json:"secrets_file,omitempty"`
+	SecretsSHA256 string           `json:"secrets_sha256,omitempty"`
+	Checks        []CheckResult    `json:"checks"`
 }
 
 func (r *InstallResult) check(code string, ok bool, remedy string) {
@@ -122,8 +124,16 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 		}
 	}
 	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run}
-	deps, err = configureClientEndpoint(ctx, cfg.Namespace, cfg.ServiceType, deps)
-	r.check("service", err == nil, "Restore the Oberth Service and Kubernetes read permissions.")
+	identity := publicClusterIdentity(cfg, config, selected)
+	r.check("cluster_ca", identity.CAPin != "" && !config.Insecure, "Use a kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
+	preflightDeps := deps
+	preflightDeps.RunCommand = host.RunCommand
+	inspectClusterPreflight(ctx, cfg, preflightDeps, &identity, &r)
+	r.Cluster = &identity
+	service, serviceErr := kube.CoreV1().Services(cfg.Namespace).Get(ctx, "oberth", metav1.GetOptions{})
+	deps.ClientServiceType = cfg.ServiceType
+	deps = WithServiceEndpoint(service, cfg.Namespace, deps)
+	r.check("service", serviceErr == nil, "Restore the Oberth Service and Kubernetes read permissions.")
 	deps = withClientPorts(cfg, deps)
 	ssh, https := clientPorts(deps)
 	address := clientReachableHost(deps)
@@ -133,8 +143,8 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	deployment, err := kube.AppsV1().Deployments(cfg.Namespace).Get(ctx, "oberth", metav1.GetOptions{})
 	ready := err == nil && deployment.Status.ReadyReplicas > 0 && deployment.Spec.Replicas != nil && deployment.Status.ReadyReplicas >= *deployment.Spec.Replicas
 	r.check("deployment_ready", ready, "Check Oberth pod events, unseal OpenBao, and finish upstream registration.")
-	upstreams, err := listUpstreams(ctx, cfg, deps)
-	r.check("upstream", err == nil && len(upstreams) > 0, "Register the upstream deploy public key at the forge, then rerun upstream add and upstream list --check.")
+	upstreamOutput, upstreamErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "upstream", "list", "--check")...)
+	r.check("upstream", upstreamErr == nil && verifiedUpstreams(upstreamOutput), "Register the upstream deploy public key at the forge, then rerun upstream add and upstream list --check.")
 	caPEM, err := serverCACertificate(ctx, cfg, deps)
 	ca, parseErr := parseCertificatePEM(caPEM)
 	caOK := err == nil && parseErr == nil
@@ -194,6 +204,11 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
 		result = VerifyInstall(ctx, cfg, deps)
 	}
+	if errors.Is(installErr, errInstallPreflight) {
+		plan := PlanInstall(ctx, cfg, deps)
+		result.Checks = plan.Checks
+		result.Cluster = &plan.Identity
+	}
 	review := Review(cfg)
 	result.Review = &review
 	result.FirstUplink = identity
@@ -213,4 +228,32 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 		return errors.New("install did not pass all checks; follow the reported remedies")
 	}
 	return nil
+}
+
+// The CLI's tabwriter aligns AUTH with its header. Require a recognized
+// successful probe; registration alone does not prove the forge still works.
+func verifiedUpstreams(raw []byte) bool {
+	authAt, rows := -1, 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if authAt < 0 {
+			if fields[0] == "NAME" {
+				authAt = strings.Index(line, "AUTH")
+			}
+			continue
+		}
+		if len(fields) < 2 || len(line) <= authAt {
+			return false
+		}
+		status := strings.TrimSpace(line[authAt:])
+		healthy := status == "ok" || (strings.HasPrefix(status, "ok (read ") && strings.HasSuffix(status, ")")) || (fields[1] != "ssh" && status == "-")
+		if !healthy {
+			return false
+		}
+		rows++
+	}
+	return rows > 0
 }

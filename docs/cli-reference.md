@@ -480,6 +480,8 @@ Flags:
         OpenBao namespace (default: openbao)
   -organization string
         upstream organization
+  -plan
+        inspect the selected cluster and preflight checks without installing
   -push-banner-url string
         push feedback URL; omitted preserves the live URL, explicit empty clears it
   -rekor-chart-version string

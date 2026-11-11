@@ -63,3 +63,41 @@ boolean `ok`, and `remedy` for failures. Failed checks return a nonzero exit.
 Tokens and subprocess diagnostics never enter this response. For a remote
 install, copy the recovery file through the authenticated SSH channel directly
 into the user's chosen secure destination, never into tool output.
+
+## Cluster plan and preflight
+
+Run `oberth install --plan --json --context selected-context` before confirming
+installation. The version 1 plan includes `identity.files`, `context`,
+`api_server`, `ca_sha256`, `distribution` and node names, architectures,
+Kubernetes versions and available filesystem bytes. It reads cluster state;
+it does not install prerequisites, create a cluster, write secrets or deploy
+anything. `--verify --json` includes the same cluster preflight checks.
+
+An explicit `--kubeconfig` selects one file. Otherwise client-go merges all
+files in `KUBECONFIG` (colon-separated on Unix), then uses the default user
+kubeconfig when that variable is unset. An explicit context selects that
+context in the merged configuration; an unknown name is refused. Several
+contexts require a choice. The selected context is also pinned for Helm and
+kubectl. Remote and local clusters have the same Review/`--yes` gate.
+
+When no user kubeconfig exists but `/etc/rancher/k3s/k3s.yaml` does, the installer
+stops and gives this operator-run command:
+
+```sh
+mkdir -p "$HOME/.kube" && chmod 700 "$HOME/.kube" && sudo install -m 600 -o "$(id -u)" -g "$(id -g)" /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
+```
+
+The original server address stays at `127.0.0.1`. Rerun the plan after copying.
+No file is made world-readable. macOS also uses the selected kubeconfig;
+creating kind requires an explicit `--create-kind`.
+
+Preflight fails with a remedy for unavailable prerequisites, unknown cluster
+CA, unreadable or unready nodes, unsupported architecture, less than 1 GiB
+available node filesystem space, missing default StorageClass, and unknown
+NetworkPolicy enforcement. Free space comes from the kubelet stats API, not
+from capacity or allocatable estimates; unreadable stats fail the check.
+NetworkPolicy detection recognizes ready Calico, Cilium and kube-router
+DaemonSets or the k3s built-in controller when node arguments do not disable
+it. This checks controller configuration, not a traffic isolation probe;
+the bootstrap acceptance cell tests traffic behavior. An unfamiliar controller
+fails closed and needs explicit support before its plan can pass.

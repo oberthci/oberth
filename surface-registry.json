@@ -395,6 +395,14 @@
     "flag:verify": {
       "doc_anchor": "docs/install-answers.md",
       "test_ref": "internal/installer/answers_result_test.go TestAnswersStrictRoundTrip"
+    },
+    "flag:plan": {
+      "doc_anchor": "docs/install-answers.md#cluster-plan-and-preflight",
+      "test_ref": "internal/installer/cluster_plan_test.go TestPlanReportsSelectedRemoteClusterWithoutAnotherGate"
+    },
+    "env:KUBECONFIG": {
+      "doc_anchor": "docs/install-answers.md#cluster-plan-and-preflight",
+      "test_ref": "internal/installer/cluster_plan_test.go TestMultifileKubeconfigKeepsExplicitContext"
     }
   }
 }

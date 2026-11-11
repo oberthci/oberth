@@ -245,7 +245,7 @@ func executeWithCredentials(ctx context.Context, cfg Config, deps InstallDeps) (
 func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFileSink bool) error {
 	contextName := cfg.ContextName
 	kindClusterName := ""
-	if cfg.CreateKind || (deps.GOOS == "darwin" && cfg.KubeconfigPath == "" && cfg.ContextName == "") {
+	if cfg.CreateKind {
 		kindClusterName = KindClusterName
 		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForKind(cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 		cacheRoot, err := deps.UserCacheDir()
@@ -311,6 +311,23 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
 
+	if !cfg.DryRun {
+		preflight := InstallResult{OK: true}
+		preflightConfig := cfg
+		// RunCommand already carries an explicit kubeconfig, if supplied.
+		preflightConfig.KubeconfigPath = ""
+		inspectClusterPreflight(ctx, preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: deps.RunCommand}, &ClusterIdentity{}, &preflight)
+		if !preflight.OK {
+			var failures []string
+			for _, check := range preflight.Checks {
+				if !check.OK {
+					failures = append(failures, check.Code+": "+check.Remedy)
+				}
+			}
+			return fmt.Errorf("%w:\n%s", errInstallPreflight, strings.Join(failures, "\n"))
+		}
+	}
+
 	// Wire the production ReadPassword and MakeRaw defaults when the session
 	// is interactive: x/term.ReadPassword and x/term.MakeRaw on the stdin fd.
 	// Non-interactive sessions leave both nil (the callers check isInteractive
@@ -359,10 +376,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 	if cfg.KubeconfigPath != "" {
 		helmKubeArgs = []string{"--kubeconfig", cfg.KubeconfigPath, "--kube-context", selectedContext}
 	} else {
-		helmKubeArgs, _, err = ResolveHelmKubeArgs(contextName)
-		if err != nil {
-			return fmt.Errorf("resolve Helm cluster target: %w", err)
-		}
+		helmKubeArgs = []string{"--kube-context", selectedContext}
 	}
 	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
 
@@ -1018,11 +1032,6 @@ func oberthChartValuesArgs(cfg Config) []string {
 	// promise, and fails outright when the binary's version is not a published
 	// chart version, which is true of every fork build.
 	return []string{"show", "values", oberthChart(cfg)}
-}
-
-func kindNameFromContext(contextName string) (string, bool) {
-	name, found := strings.CutPrefix(contextName, "kind-")
-	return name, found && name != ""
 }
 
 func commandOutputSuffix(output []byte) string {

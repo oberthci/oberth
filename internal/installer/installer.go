@@ -788,7 +788,7 @@ func (cfg *Config) Validate() error {
 // publishes on 127.0.0.1 only, so a kind install advertises localhost.
 func resolveInstallClientHost(cfg *Config, deps *Deps, cluster ClusterInfo) {
 	deps.ClientHost = cfg.ClientHost
-	if deps.ClientHost != "" && cluster.Engine == "kind" && !isLoopbackHost(deps.ClientHost) {
+	if deps.ClientHost != "" && cfg.CreateKind && !isLoopbackHost(deps.ClientHost) {
 		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
 		deps.ClientHost = "localhost"
 		cfg.ClientHost = "localhost"
@@ -814,13 +814,8 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 	if deps.KindClusterName != "" {
 		cluster.Engine = "kind"
-	} else if cluster.Engine == "kind" {
-		clusterName, ok := kindNameFromContext(cluster.Context)
-		if !ok {
-			return fmt.Errorf("kind context %q does not use the expected kind-<name> format", cluster.Context)
-		}
-		deps.KindClusterName = clusterName
 	}
+
 	// Any cluster the kubeconfig reaches is a valid target; the install names
 	// the one it acts on before anything else.
 	_, _ = fmt.Fprintf(deps.Output, "Target: %s (%s)\n", cluster.Context, cluster.Server)
@@ -2194,7 +2189,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 	step := 1
 
 	if len(kindConfig) > 0 {
-		_, _ = fmt.Fprintf(w, "macOS detected: use kind cluster %q (context %q), not k3s or k0s.\n\n", KindClusterName, KindContextName)
+		_, _ = fmt.Fprintf(w, "Requested kind cluster %q (context %q).\n\n", KindClusterName, KindContextName)
 		_, _ = fmt.Fprintf(w, "  %d. Check prerequisites\n", step)
 		_, _ = fmt.Fprintln(w, "     Docker Desktop or OrbStack is installed and running (docker info)")
 		_, _ = fmt.Fprintln(w, "     kind is installed (brew install kind)")
@@ -2216,11 +2211,8 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		_, _ = fmt.Fprintf(w, "     Verify the signed release %s (release.json, chart and their signature bundles, %s) against the compiled-in release key; refuse on any mismatch\n",
 			displayVersion(cfg.ChartVersion), releaseSourceText(cfg.Release))
 	}
-	if cluster.Engine == "kind" {
+	if cfg.CreateKind {
 		clusterName := KindClusterName
-		if parsed, ok := kindNameFromContext(cluster.Context); ok {
-			clusterName = parsed
-		}
 		showArgs := oberthChartValuesArgs(cfg)
 		_, _ = fmt.Fprintf(w, "\n  %d. Resolve, pull, and load the chart images into kind\n", step)
 		printReleaseVerification()
@@ -2418,13 +2410,12 @@ const k3sKubeconfigPath = "/etc/rancher/k3s/k3s.yaml"
 
 // LoadKubeConfigForContext loads Kubernetes client configuration from standard
 // rules and, when set, selects the exact requested context. When the standard
-// load fails and no explicit context or KUBECONFIG is set, it falls back to the
-// k3s kubeconfig at /etc/rancher/k3s/k3s.yaml.
+// user configuration is absent, it reports the private copy command for k3s.
 func LoadKubeConfigForContext(contextName string, output io.Writer) (kubernetes.Interface, *rest.Config, string, error) {
 	return loadKubeConfigForContext(contextName, k3sKubeconfigPath, output)
 }
 
-// loadKubeConfigForContext is the testable core: the k3s fallback path is
+// loadKubeConfigForContext is the testable core: the fresh k3s detection path is
 // injected so tests can point it at a temp file or an unreadable path, and
 // the standard loading rules are injected so tests can simulate an empty
 // default search path (clientcmd.RecommendedHomeFile is a package-level
@@ -2439,32 +2430,10 @@ func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextN
 	if err == nil {
 		return client, restConfig, selectedContext, nil
 	}
-	// Standard kubeconfig load failed. Fall back to the k3s path only when
-	// no explicit context was requested and $KUBECONFIG is not set — an
-	// explicit KUBECONFIG, even pointing at a missing file, is the user's
-	// stated intent and must not be silently overridden.
-	if contextName != "" || os.Getenv("KUBECONFIG") != "" || k3sFallbackPath == "" {
-		return nil, nil, "", err
+	if fresh := freshK3sHint(rules, k3sFallbackPath); fresh != nil {
+		return nil, nil, "", fresh
 	}
-	// Probe readability before committing to the fallback. k3s defaults
-	// k3s.yaml to 0600 root, so a non-root user gets EACCES; returning
-	// that as a new error would hide the original "no configuration" message.
-	probe, openErr := os.Open(k3sFallbackPath) // #nosec G304 -- fixed or test-injected path
-	if openErr != nil {
-		return nil, nil, "", err
-	}
-	_ = probe.Close()
-	// Load k3s.yaml as the sole source via ExplicitPath so that its
-	// "default" context cannot hijack selection in a merged config.
-	k3sRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: k3sFallbackPath}
-	client, restConfig, selectedContext, k3sErr := loadFromRules(k3sRules, "")
-	if k3sErr != nil {
-		return nil, nil, "", k3sErr
-	}
-	if output != nil {
-		_, _ = fmt.Fprintf(output, "Using k3s kubeconfig at %s\n", k3sFallbackPath)
-	}
-	return client, restConfig, selectedContext, nil
+	return nil, nil, "", err
 }
 
 func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string) (kubernetes.Interface, *rest.Config, string, error) {
@@ -2496,56 +2465,23 @@ func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string
 // make a helm invocation target the same cluster that LoadKubeConfigForContext
 // would select, plus a human-readable description of the resolved target.
 //
-// When contextName is given, the returned args contain only --kube-context.
-// When no context is given, this function mirrors the fallback chain in
-// LoadKubeConfigForContext: standard client-go rules first, then the k3s
-// fallback at /etc/rancher/k3s/k3s.yaml. When the k3s fallback is used,
-// the returned args include --kubeconfig so helm reads the same file.
+// The selected context is pinned in Helm's arguments. KUBECONFIG keeps its
+// full file list; a root-owned k3s file is never selected implicitly.
 func ResolveHelmKubeArgs(contextName string) (helmArgs []string, target string, err error) {
 	return resolveHelmKubeArgs(clientcmd.NewDefaultClientConfigLoadingRules(), contextName, k3sKubeconfigPath)
 }
 
 // resolveHelmKubeArgs is the testable core of ResolveHelmKubeArgs.
 func resolveHelmKubeArgs(rules *clientcmd.ClientConfigLoadingRules, contextName, k3sFallbackPath string) ([]string, string, error) {
-	if contextName != "" {
-		return []string{"--kube-context", contextName}, "context " + contextName, nil
-	}
-
-	// Try standard client-go loading rules (parse only, no client creation).
-	overrides := &clientcmd.ConfigOverrides{}
-	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
-	rawConfig, err := config.RawConfig()
-	if err == nil {
-		resolved := rawConfig.CurrentContext
-		if resolved == "" {
-			resolved = "(default)"
-		}
-		return nil, "context " + resolved, nil
-	}
-
-	// Standard rules failed. Try k3s fallback under the same conditions as
-	// LoadKubeConfigForContext: no explicit KUBECONFIG and the k3s file is
-	// readable.
-	if os.Getenv("KUBECONFIG") != "" || k3sFallbackPath == "" {
+	_, _, selected, err := loadKubeConfigWithRules(rules, contextName, k3sFallbackPath, io.Discard)
+	if err != nil {
 		return nil, "", err
 	}
-	probe, openErr := os.Open(k3sFallbackPath) // #nosec G304 -- fixed or test-injected path
-	if openErr != nil {
-		return nil, "", err
+	args := []string{"--kube-context", selected}
+	if rules.ExplicitPath != "" {
+		args = append([]string{"--kubeconfig", rules.ExplicitPath}, args...)
 	}
-	_ = probe.Close()
-	k3sRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: k3sFallbackPath}
-	k3sConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(k3sRules, &clientcmd.ConfigOverrides{})
-	k3sRaw, k3sErr := k3sConfig.RawConfig()
-	if k3sErr != nil {
-		return nil, "", k3sErr
-	}
-	resolved := k3sRaw.CurrentContext
-	if resolved == "" {
-		resolved = "(default)"
-	}
-	return []string{"--kubeconfig", k3sFallbackPath},
-		fmt.Sprintf("context %s (from %s)", resolved, k3sFallbackPath), nil
+	return args, "context " + selected, nil
 }
 
 // pushBannerHost returns the first usable host for the push banner URL.

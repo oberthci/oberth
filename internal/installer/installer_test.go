@@ -28,7 +28,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
-	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 )
 
@@ -104,13 +103,13 @@ func TestExecuteDarwinDryRunPrintsKindAndHelmCommands(t *testing.T) {
 	// The composable install flags gate every optional stack, so the full
 	// macOS plan (kind + images + OpenBao + Oberth) requires the secret-store
 	// opt-in exactly as the Linux flow does.
-	if err := Execute(context.Background(), Config{DryRun: true, BinaryVersion: "v0.10.55", InstallSecretStore: true}, deps); err != nil {
+	if err := Execute(context.Background(), Config{CreateKind: true, DryRun: true, BinaryVersion: "v0.10.55", InstallSecretStore: true}, deps); err != nil {
 		t.Fatal(err)
 	}
 
 	text := output.String()
 	assertSubstringsInOrder(t, text, []string{
-		`macOS detected: use kind cluster "oberth"`,
+		`Requested kind cluster "oberth"`,
 		"cat <<'OBERTH_KIND_CONFIG' | kind create cluster --name oberth --config=-",
 		"containerPort: 30022",
 		"hostPort: 30443",
@@ -337,7 +336,7 @@ func TestExecuteDarwinSelectsOberthKindContext(t *testing.T) {
 		},
 	}
 
-	err := Execute(context.Background(), Config{}, deps)
+	err := Execute(context.Background(), Config{CreateKind: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "stop after context selection") {
 		t.Fatalf("error = %v, want injected loader stop", err)
 	}
@@ -823,87 +822,18 @@ func TestKindNodePlatformArch(t *testing.T) {
 	}
 }
 
-func TestExecuteDarwinNodeListFailureStillLoadsKindImages(t *testing.T) {
-	t.Parallel()
-
-	ready := corev1.ConditionTrue
-	kubeClient := fake.NewClientset(
-		&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "kube-public"},
-			Data:       map[string]string{"ca.crt": "test-ca"},
-		},
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "openbao-0", Namespace: DefaultOpenBaoNamespace, Labels: map[string]string{"app.kubernetes.io/instance": "openbao"}},
-			Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: ready}}},
-		},
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "oberth-0", Namespace: DefaultNamespace, Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}},
-			Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: ready}}},
-		},
-		readyArgoControllerPod(),
-	)
-	kubeClient.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
-		return true, nil, errors.New("node discovery unavailable")
-	})
-
-	serverImage := testServerRepo + "@" + testServerIndexDigest
-	serverLocal := planKindDigestImage(serverImage).loadRef
-	var hostCommands []string
-	deps := InstallDeps{
-		Output: io.Discard,
-		GOOS:   "darwin",
-		UserCacheDir: func() (string, error) {
-			return "/Users/alice/Library/Caches", nil
-		},
-		LookPath: func(name string) (string, error) {
-			return "/usr/local/bin/" + name, nil
-		},
-		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-			command := strings.Join(append([]string{name}, args...), " ")
-			switch command {
-			case "kind get clusters":
-				return []byte(KindClusterName + "\n"), nil
-			case "docker inspect oberth-control-plane":
-				return compatibleKindInspectJSON(t, "/Users/alice/Library/Caches"), nil
-			case "kind load docker-image --name oberth " + serverLocal:
-				hostCommands = append(hostCommands, command)
-			case "kind get nodes --name oberth":
-				return []byte("oberth-control-plane\n"), nil
-			}
-			if name == "kubectl" && strings.Contains(command, "upstream list") {
-				// One upstream is already registered, so the finish path waits
-				// for the Ready pod instead of starting onboarding.
-				return []byte("NAME   KIND   URL                              KEY FINGERPRINT\ncodeberg   ssh   ssh://git@codeberg.org/acme   SHA256:x\n"), nil
-			}
-			return nil, nil
-		},
-		IsTerminal: func() bool { return false },
-		LoadKubeConfig: func(contextName string) (kubernetes.Interface, *rest.Config, string, error) {
-			if contextName != KindContextName {
-				t.Fatalf("selected context = %q, want %q", contextName, KindContextName)
-			}
-			return kubeClient, &rest.Config{Host: "https://127.0.0.1:6443"}, contextName, nil
-		},
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			// Kube args (--kube-context, --kubeconfig) may be prepended by
-			// HelmWithKubeArgs; match on substrings instead of exact prefixes.
-			command := strings.Join(args, " ")
-			switch {
-			case strings.Contains(command, "list -n "):
-				return []byte("[]"), nil
-			case strings.Contains(command, "show values "):
-				return []byte("image:\n  ref: " + serverImage + "\n"), nil
-			default:
-				return nil, nil
-			}
-		},
+func TestExecuteRefusesNodePreflightBeforeInstalling(t *testing.T) {
+	kube := fake.NewClientset()
+	deps := InstallDeps{Output: io.Discard, GOOS: "linux", LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+		return kube, &rest.Config{Host: "https://api.example.test"}, "chosen", nil
+	}, RunHelm: func(context.Context, []string) ([]byte, error) {
+		t.Fatal("Helm called before preflight passed")
+		return nil, nil
+	}}
+	err := Execute(context.Background(), Config{ContextName: "chosen"}, deps)
+	if err == nil || !strings.Contains(err.Error(), "nodes:") {
+		t.Fatal("missing nodes were not refused")
 	}
-
-	deps.ReleaseGetter, deps.releaseKey = signedReleaseServer(t, "0.10.55", serverImage)
-	if err := Execute(context.Background(), Config{BinaryVersion: "v0.10.55"}, deps); err != nil {
-		t.Fatal(err)
-	}
-	assertSliceEqual(t, hostCommands, []string{"kind load docker-image --name oberth " + serverLocal})
 }
 
 func TestPrepareKindImagesExplainsGARAuthentication(t *testing.T) {

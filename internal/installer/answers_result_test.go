@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
@@ -203,13 +204,16 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 		t.Fatal(err)
 	}
 	replicas := int32(1)
-	kube := fake.NewClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}})
+	kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}})
 	deps := InstallDeps{LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-		return kube, &rest.Config{Host: "https://127.0.0.1:6443"}, "selected", nil
+		return kube, &rest.Config{Host: "https://127.0.0.1:6443", TLSClientConfig: rest.TLSClientConfig{CAData: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})}}, "selected", nil
 	}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 		command := strings.Join(args, " ")
+		if strings.Contains(command, "stats/summary") {
+			return preflightStats(context.Background(), nil, "kubectl")
+		}
 		if strings.Contains(command, "upstream list") {
-			return []byte("NAME KIND URL\nforge ssh ssh://git@forge.example/acme\n"), nil
+			return []byte("NAME  KIND URL                           AUTH\nforge ssh  ssh://git@forge.example/acme  ok\n"), nil
 		}
 		if strings.Contains(command, "admin read-file") {
 			return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), nil
