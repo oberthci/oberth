@@ -320,6 +320,9 @@ type Config struct {
 	// AdminSSHPublicKeyPath explicitly provisions the first admin from a public
 	// key generated on the client machine. '-' reads the key from stdin.
 	AdminSSHPublicKeyPath string
+	AdminCSRPath          string
+	AdminBearer           bool
+	adminCSR              []byte
 	SecretsAgeRecipient   string
 	adminSSHPublicKey     []byte
 	uplinkOnboarded       bool

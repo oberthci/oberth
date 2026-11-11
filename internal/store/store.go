@@ -2060,7 +2060,7 @@ SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.a
        t.id, t.name, t.digest, t.created_at, t.activated_at, t.last_used_at, t.revoked_at, t.expires_at
 FROM token_credentials t
 JOIN uplinks u ON u.token_credential_id = t.id
-WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL
+WHERE t.certificate_only=0 AND t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL
 AND (t.expires_at IS NULL OR t.expires_at > ?)`, digest, unixNano(s.now()))
 	var value model.AuthenticatedUplink
 	var uplinkCreated, uplinkUpdated, tokenCreated int64

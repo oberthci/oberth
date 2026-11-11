@@ -2,15 +2,22 @@ package service
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/auth"
+	"github.com/oberthci/oberth/internal/clientcert"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type Authenticator struct {
-	source UplinkAuthenticator
+	source       UplinkAuthenticator
+	Certificates interface {
+		UplinkByClientPin(context.Context, string) (model.Uplink, error)
+	}
 }
 
 func NewAuthenticator(source UplinkAuthenticator) (*Authenticator, error) {
@@ -35,4 +42,18 @@ func (authenticator *Authenticator) Authenticate(ctx context.Context, token stri
 	}
 	return api.Actor{Identity: identity, Fingerprint: fingerprint, Admin: authenticated.Admin, TokenCredentialID: authenticated.TokenCredential.ID,
 		Scope: append([]string(nil), authenticated.Scope...)}, nil
+}
+
+func (a *Authenticator) AuthenticateCertificate(ctx context.Context, cert *x509.Certificate) (api.Actor, error) {
+	if a.Certificates == nil {
+		return api.Actor{}, api.ErrInvalidToken
+	}
+	u, err := a.Certificates.UplinkByClientPin(ctx, clientcert.Pin(cert))
+	if errors.Is(err, store.ErrNotFound) {
+		return api.Actor{}, api.ErrInvalidToken
+	}
+	if err != nil {
+		return api.Actor{}, err
+	}
+	return api.Actor{Identity: u.Identity, Fingerprint: u.Fingerprint, Admin: u.Admin, Scope: u.Scope, AuthMethod: "cert"}, nil
 }

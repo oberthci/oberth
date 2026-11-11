@@ -403,6 +403,54 @@
     "env:KUBECONFIG": {
       "doc_anchor": "docs/install-answers.md#cluster-plan-and-preflight",
       "test_ref": "internal/installer/cluster_plan_test.go TestMultifileKubeconfigKeepsExplicitContext"
+    },
+    "flag:bearer": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/clientcert/cert_test.go TestIssuancePolicy"
+    },
+    "flag:csr": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/clientcert/cert_test.go TestIssuancePolicy"
+    },
+    "flag:output-dir": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "cmd/oberth/client_renew_test.go TestClientRenewRotatesPairWithoutBearer"
+    },
+    "flag:ttl": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/clientcert/cert_test.go TestIssuancePolicy"
+    },
+    "flag:admin-bearer": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/installer/client_cert_test.go TestFirstAdminCSRDoesNotMintBearer"
+    },
+    "flag:admin-csr": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/installer/client_cert_test.go TestFirstAdminCSRDoesNotMintBearer"
+    },
+    "flag:client-cert": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "cmd/oberth/client_renew_test.go TestClientRenewRotatesPairWithoutBearer"
+    },
+    "flag:client-key": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "cmd/oberth/client_renew_test.go TestClientRenewRotatesPairWithoutBearer"
+    },
+    "flag:database": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/clientcert/cert_test.go TestIssuancePolicy"
+    },
+    "flag:fingerprint": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/clientcert/cert_test.go TestIssuancePolicy"
+    },
+    "env:OBERTH_CLIENT_CERT": {
+      "doc_anchor": "docs/client-certificates.md#cli-and-renewal",
+      "test_ref": "internal/client/connection_test.go TestCertificateConnectionSelection"
+    },
+    "env:OBERTH_CLIENT_KEY": {
+      "doc_anchor": "docs/client-certificates.md#cli-and-renewal",
+      "test_ref": "internal/client/connection_test.go TestCertificateConnectionSelection"
     }
   }
 }

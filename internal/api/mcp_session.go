@@ -436,13 +436,9 @@ func (server *Server) handleMCPEventStream(writer http.ResponseWriter, request *
 // reauthorizeStream re-checks the bearer token so a revoked or narrowed
 // credential cannot keep receiving events on an old stream.
 func (server *Server) reauthorizeStream(request *http.Request, original Actor) bool {
-	token, ok := bearerToken(request.Header.Values("Authorization"))
-	if !ok {
-		return false
-	}
 	authCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
 	defer cancel()
-	fresh, err := server.auth.Authenticate(authCtx, token)
+	fresh, err := server.authenticateRequest(authCtx, request)
 	return err == nil && strings.TrimSpace(fresh.Identity) != "" && fresh.Identity == original.Identity && fresh.Fingerprint == original.Fingerprint &&
 		fresh.Admin == original.Admin && slices.Equal(fresh.Scope, original.Scope)
 }

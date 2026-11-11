@@ -990,7 +990,7 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 93 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 95 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
   assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (any uplink whose scope covers the run's repository, or an admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since`, `events_wait` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
@@ -998,7 +998,8 @@ containing CI and real workload qualification remain separately required.
   `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
   `issue_unlock`, `issue_close_many`,
   secret-access `access_list`/`access_allow`/`access_revoke`, unscoped-admin-only
-  `uplink_list`/`uplink_revoke`/`uplink_rotate`,
+  `uplink_cert`, `uplink_list`/`uplink_revoke`/`uplink_rotate`,
+  certificate-authenticated `client_renew`,
   `access_dismiss`,
   admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
@@ -2832,6 +2833,7 @@ and v2 backup-and-replace semantics are unchanged. See
 | `20261104120123-concurrency-limits-971dc11f4a5530e149fd22d0d6847b46` | YAML concurrency limits | Persist each run's limit and accepted pipeline definitions; seed legacy groups at limit 1 | Database restore |
 | `20261104022000-migration-ids` | Migration IDs | Add/backfill unique IDs in the existing ledger, preserving integer receipts and timestamps; future definitions load from separate SQL files | Database restore |
 | `20261104130000-queue-cap` | Optional queue cap | Persist queueCap.maxNotStarted (default 0/off) and FIFO deferred branch receives; preserve the frozen integer catalog | Database restore |
+| `20261111190000-client-certificates` | Client certificate bindings | Public SPKI pins and certificate-only uplink lifecycle records | Database restore |
 | `YYYYMMDDHHMMSS-<slug>-<random>` | Future migrations | Per-file `Purpose` and `Rollback` contract in `internal/store/migrations/`; no shared number allocation | Per-file contract (database restore by default) |
 
 Timestamp migration `20261104190000-priority-four-classes`: extend execution-priority vocabulary while preserving legacy receipts; rollback restores the pre-upgrade backup.

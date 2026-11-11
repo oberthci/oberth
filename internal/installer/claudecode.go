@@ -26,7 +26,7 @@ import (
 // deployment's CA). Both go through SetupClaudeCode, which does two things:
 // it makes Claude Code trust the CA, and it installs and configures the
 // Oberth plugin (claude-plugin/ of this repository). The plugin carries the
-// MCP server entry, so no user-scope server is registered here.
+// skills; a configured user MCP entry is registered separately.
 //
 // The CA trust is laid out exactly as the plugin's own /oberth:connect
 // (claude-plugin/scripts/trust) lays it out, so either of the two can run
@@ -71,6 +71,8 @@ var ErrClaudeCodeMissing = errors.New("claude is not on PATH; install Claude Cod
 
 // ClaudeCodeSetup is what SetupClaudeCode configures.
 type ClaudeCodeSetup struct {
+	ClientCert string
+	ClientKey  string
 	// URL is the MCP endpoint, ending in /mcp.
 	URL string
 	// CA is the deployment's CA certificate: a PEM file path or inline PEM.
@@ -80,10 +82,10 @@ type ClaudeCodeSetup struct {
 	// Marketplace is the plugin marketplace source; empty selects
 	// DefaultClaudePluginMarketplace.
 	Marketplace string
-	// Token returns the uplink token for the plugin's credential option, or
+	// Token returns the uplink token for explicit bearer configuration, or
 	// is nil when this machine has none. It is called only when the token
 	// is about to be saved, and its value goes to Claude Code on standard
-	// input: never into an argument list, a file or the output.
+	// input resolver: never into an argument list or the output.
 	Token func(context.Context) (string, error)
 	// ReplaceToken saves Token even when the plugin already holds one.
 	ReplaceToken bool
@@ -174,6 +176,11 @@ func SetupClaudeCode(ctx context.Context, deps Deps, setup ClaudeCodeSetup) ([]C
 	if plugin.Target != "" {
 		changes = append(changes, plugin)
 	}
+	mcp, err := configureClaudeMCP(ctx, setup)
+	if err != nil {
+		problems = append(problems, err)
+	}
+	changes = append(changes, mcp)
 	return changes, errors.Join(problems...)
 }
 
@@ -206,7 +213,7 @@ type pluginRunner func(ctx context.Context, input []byte, args ...string) ([]byt
 
 // ensureClaudePlugin installs the plugin when it is missing, enables it when
 // it is disabled, and saves the options that differ: the MCP URL, the CA pin
-// and, when this machine has one, the token.
+// and its CA pin. Credential transport is configured separately.
 func ensureClaudePlugin(ctx context.Context, deps Deps, setup ClaudeCodeSetup, pin string) (ClaudeCodeChange, error) {
 	change := ClaudeCodeChange{Target: "Claude Code plugin " + ClaudePluginID, Action: "no change"}
 	marketplace := setup.Marketplace
@@ -217,7 +224,7 @@ func ensureClaudePlugin(ctx context.Context, deps Deps, setup ClaudeCodeSetup, p
 	if pin != "" {
 		want["ca_pin"] = pin
 	}
-	tokenHint := "token: not saved; enter it with /plugin configure " + ClaudePluginID + " in Claude Code"
+	tokenHint := "Enroll a client certificate with /oberth:connect, or pass --token-file for bearer access."
 	if setup.DryRun {
 		change.Action = "would be installed or configured"
 		change.Details = []string{
@@ -228,7 +235,7 @@ func ensureClaudePlugin(ctx context.Context, deps Deps, setup ClaudeCodeSetup, p
 			change.Details = append(change.Details, "ca_pin: "+pin)
 		}
 		if setup.Token != nil {
-			change.Details = append(change.Details, "token: saved in Claude Code's credential store when the plugin holds none")
+			change.Details = append(change.Details, "bearer credential: saved in a private file for the configured MCP header helper")
 		} else {
 			change.Details = append(change.Details, tokenHint)
 		}
@@ -264,7 +271,7 @@ func ensureClaudePlugin(ctx context.Context, deps Deps, setup ClaudeCodeSetup, p
 		change.Details = append(change.Details, "enabled")
 	}
 
-	inputs, configured, err := claudePluginOptions(ctx, claude)
+	inputs, _, err := claudePluginOptions(ctx, claude)
 	if err != nil {
 		return change, err
 	}
@@ -275,18 +282,7 @@ func ensureClaudePlugin(ctx context.Context, deps Deps, setup ClaudeCodeSetup, p
 			change.Details = append(change.Details, key+": "+value)
 		}
 	}
-	switch {
-	case setup.Token != nil && (setup.ReplaceToken || !configured["token"]):
-		token, err := setup.Token(ctx)
-		if err != nil {
-			change.Details = append(change.Details, tokenHint+" ("+err.Error()+")")
-			break
-		}
-		values["token"] = token
-		change.Details = append(change.Details, "token: saved in Claude Code's credential store")
-	case !configured["token"]:
-		change.Details = append(change.Details, tokenHint)
-	}
+
 	if len(values) > 0 {
 		// Standard input, so the token reaches neither an argument list nor
 		// a file of ours.

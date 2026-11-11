@@ -604,7 +604,7 @@ func knownTool(name string) bool { return registeredToolNames()[name] }
 // with the server's refusal.
 var adminOnlyTools = map[string]bool{
 	"publication_abandon": true, "run_purge": true, "issue_unlock": true, "issue_close_many": true,
-	"uplink_list": true, "uplink_revoke": true, "uplink_rotate": true,
+	"uplink_cert": true, "uplink_list": true, "uplink_revoke": true, "uplink_rotate": true,
 	"access_dismiss": true, "access_allow": true, "access_revoke": true,
 	"workflow_capability_grant": true, "workflow_capability_revoke": true,
 	"resource_grant": true, "resource_revoke": true, "size_grant": true, "size_revoke": true,
@@ -780,6 +780,8 @@ func toolDefinitions() []map[string]any {
 		tool("issue_close_many", "Close 1..50 unique issues with a reason and per-ID results. Admin only; active locks remain enforced, one audit action per closure.", object(map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 1}, "minItems": 1, "maxItems": 50, "uniqueItems": true}, "reason": stringProperty("Nonempty closure reason, at most 4096 bytes")}, "ids", "reason")),
 		tool("issue_lock", "Acquire or renew the caller-owned five-minute issue lock.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		// Credential and grant lifecycle (#1105).
+		tool("uplink_cert", "Issue a client certificate for an existing uplink from a locally generated CSR. Unscoped admin only. EC P-256 or Ed25519; default 2160h, bounded to 1h–8760h. Returns only the public certificate.", object(map[string]any{"identity": stringProperty("Uplink identity"), "fingerprint": stringProperty("SSH fingerprint to disambiguate"), "csr": stringProperty("PEM certificate request"), "ttl": stringProperty("Certificate lifetime")}, "identity", "csr")),
+		tool("client_renew", "Renew the authenticated uplink client certificate using a new local CSR. Requires current certificate authentication. Old and new pins overlap; private keys stay local.", object(map[string]any{"csr": stringProperty("PEM certificate request"), "ttl": stringProperty("Certificate lifetime")}, "csr")),
 		tool("uplink_list", "List public uplink identities and usage. Unscoped admin only. No tokens are returned.", object(map[string]any{})),
 		tool("uplink_revoke", "Revoke an uplink SSH key and bearer immediately. Unscoped admin only; audited; the last active unscoped admin cannot be revoked.", object(map[string]any{"identity": stringProperty("Uplink identity"), "fingerprint": stringProperty("Exact key fingerprint, required when identity has several keys")}, "identity")),
 		tool("uplink_rotate", "Finish rotation to an already registered active replacement key with identical identity, admin status and scope, atomically revoking the selected old credential. Unscoped admin only. Issue the replacement through uplink add first; no key material crosses MCP.", object(map[string]any{"identity": stringProperty("Uplink identity"), "fingerprint": stringProperty("Old key fingerprint"), "replacement_fingerprint": stringProperty("Already issued replacement key fingerprint")}, "identity", "fingerprint", "replacement_fingerprint")),

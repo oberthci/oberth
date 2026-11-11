@@ -93,6 +93,22 @@ func (s *Store) appendAuditAction(ctx context.Context, execer auditExecer, spec 
 	if !json.Valid([]byte(spec.Details)) {
 		return model.AuditAction{}, fmt.Errorf("%w: audit details must be JSON", ErrInvalid)
 	}
+	if method := model.AuthMethod(ctx); method != "" {
+		var details map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(spec.Details), &details); err != nil || details == nil {
+			return model.AuditAction{}, fmt.Errorf("%w: audit details must be an object", ErrInvalid)
+		}
+		encodedMethod, err := json.Marshal(method)
+		if err != nil {
+			return model.AuditAction{}, err
+		}
+		details["auth_method"] = encodedMethod
+		encoded, err := json.Marshal(details)
+		if err != nil {
+			return model.AuditAction{}, err
+		}
+		spec.Details = string(encoded)
+	}
 	if previous, repeated, err := s.repeatedPinRotationDecision(ctx, execer, spec); err != nil {
 		return model.AuditAction{}, fmt.Errorf("read pin rotation audit decision: %w", err)
 	} else if repeated {

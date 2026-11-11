@@ -1013,7 +1013,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"sync_intervals", "token_credentials",
 		"trusted_applies",
 		"trusted_plans",
-		"uplink_scopes",
+		"uplink_client_pins", "uplink_scopes",
 		"uplinks",
 		"upstreams",
 		"vm_capacity_slots",
@@ -1077,7 +1077,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"trusted_plans_expiry_idx",
 		"trusted_plans_promotion_idx",
 		"trusted_plans_repo_idx",
-		"uplinks_token_credential_idx",
+		"uplink_client_pins_uplink_idx", "uplinks_token_credential_idx",
 		"vm_execution_capacity",
 		"vm_suite_resource_uid",
 	})
@@ -1176,7 +1176,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"issue_locks":                    {"issue_id", "owner", "acquired_at", "expires_at"},
 		"audit_actions":                  {"id", "actor", "action", "resource_type", "resource_id", "details", "previous_sha256", "sha256", "created_at"},
 		"audit_anchors":                  {"id", "audit_id", "audit_sha256", "tsa_url", "receipt", "anchored_at", "created_at"},
-		"token_credentials":              {"id", "name", "digest", "created_at", "last_used_at", "revoked_at", "activated_at", "expires_at"},
+		"token_credentials":              {"id", "name", "digest", "created_at", "last_used_at", "revoked_at", "activated_at", "expires_at", "certificate_only"},
+		"uplink_client_pins":             {"pin", "uplink_id", "expires_at", "created_at"},
 		"uplinks":                        {"id", "fingerprint", "identity", "token_credential_id", "auth_actor", "created_at", "updated_at", "admin"},
 		"run_cancellations":              {"run_id", "job_name", "superseded_by", "reason", "created_at", "completed_at"},
 		"receive_events":                 {"id", "actor", "repo_id", "ref_kind", "ref", "old_sha", "object_sha", "commit_sha", "outcome", "run_id", "created_at"},
@@ -1214,17 +1215,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"origin = 'branch' and run_id is not null and promotion_id is null",
 		"origin = 'promotion' and run_id is null and promotion_id is not null")
 
-	foreignKeyRows, err := store.db.Query(`PRAGMA foreign_key_check`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if foreignKeyRows.Next() {
-		_ = foreignKeyRows.Close()
-		t.Fatal("fresh schema failed PRAGMA foreign_key_check")
-	}
-	if err := foreignKeyRows.Close(); err != nil {
-		t.Fatal(err)
-	}
+	assertNoForeignKeyViolations(t, store.db)
 
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -1847,4 +1838,20 @@ VALUES('oberth', 2, 'main', 2, 2)`); err != nil {
 		t.Fatal("foreign key integrity check failed after migration")
 	}
 	_ = fkRows.Close()
+}
+
+func assertNoForeignKeyViolations(t *testing.T, database *sql.DB) {
+	t.Helper()
+	foreignKeyRows, err := database.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeyRows.Next() {
+		_ = foreignKeyRows.Close()
+		t.Fatal("fresh schema failed PRAGMA foreign_key_check")
+	}
+	if err := foreignKeyRows.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 }

@@ -479,6 +479,8 @@ tools (a call to one is still refused by the server); available operations are:
 | `issue_unlock` | Break an issue lock, recording its previous owner. Admin only; visibility and audit gate enforced. |
 | `issue_close_many` | Close 1..50 unique issues with a reason and per-ID results. Admin only; active locks remain enforced, one audit action per closure. |
 | `issue_lock` | Acquire or renew the caller-owned five-minute issue lock. |
+| `uplink_cert` | Issue a clientAuth certificate from a local CSR; unscoped admin only. |
+| `client_renew` | Renew this uplink using its current client certificate and a new local CSR. |
 | `uplink_list` | List public uplink identities and usage. Unscoped admin only. No tokens are returned. |
 | `uplink_revoke` | Revoke an uplink SSH key and bearer immediately. Unscoped admin only; audited; the last active unscoped admin cannot be revoked. |
 | `uplink_rotate` | Finish rotation to an already registered active replacement key with identical identity, admin status and scope, atomically revoking the selected old credential. Unscoped admin only. Issue the replacement through uplink add first; no key material crosses MCP. |

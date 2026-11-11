@@ -24,6 +24,7 @@ import (
 const maxRequestBytes = 1 << 20
 
 type Actor struct {
+	AuthMethod string `json:"auth_method,omitempty"`
 	// TokenCredentialID is an internal admission key, never response data.
 	TokenCredentialID string `json:"-"`
 	Identity          string `json:"identity"`
@@ -326,17 +327,8 @@ func (server *Server) routes() {
 
 func (server *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		token, ok := bearerToken(request.Header.Values("Authorization"))
-		if !ok {
-			if server.recordAuthFailure(writer, request, "missing_or_malformed") {
-				return
-			}
-			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth"`)
-			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
-			return
-		}
 		authCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
-		actor, err := server.auth.Authenticate(authCtx, token)
+		actor, err := server.authenticateRequest(authCtx, request)
 		if err == nil {
 			err = authCtx.Err()
 		}
@@ -355,7 +347,7 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 				return
 			}
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth", error="invalid_token"`)
-			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "invalid bearer token"})
+			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 			return
 		}
 		if actor.MetricsOnly() && (request.Method != http.MethodGet || request.URL.Path != "/metrics") {
@@ -363,7 +355,7 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 			writeJSON(writer, http.StatusForbidden, map[string]string{"error": "a metrics-scoped token may read only GET /metrics"})
 			return
 		}
-		next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), contextKey{}, actor)))
+		next.ServeHTTP(writer, request.WithContext(context.WithValue(model.WithAuthMethod(request.Context(), actor.AuthMethod), contextKey{}, actor)))
 	})
 }
 
@@ -672,12 +664,11 @@ func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request
 		case <-tick.C:
 		}
 		if time.Since(lastAuth) >= liveLogAuthInterval {
-			token, ok := bearerToken(request.Header.Values("Authorization"))
 			authCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
-			fresh, authErr := server.auth.Authenticate(authCtx, token)
+			fresh, authErr := server.authenticateRequest(authCtx, request)
 			cancel()
 			original := actorFrom(request.Context())
-			if !ok || authErr != nil || strings.TrimSpace(fresh.Identity) == "" || fresh.Identity != original.Identity || fresh.Fingerprint != original.Fingerprint || fresh.Admin != original.Admin || !slices.Equal(fresh.Scope, original.Scope) {
+			if authErr != nil || strings.TrimSpace(fresh.Identity) == "" || fresh.Identity != original.Identity || fresh.Fingerprint != original.Fingerprint || fresh.Admin != original.Admin || !slices.Equal(fresh.Scope, original.Scope) {
 				_ = write("event: auth_error\ndata: {\"error\":\"stream authorization changed or expired; reconnect with a current bearer token\"}\n\n")
 				return
 			}

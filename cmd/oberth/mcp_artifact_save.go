@@ -68,12 +68,12 @@ func saveMCPArtifact(ctx context.Context, cfg mcpFlagResult, args json.RawMessag
 		return err
 	}
 	tokenContext, cancelToken := context.WithTimeout(ctx, mcpRequestTimeout)
-	cfg.Token, err = (client.Config{Token: cfg.Token, TokenCommand: cfg.TokenCommand}).ResolveToken(tokenContext)
+	cfg.Token, err = (client.Config{Token: cfg.Token, TokenCommand: cfg.TokenCommand, ClientCert: cfg.ClientCert, ClientKey: cfg.ClientKey}).ResolveToken(tokenContext)
 	cancelToken()
 	if err != nil {
 		return err
 	}
-	httpClient, err := mcpHTTPClientFunc(cfg.CAFile)
+	httpClient, err := certificateMCPClient(cfg)
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,9 @@ func saveMCPArtifact(ctx context.Context, cfg mcpFlagResult, args json.RawMessag
 		if requestErr != nil {
 			return fmt.Errorf("build request: %w", requestErr)
 		}
-		request.Header.Set("Authorization", "Bearer "+cfg.Token)
+		if cfg.Token != "" {
+			request.Header.Set("Authorization", "Bearer "+cfg.Token)
+		}
 		request.Header.Set("User-Agent", "oberth-cli/"+cfg.Version)
 		response, doErr := download.Do(request)
 		if doErr != nil {

@@ -79,14 +79,13 @@ func TestClaudePluginManifests(t *testing.T) {
 	if plugin.Name != ClaudePluginName || plugin.Description == "" || plugin.Version != nil {
 		t.Fatalf("plugin = %+v", plugin)
 	}
-	if len(plugin.UserConfig) != 3 {
+	if len(plugin.UserConfig) != 2 {
 		t.Fatalf("userConfig = %+v", plugin.UserConfig)
 	}
 	for key, want := range map[string]option{
 		// Optional: the plugin is installed before any server exists, and its
 		// session hint then guides to /oberth:install.
 		"url":    {},
-		"token":  {Sensitive: true},
 		"ca_pin": {},
 	} {
 		got := plugin.UserConfig[key]
@@ -99,23 +98,14 @@ func TestClaudePluginManifests(t *testing.T) {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
 	read(pluginPath(t, ".mcp.json"), &servers)
-	server := servers.MCPServers[claudeCodeServerName]
-	if len(servers.MCPServers) != 1 || server["type"] != "http" || server["timeout"] != float64(ClaudeCodeMCPTimeoutMS) {
-		t.Fatalf(".mcp.json = %+v", servers)
+	if len(servers.MCPServers) != 0 {
+		t.Fatal("unconfigured plugin must not register an MCP server")
 	}
-	if server["url"] != "${user_config.url}" {
-		t.Fatalf("url = %v", server["url"])
+	if _, err := os.Stat(pluginPath(t, "scripts", "trust")); err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(server["headers"], map[string]any{"Authorization": "Bearer ${user_config.token}"}) {
-		t.Fatalf("headers = %v", server["headers"])
-	}
-	// Claude Code refuses ${user_config.*} in a headersHelper, and a helper
-	// would need a token file: the header is the one credential path.
-	if _, helper := server["headersHelper"]; helper {
-		t.Fatal(".mcp.json carries a headersHelper")
-	}
-	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 1 || entries[0].Name() != "trust" {
-		t.Fatalf("scripts = %v %v", entries, err)
+	if _, err := os.Stat(pluginPath(t, "scripts", "bearer-headers")); err != nil {
+		t.Fatal(err)
 	}
 
 	var hooks struct {
@@ -451,7 +441,7 @@ func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
 					t.Errorf("a second connect rewrote the settings:\n%s", again)
 				}
 				hint, err := runTrust(t, shell, claudeDir, []string{"CLAUDE_PLUGIN_OPTION_URL=" + address, "CLAUDE_PLUGIN_OPTION_CA_PIN=" + pin}, "hint")
-				if err != nil || hint != "" {
+				if err != nil || !strings.Contains(hint, "no client certificate") {
 					t.Errorf("hint after connect = %q %v", hint, err)
 				}
 			})
@@ -564,13 +554,13 @@ func TestPluginSessionHint(t *testing.T) {
 				t.Fatalf("hint with a malformed pin = %q", out)
 			}
 			// Without a pin the server has a publicly trusted certificate.
-			if out := hint(""); out != "" {
+			if out := hint(""); !strings.Contains(out, "no client certificate") {
 				t.Fatalf("hint without a pin = %q", out)
 			}
 			// An unconfigured plugin has nothing to connect to.
 			// Without a server the hint guides to an install or a connection,
 			// and asks for nothing secret in the chat.
-			if out, err := runTrust(t, shell, claudeDir, nil, "hint"); err != nil || !inOrder(out, []string{"no Oberth server is configured", "/oberth:install", "/plugin configure", "never into the chat", "/oberth:connect"}) {
+			if out, err := runTrust(t, shell, claudeDir, nil, "hint"); err != nil || !inOrder(out, []string{"no Oberth server is configured", "/oberth:install", "/plugin configure", "public configuration only", "/oberth:connect"}) {
 				t.Fatalf("hint without a URL = %q %v", out, err)
 			}
 
@@ -579,10 +569,10 @@ func TestPluginSessionHint(t *testing.T) {
 			if _, err := ensureSettingsCATrust(paths, authority.pem, []*x509.Certificate{authority.certificate}, pin, false); err != nil {
 				t.Fatal(err)
 			}
-			if out := hint(pin); out != "" {
+			if out := hint(pin); !strings.Contains(out, "no client certificate") {
 				t.Fatalf("hint with trust = %q", out)
 			}
-			if out := hint(strings.ToUpper(pin)); out != "" {
+			if out := hint(strings.ToUpper(pin)); !strings.Contains(out, "no client certificate") {
 				t.Fatalf("hint with the pin in upper case = %q", out)
 			}
 			// Another pin (a rotated CA) is not the stored one.

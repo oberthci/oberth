@@ -12,7 +12,7 @@ import (
 // an empty directory, returning that directory.
 func isolate(t *testing.T) string {
 	t.Helper()
-	for _, name := range []string{"OBERTH_BASE_URL", "OBERTH_MCP_URL", "OBERTH_TOKEN", "OBERTH_TOKEN_COMMAND", "OBERTH_CA_CERT"} {
+	for _, name := range []string{"OBERTH_BASE_URL", "OBERTH_MCP_URL", "OBERTH_TOKEN", "OBERTH_TOKEN_COMMAND", "OBERTH_CA_CERT", "OBERTH_CLIENT_CERT", "OBERTH_CLIENT_KEY"} {
 		t.Setenv(name, "")
 	}
 	root := t.TempDir()
@@ -296,5 +296,28 @@ func TestDisplayAddressDropsUserInformation(t *testing.T) {
 		if got := DisplayAddress(input); got != want {
 			t.Errorf("DisplayAddress(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestCertificateConnectionSelection(t *testing.T) {
+	root := isolate(t)
+	write(t, filepath.Join(root, "env"), "export OBERTH_BASE_URL=\"https://ci.example.test\"\n", 0600)
+	write(t, filepath.Join(root, "client.crt"), "public", 0600)
+	write(t, filepath.Join(root, "client.key"), "private fixture", 0600)
+	write(t, filepath.Join(root, "token"), "unused", 0600)
+	c, err := ResolveConnection(ConnectionFlags{})
+	if err != nil || c.ClientCert != filepath.Join(root, "client.crt") || c.Token != "" || c.TokenCommand != "" {
+		t.Fatal("certificate files did not select certificate-only authentication", err)
+	}
+	c, err = ResolveConnection(ConnectionFlags{URL: "https://other.example.test"})
+	if err == nil || c.ClientCert != "" || c.ClientKey != "" {
+		t.Fatal("saved certificate followed another address")
+	}
+	if _, err := ResolveConnection(ConnectionFlags{ClientCert: "certificate"}); err == nil {
+		t.Fatal("partial certificate pair accepted")
+	}
+	c, err = ResolveConnection(ConnectionFlags{ClientCert: "certificate", ClientKey: "key"})
+	if err != nil || c.ClientCert != "certificate" || c.ClientKey != "key" || c.Token != "" {
+		t.Fatal("explicit pair not selected", err)
 	}
 }

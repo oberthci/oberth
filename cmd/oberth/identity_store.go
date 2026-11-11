@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/oberthci/oberth/internal/clientcert"
 	"github.com/oberthci/oberth/internal/secretstore"
 )
 
@@ -89,7 +90,7 @@ func materializeIdentity(name string, data map[string][]byte) error {
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	dir := map[string]string{"server": "server", "oberth-upstream-key": "upstream", "oberth-known-hosts": "hosts"}[name]
+	dir := map[string]string{"server": "server", "client-ca": "client-ca", "oberth-upstream-key": "upstream", "oberth-known-hosts": "hosts"}[name]
 	if dir == "" {
 		return errors.New("unknown runtime identity bundle")
 	}
@@ -135,6 +136,30 @@ func bootstrapRuntimeIdentities(ctx context.Context, options *serveOptions) erro
 	}
 	s, err := newBaoIdentityStore(options.namespace)
 	if err != nil {
+		return err
+	}
+	clientCA, err := s.Load(ctx, "client-ca")
+	if err != nil {
+		return err
+	}
+	if clientCA == nil {
+		clientCA, err = clientcert.GenerateAuthority()
+		if err != nil {
+			return err
+		}
+		if err = s.Save(ctx, "client-ca", clientCA); err != nil {
+			return err
+		}
+	}
+	defer func() {
+		for _, v := range clientCA {
+			clear(v)
+		}
+	}()
+	if _, err = clientcert.Load(clientCA["ca.crt"], clientCA["ca.key"]); err != nil {
+		return err
+	}
+	if err = materializeIdentity("client-ca", clientCA); err != nil {
 		return err
 	}
 	data, err := s.Load(ctx, "server")

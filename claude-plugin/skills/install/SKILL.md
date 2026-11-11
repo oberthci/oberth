@@ -9,7 +9,7 @@ argument-hint: "[kubeconfig context]"
 Oberth installs with its own CLI onto a cluster the user already has. This
 guide drives `oberth install` non-interactively. The install creates
 credentials that are shown once (the OpenBao root token and unseal key, the
-first uplink's bearer token). They go to a secrets file, never into this
+first admin's client certificate (public)). They go to a secrets file, never into this
 session.
 
 Arguments given to the command: `$ARGUMENTS`
@@ -53,12 +53,22 @@ Arguments given to the command: `$ARGUMENTS`
       `--client-https-port`.
    4. Turn on assisted continuation (`--assist`), so a failed step of a run
       the agent pushed can be held for it to fix in place? Off by default.
-5. **Review.** Show the complete command and wait for the user to say
+5. **Local identity.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" keygen`.
+   The private client key stays under `~/.claude/oberth/` with mode 0600.
+   Reuse the user's SSH public key or generate an Ed25519 SSH key locally;
+   never upload either private key. Set `--admin-ssh-public-key` to its public
+   file and `--admin-csr "$HOME/.claude/oberth/current/client.csr"`. For an SSH target,
+   copy only the CSR and SSH public key and return the issued certificate over
+   that authenticated SSH connection. Never set `--admin-bearer` by default.
+
+6. **Review.** Show the complete command and wait for the user to say
    "install". Nothing runs before that.
 
    ```sh
    oberth install --context '<context>' --install-secretstore \
-     --secrets-file "$HOME/oberth-install-secrets.txt" \
+     --yes --secrets-file "$HOME/oberth-install-secrets.txt" \
+     --admin-ssh-public-key "$HOME/.ssh/id_ed25519.pub" \
+     --admin-csr "$HOME/.claude/oberth/current/client.csr" --client-access none \
      --forge github --organization '<org>' --client-host localhost
    ```
 
@@ -81,17 +91,16 @@ Arguments given to the command: `$ARGUMENTS`
    - When the output says the client files were kept because they differ,
      this machine is set up for another Oberth server. Ask the user before
      rerunning with `--replace-client-files`; never add it yourself.
-   - The install configured this machine's client files (`~/.config/oberth`)
-     and, when Claude Code is on PATH, its CA trust and this plugin. The user
-     then enters the server in `/plugin configure oberth@oberthci`: the URL is
-     `OBERTH_BASE_URL` from `~/.config/oberth/env` plus `/mcp`; the token is
-     the `OBERTH_UPLINK_TOKEN` line of the secrets file, which the user opens
-     and copies; the CA pin is what `oberth client pin` prints. One restart of
-     Claude Code follows.
-   - Promotion to a target branch needs a single-use grant from an admin
-     uplink. The admin uplink belongs to the user, with a key you do not
-     hold. Tell them the command from the install output. Never create one
-     for yourself.
+   - Use the install result's URL and CA pin with `/oberth:connect` (the
+     pin came from the authenticated installer). Run the plugin's `trust
+     credentials` command with the issued certificate and the local key, then
+     `trust configure '<https URL>/mcp'`. It adds a user MCP entry only after
+     configuration and has no Authorization header in certificate mode.
+     Existing settings and env values are kept. Restart Claude Code once,
+     confirm `/status` shows the mTLS client certificate row, and call
+     `system_status` to prove authentication. Never read the secrets file.
+   - The first admin is the user's locally generated identity. No bearer
+     token is generated unless the user explicitly selects `--admin-bearer`.
 
 ## Rules
 

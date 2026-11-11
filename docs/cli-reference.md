@@ -96,6 +96,10 @@ Usage: oberth artifacts <run-id> [name] [--output FILE]
 Lists a run's artifacts, or writes one artifact to stdout or --output.
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -data-root string
         Oberth data root holding the artifact store (default "/data")
   -o string
@@ -404,6 +408,10 @@ Usage: oberth install [flags]
 Flags:
   -accept-witness-genesis string
         one-shot acknowledgment of the existing deployment's exact audit chain head (<auditID>:<sha256hex>, from 'oberth audit head') when enabling --install-rekor on a deployment that already has audit history
+  -admin-bearer
+        also mint a bearer token with --admin-csr
+  -admin-csr string
+        local client CSR for the first admin; certificate written to <CSR>.crt, no bearer by default
   -admin-ssh-public-key string
         local SSH public key for the first admin uplink (file or - for stdin; never a private key)
   -also-upstream value
@@ -547,6 +555,10 @@ A full page ends with the --before value for the next page; --all follows every 
         only issues older than this issue ID (printed after a full page)
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit the server payload (one page, or every page with --all)
   -limit int
@@ -586,6 +598,10 @@ With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail
         absolute log cursor from next_byte_offset
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -context int
         lines of context around each match
   -json
@@ -619,6 +635,10 @@ at least one matching event arrives (default: one after the newest) or --timeout
 The last line names the cursor to pass as --since next time.
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit the tool's JSON result unchanged
   -kind value
@@ -661,6 +681,10 @@ Usage: oberth sync status [--lock <key>] [--since 24h] [--limit N] [--json]
 Native Argo semaphore and mutex holders and waiters now, and their stored history.
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit the tool's JSON result unchanged
   -limit int
@@ -731,6 +755,10 @@ Usage: oberth mcp call [arguments] [flags]
         JSON file or - for stdin
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -o string
         output file
   -output string
@@ -753,6 +781,10 @@ Usage: oberth mcp tools [arguments] [flags]
         JSON file or - for stdin
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -o string
         output file
   -output string
@@ -775,6 +807,7 @@ Configure this machine's MCP client (Claude Code) for an Oberth server.
 
 Commands:
   setup   trust the server's CA in Claude Code and install the Oberth plugin
+  renew   renew with the current certificate and rotate the local key
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
 Use oberth client <command> --help for its flags.
@@ -789,11 +822,10 @@ Make Claude Code trust the Oberth server's CA and install the Oberth plugin.
 The CA is stored as oberth/ca.crt in Claude Code's directory (~/.claude) and
 env.NODE_EXTRA_CA_CERTS in its settings.json is made to hold it; other keys
 and an existing bundle are kept, and the operating system's trust store is
-never touched. The plugin (oberth@oberthci) carries the MCP server entry, the
-agent-loop skill and /oberth:connect; no user-scope MCP server is registered.
-Its options are set to the server's MCP URL and the CA pin. A token this
-machine already holds is passed to Claude Code's credential store on
-standard input; without one the plugin asks for it in Claude Code.
+never touched. The plugin (oberth@oberthci) carries the
+agent-loop skill and /oberth:connect. The configured user MCP entry uses the
+client certificate and key, or an explicit bearer credential in a private
+file read by a header helper. Unconfigured plugins create no MCP entry.
 
 Unset flags fall back to OBERTH_MCP_URL, OBERTH_BASE_URL, OBERTH_CA_CERT,
 OBERTH_TOKEN, OBERTH_TOKEN_COMMAND and the files oberth install writes in
@@ -803,12 +835,16 @@ would change. Restart Claude Code once afterwards.
         the deployment's CA certificate (PEM)
   -ca-trust string
         how Claude Code trusts the CA: settings, none (default "settings")
+  -client-cert string
+        PEM client certificate
+  -client-key string
+        owner-only PEM client private key
   -dry-run
         print what would change and change nothing
   -marketplace string
         plugin marketplace source: owner/repo, a git URL or a path (default oberthci/oberth)
   -token-file string
-        owner-only (0600) file holding the bearer token; it replaces the token the plugin holds
+        owner-only (0600) file holding the bearer token; it replaces the private bearer file used by Claude Code
   -url string
         server MCP endpoint or base address, e.g. https://localhost:30443/mcp
 ```
@@ -825,6 +861,28 @@ equals this pin. The CA is --ca-file, else OBERTH_CA_CERT, else the ca.crt
 oberth install writes in ~/.config/oberth; the server is not contacted.
   -ca-file string
         the deployment's CA certificate (PEM)
+```
+
+## oberth client renew
+
+```text
+Usage: oberth client renew [flags]
+
+Flags:
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -output-dir string
+        new identity directory for unmanaged client files; default: atomically rotate the shared current symlink
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -ttl string
+        new certificate lifetime (default 2160h; 1h–8760h)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth outbox
@@ -1051,6 +1109,10 @@ Flags:
 Usage: oberth repos [flags]
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit the server's payload unchanged
   -token-file string
@@ -1160,6 +1222,10 @@ Usage: oberth run <run-id> [flags]
        oberth run wait|resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit the server's payload unchanged
   -token-file string
@@ -1185,6 +1251,10 @@ Block until the run finishes (or, with --until held, parks a retry for assisted 
 Exit status 0 whatever the run's outcome; read the state and status lines, or --json.
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit the tool's JSON result unchanged
   -timeout int
@@ -1288,6 +1358,10 @@ Flags:
         optional burn
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -format string
         json or yaml (default "json")
   -include-failed
@@ -1331,6 +1405,10 @@ Usage: oberth runs [flags]
         only runs older than this cursor (printed after a full page)
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit {"runs":[...],"next_before":N}; --active emits {"runs":[...]}
   -latest
@@ -1814,6 +1892,10 @@ Flags:
 Usage: oberth status [flags]
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
   -json
         emit the server's payload unchanged
   -token-file string
@@ -1901,6 +1983,10 @@ Usage: oberth uplink add [flags]
 Flags:
   -admin
         Grant admin privileges (required for access_allow/access_revoke)
+  -bearer
+        also mint a bearer token when enrolling with --csr
+  -csr string
+        enroll with a PEM client CSR (file or -); no bearer token unless --bearer
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -scope value
@@ -1909,6 +1995,22 @@ Flags:
         HTTPS certificate path (in-pod; requires the live admin daemon) (default "/run/oberth-identities/server/tls.crt")
   -ttl string
         bearer token lifetime (positive Go duration; default and maximum come from the live server)
+```
+
+## oberth uplink cert
+
+```text
+Usage: oberth uplink cert [flags]
+
+Flags:
+  -csr string
+        PEM CSR file or - for stdin (private key remains local)
+  -database string
+        SQLite database path (in-pod) (default "/data/oberth.sqlite")
+  -fingerprint string
+        SSH fingerprint to disambiguate the uplink
+  -ttl duration
+        certificate lifetime (default 2160h; 1h–8760h)
 ```
 
 ## oberth uplink list

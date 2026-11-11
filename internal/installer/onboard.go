@@ -79,10 +79,12 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		if err != nil {
 			return errors.New("first admin uplink could not be created; inspect cluster administration")
 		}
-		if token == "" {
+		if token == "" && (cfg.AdminCSRPath == "" || cfg.AdminBearer) {
 			return errors.New("first admin uplink did not return a recognized credential")
 		}
-		creds.add("Bearer token", token)
+		if token != "" {
+			creds.add("Bearer token", token)
+		}
 		cfg.uplinkOnboarded, cfg.adminToken, cfg.UplinkIdentity = true, token, identity
 		if deps.UplinkCreated != nil {
 			deps.UplinkCreated(identity)
@@ -1287,10 +1289,26 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 	if cfg.AdminSSHPublicKeyPath != "" {
 		args = append(args, "--admin")
 	}
-	args = append(args, "-", identity)
-	out, cmdErr := run(ctx, publicKey, "kubectl", kubectlOberthArgs(cfg, deps, true, args...)...)
+	commandInput := publicKey
+	if cfg.AdminCSRPath != "" {
+		args = append(args, "--csr", "-")
+		if cfg.AdminBearer {
+			args = append(args, "--bearer")
+		}
+		args = append(args, strings.TrimSpace(string(publicKey)), identity)
+		commandInput = cfg.adminCSR
+	} else {
+		args = append(args, "-", identity)
+	}
+	out, cmdErr := run(ctx, commandInput, "kubectl", kubectlOberthArgs(cfg, deps, true, args...)...)
 	if cmdErr != nil {
 		return "", "", "", "", fmt.Errorf("uplink add: %w%s", cmdErr, commandOutputSuffix([]byte(sanitizeExecOutput(string(out)))))
+	}
+	if cfg.AdminCSRPath != "" {
+		if err := writeAdminCertificate(cfg.AdminCSRPath+".crt", out, cfg.adminCSR); err != nil {
+			return "", "", "", "", err
+		}
+		tw.AppendRow("Client certificate", cfg.AdminCSRPath+".crt", "✓ saved", false)
 	}
 	token = extractUplinkToken(string(out))
 	return expanded, identity, token, sanitizeExecOutput(string(out)), nil
@@ -2030,7 +2048,7 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	tmp := file.Name()
-	defer func() { _ = os.Remove(tmp) }()
+	defer func() { _ = os.Remove(tmp) }() //nolint:gosec // G703: temporary file created by this function in the selected configuration directory.
 	if err = file.Chmod(perm); err == nil {
 		_, err = file.Write(data)
 	}
@@ -2041,7 +2059,7 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	return os.Rename(tmp, path)
+	return os.Rename(tmp, path) //nolint:gosec // G703: atomic publication in the operator-selected configuration directory.
 }
 
 // ---------------------------------------------------------------------------

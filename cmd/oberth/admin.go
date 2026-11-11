@@ -1357,9 +1357,11 @@ func runUplink(ctx context.Context, arguments []string, input io.Reader, output 
 
 func runUplinkWithDependencies(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies uplinkDependencies) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: uplink add|list|remove|rotate|scope", errUsage)
+		return fmt.Errorf("%w: uplink add|cert|list|remove|rotate|scope", errUsage)
 	}
 	switch arguments[0] {
+	case "cert":
+		return runUplinkCert(ctx, arguments[1:], input, output, dependencies)
 	case "add":
 	case "list":
 		return runUplinkList(ctx, arguments[1:], output)
@@ -1370,7 +1372,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	case "scope":
 		return runUplinkScope(ctx, arguments[1:], output, dependencies.mutationGate)
 	default:
-		return fmt.Errorf("%w: uplink add [--admin] [--ttl DURATION] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
+		return fmt.Errorf("%w: uplink add [--admin] [--ttl DURATION] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink cert <identity> --csr <file|-> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
 	}
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -1379,6 +1381,8 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
 	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; default and maximum come from the live server)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
+	csrPath := flags.String("csr", "", "enroll with a PEM client CSR (file or -); no bearer token unless --bearer")
+	bearer := flags.Bool("bearer", false, "also mint a bearer token when enrolling with --csr")
 	var scope []string
 	flags.Func("scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository); metrics alone: read only /metrics", func(value string) error { scope = append(scope, splitScope(value)...); return nil })
 	if err := flags.Parse(arguments[1:]); err != nil {
@@ -1452,6 +1456,41 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if *isAdmin && model.MetricsOnly(scopes) {
 		return fmt.Errorf("%w: --scope %s reads only /metrics and cannot be combined with --admin", errUsage, model.MetricsScope)
 	}
+	var csr []byte
+	if *csrPath != "" {
+		if *csrPath == "-" && flags.Arg(0) == "-" {
+			return fmt.Errorf("%w: CSR and SSH key cannot both read stdin", errUsage)
+		}
+		csr, err = readClientCSR(*csrPath, input)
+		if err != nil {
+			return err
+		}
+		authority, err := loadClientAuthority()
+		if err != nil {
+			return err
+		}
+		if authority == nil {
+			return errors.New("client CA unavailable")
+		}
+		// Validate before creating the public registration.
+		if _, _, err := authority.Issue(identity, csr, lifetime); err != nil {
+			return err
+		}
+		if !*bearer {
+			if err := gate(ctx, "uplink.register"); err != nil {
+				return err
+			}
+			if _, err := database.RegisterCertificateUplink(ctx, administrativeActor, model.UplinkSpec{Identity: identity, Fingerprint: fingerprint, Admin: *isAdmin, Scope: scopes}); err != nil {
+				return err
+			}
+			cert, err := issueUplinkCertificate(ctx, database, identity, fingerprint, csr, lifetime)
+			if err != nil {
+				return err
+			}
+			_, err = io.WriteString(output, cert)
+			return err
+		}
+	}
 	tokens := gatedAdminTokens{Store: database, Gate: gate, Policy: policy}
 	issuer := auth.Issuer{
 		Tokens:    tokens,
@@ -1485,6 +1524,14 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		issuer.ExpiresAt = &expires
 	}
 	if _, err := issuer.Issue(ctx, identity, output); err != nil {
+		return err
+	}
+	if len(csr) > 0 {
+		cert, err := issueUplinkCertificate(ctx, database, identity, fingerprint, csr, lifetime)
+		if err != nil {
+			return err
+		}
+		_, err = io.WriteString(output, cert)
 		return err
 	}
 	return nil

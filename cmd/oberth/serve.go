@@ -1125,10 +1125,15 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	clientAuthority, err := loadClientAuthority()
+	if err != nil {
+		return err
+	}
 	controlAPI, err := service.NewAPI(withAgentEvents(options, database, service.APIConfig{
 		BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
 		ResourceDeclarations: argoJobs,
 		ReleasePreflight:     argoJobs,
+		ClientCertificates:   &service.ClientCertIssuer{Authority: clientAuthority, Store: database},
 		UplinkLifecycle:      database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
@@ -1176,6 +1181,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	authenticator.Certificates = database
 	// The writer heartbeat has its own serial, local-only probe. Shutdown joins
 	// it before closing SQLite, including on an early setup error.
 	writerProgress.Beat()
@@ -1252,17 +1258,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		})
 		defer stopRenewal()
 	}
-	httpsServer := &http.Server{
-		Handler: httpAPI.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
-		// ReadTimeout bounds the time a client may take to send the complete
-		// request (headers + body). 30 seconds is generous for the 1 MiB MCP
-		// body limit. Long-poll responses (wait, promote_status, livelog) are
-		// unaffected: the body is read in full before the handler's long-poll
-		// begins, and the response phase is bounded by WriteTimeout instead.
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 3 * time.Minute, MaxHeaderBytes: 1 << 20,
-		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, GetCertificate: served.getCertificate},
-	}
+	httpsServer := newAPIHTTPServer(httpAPI.Handler(), served, clientAuthority)
 	// Go module proxy (#662): a read-only GOPROXY-protocol HTTPS listener
 	// serving configured private modules from Oberth's own git cache. Pipeline pods
 	// resolve private modules through this instead of needing git credentials.

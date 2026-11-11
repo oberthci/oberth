@@ -318,7 +318,7 @@ func TestClaudeCodeSetupTrustsTheCAAndInstallsThePlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != 2 || changes[0].Action != "set" || changes[1].Action != "installed" {
+	if len(changes) != 3 || changes[0].Action != "set" || changes[1].Action != "installed" {
 		t.Fatalf("changes = %+v", changes)
 	}
 	stored := filepath.Join(fixture.store, "ca.crt")
@@ -348,7 +348,7 @@ func TestClaudeCodeSetupTrustsTheCAAndInstallsThePlugin(t *testing.T) {
 		t.Fatalf("claude commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	options := fixture.claude.options
-	if options["url"] != "https://oberth.example:30443/mcp" || options["ca_pin"] != fixture.pin || options["token"] != testToken {
+	if options["url"] != "https://oberth.example:30443/mcp" || options["ca_pin"] != fixture.pin || options["token"] != "" {
 		t.Fatalf("plugin options url=%q ca_pin=%q token set=%v", options["url"], options["ca_pin"], options["token"] != "")
 	}
 	for _, command := range fixture.claude.commands() {
@@ -400,34 +400,29 @@ func TestClaudeCodeSetupIsIdempotent(t *testing.T) {
 func TestClaudeCodeSetupKeepsTheTokenAndEnablesThePlugin(t *testing.T) {
 	fixture := newClaudeCodeFixture(t)
 	fixture.claude.installed = true
-	fixture.claude.options = map[string]string{"url": "https://old.example:30443/mcp", "token": "kept"}
 	setup := fixture.setup(false)
-	changes, err := SetupClaudeCode(t.Context(), fixture.claude.deps(), setup)
-	if err != nil {
+	if _, err := SetupClaudeCode(t.Context(), fixture.claude.deps(), setup); err != nil {
 		t.Fatal(err)
 	}
-	if !fixture.claude.enabled || fixture.claude.options["token"] != "kept" || fixture.claude.options["url"] != setup.URL {
-		t.Fatalf("enabled=%v options url=%q, token kept=%v", fixture.claude.enabled, fixture.claude.options["url"], fixture.claude.options["token"] == "kept")
+	tokenPath := filepath.Join(fixture.store, "bearer-token")
+	before := mustRead(t, tokenPath)
+	setup.Token = func(context.Context) (string, error) { t.Fatal("existing token was reread"); return "", nil }
+	if _, err := SetupClaudeCode(t.Context(), fixture.claude.deps(), setup); err != nil {
+		t.Fatal(err)
 	}
-	if plugin := changes[len(changes)-1]; plugin.Action != "configured" {
-		t.Fatalf("plugin change = %+v", plugin)
+	if !bytes.Equal(before, mustRead(t, tokenPath)) {
+		t.Fatal("saved credential changed")
 	}
+	if !fixture.claude.enabled {
+		t.Fatal("plugin not enabled")
+	}
+	setup = fixture.setup(false)
 	setup.ReplaceToken = true
 	if _, err := SetupClaudeCode(t.Context(), fixture.claude.deps(), setup); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.claude.options["token"] != testToken {
-		t.Fatal("an explicit token did not replace the saved one")
-	}
-	// Without a token on this machine the plugin asks for it.
-	fixture.claude.options["token"] = ""
-	setup.Token, setup.ReplaceToken = nil, false
-	changes, err = SetupClaudeCode(t.Context(), fixture.claude.deps(), setup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if text := changes[len(changes)-1].String(); !strings.Contains(text, "/plugin configure "+ClaudePluginID) {
-		t.Fatalf("no hint to enter the token:\n%s", text)
+	if info, err := os.Stat(tokenPath); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("bearer file permissions", err)
 	}
 }
 
@@ -461,7 +456,7 @@ func TestClaudeCodeSetupDryRunChangesNothing(t *testing.T) {
 
 // The token reaches Claude Code on standard input only: it is in no argument
 // list, no output line and no file this setup writes.
-func TestClaudeCodeSetupNeverWritesTheToken(t *testing.T) {
+func TestClaudeCodeSetupNeverExposesTheToken(t *testing.T) {
 	fixture := newClaudeCodeFixture(t)
 	changes, err := SetupClaudeCode(t.Context(), fixture.claude.deps(), fixture.setup(false))
 	if err != nil {
@@ -479,7 +474,7 @@ func TestClaudeCodeSetupNeverWritesTheToken(t *testing.T) {
 	}
 	saved := filepath.Join(fixture.home, ".config", "oberth", "token")
 	err = filepath.WalkDir(fixture.home, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || path == saved {
+		if err != nil || entry.IsDir() || path == saved || path == filepath.Join(fixture.store, "bearer-token") {
 			return err
 		}
 		if bytes.Contains(mustRead(t, path), []byte(testToken)) {

@@ -259,7 +259,14 @@ DELETE FROM schema_migrations WHERE id='20261109220004-agent-events-5a27b6918739
 
 // PostPromotionTagsDowngrade removes promote tag_after requests (#1524) from
 // disposable historical fixtures.
-const PostPromotionTagsDowngrade = `
+const PostPromotionTagsDowngrade = PostClientCertificatesDowngrade + `
 DROP TABLE IF EXISTS promotion_tags;
 DELETE FROM schema_migrations WHERE id='20261111132749-promotion-tags-c5ec022389eceac5d4f1120521ed20ef';
+`
+
+// PostClientCertificatesDowngrade reconstructs pre-certificate fixtures.
+const PostClientCertificatesDowngrade = `
+DROP TABLE IF EXISTS uplink_client_pins;
+ALTER TABLE token_credentials DROP COLUMN certificate_only;
+DELETE FROM schema_migrations WHERE id='20261111190000-client-certificates';
 `
