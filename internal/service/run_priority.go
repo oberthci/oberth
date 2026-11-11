@@ -277,7 +277,7 @@ const priorityPollInterval = 15 * time.Second
 func (r *admissionReservation) priorityRun() model.Run {
 	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, PriorityOverride: r.priorityOverride, PriorityOverrideReason: r.priorityOverrideReason, QueuedAt: r.queuedAt}
 	if run.PriorityReason == model.TagReleasePriorityReason && r.priorityLookupFailed {
-		run.Priority = model.PriorityNormal
+		run.Priority = model.PriorityStandard
 		run.PriorityReason = "tag/release automatic priority withheld: repository release policy unavailable"
 		if r.priorityOverride != "" {
 			run.Priority = r.priorityOverride

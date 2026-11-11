@@ -103,16 +103,16 @@ func TestFourClassesLoweringSurvivesReopenAndAudit(t *testing.T) {
 	}
 }
 
-func TestFourClassesLegacyGrantProjectionAndCappedAuthority(t *testing.T) {
+func TestFourClassesGrantProjectionAndCappedAuthority(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	if _, err := s.db.Exec(`INSERT INTO priority_grants(identity,max_class,expires,granted_by) VALUES('legacy','highest',?,'admin')`, unixNano(now.Add(time.Hour))); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO priority_grants(identity,max_class,expires,granted_by) VALUES('delegate','high',?,'admin')`, unixNano(now.Add(time.Hour))); err != nil {
 		t.Fatal(err)
 	}
 	grants, err := s.ListPriorityGrants(t.Context())
 	if err != nil || len(grants) != 1 || grants[0].MaxClass != "high" {
-		t.Fatalf("legacy grant not canonical: %+v %v", grants, err)
+		t.Fatalf("grant not canonical: %+v %v", grants, err)
 	}
 	if _, err := s.SetPriorityGrant(t.Context(), "admin", model.PriorityGrant{Identity: "worker", MaxClass: "promotion", Expires: now.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
@@ -159,6 +159,21 @@ func TestFourClassesUpgradePreservesLegacyPriorityEvidence(t *testing.T) {
 	ordinary := makeRun("legacy-normal", "push")
 	urgent := makeRun("legacy-explicit", "push")
 	automatic := makeRun("legacy-promotion", "promotion")
+
+	// Reconstruct the old CHECK vocabulary before inserting historical rows.
+	// Remove later empty resource tables and receipts together so the legacy
+	// ledger has no gap when the complete migration catalog is replayed.
+	ddl := testdb.PostExecutionTargetsDowngrade + `DROP TABLE resource_attempts; DROP TABLE resource_attempt_inventories; DROP TABLE pod_resource_dispositions;
+ CREATE TABLE run_priority_overrides_old (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,priority TEXT NOT NULL CHECK(priority IN ('low','normal','high','highest')),reason TEXT NOT NULL,actor TEXT NOT NULL,updated_at INTEGER NOT NULL) WITHOUT ROWID;
+ INSERT INTO run_priority_overrides_old SELECT * FROM run_priority_overrides; DROP TABLE run_priority_overrides; ALTER TABLE run_priority_overrides_old RENAME TO run_priority_overrides;
+ CREATE TABLE priority_grants_old (identity TEXT PRIMARY KEY,max_class TEXT NOT NULL CHECK(max_class IN ('high','highest')),expires INTEGER NOT NULL,granted_by TEXT NOT NULL) WITHOUT ROWID;
+ INSERT INTO priority_grants_old SELECT * FROM priority_grants; DROP TABLE priority_grants; ALTER TABLE priority_grants_old RENAME TO priority_grants;
+ CREATE TABLE run_priority_requests_old (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,requested TEXT NOT NULL,accepted TEXT NOT NULL CHECK(accepted IN ('normal','high','highest')),reason TEXT NOT NULL,actor TEXT NOT NULL,refusal TEXT NOT NULL) WITHOUT ROWID;
+ INSERT INTO run_priority_requests_old SELECT run_id,requested,CASE accepted WHEN 'standard' THEN 'normal' WHEN 'promotion' THEN 'high' ELSE accepted END,reason,actor,refusal FROM run_priority_requests; DROP TABLE run_priority_requests; ALTER TABLE run_priority_requests_old RENAME TO run_priority_requests;
+ DELETE FROM schema_migrations WHERE id IN ('20261104190000-priority-four-classes','20261104203255-pod-resource-dispositions-de9abcf59e57071e796e5aae3d614e3c','20261104220233-resource-attempt-inventory-53d49c721cd86410289f1448a4686d70');`
+	if _, err := s.db.Exec(ddl); err != nil {
+		t.Fatal(err)
+	}
 	for _, statement := range []struct {
 		sql  string
 		args []any
@@ -173,28 +188,18 @@ func TestFourClassesUpgradePreservesLegacyPriorityEvidence(t *testing.T) {
 		}
 	}
 
-	// Reconstruct the exact old CHECK vocabulary, retaining all raw receipts.
-	// Remove later empty resource tables and receipts together so the legacy
-	// ledger has no gap when the complete migration catalog is replayed.
-	ddl := testdb.PostExecutionTargetsDowngrade + `DROP TABLE resource_attempts; DROP TABLE resource_attempt_inventories; DROP TABLE pod_resource_dispositions;
- CREATE TABLE run_priority_overrides_old (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,priority TEXT NOT NULL CHECK(priority IN ('low','normal','high','highest')),reason TEXT NOT NULL,actor TEXT NOT NULL,updated_at INTEGER NOT NULL) WITHOUT ROWID;
- INSERT INTO run_priority_overrides_old SELECT * FROM run_priority_overrides; DROP TABLE run_priority_overrides; ALTER TABLE run_priority_overrides_old RENAME TO run_priority_overrides;
- CREATE TABLE priority_grants_old (identity TEXT PRIMARY KEY,max_class TEXT NOT NULL CHECK(max_class IN ('high','highest')),expires INTEGER NOT NULL,granted_by TEXT NOT NULL) WITHOUT ROWID;
- INSERT INTO priority_grants_old SELECT * FROM priority_grants; DROP TABLE priority_grants; ALTER TABLE priority_grants_old RENAME TO priority_grants;
- CREATE TABLE run_priority_requests_old (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,requested TEXT NOT NULL,accepted TEXT NOT NULL CHECK(accepted IN ('normal','high','highest')),reason TEXT NOT NULL,actor TEXT NOT NULL,refusal TEXT NOT NULL) WITHOUT ROWID;
- INSERT INTO run_priority_requests_old SELECT * FROM run_priority_requests; DROP TABLE run_priority_requests; ALTER TABLE run_priority_requests_old RENAME TO run_priority_requests;
- DELETE FROM schema_migrations WHERE id IN ('20261104190000-priority-four-classes','20261104203255-pod-resource-dispositions-de9abcf59e57071e796e5aae3d614e3c','20261104220233-resource-attempt-inventory-53d49c721cd86410289f1448a4686d70');`
-	if _, err := s.db.Exec(ddl); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := s.AppendAuditAction(t.Context(), model.AuditActionSpec{Actor: "admin", Action: "fixture.legacy", ResourceType: "queue", ResourceID: "priority", Details: `{"priority":"highest","reason":"historical receipt"}`}); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := func() []string {
 		t.Helper()
 		var all []string
-		for _, table := range []string{"run_priority_overrides", "priority_grants", "run_priority_requests"} {
-			rows, err := s.db.Query(`SELECT * FROM ` + table + ` ORDER BY 1`)
+		for _, query := range []string{
+			`SELECT run_id,reason,actor,updated_at FROM run_priority_overrides ORDER BY 1`,
+			`SELECT identity,expires,granted_by FROM priority_grants ORDER BY 1`,
+			`SELECT run_id,reason,actor,refusal FROM run_priority_requests ORDER BY 1`,
+		} {
+			rows, err := s.db.Query(query)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -229,7 +234,7 @@ func TestFourClassesUpgradePreservesLegacyPriorityEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := snapshot(); !reflect.DeepEqual(got, before) {
-		t.Fatalf("migration rewrote raw priority evidence: %v != %v", got, before)
+		t.Fatalf("migration changed priority metadata: %v != %v", got, before)
 	}
 	auditAfter, err := s.VerifyAuditChain(t.Context())
 	if err != nil || !reflect.DeepEqual(auditBefore, auditAfter) {

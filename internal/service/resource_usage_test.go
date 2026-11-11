@@ -82,7 +82,7 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	f.service.resources = reader
 	pressure := pressureTestGate()
 	pressure.sample.IO.FullAvg60 = 72
-	pressure.prepare(1, model.PriorityNormal, "", "M")
+	pressure.prepare(1, model.PriorityStandard, "", "M")
 	observer := &Scheduler{admission: pressure.gate}
 	f.service.admission = observer
 	before, _ := json.Marshal(observer.AdmissionState())

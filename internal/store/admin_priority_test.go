@@ -32,7 +32,7 @@ func TestAdminPriorityLoweringPersistsAndCapsAging(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if lowered.Priority != priority.Canonical() || !strings.Contains(lowered.PriorityReason, "let ordinary work proceed") {
+			if lowered.Priority != priority || !strings.Contains(lowered.PriorityReason, "let ordinary work proceed") {
 				t.Fatalf("lowered=%+v", lowered)
 			}
 			now = now.Add(2 * time.Hour)
@@ -40,7 +40,7 @@ func TestAdminPriorityLoweringPersistsAndCapsAging(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p, why := got.EffectivePriority(now); p != priority.Canonical() || !strings.Contains(why, "let ordinary work proceed") {
+			if p, why := got.EffectivePriority(now); p != priority || !strings.Contains(why, "let ordinary work proceed") {
 				t.Fatalf("aging erased admin priority: %s %s", p, why)
 			}
 			next, err := s.NextQueuedRun(t.Context())
@@ -53,7 +53,7 @@ func TestAdminPriorityLoweringPersistsAndCapsAging(t *testing.T) {
 			}
 			defer reopened.Close()
 			got, err = reopened.Run(t.Context(), first.ID)
-			if err != nil || got.Priority != priority.Canonical() {
+			if err != nil || got.Priority != priority {
 				t.Fatalf("restart lost priority: %+v %v", got, err)
 			}
 			var actor, details string
@@ -64,7 +64,7 @@ func TestAdminPriorityLoweringPersistsAndCapsAging(t *testing.T) {
 			if err = json.Unmarshal([]byte(details), &audit); err != nil {
 				t.Fatal(err)
 			}
-			if actor != "admin" || audit["previous_priority"] != "promotion" || audit["priority"] != string(priority.Canonical()) || audit["reason"] != "let ordinary work proceed" {
+			if actor != "admin" || audit["previous_priority"] != "promotion" || audit["priority"] != string(priority) || audit["reason"] != "let ordinary work proceed" {
 				t.Fatalf("audit=%s by %s", details, actor)
 			}
 		})

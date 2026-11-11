@@ -62,14 +62,21 @@ func TestMetricsScopedTokenReadsOnlyMetrics(t *testing.T) {
 	if response := serve(http.MethodGet, "/metrics"); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "oberth_fixture_total 7") {
 		t.Fatalf("metrics: status=%d body=%s", response.Code, response.Body)
 	}
-	for _, route := range []string{
-		"POST /api/admission/hold", "POST /api/promotions", "POST /mcp", "GET /mcp", "DELETE /mcp",
-		"GET /api/runs", "GET /api/runs/counts", "GET /api/run-resources", "GET /api/runs/r1/resources",
-		"GET /api/runs/r1", "GET /api/runs/r1/logs", "GET /api/runs/r1/livelog/stream", "GET /api/runs/r1/livelog",
-		"GET /api/runs/r1/artifacts", "GET /api/runs/r1/artifacts/a.txt", "GET /api/repos", "GET /api/issues/1",
-		"GET /api/issues", "GET /api/grants", "GET /api/audit", "GET /api/schedules", "GET /api/status", "GET /api/uplinks",
-	} {
+	// Public pages and health probes are the only exceptions. Any newly
+	// registered route must pass the refusal test or explicitly be made public.
+	public := map[string]bool{"GET /healthz": true, "GET /livez": true, "GET /readyz": true, "GET /metrics": true, "GET /assets/{asset...}": true, "GET /{$}": true, "GET /runs/{run}": true, "GET /runs": true, "GET /repos": true, "GET /issues": true, "GET /status": true}
+	for _, route := range server.mux.patterns {
+		if public[route] {
+			continue
+		}
 		method, path, _ := strings.Cut(route, " ")
+		parts := strings.Split(path, "/")
+		for i, part := range parts {
+			if strings.HasPrefix(part, "{") {
+				parts[i] = "1"
+			}
+		}
+		path = strings.Join(parts, "/")
 		if response := serve(method, path); response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "only GET /metrics") {
 			t.Errorf("%s: status=%d body=%s", route, response.Code, response.Body)
 		}

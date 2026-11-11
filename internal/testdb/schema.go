@@ -265,8 +265,15 @@ DELETE FROM schema_migrations WHERE id='20261111132749-promotion-tags-c5ec022389
 `
 
 // PostClientCertificatesDowngrade reconstructs pre-certificate fixtures.
-const PostClientCertificatesDowngrade = `
+const PostClientCertificatesDowngrade = PostCanonicalPrioritiesDowngrade + `
 DROP TABLE IF EXISTS uplink_client_pins;
 ALTER TABLE token_credentials DROP COLUMN certificate_only;
 DELETE FROM schema_migrations WHERE id='20261111190000-client-certificates';
+`
+
+// PostCanonicalPrioritiesDowngrade removes the receipt in disposable fixtures.
+const PostCanonicalPrioritiesDowngrade = `
+DROP INDEX IF EXISTS runs_ref_prefix_idx;
+DELETE FROM schema_migrations WHERE id='20261111201000-run-ref-prefix-index';
+DELETE FROM schema_migrations WHERE id='20261111200000-canonical-priorities';
 `

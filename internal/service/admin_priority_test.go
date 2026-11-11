@@ -35,11 +35,11 @@ func TestAdminPriorityLoweringToolAndReservation(t *testing.T) {
 			t.Fatal(callErr)
 		}
 		shown := value.(model.Run)
-		if shown.Priority != model.RunPriority(priority).Canonical() || !strings.Contains(shown.PriorityReason, "operator queue correction") {
+		if shown.Priority != model.RunPriority(priority) || !strings.Contains(shown.PriorityReason, "operator queue correction") {
 			t.Fatalf("reason line=%+v", shown)
 		}
 		reservation := &admissionReservation{priority: shown.Priority, priorityReason: shown.PriorityReason, priorityOverride: shown.PriorityOverride, priorityOverrideReason: shown.PriorityOverrideReason, queuedAt: time.Now().Add(-2 * time.Hour)}
-		if got := reservation.effectivePriority(time.Now()); got != model.RunPriority(priority).Canonical() {
+		if got := reservation.effectivePriority(time.Now()); got != model.RunPriority(priority) {
 			t.Fatalf("reservation aged to %s", got)
 		}
 	}
@@ -52,7 +52,7 @@ func TestAdminPriorityLoweringToolAndReservation(t *testing.T) {
 }
 
 func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
-	for _, priority := range []model.RunPriority{model.PriorityNormal, model.PriorityLow} {
+	for _, priority := range []model.RunPriority{model.PriorityStandard, model.PriorityLow} {
 		t.Run(string(priority), func(t *testing.T) {
 			f := newControlFixture(t)
 			gate := newAdmissionGate()
@@ -74,7 +74,7 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 				}
 				runs = append(runs, queued.Run)
 			}
-			if _, err = f.store.BumpRunPriority(t.Context(), "admin", runs[0].ID, model.PriorityHighest, "old urgency"); err != nil {
+			if _, err = f.store.BumpRunPriority(t.Context(), "admin", runs[0].ID, model.PriorityHigh, "old urgency"); err != nil {
 				t.Fatal(err)
 			}
 			var waiting []*admissionReservation

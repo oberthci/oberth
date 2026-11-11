@@ -120,7 +120,11 @@ func (s *Store) appendPromotionRetryAudit(ctx context.Context, tx *sql.Tx, promo
 	}, now); err != nil {
 		return fmt.Errorf("append promotion retry audit: %w", err)
 	}
-	return nil
+	// Carry the original tag request atomically with retry admission, before
+	// any fast-forward can finish the new promotion.
+	_, err = tx.ExecContext(ctx, `INSERT INTO promotion_tags(promotion_id,actor,name,message,status,requested_at,updated_at)
+ SELECT ?,?,name,message,'pending',?,? FROM promotion_tags WHERE promotion_id=?`, promotion.ID, promotion.Actor, now, now, admission.retryOf)
+	return err
 }
 
 // checkPromotionGrantReservableTx lets a promotion hold grantID only while

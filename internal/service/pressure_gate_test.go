@@ -38,7 +38,7 @@ func TestPressureStarvationDoesNotCrossHardLimits(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := hostPressureTestGate()
 			f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = tc.cpu, tc.io
-			r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
+			r := f.prepare(1, model.PriorityStandard, "", pipeline.M)
 			f.advance(20 * time.Minute)
 			if r.granted {
 				t.Fatal("starvation bypass before maxWait elapsed")
@@ -64,7 +64,7 @@ func TestHostPressureAvg10AndIndependentHysteresis(t *testing.T) {
 			f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = tc.cpu, tc.io
 			// avg60 must never select or override the avg10 gate.
 			f.sample.CPU.SomeAvg60, f.sample.IO.FullAvg60 = 99, 99
-			r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
+			r := f.prepare(1, model.PriorityStandard, "", pipeline.M)
 			if r.granted == tc.blocked {
 				t.Fatalf("grant=%t blocked=%t", r.granted, tc.blocked)
 			}
@@ -72,7 +72,7 @@ func TestHostPressureAvg10AndIndependentHysteresis(t *testing.T) {
 	}
 	f := hostPressureTestGate()
 	f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 30, 20
-	r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
+	r := f.prepare(1, model.PriorityStandard, "", pipeline.M)
 	for _, values := range [][2]float64{{20, 10}, {19.99, 20}, {30, 9.99}, {20, 9.99}} {
 		f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = values[0], values[1]
 		f.advance(time.Second)
@@ -101,11 +101,11 @@ func TestHostPressureIdleBypassUsesRunClassification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := hostPressureTestGate()
 			if tc.running {
-				f.prepare(1, model.PriorityNormal, "", pipeline.S)
+				f.prepare(1, model.PriorityStandard, "", pipeline.S)
 			}
 			f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 99, 99
 			f.advance(time.Second)
-			run := model.Run{ID: "bypass", QueuedAt: f.now, Priority: model.PriorityHighest, Release: tc.release, RefKind: model.RefBranch}
+			run := model.Run{ID: "bypass", QueuedAt: f.now, Priority: model.PriorityHigh, Release: tc.release, RefKind: model.RefBranch}
 			if tc.tag {
 				run.RefKind = model.RefTag
 			}
@@ -127,7 +127,7 @@ func TestHostPressureIdleBypassUsesRunClassification(t *testing.T) {
 func TestHostPressureUnavailableBudgetOnlyAndRecovery(t *testing.T) {
 	f := hostPressureTestGate()
 	f.err = errors.New("PSI unavailable")
-	r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
+	r := f.prepare(1, model.PriorityStandard, "", pipeline.M)
 	state := (&Scheduler{admission: f.gate}).AdmissionState()
 	if !r.granted || state.Pressure.Available || !strings.Contains(state.Pressure.Fallback, "budget-only") {
 		t.Fatalf("fallback missing: %+v", state.Pressure)
@@ -135,7 +135,7 @@ func TestHostPressureUnavailableBudgetOnlyAndRecovery(t *testing.T) {
 	f.err = nil
 	f.sample.CPU.SomeAvg10 = 60
 	f.advance(time.Second)
-	waiting := f.prepare(2, model.PriorityNormal, "", pipeline.M)
+	waiting := f.prepare(2, model.PriorityStandard, "", pipeline.M)
 	if waiting.granted {
 		t.Fatal("source recovery did not restore gate")
 	}
@@ -153,8 +153,8 @@ func TestHostPressureUnavailableBudgetOnlyAndRecovery(t *testing.T) {
 func TestHostPressureStarvationOnlyHeadAndBudgetStillApply(t *testing.T) {
 	f := hostPressureTestGate()
 	f.sample.CPU.SomeAvg10 = 45
-	head := f.prepare(1, model.PriorityHighest, "", pipeline.M)
-	behind := f.prepare(2, model.PriorityNormal, "", pipeline.M)
+	head := f.prepare(1, model.PriorityHigh, "", pipeline.M)
+	behind := f.prepare(2, model.PriorityStandard, "", pipeline.M)
 	behind.queuedAt = f.now.Add(-time.Hour / 2)
 	f.advance(time.Second)
 	if head.granted || behind.granted {
@@ -184,7 +184,7 @@ func TestHostPressureConfigurationAndSampleValidation(t *testing.T) {
 	}
 	f := hostPressureTestGate()
 	f.sample.CPU.SomeAvg10 = math.NaN()
-	if r := f.prepare(1, model.PriorityNormal, "", pipeline.M); !r.granted || f.gate.pressure.state.Available {
+	if r := f.prepare(1, model.PriorityStandard, "", pipeline.M); !r.granted || f.gate.pressure.state.Available {
 		t.Fatal("invalid avg10 did not fail open")
 	}
 	value, err := parsePressure("some avg10=41.25 avg60=30.5 avg300=1 total=10\n", false)
@@ -224,7 +224,7 @@ func TestHostPressureEnabledOverridesLegacyObserve(t *testing.T) {
 	c.Mode = PressureObserve
 	f.gate.pressure = newPressureCheck(c)
 	f.sample.CPU.SomeAvg10 = 60
-	if r := f.prepare(1, model.PriorityNormal, "", pipeline.M); r.granted || !f.gate.pressure.state.Holding || f.gate.pressure.state.Mode != PressureEnforce {
+	if r := f.prepare(1, model.PriorityStandard, "", pipeline.M); r.granted || !f.gate.pressure.state.Holding || f.gate.pressure.state.Mode != PressureEnforce {
 		t.Fatal("legacy observe disabled enabled host admission")
 	}
 }
@@ -234,9 +234,9 @@ func TestHostPressureModerateAdmitsOnePerSettleWindow(t *testing.T) {
 	for _, values := range [][2]float64{{20, 0}, {15, 0}, {0, 10}} {
 		f := hostPressureTestGate()
 		f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = values[0], values[1]
-		first := f.prepare(1, model.PriorityNormal, "", pipeline.S)
-		second := f.prepare(2, model.PriorityNormal, "", pipeline.S)
-		third := f.prepare(3, model.PriorityNormal, "", pipeline.S)
+		first := f.prepare(1, model.PriorityStandard, "", pipeline.S)
+		second := f.prepare(2, model.PriorityStandard, "", pipeline.S)
+		third := f.prepare(3, model.PriorityStandard, "", pipeline.S)
 		if !first.granted || second.granted || third.granted {
 			t.Fatalf("moderate PSI %v admitted a burst: runs=%d", values, f.gate.runs)
 		}
@@ -260,7 +260,7 @@ func TestHostPressureIdleAdmitsBackToBack(t *testing.T) {
 	f := hostPressureTestGate()
 	f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 14.99, 9.99
 	for id := int64(1); id <= 4; id++ {
-		if !f.prepare(id, model.PriorityNormal, "", pipeline.S).granted {
+		if !f.prepare(id, model.PriorityStandard, "", pipeline.S).granted {
 			t.Fatal("idle host did not clear immediately")
 		}
 	}
@@ -270,7 +270,7 @@ func TestHostPressureStarvationStartsAtPressureDeferral(t *testing.T) {
 	f := hostPressureTestGate()
 	// The old queue time may represent a long wait for budget or a VM.
 	f.sample.CPU.SomeAvg10 = 45
-	r := f.prepare(1, model.PriorityNormal, "", pipeline.S)
+	r := f.prepare(1, model.PriorityStandard, "", pipeline.S)
 	r.queuedAt = f.now.Add(-time.Hour)
 	f.advance(time.Second)
 	if r.granted {
@@ -297,9 +297,9 @@ func TestHostPressureStarvationStartsAtPressureDeferral(t *testing.T) {
 func TestHostPressureStarvationOnePerPassAndSettleWindow(t *testing.T) {
 	f := hostPressureTestGate()
 	f.sample.CPU.SomeAvg10 = 45
-	first := f.prepare(1, model.PriorityNormal, "", pipeline.S)
-	second := f.prepare(2, model.PriorityNormal, "", pipeline.S)
-	third := f.prepare(3, model.PriorityNormal, "", pipeline.S)
+	first := f.prepare(1, model.PriorityStandard, "", pipeline.S)
+	second := f.prepare(2, model.PriorityStandard, "", pipeline.S)
+	third := f.prepare(3, model.PriorityStandard, "", pipeline.S)
 	// Model waiters previously deferred at the head before priority changed.
 	second.pressureSince, third.pressureSince = f.now, f.now
 	f.advance(20*time.Minute + time.Second)
@@ -332,8 +332,8 @@ func TestHostPressureLegacyObserveStartupWarning(t *testing.T) {
 func TestHostPressureStarvationOnlyOnceInLongPass(t *testing.T) {
 	f := hostPressureTestGate()
 	f.sample.CPU.SomeAvg10 = 45
-	first := f.prepare(1, model.PriorityNormal, "", pipeline.S)
-	second := f.prepare(2, model.PriorityNormal, "", pipeline.S)
+	first := f.prepare(1, model.PriorityStandard, "", pipeline.S)
+	second := f.prepare(2, model.PriorityStandard, "", pipeline.S)
 	first.pressureSince, second.pressureSince = f.now.Add(-21*time.Minute), f.now.Add(-21*time.Minute)
 	// A slow grant makes this one pass last longer than the settle window.
 	// Per-pass protection must still stop the second starvation grant.
@@ -351,7 +351,7 @@ func TestHostPressureDiskWaitDoesNotStartStarvation(t *testing.T) {
 	f := hostPressureTestGate()
 	f.blockDisk(true)
 	f.sample.CPU.SomeAvg10 = 45
-	waiting := f.prepare(2, model.PriorityNormal, "", pipeline.S)
+	waiting := f.prepare(2, model.PriorityStandard, "", pipeline.S)
 	f.advance(21 * time.Minute)
 	if !waiting.pressureSince.IsZero() {
 		t.Fatal("disk wait incorrectly started pressure starvation")

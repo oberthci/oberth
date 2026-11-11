@@ -83,6 +83,8 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags.BoolVar(&cfg.InstallSecretStore, "install-secretstore", false,
 		"also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, "+
 			"root token and unseal key shown once, on the terminal or in --secrets-file) and configure it as Oberth's release secret store")
+	flags.StringVar(&cfg.ResumeSecretsFile, "resume-secrets-file", "", "read the existing OpenBao root token from this private recovery file")
+	flags.StringVar(&cfg.ResumeAgeIdentity, "resume-age-identity", "", "age identity file for an encrypted install recovery file")
 	flags.StringVar(&cfg.SecretsFile, "secrets-file", "",
 		"write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) "+
 			"to this new file (mode 0600; refused when it exists or lies in a git worktree) and print only its path and SHA-256; "+

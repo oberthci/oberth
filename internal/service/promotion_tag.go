@@ -18,7 +18,7 @@ import (
 
 // promote tag_after (#1524). The tag is pushed in the same logical operation
 // as the promotion: only after the promotion passed, only when the upstream
-// target equals the promotion's result, on that result commit, and never
+// target contains the promotion's result, on that result commit, and never
 // with force. A transient upstream failure is retried on the publication
 // retry schedule; every other outcome is recorded as failed with a reason.
 
@@ -141,13 +141,30 @@ func (service *API) decidePromotionTag(ctx context.Context, promotion model.Prom
 	if err != nil {
 		return model.PromotionTagPending, "upstream " + target + " could not be read", "", true, true
 	}
-	if !exists || !sameOID(upstream, promotion.ResultSHA) {
-		return failed("upstream %s is %s, not the promotion result %s; tag %s not pushed", target, shortSHA(upstream), shortSHA(promotion.ResultSHA), request.Name)
+	verified := exists && sameOID(upstream, promotion.ResultSHA)
+	if exists && !verified {
+		reader, ok := service.git.(interface {
+			UpstreamContainsCommit(context.Context, string, string, string) (bool, error)
+		})
+		if !ok {
+			return failed("upstream %s is not the promotion result; ancestry verification unavailable; tag %s not pushed", target, request.Name)
+		}
+		verified, err = reader.UpstreamContainsCommit(ctx, input, target, promotion.ResultSHA)
+		if err != nil {
+			return model.PromotionTagPending, "upstream ancestry could not be verified", "", true, true
+		}
 	}
-	object, err = publisher.PublishAnnotatedTag(ctx, input, request.Name, promotion.ResultSHA, request.Message)
+	if !verified {
+		return failed("upstream %s is not the promotion result and no longer contains it; tag %s not pushed", target, request.Name)
+	}
+	err = auditedGitMutation(ctx, service.auditor, request.Actor, "promotion.tag_after.push", "promotion", promotion.ID,
+		map[string]any{"tag": request.Name, "commit": promotion.ResultSHA, "target": target, "observed_target": upstream}, func() error {
+			object, err = publisher.PublishAnnotatedTag(ctx, input, request.Name, promotion.ResultSHA, request.Message)
+			return err
+		})
 	switch {
 	case err == nil:
-		return model.PromotionTagPushed, fmt.Sprintf("pushed annotated tag %s (object %s) on %s after upstream %s equals the promotion result",
+		return model.PromotionTagPushed, fmt.Sprintf("pushed annotated tag %s (object %s) on %s after verifying upstream %s contains the promotion result",
 			request.Name, shortSHA(object), shortSHA(promotion.ResultSHA), target), object, true, false
 	case errors.Is(err, gitcache.ErrTagExists):
 		return model.PromotionTagFailed, fmt.Sprintf("tag %s already exists at another commit; never moved", request.Name), "", true, false

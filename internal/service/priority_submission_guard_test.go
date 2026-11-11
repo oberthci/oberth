@@ -20,7 +20,7 @@ func TestNewHeadSupersedesQueuedPriorityAndInheritsOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.BumpRunPriority(ctx, "admin", old.ID, model.PriorityHighest, "urgent"); err != nil {
+	if _, err = f.store.BumpRunPriority(ctx, "admin", old.ID, model.PriorityHigh, "urgent"); err != nil {
 		t.Fatal(err)
 	}
 	newer, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "guard-new", Repository: f.repo, Branch: old.Ref, SHA: strings.Repeat("b", 40), Actor: "other"})
@@ -42,8 +42,8 @@ func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
 	}
 	defer release()
 	blockOnDiskFloor(g)
-	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), pipeline.L)
-	small := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), pipeline.M)
+	head := priorityWaiter(g, 2, model.PriorityHigh, time.Now(), pipeline.L)
+	small := priorityWaiter(g, 3, model.PriorityHigh, time.Now(), pipeline.M)
 	if granted(g, small) || granted(g, head) {
 		t.Fatal("a run overtook the disk floor")
 	}
@@ -88,7 +88,7 @@ func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 		before[r.ID] = got
 	}
 	admin := true
-	urgent, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{PriorityRequest: model.PriorityRequest{Priority: model.PriorityHighest, PriorityReason: "release blocker", UnscopedAdmin: &admin}, EventID: "priority-guard", Repository: f.exampleService, Branch: "urgent", SHA: strings.Repeat("d", 40), Actor: "operator"})
+	urgent, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{PriorityRequest: model.PriorityRequest{Priority: model.PriorityHigh, PriorityReason: "release blocker", UnscopedAdmin: &admin}, EventID: "priority-guard", Repository: f.exampleService, Branch: "urgent", SHA: strings.Repeat("d", 40), Actor: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,8 +134,8 @@ func TestPriorityGuardAuthorizationFallbackAndGrantLifecycle(t *testing.T) {
 		}
 		return r.Run
 	}
-	refused := enqueue("no-grant", model.PriorityHighest)
-	if refused.Priority != model.PriorityNormal || !strings.Contains(refused.PriorityRefusal, "no admin grant") || refused.PriorityRequestedBy != "worker" {
+	refused := enqueue("no-grant", model.PriorityHigh)
+	if refused.Priority != model.PriorityStandard || !strings.Contains(refused.PriorityRefusal, "no admin grant") || refused.PriorityRequestedBy != "worker" {
 		t.Fatalf("unauthorized priority accepted: %+v", refused)
 	}
 	raw := json.RawMessage(`{"identity":"worker","max_class":"promotion","expires":"` + time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`)
@@ -149,8 +149,8 @@ func TestPriorityGuardAuthorizationFallbackAndGrantLifecycle(t *testing.T) {
 	if high.Priority != model.PriorityPromotion || high.PriorityReason != "submission priority: urgent fix" {
 		t.Fatalf("grant ignored: %+v", high)
 	}
-	above := enqueue("above-grant", model.PriorityHighest)
-	if above.Priority != model.PriorityNormal || !strings.Contains(above.PriorityRefusal, "exceeds") {
+	above := enqueue("above-grant", model.PriorityHigh)
+	if above.Priority != model.PriorityStandard || !strings.Contains(above.PriorityRefusal, "exceeds") {
 		t.Fatalf("grant ceiling ignored: %+v", above)
 	}
 	if _, err = control.CallTool(t.Context(), admin, "priority_grant_list", json.RawMessage(`{}`)); err != nil {
@@ -160,7 +160,7 @@ func TestPriorityGuardAuthorizationFallbackAndGrantLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := enqueue("revoked", model.PriorityPromotion)
-	if after.Priority != model.PriorityNormal {
+	if after.Priority != model.PriorityStandard {
 		t.Fatal("revoked grant retained")
 	}
 	retained, err := f.store.Run(t.Context(), high.ID)
@@ -196,7 +196,7 @@ func TestPriorityCancellationRequiresRequesterOrUnscopedAdmin(t *testing.T) {
 func TestPrioritySubmissionReasonCannotImpersonateAutomaticTagClass(t *testing.T) {
 	f := newControlFixture(t)
 	admin := true
-	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{PriorityRequest: model.PriorityRequest{Priority: model.PriorityHighest, PriorityReason: model.TagReleasePriorityReason, UnscopedAdmin: &admin}, EventID: "priority-reason-marker", Repository: f.repo, Branch: "urgent", SHA: strings.Repeat("a", 40), Actor: "operator"})
+	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{PriorityRequest: model.PriorityRequest{Priority: model.PriorityHigh, PriorityReason: model.TagReleasePriorityReason, UnscopedAdmin: &admin}, EventID: "priority-reason-marker", Repository: f.repo, Branch: "urgent", SHA: strings.Repeat("a", 40), Actor: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestPrioritySubmissionReasonCannotImpersonateAutomaticTagClass(t *testing.T
 	r.prepared = true
 	p := r.priorityRun().Priority
 	f.scheduler.admission.mu.Unlock()
-	if p != model.PriorityHighest {
+	if p != model.PriorityHigh {
 		t.Fatalf("submission reason downgraded explicit priority to %s", p)
 	}
 	r.cancel()

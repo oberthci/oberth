@@ -51,20 +51,21 @@ const (
 // No pod can interleave a partial line with another pod or a progress marker.
 // A bounded read lease also prevents a stalled connection blocking final drain.
 type stepLogFollowers struct {
-	goProxyURL   string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	reader       PodLogFollower
-	identity     podLogIdentityReader
-	pod          func(context.Context, string, string) (*corev1.Pod, error)
-	restored     map[string]runlog.PodLogCursor
-	drainExpired atomic.Bool
-	output       io.Writer
-	workers      map[string]*stepLogFollower
-	resumed      map[string]runprogress.Status
-	resumedAt    time.Time
-	mu           sync.Mutex
-	err          error
+	goProxyURL     string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	reader         PodLogFollower
+	identity       podLogIdentityReader
+	pod            func(context.Context, string, string) (*corev1.Pod, error)
+	restored       map[string]runlog.PodLogCursor
+	journaledSteps map[string]bool
+	drainExpired   atomic.Bool
+	output         io.Writer
+	workers        map[string]*stepLogFollower
+	resumed        map[string]runprogress.Status
+	resumedAt      time.Time
+	mu             sync.Mutex
+	err            error
 }
 
 type stepLogFollower struct {
@@ -92,6 +93,7 @@ type stepLogFollower struct {
 	diagnostic          *model.StepDiagnostic
 	terminationReported bool
 	complete            bool
+	journaledStep       bool
 	pending             []byte
 }
 
@@ -109,6 +111,18 @@ func newStepLogFollowers(ctx context.Context, reader PodLogFollower, output io.W
 }
 
 func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
+	// A journaled earlier attempt proves this logical step uses durable cursors.
+	// A later attempt without a cursor has never been retained and must start
+	// at its beginning, even if it started before controller adoption.
+	if logs.journaledSteps == nil {
+		logs.journaledSteps = map[string]bool{}
+	}
+	for _, step := range stepAttempts(workflow) {
+		saved, ok := logs.restored[string(workflow.UID)+"/"+step.NodeID+"/"+step.PodName]
+		if ok && saved.WorkflowUID == string(workflow.UID) && saved.Node == step.NodeID && saved.Pod == step.PodName {
+			logs.journaledSteps[step.Stage+"/"+step.Step] = true
+		}
+	}
 	active := 0
 	busySteps := map[string]bool{}
 	for _, worker := range logs.workers {
@@ -149,6 +163,7 @@ func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
 			worker.diagnostic = saved.Termination
 			worker.terminationReported = saved.TerminationReported
 		}
+		worker.journaledStep = logs.journaledSteps[step.Stage+"/"+step.Step]
 		worker.terminal.Store(terminal(step.Status))
 		logs.workers[key] = worker
 		active++
@@ -245,7 +260,7 @@ func (worker *stepLogFollower) run() {
 		worker.write([]byte("[" + worker.step.Stage + "/" + worker.step.Step + "] oberth: Argo retry attempt " + worker.step.Attempt + "\n"))
 	}
 
-	if previous, restored := worker.owner.resumed[worker.step.Stage+"/"+worker.step.Step]; restored && !hasCursor && (worker.step.StartedAt == nil || worker.step.StartedAt.Before(worker.owner.resumedAt)) {
+	if previous, restored := worker.owner.resumed[worker.step.Stage+"/"+worker.step.Step]; restored && !hasCursor && !worker.journaledStep && (worker.step.StartedAt == nil || worker.step.StartedAt.Before(worker.owner.resumedAt)) {
 		if terminal(previous) && worker.step.Attempt == "" {
 			worker.discontinuity("controller adopted a previously terminal step; its retained output is preserved without historical replay")
 			worker.status("gapped", "historical log completeness cannot be established after adoption")

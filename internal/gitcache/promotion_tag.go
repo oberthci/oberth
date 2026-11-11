@@ -130,3 +130,40 @@ func shortObject(sha string) string {
 	}
 	return sha
 }
+
+// UpstreamContainsCommit fetches the current target privately and checks the
+// promoted result's ancestry. It never moves a public mirror ref.
+func (c *Cache) UpstreamContainsCommit(ctx context.Context, input, branch, commit string) (bool, error) {
+	if err := ValidateBranch(branch); err != nil {
+		return false, err
+	}
+	if err := ValidateSHA(commit); err != nil {
+		return false, err
+	}
+	_, path, err := c.path(input)
+	if err != nil {
+		return false, err
+	}
+	lock := c.repoLock(path)
+	if err := lock.LockContext(ctx); err != nil {
+		return false, err
+	}
+	defer lock.Unlock()
+	if err := c.checkRepositoryActive(ctx, input); err != nil {
+		return false, err
+	}
+	if err := c.configureRemote(ctx, input, path); err != nil {
+		return false, err
+	}
+	if err := c.run(ctx, commandSpec{dir: path, args: []string{"fetch", "--no-tags", "upstream", "refs/heads/" + branch}}); err != nil {
+		return false, err
+	}
+	err = c.run(ctx, commandSpec{dir: path, args: []string{"merge-base", "--is-ancestor", commit, "FETCH_HEAD"}})
+	if err == nil {
+		return true, nil
+	}
+	if isExitCode(err, 1) {
+		return false, nil
+	}
+	return false, err
+}

@@ -221,18 +221,14 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		database = opened
 		return nil
 	}
-	// Re-pinning keeps a registration: a different URL or key under this
-	// name is refused before any pin is rescanned or written.
-	registered := false
-	if *repin {
-		if err := openDatabase(); err != nil {
-			return err
-		}
-		same, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
-		if err != nil {
-			return err
-		}
-		registered = same
+	// Validate an existing registration before generating keys or scanning pins,
+	// including the ordinary add path used after restore.
+	if err := openDatabase(); err != nil {
+		return err
+	}
+	registered, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
+	if err != nil {
+		return err
 	}
 	var identityStore app.BootstrapIdentityStore
 	if kind == "ssh" {
@@ -293,11 +289,19 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			return fmt.Errorf("upstream SSH identity is not ready: %w", err)
 		}
 	}
-	if registered {
+	if registered && *repin {
 		_, err := fmt.Fprintf(output, "Upstream %s: host keys re-pinned; registration unchanged.\n", name)
 		return err
 	}
 	if err := openDatabase(); err != nil {
+		return err
+	}
+	same, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
+	if err != nil {
+		return err
+	}
+	if same {
+		_, err = fmt.Fprintf(output, "Upstream %s: identity verified; identical registration kept.\n", name)
 		return err
 	}
 	if err := dependencies.mutationGate(ctx, "upstream.register", *databasePath); err != nil {

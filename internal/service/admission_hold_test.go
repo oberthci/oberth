@@ -83,7 +83,7 @@ func TestAdmissionHoldSkipsPreparedAndUnpreparedClaimsWithoutPreemption(t *testi
 	if !granted(gate, holder) {
 		t.Fatal("holder not admitted")
 	}
-	ordinary := gate.reserveRun(model.Run{ID: "ordinary", QueueSequence: 2, RefKind: model.RefBranch, Priority: model.PriorityHighest})
+	ordinary := gate.reserveRun(model.Run{ID: "ordinary", QueueSequence: 2, RefKind: model.RefBranch, Priority: model.PriorityHigh})
 	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{On: true, Reason: "release", Duration: time.Hour}); err != nil {
 		t.Fatal(err)
 	}

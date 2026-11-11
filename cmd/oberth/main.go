@@ -43,7 +43,7 @@ func main() {
 		// inside a held attempt (docs/assisted-continuation.md).
 		os.Exit(holdfs.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	if code, handled := gitcache.ReceiveHookInvocation(ctx, os.Args, os.Stdin, os.Stderr); handled {
 		stop()

@@ -38,10 +38,10 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	}
 	blockOnDiskFloor(g)
 	now := time.Now()
-	normal := priorityWaiter(g, 2, model.PriorityNormal, now, pipeline.XL)
+	normal := priorityWaiter(g, 2, model.PriorityStandard, now, pipeline.XL)
 	high := priorityWaiter(g, 3, model.PriorityPromotion, now, pipeline.XL)
-	highest := priorityWaiter(g, 4, model.PriorityHighest, now, pipeline.XL)
-	highest2 := priorityWaiter(g, 5, model.PriorityHighest, now, pipeline.XL)
+	highest := priorityWaiter(g, 4, model.PriorityHigh, now, pipeline.XL)
+	highest2 := priorityWaiter(g, 5, model.PriorityHigh, now, pipeline.XL)
 	release()
 	assertWaiterOrder(t, g, highest, highest2, high, normal)
 	clearDiskFloor(g)
@@ -64,8 +64,8 @@ func TestPriorityAdmissionStarvationReordersExistingWaiters(t *testing.T) {
 	}
 	defer release()
 	blockOnDiskFloor(g)
-	normal := priorityWaiter(g, 2, model.PriorityNormal, clock.now.Add(-time.Hour+time.Nanosecond), pipeline.XL)
-	highest := priorityWaiter(g, 3, model.PriorityHighest, clock.now, pipeline.XL)
+	normal := priorityWaiter(g, 2, model.PriorityStandard, clock.now.Add(-time.Hour+time.Nanosecond), pipeline.XL)
+	highest := priorityWaiter(g, 3, model.PriorityHigh, clock.now, pipeline.XL)
 	assertWaiterOrder(t, g, highest, normal)
 	clock.now = clock.now.Add(time.Nanosecond)
 	// Aging lifts normal, but never above base highest.
@@ -99,7 +99,7 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 		}
 	}
 	got, err := f.store.Run(ctx, run.ID)
-	if err != nil || got.Priority != model.PriorityNormal {
+	if err != nil || got.Priority != model.PriorityStandard {
 		t.Fatalf("nonadmin mutated priority: %+v %v", got, err)
 	}
 	if _, err = control.CallTool(ctx, admin, "queue_priority_config", json.RawMessage(`{"rc_patterns":["rc/*"]}`)); err != nil {
@@ -224,7 +224,7 @@ func TestPriorityAdmissionAgesHighBeforeNewerNormal(t *testing.T) {
 	blockOnDiskFloor(g)
 	high := priorityWaiter(g, 2, model.PriorityHigh, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Minute)
-	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, pipeline.XL)
+	normal := priorityWaiter(g, 3, model.PriorityStandard, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Hour)
 	release()
 	assertWaiterOrder(t, g, high, normal)
@@ -376,7 +376,7 @@ func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testin
 	}
 	for _, trigger := range []string{"branch", "tag", "release"} {
 		branch, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "priority-branch-" + trigger, Repository: f.repo, Branch: "release/" + trigger, SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: trigger})
-		if err != nil || branch.Priority != model.PriorityNormal || branch.RefKind != model.RefBranch {
+		if err != nil || branch.Priority != model.PriorityStandard || branch.RefKind != model.RefBranch {
 			t.Fatalf("branch transport claimed release urgency: %+v %v", branch, err)
 		}
 	}
@@ -397,11 +397,11 @@ func TestPriorityWithheldTagPreservesAdminBumpsPromotionsAndAging(t *testing.T) 
 		reason string
 		want   model.RunPriority
 	}{
-		{model.TagReleasePriorityReason, model.PriorityNormal},
-		{"admin bump: deliberately urgent", model.PriorityHighest},
+		{model.TagReleasePriorityReason, model.PriorityStandard},
+		{"admin bump: deliberately urgent", model.PriorityHigh},
 		{"promotion run", model.PriorityPromotion},
 	} {
-		r := &admissionReservation{gate: g, prepared: true, priorityLookupFailed: true, priority: model.PriorityHighest, priorityReason: tc.reason, queuedAt: now}
+		r := &admissionReservation{gate: g, prepared: true, priorityLookupFailed: true, priority: model.PriorityHigh, priorityReason: tc.reason, queuedAt: now}
 		if tc.reason == "promotion run" || tc.reason == model.TagReleasePriorityReason {
 			r.priority = model.PriorityPromotion
 		}
@@ -411,7 +411,7 @@ func TestPriorityWithheldTagPreservesAdminBumpsPromotionsAndAging(t *testing.T) 
 		// A capped tag waits as normal work and ages into high like any
 		// normal run; bumps and promotions keep highest.
 		aged := tc.want
-		if aged == model.PriorityNormal {
+		if aged == model.PriorityStandard {
 			aged = model.PriorityPromotion
 		}
 		if got := r.effectivePriority(now.Add(time.Hour)); got != aged {
@@ -421,7 +421,7 @@ func TestPriorityWithheldTagPreservesAdminBumpsPromotionsAndAging(t *testing.T) 
 }
 
 func TestPriorityWithheldTagRetainsExplicitAdminFallback(t *testing.T) {
-	r := &admissionReservation{prepared: true, priorityLookupFailed: true, priority: model.PriorityHighest, priorityReason: model.TagReleasePriorityReason, priorityOverride: model.PriorityHigh, priorityOverrideReason: "intentional expedite"}
+	r := &admissionReservation{prepared: true, priorityLookupFailed: true, priority: model.PriorityHigh, priorityReason: model.TagReleasePriorityReason, priorityOverride: model.PriorityHigh, priorityOverrideReason: "intentional expedite"}
 	run := r.priorityRun()
 	if run.Priority != model.PriorityHigh || run.PriorityReason != "admin bump: intentional expedite" {
 		t.Fatalf("withheld priority lost explicit fallback: %+v", run)

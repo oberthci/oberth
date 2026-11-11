@@ -3434,7 +3434,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRunt
 	for _, want := range []string{
 		"Cannot enable trusted Plan Transit",
 		"supply the root token without exposing it in shell history",
-		"read -rs BAO_TOKEN && export BAO_TOKEN",
+		"--resume-secrets-file PATH --secrets-file NEW_PATH",
 		"oberth install --install-secretstore",
 		"Keep every install flag unchanged",
 		"--namespace",
@@ -3447,7 +3447,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRunt
 		}
 	}
 	guidanceIndex := strings.Index(output, "supply the root token without exposing it in shell history")
-	readIndex := strings.Index(output, "read -rs BAO_TOKEN && export BAO_TOKEN")
+	readIndex := strings.Index(output, "--resume-secrets-file PATH --secrets-file NEW_PATH")
 	if guidanceIndex > readIndex {
 		t.Fatalf("history-safe guidance must precede the read command:\n%s", output)
 	}

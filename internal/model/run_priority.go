@@ -9,35 +9,17 @@ import (
 type RunPriority string
 
 const (
-	PriorityLow       RunPriority = "low"
-	PriorityStandard  RunPriority = "standard"
-	PriorityPromotion RunPriority = "promotion"
-	PriorityHigh      RunPriority = "high"
-	// Compatibility alias for PriorityStandard; legacy wire inputs are normalized separately.
-	PriorityNormal = PriorityStandard
-	// Compatibility alias for PriorityHigh; legacy wire inputs are normalized separately.
-	PriorityHighest        = PriorityHigh
-	PriorityStarvationWait = time.Hour
+	PriorityLow            RunPriority = "low"
+	PriorityStandard       RunPriority = "standard"
+	PriorityPromotion      RunPriority = "promotion"
+	PriorityHigh           RunPriority = "high"
+	PriorityStarvationWait             = time.Hour
 	// PriorityAgedReason explains standard work joining delivery FIFO, never urgency.
 	PriorityAgedReason = "aged: standard run waited at least 60 minutes"
 	// TagReleasePriorityReason identifies the automatic boost, so size limits
 	// never downgrade an explicit admin bump or a promotion.
 	TagReleasePriorityReason = "tag/release run: oldest waiting server-classified tag ref"
 )
-
-// Canonical reads the class names stored database rows still carry (normal,
-// highest) as standard and high. Requests take the canonical names only; see
-// Valid.
-func (p RunPriority) Canonical() RunPriority {
-	switch p {
-	case "normal":
-		return PriorityStandard
-	case "highest":
-		return PriorityHigh
-	default:
-		return p
-	}
-}
 
 // Valid reports one of the four request classes, spelled canonically.
 func (p RunPriority) Valid() bool {
@@ -50,7 +32,7 @@ func (p RunPriority) Valid() bool {
 }
 
 func (p RunPriority) Rank() int {
-	switch p.Canonical() {
+	switch p {
 	case PriorityLow:
 		return -1
 	case PriorityPromotion:
@@ -67,7 +49,7 @@ func (p RunPriority) Rank() int {
 // Every explicit admin override pins its class, including a lowered promotion.
 // Admission/end freezes the aging clock; running work is never preempted.
 func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
-	priority, reason := run.Priority.Canonical(), run.PriorityReason
+	priority, reason := run.Priority, run.PriorityReason
 	if priority == "" {
 		priority, reason = PriorityStandard, "ordinary run"
 	}
