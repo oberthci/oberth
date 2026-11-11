@@ -353,7 +353,7 @@ func (fixture *groupFixture) assertNothingCreated(t *testing.T) {
 
 func callGroupRunGet(t *testing.T, control *API, id string) RunDetailResponse {
 	t.Helper()
-	args, err := json.Marshal(map[string]string{"id": id})
+	args, err := json.Marshal(map[string]any{"id": id, "summary": false})
 	if err != nil {
 		t.Fatal(err)
 	}

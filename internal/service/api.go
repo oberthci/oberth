@@ -521,7 +521,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "run_get":
 		var arguments struct {
 			ID      string `json:"id"`
-			Summary bool   `json:"summary"`
+			Summary *bool  `json:"summary"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -529,7 +529,9 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if strings.TrimSpace(arguments.ID) == "" {
 			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 		}
-		return service.readRun(ctx, actor, arguments.ID, arguments.Summary)
+		// The summary is the default; the full record (timing, diagnostics,
+		// the repository record) only on an explicit summary:false.
+		return service.readRun(ctx, actor, arguments.ID, arguments.Summary == nil || *arguments.Summary)
 	case "run_resources":
 		return service.readRunResources(ctx, raw)
 	case "run_retry":

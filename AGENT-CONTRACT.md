@@ -3308,7 +3308,8 @@ migration. Existing single-issue mutation authorization is unchanged.
 
 ## Retained run and step timing (#1128)
 
-Full MCP `run_get`, default `GET /api/runs/{id}`, and `oberth run <id> --json`
+MCP `run_get {summary: false}` (the default is the compact summary), default
+`GET /api/runs/{id}`, and `oberth run <id> --json`
 expose `Timing`, version 1, and per-step `MeasuredSizeComparison` when available.
 Dashboard polling selects `?view=dashboard`, which omits `Timing`,
 `MeasuredUsage`, `MeasuredSizeComparison`, and `Termination`. For resource

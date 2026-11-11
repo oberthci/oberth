@@ -53,7 +53,7 @@ func TestScheduleEntryIsVisibleThroughHTTPAndMCP(t *testing.T) {
 	if err = recordjson.Unmarshal(response.Body.Bytes(), &detail); err != nil || response.Code != http.StatusOK || detail.Run.ScheduleEntry != "nightly" {
 		t.Fatalf("HTTP detail lost entry: %d %s (%v)", response.Code, response.Body, err)
 	}
-	raw, _ := json.Marshal(map[string]string{"id": run.ID})
+	raw, _ := json.Marshal(map[string]any{"id": run.ID, "summary": false})
 	value, err := reader.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", raw)
 	if err != nil {
 		t.Fatal(err)

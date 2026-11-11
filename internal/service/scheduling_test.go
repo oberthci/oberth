@@ -219,7 +219,7 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mcpValue, err := service.CallTool(t.Context(), api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID+`"}`))
+	mcpValue, err := service.CallTool(t.Context(), api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID+`","summary":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	if status.Status != "running" || status.DisplayStatus != "running" || !strings.Contains(status.DisplayReason, model.ExecutionDeadlineMessage) || status.Scheduling.Execution.Reason != "DeadlineExceeded" {
 		t.Fatalf("status = %+v", status)
 	}
-	value, err := service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID+`"}`))
+	value, err := service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID+`","summary":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}

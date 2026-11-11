@@ -27,7 +27,7 @@ func TestRunGetRetainsVersionedTimingWithoutCluster(t *testing.T) {
 	if expected.ClaimedAt == nil || expected.CheckoutReadyAt == nil || expected.TerminalAt == nil || len(expected.Admissions) != 1 || expected.Admissions[0].RequestedAt == nil || expected.Admissions[0].GrantedAt == nil {
 		t.Fatalf("missing lifecycle evidence: %+v", expected)
 	}
-	value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID[:12]+`"}`))
+	value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID[:12]+`","summary":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}

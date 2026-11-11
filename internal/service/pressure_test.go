@@ -546,7 +546,7 @@ func TestPressureNonAdminAndMCPViewsKeepNonNumericReason(t *testing.T) {
 		} else if !strings.Contains(observed.Message, "host io pressure") || strings.Contains(observed.Message, "%") {
 			t.Fatal("non-admin reason numeric or misleading", observed.Message)
 		}
-		value, err := control.CallTool(t.Context(), actor, "run_get", json.RawMessage(`{"id":"`+source.ID+`"}`))
+		value, err := control.CallTool(t.Context(), actor, "run_get", json.RawMessage(`{"id":"`+source.ID+`","summary":false}`))
 		if err != nil {
 			t.Fatal(err)
 		}
