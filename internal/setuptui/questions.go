@@ -159,7 +159,6 @@ func probeContext(contextName, path string) func() probeResult {
 		}
 		return probeResult{apply: func(st *WizardState) {
 			st.ClusterInfo = info
-			st.Config.TLSExtraDNSNames, st.Config.TLSExtraIPs = installer.SingleHostTLSNames(info.nodes, st.Config.TLSExtraDNSNames, st.Config.TLSExtraIPs)
 		}}
 	}
 }
@@ -421,11 +420,18 @@ func tlsCertificateDescription(state *WizardState) string {
 	return "self-signed certificate (ed25519)"
 }
 
+// Derive detected names from the current probe without saving them as answers.
+// Changing clusters must not carry another node's names into the next CA.
+func wizardTLSNames(state *WizardState) ([]string, []string) {
+	return installer.SingleHostTLSNames(state.ClusterInfo.nodes, state.Config.TLSExtraDNSNames, state.Config.TLSExtraIPs)
+}
+
 // serverCertificateNames is the name set the server certificate covers.
 func serverCertificateNames(state *WizardState) (dnsNames, ips []string) {
+	dns, addresses := wizardTLSNames(state)
 	var extra []string
-	extra = append(extra, state.Config.TLSExtraDNSNames...)
-	extra = append(extra, state.Config.TLSExtraIPs...)
+	extra = append(extra, dns...)
+	extra = append(extra, addresses...)
 	return secretstore.ServerTLSNames(state.namespace(), extra)
 }
 
