@@ -502,10 +502,8 @@ publish_public_release() {
 	for file in oberth-linux-amd64 oberth-linux-arm64 oberth-darwin-amd64 oberth-darwin-arm64 "oberth-${tag#v}.tgz" SHA256SUMS SHA256SUMS.sig cosign.pub release.json; do
 		publish_exact_object "oberth/$tag/$file" "$release_dir/$file" "$(artifact_content_type "$file")" "$release_origin/oberth/$tag/$file"
 	done
-	for payload in release.json; do
-		publish_signed_bundle "oberth/$tag/$payload.sigstore.json" "$release_origin/oberth/$tag/$payload.sigstore.json" \
-			"$release_dir/$payload" "$release_dir/$payload.sigstore.json"
-	done
+	publish_signed_bundle "oberth/$tag/release.json.sigstore.json" "$release_origin/oberth/$tag/release.json.sigstore.json" \
+		"$release_dir/release.json" "$release_dir/release.json.sigstore.json"
 	chart_name=oberth-${tag#v}.tgz
 	publish_exact_object "oberth/$chart_name" "$release_dir/$chart_name" application/gzip "$chart_repo/$chart_name"
 	publish_exact_object "oberth/cosign.pub" "$release_dir/cosign.pub" 'text/plain; charset=utf-8' "$chart_repo/cosign.pub"
