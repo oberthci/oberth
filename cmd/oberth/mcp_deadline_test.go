@@ -76,6 +76,12 @@ func TestMCPDeadlineCoversEveryBlockingTool(t *testing.T) {
 	if timeouts["run_hold_exec"].Default != argojob.MaxAssistExecTimeout {
 		t.Fatalf("run_hold_exec bound %s, want argojob.MaxAssistExecTimeout %s", timeouts["run_hold_exec"].Default, argojob.MaxAssistExecTimeout)
 	}
+	// run_hold_patch takes no timeout argument: a read and a write, each up
+	// to the exec bound, so the 60-second default cut it short.
+	limit, toolTimeout, err := mcpDeadline(mcpFlagResult{}, toolsCallParams{Name: "run_hold_patch", Arguments: json.RawMessage(`{"id":"x"}`)})
+	if err != nil || toolTimeout != 2*argojob.MaxAssistExecTimeout || limit != toolTimeout+mcpDeadlineMargin {
+		t.Fatalf("run_hold_patch: deadline %s tool %s err %v", limit, toolTimeout, err)
+	}
 	for name, timeout := range timeouts {
 		limit, toolTimeout, err := mcpDeadline(mcpFlagResult{}, toolsCallParams{Name: name, Arguments: json.RawMessage(`{}`)})
 		if err != nil || toolTimeout != timeout.Default || limit < timeout.Default+mcpDeadlineMargin {

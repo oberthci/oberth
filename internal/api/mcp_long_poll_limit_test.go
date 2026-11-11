@@ -77,3 +77,12 @@ func TestMCPLongPollsAreCappedPerCredential(t *testing.T) {
 		t.Fatalf("slot not returned: %s", again.Body.String())
 	}
 }
+
+// Hold actions outlast the server-wide WriteTimeout; their write deadline
+// follows the tool's own bound. Other tools keep the server default.
+func TestToolWriteBoundCoversHoldActions(t *testing.T) {
+	exec := toolTimeouts()["run_hold_exec"].Default
+	if exec < 10*time.Minute || toolWriteBound("run_hold_exec") != exec || toolWriteBound("run_hold_patch") != 2*exec || toolWriteBound("run_get") != 0 {
+		t.Fatalf("exec %s patch %s run_get %s", toolWriteBound("run_hold_exec"), toolWriteBound("run_hold_patch"), toolWriteBound("run_get"))
+	}
+}

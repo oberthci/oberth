@@ -16,12 +16,16 @@ const mcpDeadlineMargin = 30 * time.Second
 // mcpDeadline gives blocking tools room to return their terminal response.
 // The bound comes from the tool's own timeout argument, whatever its spelling
 // (timeout, timeout_s, timeout_seconds), and when that is omitted from the
-// bound the tool's published schema says the server applies. Tools without a
-// timeout argument keep the 60-second default; --timeout overrides both.
+// bound the tool's published schema says the server applies; run_hold_patch,
+// which has no timeout argument, gets its fixed server bound. Other tools keep
+// the 60-second default; --timeout overrides both.
 func mcpDeadline(cfg mcpFlagResult, params any) (time.Duration, time.Duration, error) {
 	var toolTimeout time.Duration
 	if call, ok := params.(toolsCallParams); ok {
 		toolTimeout = api.ToolTimeouts()[call.Name].Default
+		if bound, ok := api.FixedToolBounds()[call.Name]; ok {
+			toolTimeout = bound
+		}
 		var arguments map[string]json.RawMessage
 		if json.Unmarshal(call.Arguments, &arguments) == nil {
 			for _, name := range mcpTimeoutArguments(call.Name) {

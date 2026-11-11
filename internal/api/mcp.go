@@ -442,6 +442,11 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 			server.handleMCPLongPoll(writer, request, response, call)
 			return
 		}
+		if bound := toolWriteBound(call.Name); bound > 0 {
+			// A bounded tool (run_hold_exec, run_hold_patch) may outlast the
+			// server-wide WriteTimeout; its reply must still be written.
+			_ = http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(bound + writeDeadlineMargin))
+		}
 		result, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), call.Name, call.Arguments)
 		if subscribed, ok := result.(EventsSubscribeResponse); ok && err == nil && session != nil {
 			server.sessions.setSubscription(session, subscribed.Subscription)

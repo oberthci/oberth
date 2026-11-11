@@ -80,3 +80,19 @@ func schemaSeconds(value any) time.Duration {
 func ToolTimeouts() map[string]ToolTimeout {
 	return toolTimeouts()
 }
+
+// FixedToolBounds are the server-side bounds of tools that take no timeout
+// argument. run_hold_patch reads and then writes the held step's tree through
+// the server's helper, each bounded like run_hold_exec by assist.execTimeout.
+func FixedToolBounds() map[string]time.Duration {
+	return map[string]time.Duration{"run_hold_patch": 2 * toolTimeouts()["run_hold_exec"].Default}
+}
+
+// toolWriteBound is how long a non-long-poll tool may take before its reply
+// is written; zero keeps the server's WriteTimeout.
+func toolWriteBound(name string) time.Duration {
+	if bound, ok := FixedToolBounds()[name]; ok {
+		return bound
+	}
+	return toolTimeouts()[name].Default
+}
