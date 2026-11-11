@@ -115,7 +115,7 @@ func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, dep
 	if !exists || release.Chart != "argo-workflows-"+DefaultArgoChartVersion || (release.Status != "deployed" && release.Status != "failed") || helmRevisionLabel(release.Revision) == "" {
 		return nil, noop, errors.New("controller transition requires existing managed Argo chart1.0.24 in deployed or failed state")
 	}
-	file, profile, cleanup, err := prepareNonrootArgoValues(ctx, Config{Namespace: cfg.Namespace, ArgoNamespace: namespace, ArgoControllerProfile: cfg.ArgoControllerProfile}, deps, true, DefaultArgoChartVersion)
+	file, profile, cleanup, err := prepareNonrootArgoValues(ctx, Config{Namespace: cfg.Namespace, ArgoNamespace: namespace, ArgoControllerProfile: cfg.ArgoControllerProfile, ArgoValuesReviewed: cfg.ArgoValuesReviewed}, deps, true, DefaultArgoChartVersion)
 	if err != nil {
 		return nil, noop, err
 	}
@@ -125,7 +125,7 @@ func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, dep
 		return nil, noop, errors.New("cannot bind existing Argo values")
 	}
 	var values map[string]any
-	if json.Unmarshal(raw, &values) != nil || validateNonrootReuse(values, namespace) != nil {
+	if json.Unmarshal(raw, &values) != nil || checkNonrootReuse(raw, values, namespace, cfg.ArgoValuesReviewed) != nil {
 		cleanup()
 		return nil, noop, errors.New("changed or unsupported Argo values")
 	}

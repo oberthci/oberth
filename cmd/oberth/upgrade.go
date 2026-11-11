@@ -32,6 +32,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
 	flags.StringVar(&cfg.OwnershipHandoff, "ownership-handoff", "", "verified connector/site ownership handoff receipt required before retirement")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
+	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
 	flags.BoolVar(&cfg.AllowRetiredExecution, "allow-retired-execution", false, "override retired resource/repository checks; accept orphaned resources and refused legacy runs")
 	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for all queued/running runs before upgrading (advisory, not an admission freeze)")
 	flags.DurationVar(&cfg.WaitTimeout, "wait-timeout", installer.DefaultUpgradeWaitTimeout, "maximum queue wait, independent of --timeout")
@@ -169,6 +170,10 @@ func takePreUpgradeBackup(ctx context.Context, dir, kubeContext, namespace strin
 	}
 	return installer.UpgradeBackup{Path: archive}, nil
 }
+
+// argoValuesReviewedHelp documents the acknowledgment of stored Argo values
+// the nonroot profile's allowlist does not cover.
+const argoValuesReviewedHelp = "keep stored argo-workflows values the nonroot profile does not know: `sha256:DIGEST` of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)"
 
 // addReleaseSourceFlags registers where a signed release is read from; the
 // verification against the compiled-in key is the same for every source.

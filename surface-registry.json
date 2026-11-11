@@ -8,6 +8,10 @@
       "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
       "test_ref": "internal/installer/argo_profile_render_test.go TestArgoParallelismOnANonrootReleaseKeepsTheProfile"
     },
+    "flag:argo-values-reviewed": {
+      "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
+      "test_ref": "internal/installer/argo_nonroot_test.go TestNonrootReuseAcknowledgesReviewedValues"
+    },
     "flag:argo-parallelism": {
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"

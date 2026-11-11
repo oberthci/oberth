@@ -44,6 +44,7 @@ type UpgradeConfig struct {
 	UserValues            []string // --values/-f: repeatable values file paths
 	UserSet               []string // --set: repeatable key=value pairs
 	ArgoControllerProfile string   // explicit supported controller transition; empty preserves existing profile
+	ArgoValuesReviewed    string   // --argo-values-reviewed: SHA-256 of the reviewed stored Argo values
 	BinarySchemaVersion   int      // set by the caller to store.LatestMigrationVersion()
 	TLSExtraDNSNames      []string
 	TLSExtraIPs           []string

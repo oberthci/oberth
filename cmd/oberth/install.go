@@ -69,6 +69,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.RekorChartVersion, "rekor-chart-version", "", "Rekor chart version")
 	flags.StringVar(&cfg.ArgoChartVersion, "argo-chart-version", "", "argo-workflows chart version")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)")
+	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
 	flags.StringVar(&cfg.ArgoVaultAddress, "argo-vault-address", "",
 		"OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)")
 	flags.StringVar(&cfg.PushBannerURL, "push-banner-url", "", "push feedback URL; omitted preserves the live URL, explicit empty clears it")

@@ -151,6 +151,10 @@ type Config struct {
 	RekorChartVersion     string
 	ArgoChartVersion      string
 	ArgoControllerProfile string
+	// ArgoValuesReviewed acknowledges stored Argo values outside the nonroot
+	// profile's allowlist: the SHA-256 of `helm get values argo-workflows -o
+	// json` as reviewed (--argo-values-reviewed).
+	ArgoValuesReviewed string
 	// ArgoParallelism and ArgoNamespaceParallelism set the managed Argo
 	// controller's workflow limits (controller.parallelism and
 	// controller.namespaceParallelism); nil keeps the release's value.

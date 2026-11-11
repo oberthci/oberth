@@ -3,6 +3,8 @@ package installer
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,6 +97,29 @@ func nonrootProfileObjects(namespace string, profile argoworkflow.NonrootProfile
 // built-in profile, plus controller priority and CPU/memory requests. It rejects
 // other customization instead of silently overwriting
 // archive, plugin, controller or environment settings under --reuse-values.
+// checkNonrootReuse accepts stored Argo values the nonroot profile can be
+// layered over: the built-in allowlist, or values outside it that the
+// operator reviewed and acknowledged with --argo-values-reviewed, the SHA-256
+// of exactly this `helm get values argo-workflows -o json` output. The
+// acknowledgment binds the bytes reviewed: any later change refuses again.
+// The controller's image, arguments, environment and mounts are still
+// verified against the profile after the upgrade.
+func checkNonrootReuse(raw []byte, values map[string]any, namespace, reviewed string) error {
+	err := validateNonrootReuse(values, namespace)
+	if err == nil {
+		return nil
+	}
+	if reviewed == "" {
+		return fmt.Errorf("%w; to keep them, review `helm get values argo-workflows -n %s -o json` and pass "+
+			"--argo-values-reviewed sha256:<SHA-256 of that output>", err, namespace)
+	}
+	sum := sha256.Sum256(raw)
+	if strings.TrimPrefix(reviewed, "sha256:") != hex.EncodeToString(sum[:]) {
+		return errors.New("--argo-values-reviewed does not match the stored Argo values: they changed since the review, or the digest is not of `helm get values argo-workflows -o json`")
+	}
+	return nil
+}
+
 func validateNonrootReuse(values map[string]any, namespace string) error {
 	// The stored profile is the canonical one for the stored limits, or the
 	// built-in one an earlier release wrote before the limits were set.
@@ -132,6 +157,25 @@ func validateNonrootReuseFor(values map[string]any, namespace string, nonroot ar
 				return errors.New("nonroot profile requires a valid controller.priorityClassName")
 			}
 			controllerAllowed["priorityClassName"] = value
+		}
+		// Placement only: where the controller runs, not what it runs.
+		if value, exists := controller["nodeSelector"]; exists {
+			selector, ok := value.(map[string]any)
+			for _, v := range selector {
+				if _, isString := v.(string); !isString {
+					ok = false
+				}
+			}
+			if !ok {
+				return errors.New("nonroot profile requires controller.nodeSelector to map labels to strings")
+			}
+			controllerAllowed["nodeSelector"] = value
+		}
+		if value, exists := controller["tolerations"]; exists {
+			if _, ok := value.([]any); !ok {
+				return errors.New("nonroot profile requires controller.tolerations to be a list")
+			}
+			controllerAllowed["tolerations"] = value
 		}
 		if resources, ok := controller["resources"].(map[string]any); ok {
 			requests, _ := resources["requests"].(map[string]any)
@@ -235,7 +279,7 @@ func prepareNonrootArgoValues(ctx context.Context, cfg Config, deps Deps, exists
 		if err := json.Unmarshal(encoded, &stored); err != nil {
 			return "", nil, noop, errors.New("cannot decode existing Argo profile settings")
 		}
-		if err := validateNonrootReuse(stored, cfg.ArgoNamespace); err != nil {
+		if err := checkNonrootReuse(encoded, stored, cfg.ArgoNamespace, cfg.ArgoValuesReviewed); err != nil {
 			return "", nil, noop, err
 		}
 	}

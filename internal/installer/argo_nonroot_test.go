@@ -2,11 +2,14 @@ package installer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -296,5 +299,68 @@ func TestNonrootArgoReuseAcceptsInstallerLimits(t *testing.T) {
 	cfg.ArgoSyncLimits = map[string]int{"kvm": 3}
 	if objects := profileValues(t, cfg); len(objects) != 1 {
 		t.Fatalf("requested limits duplicated in the profile values: %v", objects)
+	}
+}
+
+// Stored values outside the allowlist refuse the profile unless the operator
+// acknowledges exactly the bytes reviewed; placement keys need no review.
+func TestNonrootReuseAcknowledgesReviewedValues(t *testing.T) {
+	t.Parallel()
+	placement := `{"controller":{"nodeSelector":{"kubernetes.io/os":"linux"},"tolerations":[{"key":"ci","operator":"Exists"}]}}`
+	var values map[string]any
+	if err := json.Unmarshal([]byte(placement), &values); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkNonrootReuse([]byte(placement), values, DefaultArgoNamespace, ""); err != nil {
+		t.Fatalf("placement-only values refused: %v", err)
+	}
+	for _, bad := range []string{`{"controller":{"nodeSelector":{"a":1}}}`, `{"controller":{"tolerations":"all"}}`} {
+		var values map[string]any
+		if err := json.Unmarshal([]byte(bad), &values); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateNonrootReuse(values, DefaultArgoNamespace); err == nil {
+			t.Fatalf("malformed placement %s accepted", bad)
+		}
+	}
+
+	custom := []byte(`{"controller":{"podAnnotations":{"team":"ci"}}}` + "\n")
+	if err := json.Unmarshal(custom, &values); err != nil {
+		t.Fatal(err)
+	}
+	err := checkNonrootReuse(custom, values, DefaultArgoNamespace, "")
+	if err == nil || !strings.Contains(err.Error(), "--argo-values-reviewed") || !strings.Contains(err.Error(), "helm get values argo-workflows -n "+DefaultArgoNamespace+" -o json") {
+		t.Fatalf("unreviewed custom values: %v", err)
+	}
+	sum := sha256.Sum256(custom)
+	digest := hex.EncodeToString(sum[:])
+	for _, reviewed := range []string{"sha256:" + digest, digest} {
+		if err := checkNonrootReuse(custom, values, DefaultArgoNamespace, reviewed); err != nil {
+			t.Fatalf("reviewed %q refused: %v", reviewed, err)
+		}
+	}
+	changed := []byte(`{"controller":{"podAnnotations":{"team":"other"}}}` + "\n")
+	if err := checkNonrootReuse(changed, values, DefaultArgoNamespace, "sha256:"+digest); err == nil {
+		t.Fatal("values changed after the review accepted")
+	}
+
+	// The install path: the reviewed digest is of what Helm returned.
+	deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		if args[0] != "get" {
+			t.Fatalf("unexpected Helm call %v", args)
+		}
+		return custom, nil
+	}}
+	cfg := Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}
+	_, _, cleanup, err := prepareNonrootArgoValues(t.Context(), cfg, deps, true, DefaultArgoChartVersion)
+	cleanup()
+	if err == nil {
+		t.Fatal("unreviewed custom values accepted on install")
+	}
+	cfg.ArgoValuesReviewed = "sha256:" + digest
+	_, _, cleanup, err = prepareNonrootArgoValues(t.Context(), cfg, deps, true, DefaultArgoChartVersion)
+	cleanup()
+	if err != nil {
+		t.Fatalf("reviewed custom values refused on install: %v", err)
 	}
 }
