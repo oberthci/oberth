@@ -60,11 +60,21 @@ func TestClientCertificateIssuanceAndRenewalAuthority(t *testing.T) {
 	if _, err := f.store.UplinkByClientPin(t.Context(), clientcert.Pin(leaf)); err != nil {
 		t.Fatal("returned certificate pin not bound", err)
 	}
-	actor := api.Actor{Identity: u.Identity, Fingerprint: u.Fingerprint, AuthMethod: "bearer"}
+	actor := api.Actor{Identity: u.Identity, Fingerprint: u.Fingerprint, TokenCredentialID: u.TokenCredentialID, AuthMethod: "bearer"}
 	if _, err := f.call(actor, "client_renew", map[string]any{"csr": csr()}); !errors.Is(err, ErrForbidden) {
 		t.Fatal("bearer renewed", err)
 	}
 	actor.AuthMethod = "cert"
+	stale := actor
+	stale.TokenCredentialID = "replaced-credential"
+	if _, err := f.call(stale, "client_renew", map[string]any{"csr": csr()}); !errors.Is(err, ErrForbidden) {
+		t.Fatal("replaced credential renewed", err)
+	}
+	authenticator := &Authenticator{Certificates: f.store}
+	authenticated, err := authenticator.AuthenticateCertificate(t.Context(), leaf)
+	if err != nil || authenticated.TokenCredentialID != u.TokenCredentialID {
+		t.Fatal("certificate authentication lost credential ownership", err)
+	}
 	if _, err := f.call(actor, "client_renew", map[string]any{"identity": "other", "csr": csr()}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatal("cross-identity renewal", err)
 	}

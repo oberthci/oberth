@@ -13,12 +13,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/clientcert"
 )
 
 func TestClientRenewRotatesPairWithoutBearer(t *testing.T) {
+	for _, mode := range []string{"valid", "expired", "future", "server-only", "ca"} {
+		t.Run(mode, func(t *testing.T) { testClientRenewPair(t, mode) })
+	}
+}
+
+func testClientRenewPair(t *testing.T, mode string) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("OBERTH_TOKEN", "")
 	t.Setenv("OBERTH_TOKEN_COMMAND", "")
@@ -91,10 +98,34 @@ func TestClientRenewRotatesPairWithoutBearer(t *testing.T) {
 		if request.Params.Name != "client_renew" {
 			t.Error("wrong renewal tool")
 		}
-		issued, _, err := ca.Issue("agent", []byte(request.Params.Arguments.CSR), 0)
+		issued, issuedLeaf, err := ca.Issue("agent", []byte(request.Params.Arguments.CSR), 0)
 		if err != nil {
 			t.Error(err)
 			return
+		}
+		if mode != "valid" {
+			switch mode {
+			case "expired":
+				issuedLeaf.NotAfter = time.Now().Add(-time.Hour)
+			case "future":
+				issuedLeaf.NotBefore = time.Now().Add(time.Hour)
+			case "server-only":
+				issuedLeaf.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+			case "ca":
+				issuedLeaf.IsCA = true
+			}
+			block, _ := pem.Decode(files["ca.key"])
+			signer, parseErr := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if parseErr != nil {
+				t.Error(parseErr)
+				return
+			}
+			der, issueErr := x509.CreateCertificate(rand.Reader, issuedLeaf, ca.Certificate, issuedLeaf.PublicKey, signer)
+			if issueErr != nil {
+				t.Error(issueErr)
+				return
+			}
+			issued = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"structuredContent": map[string]string{"certificate": string(issued)}}})
@@ -110,6 +141,25 @@ func TestClientRenewRotatesPairWithoutBearer(t *testing.T) {
 	}
 	var out bytes.Buffer
 	err = runClientRenew(t.Context(), []string{"--url", server.URL, "--ca-file", serverCA, "--client-cert", filepath.Join(current, "client.crt"), "--client-key", filepath.Join(current, "client.key")}, &out)
+	if mode != "valid" {
+		if err == nil {
+			t.Fatal("unusable renewal accepted")
+		}
+		target, linkErr := os.Readlink(current)
+		if linkErr != nil || target != initial {
+			t.Fatal("failed renewal replaced current identity", linkErr)
+		}
+		entries, readErr := os.ReadDir(root)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, entry := range entries {
+			if len(entry.Name()) >= 9 && entry.Name()[:9] == "identity-" {
+				t.Fatal("failed renewal retained a candidate identity")
+			}
+		}
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

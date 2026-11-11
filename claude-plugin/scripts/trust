@@ -233,10 +233,13 @@ settings() {
 					if ((depth == 1 || (depth == 2 && inside)) && index(name, "\\")) refuse("has a key with an escape this command does not read")
 					v = space(k + 1)
 					if (depth == 1 && name == "env") {
+						if (environment) refuse("has duplicate env objects")
 						if (substr(s, v, 1) != "{") refuse("env is not an object")
 						environment = v; from = 0; to = 0
 					} else if (depth == 2 && inside && name == key) {
+						if (from) refuse("has duplicate env." key)
 						if (substr(s, v, 1) != "\"") refuse("env." key " is not a string")
+						member_start = i
 						from = v; to = closing(v)
 						if (!to) refuse("has an unterminated string")
 					}
@@ -257,6 +260,19 @@ settings() {
 			if (!finished) refuse("is not a complete JSON object")
 			if (mode == "get") {
 				if (from) printf "%s", decoded(substr(s, from + 1, to - from - 1))
+				exit 0
+			}
+			if (mode == "unset") {
+				if (!from) { printf "%s", s; exit 0 }
+				after = space(to + 1)
+				if (substr(s, after, 1) == ",") {
+					printf "%s", substr(s, 1, member_start - 1) substr(s, after + 1)
+				} else {
+					before = member_start - 1
+					while (before > environment && index(" \t\r\n", substr(s, before, 1))) before--
+					if (substr(s, before, 1) == ",") member_start = before
+					printf "%s", substr(s, 1, member_start - 1) substr(s, to + 1)
+				}
 				exit 0
 			}
 			if (from) {
@@ -544,6 +560,9 @@ keygen() {
   [ "$(cat "$store/current/.oberth-client-identity" 2>/dev/null)" = oberth-client-identity-v1 ] || fail "current directory is not a managed client identity"
   [ -f "$store/current/client.key" ] && [ -f "$store/current/client.csr" ] || fail "incomplete client key/CSR pair"
   openssl req -in "$store/current/client.csr" -verify -noout >/dev/null 2>&1 || fail "invalid client CSR"
+  csrpub=$(openssl req -in "$store/current/client.csr" -pubkey -noout 2>/dev/null) || fail "invalid client CSR"
+  keypub=$(openssl pkey -in "$store/current/client.key" -pubout 2>/dev/null) || fail "invalid client key"
+  [ "$csrpub" = "$keypub" ] || fail "client CSR does not match local key"
  else
   [ ! -e "$store/current" ] || fail "current identity must be a symlink"
   work=$(mktemp -d "$store/identity-XXXXXX")
@@ -590,6 +609,18 @@ renew() {
  oberth client renew --url "$url" --ca-file "$ca" --client-cert "$cert" --client-key "$key"
 }
 
+clear_client_credentials() {
+ claude=$(claude_directory); settings_file="$claude/settings.json"
+ [ -e "$settings_file" ] || return 0
+ work=$(mktemp -d "$claude/.client-settings.XXXXXX")
+ trap 'rm -rf "$work"' EXIT
+ variable=CLAUDE_CODE_CLIENT_CERT
+ settings unset "$settings_file" >"$work/one" || fail "settings unchanged"
+ variable=CLAUDE_CODE_CLIENT_KEY
+ settings unset "$work/one" >"$work/two" || fail "settings unchanged"
+ chmod 600 "$work/two"; write_file "$settings_file" "$work/two"
+}
+
 # Register only a configured endpoint. No empty MCP server exists at plugin install.
 configure() {
  url=${1:-}; token_file=${2:-}
@@ -608,6 +639,7 @@ configure() {
   helper="$helper_store/bearer-headers"
   case "$helper" in *[!A-Za-z0-9/@._-]*) fail "plugin path cannot be quoted safely";; esac
   config=$(printf '{"type":"http","url":"%s","timeout":630000,"headersHelper":"sh %s %s"}' "$url" "$helper" "$token_file")
+  clear_client_credentials
  else
   config=$(printf '{"type":"http","url":"%s","timeout":630000}' "$url")
  fi

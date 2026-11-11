@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -36,9 +37,31 @@ func TestPluginLocalCertificateEnrollment(t *testing.T) {
 			current := filepath.Join(dir, "oberth", "current")
 			keyPath := filepath.Join(current, "client.key")
 			key := mustRead(t, keyPath)
+			originalCSR := mustRead(t, filepath.Join(current, "client.csr"))
 			if strings.Contains(out, string(key)) {
 				t.Fatal("private key in output")
 			}
+			_, differentKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wrongCSR, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, differentKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(current, "client.csr"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: wrongCSR}), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := runTrust(t, shell, dir, nil, "keygen"); err == nil {
+				t.Fatal("reused mismatched CSR and key")
+			}
+			if !bytes.Equal(mustRead(t, keyPath), key) {
+				t.Fatal("mismatch changed the private key")
+			}
+			if err := os.WriteFile(filepath.Join(current, "client.csr"), originalCSR, 0600); err != nil {
+				t.Fatal(err)
+			}
+
 			if info, err := os.Stat(keyPath); err != nil || info.Mode().Perm() != 0600 {
 				t.Fatal("private key permissions", err)
 			}
@@ -141,5 +164,54 @@ func TestFirstAdminCSRDoesNotMintBearer(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "PRIVATE KEY") || strings.Contains(output.String(), "oberth_") {
 		t.Fatal("secret in output")
+	}
+}
+
+func TestExplicitBearerSetupClearsClientCertificate(t *testing.T) {
+	for _, implementation := range append([]string{"go"}, trustShells()...) {
+		t.Run(implementation, func(t *testing.T) {
+			for _, env := range []string{
+				`{"CLAUDE_CODE_CLIENT_CERT":"old.crt","KEEP":"value","CLAUDE_CODE_CLIENT_KEY":"old.key"}`,
+				`{"KEEP":"value","CLAUDE_CODE_CLIENT_CERT":"old.crt","CLAUDE_CODE_CLIENT_KEY":"old.key"}`,
+				`{"CLAUDE_CODE_CLIENT_KEY":"old.key","CLAUDE_CODE_CLIENT_CERT":"old.crt","KEEP":"value"}`,
+			} {
+				dir := t.TempDir()
+				t.Setenv("CLAUDE_CONFIG_DIR", dir)
+				path := filepath.Join(dir, "settings.json")
+				if err := os.WriteFile(path, []byte(`{"env":`+env+`,"model":"kept"}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if implementation == "go" {
+					_, err := configureClaudeMCP(t.Context(), ClaudeCodeSetup{URL: "https://new.example/mcp", Token: func(context.Context) (string, error) { return "fixture-only", nil }})
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					bin := t.TempDir()
+					if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+						t.Fatal(err)
+					}
+					if out, err := runTrust(t, implementation, dir, []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH")}, "configure", "https://new.example/mcp", "/tmp/fixture-token"); err != nil {
+						t.Fatal(err, out)
+					}
+				}
+				var result struct {
+					Env   map[string]string `json:"env"`
+					Model string            `json:"model"`
+				}
+				if err := json.Unmarshal(mustRead(t, path), &result); err != nil {
+					t.Fatal(err)
+				}
+				if _, ok := result.Env["CLAUDE_CODE_CLIENT_CERT"]; ok {
+					t.Fatal("bearer setup retained certificate")
+				}
+				if _, ok := result.Env["CLAUDE_CODE_CLIENT_KEY"]; ok {
+					t.Fatal("bearer setup retained key")
+				}
+				if result.Env["KEEP"] != "value" || result.Model != "kept" {
+					t.Fatal("other settings were changed")
+				}
+			}
+		})
 	}
 }

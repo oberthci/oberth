@@ -451,6 +451,10 @@
     "env:OBERTH_CLIENT_KEY": {
       "doc_anchor": "docs/client-certificates.md#cli-and-renewal",
       "test_ref": "internal/client/connection_test.go TestCertificateConnectionSelection"
+    },
+    "env:PATH": {
+      "doc_anchor": "docs/client-certificates.md",
+      "test_ref": "internal/installer/client_cert_test.go TestExplicitBearerSetupClearsClientCertificate"
     }
   }
 }

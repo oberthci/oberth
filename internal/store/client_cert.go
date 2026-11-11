@@ -88,9 +88,9 @@ func (s *Store) RegisterCertificateUplink(ctx context.Context, actor string, spe
 }
 
 // BindClientPin is atomic with its issuance receipt, and refuses a removed or
-// revoked registration. A pin cannot migrate to a different uplink.
-func (s *Store) BindClientPin(ctx context.Context, actor string, id int64, pin string, expiry time.Time) error {
-	if actor == "" || len(pin) != 64 || !expiry.After(s.now()) {
+// revoked or replaced registration. A pin cannot migrate to a different uplink.
+func (s *Store) BindClientPin(ctx context.Context, actor string, id int64, credentialID, pin string, expiry time.Time) error {
+	if actor == "" || credentialID == "" || len(pin) != 64 || !expiry.After(s.now()) {
 		return ErrInvalid
 	}
 	if _, err := hex.DecodeString(pin); err != nil {
@@ -102,7 +102,7 @@ func (s *Store) BindClientPin(ctx context.Context, actor string, id int64, pin s
 	}
 	defer func() { _ = tx.Rollback() }()
 	var active bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id WHERE u.id=? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL)`, id).Scan(&active); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id WHERE u.id=? AND t.id=? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL)`, id, credentialID).Scan(&active); err != nil {
 		return err
 	}
 	if !active {
