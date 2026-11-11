@@ -659,7 +659,6 @@ redeem() {
  echo "Local SSH push key registered; private key remains on this machine."
 }
 
-
 # Register only a configured endpoint. No empty MCP server exists at plugin install.
 configure() {
  url=${1:-}; token_file=${2:-}
