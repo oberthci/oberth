@@ -386,20 +386,9 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	// Addresses clients use (--tls-extra-dns-name/--tls-extra-ip, plus the
 	// host the installer itself advertises) join the same rotation. The key
 	// is kept, so clients that trust it keep working.
-	for _, name := range cfg.TLSExtraDNSNames {
-		if !stringSliceContains(cert.DNSNames, name) && !stringSliceContains(missingNames, name) {
-			missingNames = append(missingNames, name)
-		}
-	}
-	var missingIPs []net.IP
-	for _, address := range cfg.TLSExtraIPs {
-		ip := net.ParseIP(address)
-		if ip == nil {
-			return fmt.Errorf("--tls-extra-ip %q is not an IP address", address)
-		}
-		if !slices.ContainsFunc(cert.IPAddresses, ip.Equal) && !slices.ContainsFunc(missingIPs, ip.Equal) {
-			missingIPs = append(missingIPs, ip)
-		}
+	missingNames, missingIPs, err := missingClientSANs(cert, cfg, missingNames)
+	if err != nil {
+		return err
 	}
 	// Certificates issued before the server certificate became its own
 	// name-constrained anchor cannot be pinned by BoringSSL clients (Claude
@@ -407,6 +396,10 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	needsAnchor := !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 || !cert.PermittedDNSDomainsCritical
 	if len(missingNames) == 0 && len(missingIPs) == 0 && !needsAnchor {
 		return nil
+	}
+
+	if cert.IsCA && (len(missingNames) > 0 || len(missingIPs) > 0) && !cfg.ReissueServerCA {
+		return errors.New("existing self-signed server CA lacks requested names; review the TLS name set and rerun with --reissue-server-ca, then refresh client CA pins")
 	}
 
 	if !haveStore || server == nil {
@@ -778,4 +771,23 @@ func stringSliceContains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func missingClientSANs(cert *x509.Certificate, cfg *Config, missingNames []string) ([]string, []net.IP, error) {
+	for _, name := range cfg.TLSExtraDNSNames {
+		if !stringSliceContains(cert.DNSNames, name) && !stringSliceContains(missingNames, name) {
+			missingNames = append(missingNames, name)
+		}
+	}
+	var missingIPs []net.IP
+	for _, address := range cfg.TLSExtraIPs {
+		ip := net.ParseIP(address)
+		if ip == nil {
+			return nil, nil, fmt.Errorf("--tls-extra-ip %q is not an IP address", address)
+		}
+		if !slices.ContainsFunc(cert.IPAddresses, ip.Equal) && !slices.ContainsFunc(missingIPs, ip.Equal) {
+			missingIPs = append(missingIPs, ip)
+		}
+	}
+	return missingNames, missingIPs, nil
 }

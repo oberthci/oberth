@@ -20,6 +20,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.SetOutput(io.Discard)
 
 	var cfg installer.UpgradeConfig
+	flags.BoolVar(&cfg.ReissueServerCA, "reissue-server-ca", false, "allow server CA replacement after reviewing its planned names; clients must refresh the CA pin")
 	var kubeContext string
 	var userValues, userSet stringList
 	var tlsDNS, tlsIPs, removeDNS, removeIPs stringList

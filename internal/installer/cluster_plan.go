@@ -154,17 +154,20 @@ func PlanInstall(ctx context.Context, cfg Config, host InstallDeps) InstallPlan 
 	}
 	run := host.RunCommand
 	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run}
-	inspectClusterPreflight(ctx, cfg, deps, &plan.Identity, &r)
+	inspectClusterPreflight(ctx, &cfg, deps, &plan.Identity, &r)
+	plan.Review = Review(cfg)
+	plan.Review.Context = selected
 	plan.OK, plan.Checks = r.OK, r.Checks
 	return plan
 }
 
-func inspectClusterPreflight(ctx context.Context, cfg Config, deps Deps, identity *ClusterIdentity, r *InstallResult) {
+func inspectClusterPreflight(ctx context.Context, cfg *Config, deps Deps, identity *ClusterIdentity, r *InstallResult) {
 	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	r.check("nodes", err == nil && len(nodes.Items) > 0, "Grant read access to nodes and bring at least one node Ready.")
 	if err != nil {
 		return
 	}
+	cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = SingleHostTLSNames(nodes.Items, cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 	identity.Distribution = DetectEngine(nodes.Items)
 	if identity.Distribution == "unknown" {
 		for _, node := range nodes.Items {

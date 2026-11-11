@@ -446,6 +446,7 @@ func (w *wizard) finish(out io.Writer) error {
 // the wizard state, for --dry-mode and the review screen.
 func BuildCommandLine(state *WizardState) string {
 	c := state.Config
+	c.TLSExtraDNSNames, c.TLSExtraIPs = wizardTLSNames(state)
 	args := []string{"oberth install"}
 	if c.CreateKind {
 		args = append(args, "--create-kind")
@@ -526,6 +527,7 @@ func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'
 // plus the onboarding wiring the installer's non-interactive path needs.
 func installConfig(st *WizardState) installer.Config {
 	cfg := st.Config
+	cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = wizardTLSNames(st)
 	cfg.ForgeType = st.ForgeType
 	cfg.ForgeOrg = st.ForgeOrg
 	cfg.ForgeURL = forgeUpstreamURL(st.ForgeType, st.ForgeOrg)

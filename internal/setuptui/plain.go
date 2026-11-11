@@ -287,6 +287,8 @@ func (p *plainRun) review() (bool, error) {
 			return true, nil
 		}
 		result.apply(p.st)
+		dns, ips := wizardTLSNames(p.st)
+		p.say("  TLS DNS names: %v; IP addresses: %v\n", dns, ips)
 	}
 	if p.opts.AnswersOut != "" {
 		if err := installer.WriteAnswers(p.opts.AnswersOut, installConfig(p.st)); err != nil {

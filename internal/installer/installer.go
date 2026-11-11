@@ -103,6 +103,7 @@ const (
 
 // Config holds options for the install command.
 type Config struct {
+	ReissueServerCA        bool
 	KubeconfigPath         string
 	ContextName            string
 	CreateKind             bool

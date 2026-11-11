@@ -108,7 +108,7 @@ func TestAbsentBaoCertificateStillChecksExistingRuntimeSANs(t *testing.T) {
 	}
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
-	if err == nil || !strings.Contains(err.Error(), "does not cover the goproxy service names") {
+	if err == nil || !strings.Contains(err.Error(), "--reissue-server-ca") {
 		t.Fatalf("missing OpenBao certificate was treated as fresh install: %v", err)
 	}
 }

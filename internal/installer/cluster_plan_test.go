@@ -35,7 +35,7 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: preflightStats}
 	identity := ClusterIdentity{}
 	result := InstallResult{OK: true}
-	inspectClusterPreflight(context.Background(), Config{}, deps, &identity, &result)
+	inspectClusterPreflight(context.Background(), &Config{}, deps, &identity, &result)
 	if !result.OK || len(identity.Nodes) != 1 || identity.Nodes[0].AvailableBytes == nil || identity.Distribution != "k3s" {
 		t.Fatalf("preflight facts missing: %v", result.Checks)
 	}
@@ -48,7 +48,7 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 		return nil, errors.New("private diagnostic")
 	}
 	result = InstallResult{OK: true}
-	inspectClusterPreflight(context.Background(), Config{}, deps, &ClusterIdentity{}, &result)
+	inspectClusterPreflight(context.Background(), &Config{}, deps, &ClusterIdentity{}, &result)
 	failed := map[string]bool{}
 	for _, check := range result.Checks {
 		if !check.OK {
@@ -212,7 +212,7 @@ func TestPolicyPreflightReadsControllerConfiguration(t *testing.T) {
 				}
 			}
 			result := InstallResult{OK: true}
-			inspectClusterPreflight(context.Background(), Config{}, Deps{KubeClient: kube, RunCommand: preflightStats}, &ClusterIdentity{}, &result)
+			inspectClusterPreflight(context.Background(), &Config{}, Deps{KubeClient: kube, RunCommand: preflightStats}, &ClusterIdentity{}, &result)
 			if result.OK != test.want {
 				t.Fatalf("preflight ok=%t, want %t", result.OK, test.want)
 			}

@@ -403,6 +403,10 @@
     "env:KUBECONFIG": {
       "doc_anchor": "docs/install-answers.md#cluster-plan-and-preflight",
       "test_ref": "internal/installer/cluster_plan_test.go TestMultifileKubeconfigKeepsExplicitContext"
+    },
+    "flag:reissue-server-ca": {
+      "doc_anchor": "docs/single-host-tls.md",
+      "test_ref": "internal/installer/single_host_tls_test.go TestExistingCARequiresExplicitReissue"
     }
   }
 }
