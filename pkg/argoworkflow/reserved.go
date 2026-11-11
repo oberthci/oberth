@@ -82,15 +82,31 @@ func mapKeys(values map[string]string) []string {
 	return keys
 }
 
+// SyncLimitsConfigMap is the one ConfigMap a semaphore may read its limit
+// from: the shared limits the installation keeps for repositories.
+const SyncLimitsConfigMap = "oberth-sync-limits"
+
 // admitSynchronization refuses a document-declared lock on the release mutex
-// the server reserves. Every other mutex name and every semaphore, including
-// the oberth-sync-limits ConfigMap keys repositories are meant to share,
-// remains the document's own choice.
+// the server reserves, and a semaphore whose limit is read from anywhere but
+// the oberth-sync-limits ConfigMap in the Workflow's namespace: the
+// controller copies an unparsable value into the Workflow's status message,
+// so any other ConfigMap key would be readable through a run. Every other
+// mutex name and every oberth-sync-limits key remains the document's choice.
 func admitSynchronization(location string, synchronization *wfv1.Synchronization) []error {
 	if synchronization == nil {
 		return nil
 	}
 	var problems []error
+	for index, semaphore := range synchronization.Semaphores {
+		if semaphore == nil {
+			continue
+		}
+		if semaphore.Database != nil || semaphore.Namespace != "" || semaphore.ConfigMapKeyRef == nil || semaphore.ConfigMapKeyRef.Name != SyncLimitsConfigMap {
+			problems = append(problems, fmt.Errorf(
+				"argoworkflow: %s.semaphores[%d] is refused: a semaphore reads its limit from configMapKeyRef name %s, key of your choice, in the Workflow's own namespace",
+				location, index, SyncLimitsConfigMap))
+		}
+	}
 	for index, mutex := range synchronization.Mutexes {
 		if mutex == nil {
 			continue
