@@ -55,11 +55,12 @@ func serverPKINames(cfg Config) (dnsNames, ips []string) {
 //
 // OpenBao generates the CA (type internal), so its key never exists outside
 // OpenBao. The CA is name-constrained to the server's DNS names. It carries
-// no IP constraints: Claude Code's TLS stack (BoringSSL) rejects any chain
-// whose CA has them (UNSUPPORTED_CONSTRAINT_TYPE). IP SANs are limited at
+// no IP constraints: the pinned OpenBao CA-generation API supports DNS only,
+// and affected Bun clients reject IP constraints. See docs/single-host-tls.md.
+// IP SANs are limited at
 // issuance instead: the role allows only the configured addresses and only
 // the server's policy may use the role. A CA that no longer covers the DNS
-// names, or is close to expiry, is replaced, which changes what clients pin;
+// names, or is close to expiry, requires explicit reissue, changing what clients pin;
 // the installer refreshes the pins it manages itself.
 func ensureServerPKI(ctx context.Context, cfg Config, store openBaoExec, token string, mounts map[string]baoMount) (caPEM string, replaced bool, err error) {
 	if err := validateServerTLSFlags(&cfg); err != nil {
@@ -91,11 +92,9 @@ func ensureServerPKI(ctx context.Context, cfg Config, store openBaoExec, token s
 	if err != nil && !strings.Contains(err.Error(), "no default issuer") {
 		return "", false, err
 	}
-	if pemText, _ := current["certificate"].(string); pemText != "" {
-		if ca, parseErr := parseCertificatePEM([]byte(pemText)); parseErr == nil &&
-			serverCACovers(ca, dnsNames) && time.Until(ca.NotAfter) > serverCARenewBefore {
-			caPEM = strings.TrimSpace(pemText) + "\n"
-		}
+	caPEM, err = selectExistingServerCA(cfg, current, dnsNames, cidrs)
+	if err != nil {
+		return "", false, err
 	}
 	if caPEM == "" {
 		caPEM, err = generateServerCA(ctx, store, token, dnsNames)
@@ -112,6 +111,41 @@ func ensureServerPKI(ctx context.Context, cfg Config, store openBaoExec, token s
 		}
 	}
 	return caPEM, replaced, nil
+}
+
+func selectExistingServerCA(cfg Config, current map[string]any, dnsNames, cidrs []string) (caPEM string, err error) {
+	if pemText, _ := current["certificate"].(string); pemText != "" {
+		ca, parseErr := parseCertificatePEM([]byte(pemText))
+		if parseErr == nil {
+			if serverCACovers(ca, dnsNames) && serverCAAllowsIPs(ca, cidrs) && time.Until(ca.NotAfter) > serverCARenewBefore {
+				caPEM = strings.TrimSpace(pemText) + "\n"
+			}
+			if caPEM == "" && (len(ca.PermittedIPRanges) > 0 || len(ca.ExcludedIPRanges) > 0) {
+				return "", errors.New("existing CA has IP name constraints; this OpenBao backend cannot preserve them on reissue; retain this CA until the backend supports IP-constrained CA generation")
+			}
+		}
+	}
+	if caPEM == "" && current["certificate"] != nil && !cfg.ReissueServerCA {
+		return "", fmt.Errorf("existing server CA does not cover the planned names or needs renewal; review DNS %v and IP %v, then rerun with --reissue-server-ca; clients must refresh their CA pin", dnsNames, cidrs)
+	}
+	return caPEM, nil
+}
+
+func checkServerCAReissue(ctx context.Context, cfg Config, store openBaoExec, token string) error {
+	role, err := store.readData(ctx, token, defaultServerPKIMount+"/roles/"+defaultServerPKIRole)
+	if err != nil {
+		return err
+	}
+	dns, cidrs, err := mergedServerPKINames(cfg, role)
+	if err != nil {
+		return err
+	}
+	current, err := store.readData(ctx, token, defaultServerPKIMount+"/issuer/default")
+	if err != nil {
+		return err
+	}
+	_, err = selectExistingServerCA(cfg, current, dns, cidrs)
+	return err
 }
 
 // generateServerCA has OpenBao create a new name-constrained ECDSA P-256
@@ -161,13 +195,26 @@ func serverCACovers(ca *x509.Certificate, dnsNames []string) bool {
 	if !ca.IsCA || !ca.PermittedDNSDomainsCritical {
 		return false
 	}
-	// IP constraints make the chain unusable for BoringSSL clients; replace
-	// a CA that has them (one issued by an earlier build).
-	if len(ca.PermittedIPRanges) > 0 || len(ca.ExcludedIPRanges) > 0 {
-		return false
-	}
 	for _, name := range dnsNames {
 		if !slices.Contains(ca.PermittedDNSDomains, name) {
+			return false
+		}
+	}
+	return true
+}
+
+func serverCAAllowsIPs(ca *x509.Certificate, cidrs []string) bool {
+	for _, cidr := range cidrs {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return false
+		}
+		for _, excluded := range ca.ExcludedIPRanges {
+			if excluded.Contains(ip) {
+				return false
+			}
+		}
+		if len(ca.PermittedIPRanges) > 0 && !slices.ContainsFunc(ca.PermittedIPRanges, func(network *net.IPNet) bool { return network.Contains(ip) }) {
 			return false
 		}
 	}

@@ -29,6 +29,7 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
+	ReissueServerCA       bool
 	WaitTimeout           time.Duration // independent queue-observation limit
 	WaitFor               string        // all or critical; a nonempty selection enables waiting
 	WaitIdle              bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work

@@ -29,6 +29,7 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
+	ReissueServerCA bool     `json:"reissue_server_ca"`
 	Context         string   `json:"context"`
 	Namespace       string   `json:"namespace"`
 	ArgoNamespace   string   `json:"argo_namespace"`
@@ -41,7 +42,7 @@ type InstallReview struct {
 }
 
 func Review(cfg Config) InstallReview {
-	return InstallReview{Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
+	return InstallReview{ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -128,7 +129,7 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	r.check("cluster_ca", identity.CAPin != "" && !config.Insecure, "Use a kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
 	preflightDeps := deps
 	preflightDeps.RunCommand = host.RunCommand
-	inspectClusterPreflight(ctx, cfg, preflightDeps, &identity, &r)
+	inspectClusterPreflight(ctx, &cfg, preflightDeps, &identity, &r)
 	r.Cluster = &identity
 	service, serviceErr := kube.CoreV1().Services(cfg.Namespace).Get(ctx, "oberth", metav1.GetOptions{})
 	deps.ClientServiceType = cfg.ServiceType

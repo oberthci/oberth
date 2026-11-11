@@ -157,7 +157,10 @@ func probeContext(contextName, path string) func() probeResult {
 		if info.err != nil {
 			return probeResult{err: info.err}
 		}
-		return probeResult{apply: func(st *WizardState) { st.ClusterInfo = info }}
+		return probeResult{apply: func(st *WizardState) {
+			st.ClusterInfo = info
+			st.Config.TLSExtraDNSNames, st.Config.TLSExtraIPs = installer.SingleHostTLSNames(info.nodes, st.Config.TLSExtraDNSNames, st.Config.TLSExtraIPs)
+		}}
 	}
 }
 
@@ -339,7 +342,7 @@ func displayUpstream(baseURL string) string {
 // A kind cluster publishes on 127.0.0.1 only, so it offers localhost alone.
 func clientHostOptions(st *WizardState) []option {
 	local := option{value: "localhost", label: "localhost", detail: "this machine only"}
-	if st.Config.CreateKind || st.ClusterInfo.engine == "kind" {
+	if st.Config.CreateKind {
 		local.detail = "kind publishes Oberth on 127.0.0.1 only"
 		return []option{local}
 	}
@@ -762,7 +765,7 @@ func buildQuestions() []*question {
 		{
 			id: "tls.client", step: stepTLS, heading: "Which address do clients use?",
 			explain: func(st *WizardState) string {
-				if st.Config.CreateKind || st.ClusterInfo.engine == "kind" {
+				if st.Config.CreateKind {
 					return "kind publishes ports 30022 and 30443 on 127.0.0.1 only, so clients on this machine use localhost."
 				}
 				text := "Clone URLs, the CLI and MCP settings and the dashboard link name this address, and the certificate covers it. On k3s and most clusters, ports 30022 and 30443 already listen on every address of the node, so pick the one your other machines (a laptop, the VM's host) reach this server by. localhost works on this machine only."

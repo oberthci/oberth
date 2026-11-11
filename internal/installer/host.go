@@ -316,7 +316,8 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 		preflightConfig := cfg
 		// RunCommand already carries an explicit kubeconfig, if supplied.
 		preflightConfig.KubeconfigPath = ""
-		inspectClusterPreflight(ctx, preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: deps.RunCommand}, &ClusterIdentity{}, &preflight)
+		inspectClusterPreflight(ctx, &preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: deps.RunCommand}, &ClusterIdentity{}, &preflight)
+		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = preflightConfig.TLSExtraDNSNames, preflightConfig.TLSExtraIPs
 		if !preflight.OK {
 			var failures []string
 			for _, check := range preflight.Checks {
@@ -328,6 +329,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 		}
 	}
 
+	PrintReview(deps.Output, cfg)
 	// Wire the production ReadPassword and MakeRaw defaults when the session
 	// is interactive: x/term.ReadPassword and x/term.MakeRaw on the stdin fd.
 	// Non-interactive sessions leave both nil (the callers check isInteractive
@@ -501,7 +503,7 @@ type kindMount struct {
 // MCP client verify TLS without an /etc/hosts entry pointing a covered name at
 // the loopback. Existing entries are preserved and never duplicated.
 func certificateNamesForKind(dnsNames, ips []string) ([]string, []string) {
-	return appendMissing(dnsNames, "localhost"), appendMissing(ips, "127.0.0.1")
+	return appendMissing(dnsNames, "localhost"), appendMissing(appendMissing(ips, "127.0.0.1"), "::1")
 }
 
 // certificateNamesForClientHost adds the address host-side clients are told

@@ -35,6 +35,7 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags.SetOutput(io.Discard)
 
 	var cfg installer.Config
+	flags.BoolVar(&cfg.ReissueServerCA, "reissue-server-ca", false, "allow server CA replacement after reviewing its planned names; clients must refresh the CA pin")
 	var options installFlagOptions
 	options.answersPath = flags.String("answers", "", "version 1 YAML/JSON install answers; explicit flags override scalar answers")
 	options.yes = flags.Bool("yes", false, "confirm the reviewed install on the selected kubeconfig context")

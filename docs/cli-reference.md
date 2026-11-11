@@ -484,6 +484,8 @@ Flags:
         inspect the selected cluster and preflight checks without installing
   -push-banner-url string
         push feedback URL; omitted preserves the live URL, explicit empty clears it
+  -reissue-server-ca
+        allow server CA replacement after reviewing its planned names; clients must refresh the CA pin
   -rekor-chart-version string
         Rekor chart version
   -rekor-namespace string
@@ -1856,6 +1858,8 @@ Flags:
         upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)
   -openbao-namespace string
         OpenBao namespace (default: openbao)
+  -reissue-server-ca
+        allow server CA replacement after reviewing its planned names; clients must refresh the CA pin
   -release-dir DIR
         read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
   -release-origin string

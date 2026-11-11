@@ -13,7 +13,7 @@ type upgradeServerPKI struct {
 }
 
 func upgradeHasTLSFlags(cfg UpgradeConfig) bool {
-	return len(cfg.TLSExtraDNSNames)+len(cfg.TLSExtraIPs)+len(cfg.TLSRemoveDNSNames)+len(cfg.TLSRemoveIPs) > 0
+	return cfg.ReissueServerCA || len(cfg.TLSExtraDNSNames)+len(cfg.TLSExtraIPs)+len(cfg.TLSRemoveDNSNames)+len(cfg.TLSRemoveIPs) > 0
 }
 
 // Plan and check everything on the read-only path, including --dry-run.
@@ -38,7 +38,7 @@ func prepareUpgradeServerPKI(ctx context.Context, cfg *UpgradeConfig, deps Deps,
 		}
 		return nil, nil
 	}
-	config := Config{Namespace: cfg.Namespace, OpenBaoNamespace: cfg.OpenBaoNamespace,
+	config := Config{ReissueServerCA: cfg.ReissueServerCA, Namespace: cfg.Namespace, OpenBaoNamespace: cfg.OpenBaoNamespace,
 		TLSExtraDNSNames: cfg.TLSExtraDNSNames, TLSExtraIPs: cfg.TLSExtraIPs,
 		TLSRemoveDNSNames: cfg.TLSRemoveDNSNames, TLSRemoveIPs: cfg.TLSRemoveIPs}
 	mergeTLSNames(&config, live)
@@ -49,6 +49,10 @@ func prepareUpgradeServerPKI(ctx context.Context, cfg *UpgradeConfig, deps Deps,
 	if err := checkServerPKIRole(ctx, config, deps, store, token, upgradeHasTLSFlags(*cfg)); err != nil {
 		return nil, err
 	}
+	if err := checkServerCAReissue(ctx, config, store, token); err != nil {
+		return nil, err
+	}
+	PrintReview(deps.Output, config)
 	plan := &upgradeServerPKI{config: config, store: store, token: token}
 	plan.configure(cfg)
 	return plan, nil

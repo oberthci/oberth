@@ -287,6 +287,7 @@ func (p *plainRun) review() (bool, error) {
 			return true, nil
 		}
 		result.apply(p.st)
+		p.say("  TLS DNS names: %v; IP addresses: %v\n", p.st.Config.TLSExtraDNSNames, p.st.Config.TLSExtraIPs)
 	}
 	if p.opts.AnswersOut != "" {
 		if err := installer.WriteAnswers(p.opts.AnswersOut, installConfig(p.st)); err != nil {

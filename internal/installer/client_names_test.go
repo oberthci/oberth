@@ -20,8 +20,8 @@ func TestCertificateNamesForClientHost(t *testing.T) {
 		host             string
 		wantDNS, wantIPs []string
 	}{
-		{"localhost", []string{"localhost"}, []string{"127.0.0.1"}},
-		{"", []string{"localhost"}, []string{"127.0.0.1"}},
+		{"localhost", []string{"localhost"}, []string{"127.0.0.1", "::1"}},
+		{"", []string{"localhost"}, []string{"127.0.0.1", "::1"}},
 		{"10.0.0.5", nil, []string{"10.0.0.5"}},
 		{"k8s.example.test", []string{"k8s.example.test"}, nil},
 	} {
@@ -32,7 +32,7 @@ func TestCertificateNamesForClientHost(t *testing.T) {
 	}
 	// Operator-supplied names keep their order; the advertised host is appended once.
 	dns, ips := certificateNamesForClientHost("localhost", []string{"example-node", "localhost"}, []string{"192.0.2.193"})
-	if !slices.Equal(dns, []string{"example-node", "localhost"}) || !slices.Equal(ips, []string{"192.0.2.193", "127.0.0.1"}) {
+	if !slices.Equal(dns, []string{"example-node", "localhost"}) || !slices.Equal(ips, []string{"192.0.2.193", "127.0.0.1", "::1"}) {
 		t.Fatalf("got %v %v", dns, ips)
 	}
 }
@@ -103,9 +103,10 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 		},
 	}
 	cfg := Config{
+		ReissueServerCA:    true,
 		InstallSecretStore: true,
 		TLSExtraDNSNames:   []string{"example-node", "localhost"},
-		TLSExtraIPs:        []string{"192.0.2.193", "127.0.0.1"},
+		TLSExtraIPs:        []string{"192.0.2.193", "127.0.0.1", "::1"},
 	}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight: %v", err)
@@ -125,9 +126,8 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	}
 }
 
-// Without an OpenBao admin token only a warning is possible; missing client
-// addresses must not fail the install the way missing goproxy names do.
-func TestPreflightWithoutStoreLeavesClientAddressesToWarning(t *testing.T) {
+// Missing client addresses require explicit consent even without an OpenBao token.
+func TestPreflightWithoutStoreRequiresReissueConsent(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "")
 	certPEM, _ := testCertAndKey(t, []string{"oberth"})
 	liveValuesJSON, _ := json.Marshal(liveHelmValuesSubset{})
@@ -143,9 +143,9 @@ func TestPreflightWithoutStoreLeavesClientAddressesToWarning(t *testing.T) {
 		},
 		RunHelm: func(context.Context, []string) ([]byte, error) { return liveValuesJSON, nil },
 	}
-	cfg := Config{TLSExtraIPs: []string{"127.0.0.1"}}
-	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
-		t.Fatalf("preflight must not fail: %v", err)
+	cfg := Config{TLSExtraIPs: []string{"127.0.0.1", "::1"}}
+	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err == nil || !strings.Contains(err.Error(), "--reissue-server-ca") {
+		t.Fatalf("preflight must require explicit reissue: %v", err)
 	}
 	if cfg.pendingCertRotation != nil {
 		t.Fatal("no rotation is possible without the store")
@@ -209,7 +209,7 @@ func TestPreflightStandsDownForServerPKI(t *testing.T) {
 		},
 		RunHelm: func(context.Context, []string) ([]byte, error) { return liveValuesJSON, nil },
 	}
-	cfg := Config{InstallSecretStore: true, serverPKI: true, TLSExtraIPs: []string{"127.0.0.1"}}
+	cfg := Config{InstallSecretStore: true, serverPKI: true, TLSExtraIPs: []string{"127.0.0.1", "::1"}}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight: %v", err)
 	}

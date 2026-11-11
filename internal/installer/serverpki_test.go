@@ -19,7 +19,7 @@ import (
 
 // newTestServerCA stands in for the CA OpenBao generates: self-signed, CA,
 // pathlen 0, critical DNS name constraints.
-func newTestServerCA(dnsNames []string) []byte {
+func newTestServerCA(dnsNames []string, ips ...string) []byte {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		panic(err)
@@ -29,6 +29,9 @@ func newTestServerCA(dnsNames []string) []byte {
 		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(serverCAValidity),
 		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true, IsCA: true, MaxPathLenZero: true,
 		PermittedDNSDomainsCritical: true, PermittedDNSDomains: dnsNames,
+	}
+	for _, ip := range ips {
+		template.PermittedIPRanges = append(template.PermittedIPRanges, hostCIDR(net.ParseIP(ip)))
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
@@ -50,8 +53,8 @@ func TestServerCACoversItsDNSNames(t *testing.T) {
 		t.Fatal("a new DNS name must require a new CA")
 	}
 	ca.PermittedIPRanges = []*net.IPNet{{IP: net.ParseIP("127.0.0.1").To4(), Mask: net.CIDRMask(32, 32)}}
-	if serverCACovers(ca, []string{"oberth"}) {
-		t.Fatal("a CA with IP constraints is unusable for BoringSSL clients and must be replaced")
+	if !serverCACovers(ca, []string{"oberth"}) {
+		t.Fatal("existing IP constraints must not trigger replacement with a weaker CA")
 	}
 }
 
@@ -132,6 +135,7 @@ func TestServerPKIReinstallPreservesExistingNames(t *testing.T) {
 			runner := &fakeBaoRunner{t: t, responses: responses}
 			if extra != "" {
 				cfg.TLSExtraDNSNames = []string{extra}
+				cfg.ReissueServerCA = true
 			}
 			_, replaced, err := ensureServerPKI(t.Context(), cfg, newOpenBaoExec(secretStoreTestDeps(runner, io.Discard), DefaultOpenBaoNamespace, "openbao-0"), "test-token", map[string]baoMount{"oberth-pki/": {Type: "pki"}})
 			if err != nil {
