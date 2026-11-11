@@ -478,8 +478,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 
-	// Recheck after preview/drain, immediately before the first live write.
-
 	// The backup and the rollback record come last before the first write,
 	// so they hold the state the upgrade starts from.
 	backupPath, err := takeUpgradeBackup(ctx, cfg, w)
