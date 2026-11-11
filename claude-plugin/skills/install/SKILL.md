@@ -2,6 +2,7 @@
 name: install
 description: Install a new Oberth server on the Kubernetes cluster the user's KUBECONFIG names, without any secret entering this session. Use when the user runs /oberth:install, asks to install or set up Oberth, or the session-start note says no Oberth server is configured and the user wants one.
 argument-hint: "[kubeconfig context]"
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth" *)
 ---
 
 # Install Oberth
@@ -21,16 +22,19 @@ Arguments given to the command: `$ARGUMENTS`
    https://kubernetes.io/docs/tasks/tools/, helm:
    https://helm.sh/docs/intro/install/; a k3s host has kubectl). Never install
    them yourself.
-2. **The CLI.** When `command -v oberth` finds nothing, install it into the
-   user's home. No sudo is needed, and the script verifies the checksums and
-   the release signature:
+2. **The CLI.** Fetch and verify the newest CLI with the plugin's pinned
+   release key. Always use this verified copy for the install:
 
    ```sh
-   export OBERTH_INSTALL_DIR="$HOME/.local/bin"
-   curl -fsSL https://oberth.ci/install.sh | sh
+   sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth"
    ```
 
-   Then use `"$HOME/.local/bin/oberth"` when that directory is not on PATH.
+   An explicit version is the script's one optional argument, for example
+   `v0.21.5`. It requires curl or wget, openssl, and sha256sum or shasum;
+   it installs `~/.local/bin/oberth-<version>` and the `oberth` symlink.
+   If verification fails, stop and explain the message. Never substitute
+   a website script or an unverified binary. Use `"$HOME/.local/bin/oberth"`
+   for the remaining commands when that directory is not on PATH.
 3. **The cluster.** List the contexts with `kubectl config get-contexts`. Any
    cluster they reach is a valid target, local or remote. With one context,
    name it and its API server. With several, ask the user which one, or take

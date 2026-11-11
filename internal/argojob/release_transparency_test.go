@@ -25,6 +25,16 @@ func TestReleaseSignaturesRequireTransparencyLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	helper := string(script)
+	helperStart := strings.Index(helper, "checksum_signature() (")
+	if helperStart < 0 {
+		t.Fatal("checksum_signature is missing")
+	}
+	helper = helper[helperStart:]
+	helper = helper[:strings.Index(helper, "\n)\n")]
+	if !strings.Contains(helper, `"$cosign_tool" verify-blob --key "$release_public_key"`) {
+		t.Fatal("checksum signature helper must authenticate the Sigstore bundle")
+	}
 	runtime := string(script)
 	start := strings.Index(runtime, "verify_runtime_payload() {")
 	if start < 0 {
@@ -32,7 +42,7 @@ func TestReleaseSignaturesRequireTransparencyLog(t *testing.T) {
 	}
 	runtime = runtime[start:]
 	runtime = runtime[:strings.Index(runtime, "\n}\n")]
-	if !strings.Contains(runtime, `TUF_ROOT=$runtime_tuf_root "$cosign_tool" verify-blob`) {
+	if !strings.Contains(runtime, `TUF_ROOT=$runtime_tuf_root checksum_signature "$release_dir"`) {
 		t.Error("runtime verification after executing the candidate must use a fresh TUF cache")
 	}
 }

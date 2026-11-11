@@ -114,7 +114,7 @@ func TestClaudePluginManifests(t *testing.T) {
 	if _, helper := server["headersHelper"]; helper {
 		t.Fatal(".mcp.json carries a headersHelper")
 	}
-	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 1 || entries[0].Name() != "trust" {
+	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 2 || entries[0].Name() != "fetch-oberth" || entries[1].Name() != "trust" {
 		t.Fatalf("scripts = %v %v", entries, err)
 	}
 
@@ -145,7 +145,7 @@ func TestClaudePluginManifests(t *testing.T) {
 		},
 		"install": {
 			"name: install", "description:", "$ARGUMENTS", "--secrets-file", "--context", "--expected-host-fingerprint",
-			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "OBERTH_INSTALL_DIR", "trust on first",
+			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "scripts/fetch-oberth", "trust on first",
 			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "exactly as printed", "--replace-client-files",
 		},
 		"connect": {

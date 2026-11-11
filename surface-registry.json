@@ -403,6 +403,14 @@
     "env:KUBECONFIG": {
       "doc_anchor": "docs/install-answers.md#cluster-plan-and-preflight",
       "test_ref": "internal/installer/cluster_plan_test.go TestMultifileKubeconfigKeepsExplicitContext"
+    },
+    "value:plugin-fetch-oberth": {
+      "doc_anchor": "docs/plugin-bootstrap.md#verified-plugin-bootstrap",
+      "test_ref": "internal/installer/plugin_fetch_test.go TestPluginFetchVerifiedRelease"
+    },
+    "value:SHA256SUMS.sig": {
+      "doc_anchor": "docs/plugin-bootstrap.md#release-verification",
+      "test_ref": "internal/argojob/release_public_test.go TestPublicChecksumProofsRefuseDisagreement"
     }
   }
 }
