@@ -16,7 +16,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 
 	var cfg installer.Config
 	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "kubeconfig file for an existing cluster")
-	flags.StringVar(&cfg.ContextName, "context", "", "context in the selected kubeconfig")
+	flags.StringVar(&cfg.ContextName, "context", "", "kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)")
 	flags.BoolVar(&cfg.CreateKind, "create-kind", false, "create or use the local oberth kind cluster")
 	flags.StringVar(&cfg.ForgeURL, "upstream-url", "", "organization upstream base URL, e.g. ssh://git@github.com/oberthci")
 	flags.StringVar(&cfg.ForgeType, "forge", "", "upstream name (github, codeberg, or gitlab)")
@@ -34,7 +34,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		"another organization to connect with the same upstream key, host/organization or ssh:// URL (repeatable), "+
 			"e.g. codeberg.org/acme")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")
-	flags.BoolVar(&cfg.Yes, "yes", false, "proceed even for non-local clusters")
 	flags.BoolVar(&cfg.Upgrade, "upgrade", false,
 		"force helm reconciliation of existing releases at the installed Oberth version; "+
 			"version changes of an existing Oberth release are refused here and go through oberth upgrade")
@@ -122,7 +121,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)

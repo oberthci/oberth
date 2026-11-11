@@ -40,7 +40,7 @@ func runSizeGrant(ctx context.Context, arguments []string, output io.Writer) err
 	if err := flags.Parse(rest); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)

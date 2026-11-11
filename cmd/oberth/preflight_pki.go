@@ -24,7 +24,7 @@ func runPreflightPKI(ctx context.Context, arguments []string, output io.Writer) 
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)

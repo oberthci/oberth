@@ -34,7 +34,7 @@ type UpgradeConfig struct {
 	WaitIdle              bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
 	Namespace             string
 	DryRun                bool
-	Yes                   bool   // --yes: proceed without confirmation for non-local targets
+	Yes                   bool   // --yes, with --rollback: replace the database with the pre-upgrade backup without a second run
 	ChartOverride         string // --chart: override the chart reference
 	BinaryVersion         string
 	Timeout               time.Duration
@@ -332,17 +332,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		server = deps.RestConfig.Host
 	}
 	_, _ = fmt.Fprintf(w, "Target: %s (%s)\n", deps.ContextName, server)
-
-	// Non-local safety guard: match install's pattern (installer.go:468-475).
-	// An upgrade against a remote cluster without explicit acknowledgement
-	// risks applying to the wrong environment.
-	if !IsLocalServer(server) && !cfg.Yes {
-		return UpgradeResult{}, fmt.Errorf("target %q does not appear to be a local cluster (server: %s); "+
-			"use --yes to proceed or switch to a local context", deps.ContextName, server)
-	}
-	if !IsLocalServer(server) && cfg.Yes {
-		_, _ = fmt.Fprintf(w, "WARNING: %q does not appear to be a local cluster; proceeding because --yes was set\n", deps.ContextName)
-	}
 
 	// Detect current version from the Helm release.
 	release, exists, err := findHelmRelease(ctx, deps, "oberth", cfg.Namespace)

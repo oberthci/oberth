@@ -129,18 +129,6 @@ func (p *plainRun) run(resumed bool, loadErr error, vanished string, input io.Re
 		}
 		switch strings.ToLower(answer) {
 		case "yes", "y":
-			p.st.remoteAcknowledged = false
-			if !p.st.Config.Yes && !p.st.Config.CreateKind && !p.st.ClusterInfo.isLocal {
-				acknowledgement, err := p.ask(fmt.Sprintf("Authorize changes to remote cluster %s (%s)? yes or no", p.st.ClusterInfo.context, p.st.ClusterInfo.server), "no")
-				if err != nil {
-					return err
-				}
-				if strings.ToLower(acknowledgement) != "yes" && strings.ToLower(acknowledgement) != "y" {
-					p.say("  Nothing applied.\n")
-					return nil
-				}
-				p.st.remoteAcknowledged = true
-			}
 			return p.install(input)
 		case "no", "n":
 			p.say("  Nothing applied. Answers are saved in %s; rerun `oberth setup` to continue.\n", displayHome(statePath))

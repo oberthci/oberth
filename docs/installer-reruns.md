@@ -22,7 +22,7 @@ Every Oberth chart the CLI deploys is verified first, the same way `oberth upgra
 Version changes go through one command:
 
 ```sh
-oberth upgrade --yes            # from the directory where the backup and rollback record should go
+oberth upgrade                  # from the directory where the backup and rollback record should go
 ```
 
 It, in order:

@@ -36,7 +36,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.DurationVar(&cfg.WaitTimeout, "wait-timeout", installer.DefaultUpgradeWaitTimeout, "maximum queue wait, independent of --timeout")
 	flags.StringVar(&cfg.WaitFor, "wait-for", "", "enable waiting for all or critical (tag/promotion/plan/apply/unknown) runs")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
-	flags.BoolVar(&cfg.Yes, "yes", false, "proceed without confirmation for non-local targets")
+	flags.BoolVar(&cfg.Yes, "yes", false, "with --rollback: accept the plan, including replacing the server database with the pre-upgrade backup")
 	flags.StringVar(&cfg.ChartOverride, "chart", "", "deploy this chart instead of the signed release (development only: not verified)")
 	addReleaseSourceFlags(flags, &cfg.ReleaseDir, &cfg.ReleaseOrigin, &cfg.ChartRepository)
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
@@ -52,7 +52,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -62,6 +62,9 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	}
 	if *rollback != "" {
 		return runUpgradeRollback(ctx, *rollback, kubeContext, cfg, *forceRecord, *timeout, input, output)
+	}
+	if cfg.Yes {
+		return fmt.Errorf("%w: --yes applies to --rollback only; an upgrade needs no confirmation flag", errUsage)
 	}
 
 	if cfg.WaitTimeout <= 0 {

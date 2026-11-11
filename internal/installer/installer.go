@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -111,7 +110,6 @@ type Config struct {
 	Dev        bool
 	Production bool
 	DryRun     bool
-	Yes        bool
 	Upgrade    bool
 	// InstallSecretStore additionally installs a PRODUCTION-mode OpenBao —
 	// standalone server with persistent storage — then initializes it
@@ -512,7 +510,6 @@ type ClusterInfo struct {
 	Context          string
 	Server           string
 	Engine           string // "k3s", "kind", "k0s", "minikube", "unknown"
-	IsLocal          bool
 }
 
 // OpenBaoResult describes the outcome of the OpenBao install phase.
@@ -770,18 +767,10 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 		deps.KindClusterName = clusterName
 	}
-	// Cluster info line omitted — the kind/k3s creation messages already
-	// communicate the cluster identity; repeating it adds noise.
+	// Any cluster the kubeconfig reaches is a valid target; the install names
+	// the one it acts on before anything else.
+	_, _ = fmt.Fprintf(deps.Output, "Target: %s (%s)\n", cluster.Context, cluster.Server)
 	resolveInstallClientHost(&cfg, &deps, cluster)
-
-	if !cluster.IsLocal && !cfg.Yes {
-		return fmt.Errorf("context %q does not appear to be a local cluster (server: %s); "+
-			"oberth install is a bootstrap command that creates a dev secret store — "+
-			"use --yes to proceed or switch to a local context", cluster.Context, cluster.Server)
-	}
-	if !cluster.IsLocal && cfg.Yes {
-		_, _ = fmt.Fprintf(deps.Output, "WARNING: %q does not appear to be a local cluster; proceeding because --yes was set\n", cluster.Context)
-	}
 
 	if cfg.InstallSecretStoreDev {
 		_, _ = fmt.Fprintln(deps.Output, "EVALUATION MODE — not for production. Dev OpenBao state does not survive pod restart.")
@@ -1104,7 +1093,6 @@ func DetectCluster(ctx context.Context, deps Deps) (ClusterInfo, error) {
 		Context: deps.ContextName,
 		Server:  deps.RestConfig.Host,
 	}
-	info.IsLocal = IsLocalServer(info.Server)
 
 	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -1113,38 +1101,7 @@ func DetectCluster(ctx context.Context, deps Deps) (ClusterInfo, error) {
 		return info, nil
 	}
 	info.Engine = DetectEngine(nodes.Items)
-	// Engine detection is informational only. The safety locality decision
-	// (whether --yes is required) derives from the API server endpoint, not
-	// from the detected engine. A kubelet version that contains "+k3s" on a
-	// remote public endpoint must still require --yes, because bootstrap
-	// and dev-secret-store flags are destructive on production clusters.
 	return info, nil
-}
-
-// IsLocalServer reports whether the server URL points to a loopback or RFC1918 address.
-func IsLocalServer(serverURL string) bool {
-	parsed, err := url.Parse(serverURL)
-	if err != nil {
-		return false
-	}
-	host := parsed.Hostname()
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() {
-		return true
-	}
-	for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
-		_, network, _ := net.ParseCIDR(cidr)
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
 }
 
 // DetectEngine identifies the Kubernetes engine from node metadata.

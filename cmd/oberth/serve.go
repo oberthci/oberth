@@ -350,7 +350,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return serveOptions{}, flag.ErrHelp
 		}
 		return serveOptions{}, fmt.Errorf("%w: %w", errUsage, err)

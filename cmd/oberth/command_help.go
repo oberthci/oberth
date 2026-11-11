@@ -35,3 +35,11 @@ const gitSSHHelp = `Usage: oberth git-ssh [SSH transport arguments]
 Git invokes this pinned-key SSH transport through GIT_SSH.
 It uses OBERTH_GIT_SSH_CONFIG and accepts only the configured native Git service.
 `
+
+// printFlagUsage prints a command's flag help in the one format every command
+// uses: "Usage: oberth <command> [flags]" and the flags. A flag set with its
+// own Usage function calls that instead.
+func printFlagUsage(flags *flag.FlagSet) {
+	_, _ = fmt.Fprintf(flags.Output(), "Usage: oberth %s [flags]\n\nFlags:\n", flags.Name())
+	flags.PrintDefaults()
+}

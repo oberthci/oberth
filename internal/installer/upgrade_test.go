@@ -1139,32 +1139,11 @@ func TestResolveChartImageRefLocalChartStillRequiresDigest(t *testing.T) {
 	}
 }
 
-// --- #71: non-local guard ---
+// --- Any reachable cluster is a target ---
 
-func TestRunUpgradeRejectsNonLocalWithoutYes(t *testing.T) {
-	t.Parallel()
-	var output bytes.Buffer
-	deps := Deps{
-		Output:      &output,
-		ContextName: "prod-cluster",
-		RestConfig:  &rest.Config{Host: "https://example.com:6443"},
-		KubeClient:  fake.NewClientset(),
-	}
-	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
-	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		NoBackup:      true,
-		BinaryVersion: "0.12.35",
-		Namespace:     "oberth",
-	}, deps)
-	if err == nil || !strings.Contains(err.Error(), "does not appear to be a local cluster") {
-		t.Fatalf("non-local guard error = %v", err)
-	}
-	if !strings.Contains(output.String(), "Target: prod-cluster") {
-		t.Fatalf("output should contain target disclosure: %q", output.String())
-	}
-}
-
-func TestRunUpgradeAllowsNonLocalWithYes(t *testing.T) {
+// The upgrade names its target and applies to it whatever its API address
+// is: no locality heuristic and no --yes gate.
+func TestRunUpgradeTargetsAnyCluster(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
 	deps := Deps{
@@ -1176,7 +1155,7 @@ func TestRunUpgradeAllowsNonLocalWithYes(t *testing.T) {
 				return out, nil
 			}
 			if args[0] == "list" {
-				return []byte("[]"), nil // no releases — proves we passed the guard
+				return []byte("[]"), nil
 			}
 			return nil, fmt.Errorf("unexpected: %v", args)
 		},
@@ -1187,14 +1166,12 @@ func TestRunUpgradeAllowsNonLocalWithYes(t *testing.T) {
 		NoBackup:      true,
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
-		Yes:           true,
 	}, deps)
-	// Should get past the non-local guard and fail on "no release found".
 	if err == nil || !strings.Contains(err.Error(), "no Oberth Helm release found") {
-		t.Fatalf("expected 'no release found' (proving guard was bypassed), got: %v", err)
+		t.Fatalf("expected the release lookup to run, got: %v", err)
 	}
-	if !strings.Contains(output.String(), "WARNING:") {
-		t.Fatalf("non-local --yes should print WARNING: %q", output.String())
+	if !strings.Contains(output.String(), "Target: prod-cluster (https://example.com:6443)") || strings.Contains(output.String(), "WARNING:") {
+		t.Fatalf("target disclosure: %q", output.String())
 	}
 }
 
@@ -2006,47 +1983,6 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 	}
 	if !strings.Contains(text, "forward-only") {
 		t.Fatalf("expected forward-only warning in announcement, got: %q", text)
-	}
-}
-
-func TestUpgradeRequiresYesForNonLocalSchemaChange(t *testing.T) {
-	t.Parallel()
-	var output bytes.Buffer
-	deps := Deps{
-		Output:      &output,
-		ContextName: "prod-cluster",
-		RestConfig:  &rest.Config{Host: "https://example.com:6443"},
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if out, ok := testUpgradeValuePreflight(args); ok {
-				return out, nil
-			}
-			if args[0] == "list" {
-				releases := []helmRelease{{
-					Name: "oberth", Namespace: "oberth",
-					Status: "deployed", Chart: "oberth-0.16.18",
-				}}
-				data, _ := json.Marshal(releases)
-				return data, nil
-			}
-			return nil, fmt.Errorf("unexpected helm call: %v", args)
-		},
-		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
-			return []byte("16\n"), nil
-		},
-		KubeClient: fake.NewClientset(),
-	}
-
-	// Non-local without --yes should be caught by the existing guard
-	// BEFORE schema migration. The schema migration check provides an
-	// additional layer for the case where --yes is not set.
-	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion:       "0.16.19",
-		Namespace:           "oberth",
-		Yes:                 false,
-		BinarySchemaVersion: 17,
-	}, deps)
-	if err == nil {
-		t.Fatal("expected error for non-local without --yes")
 	}
 }
 

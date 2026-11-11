@@ -14,7 +14,9 @@ Use oberth access <command> --help for command flags.
 ## oberth access allow
 
 ```text
-Usage of access allow:
+Usage: oberth access allow [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -namespace string
@@ -24,7 +26,9 @@ Usage of access allow:
 ## oberth access list
 
 ```text
-Usage of access list:
+Usage: oberth access list [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -json
@@ -38,7 +42,9 @@ Usage of access list:
 ## oberth access revoke
 
 ```text
-Usage of access revoke:
+Usage: oberth access revoke [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -namespace string
@@ -115,7 +121,9 @@ Usage: oberth audit [--tail] [--action <prefix>] [--actor <identity>] [--repo <r
 ## oberth audit head
 
 ```text
-Usage of audit head:
+Usage: oberth audit head [flags]
+
+Flags:
   -database string
         SQLite database path (default "/data/oberth.sqlite")
 ```
@@ -123,7 +131,9 @@ Usage of audit head:
 ## oberth audit record
 
 ```text
-Usage of audit record:
+Usage: oberth audit record [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -details string
@@ -178,7 +188,9 @@ Guide: https://github.com/oberthci/oberth/blob/main/docs/backup-restore.md
 ## oberth backup database
 
 ```text
-Usage of backup database:
+Usage: oberth backup database [flags]
+
+Flags:
   -database string
         SQLite database path (default "/data/oberth.sqlite")
   -max-database-bytes int
@@ -345,7 +357,9 @@ Use oberth fragments <command> --help for command flags.
 ## oberth fragments list
 
 ```text
-Usage of fragments list:
+Usage: oberth fragments list [flags]
+
+Flags:
   -data-root string
         Oberth data root holding the git cache (default "/data")
   -database string
@@ -355,7 +369,9 @@ Usage of fragments list:
 ## oberth fragments show
 
 ```text
-Usage of fragments show:
+Usage: oberth fragments show [flags]
+
+Flags:
   -data-root string
         Oberth data root holding the git cache (default "/data")
   -database string
@@ -373,7 +389,9 @@ It uses OBERTH_GIT_SSH_CONFIG and accepts only the configured native Git service
 ## oberth init
 
 ```text
-Usage of init:
+Usage: oberth init [flags]
+
+Flags:
   -force
         overwrite existing .oberth/build.yaml
 ```
@@ -381,7 +399,9 @@ Usage of init:
 ## oberth install
 
 ```text
-Usage of install:
+Usage: oberth install [flags]
+
+Flags:
   -accept-witness-genesis string
         one-shot acknowledgment of the existing deployment's exact audit chain head (<auditID>:<sha256hex>, from 'oberth audit head') when enabling --install-rekor on a deployment that already has audit history
   -also-upstream value
@@ -415,7 +435,7 @@ Usage of install:
   -client-host string
         address clients use to reach this server, a DNS name or IP (default: the Kubernetes API host, or localhost); client files, SSH config and printed URLs use it and the certificate covers it
   -context string
-        context in the selected kubeconfig
+        kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)
   -create-kind
         create or use the local oberth kind cluster
   -credentialed-secret-path oberth access allow
@@ -484,8 +504,6 @@ Usage of install:
         file-tool image for cache preparation and database helpers (air-gapped mirror)
   -values value
         helm values file applied to the Oberth release (repeatable, applied in order); the installer's own settings still win, so a value it computed cannot be overridden by a stale one in a file
-  -yes
-        proceed even for non-local clusters
 ```
 
 ## oberth issues
@@ -805,7 +823,9 @@ Use oberth preflight <command> --help for command flags.
 ## oberth preflight drift
 
 ```text
-Usage of preflight drift:
+Usage: oberth preflight drift [flags]
+
+Flags:
   -chart string
         path to the local chart directory (default "charts/oberth")
   -context string
@@ -819,7 +839,9 @@ Usage of preflight drift:
 ## oberth preflight pki
 
 ```text
-Usage of preflight pki:
+Usage: oberth preflight pki [flags]
+
+Flags:
   -context string
         kubeconfig context
   -namespace string
@@ -835,7 +857,9 @@ Usage of preflight pki:
 ## oberth preflight upstreams
 
 ```text
-Usage of preflight upstreams:
+Usage: oberth preflight upstreams [flags]
+
+Flags:
   -inventory string
         complete old-server upstream list metadata file
 ```
@@ -944,7 +968,9 @@ Use oberth repo <command> --help for command flags.
 ## oberth repo add
 
 ```text
-Usage of repo add:
+Usage: oberth repo add [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -default-branch string
@@ -960,7 +986,9 @@ Usage: oberth repo archive <repository> [--url <mcp-url>] [--token-file <path>] 
 ## oberth repo remove
 
 ```text
-Usage of repo remove:
+Usage: oberth repo remove [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -git-cache-root string
@@ -976,7 +1004,9 @@ Usage: oberth repo unarchive <repository> [--url <mcp-url>] [--token-file <path>
 ## oberth repo verify
 
 ```text
-Usage of repo verify:
+Usage: oberth repo verify [flags]
+
+Flags:
   -all
         verify every registered repository
   -database string
@@ -1013,7 +1043,9 @@ Use oberth resource <command> --help for command flags.
 ## oberth resource get
 
 ```text
-Usage of resource get:
+Usage: oberth resource get [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
 ```
@@ -1021,7 +1053,9 @@ Usage of resource get:
 ## oberth resource grant
 
 ```text
-Usage of resource grant:
+Usage: oberth resource grant [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
   -limits-cpu string
@@ -1041,7 +1075,9 @@ Usage of resource grant:
 ## oberth resource revoke
 
 ```text
-Usage of resource revoke:
+Usage: oberth resource revoke [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
 ```
@@ -1217,7 +1253,9 @@ Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]
 ## oberth run resources
 
 ```text
-Usage of run resources:
+Usage: oberth run resources [flags]
+
+Flags:
   -burn string
         optional burn
   -ca-file string
@@ -1289,7 +1327,9 @@ Usage: oberth runs cancel --repo <repo> --ref <branch> [--reason <text>] [--forc
 ## oberth schedules
 
 ```text
-Usage of schedules:
+Usage: oberth schedules [flags]
+
+Flags:
   -data-root string
         Oberth data root holding the git cache (default "/data")
   -database string
@@ -1354,7 +1394,9 @@ Use oberth secretstore <command> --help for command flags.
 ## oberth secretstore bootstrap-tls
 
 ```text
-Usage of secretstore bootstrap-tls:
+Usage: oberth secretstore bootstrap-tls [flags]
+
+Flags:
   -namespace string
         OpenBao Kubernetes namespace
   -output-dir string
@@ -1370,7 +1412,9 @@ Usage: oberth secretstore exec --dir DIR --path PATH -- COMMAND [ARG...]
 ## oberth secretstore setup
 
 ```text
-Usage of secretstore setup:
+Usage: oberth secretstore setup [flags]
+
+Flags:
   -print-script
         write the embedded setup script to stdout
 ```
@@ -1378,7 +1422,9 @@ Usage of secretstore setup:
 ## oberth secretstore sync
 
 ```text
-Usage of secretstore sync:
+Usage: oberth secretstore sync [flags]
+
+Flags:
   -argo-namespace string
         pipeline namespace (default "oberth-argo")
   -context string
@@ -1392,7 +1438,9 @@ Usage of secretstore sync:
 ## oberth secretstore verify
 
 ```text
-Usage of secretstore verify:
+Usage: oberth secretstore verify [flags]
+
+Flags:
   -address string
         OpenBao API base URL (default: discovered from the running serve process)
   -ca-cert string
@@ -1426,7 +1474,9 @@ Usage of secretstore verify:
 ## oberth serve
 
 ```text
-Usage of serve:
+Usage: oberth serve [flags]
+
+Flags:
   -accept-witness-chain-reset string
         one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain
   -accept-witness-genesis string
@@ -1668,7 +1718,9 @@ Usage of serve:
 ## oberth setup
 
 ```text
-Usage of setup:
+Usage: oberth setup [flags]
+
+Flags:
   -accessible
         screen reader mode (sequential prompts, no cursor addressing)
   -chart string
@@ -1693,7 +1745,9 @@ Use oberth size <command> --help for command flags.
 ## oberth size get
 
 ```text
-Usage of size get:
+Usage: oberth size get [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
 ```
@@ -1701,7 +1755,9 @@ Usage of size get:
 ## oberth size grant
 
 ```text
-Usage of size grant:
+Usage: oberth size grant [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
   -max string
@@ -1711,7 +1767,9 @@ Usage of size grant:
 ## oberth size revoke
 
 ```text
-Usage of size revoke:
+Usage: oberth size revoke [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
 ```
@@ -1733,7 +1791,9 @@ Usage: oberth status [flags]
 ## oberth upgrade
 
 ```text
-Usage of upgrade:
+Usage: oberth upgrade [flags]
+
+Flags:
   -allow-downgrade
         accept a CLI older than the installed release (a deliberate rollback within one database schema)
   -argo-controller-profile string
@@ -1787,7 +1847,7 @@ Usage of upgrade:
   -wait-timeout duration
         maximum queue wait, independent of --timeout (default 2h0m0s)
   -yes
-        proceed without confirmation for non-local targets
+        with --rollback: accept the plan, including replacing the server database with the pre-upgrade backup
 ```
 
 ## oberth uplink
@@ -1800,7 +1860,9 @@ Use oberth uplink <command> --help for command flags.
 ## oberth uplink add
 
 ```text
-Usage of uplink add:
+Usage: oberth uplink add [flags]
+
+Flags:
   -admin
         Grant admin privileges (required for access_allow/access_revoke)
   -database string
@@ -1816,7 +1878,9 @@ Usage of uplink add:
 ## oberth uplink list
 
 ```text
-Usage of uplink list:
+Usage: oberth uplink list [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
 ```
@@ -1824,7 +1888,9 @@ Usage of uplink list:
 ## oberth uplink remove
 
 ```text
-Usage of uplink remove:
+Usage: oberth uplink remove [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -fingerprint string
@@ -1834,7 +1900,9 @@ Usage of uplink remove:
 ## oberth uplink rotate
 
 ```text
-Usage of uplink rotate:
+Usage: oberth uplink rotate [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -tls-cert string
@@ -1846,7 +1914,9 @@ Usage of uplink rotate:
 ## oberth uplink scope
 
 ```text
-Usage of uplink scope:
+Usage: oberth uplink scope [flags]
+
+Flags:
   -clear
         remove the limit: the uplink reaches every repository again
   -database string
@@ -1867,7 +1937,9 @@ Use oberth upstream <command> --help for command flags.
 ## oberth upstream add
 
 ```text
-Usage of upstream add:
+Usage: oberth upstream add [flags]
+
+Flags:
   -database string
 
   -dedicated-key
@@ -1893,7 +1965,9 @@ Usage of upstream add:
 ## oberth upstream list
 
 ```text
-Usage of upstream list:
+Usage: oberth upstream list [flags]
+
+Flags:
   -check
         authenticate to each SSH upstream now and report whether the forge still accepts its key
   -database string
@@ -1907,7 +1981,9 @@ Usage of upstream list:
 ## oberth upstream provide-key
 
 ```text
-Usage of upstream provide-key:
+Usage: oberth upstream provide-key [flags]
+
+Flags:
   -database string
         SQLite database path (default "/data/oberth.sqlite")
   -dedicated-key
@@ -1921,7 +1997,9 @@ Usage of upstream provide-key:
 ## oberth upstream remove
 
 ```text
-Usage of upstream remove:
+Usage: oberth upstream remove [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -yes
@@ -1931,7 +2009,9 @@ Usage of upstream remove:
 ## oberth validate
 
 ```text
-Usage of validate:
+Usage: oberth validate [flags]
+
+Flags:
   -allow-unresolved-fragments
         deprecated: unresolved fragments still fail validation because admission requires their pinned contents
   -runner-image-prefixes string
@@ -1948,7 +2028,9 @@ Print build information, or the database schema version.
 ## oberth wait-idle
 
 ```text
-Usage of wait-idle:
+Usage: oberth wait-idle [flags]
+
+Flags:
   -timeout duration
         maximum time to wait for the live daemon queue (in-pod) (default 2h0m0s)
   -wait-for string
@@ -1958,7 +2040,9 @@ Usage of wait-idle:
 ## oberth upstream add (in-pod)
 
 ```text
-Usage of upstream add:
+Usage: oberth upstream add [flags]
+
+Flags:
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -dedicated-key

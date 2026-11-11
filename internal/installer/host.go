@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -64,7 +65,12 @@ type InstallDeps struct {
 	UserCacheDir   func() (string, error)
 	MkdirAll       func(string, fs.FileMode) error
 	LoadKubeConfig func(contextName string) (kubernetes.Interface, *rest.Config, string, error)
-	RunHelm        func(ctx context.Context, args []string) ([]byte, error)
+	// KubeContexts lists the contexts of the selected kubeconfig (an explicit
+	// path, else KUBECONFIG, else ~/.kube/config). Without --context an
+	// install needs exactly one; nil skips the check (tests that inject
+	// LoadKubeConfig).
+	KubeContexts func(kubeconfigPath string) ([]string, error)
+	RunHelm      func(ctx context.Context, args []string) ([]byte, error)
 	// CredentialSink, when non-nil, receives every held once-only credential
 	// (OpenBao root token, unseal keys, uplink bearer token) as structured
 	// label/value pairs INSTEAD of the boxed terminal flush. The TUI wizard
@@ -112,6 +118,9 @@ func (deps InstallDeps) withDefaults() InstallDeps {
 		deps.MkdirAll = os.MkdirAll
 	}
 	if deps.LoadKubeConfig == nil {
+		if deps.KubeContexts == nil {
+			deps.KubeContexts = KubeconfigContexts
+		}
 		output := deps.Output
 		deps.LoadKubeConfig = func(contextName string) (kubernetes.Interface, *rest.Config, string, error) {
 			return LoadKubeConfigForContext(contextName, output)
@@ -187,7 +196,6 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 			return printDryRunPlanWithKind(cfg, deps.Output, ClusterInfo{
 				Context: KindContextName,
 				Engine:  "kind",
-				IsLocal: true,
 			}, config)
 		}
 
@@ -200,6 +208,14 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 			_, _ = fmt.Fprintf(deps.Output, "Created kind cluster %q and selected context %q.\n", KindClusterName, contextName)
 		} else {
 			_, _ = fmt.Fprintf(deps.Output, "Using existing kind cluster %q with context %q.\n", KindClusterName, contextName)
+		}
+	}
+
+	if contextName == "" && deps.KubeContexts != nil {
+		names, err := deps.KubeContexts(cfg.KubeconfigPath)
+		if err == nil && len(names) > 1 {
+			return fmt.Errorf("the kubeconfig has %d contexts; choose the cluster to install on with --context <name>:\n  %s",
+				len(names), strings.Join(names, "\n  "))
 		}
 	}
 
@@ -306,6 +322,24 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		ReleaseGetter:    deps.ReleaseGetter,
 		releaseKey:       deps.releaseKey,
 	})
+}
+
+// KubeconfigContexts lists the context names of a kubeconfig, sorted: the
+// file at path, else what KUBECONFIG names, else ~/.kube/config. A kubeconfig
+// that cannot be read lists none, and the load that follows reports why.
+func KubeconfigContexts(path string) ([]string, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.ExplicitPath = path
+	raw, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).RawConfig()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(raw.Contexts))
+	for name := range raw.Contexts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 type kindConfig struct {

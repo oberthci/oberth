@@ -206,7 +206,7 @@ func SetupProductionSecretStore(ctx context.Context, cfg Config, deps Deps, open
 			_, _ = fmt.Fprintln(deps.Output, "    read -rs BAO_TOKEN && export BAO_TOKEN")
 			_, _ = fmt.Fprintln(deps.Output, "    oberth install --install-secretstore")
 			_, _ = fmt.Fprintln(deps.Output, "")
-			_, _ = fmt.Fprintln(deps.Output, "Keep every install flag unchanged, especially --namespace, --openbao-namespace, --chart-version, --openbao-chart-version, and --yes.")
+			_, _ = fmt.Fprintln(deps.Output, "Keep every install flag unchanged, especially --namespace, --openbao-namespace, --chart-version and --openbao-chart-version.")
 			_, _ = fmt.Fprintln(deps.Output, "Or run scripts/setup-secretstore.sh from an already-authenticated bao CLI session.")
 			return SecretStoreResult{}, fmt.Errorf("%s is required to verify production Transit provisioning before Oberth can be enabled", baoTokenEnvVar)
 		}

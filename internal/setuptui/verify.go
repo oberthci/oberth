@@ -24,7 +24,6 @@ type clusterInfoMsg struct {
 	server    string
 	version   string
 	engine    string // k3s, kind, gke, eks, unknown
-	isLocal   bool
 	nodeCount int
 	cores     int
 	nodeName  string // first node's hostname (for TLS SANs)
@@ -100,7 +99,6 @@ func probeClusterWithPath(contextName, path string) tea.Cmd {
 		nodeCount := len(nodes.Items)
 		totalCores := 0
 		engine := "unknown"
-		isLocal := false
 		var nodeName, nodeIP string
 
 		for i, node := range nodes.Items {
@@ -126,7 +124,6 @@ func probeClusterWithPath(contextName, path string) tea.Cmd {
 			}
 			if v, ok := node.Labels["node.kubernetes.io/instance-type"]; ok && v == "k3s" {
 				engine = "k3s"
-				isLocal = true
 			}
 		}
 		// Heuristic: check kubelet version for k3s marker.
@@ -134,10 +131,8 @@ func probeClusterWithPath(contextName, path string) tea.Cmd {
 			kubeletVersion := nodes.Items[0].Status.NodeInfo.KubeletVersion
 			if strings.Contains(kubeletVersion, "k3s") {
 				engine = "k3s"
-				isLocal = true
 			} else if strings.Contains(kubeletVersion, "kind") {
 				engine = "kind"
-				isLocal = true
 			}
 		}
 
@@ -146,7 +141,6 @@ func probeClusterWithPath(contextName, path string) tea.Cmd {
 			server:    restConfig.Host,
 			version:   serverVersion.GitVersion,
 			engine:    engine,
-			isLocal:   isLocal,
 			nodeCount: nodeCount,
 			cores:     totalCores,
 			nodeName:  nodeName,

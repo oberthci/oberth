@@ -108,9 +108,8 @@ var clusterProbe = func(contextName, path string) clusterInfoMsg {
 
 // kubeContext represents one entry from a kubeconfig.
 type kubeContext struct {
-	name    string
-	server  string
-	isLocal bool
+	name   string
+	server string
 }
 
 // loadKubeContexts lists a kubeconfig's contexts, the current one first. An
@@ -128,7 +127,7 @@ func loadKubeContexts(path string) ([]kubeContext, string, error) {
 		if cluster, ok := raw.Clusters[ctx.Cluster]; ok {
 			server = cluster.Server
 		}
-		contexts = append(contexts, kubeContext{name: name, server: server, isLocal: isLocalServer(server)})
+		contexts = append(contexts, kubeContext{name: name, server: server})
 	}
 	current := raw.CurrentContext
 	sort.Slice(contexts, func(i, j int) bool {
@@ -140,22 +139,12 @@ func loadKubeContexts(path string) ([]kubeContext, string, error) {
 	return contexts, current, nil
 }
 
-// isLocalServer heuristically determines if a server URL is local.
-func isLocalServer(server string) bool { return installer.IsLocalServer(server) }
-
 func contextOptions(contexts []kubeContext, current string) []option {
 	opts := make([]option, 0, len(contexts))
 	for _, c := range contexts {
-		where := "remote"
-		if c.isLocal {
-			where = "local"
-		}
-		detail := where
-		if c.server != "" {
-			detail += " · " + c.server
-		}
+		detail := c.server
 		if c.name == current {
-			detail = "current · " + detail
+			detail = strings.TrimSuffix("current · "+detail, " · ")
 		}
 		opts = append(opts, option{value: c.name, label: c.name, detail: detail})
 	}
@@ -516,7 +505,7 @@ func buildQuestions() []*question {
 					st.Config.CreateKind = true
 					st.Config.KubeconfigPath = ""
 					st.Config.ContextName = ""
-					st.ClusterInfo = clusterInfoMsg{context: installer.KindContextName, engine: "kind", isLocal: true}
+					st.ClusterInfo = clusterInfoMsg{context: installer.KindContextName, engine: "kind"}
 				case clusterChoiceFile:
 					st.Config.CreateKind = false
 				default:

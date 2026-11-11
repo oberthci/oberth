@@ -996,29 +996,6 @@ func TestConfigValidateChartVersionNotFromDevPrefixBuild(t *testing.T) {
 
 // --- Cluster detection ---
 
-func TestIsLocalServer(t *testing.T) {
-	t.Parallel()
-	for _, test := range []struct {
-		url  string
-		want bool
-	}{
-		{"https://127.0.0.1:6443", true},
-		{"https://localhost:6443", true},
-		{"https://[::1]:6443", true},
-		{"https://192.168.1.100:6443", true},
-		{"https://10.0.0.1:6443", true},
-		{"https://172.16.0.1:6443", true},
-		{"https://172.31.255.255:6443", true},
-		{"https://35.200.100.1:6443", false},
-		{"https://k8s.example.com:6443", false},
-		{"https://100.64.0.1:6443", false},
-	} {
-		if got := IsLocalServer(test.url); got != test.want {
-			t.Errorf("IsLocalServer(%q) = %v, want %v", test.url, got, test.want)
-		}
-	}
-}
-
 func TestDetectEngine(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -1090,9 +1067,12 @@ func TestDetectEngine(t *testing.T) {
 	}
 }
 
-// --- Remote context refusal ---
+// --- Any reachable cluster is a target ---
 
-func TestRemoteContextRefusal(t *testing.T) {
+// An API server on a public address is a valid target: the install does not
+// classify clusters by address and has no --yes gate. Here it goes on to the
+// secret-store decision, which a non-interactive run without a flag refuses.
+func TestRemoteContextIsAValidTarget(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	node := &corev1.Node{
@@ -1107,16 +1087,12 @@ func TestRemoteContextRefusal(t *testing.T) {
 		RestConfig:  &rest.Config{Host: "https://35.200.100.1:6443"},
 		ContextName: "gke_project_zone_cluster",
 	}
-	cfg := Config{}
-	err := Run(context.Background(), cfg, deps)
-	if err == nil {
-		t.Fatal("expected error for remote context without --yes")
-	}
-	if !strings.Contains(err.Error(), "does not appear to be a local cluster") {
+	err := Run(context.Background(), Config{SecretStoreUndecided: true}, deps)
+	if err == nil || !strings.Contains(err.Error(), "OpenBao is required") {
 		t.Fatalf("error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "--yes") {
-		t.Fatalf("error should mention --yes, got %v", err)
+	if strings.Contains(err.Error()+buf.String(), "local cluster") || strings.Contains(buf.String(), "WARNING") {
+		t.Fatalf("cluster classified by address: %v\n%s", err, buf.String())
 	}
 }
 
@@ -3510,7 +3486,6 @@ func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRunt
 		OpenBaoNamespace:    openBaoNamespace,
 		ChartVersion:        "v9.9.9",
 		OpenBaoChartVersion: "9.9.9",
-		Yes:                 true,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
@@ -3536,7 +3511,6 @@ func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRunt
 		"--openbao-namespace",
 		"--chart-version",
 		"--openbao-chart-version",
-		"--yes",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing safe re-run guidance %q:\n%s", want, output)
@@ -4692,38 +4666,8 @@ func TestCredentialedPolicyWithGrantsDeduplicates(t *testing.T) {
 	}
 }
 
-// --- Finding 6: remote k3s still requires --yes ---
-
-// TestRemoteK3sRequiresYes proves that a k3s engine behind a public API server
-// endpoint still requires --yes. Before the fix, engine detection overrode the
-// API endpoint locality check: any recognized engine marked the cluster local,
-// so a remote k3s/k0s installation with a public endpoint skipped the safety
-// gate.
-func TestRemoteK3sRequiresYes(t *testing.T) {
-	t.Parallel()
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "remote-k3s-node"},
-		Status: corev1.NodeStatus{
-			NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.33.0+k3s1"},
-		},
-	}
-	deps := Deps{
-		Output:      io.Discard,
-		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
-		RestConfig:  &rest.Config{Host: "https://35.200.100.1:6443"},
-		ContextName: "remote-k3s",
-	}
-	err := Run(context.Background(), Config{}, deps)
-	if err == nil {
-		t.Fatal("expected error for remote k3s without --yes")
-	}
-	if !strings.Contains(err.Error(), "--yes") {
-		t.Fatalf("error should mention --yes, got: %v", err)
-	}
-}
-
-// TestRemoteK3sEngineStillDetected proves engine detection is informational:
-// a remote k3s endpoint is detected as k3s but is NOT marked local.
+// TestRemoteK3sEngineStillDetected proves engine detection does not depend
+// on the API server address.
 func TestRemoteK3sEngineStillDetected(t *testing.T) {
 	t.Parallel()
 	node := &corev1.Node{
@@ -4744,9 +4688,6 @@ func TestRemoteK3sEngineStillDetected(t *testing.T) {
 	}
 	if info.Engine != "k3s" {
 		t.Fatalf("Engine = %q, want k3s", info.Engine)
-	}
-	if info.IsLocal {
-		t.Fatal("remote k3s endpoint should not be marked local")
 	}
 }
 

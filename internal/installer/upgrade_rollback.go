@@ -232,9 +232,6 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	if uid := kubeSystemUID(ctx, deps); record.ClusterUID != "" && uid != "" && uid != record.ClusterUID {
 		return errors.New("the record is for another cluster (kube-system UID differs); refusing to roll back here")
 	}
-	if !IsLocalServer(server) && !cfg.Yes {
-		return fmt.Errorf("target %q does not appear to be a local cluster (server: %s); use --yes to proceed", deps.ContextName, server)
-	}
 	release, exists, err := findHelmRelease(ctx, deps, "oberth", record.Namespace)
 	if err != nil {
 		return err

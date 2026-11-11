@@ -23,7 +23,7 @@ func runPreflightUpstreams(arguments []string, output io.Writer) error {
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
