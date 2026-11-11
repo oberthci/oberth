@@ -3,15 +3,12 @@ package installer
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
 	"strings"
 
-	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
@@ -25,11 +22,6 @@ import (
 //     oldest step logs above the budget, irreversibly (logs are not in a
 //     backup). The previously rendered value is kept unless the operator
 //     sets one.
-//   - platformProtection.enabled true -> false: the release's PriorityClasses
-//     are removed (the argo-controller and openbao classes carry
-//     resource-policy keep and stay). The upgrade refuses when a Pod outside
-//     the release names a class Helm would delete, and otherwise says which
-//     classes go.
 //   - argo.controllerProfileConfigMap: a pin the v0.20 installer wrote equals
 //     the profile the controller runs; it is cleared so the server follows the
 //     controller (#1517). A hand-set different name stays.
@@ -86,17 +78,6 @@ func reconcileChangedDefaults(ctx context.Context, cfg UpgradeConfig, deps Deps,
 		}
 	}
 
-	const protection = "platformProtection.enabled"
-	if was, _ := dottedValue(all, protection); !chosen(protection) && was == true {
-		if next, _ := dottedValue(target, protection); next != true {
-			note, err := platformProtectionRemoval(ctx, cfg, deps)
-			if err != nil {
-				return plan, err
-			}
-			plan.notes = append(plan.notes, note)
-		}
-	}
-
 	if pin, _ := dottedValue(user, "argo.controllerProfileConfigMap"); pin != nil && pin != "" && !operatorSets("argo.controllerProfileConfigMap") {
 		name, _ := pin.(string)
 		namespace, _ := dottedValue(all, "argo.namespace")
@@ -106,167 +87,6 @@ func reconcileChangedDefaults(ctx context.Context, cfg UpgradeConfig, deps Deps,
 		}
 	}
 	return plan, nil
-}
-
-// platformProtectionRemoval explains which PriorityClasses the flip to the
-// opt-in default deletes, or refuses when a Pod outside the release names
-// one of them: its next replacement would be refused by admission.
-func platformProtectionRemoval(ctx context.Context, cfg UpgradeConfig, deps Deps) (string, error) {
-	if deps.KubeClient == nil {
-		return "", errors.New("platformProtection: cannot check which Pods use the release's PriorityClasses without Kubernetes")
-	}
-	classes, err := deps.KubeClient.SchedulingV1().PriorityClasses().List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=oberth"})
-	if err != nil {
-		return "", fmt.Errorf("platformProtection: list PriorityClasses: %w", err)
-	}
-	deleted, kept := map[string]bool{}, []string{}
-	prefix := cfg.Namespace + "-"
-	for _, class := range classes.Items {
-		if !strings.HasPrefix(class.Name, prefix) || !strings.Contains(class.Name, "-platform-") {
-			continue
-		}
-		if class.Annotations[helmResourcePolicyAnnotation] == "keep" {
-			kept = append(kept, class.Name)
-		} else {
-			deleted[class.Name] = true
-		}
-	}
-	if len(deleted) > 0 {
-		user, err := priorityClassUser(ctx, deps, cfg.Namespace, deleted)
-		if err != nil {
-			return "", fmt.Errorf("platformProtection: %w", err)
-		}
-		if user.name != "" {
-			return "", fmt.Errorf("platformProtection.enabled defaults to false since v0.21.0, and this release never set it: the upgrade would delete PriorityClass %s, "+
-				"which %s %s/%s outside the release uses (its next Pod would be refused). Keep the classes with --set platformProtection.enabled=true, "+
-				"or move that workload off the class first", user.class, user.kind, user.namespace, user.name)
-		}
-	}
-	names := make([]string, 0, len(deleted))
-	for name := range deleted {
-		names = append(names, name)
-	}
-	note := "platformProtection.enabled defaults to false since v0.21.0 and this release never set it: removing the server's priorityClassName"
-	if len(names) > 0 {
-		note += " and deleting PriorityClass " + strings.Join(names, ", ")
-	}
-	if len(kept) > 0 {
-		note += "; kept (resource-policy keep): " + strings.Join(kept, ", ")
-	}
-	return note + ". Keep protection with --set platformProtection.enabled=true", nil
-}
-
-// classUser is one object outside the release that names a PriorityClass.
-type classUser struct{ kind, namespace, name, class string }
-
-// priorityClassUser finds a Pod, or a Pod template of a Deployment,
-// StatefulSet, DaemonSet, ReplicaSet, Job or CronJob, outside the Oberth
-// release that names one of classes. Templates matter as much as Pods: a
-// Deployment scaled to zero or a CronJob between runs has no Pod, and its
-// next one would be refused once the class is gone.
-func priorityClassUser(ctx context.Context, deps Deps, releaseNamespace string, classes map[string]bool) (classUser, error) {
-	own := func(meta metav1.ObjectMeta) bool {
-		return meta.Namespace == releaseNamespace && meta.Labels["app.kubernetes.io/instance"] == "oberth"
-	}
-	check := func(kind string, meta metav1.ObjectMeta, spec corev1.PodSpec) (classUser, bool) {
-		if !classes[spec.PriorityClassName] || own(meta) {
-			return classUser{}, false
-		}
-		return classUser{kind: kind, namespace: meta.Namespace, name: meta.Name, class: spec.PriorityClassName}, true
-	}
-	all := metav1.ListOptions{}
-	client := deps.KubeClient
-	pods, err := client.CoreV1().Pods(metav1.NamespaceAll).List(ctx, all)
-	if err != nil {
-		return classUser{}, fmt.Errorf("list Pods using the release's PriorityClasses: %w", err)
-	}
-	for _, item := range pods.Items {
-		if user, ok := check("Pod", item.ObjectMeta, item.Spec); ok {
-			return user, nil
-		}
-	}
-	deployments, err := client.AppsV1().Deployments(metav1.NamespaceAll).List(ctx, all)
-	if err != nil {
-		return classUser{}, fmt.Errorf("list Deployments using the release's PriorityClasses: %w", err)
-	}
-	for _, item := range deployments.Items {
-		if user, ok := check("Deployment", item.ObjectMeta, item.Spec.Template.Spec); ok {
-			return user, nil
-		}
-	}
-	statefulSets, err := client.AppsV1().StatefulSets(metav1.NamespaceAll).List(ctx, all)
-	if err != nil {
-		return classUser{}, fmt.Errorf("list StatefulSets using the release's PriorityClasses: %w", err)
-	}
-	for _, item := range statefulSets.Items {
-		if user, ok := check("StatefulSet", item.ObjectMeta, item.Spec.Template.Spec); ok {
-			return user, nil
-		}
-	}
-	daemonSets, err := client.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, all)
-	if err != nil {
-		return classUser{}, fmt.Errorf("list DaemonSets using the release's PriorityClasses: %w", err)
-	}
-	for _, item := range daemonSets.Items {
-		if user, ok := check("DaemonSet", item.ObjectMeta, item.Spec.Template.Spec); ok {
-			return user, nil
-		}
-	}
-	replicaSets, err := client.AppsV1().ReplicaSets(metav1.NamespaceAll).List(ctx, all)
-	if err != nil {
-		return classUser{}, fmt.Errorf("list ReplicaSets using the release's PriorityClasses: %w", err)
-	}
-	for _, item := range replicaSets.Items {
-		// A Deployment's ReplicaSets, old revisions included, follow the
-		// Deployment's template, which was checked above: one kept for
-		// rollback history must not refuse after the workload moved off.
-		if ownedBy(item.ObjectMeta, "Deployment") {
-			continue
-		}
-		if user, ok := check("ReplicaSet", item.ObjectMeta, item.Spec.Template.Spec); ok {
-			return user, nil
-		}
-	}
-	jobs, err := client.BatchV1().Jobs(metav1.NamespaceAll).List(ctx, all)
-	if err != nil {
-		return classUser{}, fmt.Errorf("list Jobs using the release's PriorityClasses: %w", err)
-	}
-	for _, item := range jobs.Items {
-		// A finished Job creates no further Pod, and a CronJob's Jobs follow
-		// the CronJob's template, checked below; a running one has a Pod.
-		if jobFinished(item) || ownedBy(item.ObjectMeta, "CronJob") {
-			continue
-		}
-		if user, ok := check("Job", item.ObjectMeta, item.Spec.Template.Spec); ok {
-			return user, nil
-		}
-	}
-	cronJobs, err := client.BatchV1().CronJobs(metav1.NamespaceAll).List(ctx, all)
-	if err != nil {
-		return classUser{}, fmt.Errorf("list CronJobs using the release's PriorityClasses: %w", err)
-	}
-	for _, item := range cronJobs.Items {
-		if user, ok := check("CronJob", item.ObjectMeta, item.Spec.JobTemplate.Spec.Template.Spec); ok {
-			return user, nil
-		}
-	}
-	return classUser{}, nil
-}
-
-// ownedBy reports whether the object's controller is of kind.
-func ownedBy(meta metav1.ObjectMeta, kind string) bool {
-	owner := metav1.GetControllerOf(&meta)
-	return owner != nil && owner.Kind == kind
-}
-
-// jobFinished reports whether a Job completed or failed for good.
-func jobFinished(job batchv1.Job) bool {
-	for _, condition := range job.Status.Conditions {
-		if (condition.Type == batchv1.JobComplete || condition.Type == batchv1.JobFailed) && condition.Status == corev1.ConditionTrue {
-			return true
-		}
-	}
-	return false
 }
 
 // runningControllerProfile is the profile ConfigMap the running controller

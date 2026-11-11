@@ -2,17 +2,13 @@ package installer
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -20,7 +16,7 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-const v021Defaults = "retention:\n  logs:\n    budgetBytes: 2147483648\nplatformProtection:\n  enabled: false\n"
+const v021Defaults = "retention:\n  logs:\n    budgetBytes: 2147483648\n"
 
 func defaultsDeps(user, all string, objects ...runtime.Object) Deps {
 	return Deps{KubeClient: fake.NewClientset(objects...), RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -31,23 +27,11 @@ func defaultsDeps(user, all string, objects ...runtime.Object) Deps {
 	}}
 }
 
-func platformClass(name string, keep bool) *schedulingv1.PriorityClass {
-	class := &schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}}}
-	if keep {
-		class.Annotations = map[string]string{helmResourcePolicyAnnotation: "keep"}
-	}
-	return class
-}
-
-func podWithClass(namespace, name, class string, labels map[string]string) *corev1.Pod {
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name, Labels: labels}, Spec: corev1.PodSpec{PriorityClassName: class}}
-}
-
 // An existing release keeps its rendered log budget (0) unless the operator
 // chose one: the new 2 GiB default would delete old logs on the next sweep.
 func TestUpgradeKeepsTheRenderedLogBudget(t *testing.T) {
 	t.Parallel()
-	all := `{"retention":{"logs":{"budgetBytes":0}},"platformProtection":{"enabled":false}}`
+	all := `{"retention":{"logs":{"budgetBytes":0}}}`
 	plan, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all), "7", []byte(v021Defaults))
 	if err != nil {
 		t.Fatal(err)
@@ -77,84 +61,6 @@ func TestUpgradeKeepsTheRenderedLogBudget(t *testing.T) {
 	}
 	if plan, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth", UserValues: []string{values}}, defaultsDeps(`{}`, all), "7", []byte(v021Defaults)); err != nil || len(plan.args) != 0 {
 		t.Fatalf("--values choice overridden: %+v, %v", plan, err)
-	}
-}
-
-func TestUpgradePlatformProtectionFlip(t *testing.T) {
-	t.Parallel()
-	all := `{"retention":{"logs":{"budgetBytes":2147483648}},"platformProtection":{"enabled":true}}`
-	server := platformClass("oberth-oberth-platform-oberth", false)
-	argo := platformClass("oberth-oberth-platform-argo-controller", true)
-	own := podWithClass("oberth", "oberth-0", server.Name, map[string]string{"app.kubernetes.io/instance": "oberth"})
-
-	// Only the release's own pod uses the class Helm deletes: remove it and
-	// say so, naming the kept classes too.
-	plan, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own), "7", []byte(v021Defaults))
-	if err != nil || len(plan.args) != 0 || len(plan.notes) != 1 ||
-		!strings.Contains(plan.notes[0], "deleting PriorityClass "+server.Name) || !strings.Contains(plan.notes[0], "kept (resource-policy keep): "+argo.Name) {
-		t.Fatalf("plan = %+v, %v", plan, err)
-	}
-	// A pod outside the release names the class Helm would delete: refuse.
-	foreign := podWithClass("tools", "proxy-0", server.Name, nil)
-	_, err = reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, foreign), "7", []byte(v021Defaults))
-	if err == nil || !strings.Contains(err.Error(), "tools/proxy-0") || !strings.Contains(err.Error(), "--set platformProtection.enabled=true") {
-		t.Fatalf("foreign user of a deleted class: %v", err)
-	}
-	// A workload without a Pod right now (scaled to zero, a CronJob between
-	// runs) names the class in its Pod template: refuse as well.
-	template := corev1.PodTemplateSpec{Spec: corev1.PodSpec{PriorityClassName: server.Name}}
-	zero := int32(0)
-	for _, workload := range []runtime.Object{
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.DeploymentSpec{Replicas: &zero, Template: template}},
-		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.StatefulSetSpec{Template: template}},
-		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.DaemonSetSpec{Template: template}},
-		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: batchv1.JobSpec{Template: template}},
-		&batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: batchv1.CronJobSpec{JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: template}}}},
-	} {
-		kind := fmt.Sprintf("%T", workload)
-		_, err = reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, workload), "7", []byte(v021Defaults))
-		if err == nil || !strings.Contains(err.Error(), "tools/idle") {
-			t.Fatalf("%s template naming a deleted class: %v", kind, err)
-		}
-	}
-	// What a checked controller left behind is no user of its own: a
-	// Deployment's old ReplicaSet after the workload moved off the class, a
-	// CronJob's Job, a finished Job.
-	controller := true
-	for _, leftover := range []runtime.Object{
-		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle-5d4f", OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "idle", Controller: &controller}}},
-			Spec: appsv1.ReplicaSetSpec{Replicas: &zero, Template: template}},
-		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle-28", OwnerReferences: []metav1.OwnerReference{{Kind: "CronJob", Name: "idle", Controller: &controller}}},
-			Spec: batchv1.JobSpec{Template: template}},
-		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "done"}, Spec: batchv1.JobSpec{Template: template},
-			Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}}},
-	} {
-		if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, leftover), "7", []byte(v021Defaults)); err != nil {
-			t.Fatalf("%T left by a checked controller refused: %v", leftover, err)
-		}
-	}
-	// A ReplicaSet of its own is a user.
-	standalone := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.ReplicaSetSpec{Replicas: &zero, Template: template}}
-	if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, standalone), "7", []byte(v021Defaults)); err == nil || !strings.Contains(err.Error(), "ReplicaSet tools/idle") {
-		t.Fatalf("standalone ReplicaSet naming a deleted class: %v", err)
-	}
-	// The release's own Deployment is not a foreign user.
-	ownDeployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "oberth", Name: "oberth", Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}},
-		Spec: appsv1.DeploymentSpec{Template: template}}
-	if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, ownDeployment), "7", []byte(v021Defaults)); err != nil {
-		t.Fatalf("own Deployment refused: %v", err)
-	}
-	// A pod on a kept class is no reason to refuse.
-	onKept := podWithClass("oberth-argo", "controller-0", argo.Name, nil)
-	if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, onKept), "7", []byte(v021Defaults)); err != nil {
-		t.Fatalf("kept class user refused: %v", err)
-	}
-	// An explicit choice, stored or given, is not second-guessed.
-	if plan, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{"platformProtection":{"enabled":true}}`, all, server, own, foreign), "7", []byte(v021Defaults)); err != nil || len(plan.notes) != 0 {
-		t.Fatalf("stored choice: %+v, %v", plan, err)
-	}
-	if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth", UserSet: []string{"platformProtection.enabled=false"}}, defaultsDeps(`{}`, all, server, own, foreign), "7", []byte(v021Defaults)); err != nil {
-		t.Fatalf("explicit false refused: %v", err)
 	}
 }
 

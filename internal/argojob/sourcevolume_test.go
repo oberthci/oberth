@@ -29,6 +29,8 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+
+	"github.com/oberthci/oberth/internal/podpriority"
 )
 
 // seedTestConfig is a pipeline namespace distinct from the server's, which is
@@ -236,7 +238,7 @@ func TestSeedPodHoldsNoServiceAccountToken(t *testing.T) {
 	if created.Spec.AutomountServiceAccountToken == nil || *created.Spec.AutomountServiceAccountToken {
 		t.Fatal("the seed pod mounts a ServiceAccount token")
 	}
-	if created.Spec.PriorityClassName != "" || created.Spec.Priority != nil {
+	if created.Spec.PriorityClassName != podpriority.PipelineClass(created.Namespace) || created.Spec.Priority != nil {
 		t.Fatal("the CI seed pod received a priority override")
 	}
 	container := created.Spec.Containers[0]

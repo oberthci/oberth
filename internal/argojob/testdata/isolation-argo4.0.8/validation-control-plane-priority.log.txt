@@ -1,0 +1,8 @@
+PASS /proof/isolation/container-submitted.json
+PASS /proof/isolation/containerset-submitted.json
+PASS /proof/isolation/dedicated-tools-submitted.json
+PASS /proof/isolation/inline-dag-submitted.json
+PASS /proof/isolation/inline-steps-submitted.json
+PASS /proof/isolation/none-submitted.json
+PASS /proof/isolation/script-submitted.json
+PASS /proof/isolation/sidecars-submitted.json

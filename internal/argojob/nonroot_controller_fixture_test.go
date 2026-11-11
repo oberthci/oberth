@@ -133,12 +133,18 @@ func nonrootApplyControllerFixture(t *testing.T, before *corev1.Pod, wf *wfv1.Wo
 	if err != nil {
 		t.Fatal(err)
 	}
-	patched, err := strategicpatch.StrategicMergePatch(spec, []byte(tmpl.PodSpecPatch), corev1.PodSpec{})
-	if err != nil {
-		t.Fatal(err)
+	// The controller applies the workflow patch before the template patch.
+	for _, patch := range []string{wf.Spec.PodSpecPatch, tmpl.PodSpecPatch} {
+		if patch == "" {
+			continue
+		}
+		spec, err = strategicpatch.StrategicMergePatch(spec, []byte(patch), corev1.PodSpec{})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	var patchedSpec corev1.PodSpec
-	if err := json.Unmarshal(patched, &patchedSpec); err != nil {
+	if err := json.Unmarshal(spec, &patchedSpec); err != nil {
 		t.Fatal(err)
 	}
 	pod.Spec = patchedSpec
@@ -181,6 +187,7 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 		t.Run(shape, func(t *testing.T) {
 			before := nonrootControllerFixture(t, shape+"-before-patch.json")
 			observed := nonrootControllerFixture(t, shape+"-submitted.json")
+			assertPipelinePodPriority(t, observed)
 			// Replay the historical administrator limit and v1 helper policy
 			// without changing the authenticated observation. New v2 budgets
 			// are covered by the pinned helper regression and controller proof.

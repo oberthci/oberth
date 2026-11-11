@@ -102,14 +102,9 @@ agentEvents:
   # Keepalive interval of MCP streams (1s-5m).
   heartbeat: 20s
 
-# Opt-in platform priority (default off). true creates three cluster-scoped
-# release/namespace-specific PriorityClasses (value 1000000,
-# PreemptLowerPriority) and assigns only the Oberth pod template; on a shared
-# node they preempt other workloads. Argo and OpenBao are separate releases:
-# see docs/platform-protection.md for their overlays. Requests in those
-# overlays are based on one idle sample, unmeasured under load.
-platformProtection:
-  enabled: false
+# The chart always creates control-plane and non-preempting pipeline
+# PriorityClasses. The installer assigns the same control-plane class to its
+# Argo controller and OpenBao releases. See docs/platform-protection.md.
 
 # Prometheus Operator scrape of the server's /metrics (default off). Mint a
 # metrics-scoped token (oberth uplink add --scope metrics), which reads
@@ -578,7 +573,7 @@ secretstore:
   # Grant this ServiceAccount system:auth-delegator so OpenBao can validate
   # its tokens via TokenReview without storing a reviewer JWT. This binding is
   # cluster-scoped, like the chart's ValidatingAdmissionPolicy and its binding,
-  # the resource-sampler ClusterRole and (opt-in) the platform PriorityClasses;
+  # the resource-sampler ClusterRole and the scheduling PriorityClasses;
   # disable it if the binding is
   # managed elsewhere.
   createAuthDelegatorBinding: true

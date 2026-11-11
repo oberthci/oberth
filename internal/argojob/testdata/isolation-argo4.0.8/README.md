@@ -119,3 +119,23 @@ This is controller construction/validation evidence, not a live workload peak
 or kubelet acceptance. Prior receipts are retained in the review handoff.
 
 The 2026-11-10 release-priority recapture (#1517 review P2) regenerates the inputs after Build began setting spec.priority on release runs. Inputs are exact current Build output in the helper-storage recovery mode the regression applies to these retained historical inputs (their own v1 policy annotation). The authenticated Argo v4.0.8 module (sums equal provenance) ran its real operate(ctx) with fake clients and the retained isolation, nonroot and WIF capture helpers in one overlay (nonroot first sets klog v=0, as before; its outputs were discarded). Instrumented workflowpod.go SHA-256 e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4 (both capture lines, tab-indented, immediately before processPodSpecPatch). Go 1.26.9 on linux/amd64, so server_goarch is amd64. Every captured Pod equals the previous capture except timestamps and the architecture value: spec.priority does not reach Pod construction. All 24 submitted Pods (16 WIF, 8 isolation) passed the retained Kubernetes v1.35.7 validator (validation-release-priority.log.txt). No Pod was edited by hand; no live cluster or credential was used.
+
+
+The 2026-11-12 #1539 capture uses the authenticated Argo v4.0.8 controller
+with the retained capture-only hooks. Current Build inputs retain each fixture's
+own helper-storage policy and now select the lower pipeline PriorityClass and
+workflow-level Never preemption patch. All 26 submitted Pods across isolation,
+WIF and nonroot passed the retained Kubernetes v1.35.7 validator. Every submitted
+Pod names its execution namespace's pipeline class with preemptionPolicy Never.
+No expected Pod was edited by hand, and no live API or credential was used.
+
+The exact combined input exporter is retained as
+`../isolation-argo4.0.8/priority-export_test.go.txt`. Overlay it into
+`internal/argojob/zz_priority_export_test.go` and run
+`TestExportPriorityControllerInputs` with `/proof/{isolation,wif,nonroot}` as
+scratch output directories. Copy the authenticated Argo module to separate
+scratch, then overlay the retained isolation, WIF and nonroot capture helpers
+and workflowpod.go capture-only hooks. Run the nonroot capture first to fix
+executor verbosity, followed by isolation and WIF. Run the retained validator
+against every submitted Pod before copying outputs and updating checksums.
+The capture ran with Go 1.26.10 on linux/arm64.

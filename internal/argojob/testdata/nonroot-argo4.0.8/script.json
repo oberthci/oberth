@@ -19,7 +19,7 @@
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/request-defaults": "2cpu-2Gi-helpers-250m-256Mi-v2",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "1f221443123ae126b0c468829985139f70d5ac0db55b5b980fd352435100467f",
+      "oberth.ci/spec-identity": "cd399d2c5b1a030855ca51dd672ba7b471d7e5a34559522106329aa77558d95a",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "oberth.ci/verified-controller-profile": "nonroot-static-v1:2c7fe64021647914fb3122256b5fdab6c1132308be89d10a3ecb558c8f6cfde8",
       "workflows.argoproj.io/pod-name-format": "v2"
@@ -289,6 +289,7 @@
       "secondsAfterCompletion": 3600
     },
     "activeDeadlineSeconds": 600,
+    "podPriorityClassName": "oberth-argo-oberth-pipeline",
     "securityContext": {
       "runAsUser": 0,
       "runAsGroup": 0,
@@ -297,6 +298,7 @@
         "type": "RuntimeDefault"
       }
     },
+    "podSpecPatch": "{\"preemptionPolicy\":\"Never\"}",
     "podMetadata": {
       "labels": {
         "oberth.ci/run": "run-abc123",

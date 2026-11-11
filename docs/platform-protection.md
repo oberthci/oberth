@@ -1,105 +1,65 @@
 # Platform protection
 
-Set `platformProtection.enabled: true` to create three PriorityClasses for
-Oberth, its Argo workflow-controller and OpenBao. Default, false, and historical
-stored values without this key leave workloads unchanged. The classes are
-cluster-scoped and preempt lower-priority Pods, so on a node shared with other
-workloads they are an explicit choice. (Chart versions v0.17.79 through v0.20.x
-defaulted to true. Since v0.21.0 an `oberth upgrade` of an install that never
-set the key removes the server's `priorityClassName` and the Oberth class and
-prints which classes go; the Argo controller and OpenBao classes carry
-`helm.sh/resource-policy: keep` and stay. If a Pod outside the release, or the Pod
-template of a Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob
-outside it (a workload scaled to zero or between runs has no Pod), uses a
-class the upgrade would delete, the upgrade refuses and names it. Pass
-`--set platformProtection.enabled=true` once to keep protection.) Run admission capacity
-is unchanged. External ingress, connectors and other projects have their own
-protection policy outside Oberth.
+The chart always creates two scheduling classes. One shared control-plane
+PriorityClass has value 1,000,000 and `preemptionPolicy: PreemptLowerPriority`.
+The Oberth server uses it, and the installer passes the same class to the Argo
+controller and OpenBao through their chart values. CI saturation therefore does
+not leave a replacement server waiting behind pipeline CPU requests.
+On an eligible node, this class can preempt any lower-priority Pod, including
+workloads outside Oberth.
 
-All three classes have value 1,000,000, `globalDefault: false` and
-`preemptionPolicy: PreemptLowerPriority`. The chart assigns Oberth's Pod template.
-CI Workflows cannot select these classes: admission refuses authored priority
-overrides and Pod patches.
+The pipeline class has value 0 and `preemptionPolicy: Never`. Workflows, source
+seed/collection Pods and executor identity helpers use this lower class. Pipeline
+work does not preempt other pipelines. Both classes have `globalDefault: false`,
+so unrelated Pods do not inherit them. Repository-authored Workflow, template
+and Pod-patch priority overrides are refused, including release runs. Resource
+manifests and embedded resource Pod templates cannot select a priority class or
+supply Pod patches. Argo's
+release queue priority only orders Workflows; it never raises Pod priority.
 
-For release `oberth` in namespace `oberth`:
+For Oberth release `oberth` in namespace `oberth`, using pipeline namespace
+`oberth-argo`:
 
-| Component | PriorityClass |
+| Workloads | PriorityClass |
 | --- | --- |
-| Oberth | `oberth-oberth-platform-oberth` |
-| Argo workflow-controller | `oberth-oberth-platform-argo-controller` |
-| OpenBao | `oberth-oberth-platform-openbao` |
+| Oberth, Argo controller, OpenBao | `oberth-oberth-control-plane` |
+| Pipeline Pods and helpers | `oberth-argo-oberth-pipeline` |
 
-Names include namespace and release identity. Argo and OpenBao belong to separate
-releases. The priority examples in `deploy/platform-protection/` are optional and
-are not applied by the installer. Adjust their class names to the rendered
-Oberth chart. They do not set resource requests or limits: preserve the target
-installation's existing values and qualify sizing separately. No installation's
-idle sample is a product resource default.
+Control-plane names include the Helm release fullname and namespace. The
+pipeline class belongs to its execution namespace, which has one execution
+owner. An isolated execution target must establish the non-preempting class
+`<pipeline-namespace>-oberth-pipeline` in that cluster as well.
 
-Priority affects scheduling, preemption and kubelet eviction ranking. It does
-not guarantee survival under memory pressure or set kernel OOM victim order.
-These ordinary custom classes are not system-critical; pressure taints and
-kubelet admission can still prevent replacement Pods from starting. Resource
-requests, available capacity, QoS and eviction policy remain relevant.
+The installer creates the classes with the final Oberth Helm ownership before
+installing OpenBao or Argo; missing classes would otherwise prevent their Pods
+from being admitted. The Oberth chart then adopts those same objects. An existing
+class with conflicting ownership or priority policy refuses installation.
+Creating them requires cluster-scoped PriorityClass permission in the selected
+kubeconfig context. The classes carry `helm.sh/resource-policy: keep` because
+separate dependency releases and active Pods can outlive the server release.
+Remove them only after those releases and pipeline workloads are gone.
 
-## Activation and verification
+Priority classes are mandatory. If the stored Helm values contain
+`platformProtection`, clear that setting with
+`oberth upgrade --set platformProtection=null`; the chart refuses that toggle.
 
-Use a maintenance window and independent operator access. Pause intake using
-the installation's controls and drain all work, including credentialed steps
-and legacy execution. `--wait-idle` observes idleness; it does not freeze intake.
-Keep intake paused until replacement and health checks complete.
+For separately managed dependencies, the examples in `deploy/platform-protection/`
+set only their priority. Use the names rendered for the chosen Oberth release.
+Keep existing resource requests, TLS, storage, identities and controller profiles.
+OpenBao uses OnDelete: updating its template protects replacement Pods and does
+not restart or unseal the current Pod. Use the normal authorized replacement and
+unseal procedure. Never put unseal keys on command arguments.
 
-Save private copies of each release's values and exact chart/image pins. Render
-Oberth and both dependency charts against those values. Activation requires
-cluster-scoped permission to create PriorityClasses. Establish and verify the
-classes before assigning the separate dependency releases; a missing class can
-prevent replacement of their Pods.
+## Verification
 
-Enable Oberth with the target-release CLI so image pins, compatibility values
-and schema preflight are retained:
+Render the Oberth and dependency charts and inspect each Pod template's
+`priorityClassName`, the class values and preemption policies. With disposable
+pipeline work filling CPU requests on a suitable node, restart the server or
+perform the normal upgrade. Verify a new server Pod reaches Ready while lower
+priority pipeline Pods are preempted. The coordinator runs this live acceptance;
+fake-client and rendering tests cannot measure a real recovery deadline.
 
-```sh
-oberth upgrade --namespace "$OBERTH_NAMESPACE" --set platformProtection.enabled=true
-```
-
-For separate dependency releases, merge only the reviewed priority example into
-stored values using their existing chart versions. Preserve namespace scope,
-identities, TLS, storage, controller profile and resource sizing. Oberth and Argo
-use Recreate: their replacement temporarily interrupts service. OpenBao uses
-OnDelete: changing its template alone does not replace or protect an existing
-Pod. Preserve that strategy and use the installation's authorized replacement
-and unseal procedure. A replacement seals OpenBao until configured auto-unseal
-or the required key holders complete unseal. Never put unseal keys in arguments.
-
-Verify new Pod UIDs, the intended class and numeric priority, unchanged resource
-requests/limits, readiness, workflow reconciliation, database access and actual
-credential delivery. Helm success or a Running Pod alone is insufficient. For
-HA installations use their existing staged maintenance procedure. Keep rollback
-configuration and operator access available until acceptance is complete.
-
-## Preemption and recovery
-
-Any lower-priority CI Pod can be preempted, including a release or promotion
-step. A lost VM launcher also loses guest state. Equal-priority platform Pods
-cannot preempt one another. A promotion's upstream push runs inside Oberth;
-its workflow test Pods still face preemption. A publish/apply step can leave
-partial external effects and is not made safe by merely replaying a run.
-
-The same risks apply to later routine restarts. A quiet activation window does
-not qualify recovery under load. Use the
-[platform recovery qualification](platform-pressure-qualification.md) procedure
-and keep installation-specific measurements in external operator records.
-
-## Disable, downgrade and uninstall
-
-The Argo/OpenBao classes carry `helm.sh/resource-policy: keep` because separate
-releases depend on them. The Oberth class follows the ordinary release lifecycle.
-Before disabling protection, downgrading or uninstalling Oberth, restore the
-external releases' previous assignments together with their resource settings.
-Verify replacement health before removing any unused retained class. Never
-remove a class still referenced by a Pod or workload template. Existing Pods
-retain their admitted numeric priority until replaced.
-
-Charts predating this feature may reject stored `platformProtection` values.
-Prepare compatible older-chart values explicitly instead of blindly reusing
-new settings. Retention annotations are not a substitute for orderly migration.
+Priority makes CPU requests reclaimable. It does not add capacity or override
+node affinity, taints, unavailable storage, image pulls or memory pressure.
+Requests, QoS and node health still matter. Admission capacity limits are
+unchanged.

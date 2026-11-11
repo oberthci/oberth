@@ -1,0 +1,2 @@
+PASS /proof/nonroot/container-submitted.json
+PASS /proof/nonroot/script-submitted.json

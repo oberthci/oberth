@@ -1,7 +1,4 @@
-# Opt in explicitly on the separate argo-workflows chart 1.0.24 release.
-# These names assume Oberth release=oberth, namespace=oberth. Adjust together
-# with the rendered PriorityClasses for any other release/namespace.
+# The installer sets this priority automatically. For a separately managed
+# release, use the class rendered by the Oberth chart in the chosen namespace.
 controller:
-  priorityClassName: oberth-oberth-platform-argo-controller
-  # Preserve the installation's existing resource requests and limits.
-  # Qualify sizing separately; this example changes priority only.
+  priorityClassName: oberth-oberth-control-plane

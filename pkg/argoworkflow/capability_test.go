@@ -52,6 +52,9 @@ func TestOperatorCapabilityAdmitsOnlyGrantedResourceEnvelopes(t *testing.T) {
 		{"multiple objects", capabilityResourceDocument + "          ---\n          apiVersion: v1\n          kind: Secret\n", policy},
 		{"arbitrary flags", strings.ReplaceAll(capabilityResourceDocument, "action: create", "action: create\n        flags: [--namespace=other]"), policy},
 		{"parameter injection", strings.ReplaceAll(capabilityResourceDocument, "operatorDefinedPayload: opaque", "operatorDefinedPayload: '{{inputs.parameters.payload}}'"), policy},
+		{"control-plane priority", strings.ReplaceAll(capabilityResourceDocument, "operatorDefinedPayload: opaque", "priorityClassName: control-oberth-control-plane"), policy},
+		{"embedded Pod priority", strings.ReplaceAll(capabilityResourceDocument, "operatorDefinedPayload: opaque", "template:\n              spec:\n                priorityClassName: control-oberth-control-plane"), policy},
+		{"embedded Pod patch", strings.ReplaceAll(capabilityResourceDocument, "operatorDefinedPayload: opaque", `podSpecPatch: '{"priorityClassName":"control-oberth-control-plane"}'`), policy},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

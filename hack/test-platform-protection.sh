@@ -23,75 +23,32 @@ render() {
 }
 
 render >"$work/default.yaml"
-# Opt-in: the default renders no cluster-scoped priority that could preempt
-# other workloads on a shared node (docs/platform-protection.md).
-if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/default.yaml"; then
-  echo 'default values enabled platform priority' >&2
-  exit 1
-fi
-render --set platformProtection.enabled=false >"$work/off.yaml"
-if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/off.yaml"; then
-  echo 'explicitly disabled platform priority still rendered protection' >&2
-  exit 1
-fi
+test "$(grep -c '^kind: PriorityClass$' "$work/default.yaml")" -eq 2
+grep -Fxq '  name: oberth-oberth-control-plane' "$work/default.yaml"
+grep -Fxq '  name: oberth-argo-oberth-pipeline' "$work/default.yaml"
+test "$(grep -c '^value: 1000000$' "$work/default.yaml")" -eq 1
+test "$(grep -c '^value: 0$' "$work/default.yaml")" -eq 1
+test "$(grep -c '^globalDefault: false$' "$work/default.yaml")" -eq 2
+test "$(grep -c '^preemptionPolicy: PreemptLowerPriority$' "$work/default.yaml")" -eq 1
+test "$(grep -c '^preemptionPolicy: Never$' "$work/default.yaml")" -eq 1
+test "$(grep -c '^      priorityClassName:' "$work/default.yaml")" -eq 1
+grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/default.yaml"
 
-# Simulate --reuse-values with a stored values shape predating this feature.
+# A stored values file without a scheduling toggle still protects recovery.
 cp -R -- "$chart" "$work/reused"
 chmod -R u+w "$work/reused"
 awk -f "$script_dir/strip-removed-chart-values.awk" "$script_dir/testdata/chart-values-v0.17.53.yaml" >"$work/reused/values.yaml"
 "$helm_tool" template oberth "$work/reused" --namespace oberth >"$work/reused.yaml"
-if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/reused.yaml"; then
-  echo 'absent platformProtection enabled platform priority' >&2
+test "$(grep -c '^kind: PriorityClass$' "$work/reused.yaml")" -eq 2
+grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/reused.yaml"
+
+"$helm_tool" template second "$chart" --namespace alternate --set argo.namespace=other-pipelines >"$work/alternate.yaml"
+grep -Fxq '  name: alternate-second-oberth-control-plane' "$work/alternate.yaml"
+grep -Fxq '  name: other-pipelines-oberth-pipeline' "$work/alternate.yaml"
+if render --set platformProtection.enabled=false >"$work/invalid.yaml" 2>&1; then
+  echo 'unknown scheduling toggle accepted' >&2
   exit 1
 fi
-
-render --set platformProtection.enabled=true >"$work/no-tunnel.yaml"
-test "$(grep -c '^kind: PriorityClass$' "$work/no-tunnel.yaml")" -eq 3
-test "$(grep -c '^      priorityClassName:' "$work/no-tunnel.yaml")" -eq 1
-render --set platformProtection.enabled=true >"$work/on.yaml"
-# Platform priority is opt-in: the default equals the explicit opt-out.
-diff -u "$work/default.yaml" "$work/off.yaml"
-test "$(grep -c '^kind: PriorityClass$' "$work/on.yaml")" -eq 3
-test "$(grep -c '^value: 1000000$' "$work/on.yaml")" -eq 3
-test "$(grep -c '^globalDefault: false$' "$work/on.yaml")" -eq 3
-test "$(grep -c '^preemptionPolicy: PreemptLowerPriority$' "$work/on.yaml")" -eq 3
-test "$(awk '/^kind:/ { priority=($0 == "kind: PriorityClass") } priority && /^    helm.sh\/resource-policy: keep$/ { count++ } END { print count+0 }' "$work/on.yaml")" -eq 2
-for component in argo-controller openbao; do
-  grep -A2 -Fx "  name: oberth-oberth-platform-$component" "$work/on.yaml" | \
-    grep -Fxq '    helm.sh/resource-policy: keep'
-done
-test "$(grep -c '^      priorityClassName:' "$work/on.yaml")" -eq 1
-for component in oberth argo-controller openbao; do
-  grep -Fxq "  name: oberth-oberth-platform-$component" "$work/on.yaml"
-done
-grep -Fxq '      priorityClassName: oberth-oberth-platform-oberth' "$work/on.yaml"
-
-# Every other rendered byte, including CI configuration, requests, limits and
-# admission capacity, must stay identical. No class on workflow defaults/helpers.
-awk '
-  function emit() { if (doc !~ /kind: PriorityClass/) printf "%s", doc }
-  /^---$/ { emit(); doc=$0 ORS; next }
-  /^      priorityClassName:/ { next }
-  { doc=doc $0 ORS }
-  END { emit() }
-' "$work/on.yaml" >"$work/ordinary.yaml"
-diff -u "$work/off.yaml" "$work/ordinary.yaml"
-
-# Cluster-scoped names must differ for the same release in another namespace.
-"$helm_tool" template oberth "$chart" --namespace alternate \
-  --set platformProtection.enabled=true >"$work/alternate.yaml"
-grep -Fxq '  name: alternate-oberth-platform-argo-controller' "$work/alternate.yaml"
-"$helm_tool" template second "$chart" --namespace oberth \
-  --set platformProtection.enabled=true >"$work/second.yaml"
-grep -Fxq '  name: oberth-second-oberth-platform-argo-controller' "$work/second.yaml"
-
-# Reject misspelled knobs and invalid booleans rather than silently enabling.
-for setting in platformProtection.enable=true platformProtection.enabled=invalid; do
-  if render --set "$setting" >"$work/invalid.yaml" 2>&1; then
-    echo "invalid platform protection setting accepted: $setting" >&2
-    exit 1
-  fi
-done
 
 # Exercise the real pinned Argo chart, not a stand-in controller template.
 # These are the installer's namespace/identity options, without network access.
@@ -118,7 +75,7 @@ controller:
 EOF
 argo_render -f "$work/argo-existing.yaml" -f "$root/deploy/platform-protection/argo-workflows-values.yaml" >"$work/argo-on.yaml"
 test "$(grep -c '^[[:space:]]*priorityClassName:' "$work/argo-on.yaml")" -eq 1
-grep -Fxq '      priorityClassName: oberth-oberth-platform-argo-controller' "$work/argo-on.yaml"
+grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/argo-on.yaml"
 grep -Eq '^[[:space:]]+cpu: 321m$' "$work/argo-on.yaml"
 grep -Eq '^[[:space:]]+memory: 654Mi$' "$work/argo-on.yaml"
 if grep -Eq '^[[:space:]]+(podPriorityClassName|limits):' "$work/argo-on.yaml"; then
@@ -148,7 +105,7 @@ for source in "$work/bao-off.yaml" "$work/bao-on.yaml"; do
   grep -A1 -Fx '  updateStrategy:' "$source" | grep -Fxq '    type: OnDelete'
 done
 test "$(grep -c '^[[:space:]]*priorityClassName:' "$work/bao-on.yaml")" -eq 1
-grep -Fxq '      priorityClassName: oberth-oberth-platform-openbao' "$work/bao-on.yaml"
+grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/bao-on.yaml"
 grep -Eq '^[[:space:]]+cpu: 432m$' "$work/bao-on.yaml"
 grep -Eq '^[[:space:]]+memory: 765Mi$' "$work/bao-on.yaml"
 if grep -Eq '^[[:space:]]+limits:' "$work/bao-on.yaml"; then

@@ -14,14 +14,14 @@
       "oberth.ci/trigger": "release"
     },
     "annotations": {
+      "example.com/tier": "L",
       "oberth.ci/declared-secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/helper-storage": "argo-256Mi-512Mi-v1",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/request-defaults": "2cpu-2Gi-helpers-250m-256Mi-v2",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
-      "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "b370ac049ecd1a653edfdbae76c6074845c7479a0b79ec179ce7969d3b312b2c",
+      "oberth.ci/spec-identity": "3ba50665be924967d2acff8f342393808181078022b3ba4dd8ce4323929a2e45",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -174,7 +174,7 @@
         },
         "serviceAccountName": "oberth-argo-credentialed",
         "automountServiceAccountToken": false,
-        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"ephemeral-storage\":\"512Mi\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}},\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/tools-alias\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools/bin\"},{\"mountPath\":\"/mainctrfs/workspace-parent\",\"name\":\"work\",\"readOnly\":true},{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"source\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-tools\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools\"},{\"mountPath\":\"/mainctrfs/cache/gomod\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gomod\"},{\"mountPath\":\"/mainctrfs/cache/gobuild\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gobuild\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-trivy\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"trivy-cache\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-release\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"release\"},{\"mountPath\":\"/mainctrfs/run/oberth/usage\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"bin\"}]}],\"initContainers\":[{\"command\":[\"sh\",\"-c\",\"trap 'printf \\\"%s\\\\n\\\" \\\"executor token wait terminated\\\" \\u003e\\u00262; exit 143' TERM\\ntrap 'printf \\\"%s\\\\n\\\" \\\"executor token wait interrupted\\\" \\u003e\\u00262; exit 130' INT\\nprintf '%s\\\\n' 'waiting for executor token from Oberth' \\u003e\\u00262\\nwaited_seconds=0\\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do\\n  if ! sleep 1; then\\n    printf '%s\\\\n' 'executor token wait failed' \\u003e\\u00262\\n    exit 1\\n  fi\\n  waited_seconds=$((waited_seconds + 1))\\n  if [ \\\"$((waited_seconds % 30))\\\" -eq 0 ]; then\\n    printf 'still waiting for executor token from Oberth after %ss\\\\n' \\\"$waited_seconds\\\" \\u003e\\u00262\\n  fi\\ndone\\nprintf '%s\\\\n' 'executor token ready' \\u003e\\u00262\"],\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"name\":\"oberth-executor-token\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"ephemeral-storage\":\"512Mi\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}},\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"runAsGroup\":0,\"runAsNonRoot\":false,\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"volumeMounts\":[{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\",\"name\":\"exec-sa-token\"}]},{\"name\":\"init\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"ephemeral-storage\":\"512Mi\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}}}],\"nodeSelector\":{\"kubernetes.io/arch\":\"amd64\"},\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"wait\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"ephemeral-storage\":\"512Mi\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}},\"volumeMounts\":[{\"mountPath\":\"/mainctrfs/tools-alias\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools/bin\"},{\"mountPath\":\"/mainctrfs/workspace-parent\",\"name\":\"work\",\"readOnly\":true},{\"mountPath\":\"/mainctrfs/work/src\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"source\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-tools\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"tools\"},{\"mountPath\":\"/mainctrfs/cache/gomod\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gomod\"},{\"mountPath\":\"/mainctrfs/cache/gobuild\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"gobuild\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-trivy\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"trivy-cache\"},{\"mountPath\":\"/mainctrfs/tmp/oberth-release\",\"name\":\"work\",\"readOnly\":true,\"subPath\":\"release\"},{\"mountPath\":\"/mainctrfs/run/oberth/usage\",\"name\":\"oberth-source\",\"readOnly\":true,\"subPath\":\"bin\"}]}],\"initContainers\":[{\"command\":[\"sh\",\"-c\",\"trap 'printf \\\"%s\\\\n\\\" \\\"executor token wait terminated\\\" \\u003e\\u00262; exit 143' TERM\\ntrap 'printf \\\"%s\\\\n\\\" \\\"executor token wait interrupted\\\" \\u003e\\u00262; exit 130' INT\\nprintf '%s\\\\n' 'waiting for executor token from Oberth' \\u003e\\u00262\\nwaited_seconds=0\\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do\\n  if ! sleep 1; then\\n    printf '%s\\\\n' 'executor token wait failed' \\u003e\\u00262\\n    exit 1\\n  fi\\n  waited_seconds=$((waited_seconds + 1))\\n  if [ \\\"$((waited_seconds % 30))\\\" -eq 0 ]; then\\n    printf 'still waiting for executor token from Oberth after %ss\\\\n' \\\"$waited_seconds\\\" \\u003e\\u00262\\n  fi\\ndone\\nprintf '%s\\\\n' 'executor token ready' \\u003e\\u00262\"],\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"name\":\"oberth-executor-token\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"ephemeral-storage\":\"512Mi\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}},\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"runAsGroup\":0,\"runAsNonRoot\":false,\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"volumeMounts\":[{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\",\"name\":\"exec-sa-token\"}]},{\"name\":\"init\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"ephemeral-storage\":\"512Mi\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}}}],\"nodeSelector\":{\"kubernetes.io/arch\":\"arm64\"},\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
       }
     ],
     "entrypoint": "main",
@@ -237,6 +237,7 @@
     },
     "activeDeadlineSeconds": 7200,
     "priority": 1,
+    "podPriorityClassName": "oberth-argo-oberth-pipeline",
     "securityContext": {
       "runAsUser": 0,
       "runAsGroup": 0,
@@ -245,6 +246,7 @@
         "type": "RuntimeDefault"
       }
     },
+    "podSpecPatch": "{\"preemptionPolicy\":\"Never\"}",
     "podMetadata": {
       "labels": {
         "oberth.ci/run": "run-abc123",

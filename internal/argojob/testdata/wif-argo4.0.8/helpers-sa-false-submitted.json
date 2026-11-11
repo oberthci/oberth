@@ -190,7 +190,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:51:05Z"
+            "value": "2026-11-12T01:37:36Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -286,7 +286,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:51:05Z"
+            "value": "2026-11-12T01:37:36Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -392,7 +392,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:51:05Z"
+            "value": "2026-11-12T01:37:36Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -520,7 +520,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:51:05Z"
+            "value": "2026-11-12T01:37:36Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -634,7 +634,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:51:05Z"
+            "value": "2026-11-12T01:37:36Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -693,7 +693,9 @@
       "seccompProfile": {
         "type": "RuntimeDefault"
       }
-    }
+    },
+    "priorityClassName": "oberth-argo-oberth-pipeline",
+    "preemptionPolicy": "Never"
   },
   "status": {}
 }
