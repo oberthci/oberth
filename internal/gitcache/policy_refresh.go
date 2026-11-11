@@ -61,7 +61,7 @@ func (c *Cache) rememberPushPolicyLocked(ctx context.Context, path, branch strin
 	ref := upstreamRefPrefix + "heads/" + branch
 	sha, err := c.capture(ctx, path, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
-		absent, readErr := c.trackingBranchAbsent(ctx, path, branch)
+		absent, readErr := c.defaultBranchUnborn(ctx, path, branch)
 		if readErr != nil || !absent {
 			return // Unreadable default state must not become an absent policy.
 		}
@@ -123,7 +123,12 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 				return "", previous.err
 			}
 			if previous.sha == "" {
-				if absent, readErr := c.trackingBranchAbsent(ctx, path, strings.TrimPrefix(previous.ref, upstreamRefPrefix+"heads/")); readErr == nil && absent {
+				if previous.ref == "" {
+					// Recorded on an upstream without any ref.
+					if refs, readErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix); readErr == nil && strings.TrimSpace(refs) == "" {
+						return "", nil
+					}
+				} else if unborn, readErr := c.defaultBranchUnborn(ctx, path, strings.TrimPrefix(previous.ref, upstreamRefPrefix+"heads/")); readErr == nil && unborn {
 					return "", nil
 				}
 			} else {

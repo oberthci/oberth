@@ -119,3 +119,62 @@ func TestMissingRepositoryHintSuggestsHomeRelativeUpstream(t *testing.T) {
 		t.Fatalf("hint for a transport failure = %q", got)
 	}
 }
+
+// A default branch that existed upstream and then disappears beside other
+// refs was deleted, not unborn: its policy must not lapse and the next push
+// or promotion must not recreate it ungoverned. The cache is served stale
+// with the configuration cause, policy reads fail, and release admission
+// refuses. A never-born default beside other refs stays unborn (above).
+func TestDeletedDefaultBranchIsNotReadAsUnborn(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(60*time.Second))
+	defer cancel()
+	root := t.TempDir()
+	upstream := filepath.Join(root, "upstream.git")
+	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)
+	work := filepath.Join(root, "work")
+	runGit(t, "", "init", "--initial-branch=main", work)
+	if err := os.WriteFile(filepath.Join(work, "policy.yaml"), []byte("policy\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work, "add", "policy.yaml")
+	runGit(t, work, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "policy")
+	runGit(t, work, "push", upstream, "main", "main:feature")
+	cache, err := newBackendTestCache(t, Config{
+		Root:           filepath.Join(root, "cache"),
+		CommandTimeout: testtimeout.Start(10 * time.Second),
+		Upstream:       func(string) (string, error) { return upstream, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, err := cache.Ensure(ctx, "demo")
+	if err != nil || ready.Stale {
+		t.Fatalf("Ensure = %+v, %v", ready, err)
+	}
+	if _, _, exists, err := cache.ReadDefaultBlob(WithFreshPolicy(ctx), "demo", "policy.yaml", 4096); err != nil || !exists {
+		t.Fatalf("policy on a born default = exists %v, %v", exists, err)
+	}
+
+	runGit(t, upstream, "update-ref", "-d", "refs/heads/main")
+	ready, err = cache.Ensure(ctx, "demo")
+	if err != nil || !ready.Stale || !strings.Contains(ready.StaleReason, "default branch") {
+		t.Fatalf("Ensure after the default branch was deleted = %+v, %v; want stale with the default-branch cause", ready, err)
+	}
+	if sha, _, _, err := cache.ReadDefaultBlob(WithFreshPolicy(ctx), "demo", "policy.yaml", 4096); err == nil {
+		t.Fatalf("policy after the default branch was deleted = %q without error; want a refusal, never an absent policy", sha)
+	}
+	if admission, err := cache.prepareReleaseAdmissionLocked(ctx, ready.Path, true); err == nil {
+		t.Fatalf("release admission after the default branch was deleted = %+v; want a refusal", admission)
+	}
+
+	// Restoring the branch on the forge restores its authority.
+	runGit(t, work, "push", upstream, "main")
+	ready, err = cache.Ensure(ctx, "demo")
+	if err != nil || ready.Stale {
+		t.Fatalf("Ensure after the default branch was restored = %+v, %v", ready, err)
+	}
+	if _, _, exists, err := cache.ReadDefaultBlob(WithFreshPolicy(ctx), "demo", "policy.yaml", 4096); err != nil || !exists {
+		t.Fatalf("policy after restore = exists %v, %v", exists, err)
+	}
+}

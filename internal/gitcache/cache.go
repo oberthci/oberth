@@ -402,7 +402,7 @@ func (c *Cache) prepareReleaseAdmissionLocked(ctx context.Context, path string, 
 	// existence-based, never a guess: any OTHER rev-parse failure still
 	// refuses the receive.
 	if _, refErr := c.capture(ctx, path, "show-ref", "--verify", "--quiet", upstreamRef); refErr != nil {
-		if absent, listErr := c.trackingBranchAbsent(ctx, path, defaultBranch); listErr == nil && absent {
+		if unborn, listErr := c.defaultBranchUnborn(ctx, path, defaultBranch); listErr == nil && unborn {
 			return ReleaseAdmission{}, c.deleteRef(ctx, path, admissionRef, "")
 		}
 	}
@@ -868,6 +868,51 @@ func (c *Cache) trackingBranchAbsent(ctx context.Context, path, branch string) (
 	return true, nil
 }
 
+// defaultBornFile marks a cache whose upstream default branch has existed.
+const defaultBornFile = "oberth-default-born"
+
+// recordDefaultBranchBorn durably notes that the upstream default branch
+// exists, so its later disappearance is never read as a new repository.
+func (c *Cache) recordDefaultBranchBorn(ctx context.Context, path, branch string) error {
+	marker := filepath.Join(path, defaultBornFile)
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read default-branch marker: %w", err)
+	}
+	if absent, err := c.trackingBranchAbsent(ctx, path, branch); err != nil || absent {
+		return err
+	}
+	if err := os.WriteFile(marker, []byte(branch+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write default-branch marker: %w", err)
+	}
+	return syncDirectory(path)
+}
+
+// defaultBranchUnborn reports whether branch is an unborn default: the last
+// successful (pruning) fetch proved it absent upstream, and either this cache
+// never saw a default branch upstream (a new repository, empty or holding
+// only other branches) or the upstream now holds no refs at all. A default
+// branch that existed and vanished beside other refs was deleted; treating
+// it as unborn would silently drop its policy and let the next push or
+// promotion recreate it ungoverned.
+func (c *Cache) defaultBranchUnborn(ctx context.Context, path, branch string) (bool, error) {
+	absent, err := c.trackingBranchAbsent(ctx, path, branch)
+	if err != nil || !absent {
+		return false, err
+	}
+	if _, err := os.Stat(filepath.Join(path, defaultBornFile)); errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	} else if err != nil {
+		return false, err
+	}
+	refs, err := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(refs) == "", nil
+}
+
 // errNoSymbolicDefaultBranch reports an upstream advertisement that carries
 // no symbolic HEAD; discoverDefaultBranch decides whether that is the unborn
 // bootstrap case or a hard error.
@@ -910,15 +955,26 @@ func (c *Cache) setHead(ctx context.Context, path, branch string) error {
 		return err
 	}
 	ref := "refs/heads/" + branch
+	if err := c.recordDefaultBranchBorn(ctx, path, branch); err != nil {
+		return err
+	}
 	if _, err := c.capture(ctx, path, "show-ref", "--verify", "--quiet", ref); err != nil {
 		// Unborn-branch bootstrap: the upstream has no default branch yet,
 		// so it cannot exist in the cache either. Point HEAD at the unborn
 		// branch only when the pruning fetch proved it absent upstream — a
 		// fetched branch missing from the public refs means materialization
-		// failed.
+		// failed — and this cache never saw a default branch there: one
+		// that disappeared was deleted, and its policy must not lapse.
 		absent, listErr := c.trackingBranchAbsent(ctx, path, branch)
 		if listErr != nil || !absent {
 			return fmt.Errorf("upstream default branch %s was not fetched: %w", branch, err)
+		}
+		unborn, listErr := c.defaultBranchUnborn(ctx, path, branch)
+		if listErr != nil {
+			return fmt.Errorf("upstream default branch %s was not fetched: %w", branch, listErr)
+		}
+		if !unborn {
+			return fmt.Errorf("%w: default branch %s is missing upstream although this repository had a default branch before; restore it on the forge", ErrUpstreamDefaultBranch, branch)
 		}
 	}
 	return c.run(ctx, commandSpec{dir: path, args: []string{"symbolic-ref", "HEAD", ref}})

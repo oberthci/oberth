@@ -137,7 +137,11 @@ A forge repository may start empty. While its default branch does not exist
 (an unborn HEAD, which protocol v0 forges never advertise), the cache keeps
 its recorded default branch, `main` for a new repository, even after other
 branches are synced there; the first promotion or default-branch publication
-creates it upstream.
+creates it upstream. That holds only for a repository whose default branch
+this cache has never seen upstream. A default branch that existed and then
+disappears beside other refs was deleted: Oberth serves the cache stale with
+"upstream default branch unknown", policy reads and release admission refuse,
+and nothing recreates the branch without its policy. Restore it on the forge.
 
 Clients pin Oberth's own SSH endpoint from `oberth status` (the
 `ssh host key` fingerprint) or the `ssh_host_key` field of `system_status`,
