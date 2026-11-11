@@ -90,6 +90,9 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 		}
 		return code("deadline", "inspect run_logs; a hung or slow step needs a fix or a reviewed deadline in git", "the step ran out of its deadline")
 	}
+	if upstreamConfigurationFailure(message) {
+		return code("upstream_configuration", "set the repository's default branch on the forge, then run_retry", boundedText(message, 200))
+	}
 	if model.IsInfrastructureRunFailure(run.Status, run.Phase, run.FailedStep) {
 		return infrastructure("infrastructure", "run_retry", "the run failed outside any step")
 	}

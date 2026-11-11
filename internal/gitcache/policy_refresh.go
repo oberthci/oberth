@@ -61,11 +61,11 @@ func (c *Cache) rememberPushPolicyLocked(ctx context.Context, path, branch strin
 	ref := upstreamRefPrefix + "heads/" + branch
 	sha, err := c.capture(ctx, path, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
-		refs, readErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
-		if readErr != nil || strings.TrimSpace(refs) != "" {
+		absent, readErr := c.defaultBranchUnborn(ctx, path, branch)
+		if readErr != nil || !absent {
 			return // Unreadable default state must not become an absent policy.
 		}
-		ref, sha = "", "" // The successful fetch proved an unborn upstream.
+		sha = "" // The successful fetch proved an unborn default branch.
 	} else if ValidateSHA(strings.TrimSpace(sha)) != nil {
 		return
 	}
@@ -76,6 +76,23 @@ type policyRefresh struct {
 	remote, ref, sha   string
 	started, completed time.Time
 	err                error
+	// cachedOnly marks a failed Ensure refresh recorded only so cached
+	// readers report its cause; fresh readers still fetch.
+	cachedOnly bool
+}
+
+// rememberFailedRefreshLocked records why Ensure's refresh failed, for cached
+// policy readers within the failure cooldown, in place of a bare "snapshot
+// unavailable".
+func (c *Cache) rememberFailedRefreshLocked(path, remote string, started time.Time, err error) {
+	if remote == "" || err == nil {
+		return
+	}
+	err = fmt.Errorf("refresh upstream: %w", err)
+	if transientPolicyTransport(err) {
+		err = fmt.Errorf("%w: %w", ErrPolicyUpstreamUnavailable, err)
+	}
+	c.policyRefreshes.Store(path, policyRefresh{remote: remote, started: started, completed: c.policyNow(), err: err, cachedOnly: true})
 }
 
 // The repository lock is the flight gate: queued readers reuse its result,
@@ -93,7 +110,8 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 	if err != nil {
 		return "", err
 	}
-	if value, ok := c.policyRefreshes.Load(path); ok {
+	cachedOnly, _ := ctx.Value(cachedPolicyKey{}).(bool)
+	if value, ok := c.policyRefreshes.Load(path); ok && (cachedOnly || !value.(policyRefresh).cachedOnly) {
 		previous := value.(policyRefresh)
 		ttl := policyRefreshTTL
 		if previous.err != nil {
@@ -104,9 +122,13 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 			if previous.err != nil {
 				return "", previous.err
 			}
-			if previous.ref == "" && previous.sha == "" {
-				refs, readErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
-				if readErr == nil && strings.TrimSpace(refs) == "" {
+			if previous.sha == "" {
+				if previous.ref == "" {
+					// Recorded on an upstream without any ref.
+					if refs, readErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix); readErr == nil && strings.TrimSpace(refs) == "" {
+						return "", nil
+					}
+				} else if unborn, readErr := c.defaultBranchUnborn(ctx, path, strings.TrimPrefix(previous.ref, upstreamRefPrefix+"heads/")); readErr == nil && unborn {
 					return "", nil
 				}
 			} else {
@@ -117,7 +139,7 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 			}
 		}
 	}
-	if cachedOnly, _ := ctx.Value(cachedPolicyKey{}).(bool); cachedOnly {
+	if cachedOnly {
 		return "", ErrPolicySnapshotUnavailable
 	}
 	// Invalidate first: an unsuccessful refresh cannot resurrect old authority.

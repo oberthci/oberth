@@ -1954,6 +1954,8 @@ Use oberth upstream <command> --help for command flags.
 Usage: oberth upstream add [flags]
 
 Flags:
+  -check-repo string
+        existing repository name to read through the new upstream before registering it (proves the organization path)
   -database string
 
   -dedicated-key
@@ -1962,16 +1964,14 @@ Flags:
         expected SSH host-key fingerprint (SHA256:...)
   -known-hosts string
 
-  -known-hosts-secret string
-        OpenBao known_hosts identity bundle (default "oberth-known-hosts")
   -namespace string
         Kubernetes namespace (default "oberth")
   -no-wait
         print the deploy key and exit immediately instead of waiting for its registration
+  -repin
+        rescan the forge's SSH host keys and replace this endpoint's pins (same trust rules as the first pin); keeps an identical registration
   -upstream-key string
 
-  -upstream-key-secret string
-        OpenBao identity bundle holding upstream SSH keys (default "oberth-upstream-key")
   -yes
         auto-accept key generation and host-key prompts
 ```
@@ -1983,7 +1983,7 @@ Usage: oberth upstream list [flags]
 
 Flags:
   -check
-        authenticate to each SSH upstream now and report whether the forge still accepts its key
+        authenticate to each SSH upstream now and read one registered repository through it, reporting whether the forge accepts the key and serves the organization path
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -known-hosts string
@@ -2004,8 +2004,6 @@ Flags:
         store as a per-upstream dedicated key
   -namespace string
         Kubernetes namespace (default "oberth")
-  -upstream-key-secret string
-        OpenBao identity bundle holding upstream SSH keys (default "oberth-upstream-key")
 ```
 
 ## oberth upstream remove
@@ -2057,6 +2055,8 @@ Flags:
 Usage: oberth upstream add [flags]
 
 Flags:
+  -check-repo string
+        existing repository name to read through the new upstream before registering it (proves the organization path)
   -database string
         SQLite database path (in-pod; requires the live admin daemon) (default "/data/oberth.sqlite")
   -dedicated-key
@@ -2065,16 +2065,14 @@ Flags:
         expected SSH host-key fingerprint (SHA256:...) for unattended bootstrap of unknown forges
   -known-hosts string
         upstream known_hosts (default "/run/oberth-identities/hosts/known_hosts")
-  -known-hosts-secret string
-        OpenBao known_hosts identity bundle (default "oberth-known-hosts")
   -namespace string
         Kubernetes namespace (default "oberth")
   -no-wait
         print the deploy key and exit immediately instead of waiting for its registration
+  -repin
+        rescan the forge's SSH host keys and replace this endpoint's pins (same trust rules as the first pin); keeps an identical registration
   -upstream-key string
         upstream SSH private key (default "/run/oberth-identities/upstream/id_ed25519")
-  -upstream-key-secret string
-        OpenBao identity bundle holding upstream SSH keys (default "oberth-upstream-key")
   -yes
         auto-accept key generation and host-key prompts
 ```

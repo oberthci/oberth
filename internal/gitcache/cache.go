@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -316,12 +318,17 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 					repo, preRefreshRemote, postRefreshRemote, refreshErr)
 			}
 
-			c.logger.Printf("upstream refresh unavailable for %s; serving stale cache", repo)
+			c.logger.Printf("upstream refresh unavailable for %s; serving stale cache: %v", repo, refreshErr)
+			// Cached policy readers (push admission) then report this cause
+			// for the failure cooldown instead of a missing snapshot.
+			if ctx.Err() == nil {
+				c.rememberFailedRefreshLocked(path, postRefreshRemote, started, refreshErr)
+			}
 			branch, err = c.currentDefaultBranch(ctx, path)
 			if err != nil {
 				return Repository{}, errors.Join(refreshErr, fmt.Errorf("read cached default branch: %w", err))
 			}
-			return Repository{Path: path, Stale: true, DefaultBranch: branch}, nil
+			return Repository{Path: path, Stale: true, StaleReason: staleReason(refreshErr), DefaultBranch: branch}, nil
 		}
 		c.rememberPushPolicyLocked(ctx, path, branch, started)
 		return Repository{Path: path, DefaultBranch: branch}, nil
@@ -334,7 +341,9 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 		return Repository{}, fmt.Errorf("create temporary cache: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(temporary) }()
-	if err := c.run(ctx, commandSpec{repository: input, args: []string{"init", "--bare", temporary}}); err != nil {
+	// HEAD starts on main: an unborn upstream keeps the cache's default.
+	initArguments := []string{"init", "--bare", "--initial-branch=main", temporary}
+	if err := c.run(ctx, commandSpec{repository: input, args: initArguments}); err != nil {
 		return Repository{}, err
 	}
 	if err := c.configureRemote(ctx, input, temporary); err != nil {
@@ -347,7 +356,7 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 		// part 4). The error now includes the forge's stderr (part 1), so the
 		// operator sees the actual reason rather than a bare exit code.
 		c.logger.Printf("initial upstream fetch failed for %s: %v", repo, err)
-		return Repository{}, fmt.Errorf("initial upstream fetch for %s: %w", repo, err)
+		return Repository{}, fmt.Errorf("initial upstream fetch for %s: %w%s", repo, err, c.missingRepositoryHint(ctx, temporary, err))
 	}
 	if err := c.materialize(ctx, temporary, nil); err != nil {
 		return Repository{}, err
@@ -393,7 +402,7 @@ func (c *Cache) prepareReleaseAdmissionLocked(ctx context.Context, path string, 
 	// existence-based, never a guess: any OTHER rev-parse failure still
 	// refuses the receive.
 	if _, refErr := c.capture(ctx, path, "show-ref", "--verify", "--quiet", upstreamRef); refErr != nil {
-		if refs, listErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix); listErr == nil && strings.TrimSpace(refs) == "" {
+		if unborn, listErr := c.defaultBranchUnborn(ctx, path, defaultBranch); listErr == nil && unborn {
 			return ReleaseAdmission{}, c.deleteRef(ctx, path, admissionRef, "")
 		}
 	}
@@ -806,27 +815,106 @@ func (c *Cache) discoverDefaultBranch(ctx context.Context, path string) (string,
 	if !errors.Is(err, errNoSymbolicDefaultBranch) {
 		return "", err
 	}
-	// No symbolic HEAD in the advertisement. Distinguish a brand-new EMPTY
-	// upstream (repository provisioned on the forge with zero commits —
-	// e.g. github.com/oberthci/terraform at bootstrap; some servers do not
-	// advertise the unborn-HEAD symref over ls-remote) from an upstream
-	// that HAS refs but no symbolic HEAD. The empty case has nothing to
-	// guess between and falls back to "main", the same default `repo add`
-	// records until the first push confirms it; the populated case stays a
-	// hard error because choosing among existing branches would guess the
-	// promotion target and the release reachability anchor.
-	refsOutput, refsErr := c.capture(ctx, path, "ls-remote", "upstream")
-	if refsErr != nil {
-		return "", errors.Join(err, refsErr)
+	// A HEAD that resolves to a commit without naming its branch (a server
+	// without the symref capability) would make Oberth guess among existing
+	// branches for the promotion target and the release anchor: refuse.
+	if headAdvertised(symrefOutput) {
+		return "", fmt.Errorf("%w: the upstream HEAD resolves to a commit but the forge does not say which branch it is; set the repository's default branch on the forge", ErrUpstreamDefaultBranch)
 	}
-	if strings.TrimSpace(refsOutput) == "" {
-		return "main", nil
+	// No HEAD at all: the upstream's default branch is unborn. That is a
+	// brand-new repository, empty or holding only branches Oberth already
+	// synced (stock OpenSSH forges speak protocol v0, which never advertises
+	// an unborn HEAD). Keep the default branch this cache already recorded
+	// (the repository's registered default), or "main" for a new cache; the
+	// first promotion or default-branch publication creates it upstream.
+	branch, err = c.currentDefaultBranch(ctx, path)
+	if err != nil {
+		branch = "main"
 	}
-	return "", err
+	return branch, nil
+}
+
+// ErrUpstreamDefaultBranch reports an upstream whose default branch Oberth
+// cannot determine. It is a forge configuration problem, not a transient
+// fault: retrying unchanged repeats it.
+var ErrUpstreamDefaultBranch = errors.New("upstream default branch unknown")
+
+// headAdvertised reports whether an `ls-remote --symref <remote> HEAD`
+// answer carries a resolved HEAD row.
+func headAdvertised(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[1] == "HEAD" {
+			return true
+		}
+	}
+	return false
+}
+
+// trackingBranchAbsent reports whether the last successful upstream fetch
+// (which prunes) proved that branch does not exist upstream. Only a clean
+// listing counts; an unreadable repository is never read as absent.
+func (c *Cache) trackingBranchAbsent(ctx context.Context, path, branch string) (bool, error) {
+	ref := upstreamRefPrefix + "heads/" + branch
+	output, err := c.capture(ctx, path, "for-each-ref", "--format=%(refname)", ref)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) == ref {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// defaultBornFile marks a cache whose upstream default branch has existed.
+const defaultBornFile = "oberth-default-born"
+
+// recordDefaultBranchBorn durably notes that the upstream default branch
+// exists, so its later disappearance is never read as a new repository.
+func (c *Cache) recordDefaultBranchBorn(ctx context.Context, path, branch string) error {
+	marker := filepath.Join(path, defaultBornFile)
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read default-branch marker: %w", err)
+	}
+	if absent, err := c.trackingBranchAbsent(ctx, path, branch); err != nil || absent {
+		return err
+	}
+	if err := os.WriteFile(marker, []byte(branch+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write default-branch marker: %w", err)
+	}
+	return syncDirectory(path)
+}
+
+// defaultBranchUnborn reports whether branch is an unborn default: the last
+// successful (pruning) fetch proved it absent upstream, and either this cache
+// never saw a default branch upstream (a new repository, empty or holding
+// only other branches) or the upstream now holds no refs at all. A default
+// branch that existed and vanished beside other refs was deleted; treating
+// it as unborn would silently drop its policy and let the next push or
+// promotion recreate it ungoverned.
+func (c *Cache) defaultBranchUnborn(ctx context.Context, path, branch string) (bool, error) {
+	absent, err := c.trackingBranchAbsent(ctx, path, branch)
+	if err != nil || !absent {
+		return false, err
+	}
+	if _, err := os.Stat(filepath.Join(path, defaultBornFile)); errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	} else if err != nil {
+		return false, err
+	}
+	refs, err := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(refs) == "", nil
 }
 
 // errNoSymbolicDefaultBranch reports an upstream advertisement that carries
-// no symbolic HEAD; discoverDefaultBranch decides whether that is the empty
+// no symbolic HEAD; discoverDefaultBranch decides whether that is the unborn
 // bootstrap case or a hard error.
 var errNoSymbolicDefaultBranch = errors.New("upstream did not advertise a symbolic default branch")
 
@@ -867,14 +955,26 @@ func (c *Cache) setHead(ctx context.Context, path, branch string) error {
 		return err
 	}
 	ref := "refs/heads/" + branch
+	if err := c.recordDefaultBranchBorn(ctx, path, branch); err != nil {
+		return err
+	}
 	if _, err := c.capture(ctx, path, "show-ref", "--verify", "--quiet", ref); err != nil {
-		// Unborn-branch bootstrap: an EMPTY upstream fetched zero refs, so
-		// its default branch cannot exist in the cache yet. Point HEAD at
-		// the unborn branch only when the cache holds no refs at all — a
-		// missing branch in a populated cache still means the fetch failed.
-		refs, listErr := c.capture(ctx, path, "for-each-ref", "--count=1")
-		if listErr != nil || strings.TrimSpace(refs) != "" {
+		// Unborn-branch bootstrap: the upstream has no default branch yet,
+		// so it cannot exist in the cache either. Point HEAD at the unborn
+		// branch only when the pruning fetch proved it absent upstream — a
+		// fetched branch missing from the public refs means materialization
+		// failed — and this cache never saw a default branch there: one
+		// that disappeared was deleted, and its policy must not lapse.
+		absent, listErr := c.trackingBranchAbsent(ctx, path, branch)
+		if listErr != nil || !absent {
 			return fmt.Errorf("upstream default branch %s was not fetched: %w", branch, err)
+		}
+		unborn, listErr := c.defaultBranchUnborn(ctx, path, branch)
+		if listErr != nil {
+			return fmt.Errorf("upstream default branch %s was not fetched: %w", branch, listErr)
+		}
+		if !unborn {
+			return fmt.Errorf("%w: default branch %s is missing upstream although this repository had a default branch before; restore it on the forge", ErrUpstreamDefaultBranch, branch)
 		}
 	}
 	return c.run(ctx, commandSpec{dir: path, args: []string{"symbolic-ref", "HEAD", ref}})
@@ -1329,3 +1429,28 @@ func validateModuleRef(ref string) error {
 
 // CacheRoot identifies the daemon-owned repository cache for removal requests.
 func (c *Cache) CacheRoot() string { return c.root }
+
+// missingRepositoryHint names the repository path the forge refused and, for
+// an absolute ssh:// path, the home-relative upstream form that plain
+// git-shell forges need. The first clone is where a wrong organization path
+// surfaces, so the error must say how to correct the registration.
+func (c *Cache) missingRepositoryHint(ctx context.Context, path string, err error) string {
+	if err == nil || !strings.Contains(err.Error(), "does not appear to be a git repository") {
+		return ""
+	}
+	remote, getErr := c.capture(ctx, path, "remote", "get-url", "upstream")
+	if getErr != nil {
+		return ""
+	}
+	parsed, parseErr := url.Parse(strings.TrimSpace(remote))
+	if parseErr != nil || parsed.Scheme != "ssh" {
+		return ""
+	}
+	hint := "; the forge has no repository at " + parsed.Path
+	if !strings.HasPrefix(parsed.Path, "/~") {
+		base := *parsed
+		base.Path = "/~" + pathpkg.Dir(parsed.Path)
+		hint += "; if it keeps repositories relative to the git user's home, register the upstream as " + base.String() + " (upstream remove, then upstream add)"
+	}
+	return hint
+}

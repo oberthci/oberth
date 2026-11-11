@@ -47,12 +47,32 @@ func ParseService(value string) (Service, error) {
 }
 
 // Repository is a ready bare cache. Stale is true when refresh failed but a
-// previously populated cache remains safe to serve.
+// previously populated cache remains safe to serve; StaleReason then says
+// why in a short client-safe phrase.
 type Repository struct {
 	Path          string
 	Stale         bool
+	StaleReason   string
 	DefaultBranch string
 	recoveryOnly  bool
+}
+
+// StaleNotice is the one-line remote message for a stale cache.
+func (repository Repository) StaleNotice() string {
+	reason := repository.StaleReason
+	if reason == "" {
+		reason = "upstream unavailable"
+	}
+	return "remote: oberth: " + reason + "; serving cached repository\n"
+}
+
+// staleReason names why a refresh failed. Only Oberth's own classification
+// reaches the client; forge stderr stays in the server log.
+func staleReason(err error) string {
+	if errors.Is(err, ErrUpstreamDefaultBranch) {
+		return "upstream default branch unknown (the forge's HEAD names no advertised branch)"
+	}
+	return "upstream unavailable"
 }
 
 // RefUpdate describes one public branch or tag change.

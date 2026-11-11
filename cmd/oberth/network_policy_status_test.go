@@ -27,7 +27,7 @@ func TestChartDisabledPipelinePolicyPersistsInStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse chart args %v: %v", args, err)
 	}
-	health := configuredHealth(options)
+	health := configuredHealth(options, nil)
 	value, err := health.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestChartEnabledPipelinePolicyStatus(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			health := configuredHealth(options)
+			health := configuredHealth(options, nil)
 			value, err := health.Status(t.Context())
 			if err != nil {
 				t.Fatal(err)
@@ -99,7 +99,7 @@ func TestPipelinePolicyConfigurationUnavailableWithoutFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	health := configuredHealth(options)
+	health := configuredHealth(options, nil)
 	value, err := health.Status(t.Context())
 	if err != nil {
 		t.Fatal(err)

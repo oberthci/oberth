@@ -464,7 +464,7 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
-	client := newBootstrapClient("ci", "custom-upstream-key", "custom-known-hosts")
+	client := newBootstrapClient("ci", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	scanCalls := 0
 	probeCalls := 0
@@ -503,8 +503,6 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 		"--upstream-key", privatePath,
 		"--known-hosts", knownHostsPath,
 		"--namespace", "ci",
-		"--upstream-key-secret", "custom-upstream-key",
-		"--known-hosts-secret", "custom-known-hosts",
 		"codeberg", "ssh://git@codeberg.org/acme",
 	}
 	var output bytes.Buffer
@@ -526,7 +524,7 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 		t.Fatalf("initial bootstrap: scans=%d probes=%d upstreams=%d", scanCalls, probeCalls, upstreamCount(t, databasePath))
 	}
 
-	privateSecret, err := client.CoreV1().Secrets("ci").Get(ctx, "custom-upstream-key", metav1.GetOptions{})
+	privateSecret, err := client.CoreV1().Secrets("ci").Get(ctx, "oberth-upstream-key", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,7 +548,7 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 		t.Fatalf("well-known forge should not display host-key fingerprints: %q", output.String())
 	}
 
-	hostsSecret, err := client.CoreV1().Secrets("ci").Get(ctx, "custom-known-hosts", metav1.GetOptions{})
+	hostsSecret, err := client.CoreV1().Secrets("ci").Get(ctx, "oberth-known-hosts", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +557,7 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 		t.Fatalf("known_hosts = %q", hostsSecret.Data["trusted_hosts"])
 	}
 	patchNames := secretPatchNames(client)
-	if strings.Join(patchNames, ",") != "custom-known-hosts,custom-upstream-key" {
+	if strings.Join(patchNames, ",") != "oberth-known-hosts,oberth-upstream-key" {
 		t.Fatalf("name-scoped Secret patches = %v", patchNames)
 	}
 	for _, action := range client.Actions() {
@@ -826,7 +824,7 @@ func TestUpstreamAddRerunHintPreservesNonDefaultFlags(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
-	client := newBootstrapClient("custom-ns", "custom-key-secret", "custom-hosts-secret")
+	client := newBootstrapClient("custom-ns", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	dependencies := upstreamDependencies{
 		input:        strings.NewReader("yes\nyes\n"),
@@ -850,8 +848,6 @@ func TestUpstreamAddRerunHintPreservesNonDefaultFlags(t *testing.T) {
 		"--upstream-key", filepath.Join(directory, "projected", "custom_key"),
 		"--known-hosts", filepath.Join(directory, "projected-hosts", "known_hosts"),
 		"--namespace", "custom-ns",
-		"--upstream-key-secret", "custom-key-secret",
-		"--known-hosts-secret", "custom-hosts-secret",
 		"--dedicated-key",
 		"--expected-host-fingerprint", ssh.FingerprintSHA256(hostKey),
 		"codeberg", "ssh://git@codeberg.org/acme",
@@ -863,8 +859,6 @@ func TestUpstreamAddRerunHintPreservesNonDefaultFlags(t *testing.T) {
 	for _, want := range []string{
 		"--dedicated-key",
 		"--namespace custom-ns",
-		"--upstream-key-secret custom-key-secret",
-		"--known-hosts-secret custom-hosts-secret",
 		"--expected-host-fingerprint",
 	} {
 		if !strings.Contains(rerun, want) {
@@ -1913,7 +1907,6 @@ func TestHostProvideKeyStreamingReachesPod(t *testing.T) {
 	}
 	var output bytes.Buffer
 	err := runUpstreamAddFromHost(context.Background(), []string{
-		"--upstream-key-secret", "custom-secret",
 		"--namespace", "custom-ns",
 		"codeberg", "ssh://git@codeberg.org/acme",
 	}, &output, hostUpstreamDeps{
@@ -1933,7 +1926,6 @@ func TestHostProvideKeyStreamingReachesPod(t *testing.T) {
 		"kubectl exec -i",
 		"oberth upstream provide-key",
 		"--namespace custom-ns",
-		"--upstream-key-secret custom-secret",
 		"codeberg",
 	} {
 		if !strings.Contains(joined, want) {
@@ -2014,7 +2006,7 @@ func TestInPodModeSkipsKeySelectionPrompt(t *testing.T) {
 
 // TestHostModeExecPassesThroughFlags pins that the kubectl exec command
 // correctly passes through --dedicated-key, --expected-host-fingerprint,
-// --no-wait, and non-default secret names.
+// --no-wait and --repin.
 func TestHostModeExecPassesThroughFlags(t *testing.T) {
 	t.Parallel()
 	runner, captured := captureInteractiveRunner(t)
@@ -2024,8 +2016,7 @@ func TestHostModeExecPassesThroughFlags(t *testing.T) {
 		"--dedicated-key",
 		"--expected-host-fingerprint", "SHA256:test",
 		"--no-wait",
-		"--upstream-key-secret", "custom-key",
-		"--known-hosts-secret", "custom-hosts",
+		"--repin",
 		"myforge", "ssh://git@forge.example.com/org",
 	}, &output, hostUpstreamDeps{
 		input:          strings.NewReader(""),
@@ -2040,8 +2031,7 @@ func TestHostModeExecPassesThroughFlags(t *testing.T) {
 		"--dedicated-key",
 		"--expected-host-fingerprint SHA256:test",
 		"--no-wait",
-		"--upstream-key-secret custom-key",
-		"--known-hosts-secret custom-hosts",
+		"--repin",
 		"myforge",
 		"ssh://git@forge.example.com/org",
 	} {
@@ -2257,10 +2247,10 @@ func TestWarnUplinkSharesUpstreamKey(t *testing.T) {
 func TestUpstreamAuthStatusReportsWithoutProbingNonSSH(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "absent")
-	if got := upstreamAuthStatus(context.Background(), model.Upstream{Kind: "local"}, missing, t.TempDir(), missing); got != "-" {
+	if got := upstreamAuthStatus(context.Background(), model.Upstream{Kind: "local"}, "", missing, t.TempDir(), missing); got != "-" {
 		t.Fatalf("local upstream: %q", got)
 	}
-	if got := upstreamAuthStatus(context.Background(), model.Upstream{Kind: "ssh", BaseURL: "ssh://git@example.test/acme"}, missing, t.TempDir(), missing); got != "error: read upstream identity" {
+	if got := upstreamAuthStatus(context.Background(), model.Upstream{Kind: "ssh", BaseURL: "ssh://git@example.test/acme"}, "", missing, t.TempDir(), missing); got != "error: read upstream identity" {
 		t.Fatalf("missing key: %q", got)
 	}
 }

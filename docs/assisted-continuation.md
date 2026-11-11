@@ -143,9 +143,18 @@ A leaf is held only when it has no credentials and no identity of its own:
   lanes, such as Oberth's own static-git qualification, forbid exec and own
   their Pod patch.
 
-Everything else keeps today's behaviour. Steps whose image lane lacks the
-server helper mount are inspect-only: `run_hold_exec` works, `run_hold_patch`
-is refused.
+Everything else keeps today's behaviour.
+
+`run_hold_patch` writes files through the server's own static executable,
+which every hold-eligible step's `main` container receives read-only at
+`/run/oberth/usage` from the run's source claim. The image does not matter:
+a stock `debian`, `alpine` or distroless image is patch-capable, with or
+without a shell and whatever its memory limit (only resource measurement
+keeps its 256Mi floor). The step's `patch_capable` (in `run.held` and
+`run_hold_list`) is false only when its held Pod lacks that mount: a Pod
+created by an older server, or a run without a seeded source claim. Such a
+step is inspect-only: `run_hold_exec` works, `run_hold_patch` is refused;
+`run_rerun` with `assist: true` builds new Pods that carry the helper.
 
 A hold is identified by the server-owned annotation, the pause variable on
 `main` and a retry node name (`...(N)`, N ≥ 1); admission refuses every

@@ -382,7 +382,7 @@ func (service *API) patchRunHold(ctx context.Context, actor api.Actor, id, step,
 		return RunHoldPatchResponse{}, err
 	}
 	if !hold.PatchCapable {
-		return RunHoldPatchResponse{}, refuse(ErrInvalidInput, "step %s is inspect-only: the server helper is not mounted in its image lane", hold.Step)
+		return RunHoldPatchResponse{}, refuse(ErrInvalidInput, "step %s is inspect-only: its held Pod has no server helper mount (/run/oberth/usage); run_hold_exec still works", hold.Step)
 	}
 	digest := holdfs.Digest([]byte(diff))
 	files := make([]string, 0, len(patches))

@@ -950,6 +950,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectStepUsageMounts(workflow, request)
+	injectAssistHelperMounts(workflow, request)
 	injectWorkspaceEnvironment(workflow)
 	injectRunEnvironment(workflow, config, request, credentialed)
 	// Per-step identity override (issue #623): for release templates consuming

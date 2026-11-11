@@ -66,6 +66,9 @@ func failedRunDisplayReason(run model.Run) string {
 	if model.IsExecutionDeadlineReason(run.Error) {
 		return "infrastructure error: deadline exceeded"
 	}
+	if upstreamConfigurationFailure(run.Error) {
+		return "upstream configuration error: " + run.Error
+	}
 	phase := strings.TrimSpace(run.Phase)
 	if phase == "" {
 		if run.Error == "" {

@@ -762,6 +762,7 @@ type remoteHealthStatus struct {
 	Cluster       string `json:"cluster"`
 	Audit         string `json:"audit"`
 	Version       string `json:"version,omitempty"`
+	SSHHostKey    string `json:"ssh_host_key_fingerprint,omitempty"`
 	Admission     *struct {
 		Hold *model.AdmissionHold `json:"hold,omitempty"`
 	} `json:"admission,omitempty"`
@@ -822,7 +823,11 @@ func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) 
 		{"version:", status.Version},
 		{"upstreams:", fmt.Sprint(status.Upstreams)},
 		{"repositories:", fmt.Sprint(status.Repositories)},
+		{"ssh host key:", status.SSHHostKey},
 	} {
+		if row.label == "ssh host key:" && row.value == "" {
+			continue
+		}
 		if _, err := fmt.Fprintf(output, "%-14s %s\n", row.label, row.value); err != nil {
 			return err
 		}

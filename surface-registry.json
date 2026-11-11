@@ -347,6 +347,18 @@
     "flag:yes": {
       "doc_anchor": "docs/installer-reruns.md",
       "test_ref": "cmd/oberth/upgrade_backup_recipient_test.go TestUpgradeBackupRecipientFlag"
+    },
+    "flag:repin": {
+      "doc_anchor": "docs/gitcache.md#upstream-host-keys-and-repository-paths",
+      "test_ref": "internal/app/upstream_repin_test.go TestUpstreamBootstrapExpectedFingerprintAndRepinOnMultiKeyForge"
+    },
+    "flag:check-repo": {
+      "doc_anchor": "docs/gitcache.md#upstream-host-keys-and-repository-paths",
+      "test_ref": "internal/app/upstream_repo_probe_test.go TestUpstreamBootstrapCheckRepositoryRefusesWrongOrganizationPath"
+    },
+    "flag:check": {
+      "doc_anchor": "docs/gitcache.md#upstream-host-keys-and-repository-paths",
+      "test_ref": "internal/app/upstream_repo_probe_test.go TestProbeSSHRepositoryNamesPathAndSuggestsHomeRelativeForm"
     }
   }
 }

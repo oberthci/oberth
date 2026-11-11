@@ -39,6 +39,7 @@ func TestAcquireHostKeysAcceptsPublishedFingerprintForWellKnownForge(t *testing.
 		newConfirmationReader(strings.NewReader("")),
 		"GitHub.com",
 		"22",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("acquireHostKeys: %v", err)
@@ -69,6 +70,7 @@ func TestAcquireHostKeysAcceptsPublishedFingerprintWithTrailingRootDot(t *testin
 		newConfirmationReader(strings.NewReader("")),
 		"GitHub.com.",
 		"22",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("acquireHostKeys: %v", err)
@@ -107,6 +109,7 @@ func TestAcquireHostKeysRejectsAnyMismatchedFingerprintForWellKnownForge(t *test
 		newConfirmationReader(strings.NewReader("yes\n")),
 		"github.com",
 		"22",
+		nil,
 	)
 	want := "MITM WARNING: github.com SSH fingerprint does not match published value"
 	if err == nil || err.Error() != want {
@@ -136,6 +139,7 @@ func TestAcquireHostKeysRejectsMismatchedFingerprintWithTrailingRootDot(t *testi
 		newConfirmationReader(strings.NewReader("yes\n")),
 		"github.com.",
 		"22",
+		nil,
 	)
 	want := "MITM WARNING: github.com. SSH fingerprint does not match published value"
 	if err == nil || err.Error() != want {
@@ -166,6 +170,7 @@ func TestAcquireHostKeysStillPromptsForUnknownForge(t *testing.T) {
 		newConfirmationReader(strings.NewReader("yes\n")),
 		"forge.example",
 		"22",
+		nil,
 	); err != nil {
 		t.Fatalf("acquireHostKeys: %v", err)
 	}
@@ -421,6 +426,7 @@ func TestAcquireHostKeysAutoYesRefusedForUnknownForge(t *testing.T) {
 		newConfirmationReader(strings.NewReader("yes\n")),
 		"forge.example",
 		"22",
+		nil,
 	)
 	if err == nil {
 		t.Fatal("--yes alone must not auto-accept unknown forge host keys")
@@ -455,6 +461,7 @@ func TestAcquireHostKeysExpectedFingerprintMatchesScanResult(t *testing.T) {
 		newConfirmationReader(strings.NewReader("")),
 		"forge.example",
 		"22",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("matching fingerprint was refused: %v", err)
@@ -503,6 +510,7 @@ func TestAcquireHostKeysFingerprintPathPinsOnlyMatchedKey(t *testing.T) {
 		newConfirmationReader(strings.NewReader("")),
 		"forge.example",
 		"22",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("acquireHostKeys: %v", err)
@@ -555,6 +563,7 @@ func TestAcquireHostKeysFingerprintPathWorksWithSinglePinnedKeyType(t *testing.T
 		newConfirmationReader(strings.NewReader("")),
 		"forge.example",
 		"22",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("acquireHostKeys: %v", err)
@@ -602,6 +611,7 @@ func TestAcquireHostKeysExpectedFingerprintMismatchShowsBoth(t *testing.T) {
 		newConfirmationReader(strings.NewReader("")),
 		"forge.example",
 		"22",
+		nil,
 	)
 	if err == nil {
 		t.Fatal("mismatched fingerprint was accepted")

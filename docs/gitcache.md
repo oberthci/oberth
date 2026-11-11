@@ -107,3 +107,53 @@ closed even for unrelated source changes. Follow the [static Git re-pin and
 re-qualification procedure](../internal/staticgit/README.md); preserve the
 required `test-static-git-runtime` gate and review both architecture byte pins
 before accepting a replacement substrate.
+
+## Upstream host keys and repository paths
+
+`oberth upstream add` pins the forge's SSH host keys once: every key a
+well-known forge publishes, only the key matching `--expected-host-fingerprint`,
+or the keys an operator confirms with `yes`. Registration, `upstream list
+--check` and the Git transport then offer the forge only the pinned key
+types, so a forge with RSA, ECDSA and Ed25519 keys authenticates with an
+Ed25519-only pin.
+
+When a forge rotates its keys, or an earlier pin is incomplete, verify the new
+fingerprints through a trusted channel and rerun the same command with
+`--repin`. It first checks the registration (another URL or key choice under
+the name is refused before anything is scanned or written), then rescans,
+accepts keys under the same rules, and replaces only this endpoint's lines in
+the `oberth-known-hosts` bundle. The interactive prompt lists the pins being
+replaced beside the scanned keys, marked new or already pinned, and the write
+is audited as `upstream.identity.repin.oberth-known-hosts`, apart from a first
+pin. An identical registration is kept. An entry Oberth did not
+write (hashed, wildcard or multi-host) is refused rather than edited.
+
+Repositories resolve to `<base URL>/<repo>.git`. A plain `git-shell` forge
+keeps them relative to the git user's home, so its base URL needs `/~/`:
+`ssh://git@forge.example/~/acme`, not `ssh://git@forge.example/acme`.
+`upstream add --check-repo <repo>` reads that existing repository's ref
+advertisement (no objects) before registering, and `upstream list --check`
+reads one registered repository per SSH upstream; both name the path the
+forge refused and suggest the `/~/` form; an in-protocol `ERR` answer counts
+as a refusal. The first clone's error carries
+the same hint.
+
+A forge repository may start empty. While its default branch does not exist
+(an unborn HEAD, which protocol v0 forges never advertise), the cache keeps
+its recorded default branch, `main` for a new repository, even after other
+branches are synced there; the first promotion or default-branch publication
+creates it upstream. A protocol v0 forge does not say which unborn branch its
+HEAD names: if that is not the recorded default (a repository initialized on
+`trunk` or `master`, say), Oberth still creates `main`, and the forge's HEAD
+stays dangling, so a direct clone from the forge checks out nothing until its
+default branch is set there to the branch Oberth created.
+
+A default branch is read as unborn only while this cache has never seen one
+upstream. A default branch that existed and then
+disappears beside other refs was deleted: Oberth serves the cache stale with
+"upstream default branch unknown", policy reads and release admission refuse,
+and nothing recreates the branch without its policy. Restore it on the forge.
+
+Clients pin Oberth's own SSH endpoint from `oberth status` (the
+`ssh host key` fingerprint) or the `ssh_host_key` field of `system_status`,
+both served over the CA-verified HTTPS API.
