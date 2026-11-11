@@ -2,7 +2,7 @@
 name: install
 description: Install a new Oberth server on the Kubernetes cluster the user's KUBECONFIG names, without any secret entering this session. Use when the user runs /oberth:install, asks to install or set up Oberth, or the session-start note says no Oberth server is configured and the user wants one.
 argument-hint: "[kubeconfig context]"
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth *), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/install *)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth" *), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" *)
 ---
 
 # Install Oberth
@@ -17,14 +17,14 @@ Arguments given to the command: `$ARGUMENTS`
 
 ## Steps
 
-1. **Prerequisites.** Run `"${CLAUDE_PLUGIN_ROOT}/scripts/install" prerequisites`.
+1. **Prerequisites.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" prerequisites`.
    Missing Helm or kubectl stops the flow with installation links. Never install
    either tool yourself.
-2. **The CLI.** Run `"${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth"` (or pass an
+2. **The CLI.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth"` (or pass an
    explicit release version). It uses the plugin's pinned release key, OpenSSL
    and SHA-256 to verify before installing into `~/.local/bin`. It needs no
    sudo, cosign, jq or Python. A verification failure stops the flow.
-3. **The cluster.** Run `"${CLAUDE_PLUGIN_ROOT}/scripts/install" plan` with the
+3. **The cluster.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" plan` with the
    chosen `--context` and answers file when available. Show its kubeconfig
    files, API URL, CA pin, node facts and remedies. Any chosen context is a valid
    target; never add a local/remote gate. With multiple contexts, ask the user.
@@ -50,7 +50,7 @@ Arguments given to the command: `$ARGUMENTS`
    "install". Nothing runs before that.
 
    ```sh
-   "${CLAUDE_PLUGIN_ROOT}/scripts/install" run --yes --json --context '<context>' --install-secretstore \
+   sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" run --yes --json --context '<context>' --install-secretstore \
      --secrets-file "$HOME/oberth-install-secrets.txt" \
      --admin-ssh-public-key '<local SSH public key file>' \
      --forge github --organization '<org>' --client-host localhost
@@ -97,7 +97,7 @@ Arguments given to the command: `$ARGUMENTS`
   an earlier one. The install refuses a path that exists; choose a new name
   instead of removing the old file.
 - A `--dry-run` prints a plan and installs nothing. After the approved
-  install, run `"${CLAUDE_PLUGIN_ROOT}/scripts/install" verify --context
+  install, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" verify --context
   '<context>'` and explain every failing check and remedy.
 - Never disable TLS verification, and never trust the server's CA any other
   way than `/oberth:connect` with the pin.

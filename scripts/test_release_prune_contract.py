@@ -35,12 +35,12 @@ class PruneContractTests(unittest.TestCase):
     def test_prune_converged_set_definition(self):
         """The converged set must include the Oberth-specific fixed aliases."""
         script = (ROOT / '.oberth/release.sh').read_text()
-        # The detached DER signature is extracted from the Sigstore bundle.
+        # The checksums have both a Sigstore bundle and its raw DER signature.
         # Signed release.json metadata and its Sigstore bundle are also fixed aliases.
         self.assertIn('"VERSION", "SHA256SUMS", "SHA256SUMS.sigstore.json", "cosign.pub"', script)
 
     def test_prune_fixed_aliases_match_signed_release_contract(self):
-        """Keep the signed record and the OpenSSL checksum signature."""
+        """Keep the signed release record and the checksum DER signature."""
         script = (ROOT / '.oberth/release.sh').read_text()
         prune_start = script.index('list-type=2&prefix=oberth/latest/')
         fixed_start = script.index('fixed = ', prune_start) + len('fixed = ')
@@ -48,7 +48,7 @@ class PruneContractTests(unittest.TestCase):
         fixed = ast.literal_eval(script[fixed_start:fixed_end])
         self.assertEqual(fixed, {
             'VERSION', 'SHA256SUMS', 'SHA256SUMS.sigstore.json', 'cosign.pub',
-            'release.json', 'release.json.sigstore.json', 'SHA256SUMS.sig',
+            'SHA256SUMS.sig', 'release.json', 'release.json.sigstore.json',
         })
         self.assertIn('SHA256SUMS.sig', fixed)
         self.assertNotIn('release.json.sig', fixed)

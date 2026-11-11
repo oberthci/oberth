@@ -2,7 +2,7 @@
 name: connect
 description: Make Claude Code trust the CA of the configured Oberth server, checked against an explicit SHA-256 pin. Use when the user runs /oberth:connect, when the session-start note says the Oberth CA is not trusted yet, or when the oberth MCP server fails with a certificate error.
 argument-hint: "[CA SHA-256 pin]"
-allowed-tools: Bash(sh ${CLAUDE_PLUGIN_ROOT}/scripts/trust *)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" *)
 ---
 
 # Connect Claude Code to Oberth

@@ -1,7 +1,14 @@
 package argojob
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +27,7 @@ type releaseRuntimeFixture struct {
 	t                                                *testing.T
 	root, candidate, scratch, receipt, script, trace string
 	env                                              []string
+	signingKey                                       *ecdsa.PrivateKey
 }
 
 func newReleaseRuntimeFixture(t *testing.T) *releaseRuntimeFixture {
@@ -41,12 +49,28 @@ func newReleaseRuntimeFixture(t *testing.T) *releaseRuntimeFixture {
 	if override := os.Getenv("OBERTH_TEST_RELEASE_SCRIPT"); override != "" {
 		f.script = override
 	}
-	pin, err := os.ReadFile(filepath.Join(repositoryRoot(t), ".oberth", "pins", "release-cosign.pub"))
+	f.signingKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicDER, err := x509.MarshalPKIXPublicKey(&f.signingKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
+	privateDER, err := x509.MarshalECPrivateKey(f.signingKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.write(".oberth/pins/release-cosign.pub", string(pin))
-	f.write("secrets/cosign-secret/COSIGN_KEY", "TEST_PRIVATE_KEY_CANARY")
+	f.write("secrets/cosign-secret/COSIGN_KEY", string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateDER})))
+	// Replace only the trust anchor in a private copy; all crypto checks run.
+	source, err := os.ReadFile(f.script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.script = filepath.Join(f.root, "fixture-release.sh")
+	f.absolute(f.script, strings.ReplaceAll(string(source), "036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31", fmt.Sprintf("%x", sha256.Sum256(pin))), 0700)
 	f.write("secrets/cosign-secret/COSIGN_PASSWORD", "TEST_PASSWORD_CANARY")
 	f.write("secrets/cosign-secret/COSIGN_PUB", string(pin))
 	f.write("secrets/gar-image-key/GAR_SA_KEY", releaseCredentialJSON("source-image-delegator"))
@@ -56,7 +80,7 @@ func newReleaseRuntimeFixture(t *testing.T) *releaseRuntimeFixture {
 	f.write("objects/oberth/cosign.pub", string(pin))
 	f.write("objects/oberth/index.yaml", "fixture-index")
 	f.version(runtimeFixtureTag, string(pin), false)
-	for _, file := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sig", "oberth-1.2.3.tgz", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json"} {
+	for _, file := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sig", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json", "oberth-1.2.3.tgz"} {
 		b, e := os.ReadFile(filepath.Join(f.root, "objects", "oberth", runtimeFixtureTag, file))
 		if e != nil {
 			t.Fatal(e)
@@ -78,13 +102,24 @@ func newReleaseRuntimeFixture(t *testing.T) *releaseRuntimeFixture {
 if [ -n "${COSIGN_PASSWORD:-}" ]; then printf 'cosign-password:%s\n' "$1" >>"$FIXTURE_TRACE"; fi
 case "$1" in
  public-key) cat "$FIXTURE_ROOT/.oberth/pins/release-cosign.pub";;
- verify-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; grep -Eq '^(valid|\{"messageSignature":\{"signature":"Zml4dHVyZS1zaWc="\}\})$' "$1" || exit 91; fi; shift; done;;
+ verify-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; grep -Eq '^(valid|.*"fixture_valid":true.*)$' "$1" || exit 91; fi; shift; done;;
  verify) if [ -e "$FIXTURE_ROOT/require-signature" ] && [ ! -e "$FIXTURE_ROOT/registry-signed" ]; then exit 1; fi;;
  sign) touch "$FIXTURE_ROOT/registry-signed";;
- sign-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; printf '%s\n' '{"messageSignature":{"signature":"Zml4dHVyZS1zaWc="}}' >"$1"; fi; shift; done;;
+ sign-blob)
+ bundle= key= payload=
+ while [ "$#" -gt 0 ]; do
+  case "$1" in --bundle) bundle=$2; shift 2;; --key) key=$2; shift 2;; *) payload=$1; shift;; esac
+ done
+ openssl dgst -sha256 -sign "$key" -out "$bundle.der" "$payload"
+ /usr/bin/python3 -I -S -B - "$payload" "$bundle" <<'PYBUNDLE'
+import base64, hashlib, json, pathlib, sys
+payload, bundle = map(pathlib.Path, sys.argv[1:])
+message = {"messageDigest": {"algorithm": "SHA2_256", "digest": base64.b64encode(hashlib.sha256(payload.read_bytes()).digest()).decode()}, "signature": base64.b64encode(pathlib.Path(str(bundle) + ".der").read_bytes()).decode()}
+bundle.write_text(json.dumps({"fixture_valid": True, "messageSignature": message}, separators=(",", ":")))
+PYBUNDLE
+ ;;
  *) exit 90;;
 esac`)
-	f.tool("openssl", `test "$1" = dgst`)
 	f.tool("trivy", ":")
 	f.tool("oberth-release-image", `case "$1" in
  static-sbom) printf 'fixture SBOM\n' >"$3";;
@@ -171,14 +206,41 @@ func (f *releaseRuntimeFixture) version(tag, key string, mutate bool) {
 		f.write("objects/oberth/"+tag+"/"+name, body)
 		fmt.Fprintf(&checks, "%x  %s\n", sha256.Sum256([]byte(body)), name)
 	}
-	fmt.Fprintf(&checks, "%x  oberth-%s.tgz\n", sha256.Sum256([]byte("fixture-chart")), strings.TrimPrefix(tag, "v"))
-	f.write("objects/oberth/"+tag+"/oberth-"+strings.TrimPrefix(tag, "v")+".tgz", "fixture-chart")
-	f.write("objects/oberth/"+tag+"/SHA256SUMS.sig", "fixture-sig")
+	chartName := "oberth-" + tag[1:] + ".tgz"
+	chart := "fixture-chart"
+	fmt.Fprintf(&checks, "%x  %s\n", sha256.Sum256([]byte(chart)), chartName)
+	f.write("objects/oberth/"+tag+"/"+chartName, chart)
 	f.write("objects/oberth/"+tag+"/SHA256SUMS", checks.String())
-	f.write("objects/oberth/"+tag+"/SHA256SUMS.sigstore.json", `{"messageSignature":{"signature":"Zml4dHVyZS1zaWc="}}`)
+	digest := sha256.Sum256([]byte(checks.String()))
+	signature, err := ecdsa.SignASN1(rand.Reader, f.signingKey, digest[:])
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.write("objects/oberth/"+tag+"/SHA256SUMS.sig", string(signature))
+	bundle, err := json.Marshal(map[string]any{"fixture_valid": true, "messageSignature": map[string]any{
+		"messageDigest": map[string]string{"algorithm": "SHA2_256", "digest": base64.StdEncoding.EncodeToString(digest[:])},
+		"signature":     base64.StdEncoding.EncodeToString(signature)}})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.write("objects/oberth/"+tag+"/SHA256SUMS.sigstore.json", string(bundle))
 	f.write("objects/oberth/"+tag+"/cosign.pub", key)
 	serverRef := "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("b", 64)
-	f.write("objects/oberth/"+tag+"/release.json", fmt.Sprintf(`{"schemaVersion":1,"component":"oberth","version":"%s","source":{"repository":"github.com/oberthci/oberth","sha":"%s"},"images":{"server":{"ref":"%s"}}}`, tag, runtimeFixtureSHA, serverRef))
+	artifacts := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(checks.String()), "\n") {
+		fields := strings.Fields(line)
+		if fields[1] != chartName {
+			artifacts[fields[1]] = "sha256:" + fields[0]
+		}
+	}
+	record, err := json.Marshal(map[string]any{"schemaVersion": 1, "component": "oberth", "version": tag,
+		"source":    map[string]string{"repository": "github.com/oberthci/oberth", "sha": runtimeFixtureSHA},
+		"images":    map[string]any{"server": map[string]string{"ref": serverRef}},
+		"artifacts": artifacts, "chart": map[string]string{"digest": fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(chart)))}})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.write("objects/oberth/"+tag+"/release.json", string(record))
 	f.write("objects/oberth/"+tag+"/release.json.sigstore.json", "valid")
 }
 func (f *releaseRuntimeFixture) run(action string, credentialed bool, arguments ...string) (string, error) {
@@ -377,7 +439,7 @@ func TestFinalizeRequiresBoundReceiptAndNeverExecutesOtherPayload(t *testing.T) 
 				if err != nil {
 					t.Fatalf("finalize: %v\n%s\n%s", err, out, f.log())
 				}
-				for _, name := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sig", "oberth-1.2.3.tgz", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json"} {
+				for _, name := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sig", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json", "oberth-1.2.3.tgz"} {
 					got, e := os.ReadFile(filepath.Join(f.root, "objects/oberth/latest", name))
 					if e != nil {
 						t.Fatal(e)
@@ -418,5 +480,34 @@ func TestReleaseRefusesSigningAfterStaticComponentScanFailure(t *testing.T) {
 	out, err := f.run("publish-images", true)
 	if err == nil || !strings.Contains(f.log(), "static-c-scan") || strings.Contains(f.log(), "cosign:sign:") {
 		t.Fatalf("C scan failure did not refuse signing: %v %s %s", err, out, f.log())
+	}
+}
+
+func TestPublicRuntimeUsesFreshTUFRootsBeforeAndAfterExecution(t *testing.T) {
+	f := newReleaseRuntimeFixture(t)
+	original, err := os.ReadFile(filepath.Join(f.root, "bin", "cosign"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := `if [ "$1" = verify-blob ]; then
+ test -n "${TUF_ROOT:-}"
+ test -d "$TUF_ROOT"
+ test -z "$(ls -A "$TUF_ROOT")"
+ mkdir "$TUF_ROOT/used"
+ printf '%s\n' "$TUF_ROOT" >>"$FIXTURE_ROOT/tuf-roots"
+fi
+`
+	f.absolute(filepath.Join(f.root, "bin", "cosign"), "#!/bin/sh\nset -eu\n"+guard+string(original), 0700)
+	if output, err := f.run("verify-public-runtime", false); err != nil {
+		t.Fatalf("runtime proof: %v %s", err, output)
+	}
+	roots := strings.Fields(string(mustReleaseFile(t, filepath.Join(f.root, "tuf-roots"))))
+	if len(roots) != 2 || roots[0] == roots[1] {
+		t.Fatal("runtime must verify twice with distinct empty TUF caches")
+	}
+	for _, root := range roots {
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			t.Fatal("private TUF cache survived verification")
+		}
 	}
 }
