@@ -141,8 +141,8 @@ The operating system's trust store is never touched. The command needs `sh`,
 name-constrained to the server's own names, so trusting it in Claude Code
 cannot vouch for any other site.
 
-A server presents its CA in the handshake from v0.21.3 on. For an earlier
-server, pass the CA as a file; it is checked against the same pin:
+The server presents its CA in the handshake. When the CA is at hand as a
+file instead, pass it; it is checked against the same pin:
 `sh <plugin>/scripts/trust connect --url <url> --pin <pin> --ca-file ca.crt`.
 
 While the plugin has a pin and the CA is not trusted yet, the session-start

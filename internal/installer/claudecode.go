@@ -638,7 +638,13 @@ func ensureSettingsCATrust(paths claudeCodeFiles, authorityPEM []byte, authority
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return ClaudeCodeChange{}, err
 		}
-		if err := atomicWriteFile(path, merged, mode); err != nil {
+		// A settings.json that is a symbolic link stays one: the file it
+		// names is replaced, as /oberth:connect does.
+		destination := path
+		if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil {
+			destination = resolved
+		}
+		if err := atomicWriteFile(destination, merged, mode); err != nil {
 			return ClaudeCodeChange{}, err
 		}
 	}

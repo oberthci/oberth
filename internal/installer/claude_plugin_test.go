@@ -491,8 +491,8 @@ func TestPluginConnectRefusesSettingsItCannotMerge(t *testing.T) {
 	}
 }
 
-// A server before v0.21.3 presents only its leaf: the CA then comes from a
-// file, checked against the same pin and the same server.
+// A server that presents only its leaf: the CA then comes from a file,
+// checked against the same pin and the same server.
 func TestPluginConnectTakesTheCAFromAFile(t *testing.T) {
 	requireOpenSSL(t)
 	authority := newTestAuthority(t, "Oberth test CA")
@@ -576,6 +576,132 @@ func TestPluginSessionHint(t *testing.T) {
 			}
 			if out := hint(pin); !strings.Contains(out, "/oberth:connect") {
 				t.Fatalf("hint with broken settings = %q", out)
+			}
+		})
+	}
+}
+
+// The leaf is checked against the pinned CA alone: a CA that openssl trusts
+// by default (here through SSL_CERT_DIR) does not make another CA's leaf
+// pass, even when the server also presents the pinned CA.
+func TestPluginConnectIgnoresTheDefaultTrustOfOpenSSL(t *testing.T) {
+	requireOpenSSL(t)
+	authority := newTestAuthority(t, "Oberth test CA")
+	other := newTestAuthority(t, "A default CA")
+	forged, forgedKey := other.issue(t)
+	impostor := servePresenting(t, forgedKey, forged, authority.certificate.Raw)
+	defaults := t.TempDir()
+	otherFile := filepath.Join(defaults, "other.pem")
+	if err := os.WriteFile(otherFile, other.pem, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := exec.Command("openssl", "x509", "-in", otherFile, "-noout", "-subject_hash").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(defaults, strings.TrimSpace(string(hash))+".0"), other.pem, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The directory does make openssl accept the forged leaf by default.
+	leafFile := filepath.Join(t.TempDir(), "leaf.pem")
+	if err := os.WriteFile(leafFile, pemOf(forged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := exec.Command("openssl", "verify", leafFile)
+	check.Env = append(os.Environ(), "SSL_CERT_DIR="+defaults)
+	if out, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("the default directory is not in use: %v\n%s", err, out)
+	}
+	claudeDir := filepath.Join(t.TempDir(), ".claude")
+	out, err := runTrust(t, "sh", claudeDir, []string{"SSL_CERT_DIR=" + defaults, "SSL_CERT_FILE=" + otherFile}, "connect", "--url", impostor, "--pin", CertificatePin(authority.certificate))
+	if err == nil || !strings.Contains(out, "is not issued by the pinned CA") || !strings.Contains(out, "Nothing was changed.") {
+		t.Fatalf("connect = %v\n%s", err, out)
+	}
+	if !emptyDirectory(t, claudeDir) {
+		t.Fatalf("a refused connect wrote into %s", claudeDir)
+	}
+}
+
+// A key written with an escape could spell env without the script seeing
+// it; such settings are refused and left as they were.
+func TestPluginConnectRefusesAnEscapedSettingsKey(t *testing.T) {
+	requireOpenSSL(t)
+	authority := newTestAuthority(t, "Oberth test CA")
+	leaf, key := authority.issue(t)
+	address := servePresenting(t, key, leaf, authority.certificate.Raw)
+	for name, settings := range map[string]string{
+		"env":          "{\"en\\u0076\": {\"FOO\": \"bar\"}}\n",
+		"the variable": "{\"env\": {\"NODE_EXTRA_CA_\\u0043ERTS\": \"/nonexistent\"}}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			claudeDir := filepath.Join(t.TempDir(), ".claude")
+			path := filepath.Join(claudeDir, "settings.json")
+			if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(settings), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := runTrust(t, "sh", claudeDir, nil, "connect", "--url", address, "--pin", CertificatePin(authority.certificate))
+			if err == nil || !strings.Contains(out, "a key with an escape") || !strings.Contains(out, "Nothing was changed.") {
+				t.Fatalf("connect = %v\n%s", err, out)
+			}
+			if string(mustRead(t, path)) != settings {
+				t.Fatal("refused settings were changed")
+			}
+		})
+	}
+}
+
+// A settings.json that is a symbolic link stays one: /oberth:connect and
+// `oberth client setup` both change the file it names.
+func TestCATrustKeepsASymbolicLinkToTheSettings(t *testing.T) {
+	requireOpenSSL(t)
+	authority := newTestAuthority(t, "Oberth test CA")
+	leaf, key := authority.issue(t)
+	address := servePresenting(t, key, leaf, authority.certificate.Raw)
+	pin := CertificatePin(authority.certificate)
+	for name, trust := range map[string]func(t *testing.T, claudeDir string){
+		"connect": func(t *testing.T, claudeDir string) {
+			if out, err := runTrust(t, "sh", claudeDir, nil, "connect", "--url", address, "--pin", pin); err != nil {
+				t.Fatalf("connect: %v\n%s", err, out)
+			}
+		},
+		"client setup": func(t *testing.T, claudeDir string) {
+			paths := claudeCodeFiles{settings: filepath.Join(claudeDir, "settings.json"), store: filepath.Join(claudeDir, "oberth")}
+			if _, err := ensureSettingsCATrust(paths, authority.pem, []*x509.Certificate{authority.certificate}, pin, false); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			claudeDir := filepath.Join(t.TempDir(), ".claude")
+			real := filepath.Join(t.TempDir(), "dotfiles", "settings.json")
+			for _, directory := range []string{claudeDir, filepath.Dir(real)} {
+				if err := os.MkdirAll(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(real, []byte("{\"model\": \"opus\"}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(claudeDir, "settings.json")
+			if err := os.Symlink(real, link); err != nil {
+				t.Fatal(err)
+			}
+			trust(t, claudeDir)
+			if info, err := os.Lstat(link); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+				t.Fatalf("settings.json is not a symbolic link any more: %v %v", info, err)
+			}
+			var merged struct {
+				Model string            `json:"model"`
+				Env   map[string]string `json:"env"`
+			}
+			if err := json.Unmarshal(mustRead(t, real), &merged); err != nil {
+				t.Fatal(err)
+			}
+			if merged.Model != "opus" || merged.Env["NODE_EXTRA_CA_CERTS"] != filepath.Join(claudeDir, "oberth", "ca.crt") {
+				t.Fatalf("the linked file = %+v", merged)
 			}
 		})
 	}

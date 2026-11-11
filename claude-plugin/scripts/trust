@@ -145,6 +145,8 @@ settings() {
 					k = space(j + 1)
 					if (substr(s, k, 1) != ":") { i = j + 1; continue }
 					name = substr(s, i + 1, j - i - 1)
+					# An escaped key could spell env or the variable unseen.
+					if ((depth == 1 || (depth == 2 && inside)) && index(name, "\\")) refuse("has a key with an escape this command does not read")
 					v = space(k + 1)
 					if (depth == 1 && name == "env") {
 						if (substr(s, v, 1) != "{") refuse("env is not an object")
@@ -331,7 +333,7 @@ connect() {
 	done
 	if [ -z "$anchor" ]; then
 		where="presented by $target"
-		advice="If the pin is right, the server may not present its CA (Oberth before v0.21.3): get the CA certificate from your admin and pass --ca-file."
+		advice="If the pin is right, the server does not present its CA: get the CA certificate from your admin and pass --ca-file."
 		if [ -n "$file" ]; then
 			where="in $file"
 			advice="Check the pin and the file with your Oberth admin."
@@ -352,7 +354,10 @@ connect() {
 		cat "$work/chain-$index.pem" >>"$work/others.pem"
 		index=$((index + 1))
 	done
-	openssl verify -CAfile "$anchor" -untrusted "$work/others.pem" "$work/chain-1.pem" 2>/dev/null | grep -q ': OK$' ||
+	# Only the pinned CA anchors this check: the default trust locations of
+	# openssl are replaced by a directory that holds no hashed certificate, so
+	# a leaf some other CA issued never passes.
+	SSL_CERT_DIR="$work" SSL_CERT_FILE="$work/no-default" openssl verify -CAfile "$anchor" -CApath "$work" -untrusted "$work/others.pem" "$work/chain-1.pem" 2>/dev/null | grep -q ': OK$' ||
 		fail "refused: the certificate $target presents is not issued by the pinned CA. Nothing was changed."
 
 	settings_file="$claude/settings.json"
