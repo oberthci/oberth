@@ -27,7 +27,7 @@ func restrictedReleaseScript(t *testing.T, source, destination string, scanner b
 	if !scanner {
 		prelude.WriteString("test \"$PATH\" = /usr/bin:/bin\n")
 	}
-	names := []string{"git", "curl", "sleep", "openssl"}
+	names := []string{"git", "curl", "sleep"}
 	if scanner {
 		names = []string{"curl"}
 	}
