@@ -1923,8 +1923,23 @@ containing CI and real workload qualification remain separately required.
   explicitly report unconfirmed completion and can be retried. Logs include
   indexes, progress journals and plans. Installation status (`system_status`
   and `/api/status`) includes retained log/artifact bytes, available bytes,
-  the admission floor, and last sweep/error under `storage`; scoped status
-  omits installation-wide storage information.
+  the admission floor, the live database size (`database_bytes`, database plus
+  WAL) and last sweep/error under `storage`; scoped status omits
+  installation-wide storage information. The same sweep keeps Workflow and step
+  timing records for the newest 2000 terminal runs and the runs evidence
+  retention protects, pruning older ones in bounded passes (`timing_pruned`).
+- The administrator-only `/metrics` endpoint also exports the status values an
+  operator alerts on: `oberth_queue_not_started`, `oberth_queue_max_not_started`,
+  `oberth_queue_deferred`, `oberth_admission_paused`, `oberth_database_bytes`,
+  `oberth_data_free_bytes`, `oberth_data_below_disk_floor`,
+  `oberth_last_backup_timestamp_seconds`,
+  `oberth_audit_anchor_timestamp_seconds` and
+  `oberth_admin_token_earliest_expiry_seconds`. A source that cannot be read is
+  left out, never exported as zero.
+- One bearer credential holds at most 64 blocking calls (`wait`,
+  `promote_status`, `run_wait`, `events_wait`) at once; a further call is
+  refused immediately with a tool error naming the limit. `events_wait` with
+  `run_ids` waits for several runs in one call.
 - A raw artifact download (`GET /api/runs/{id}/artifacts/{name}`) streams the
   whole stored object, never the bounded MCP text view, with `Content-Length`
   and `X-Oberth-Artifact-SHA256` describing exactly the bytes sent; a body that
@@ -3317,6 +3332,11 @@ analysis, use MCP `run_resources` or `oberth run resources --run <id>`.
 These are observations, independent of the verdict and the older `Run.StartedAt` field.
 Missing timestamps are unknown; they never mean a zero duration. Legacy rows
 have `unavailable=not-recorded`; no timestamp is backfilled from `StartedAt`.
+Timing detail is retained for the newest 2000 terminal runs (and every run the
+evidence retention protects); the retention sweep removes the Workflow and step
+records of older runs, keeps their milestones and admission episodes, and their
+timing reads `unavailable=pruned`. `system_status.storage.database_bytes` reports
+the live database size the backup ceiling is measured against.
 
 A run ID identifies one execution attempt. An owner resume keeps it; a restart
 re-fire has a new run ID even when it inherits admission_sequence. Known facts
