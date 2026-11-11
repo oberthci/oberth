@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
@@ -216,6 +217,12 @@ func priorityClassUser(ctx context.Context, deps Deps, releaseNamespace string, 
 		return classUser{}, fmt.Errorf("list ReplicaSets using the release's PriorityClasses: %w", err)
 	}
 	for _, item := range replicaSets.Items {
+		// A Deployment's ReplicaSets, old revisions included, follow the
+		// Deployment's template, which was checked above: one kept for
+		// rollback history must not refuse after the workload moved off.
+		if ownedBy(item.ObjectMeta, "Deployment") {
+			continue
+		}
 		if user, ok := check("ReplicaSet", item.ObjectMeta, item.Spec.Template.Spec); ok {
 			return user, nil
 		}
@@ -225,6 +232,11 @@ func priorityClassUser(ctx context.Context, deps Deps, releaseNamespace string, 
 		return classUser{}, fmt.Errorf("list Jobs using the release's PriorityClasses: %w", err)
 	}
 	for _, item := range jobs.Items {
+		// A finished Job creates no further Pod, and a CronJob's Jobs follow
+		// the CronJob's template, checked below; a running one has a Pod.
+		if jobFinished(item) || ownedBy(item.ObjectMeta, "CronJob") {
+			continue
+		}
 		if user, ok := check("Job", item.ObjectMeta, item.Spec.Template.Spec); ok {
 			return user, nil
 		}
@@ -239,6 +251,22 @@ func priorityClassUser(ctx context.Context, deps Deps, releaseNamespace string, 
 		}
 	}
 	return classUser{}, nil
+}
+
+// ownedBy reports whether the object's controller is of kind.
+func ownedBy(meta metav1.ObjectMeta, kind string) bool {
+	owner := metav1.GetControllerOf(&meta)
+	return owner != nil && owner.Kind == kind
+}
+
+// jobFinished reports whether a Job completed or failed for good.
+func jobFinished(job batchv1.Job) bool {
+	for _, condition := range job.Status.Conditions {
+		if (condition.Type == batchv1.JobComplete || condition.Type == batchv1.JobFailed) && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // runningControllerProfile is the profile ConfigMap the running controller

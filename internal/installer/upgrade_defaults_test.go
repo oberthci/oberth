@@ -117,6 +117,27 @@ func TestUpgradePlatformProtectionFlip(t *testing.T) {
 			t.Fatalf("%s template naming a deleted class: %v", kind, err)
 		}
 	}
+	// What a checked controller left behind is no user of its own: a
+	// Deployment's old ReplicaSet after the workload moved off the class, a
+	// CronJob's Job, a finished Job.
+	controller := true
+	for _, leftover := range []runtime.Object{
+		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle-5d4f", OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "idle", Controller: &controller}}},
+			Spec: appsv1.ReplicaSetSpec{Replicas: &zero, Template: template}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle-28", OwnerReferences: []metav1.OwnerReference{{Kind: "CronJob", Name: "idle", Controller: &controller}}},
+			Spec: batchv1.JobSpec{Template: template}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "done"}, Spec: batchv1.JobSpec{Template: template},
+			Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}}},
+	} {
+		if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, leftover), "7", []byte(v021Defaults)); err != nil {
+			t.Fatalf("%T left by a checked controller refused: %v", leftover, err)
+		}
+	}
+	// A ReplicaSet of its own is a user.
+	standalone := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.ReplicaSetSpec{Replicas: &zero, Template: template}}
+	if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, standalone), "7", []byte(v021Defaults)); err == nil || !strings.Contains(err.Error(), "ReplicaSet tools/idle") {
+		t.Fatalf("standalone ReplicaSet naming a deleted class: %v", err)
+	}
 	// The release's own Deployment is not a foreign user.
 	ownDeployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "oberth", Name: "oberth", Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}},
 		Spec: appsv1.DeploymentSpec{Template: template}}
