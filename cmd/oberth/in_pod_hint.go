@@ -33,8 +33,11 @@ type inPodCommandError struct {
 }
 
 func (e inPodCommandError) Error() string {
+	// The namespace and release are the operator's choice; the CLI cannot
+	// know them, so it names the placeholders and the install defaults.
 	message := fmt.Sprintf("oberth %s reads the server database, so it runs inside the server pod:\n"+
-		"  kubectl exec -n oberth deploy/oberth -- oberth %s ...", e.command, e.command)
+		"  kubectl exec -n <namespace> deploy/<release> -- oberth %s ...\n"+
+		"  (installed with the defaults: kubectl exec -n oberth deploy/oberth -- oberth %s ...)", e.command, e.command, e.command)
 	if remote := remoteEquivalents[e.command]; remote != "" {
 		message += "\nfrom this machine use: " + remote
 	} else if remote := remoteEquivalents[strings.Fields(e.command)[0]]; remote != "" {
