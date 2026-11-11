@@ -203,7 +203,7 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	}
 
 	tw.WriteFooter()
-	printClientAccessNotes(w, root, choice, tokenHint, freshToken, cfg.SecretsFile)
+	printClientAccessNotes(w, root, choice, tokenHint, freshToken, cfg.SecretsFile, cfg.SecretsAgeRecipient != "")
 	return nil
 }
 
@@ -384,13 +384,16 @@ func displayPath(path string) string {
 	return "~" + strings.TrimPrefix(path, home)
 }
 
-func printClientAccessNotes(w io.Writer, root string, choice int, storeCommand string, freshToken bool, secretsFile string) {
+func printClientAccessNotes(w io.Writer, root string, choice int, storeCommand string, freshToken bool, secretsFile string, encrypted bool) {
+	if freshToken && secretsFile != "" && encrypted {
+		_, _ = fmt.Fprintln(w, "\nThe recovery file is age-encrypted. In your own terminal, replace /path/to/age-identity below with your identity file; never run decryption into an agent transcript.")
+	}
 	switch {
 	case freshToken && secretsFile != "":
 		// The token is in the secrets file, never on screen: name the line and
 		// a command that moves it without showing it.
 		_, _ = fmt.Fprintf(w, "\nStore the bearer token (line %s of %s) where the config expects it, without printing it:\n\n    %s\n",
-			SecretsFileTokenKey, secretsFile, storeFromSecretsFile(storeCommand, secretsFile))
+			SecretsFileTokenKey, secretsFile, storeFromSecretsFile(storeCommand, secretsFile, encrypted))
 	case freshToken:
 		_, _ = fmt.Fprintf(w, "\nStore the bearer token above where the config expects it:\n\n    %s\n", storeCommand)
 	default:
@@ -521,15 +524,20 @@ func refreshPinnedServerCA(ctx context.Context, cfg Config, deps Deps, tw *table
 // storeFromSecretsFile is the store command fed from the secrets file's token
 // line, so the token moves into the secret store without reaching a screen or
 // a process argument list.
-func storeFromSecretsFile(storeCommand, secretsFile string) string {
-	read := "sed -n 's/^" + SecretsFileTokenKey + "=//p' " + shellQuoteWord(secretsFile)
+func storeFromSecretsFile(storeCommand, secretsFile string, encrypted bool) string {
+	prefix, source := "", " "+shellQuoteWord(secretsFile)
+	if encrypted {
+		prefix = "age --decrypt -i /path/to/age-identity " + shellQuoteWord(secretsFile) + " | "
+		source = ""
+	}
+	read := prefix + "sed -n 's/^" + SecretsFileTokenKey + "=//p'" + source
 	if rest, ok := strings.CutPrefix(storeCommand, "security "); ok && strings.HasSuffix(rest, " -w") {
 		// security(1) takes the value of -w only as an argument, where ps
 		// shows it. Its -i mode reads whole commands from stdin instead, so
 		// sed writes the command with the token in it and nothing carries
 		// the token in argv. -U replaces an earlier item.
 		command := strings.Replace(strings.Replace(rest, "add-generic-password ", "add-generic-password -U ", 1), `"$USER"`, "$USER", 1)
-		return `sed -n "s|^` + SecretsFileTokenKey + `=\(.*\)|` + command + ` \1|p" ` + shellQuoteWord(secretsFile) + " | security -i"
+		return prefix + `sed -n "s|^` + SecretsFileTokenKey + `=\(.*\)|` + command + ` \1|p"` + source + " | security -i"
 	}
 	if rest, ok := strings.CutPrefix(storeCommand, "pass insert "); ok {
 		// Without a terminal pass insert asks for the value twice and

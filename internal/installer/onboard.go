@@ -11,6 +11,7 @@ package installer
 // over kubectl exec, and only then waits for readiness.
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -1446,8 +1447,12 @@ func validatePublicKeyFile(data []byte) error {
 		return errors.New("that is a PRIVATE key, not a public key — provide the .pub file instead (e.g. ~/.ssh/id_ed25519.pub)")
 	}
 	// Try parsing as an authorized_keys line (the expected format).
-	if _, _, _, _, err := ssh.ParseAuthorizedKey(data); err != nil {
+	_, _, _, rest, err := ssh.ParseAuthorizedKey(data)
+	if err != nil {
 		return fmt.Errorf("file does not contain a valid SSH public key: %w", err)
+	}
+	if len(bytes.TrimSpace(rest)) != 0 {
+		return errors.New("file must contain exactly one SSH public key and no other material")
 	}
 	return nil
 }

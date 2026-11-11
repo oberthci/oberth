@@ -87,7 +87,7 @@ func TestVerificationJSONRedactsDependencyErrors(t *testing.T) {
 }
 
 func TestAdminKeyStdinRejectsPrivateBeforeSideEffects(t *testing.T) {
-	_, private, err := ed25519.GenerateKey(rand.Reader)
+	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,10 +95,24 @@ func TestAdminKeyStdinRejectsPrivateBeforeSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	called := false
-	err = Execute(context.Background(), Config{AdminSSHPublicKeyPath: "-"}, InstallDeps{Input: bytes.NewReader(body.Bytes), LookPath: func(string) (string, error) { called = true; return "", nil }})
-	if err == nil || called {
-		t.Fatal("private key reached install side effects")
+	key, err := ssh.NewPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privatePEM := pem.EncodeToMemory(body)
+	defer clear(privatePEM)
+	encrypted, err := ssh.MarshalPrivateKeyWithPassphrase(private, "", private.Seed())
+	if err != nil {
+		t.Fatal("cannot prepare encrypted private-key fixture")
+	}
+	encryptedPEM := pem.EncodeToMemory(encrypted)
+	defer clear(encryptedPEM)
+	for _, input := range [][]byte{privatePEM, append(ssh.MarshalAuthorizedKey(key), privatePEM...), append(ssh.MarshalAuthorizedKey(key), encryptedPEM...)} {
+		called := false
+		err = Execute(context.Background(), Config{AdminSSHPublicKeyPath: "-"}, InstallDeps{Input: bytes.NewReader(input), LookPath: func(string) (string, error) { called = true; return "", nil }})
+		if err == nil || called {
+			t.Fatal("private key reached install side effects")
+		}
 	}
 }
 
@@ -155,6 +169,25 @@ func TestSecretsAgeRoundTrip(t *testing.T) {
 	if err != nil || !bytes.Contains(plaintext, []byte(credential+"-second")) {
 		t.Fatal("encrypted credentials did not round trip")
 	}
+	// Execute the user-facing handoff against the real ciphertext. The token
+	// must reach only the selected store, never shell output or command text.
+	destination := filepath.Join(directory, "stored-token")
+	handoff := storeFromSecretsFile("cat > "+shellQuoteWord(destination), path, true)
+	handoff = strings.ReplaceAll(handoff, "/path/to/age-identity", shellQuoteWord(identity))
+	if strings.Contains(handoff, credential) {
+		t.Fatal("credential in handoff argv")
+	}
+	var captured bytes.Buffer
+	command = exec.Command("sh", "-c", handoff)
+	command.Stdout, command.Stderr = &captured, &captured
+	if command.Run() != nil || bytes.Contains(captured.Bytes(), []byte(credential)) {
+		t.Fatal("encrypted credential handoff failed or leaked output")
+	}
+	stored, err := os.ReadFile(destination)
+	defer clear(stored)
+	if err != nil || string(stored) != credential+"-second\n" {
+		t.Fatal("encrypted credential did not reach its store")
+	}
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatal("incorrect encrypted file permissions")
@@ -205,6 +238,7 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	}
 	replicas := int32(1)
 	kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}})
+	forgeAuthorized := true
 	deps := InstallDeps{LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return kube, &rest.Config{Host: "https://127.0.0.1:6443", TLSClientConfig: rest.TLSClientConfig{CAData: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})}}, "selected", nil
 	}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
@@ -212,8 +246,11 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 		if strings.Contains(command, "stats/summary") {
 			return preflightStats(context.Background(), nil, "kubectl")
 		}
-		if strings.Contains(command, "upstream list") {
-			return []byte("NAME  KIND URL                           AUTH\nforge ssh  ssh://git@forge.example/acme  ok\n"), nil
+		if strings.Contains(command, "upstream list --check") {
+			if !forgeAuthorized {
+				return []byte("NAME   KIND URL                              AUTH\nforge  ssh  ssh://git@forge.example/acme      refused\n"), nil
+			}
+			return []byte("NAME   KIND URL                              AUTH\nforge  ssh  ssh://git@forge.example/acme      ok\n"), nil
 		}
 		if strings.Contains(command, "admin read-file") {
 			return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), nil
@@ -225,6 +262,20 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	digest := sha256.Sum256(server.Certificate().Raw)
 	if !result.OK || result.CAPin != hex.EncodeToString(digest[:]) || result.ServerURL != server.URL || result.MCPURL != server.URL+"/mcp" || result.Context != "selected" {
 		t.Fatalf("public verification failed: checks=%v", result.Checks)
+	}
+	forgeAuthorized = false
+	if VerifyInstall(context.Background(), cfg, deps).OK {
+		t.Fatal("forge with a rejected deploy key passed verification")
+	}
+	forgeAuthorized = true
+	if err := kube.CoreV1().Services(DefaultNamespace).Delete(context.Background(), "oberth", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if VerifyInstall(context.Background(), cfg, deps).OK {
+		t.Fatal("missing Service passed verification")
+	}
+	if _, err := kube.CoreV1().Services(DefaultNamespace).Create(context.Background(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
 	}
 	cfg.ClientHost = "invalid.example.test"
 	result = VerifyInstall(context.Background(), cfg, deps)
