@@ -16,8 +16,9 @@
 #       for every host.
 #
 #   trust hint
-#       The SessionStart hook: prints one paragraph for Claude when a pin
-#       is configured and the CA is not trusted yet, and nothing otherwise.
+#       The SessionStart hook: prints one paragraph for Claude when no
+#       server is configured yet, or when a pin is configured and the CA is
+#       not trusted yet, and nothing otherwise.
 #       It never fails a session.
 #
 # Needs sh, awk and openssl. No token is read, and nothing is logged.
@@ -304,7 +305,10 @@ hint() {
 	claude=$(claude_directory) || exit 0
 	store="$claude/oberth"
 	url=$(shown "${CLAUDE_PLUGIN_OPTION_URL:-}")
-	[ -n "$url" ] || exit 0
+	if [ -z "$url" ]; then
+		echo "Oberth plugin: no Oberth server is configured, so the oberth MCP tools are not connected. Do not bring this up unless the user asks about Oberth or CI. Then offer two ways: to install a new Oberth on the Kubernetes cluster their KUBECONFIG names, run /oberth:install; to use an existing one, ask their Oberth admin for the MCP URL, an uplink token and the CA pin (oberth client pin), enter them with /plugin configure oberth@oberthci (the user types the token there, never into the chat), then run /oberth:connect."
+		exit 0
+	fi
 	given=${CLAUDE_PLUGIN_OPTION_CA_PIN:-}
 	# Without a pin the server has a publicly trusted certificate.
 	[ -n "$given" ] || exit 0

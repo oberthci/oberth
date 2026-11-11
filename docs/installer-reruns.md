@@ -22,15 +22,19 @@ Every Oberth chart the CLI deploys is verified first, the same way `oberth upgra
 Version changes go through one command:
 
 ```sh
-oberth upgrade --yes            # from the directory where the backup and rollback record should go
+oberth upgrade                  # from the directory where the backup and rollback record should go
 ```
+
+When the kubeconfig has more than one context, name the cluster with
+`--context`; the upgrade refuses to pick one and lists them. It prints
+`Target: <context> (<server>)` before anything else.
 
 It, in order:
 
 1. refuses an installed release newer than the CLI (`--allow-downgrade` accepts one within the same database schema) and a running schema newer than the CLI's;
 2. fetches the signed release for the CLI's version (`release.json`, `oberth-<version>.tgz` and their sigstore bundles from `releases.oberth.ci` and `charts.oberth.ci`, or `--release-dir DIR`), verifies both signatures against the release key compiled into the CLI, checks the chart against the record's digest and pins the server image digest the record names; any failure refuses the upgrade (`--chart` is the explicit unverified development override);
 3. previews the Helm change server-side and prints the changed value paths;
-4. takes a verified history-only backup (`oberth backup --history-only`, in `--backup-dir`, default the current directory) and writes a rollback record next to it, before the first change; without a backup it refuses unless `--no-backup`;
+4. takes a verified history-only backup (`oberth backup --history-only`, in `--backup-dir`, default the current directory) and writes a rollback record next to it, before the first change; without a backup it refuses unless `--no-backup`. The backup is encrypted to the default backup key; without a terminal that key must exist already (`oberth backup keygen`, then `oberth backup key --stored` once a copy is off the machine), or `--backup-recipient CERT` names a certificate you manage. The value-change list ignores a key whose value is null on one side and absent on the other (Helm treats them alike), so it shows only what changes;
 5. applies the Argo controller profile transition if asked, upgrades the Oberth release, waits for the rollout and verifies the running version.
 
 To roll back the upgrade that record describes:

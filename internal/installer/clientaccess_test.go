@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -129,18 +130,102 @@ func TestClientAccessSurvivesAClusterThatWillNotAnswer(t *testing.T) {
 	}
 }
 
-// Without a terminal there is nobody to answer, and a prompt that reads a
-// closed stdin is a hang rather than a default.
-func TestClientAccessIsSkippedWithoutATerminal(t *testing.T) {
-	deps, _, home := clientAccessDeps(t, "\n")
+// Without a terminal nobody answers the offer, so it takes the default Enter
+// would (both clients) without reading the closed stdin, and the CA is written
+// owner-only whatever the umask (#6, #10 of the fresh-install rehearsal).
+func TestClientAccessDefaultsToBothWithoutATerminal(t *testing.T) {
+	deps, out, home := clientAccessDeps(t, "")
 	deps.IsTerminal = func() bool { return false }
 	tw := newTableWriter(deps.Output, false)
+	old := syscall.Umask(0o002)
+	defer syscall.Umask(old)
 
 	if err := offerClientAccess(context.Background(), Config{}, deps, tw, testToken); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".config", "oberth", "env")); err == nil {
-		t.Error("a non-interactive install wrote client configuration nobody asked for")
+	root := filepath.Join(home, ".config", "oberth")
+	assertExists(t, filepath.Join(root, "env"), true)
+	assertExists(t, filepath.Join(root, "mcp.json"), true)
+	info, err := os.Stat(filepath.Join(root, "ca.crt"))
+	if err != nil || info.Mode().Perm()&0o022 != 0 {
+		t.Fatalf("ca.crt mode: %v %v", info, err)
+	}
+	if strings.Contains(out.String(), testToken) {
+		t.Fatal("the token reached the output")
+	}
+
+	// A rerun that plans the same files finds nothing to refuse.
+	if err := offerClientAccess(context.Background(), Config{}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "--replace-client-files") {
+		t.Fatalf("an identical rerun was refused:\n%s", out.String())
+	}
+
+	// Files that say something else are the operator's: without a terminal
+	// nothing is written, all three stay, and the output names the flag.
+	env := filepath.Join(root, "env")
+	const other = "export OBERTH_BASE_URL=\"https://other.example.test:30443\"\n"
+	if err := os.WriteFile(env, []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mcpBefore, err := os.ReadFile(filepath.Join(root, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mcp.json"), append(mcpBefore, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := offerClientAccess(context.Background(), Config{}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(env); string(got) != other {
+		t.Fatalf("another server's env was replaced:\n%s", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "mcp.json")); !bytes.Equal(got, append(mcpBefore, '\n')) {
+		t.Fatal("mcp.json was replaced although env was refused")
+	}
+	for _, want := range []string{"--replace-client-files", "--client-access none", "env", "mcp.json", "kept"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the refusal lacks %q:\n%s", want, out.String())
+		}
+	}
+	// --replace-client-files replaces them.
+	if err := offerClientAccess(context.Background(), Config{ReplaceClientFiles: true}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(env); string(got) == other || !strings.Contains(string(got), "OBERTH_TOKEN_COMMAND") {
+		t.Fatalf("--replace-client-files did not replace env:\n%s", got)
+	}
+
+	// --client-access none still declines in advance.
+	deps, _, home = clientAccessDeps(t, "")
+	deps.IsTerminal = func() bool { return false }
+	if err := offerClientAccess(context.Background(), Config{ClientAccess: "none"}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	assertExists(t, filepath.Join(home, ".config", "oberth", "env"), false)
+}
+
+// With --secrets-file the token is never on screen: the notes name its line
+// and a command that moves it into the secret store unseen.
+func TestClientAccessNotesReadTheTokenFromTheSecretsFile(t *testing.T) {
+	var out bytes.Buffer
+	printClientAccessNotes(&out, "/srv/u/.config/oberth", clientAccessBoth, "secret-tool store --label=x service oberth", true, "/srv/u/oberth secrets.txt")
+	want := "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' '/srv/u/oberth secrets.txt' | secret-tool store --label=x service oberth"
+	if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "token above") {
+		t.Fatalf("notes:\n%s", out.String())
+	}
+	// macOS: security -i reads the command from stdin, so the token is in no
+	// argument list (security's -w takes a value only as an argument).
+	if got, want := storeFromSecretsFile("security add-generic-password -s oberth-token -a \"$USER\" -w", "/s"),
+		`sed -n "s|^OBERTH_UPLINK_TOKEN=\(.*\)|add-generic-password -U -s oberth-token -a $USER -w \1|p" /s | security -i`; got != want {
+		t.Fatalf("macOS store command:\n got %s\nwant %s", got, want)
+	}
+	// pass insert asks twice on a pipe; -e reads the one line.
+	if got := storeFromSecretsFile("pass insert oberth/token", "/s"); got != "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s | pass insert -e -f oberth/token" {
+		t.Fatalf("pass store command: %s", got)
 	}
 }
 

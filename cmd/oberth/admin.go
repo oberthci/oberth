@@ -162,7 +162,7 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -301,7 +301,7 @@ func runUpstreamAddFromHost(ctx context.Context, arguments []string, output io.W
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -518,7 +518,7 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -713,7 +713,7 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -785,7 +785,7 @@ func runUpstreamRemove(ctx context.Context, arguments []string, input io.Reader,
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -851,7 +851,7 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -918,7 +918,7 @@ func runUplinkScope(ctx context.Context, arguments []string, output io.Writer, m
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -964,7 +964,7 @@ func runUplinkRemove(ctx context.Context, arguments []string, output io.Writer, 
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1035,7 +1035,7 @@ func runRepoAdd(ctx context.Context, arguments []string, output io.Writer, depen
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1119,7 +1119,7 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1235,7 +1235,7 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1303,7 +1303,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1468,7 +1468,7 @@ func runAccessList(ctx context.Context, arguments []string, output io.Writer) er
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1561,7 +1561,7 @@ func runAccessAllowWithDependencies(ctx context.Context, arguments []string, out
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1619,7 +1619,7 @@ func runAccessRevokeWithDependencies(ctx context.Context, arguments []string, ou
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -1719,7 +1719,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)

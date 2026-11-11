@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -61,10 +62,19 @@ type InstallDeps struct {
 	RunCommand     CommandRunner
 	RunInteractive InteractiveRunner
 	IsTerminal     func() bool
-	UserCacheDir   func() (string, error)
-	MkdirAll       func(string, fs.FileMode) error
-	LoadKubeConfig func(contextName string) (kubernetes.Interface, *rest.Config, string, error)
-	RunHelm        func(ctx context.Context, args []string) ([]byte, error)
+	// OutputIsTerminal reports whether Output reaches a terminal (default:
+	// standard output is one). Credentials are shown only on a terminal;
+	// anywhere else they go to --secrets-file or the install refuses.
+	OutputIsTerminal func() bool
+	UserCacheDir     func() (string, error)
+	MkdirAll         func(string, fs.FileMode) error
+	LoadKubeConfig   func(contextName string) (kubernetes.Interface, *rest.Config, string, error)
+	// KubeContexts lists the contexts of the selected kubeconfig (an explicit
+	// path, else KUBECONFIG, else ~/.kube/config). Without --context an
+	// install needs exactly one; nil skips the check (tests that inject
+	// LoadKubeConfig).
+	KubeContexts func(kubeconfigPath string) ([]string, error)
+	RunHelm      func(ctx context.Context, args []string) ([]byte, error)
 	// CredentialSink, when non-nil, receives every held once-only credential
 	// (OpenBao root token, unseal keys, uplink bearer token) as structured
 	// label/value pairs INSTEAD of the boxed terminal flush. The TUI wizard
@@ -105,6 +115,9 @@ func (deps InstallDeps) withDefaults() InstallDeps {
 	if deps.IsTerminal == nil {
 		deps.IsTerminal = StdinIsTerminal
 	}
+	if deps.OutputIsTerminal == nil {
+		deps.OutputIsTerminal = func() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+	}
 	if deps.UserCacheDir == nil {
 		deps.UserCacheDir = os.UserCacheDir
 	}
@@ -112,6 +125,9 @@ func (deps InstallDeps) withDefaults() InstallDeps {
 		deps.MkdirAll = os.MkdirAll
 	}
 	if deps.LoadKubeConfig == nil {
+		if deps.KubeContexts == nil {
+			deps.KubeContexts = KubeconfigContexts
+		}
 		output := deps.Output
 		deps.LoadKubeConfig = func(contextName string) (kubernetes.Interface, *rest.Config, string, error) {
 			return LoadKubeConfigForContext(contextName, output)
@@ -170,6 +186,36 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		}
 	}
 
+	// Credentials shown once never go into a log or a transcript: without a
+	// terminal they go to --secrets-file, and without one the install refuses
+	// before anything exists that could be lost.
+	secretsFileSink := false
+	if !cfg.DryRun && deps.CredentialSink == nil {
+		switch {
+		case cfg.SecretsFile != "":
+			secrets, err := createSecretsFile(cfg.SecretsFile)
+			if err != nil {
+				return err
+			}
+			cfg.SecretsFile = secrets.path
+			deps.CredentialSink = secrets.add
+			secretsFileSink = true
+			defer secrets.finish(deps.Output)
+		case !deps.OutputIsTerminal() && cfg.mayCreateCredentials(deps.IsTerminal != nil && deps.IsTerminal()):
+			return errors.New("this install can create credentials that are shown once (the OpenBao root token and unseal key, " +
+				"the first uplink's bearer token), and its output is not a terminal: pass --secrets-file PATH " +
+				"(a new file outside any git worktree, written 0600; the output names only its path and SHA-256)")
+		}
+	} else if cfg.SecretsFile != "" && !cfg.DryRun {
+		return errors.New("--secrets-file cannot be combined with a caller that receives the credentials itself")
+	} else if cfg.SecretsFile != "" {
+		// A dry run creates nothing, but a path the install would refuse is
+		// part of the plan it reviews.
+		if _, err := CheckSecretsFilePath(cfg.SecretsFile); err != nil {
+			return err
+		}
+	}
+
 	contextName := cfg.ContextName
 	kindClusterName := ""
 	if cfg.CreateKind || (deps.GOOS == "darwin" && cfg.KubeconfigPath == "" && cfg.ContextName == "") {
@@ -187,7 +233,6 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 			return printDryRunPlanWithKind(cfg, deps.Output, ClusterInfo{
 				Context: KindContextName,
 				Engine:  "kind",
-				IsLocal: true,
 			}, config)
 		}
 
@@ -200,6 +245,12 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 			_, _ = fmt.Fprintf(deps.Output, "Created kind cluster %q and selected context %q.\n", KindClusterName, contextName)
 		} else {
 			_, _ = fmt.Fprintf(deps.Output, "Using existing kind cluster %q with context %q.\n", KindClusterName, contextName)
+		}
+	}
+
+	if deps.KubeContexts != nil {
+		if err := RequireContextChoice("install on", contextName, cfg.KubeconfigPath, deps.KubeContexts); err != nil {
+			return err
 		}
 	}
 
@@ -289,23 +340,58 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
 
 	return Run(ctx, cfg, Deps{
-		Output:           deps.Output,
-		Input:            deps.Input,
-		RunHelm:          runHelm,
-		RunCommand:       deps.RunCommand,
-		RunInteractive:   deps.RunInteractive,
-		IsTerminal:       deps.IsTerminal,
-		KubeClient:       kubeClient,
-		RestConfig:       restConfig,
-		ContextName:      selectedContext,
-		KindClusterName:  kindClusterName,
-		ReadPassword:     readPw,
-		MakeRaw:          makeRaw,
-		CredentialSink:   deps.CredentialSink,
-		StepProgressSink: deps.StepProgressSink,
-		ReleaseGetter:    deps.ReleaseGetter,
-		releaseKey:       deps.releaseKey,
+		Output:            deps.Output,
+		Input:             deps.Input,
+		RunHelm:           runHelm,
+		RunCommand:        deps.RunCommand,
+		RunInteractive:    deps.RunInteractive,
+		IsTerminal:        deps.IsTerminal,
+		KubeClient:        kubeClient,
+		RestConfig:        restConfig,
+		ContextName:       selectedContext,
+		KindClusterName:   kindClusterName,
+		ReadPassword:      readPw,
+		MakeRaw:           makeRaw,
+		CredentialSink:    deps.CredentialSink,
+		credentialsAtOnce: secretsFileSink,
+		StepProgressSink:  deps.StepProgressSink,
+		ReleaseGetter:     deps.ReleaseGetter,
+		releaseKey:        deps.releaseKey,
 	})
+}
+
+// RequireContextChoice refuses to act on a kubeconfig with several contexts
+// when none was named: the operator picks the cluster, a command never does.
+// action completes "choose the cluster to ..." (install on, upgrade). A
+// kubeconfig that cannot be listed is left to the load that follows.
+func RequireContextChoice(action, contextName, kubeconfigPath string, list func(string) ([]string, error)) error {
+	if contextName != "" {
+		return nil
+	}
+	names, err := list(kubeconfigPath)
+	if err != nil || len(names) < 2 {
+		return nil
+	}
+	return fmt.Errorf("the kubeconfig has %d contexts; choose the cluster to %s with --context <name>:\n  %s",
+		len(names), action, strings.Join(names, "\n  "))
+}
+
+// KubeconfigContexts lists the context names of a kubeconfig, sorted: the
+// file at path, else what KUBECONFIG names, else ~/.kube/config. A kubeconfig
+// that cannot be read lists none, and the load that follows reports why.
+func KubeconfigContexts(path string) ([]string, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.ExplicitPath = path
+	raw, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).RawConfig()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(raw.Contexts))
+	for name := range raw.Contexts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 type kindConfig struct {

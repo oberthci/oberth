@@ -76,7 +76,7 @@ func runSecretStoreBootstrapTLS(arguments []string, output io.Writer) error {
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -99,7 +99,7 @@ func runSecretStoreSetup(arguments []string, output io.Writer) error {
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -217,7 +217,7 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -971,7 +971,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)

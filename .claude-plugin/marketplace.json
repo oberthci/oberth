@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "oberth",
-      "description": "Connect Claude Code to your Oberth CI server over MCP (URL and token asked once, the token kept in Claude Code's credential store), trust its CA by an explicit SHA-256 pin with /oberth:connect, and follow the agent loop: one events_wait kept open, holds serviced within their TTL, assisted runs never taken as evidence.",
+      "description": "Install Oberth CI on your own cluster with /oberth:install (credentials go to a secrets file, never into the session), or connect Claude Code to an existing server over MCP (URL and token kept in Claude Code's credential store), trust its CA by an explicit SHA-256 pin with /oberth:connect, and follow the agent loop: one events_wait kept open, holds serviced within their TTL, assisted runs never taken as evidence.",
       "source": "./claude-plugin",
       "category": "development"
     }

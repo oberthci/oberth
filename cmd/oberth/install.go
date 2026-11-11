@@ -16,34 +16,52 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 
 	var cfg installer.Config
 	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "kubeconfig file for an existing cluster")
-	flags.StringVar(&cfg.ContextName, "context", "", "context in the selected kubeconfig")
+	flags.StringVar(&cfg.ContextName, "context", "", "kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)")
 	flags.BoolVar(&cfg.CreateKind, "create-kind", false, "create or use the local oberth kind cluster")
 	flags.StringVar(&cfg.ForgeURL, "upstream-url", "", "organization upstream base URL, e.g. ssh://git@github.com/oberthci")
 	flags.StringVar(&cfg.ForgeType, "forge", "", "upstream name (github, codeberg, or gitlab)")
 	flags.StringVar(&cfg.ForgeOrg, "organization", "", "upstream organization")
-	flags.StringVar(&cfg.UplinkIdentity, "uplink-identity", "", "workstation identity")
-	flags.StringVar(&cfg.SSHPublicKeyPath, "ssh-public-key", "", "workstation SSH public key path")
+	flags.StringVar(&cfg.ExpectedHostFingerprint, "expected-host-fingerprint", "",
+		"SSH host-key fingerprint (SHA256:..., from ssh-keygen -lf or the forge's documentation) of the first upstream's host, "+
+			"so a non-interactive install trusts a forge whose key Oberth does not ship")
+	flags.StringVar(&cfg.UplinkIdentity, "uplink-identity", "", "workstation identity (default: user@host)")
+	flags.StringVar(&cfg.SSHPublicKeyPath, "ssh-public-key", "",
+		"workstation SSH public key path (default without a terminal: ~/.ssh/id_ed25519.pub, else ~/.ssh/oberth_ed25519.pub, generated on the first run)")
 	flags.StringVar(&cfg.UpstreamPrivateKeyPath, "upstream-key-file", "", "existing work SSH private key to import into OpenBao")
 	flags.StringVar(&cfg.ClientAccess, "client-access", "",
 		"write this machine's client files without asking: both, cli, mcp, or none")
+	flags.BoolVar(&cfg.ReplaceClientFiles, "replace-client-files", false,
+		"without a terminal: replace this machine's client files (~/.config/oberth) when they exist with other content, "+
+			"such as another server's; by default they are kept and nothing is written")
 	flags.StringVar(&cfg.ClientHost, "client-host", "",
 		"address clients use to reach this server, a DNS name or IP (default: the Kubernetes API host, or localhost); "+
 			"client files, SSH config and printed URLs use it and the certificate covers it")
+	flags.StringVar(&cfg.ClientSSHPort, "client-ssh-port", "",
+		"git SSH port clients reach the server on, when it is not the Service's (default: the NodePort 30022, or the Service port); "+
+			"client files, SSH config and printed commands use it")
+	flags.StringVar(&cfg.ClientHTTPSPort, "client-https-port", "",
+		"HTTPS port clients reach the server on, when it is not the Service's (default: the NodePort 30443, or the Service port); "+
+			"client files, the push banner and printed URLs use it")
 	var alsoUpstreams stringList
 	flags.Var(&alsoUpstreams, "also-upstream",
 		"another organization to connect with the same upstream key, host/organization or ssh:// URL (repeatable), "+
 			"e.g. codeberg.org/acme")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")
-	flags.BoolVar(&cfg.Yes, "yes", false, "proceed even for non-local clusters")
 	flags.BoolVar(&cfg.Upgrade, "upgrade", false,
 		"force helm reconciliation of existing releases at the installed Oberth version; "+
 			"version changes of an existing Oberth release are refused here and go through oberth upgrade")
 	flags.BoolVar(&cfg.InstallSecretStore, "install-secretstore", false,
 		"also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, "+
-			"root token and unseal key printed once) and configure it as Oberth's release secret store")
+			"root token and unseal key shown once, on the terminal or in --secrets-file) and configure it as Oberth's release secret store")
+	flags.StringVar(&cfg.SecretsFile, "secrets-file", "",
+		"write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) "+
+			"to this new file (mode 0600; refused when it exists or lies in a git worktree) and print only its path and SHA-256; "+
+			"required when the output is not a terminal")
 	flags.BoolVar(&cfg.InstallSecretStoreDev, "install-secretstore-dev", false,
 		"also install a dev-mode OpenBao (in-memory, auto-unsealed, well-known root token) and configure it "+
 			"as Oberth's release secret store — evaluation only")
+	flags.BoolVar(&cfg.AssistEnabled, "assist", false,
+		"enable agent-assisted continuation (chart value assist.enabled, off by default; later: oberth upgrade --set assist.enabled=true); see docs/assisted-continuation.md")
 	flags.BoolVar(&cfg.InstallRekor, "install-rekor", false,
 		"also install a local Rekor transparency-log stack (MySQL + Trillian + Rekor) for the audit witness")
 	flags.StringVar(&cfg.AcceptWitnessGenesis, "accept-witness-genesis", "",
@@ -122,7 +140,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)

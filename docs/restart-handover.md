@@ -193,9 +193,9 @@ reply is lost, inspect its durable result before deciding what to do next.
 For an optional quiet-queue check, use:
 
 ```sh
-oberth upgrade --yes --wait-idle --wait-timeout=2h --timeout=5m
+oberth upgrade --wait-idle --wait-timeout=2h --timeout=5m
 # Or wait only for critical work; ordinary branch/schedule CI may remain:
-oberth upgrade --yes --wait-for=critical --wait-timeout=2h
+oberth upgrade --wait-for=critical --wait-timeout=2h
 ```
 
 Idle probes retry transport timeouts, interrupted reads and server errors with
@@ -256,7 +256,7 @@ When piping output, retain the upgrade's status:
 
 ```sh
 set -o pipefail
-oberth upgrade --yes --wait-idle --wait-timeout=2h 2>&1 | tail -10
+oberth upgrade --wait-idle --wait-timeout=2h 2>&1 | tail -10
 ```
 
 Without `pipefail`, a pipeline ending in `tail` usually reports `tail`'s success

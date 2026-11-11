@@ -12,6 +12,9 @@ package installer
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -54,6 +57,7 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	if endpointErr != nil {
 		return endpointErr
 	}
+	deps = withClientPorts(cfg, deps)
 	ns := cfg.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
@@ -89,24 +93,155 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		return waitAndAnnounceReady(ctx, cfg, deps)
 	}
 
-	if !isInteractive(deps) && !cfg.hasOnboardingConfig() {
-		_, _ = fmt.Fprintln(deps.Output, "The pod stays NotReady until an upstream is registered. Finish the setup manually:")
-		_ = PrintNextSteps(cfg, deps.Output)
-		printAlsoUpstreamCommands(deps.Output, cfg, deps, nil)
-		return ErrOnboardingPartial
+	if !isInteractive(deps) {
+		if cfg.ForgeURL == "" {
+			// Nothing to onboard without an upstream, but this machine can
+			// still be set up: the client files name a token command and the
+			// CA, never a token, so they need no uplink yet.
+			if err := runClientAccessOffer(ctx, cfg, deps, tw, false); err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(deps.Output, "\nThe pod stays NotReady until an upstream is registered. Rerun this install with --upstream-url "+
+				"(or --forge and --organization) and, for a forge whose SSH host key Oberth does not ship, --expected-host-fingerprint; "+
+				"or finish the setup manually:")
+			_ = PrintNextSteps(cfg, deps.Output)
+			printAlsoUpstreamCommands(deps.Output, cfg, deps, nil)
+			return ErrOnboardingPartial
+		}
+		if err := defaultOnboardingIdentity(&cfg, deps, tw); err != nil {
+			return err
+		}
 	}
 	return runOnboarding(ctx, cfg, deps, tw, creds)
 }
 
-func isInteractive(deps Deps) bool {
-	return deps.IsTerminal != nil && deps.IsTerminal() && deps.Input != nil && deps.RunInteractive != nil
+// generatedUplinkKeyName is the key pair a non-interactive install creates in
+// ~/.ssh when the machine has none to register as its uplink.
+const generatedUplinkKeyName = "oberth_ed25519"
+
+// defaultOnboardingIdentity fills the uplink answers a non-interactive
+// onboarding has no prompt for: the identity user@host, and this machine's
+// SSH public key: ~/.ssh/id_ed25519.pub, else ~/.ssh/oberth_ed25519.pub, a
+// pair generated here on the first run (its private key never leaves this
+// machine). No other key in ~/.ssh is ever picked: which of them is the
+// operator's own is not for the install to guess; --ssh-public-key names one.
+func defaultOnboardingIdentity(cfg *Config, deps Deps, tw *tableWriter) error {
+	if cfg.UplinkIdentity == "" {
+		cfg.UplinkIdentity = defaultUplinkIdentity()
+	}
+	if err := validateUplinkIdentity(cfg.UplinkIdentity); err != nil {
+		return fmt.Errorf("uplink identity %q: %w; pass --uplink-identity", cfg.UplinkIdentity, err)
+	}
+	if cfg.SSHPublicKeyPath != "" {
+		return nil
+	}
+	homeDir := deps.UserHomeDir
+	if homeDir == nil {
+		homeDir = os.UserHomeDir
+	}
+	home, err := homeDir()
+	if err != nil {
+		return fmt.Errorf("find this machine's SSH key: %w; pass --ssh-public-key", err)
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	for _, candidate := range []string{filepath.Join(sshDir, "id_ed25519.pub"), filepath.Join(sshDir, generatedUplinkKeyName+".pub")} {
+		if _, err := os.Stat(privateKeyPath(candidate)); err == nil && isSSHKeyFile(candidate, true) {
+			cfg.SSHPublicKeyPath = candidate
+			return nil
+		}
+	}
+	path, err := generateUplinkKey(sshDir)
+	if err != nil {
+		return fmt.Errorf("%s has no id_ed25519 key pair to register as this machine's uplink, and generating one failed: %w; pass --ssh-public-key", sshDir, err)
+	}
+	tw.AppendRow("Uplink key", displayPath(path), "✓ generated", false)
+	cfg.SSHPublicKeyPath = path
+	return nil
 }
 
-// hasOnboardingConfig reports whether the Config carries pre-filled
-// onboarding data (from the TUI wizard), so a non-interactive session can
-// run onboarding without prompting.
-func (cfg Config) hasOnboardingConfig() bool {
-	return cfg.ForgeURL != "" && cfg.UplinkIdentity != "" && cfg.SSHPublicKeyPath != ""
+// generateUplinkKey writes a new ed25519 key pair to dir/oberth_ed25519
+// (private 0600, public 0644) and returns the public key path. An existing
+// file is never overwritten, and a private key this call created does not
+// outlive a failure to write its public half.
+func generateUplinkKey(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	privatePath := filepath.Join(dir, generatedUplinkKeyName)
+	publicPath := privatePath + ".pub"
+	for _, p := range []string{privatePath, publicPath} {
+		if _, err := os.Lstat(p); err == nil {
+			return "", fmt.Errorf("%s exists but is not a usable key pair", p)
+		}
+	}
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", err
+	}
+	comment := defaultUplinkIdentity()
+	block, err := ssh.MarshalPrivateKey(private, comment)
+	if err != nil {
+		return "", err
+	}
+	sshPublic, err := ssh.NewPublicKey(public)
+	if err != nil {
+		return "", err
+	}
+	encoded := pem.EncodeToMemory(block)
+	defer clear(encoded)
+	file, err := os.OpenFile(privatePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: a fixed name under the operator's own ~/.ssh
+	if err != nil {
+		return "", err
+	}
+	_, writeErr := file.Write(encoded)
+	if closeErr := file.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		_ = os.Remove(privatePath)
+		return "", writeErr
+	}
+	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPublic))) + " " + comment + "\n"
+	if err := writeUplinkPublicKey(publicPath, []byte(line)); err != nil {
+		// O_EXCL above proves this call created the private key.
+		_ = os.Remove(privatePath)
+		return "", err
+	}
+	return publicPath, nil
+}
+
+// writeUplinkPublicKey writes the generated public key; tests replace it.
+var writeUplinkPublicKey = func(path string, line []byte) error { return atomicWriteFile(path, line, 0o644) }
+
+// expectedFingerprintFor is --expected-host-fingerprint for an upstream on
+// the first upstream's host; another host has another key.
+func (cfg Config) expectedFingerprintFor(baseURL string) string {
+	if cfg.ExpectedHostFingerprint == "" || cfg.ForgeURL == "" {
+		return ""
+	}
+	_, first, err := upstreamFromInput(cfg.ForgeURL)
+	if err != nil {
+		return ""
+	}
+	firstURL, err1 := url.Parse(first)
+	otherURL, err2 := url.Parse(baseURL)
+	if err1 != nil || err2 != nil || firstURL.Host != otherURL.Host {
+		return ""
+	}
+	return cfg.ExpectedHostFingerprint
+}
+
+// upstreamAddArgs is the in-pod `upstream add` argv onboarding runs.
+func (cfg Config) upstreamAddArgs(name, baseURL string) []string {
+	args := []string{"upstream", "add", "--yes", "--no-wait"}
+	if fp := cfg.expectedFingerprintFor(baseURL); fp != "" {
+		args = append(args, "--expected-host-fingerprint", fp)
+	}
+	return append(args, name, baseURL)
+}
+
+func isInteractive(deps Deps) bool {
+	return deps.IsTerminal != nil && deps.IsTerminal() && deps.Input != nil && deps.RunInteractive != nil
 }
 
 func waitAndAnnounceReady(ctx context.Context, cfg Config, deps Deps) error {
@@ -139,6 +274,23 @@ func kubectlOberthArgs(cfg Config, deps Deps, stdinAttached bool, command ...str
 	}
 	args = append(args, "-c", "oberth", "-n", ns, "deploy/oberth", "--", "/usr/local/bin/oberth")
 	return append(args, command...)
+}
+
+// printedKubectl is a kubectl command line printed for the operator (or an
+// agent) to run later: the argv the installer itself runs, which names the
+// install's context, plus the --kubeconfig the install was given, so the
+// command reaches the cluster that was installed on and never whatever the
+// current context is by then. Each word is quoted for a shell.
+func printedKubectl(cfg Config, args []string) string {
+	words := []string{"kubectl"}
+	if cfg.KubeconfigPath != "" {
+		words = append(words, "--kubeconfig", cfg.KubeconfigPath)
+	}
+	words = append(words, args...)
+	for i, word := range words {
+		words[i] = shellQuoteWord(word)
+	}
+	return strings.Join(words, " ")
 }
 
 // upstreamConfigured reports whether at least one upstream is registered, by
@@ -333,11 +485,8 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	pubKeyPath, identity, token, uplinkOutput, uplinkErr := onboardUplink(ctx, cfg, deps, tw)
 	if uplinkErr != nil {
 		tw.WriteFooter()
-		ns := cfg.Namespace
-		if ns == "" {
-			ns = DefaultNamespace
-		}
-		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    kubectl exec -i -n %s deploy/oberth -- /usr/local/bin/oberth uplink add - you@host < ~/.ssh/id_ed25519.pub\n\n", uplinkErr, ns)
+		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    %s < ~/.ssh/id_ed25519.pub\n\n", uplinkErr,
+			printedKubectl(cfg, kubectlOberthArgs(cfg, deps, true, "uplink", "add", "-", "you@host")))
 		if deps.StepProgressSink != nil {
 			deps.StepProgressSink("mint uplink", "pending")
 		}
@@ -391,7 +540,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		} else {
 			_, _ = fmt.Fprintf(w, "Retrieve the upstream public key, register it with your forge account, then verify the connection:\n")
 		}
-		_, _ = fmt.Fprintf(w, "\n    kubectl exec -n %s deploy/oberth -- /usr/local/bin/oberth upstream add --yes --no-wait %s %s\n", cfg.Namespace, name, baseURL)
+		_, _ = fmt.Fprintf(w, "\n    %s\n", printedKubectl(cfg, kubectlOberthArgs(cfg, deps, false, cfg.upstreamAddArgs(name, baseURL)...)))
 		return ErrOnboardingPartial
 	}
 
@@ -452,8 +601,7 @@ func printAlsoUpstreamCommands(w io.Writer, cfg Config, deps Deps, existing []Ne
 	}
 	_, _ = fmt.Fprintln(w, "\nThe further organizations (--also-upstream) were not connected. Once the first upstream works, connect each with:")
 	for _, u := range PlanAlsoUpstreams(firstName, firstURL, cfg.AlsoUpstreams) {
-		args := append([]string{"kubectl"}, kubectlOberthArgs(cfg, deps, false, "upstream", "add", "--yes", u.Name, u.BaseURL)...)
-		_, _ = fmt.Fprintln(w, "    "+strings.Join(args, " "))
+		_, _ = fmt.Fprintln(w, "    "+printedKubectl(cfg, kubectlOberthArgs(cfg, deps, false, "upstream", "add", "--yes", u.Name, u.BaseURL)))
 	}
 }
 
@@ -859,7 +1007,7 @@ func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL 
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	addArgs := []string{"upstream", "add", "--yes", "--no-wait", name, baseURL}
+	addArgs := cfg.upstreamAddArgs(name, baseURL)
 
 	// The admin socket (/run/oberth/admin.sock) is bound just before the
 	// server prints "ready for bootstrap". A pod that is Running but not
@@ -1636,7 +1784,9 @@ func sshHostFromServer(deps Deps) string {
 		return "localhost"
 	}
 	ip := net.ParseIP(host)
-	if ip != nil && ip.IsLoopback() {
+	// An API server bound to every address (0.0.0.0, as k3d publishes it) is
+	// reached on this machine as localhost.
+	if ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
 		return "localhost"
 	}
 	return host

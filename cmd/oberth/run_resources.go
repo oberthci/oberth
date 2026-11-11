@@ -29,7 +29,7 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	if e := parseCommandFlags(flags, arguments); e != nil {
 		if errors.Is(e, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return e

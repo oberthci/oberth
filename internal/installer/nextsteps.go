@@ -18,10 +18,14 @@ type NextStepsInput struct {
 	SSHPort, HTTPSPort, ServiceType string
 	// Host is the address clients use (Config.ClientHost or the default);
 	// empty means localhost.
-	Host      string
-	Context   string
-	Namespace string
-	Upstreams []NextStepsUpstream
+	Host string
+	// Kubeconfig and Context name the cluster in the printed kubectl
+	// commands: the file the install was given (empty: the default one) and
+	// its context.
+	Kubeconfig string
+	Context    string
+	Namespace  string
+	Upstreams  []NextStepsUpstream
 	// SSHAlias is set when ~/.ssh/config on this machine has the "oberth"
 	// Host block, so the short clone form works here.
 	SSHAlias bool
@@ -49,6 +53,9 @@ func NextSteps(in NextStepsInput) []string {
 	}
 	exec := func(stdin bool, command ...string) string {
 		parts := []string{"kubectl"}
+		if in.Kubeconfig != "" {
+			parts = append(parts, "--kubeconfig", shellQuoteWord(in.Kubeconfig))
+		}
 		if in.Context != "" {
 			parts = append(parts, "--context", in.Context)
 		}
@@ -108,6 +115,12 @@ func NextSteps(in NextStepsInput) []string {
 		"   "+exec(false, "upstream", "add", "--yes", other, otherURL),
 		"   upstream list --check shows which forges accept the key")
 
+	add("", "Promote green code to a target branch: an admin issues a single-use grant first (the uplinks above are not admins).",
+		"   Register an admin uplink for a person, with a key no agent holds (the token prints once, on that terminal):",
+		"   "+exec(true, "uplink", "add", "--admin", "-", "admin@host")+" < admin.pub",
+		"   then:  oberth mcp call --token-file <admin token file> promote_grant '{\"repo\":\"<upstream>/<org>/<repo>\",\"sha\":\"<green sha>\",\"branch\":\"main\"}'",
+		"   and the agent promotes that exact SHA with the promote tool (docs/mcp-setup.md)")
+
 	add("", "Give another machine or agent access (an uplink):",
 		"   1. there:  cat ~/.ssh/id_ed25519.pub   and copy it here as you@laptop.pub",
 		"   2. here:   "+exec(true, "uplink", "add", "-", "you@laptop")+" < you@laptop.pub",
@@ -136,10 +149,11 @@ func printReadyWithNextSteps(w io.Writer, cfg Config, deps Deps, upstreams []Nex
 	for _, line := range NextSteps(NextStepsInput{
 		Host:    clientReachableHost(deps),
 		SSHPort: deps.ClientSSHPort, HTTPSPort: deps.ClientHTTPSPort, ServiceType: deps.ClientServiceType,
-		Context:   deps.ContextName,
-		Namespace: cfg.Namespace,
-		Upstreams: upstreams,
-		SSHAlias:  sshConfigured,
+		Kubeconfig: cfg.KubeconfigPath,
+		Context:    deps.ContextName,
+		Namespace:  cfg.Namespace,
+		Upstreams:  upstreams,
+		SSHAlias:   sshConfigured,
 	}) {
 		_, _ = fmt.Fprintln(w, "  "+line)
 	}

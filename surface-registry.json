@@ -303,6 +303,50 @@
     "flag:max": {
       "doc_anchor": "docs/cli-reference.md#oberth-size-grant",
       "test_ref": "cmd/oberth/size_grant_test.go TestSizeGrantCLIReadsAndValidates"
+    },
+    "flag:secrets-file": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/noninteractive_install_test.go TestInstallReservesTheSecretsFileFirst"
+    },
+    "flag:client-ssh-port": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/noninteractive_install_test.go TestNonInteractiveInstallWithoutUpstreamWritesClientFiles"
+    },
+    "flag:client-https-port": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/noninteractive_install_test.go TestNonInteractiveInstallWithoutUpstreamWritesClientFiles"
+    },
+    "flag:expected-host-fingerprint": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/noninteractive_install_test.go TestNonInteractiveOnboardingFromFlags"
+    },
+    "flag:uplink-identity": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/noninteractive_install_test.go TestNonInteractiveOnboardingFromFlags"
+    },
+    "flag:ssh-public-key": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/noninteractive_install_test.go TestNonInteractiveOnboardingFromFlags"
+    },
+    "flag:context": {
+      "doc_anchor": "README.md#quick-start",
+      "test_ref": "internal/installer/noninteractive_install_test.go TestInstallNeedsContextWhenKubeconfigHasSeveral"
+    },
+    "flag:assist": {
+      "doc_anchor": "docs/assisted-continuation.md#agent-assisted-ci-continuation-retry-hold",
+      "test_ref": "internal/installer/rerun_review_test.go TestOberthHelmArgsEnablesAssist"
+    },
+    "flag:backup-recipient": {
+      "doc_anchor": "docs/installer-reruns.md",
+      "test_ref": "cmd/oberth/upgrade_backup_recipient_test.go TestUpgradeBackupRecipientFlag"
+    },
+    "flag:replace-client-files": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/clientaccess_test.go TestClientAccessDefaultsToBothWithoutATerminal"
+    },
+    "flag:yes": {
+      "doc_anchor": "docs/installer-reruns.md",
+      "test_ref": "cmd/oberth/upgrade_backup_recipient_test.go TestUpgradeBackupRecipientFlag"
     }
   }
 }

@@ -29,20 +29,21 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.Var(&removeIPs, "tls-remove-ip", "remove a permitted IP SAN; refused while served (repeatable)")
 	flags.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "", "OpenBao namespace (default: openbao)")
 	flags.StringVar(&cfg.Namespace, "namespace", "", "Oberth namespace (default: oberth)")
-	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
+	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to upgrade (required when the kubeconfig has more than one context)")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
 	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
 	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for all queued/running runs before upgrading (advisory, not an admission freeze)")
 	flags.DurationVar(&cfg.WaitTimeout, "wait-timeout", installer.DefaultUpgradeWaitTimeout, "maximum queue wait, independent of --timeout")
 	flags.StringVar(&cfg.WaitFor, "wait-for", "", "enable waiting for all or critical (tag/promotion/plan/apply/unknown) runs")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "show what would change without doing it")
-	flags.BoolVar(&cfg.Yes, "yes", false, "proceed without confirmation for non-local targets")
+	flags.BoolVar(&cfg.Yes, "yes", false, "with --rollback: accept the plan, including replacing the server database with the pre-upgrade backup")
 	flags.StringVar(&cfg.ChartOverride, "chart", "", "deploy this chart instead of the signed release (development only: not verified)")
 	addReleaseSourceFlags(flags, &cfg.ReleaseDir, &cfg.ReleaseOrigin, &cfg.ChartRepository)
 	flags.Var(&userValues, "values", "values file to pass to helm upgrade (repeatable)")
 	flags.Var(&userValues, "f", "alias for --values")
 	flags.Var(&userSet, "set", "one canonical dotted key=scalar per flag; escape literal commas (repeatable)")
 	flags.BoolVar(&cfg.NoBackup, "no-backup", false, "upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)")
+	backupRecipient := flags.String("backup-recipient", "", "encrypt the pre-upgrade backup to this PEM `CERT` you manage instead of ~/.config/oberth/backup/recipient.pem: no backup key is created or confirmed here, so it needs no terminal")
 	backupDir := flags.String("backup-dir", "", "write the pre-upgrade backup and the rollback record to `DIR` (default: the current directory)")
 	flags.BoolVar(&cfg.AllowDowngrade, "allow-downgrade", false, "accept a CLI older than the installed release (a deliberate rollback within one database schema)")
 	forceRecord := flags.Bool("force-record", false, "DANGEROUS, with --rollback: accept a stale record although either release changed after its upgrade; later changes are undone and the database may be replaced by an old backup (check helm history first)")
@@ -52,7 +53,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return nil
 		}
 		return usageError(err)
@@ -62,6 +63,12 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	}
 	if *rollback != "" {
 		return runUpgradeRollback(ctx, *rollback, kubeContext, cfg, *forceRecord, *timeout, input, output)
+	}
+	if cfg.Yes {
+		return fmt.Errorf("%w: --yes applies to --rollback only; an upgrade needs no confirmation flag", errUsage)
+	}
+	if cfg.NoBackup && *backupRecipient != "" {
+		return fmt.Errorf("%w: --backup-recipient and --no-backup contradict each other", errUsage)
 	}
 
 	if cfg.WaitTimeout <= 0 {
@@ -110,10 +117,13 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	}
 	if !cfg.NoBackup {
 		cfg.Backup = func(ctx context.Context) (installer.UpgradeBackup, error) {
-			return takePreUpgradeBackup(ctx, cfg.RecordDir, kubeContext, cfg.Namespace, input, output)
+			return takePreUpgradeBackup(ctx, cfg.RecordDir, *backupRecipient, kubeContext, cfg.Namespace, input, output)
 		}
 	}
 
+	if err := installer.RequireContextChoice("upgrade", kubeContext, "", kubeconfigContexts); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
 	kubeClient, restConfig, selectedContext, err := installer.LoadKubeConfigForContext(kubeContext, output)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
@@ -139,6 +149,10 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	return upgradeCompletionError(cfg.DryRun, result)
 }
 
+// kubeconfigContexts lists the contexts an upgrade could reach; tests replace
+// it.
+var kubeconfigContexts = installer.KubeconfigContexts
+
 func upgradeCompletionError(dryRun bool, result installer.UpgradeResult) error {
 	if dryRun || result.Upgraded || result.AlreadyUpToDate {
 		return nil
@@ -148,10 +162,14 @@ func upgradeCompletionError(dryRun bool, result installer.UpgradeResult) error {
 
 // takePreUpgradeBackup is oberth backup --history-only, run by oberth upgrade
 // before its first change against the same context and namespace.
-func takePreUpgradeBackup(ctx context.Context, dir, kubeContext, namespace string, input io.Reader, output io.Writer) (installer.UpgradeBackup, error) {
-	recipient, err := defaultBackupRecipient(false, input, output)
-	if err != nil {
-		return installer.UpgradeBackup{}, err
+func takePreUpgradeBackup(ctx context.Context, dir, recipient, kubeContext, namespace string, input io.Reader, output io.Writer) (installer.UpgradeBackup, error) {
+	if recipient == "" {
+		var err error
+		if recipient, err = defaultBackupRecipient(false, input, output); err != nil {
+			return installer.UpgradeBackup{}, fmt.Errorf("%w; for this upgrade, --backup-recipient CERT encrypts the backup to a certificate you manage", err)
+		}
+	} else if _, err := os.Stat(recipient); err != nil {
+		return installer.UpgradeBackup{}, fmt.Errorf("--backup-recipient: %w", err)
 	}
 	archive := filepath.Join(dir, archivePrefix+time.Now().UTC().Format("20060102-150405")+archiveSuffix)
 	cfg := installer.BackupConfig{
@@ -184,6 +202,9 @@ func addReleaseSourceFlags(flags *flag.FlagSet, dir, origin, repository *string)
 // runUpgradeRollback rolls back one recorded upgrade; a restore of the
 // pre-upgrade backup runs through oberth restore --only history.
 func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg installer.UpgradeConfig, forceRecord bool, timeout time.Duration, input io.Reader, output io.Writer) error {
+	if err := installer.RequireContextChoice("roll back", kubeContext, "", kubeconfigContexts); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
 	kubeClient, restConfig, selectedContext, err := installer.LoadKubeConfigForContext(kubeContext, output)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)

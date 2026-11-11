@@ -71,7 +71,7 @@ func TestFirstRunEndToEnd(t *testing.T) {
 	}
 	cfg := fake.cfgs[0]
 	if cfg.ContextName != "default" || cfg.ForgeURL != "github.com/acme" || cfg.ClientAccess != "both" ||
-		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore || cfg.Yes || cfg.CreateKind {
+		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore || cfg.CreateKind {
 		t.Fatalf("installer config not wired from the answers: %+v", cfg)
 	}
 	if strings.Join(cfg.TLSExtraIPs, ",") != "192.0.2.193" || strings.Join(cfg.TLSExtraDNSNames, ",") != "example-node" {
@@ -675,25 +675,6 @@ func TestReport(t *testing.T) {
 	}
 }
 
-func TestBuildCommandLineYesRequiresConfirmedRemote(t *testing.T) {
-	state := &WizardState{}
-	if strings.Contains(BuildCommandLine(state), "--yes") {
-		t.Fatal("--yes must not be recommended when no cluster probe succeeded")
-	}
-	state.ClusterInfo = clusterInfoMsg{context: "gke-prod", err: errors.New("unreachable")}
-	if strings.Contains(BuildCommandLine(state), "--yes") {
-		t.Fatal("--yes must not be recommended when the cluster probe failed")
-	}
-	state.ClusterInfo = clusterInfoMsg{context: "k3s-example-node", isLocal: true}
-	if strings.Contains(BuildCommandLine(state), "--yes") {
-		t.Fatal("--yes must not be recommended for a local cluster")
-	}
-	state.ClusterInfo = clusterInfoMsg{context: "gke-prod", isLocal: false}
-	if !strings.Contains(BuildCommandLine(state), "--yes") {
-		t.Fatal("--yes expected for a positively identified remote cluster")
-	}
-}
-
 // The TLS step describes the certificate the store will issue (#007).
 func TestTLSDescribesServerPKI(t *testing.T) {
 	st := newWizardState(Options{})
@@ -794,16 +775,16 @@ func TestFinishAfterFailedInstallReturnsError(t *testing.T) {
 
 // A resumed setup keeps what the cluster probe found, so the finish screen,
 // Verify and the equivalent command name the real cluster rather than
-// localhost, and keep --yes for a remote one (review finding).
+// localhost (review finding).
 func TestResumeKeepsClusterIdentity(t *testing.T) {
 	var st WizardState
 	st.Config.ContextName = "prod"
-	st.ClusterInfo = clusterInfoMsg{context: "prod", server: "https://10.0.0.5:6443", isLocal: false, nodeName: "node-a", nodeIP: "10.0.0.5"}
+	st.ClusterInfo = clusterInfoMsg{context: "prod", server: "https://10.0.0.5:6443", nodeName: "node-a", nodeIP: "10.0.0.5"}
 	saved := st.toSaved()
 	var resumed WizardState
 	resumed.fromSaved(saved)
 	got := resumed.ClusterInfo
-	if got.server != "https://10.0.0.5:6443" || got.isLocal || got.nodeIP != "10.0.0.5" || got.nodeName != "node-a" || got.context != "prod" {
+	if got.server != "https://10.0.0.5:6443" || got.nodeIP != "10.0.0.5" || got.nodeName != "node-a" || got.context != "prod" {
 		t.Fatalf("resumed cluster info = %+v", got)
 	}
 }

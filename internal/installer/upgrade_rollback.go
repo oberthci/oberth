@@ -226,14 +226,12 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	if deps.RestConfig != nil {
 		server = deps.RestConfig.Host
 	}
+	_, _ = fmt.Fprintf(w, "Target: %s (%s)\n", deps.ContextName, server)
 	if record.APIServer != "" && server != record.APIServer {
 		return fmt.Errorf("the record is for API server %s, but context %q is %s; select the cluster the upgrade ran on", record.APIServer, deps.ContextName, server)
 	}
 	if uid := kubeSystemUID(ctx, deps); record.ClusterUID != "" && uid != "" && uid != record.ClusterUID {
 		return errors.New("the record is for another cluster (kube-system UID differs); refusing to roll back here")
-	}
-	if !IsLocalServer(server) && !cfg.Yes {
-		return fmt.Errorf("target %q does not appear to be a local cluster (server: %s); use --yes to proceed", deps.ContextName, server)
 	}
 	release, exists, err := findHelmRelease(ctx, deps, "oberth", record.Namespace)
 	if err != nil {
@@ -317,8 +315,8 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		_, _ = fmt.Fprintln(w, "No changes were made (--dry-run).")
 		return nil
 	}
-	// A restore replaces the database, on a local cluster too: like oberth
-	// restore, it never runs on the record's name alone.
+	// A restore replaces the database: like oberth restore, it never runs on
+	// the record's name alone.
 	if needRestore && !cfg.Yes {
 		return errors.New("this rollback replaces the server database with the pre-upgrade backup; review the plan above and rerun with --yes")
 	}

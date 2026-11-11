@@ -803,7 +803,7 @@ func TestInstallDerivesOrganizationURLForOnboarding(t *testing.T) {
 			if err := cfg.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			if cfg.ForgeURL != "ssh://git@"+host+"/company" || !cfg.hasOnboardingConfig() {
+			if cfg.ForgeURL != "ssh://git@"+host+"/company" {
 				t.Fatalf("organization configuration does not start onboarding: %+v", cfg)
 			}
 		})

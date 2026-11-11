@@ -37,7 +37,7 @@ func fragmentFlags(name string, arguments []string, output io.Writer) (string, s
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
-			flags.Usage()
+			printFlagUsage(flags)
 			return "", "", nil, nil
 		}
 		return "", "", nil, usageError(err)

@@ -114,7 +114,7 @@ candidate and also needs `openssl`. On the same throwaway k3d cluster it:
    (`internal/store/migrations/29991231235959-upgrade-e2e-rehearsal.sql`), so
    the next step crosses a real schema migration; nothing is committed to the
    product;
-3. runs the product command `oberth upgrade --chart <rehearsal chart> --yes
+3. runs the product command `oberth upgrade --chart <rehearsal chart>
    --backup-dir <evidence>/rehearsal` with the rehearsal CLI (the local chart is
    unsigned, hence `--chart`; signature verification is covered by the unit
    tests on the published record), under a private `HOME`, so the operator's

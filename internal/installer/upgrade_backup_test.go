@@ -264,9 +264,13 @@ func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
 		restored = target.Archive
 		return nil
 	}
-	// Replacing the database needs --yes, on a local cluster too.
+	// Replacing the database needs --yes.
 	if err := RunRollback(t.Context(), RollbackConfig{Record: path, Timeout: time.Minute, Restore: restore}, fixture.deps); err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("restoring rollback without --yes: %v", err)
+	}
+	// The rollback names its target before it plans anything.
+	if !strings.Contains(fixture.output.String(), "Target: fixture (") {
+		t.Fatalf("no target line:\n%s", fixture.output.String())
 	}
 	for _, call := range *fixture.calls {
 		if strings.HasPrefix(call, "rollback") || call == "restore" {

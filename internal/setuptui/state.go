@@ -82,8 +82,7 @@ type installRecord struct {
 // a skin over `oberth install` — plus the choices that only the wizard
 // needs. No secret is ever held here: credentials live in the ceremony.
 type WizardState struct {
-	Config             installer.Config
-	remoteAcknowledged bool // Session-only explicit review acknowledgement; never persisted.
+	Config installer.Config
 
 	ClusterChoice  string // a context name, clusterChoiceFile or clusterChoiceKind
 	ClusterInfo    clusterInfoMsg
@@ -150,7 +149,6 @@ type savedSetup struct {
 	// What the cluster probe found, so a resumed finish screen, Verify and
 	// the equivalent command do not fall back to localhost (non-secret).
 	ClusterServer string `json:"clusterServer,omitempty"`
-	ClusterLocal  bool   `json:"clusterLocal,omitempty"`
 	NodeName      string `json:"nodeName,omitempty"`
 	NodeIP        string `json:"nodeIP,omitempty"`
 
@@ -203,7 +201,6 @@ func (st *WizardState) toSaved() savedSetup {
 		ContextName:        c.ContextName,
 		CreateKind:         c.CreateKind,
 		ClusterServer:      st.ClusterInfo.server,
-		ClusterLocal:       st.ClusterInfo.isLocal,
 		NodeName:           st.ClusterInfo.nodeName,
 		NodeIP:             st.ClusterInfo.nodeIP,
 		Namespace:          c.Namespace,
@@ -245,7 +242,6 @@ func (st *WizardState) fromSaved(s savedSetup) {
 	if st.ClusterInfo.server == "" && s.ClusterServer != "" {
 		st.ClusterInfo.context = s.ContextName
 		st.ClusterInfo.server = s.ClusterServer
-		st.ClusterInfo.isLocal = s.ClusterLocal
 		st.ClusterInfo.nodeName = s.NodeName
 		st.ClusterInfo.nodeIP = s.NodeIP
 	}

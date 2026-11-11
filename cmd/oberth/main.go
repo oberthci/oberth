@@ -97,6 +97,14 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 		return fmt.Errorf("%w: expected %s", errUsage, usageCommands)
 	}
 	switch arguments[0] {
+	case "--version":
+		if len(arguments) != 1 {
+			return fmt.Errorf("%w: --version accepts no arguments", errUsage)
+		}
+		return runCLI(ctx, []string{"version"}, input, output)
+	case "help":
+		// oberth help [command...] is oberth [command...] --help.
+		return runCLI(ctx, append(append([]string{}, arguments[1:]...), "--help"), input, output)
 	case "--help", "-h":
 		_, err := fmt.Fprint(output, `Usage: oberth <command> [flags]
 

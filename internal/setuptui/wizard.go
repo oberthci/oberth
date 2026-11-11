@@ -494,12 +494,6 @@ func BuildCommandLine(state *WizardState) string {
 	if c.ClientHost != "" {
 		args = append(args, "--client-host="+shellQuote(c.ClientHost))
 	}
-	// --yes suppresses the installer's own remote-cluster consent gate.
-	// Recommend it ONLY when a probe positively identified a remote
-	// cluster — never because detection failed or was skipped.
-	if state.ClusterInfo.err == nil && state.ClusterInfo.context != "" && !state.ClusterInfo.isLocal {
-		args = append(args, "--yes")
-	}
 	if c.ChartPath != "" {
 		args = append(args, "--chart="+shellQuote(c.ChartPath))
 	}
@@ -537,9 +531,10 @@ func installConfig(st *WizardState) installer.Config {
 	cfg.UplinkIdentity = st.UplinkIdentity
 	cfg.SSHPublicKeyPath = st.SSHKeyPath
 	cfg.ClientAccess = st.ClientAccess
+	// The wizard's client-access step and its review are the consent an
+	// install without a terminal otherwise needs a flag for.
+	cfg.ReplaceClientFiles = true
 	cfg.SecretStoreUndecided = false
-	// The review flow records a separate acknowledgement for remote targets.
-	cfg.Yes = cfg.Yes || st.remoteAcknowledged
 	// Dev builds stamp BinaryVersion as "dev-<sha>"; let the installer pick
 	// the published chart instead of deriving a version from the stamp.
 	if strings.HasPrefix(cfg.BinaryVersion, "dev") {

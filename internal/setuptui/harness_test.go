@@ -178,7 +178,7 @@ func stubClusterProbe(t *testing.T, err error) *[]string {
 			return clusterInfoMsg{context: contextName, err: err}
 		}
 		return clusterInfoMsg{context: contextName, server: "https://127.0.0.1:6443", version: "v1.31.4+k3s1",
-			engine: "k3s", isLocal: true, nodeCount: 1, cores: 8, nodeName: "example-node", nodeIP: "192.0.2.193"}
+			engine: "k3s", nodeCount: 1, cores: 8, nodeName: "example-node", nodeIP: "192.0.2.193"}
 	}
 	t.Cleanup(func() { clusterProbe = previous })
 	return &calls

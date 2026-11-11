@@ -15,12 +15,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,7 +111,6 @@ type Config struct {
 	Dev        bool
 	Production bool
 	DryRun     bool
-	Yes        bool
 	Upgrade    bool
 	// InstallSecretStore additionally installs a PRODUCTION-mode OpenBao —
 	// standalone server with persistent storage — then initializes it
@@ -292,10 +291,32 @@ type Config struct {
 	// certificate always covers it. Empty keeps the default: the Kubernetes
 	// API host, or localhost when that is a loopback address (#061).
 	ClientHost string
+	// ReplaceClientFiles lets an install without a terminal replace client
+	// files (~/.config/oberth/{ca.crt,env,mcp.json}) that exist with other
+	// content (--replace-client-files). On a terminal the offer is the
+	// consent; the setup wizard sets it, because its client-access step is.
+	ReplaceClientFiles bool
 	// AlsoUpstreams are further organizations onboarding connects with the
 	// same upstream key (--also-upstream, host/organization or an ssh:// URL),
 	// after the first one (#060).
 	AlsoUpstreams []string
+	// AssistEnabled turns on agent-assisted continuation (assist.enabled),
+	// which is off by default; see docs/assisted-continuation.md.
+	AssistEnabled bool
+	// ExpectedHostFingerprint pins the first upstream's SSH host key
+	// (SHA256:...) so a non-interactive onboarding can trust a forge whose
+	// key Oberth does not ship, without a prompt.
+	ExpectedHostFingerprint string
+	// ClientSSHPort and ClientHTTPSPort are the ports clients reach the
+	// server on when they differ from the Service's (a port forward, a
+	// container runtime publishing the NodePorts elsewhere). Client files, the
+	// push banner and printed commands use them; empty means the Service's.
+	ClientSSHPort   string
+	ClientHTTPSPort string
+	// SecretsFile receives the credentials the install creates once (OpenBao
+	// root token and unseal key, the first uplink's bearer token) instead of
+	// the output. It must be a new file outside any git worktree.
+	SecretsFile string
 }
 
 // wantsSecretStore reports whether either secret-store mode was requested.
@@ -494,6 +515,10 @@ type Deps struct {
 	// InstallDeps.CredentialSink. Output-stream text must never be the
 	// delivery channel for a secret when this is set.
 	CredentialSink func(label, value string)
+	// credentialsAtOnce hands each credential to CredentialSink the moment it
+	// exists instead of after the install table closes. Set for the secrets
+	// file, which is written and synced per credential.
+	credentialsAtOnce bool
 	// StepProgressSink, when non-nil, receives structured step completion
 	// events for TUI progress tracking. Step names are stable identifiers
 	// (e.g., "deploy oberth", "rollout ready") matched by the TUI's
@@ -512,7 +537,6 @@ type ClusterInfo struct {
 	Context          string
 	Server           string
 	Engine           string // "k3s", "kind", "k0s", "minikube", "unknown"
-	IsLocal          bool
 }
 
 // OpenBaoResult describes the outcome of the OpenBao install phase.
@@ -617,6 +641,22 @@ func (cfg *Config) Validate() error {
 			return fmt.Errorf("--client-host %s: a kind cluster publishes ports 30022 and 30443 on 127.0.0.1 only, so other machines cannot reach it; use localhost, or install on a k3s or other cluster whose NodePorts listen on the node's addresses", host)
 		}
 		cfg.ClientHost = host
+	}
+	if fp := cfg.ExpectedHostFingerprint; fp != "" {
+		if cfg.ForgeURL == "" && cfg.ForgeType == "" {
+			return errors.New("--expected-host-fingerprint pins the first upstream's host key; pass it with --upstream-url or --forge")
+		}
+		if !strings.HasPrefix(fp, "SHA256:") || len(fp) < len("SHA256:")+43 || strings.ContainsAny(fp, " \t\r\n") {
+			return fmt.Errorf("--expected-host-fingerprint must be an SSH SHA256 fingerprint (SHA256:<43 characters>, as ssh-keygen -lf prints), got %q", fp)
+		}
+	}
+	for flagName, port := range map[string]string{"--client-ssh-port": cfg.ClientSSHPort, "--client-https-port": cfg.ClientHTTPSPort} {
+		if port == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+			return fmt.Errorf("%s must be a port number 1-65535, got %q", flagName, port)
+		}
 	}
 	for i, raw := range cfg.AlsoUpstreams {
 		_, baseURL, err := upstreamFromInput(strings.TrimSpace(raw))
@@ -770,18 +810,10 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 		deps.KindClusterName = clusterName
 	}
-	// Cluster info line omitted — the kind/k3s creation messages already
-	// communicate the cluster identity; repeating it adds noise.
+	// Any cluster the kubeconfig reaches is a valid target; the install names
+	// the one it acts on before anything else.
+	_, _ = fmt.Fprintf(deps.Output, "Target: %s (%s)\n", cluster.Context, cluster.Server)
 	resolveInstallClientHost(&cfg, &deps, cluster)
-
-	if !cluster.IsLocal && !cfg.Yes {
-		return fmt.Errorf("context %q does not appear to be a local cluster (server: %s); "+
-			"oberth install is a bootstrap command that creates a dev secret store — "+
-			"use --yes to proceed or switch to a local context", cluster.Context, cluster.Server)
-	}
-	if !cluster.IsLocal && cfg.Yes {
-		_, _ = fmt.Fprintf(deps.Output, "WARNING: %q does not appear to be a local cluster; proceeding because --yes was set\n", cluster.Context)
-	}
 
 	if cfg.InstallSecretStoreDev {
 		_, _ = fmt.Fprintln(deps.Output, "EVALUATION MODE — not for production. Dev OpenBao state does not survive pod restart.")
@@ -870,6 +902,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	_, _ = fmt.Fprintf(w, "oberth install %s\n", displayVersion(cfg.BinaryVersion))
 
 	var creds heldCredentials
+	if deps.credentialsAtOnce {
+		creds.atOnce = deps.CredentialSink
+	}
 
 	// Safety net: if any later step errors out or panics, captured
 	// credentials are still released. Registered before the secret-store
@@ -1104,7 +1139,6 @@ func DetectCluster(ctx context.Context, deps Deps) (ClusterInfo, error) {
 		Context: deps.ContextName,
 		Server:  deps.RestConfig.Host,
 	}
-	info.IsLocal = IsLocalServer(info.Server)
 
 	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -1113,38 +1147,7 @@ func DetectCluster(ctx context.Context, deps Deps) (ClusterInfo, error) {
 		return info, nil
 	}
 	info.Engine = DetectEngine(nodes.Items)
-	// Engine detection is informational only. The safety locality decision
-	// (whether --yes is required) derives from the API server endpoint, not
-	// from the detected engine. A kubelet version that contains "+k3s" on a
-	// remote public endpoint must still require --yes, because bootstrap
-	// and dev-secret-store flags are destructive on production clusters.
 	return info, nil
-}
-
-// IsLocalServer reports whether the server URL points to a loopback or RFC1918 address.
-func IsLocalServer(serverURL string) bool {
-	parsed, err := url.Parse(serverURL)
-	if err != nil {
-		return false
-	}
-	host := parsed.Hostname()
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() {
-		return true
-	}
-	for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
-		_, network, _ := net.ParseCIDR(cidr)
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
 }
 
 // DetectEngine identifies the Kubernetes engine from node metadata.
@@ -1684,6 +1687,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	if image := strings.TrimSpace(cfg.ImageRef); image != "" {
 		args = append(args, "--set-string", "image.ref="+image)
 	}
+	if cfg.AssistEnabled {
+		args = append(args, "--set", "assist.enabled=true")
+	}
 	if cfg.UtilityImage != "" {
 		args = append(args, "--set-string", "utilityImage="+cfg.UtilityImage)
 	}
@@ -1711,7 +1717,11 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	if cfg.PushBannerURL != "" || cfg.PushBannerURLSet {
 		args = append(args, "--set-string", "pushBannerURL="+strings.ReplaceAll(strings.ReplaceAll(cfg.PushBannerURL, `\`, `\\`), ",", `\,`))
 	} else if !cfg.existingRelease && bannerHost != "" {
-		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+defaultClientHTTPSPort(cfg.ServiceType)+"/runs")
+		bannerPort := cfg.ClientHTTPSPort
+		if bannerPort == "" {
+			bannerPort = defaultClientHTTPSPort(cfg.ServiceType)
+		}
+		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+bannerPort+"/runs")
 	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)
 	if openbao.PKIEnabled || openbao.ServerCACertPEM != "" {
@@ -2107,7 +2117,16 @@ func PrintNextSteps(cfg Config, w io.Writer) error {
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	endpoint := WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType})
+	endpoint := withClientPorts(cfg, WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType}))
+	// The commands name the cluster the install named, never whatever the
+	// current context is when they are run.
+	target := ""
+	if cfg.KubeconfigPath != "" {
+		target += " --kubeconfig " + shellQuoteWord(cfg.KubeconfigPath)
+	}
+	if cfg.ContextName != "" && !cfg.CreateKind {
+		target += " --context " + shellQuoteWord(cfg.ContextName)
+	}
 	installed := "Oberth is installed."
 	if cfg.InstallSecretStore {
 		installed = "Oberth is installed and connected to OpenBao."
@@ -2122,12 +2141,13 @@ Next steps:
 
   1. Register the upstream (interactive — generates and persists the deploy key):
 
-       kubectl exec -it -n %[1]s deploy/oberth -- \
+       kubectl%[5]s exec -it -n %[1]s deploy/oberth -- \
          /usr/local/bin/oberth upstream add <name> ssh://git@<forge>/<org>
 
-  2. Add your first uplink (prints its bearer token and TLS fingerprint once):
+  2. Add your first uplink (prints its bearer token once; store it, and pin
+     the CA that oberth client pin prints):
 
-       kubectl exec -i -n %[1]s deploy/oberth -- \
+       kubectl%[5]s exec -i -n %[1]s deploy/oberth -- \
          /usr/local/bin/oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
 
   3. Clone an existing repository through Oberth:
@@ -2139,9 +2159,18 @@ Next steps:
        cd <repo>
        oberth init
        git add .oberth/ && git commit -m "add oberth pipeline"
-       git push origin main
+       git push origin my-branch
 
-`, ns, installed, URLHost(endpoint.ClientHost), endpoint.ClientSSHPort)
+  5. Promote green code to a target branch: a promotion needs a single-use
+     grant from an admin uplink, which the first uplink is not. Register one
+     for a person, with a key no agent holds, and issue the grant with it:
+
+       kubectl%[5]s exec -it -n %[1]s deploy/oberth -- \
+         /usr/local/bin/oberth uplink add --admin - admin@host < admin.pub
+       oberth mcp call --token-file <admin token file> promote_grant \
+         '{"repo":"<upstream>/<org>/<repo>","sha":"<green sha>","branch":"main"}'
+
+`, ns, installed, URLHost(endpoint.ClientHost), endpoint.ClientSSHPort, target)
 	return err
 }
 
