@@ -119,9 +119,13 @@ Ed25519-only pin.
 
 When a forge rotates its keys, or an earlier pin is incomplete, verify the new
 fingerprints through a trusted channel and rerun the same command with
-`--repin`. It rescans, accepts keys under the same rules, replaces only this
-endpoint's lines in the `oberth-known-hosts` bundle through the audited
-identity write, and keeps an identical registration. An entry Oberth did not
+`--repin`. It first checks the registration (another URL or key choice under
+the name is refused before anything is scanned or written), then rescans,
+accepts keys under the same rules, and replaces only this endpoint's lines in
+the `oberth-known-hosts` bundle. The interactive prompt lists the pins being
+replaced beside the scanned keys, marked new or already pinned, and the write
+is audited as `upstream.identity.repin.oberth-known-hosts`, apart from a first
+pin. An identical registration is kept. An entry Oberth did not
 write (hashed, wildcard or multi-host) is refused rather than edited.
 
 Repositories resolve to `<base URL>/<repo>.git`. A plain `git-shell` forge
@@ -130,15 +134,22 @@ keeps them relative to the git user's home, so its base URL needs `/~/`:
 `upstream add --check-repo <repo>` reads that existing repository's ref
 advertisement (no objects) before registering, and `upstream list --check`
 reads one registered repository per SSH upstream; both name the path the
-forge refused and suggest the `/~/` form. The first clone's error carries
+forge refused and suggest the `/~/` form; an in-protocol `ERR` answer counts
+as a refusal. The first clone's error carries
 the same hint.
 
 A forge repository may start empty. While its default branch does not exist
 (an unborn HEAD, which protocol v0 forges never advertise), the cache keeps
 its recorded default branch, `main` for a new repository, even after other
 branches are synced there; the first promotion or default-branch publication
-creates it upstream. That holds only for a repository whose default branch
-this cache has never seen upstream. A default branch that existed and then
+creates it upstream. A protocol v0 forge does not say which unborn branch its
+HEAD names: if that is not the recorded default (a repository initialized on
+`trunk` or `master`, say), Oberth still creates `main`, and the forge's HEAD
+stays dangling, so a direct clone from the forge checks out nothing until its
+default branch is set there to the branch Oberth created.
+
+A default branch is read as unborn only while this cache has never seen one
+upstream. A default branch that existed and then
 disappears beside other refs was deleted: Oberth serves the cache stale with
 "upstream default branch unknown", policy reads and release admission refuse,
 and nothing recreates the branch without its policy. Restore it on the forge.

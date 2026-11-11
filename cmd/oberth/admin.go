@@ -198,6 +198,42 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if *dedicatedKey && kind == "ssh" {
 		keyName = app.UpstreamKeyDataKey(filepath.Base(*upstreamKey), name)
 	}
+	var database *store.Store
+	defer func() {
+		if database != nil {
+			_ = database.Close()
+		}
+	}()
+	openDatabase := func() error {
+		if database != nil {
+			return nil
+		}
+		if dependencies.mutationGate == nil {
+			return errors.New("admin audit mutation gate is unavailable")
+		}
+		if err := dependencies.mutationGate(ctx, "upstream.database.open", *databasePath); err != nil {
+			return err
+		}
+		opened, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
+		if err != nil {
+			return err
+		}
+		database = opened
+		return nil
+	}
+	// Re-pinning keeps a registration: a different URL or key under this
+	// name is refused before any pin is rescanned or written.
+	registered := false
+	if *repin {
+		if err := openDatabase(); err != nil {
+			return err
+		}
+		same, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
+		if err != nil {
+			return err
+		}
+		registered = same
+	}
 	var identityStore app.BootstrapIdentityStore
 	if kind == "ssh" {
 		if dependencies.identityStore == nil {
@@ -257,26 +293,12 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			return fmt.Errorf("upstream SSH identity is not ready: %w", err)
 		}
 	}
-	if dependencies.mutationGate == nil {
-		return errors.New("admin audit mutation gate is unavailable")
-	}
-	if err := dependencies.mutationGate(ctx, "upstream.database.open", *databasePath); err != nil {
+	if registered {
+		_, err := fmt.Fprintf(output, "Upstream %s: host keys re-pinned; registration unchanged.\n", name)
 		return err
 	}
-	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
-	if err != nil {
+	if err := openDatabase(); err != nil {
 		return err
-	}
-	defer func() { _ = database.Close() }()
-	if *repin {
-		registered, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
-		if err != nil {
-			return err
-		}
-		if registered {
-			_, err := fmt.Fprintf(output, "Upstream %s: host keys re-pinned; registration unchanged.\n", name)
-			return err
-		}
 	}
 	if err := dependencies.mutationGate(ctx, "upstream.register", *databasePath); err != nil {
 		return err
@@ -698,8 +720,14 @@ func sameUpstreamRegistered(ctx context.Context, database interface {
 		if upstream.Name != spec.Name {
 			continue
 		}
-		if upstream.Kind != spec.Kind || upstream.BaseURL != spec.BaseURL || upstream.KeyName != spec.KeyName {
+		if upstream.Kind != spec.Kind || upstream.BaseURL != spec.BaseURL {
 			return false, fmt.Errorf("upstream %s is registered as %s; re-pinning keeps a registration and cannot change it (upstream remove, then upstream add)", spec.Name, upstream.BaseURL)
+		}
+		if upstream.KeyName != spec.KeyName {
+			if upstream.KeyName != "" {
+				return false, fmt.Errorf("upstream %s is registered with a dedicated key; rerun the re-pin with --dedicated-key", spec.Name)
+			}
+			return false, fmt.Errorf("upstream %s is registered with the shared key; rerun the re-pin without --dedicated-key", spec.Name)
 		}
 		return true, nil
 	}

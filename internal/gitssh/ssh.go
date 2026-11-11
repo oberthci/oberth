@@ -69,21 +69,13 @@ func Run(ctx context.Context, arguments []string, configPath string, input io.Re
 	if err != nil {
 		return refusal("pinned host keys invalid")
 	}
-	database, err := hostkeys.NewDB(path)
+	address := net.JoinHostPort(value.host, value.port)
+	algorithms, err := PinnedHostKeyAlgorithms(path, address)
+	if errors.Is(err, ErrNoPinnedHostKey) {
+		return refusal("SSH endpoint has no pinned host key")
+	}
 	if err != nil {
 		return refusal("pinned host keys invalid")
-	}
-	address := net.JoinHostPort(value.host, value.port)
-	algorithms := database.HostKeyAlgorithms(address)
-	for _, pin := range database.HostKeys(address) {
-		if pin.Cert {
-			algorithms = append(algorithms, ssh.CertAlgoED25519v01, ssh.CertAlgoECDSA256v01, ssh.CertAlgoECDSA384v01, ssh.CertAlgoECDSA521v01, ssh.CertAlgoRSASHA256v01, ssh.CertAlgoRSASHA512v01)
-			break
-		}
-	}
-	algorithms = slices.DeleteFunc(algorithms, func(a string) bool { return a == ssh.KeyAlgoRSA || a == ssh.CertAlgoRSAv01 })
-	if len(algorithms) == 0 {
-		return refusal("SSH endpoint has no pinned host key")
 	}
 	connection, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", address)
 	if err != nil {
@@ -162,4 +154,33 @@ func Run(ctx context.Context, arguments []string, configPath string, input io.Re
 		}
 	}
 	return err
+}
+
+// ErrNoPinnedHostKey reports a known_hosts file without a usable pin for the
+// endpoint.
+var ErrNoPinnedHostKey = errors.New("no pinned host key")
+
+// PinnedHostKeyAlgorithms lists the host-key algorithms that the pins for
+// address (host:port) in the known_hosts file at path can verify. Every
+// pinned client (the Git transport and the upstream probes) offers exactly
+// these, so a forge with several host keys presents a pinned type. A
+// certificate authority pin adds the certificate algorithms. SHA-1 ssh-rsa
+// signatures are never offered; an RSA pin is verified through rsa-sha2-*.
+func PinnedHostKeyAlgorithms(path, address string) ([]string, error) {
+	database, err := hostkeys.NewDB(path)
+	if err != nil {
+		return nil, err
+	}
+	algorithms := database.HostKeyAlgorithms(address)
+	for _, pin := range database.HostKeys(address) {
+		if pin.Cert {
+			algorithms = append(algorithms, ssh.CertAlgoED25519v01, ssh.CertAlgoECDSA256v01, ssh.CertAlgoECDSA384v01, ssh.CertAlgoECDSA521v01, ssh.CertAlgoRSASHA256v01, ssh.CertAlgoRSASHA512v01)
+			break
+		}
+	}
+	algorithms = slices.DeleteFunc(algorithms, func(a string) bool { return a == ssh.KeyAlgoRSA || a == ssh.CertAlgoRSAv01 })
+	if len(algorithms) == 0 {
+		return nil, ErrNoPinnedHostKey
+	}
+	return algorithms, nil
 }

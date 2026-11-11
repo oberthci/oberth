@@ -20,9 +20,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	hostkeys "github.com/skeema/knownhosts"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/oberthci/oberth/internal/gitssh"
 )
 
 const (
@@ -184,9 +185,9 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 	}
 
 	var knownHosts []byte
-	var hostKeys []ssh.PublicKey
+	var hostKeys, replaced []ssh.PublicKey
 	if bootstrap.Repin {
-		knownHosts, err = repinBase(projectedHosts, projectedHostsErr, persisted.knownHosts, address)
+		knownHosts, replaced, err = repinBase(projectedHosts, projectedHostsErr, persisted.knownHosts, address)
 	} else {
 		knownHosts, hostKeys, err = selectKnownHosts(projectedHosts, projectedHostsErr, persisted.knownHosts, address)
 	}
@@ -195,7 +196,7 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 	}
 	acquiredHosts := len(hostKeys) == 0
 	if acquiredHosts {
-		hostKeys, err = bootstrap.acquireHostKeys(ctx, confirmations, host, port)
+		hostKeys, err = bootstrap.acquireHostKeys(ctx, confirmations, host, port, replaced)
 		if err != nil {
 			return UpstreamSSHIdentity{}, err
 		}
@@ -206,7 +207,13 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 	}
 
 	if acquiredHosts {
-		if err := bootstrap.saveIdentity(ctx, bootstrap.KnownHostsSecret, map[string][]byte{
+		// A re-pin replaces trust that was already confirmed once; the audit
+		// trail names it apart from a first pin.
+		operation := identityOperation
+		if bootstrap.Repin {
+			operation = repinOperation
+		}
+		if err := bootstrap.saveIdentityAs(ctx, operation, bootstrap.KnownHostsSecret, map[string][]byte{
 			bootstrap.KnownHostsDataKey: knownHosts,
 		}); err != nil {
 			return UpstreamSSHIdentity{}, err
@@ -450,24 +457,27 @@ func selectKnownHosts(projected knownHostsMaterial, projectedErr error, persiste
 	return nil, nil, nil
 }
 
-// repinBase returns the known_hosts bundle without this endpoint's pins. The
+// repinBase returns the known_hosts bundle without this endpoint's pins, and
+// the pins it dropped. The
 // persisted bundle is the authority; its projected file is used only when the
 // store holds none.
-func repinBase(projected knownHostsMaterial, projectedErr error, persisted []byte, address string) ([]byte, error) {
+func repinBase(projected knownHostsMaterial, projectedErr error, persisted []byte, address string) ([]byte, []ssh.PublicKey, error) {
 	base := persisted
 	if len(base) == 0 {
 		if projectedErr != nil && !errors.Is(projectedErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("app: configured upstream known_hosts is invalid; refusing to replace it: %w", projectedErr)
+			return nil, nil, fmt.Errorf("app: configured upstream known_hosts is invalid; refusing to replace it: %w", projectedErr)
 		}
 		base = projected.body
 	}
 	if len(base) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	if _, err := knownHostKeys(base, address); err != nil {
-		return nil, fmt.Errorf("app: persisted upstream known_hosts is invalid; refusing to replace it: %w", err)
+	replaced, err := knownHostKeys(base, address)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app: persisted upstream known_hosts is invalid; refusing to replace it: %w", err)
 	}
-	return withoutKnownHostsAddress(base, address)
+	kept, err := withoutKnownHostsAddress(base, address)
+	return kept, replaced, err
 }
 
 // wellKnownForges pins the SHA-256 SSH host-key fingerprints published by
@@ -499,7 +509,10 @@ var wellKnownForges = map[string]map[string]struct{}{
 	},
 }
 
-func (bootstrap UpstreamSSHBootstrap) acquireHostKeys(ctx context.Context, confirmations *confirmationReader, host, port string) ([]ssh.PublicKey, error) {
+// acquireHostKeys scans and accepts the endpoint's host keys. replaced holds
+// the pins a re-pin is about to drop; the interactive prompt shows them
+// beside the scanned keys so a rotation is told apart from a swap.
+func (bootstrap UpstreamSSHBootstrap) acquireHostKeys(ctx context.Context, confirmations *confirmationReader, host, port string, replaced []ssh.PublicKey) ([]ssh.PublicKey, error) {
 	keys, err := bootstrap.ScanHostKeys(ctx, host, port)
 	if err != nil {
 		return nil, fmt.Errorf("app: scan SSH host keys for %s:%s: %w", host, port, err)
@@ -547,11 +560,35 @@ func (bootstrap UpstreamSSHBootstrap) acquireHostKeys(ctx context.Context, confi
 	if bootstrap.AutoYes {
 		return nil, fmt.Errorf("app: --yes cannot trust unauthenticated SSH host keys for unknown forge %s:%s; use --expected-host-fingerprint SHA256:... to pin the expected fingerprint", host, port)
 	}
+	pinned := make(map[string]bool, len(replaced))
+	if bootstrap.Repin {
+		if _, err := fmt.Fprintf(bootstrap.Output, "\nSSH host-key fingerprints currently pinned for %s:%s (this re-pin replaces them):\n", host, port); err != nil {
+			return nil, err
+		}
+		for _, key := range replaced {
+			pinned[ssh.FingerprintSHA256(key)] = true
+			if _, err := fmt.Fprintf(bootstrap.Output, "- %s %s\n", key.Type(), ssh.FingerprintSHA256(key)); err != nil {
+				return nil, err
+			}
+		}
+		if len(replaced) == 0 {
+			if _, err := fmt.Fprintln(bootstrap.Output, "- none"); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if _, err := fmt.Fprintf(bootstrap.Output, "\nSSH host-key fingerprints offered by %s:%s:\n", host, port); err != nil {
 		return nil, err
 	}
 	for _, key := range keys {
-		if _, err := fmt.Fprintf(bootstrap.Output, "- %s %s\n", key.Type(), ssh.FingerprintSHA256(key)); err != nil {
+		note := ""
+		if bootstrap.Repin {
+			note = " (new)"
+			if pinned[ssh.FingerprintSHA256(key)] {
+				note = " (already pinned)"
+			}
+		}
+		if _, err := fmt.Fprintf(bootstrap.Output, "- %s %s%s\n", key.Type(), ssh.FingerprintSHA256(key), note); err != nil {
 			return nil, err
 		}
 	}
@@ -747,8 +784,7 @@ func newKnownHostsCallback(body []byte) (ssh.HostKeyCallback, func(), error) {
 }
 
 // pinnedHostKeyAlgorithms lists the host-key algorithms that the pins for
-// address can verify, in the Git transport's order. SHA-1 ssh-rsa signatures
-// are never offered; an RSA pin is verified through rsa-sha2-*.
+// address can verify: the Git transport's own selection (gitssh).
 func pinnedHostKeyAlgorithms(body []byte, address string) ([]string, error) {
 	if len(body) == 0 || len(body) > maximumBootstrapMaterialBytes {
 		return nil, errors.New("known_hosts must be non-empty and no larger than 1 MiB")
@@ -764,20 +800,9 @@ func pinnedHostKeyAlgorithms(body []byte, address string) ([]string, error) {
 	if writeErr != nil || closeErr != nil {
 		return nil, errors.Join(writeErr, closeErr)
 	}
-	database, err := hostkeys.NewDB(path)
+	algorithms, err := gitssh.PinnedHostKeyAlgorithms(path, address)
 	if err != nil {
-		return nil, err
-	}
-	algorithms := database.HostKeyAlgorithms(address)
-	for _, pin := range database.HostKeys(address) {
-		if pin.Cert {
-			algorithms = append(algorithms, ssh.CertAlgoED25519v01, ssh.CertAlgoECDSA256v01, ssh.CertAlgoECDSA384v01, ssh.CertAlgoECDSA521v01, ssh.CertAlgoRSASHA256v01, ssh.CertAlgoRSASHA512v01)
-			break
-		}
-	}
-	algorithms = slices.DeleteFunc(algorithms, func(a string) bool { return a == ssh.KeyAlgoRSA || a == ssh.CertAlgoRSAv01 })
-	if len(algorithms) == 0 {
-		return nil, fmt.Errorf("no pinned host key for %s", address)
+		return nil, fmt.Errorf("%w for %s", err, address)
 	}
 	return algorithms, nil
 }
@@ -1081,11 +1106,22 @@ func (bootstrap UpstreamSSHBootstrap) loadPersisted(ctx context.Context) (secret
 	}
 	return secretMaterial{privateKey: keys[bootstrap.PrivateKeyDataKey], publicKey: keys[bootstrap.PublicKeyDataKey], knownHosts: hosts[bootstrap.KnownHostsDataKey]}, nil
 }
+
+// Audit operations of an identity write; the bundle name follows.
+const (
+	identityOperation = "upstream.identity."
+	repinOperation    = "upstream.identity.repin."
+)
+
 func (bootstrap UpstreamSSHBootstrap) saveIdentity(ctx context.Context, name string, data map[string][]byte) error {
+	return bootstrap.saveIdentityAs(ctx, identityOperation, name, data)
+}
+
+func (bootstrap UpstreamSSHBootstrap) saveIdentityAs(ctx context.Context, operation, name string, data map[string][]byte) error {
 	if bootstrap.MutationGate == nil {
 		return errors.New("identity write requires the audit mutation gate")
 	}
-	if err := bootstrap.MutationGate(ctx, "upstream.identity."+name); err != nil {
+	if err := bootstrap.MutationGate(ctx, operation+name); err != nil {
 		return err
 	}
 	return bootstrap.Store.Save(ctx, name, data)

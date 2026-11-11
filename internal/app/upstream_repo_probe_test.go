@@ -6,6 +6,7 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -86,7 +87,12 @@ func serveUploadPack(channel ssh.Channel, requests <-chan *ssh.Request, reposito
 		command := string(request.Payload[4 : 4+length])
 		path := strings.TrimSuffix(strings.TrimPrefix(command, "git-upload-pack '"), "'")
 		status := uint32(0)
-		if repositories[path] {
+		if strings.Contains(path, "refused-in-band") {
+			// A forge that refuses inside the protocol, on stdout.
+			line := "ERR access denied or repository not exported: " + path + "\n"
+			_, _ = io.WriteString(channel, fmt.Sprintf("%04x%s", len(line)+4, line))
+			status = 1
+		} else if repositories[path] {
 			_, _ = io.WriteString(channel, "003e0000000000000000000000000000000000000000 capabilities^{}\x00\n0000")
 			buffer := make([]byte, 4)
 			_, _ = io.ReadFull(channel, buffer)
@@ -154,5 +160,19 @@ func TestUpstreamRepositoryPath(t *testing.T) {
 		if err != nil || got != want {
 			t.Errorf("UpstreamRepositoryPath(%q) = %q, %v; want %q", base, got, err, want)
 		}
+	}
+}
+
+// A well-formed pkt-line is not proof of a repository: a forge may answer
+// git-upload-pack with an "ERR" line on stdout and nothing on stderr.
+func TestProbeSSHRepositoryRefusesErrorPktLine(t *testing.T) {
+	t.Parallel()
+	client, private := testClientIdentity(t)
+	address, pins := startGitShellForge(t, client, map[string]bool{"~/acme/refused-in-band.git": true})
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(20*time.Second))
+	defer cancel()
+	err := ProbeSSHRepository(ctx, "ssh://git@"+address+"/~/acme", "refused-in-band", private, pins)
+	if !errors.Is(err, ErrUpstreamRepositoryNotFound) || !strings.Contains(err.Error(), "access denied or repository not exported") {
+		t.Fatalf("ERR pkt-line = %v, want a repository refusal carrying the forge's reason", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 )
 
 // An upstream whose default branch Oberth cannot determine is a forge
@@ -23,8 +24,23 @@ func TestUpstreamDefaultBranchFailureIsConfigurationNotInfrastructure(t *testing
 	if hint == nil || hint.Class != model.RetryCode || hint.Cause != "upstream_configuration" {
 		t.Fatalf("hint = %+v", hint)
 	}
-	// infrastructureAutoRetry refuses exactly what this guard matches.
-	if !upstreamConfigurationFailure(message) || upstreamConfigurationFailure("connect to upstream: connection refused") {
-		t.Fatal("the auto-retry guard does not separate configuration from transport failures")
+	// The scheduler retries an otherwise identical transport failure once,
+	// and never the configuration failure.
+	logs, err := runlog.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.ID = strings.Repeat("a", 32)
+	if err := logs.InitializeStepProgress(run.ID); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := &Scheduler{logs: logs}
+	result := JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: "prepare repository: connect to upstream: connection refused"}
+	if !scheduler.infrastructureAutoRetry(run, result) {
+		t.Fatal("a transport failure outside any step is not auto-retried; the fixture proves nothing")
+	}
+	result.Error = message
+	if scheduler.infrastructureAutoRetry(run, result) {
+		t.Fatal("an upstream configuration failure was auto-retried")
 	}
 }

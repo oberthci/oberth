@@ -293,3 +293,71 @@ func TestPinnedHostKeyAlgorithmsNeverOffersSHA1RSA(t *testing.T) {
 		t.Fatal("algorithms for an endpoint without pins")
 	}
 }
+
+// An interactive re-pin shows the pins it replaces beside the scanned keys,
+// so the operator can tell a rotation from a swap, and its store write is
+// audited under its own operation, apart from a first pin.
+func TestUpstreamBootstrapRepinShowsReplacedPinsAndAuditsDistinctly(t *testing.T) {
+	t.Parallel()
+	client, private := testClientIdentity(t)
+	forge := startMultiKeyForge(t, client)
+	stale, _ := testClientIdentity(t)
+	kept := forge.keys[ssh.KeyAlgoED25519]
+	store := &memoryIdentityStore{data: map[string]map[string][]byte{
+		"oberth-upstream-key": {"id_ed25519": private, "id_ed25519.pub": ssh.MarshalAuthorizedKey(client)},
+		"oberth-known-hosts": {"known_hosts": []byte(knownhosts.Line([]string{forge.address}, stale) + "\n" +
+			knownhosts.Line([]string{forge.address}, kept) + "\n")},
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), testtimeout.Start(30*time.Second))
+	defer cancel()
+	var output bytes.Buffer
+	var operations []string
+	bootstrap := repinBootstrap(t, store, "")
+	bootstrap.Repin, bootstrap.AutoYes = true, false
+	bootstrap.Input, bootstrap.Output = strings.NewReader("yes\n"), &output
+	bootstrap.MutationGate = func(_ context.Context, operation string) error {
+		operations = append(operations, operation)
+		return nil
+	}
+	if _, err := bootstrap.Ensure(ctx, "ssh://git@"+forge.address+"/acme"); err != nil {
+		t.Fatalf("interactive repin: %v\n%s", err, output.String())
+	}
+	text := output.String()
+	pinned, offered, found := strings.Cut(text, "fingerprints offered by")
+	if !found || !strings.Contains(pinned, "currently pinned") {
+		t.Fatalf("prompt does not list the replaced pins before the offered keys: %q", text)
+	}
+	for _, key := range []ssh.PublicKey{stale, kept} {
+		if !strings.Contains(pinned, ssh.FingerprintSHA256(key)) {
+			t.Errorf("replaced pin %s is not shown: %q", ssh.FingerprintSHA256(key), pinned)
+		}
+	}
+	if !strings.Contains(offered, ssh.FingerprintSHA256(kept)+" (already pinned)") ||
+		!strings.Contains(offered, ssh.FingerprintSHA256(forge.keys[ssh.KeyAlgoECDSA256])+" (new)") ||
+		strings.Contains(offered, ssh.FingerprintSHA256(stale)) {
+		t.Fatalf("offered keys are not marked against the replaced pins: %q", offered)
+	}
+	if len(operations) != 1 || operations[0] != "upstream.identity.repin.oberth-known-hosts" {
+		t.Fatalf("audit operations = %v, want one distinct re-pin operation", operations)
+	}
+
+	// A first pin keeps the plain identity operation and shows no old pins.
+	fresh := &memoryIdentityStore{data: map[string]map[string][]byte{
+		"oberth-upstream-key": {"id_ed25519": private, "id_ed25519.pub": ssh.MarshalAuthorizedKey(client)},
+	}}
+	output.Reset()
+	operations = nil
+	first := repinBootstrap(t, fresh, "")
+	first.AutoYes = false
+	first.Input, first.Output = strings.NewReader("yes\n"), &output
+	first.MutationGate = bootstrap.MutationGate
+	if _, err := first.Ensure(ctx, "ssh://git@"+forge.address+"/acme"); err != nil {
+		t.Fatalf("first pin: %v", err)
+	}
+	if strings.Contains(output.String(), "currently pinned") || strings.Contains(output.String(), "(new)") {
+		t.Fatalf("a first pin shows re-pin annotations: %q", output.String())
+	}
+	if len(operations) != 1 || operations[0] != "upstream.identity.oberth-known-hosts" {
+		t.Fatalf("first-pin audit operations = %v", operations)
+	}
+}

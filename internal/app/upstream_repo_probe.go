@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/boundedio"
@@ -87,19 +88,31 @@ func ProbeSSHRepository(ctx context.Context, baseURL, repositoryName string, pri
 	}
 	header := make([]byte, 4)
 	_, readErr := io.ReadFull(stdout, header)
+	refusal := ""
 	if readErr == nil && isPktLineLength(header) {
-		// The advertisement started: the repository exists and is readable.
-		// A flush packet ends the request before any negotiation.
-		_, _ = stdin.Write([]byte("0000"))
-		_ = stdin.Close()
-		return nil
+		// A forge may refuse inside the protocol: an "ERR <reason>" pkt-line
+		// in place of the advertisement is a failure, not a repository.
+		refusal, readErr = errorPktLine(stdout, header)
+		if readErr == nil && refusal == "" {
+			// The advertisement started: the repository exists and is
+			// readable. A flush packet ends the request before negotiation.
+			_, _ = stdin.Write([]byte("0000"))
+			_ = stdin.Close()
+			return nil
+		}
 	}
 	_ = stdin.Close()
+	if refusal != "" {
+		_ = session.Close()
+	}
 	waitErr := session.Wait()
 	if probeCtx.Err() != nil {
 		return fmt.Errorf("probe repository %s: %w", path, context.Cause(probeCtx))
 	}
-	reason := firstLine(diagnostics.Bytes())
+	reason := refusal
+	if reason == "" {
+		reason = firstLine(diagnostics.Bytes())
+	}
 	if reason == "" && waitErr != nil {
 		reason = waitErr.Error()
 	}
@@ -111,6 +124,32 @@ func ProbeSSHRepository(ctx context.Context, baseURL, repositoryName string, pri
 		hint = "; " + text
 	}
 	return fmt.Errorf("%w: the forge serves no repository at %s (%s)%s", ErrUpstreamRepositoryNotFound, path, reason, hint)
+}
+
+// errorPktLine reads the start of the first pkt-line's payload and returns
+// the reason when it is an "ERR " line (bounded), or "" for anything else.
+func errorPktLine(stdout io.Reader, header []byte) (string, error) {
+	length, err := strconv.ParseUint(string(header), 16, 16)
+	if err != nil {
+		return "", err
+	}
+	if length < 8 {
+		return "", nil // A flush or a payload too short to be an ERR line.
+	}
+	prefix := make([]byte, 4)
+	if _, err := io.ReadFull(stdout, prefix); err != nil {
+		return "", err
+	}
+	if string(prefix) != "ERR " {
+		return "", nil
+	}
+	rest := make([]byte, min(int(length)-8, 1024))
+	n, _ := io.ReadFull(stdout, rest)
+	reason := firstLine(rest[:n])
+	if reason == "" {
+		reason = "the forge refused the repository"
+	}
+	return reason, nil
 }
 
 func isPktLineLength(header []byte) bool {
