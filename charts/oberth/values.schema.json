@@ -949,13 +949,13 @@
           "additionalProperties": false,
           "properties": {
             "serviceAccount": {
-              "$ref": "#/definitions/optionalKubernetesName",
-              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
+              "$ref": "#/definitions/kubernetesName",
+              "description": "Branch-tier credentialed ServiceAccount; omit the key for oberth-argo-ci-secrets."
             },
             "vaultRole": {
               "type": "string",
-              "pattern": "^$|^[A-Za-z0-9._-]+$",
-              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "description": "Branch-tier Vault role; omit the key for oberth-argo-ci-secrets."
             }
           }
         },

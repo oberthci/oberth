@@ -30,7 +30,8 @@ runnerImagePrefixes:
   - "aquasec/trivy:"
 
 uplinkTokens:
-  # New bearer tokens only. Existing tokens are never assigned an expiry.
+  # New bearer tokens only: an existing token keeps the expiry it was minted
+  # with, and one without an expiry is reported hourly until it is rotated.
   defaultTTL: 2160h # 90 days
   maxTTL: 8760h # 365-day hard ceiling; may be lowered
 
@@ -438,9 +439,7 @@ argo:
   # oberth/data/upstream/* only and never receives approval-table grants.
   # `oberth install --install-secretstore` and setup-secretstore.sh create
   # the matching OpenBao policy and role under these default names.
-  # Deprecated: explicit empty serviceAccount/vaultRole strings select the
-  # defaults for this release only. Before the next chart release, omit those
-  # overrides or set oberth-argo-ci-secrets explicitly.
+  # Empty strings are refused: omit a key for its default.
   ciSecrets:
     serviceAccount: "oberth-argo-ci-secrets"
     vaultRole: "oberth-argo-ci-secrets"
