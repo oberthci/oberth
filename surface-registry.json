@@ -427,6 +427,18 @@
     "env:PATH": {
       "doc_anchor": "deploy/systemd/README.md#private-recovery",
       "test_ref": "internal/installer/unseal_test.go TestUnsealSubprocessDoesNotExposeCredentials"
+    },
+    "flag:consent": {
+      "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",
+      "test_ref": "internal/installer/plugin_add_repo_test.go TestAddRepoConfiguresOnlyTheRepositoryWithConsent"
+    },
+    "value:plugin.add-repo": {
+      "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",
+      "test_ref": "internal/installer/claude_plugin_test.go TestClaudePluginManifests"
+    },
+    "value:plugin.add-repo.actions": {
+      "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",
+      "test_ref": "internal/installer/plugin_add_repo_test.go TestAddRepoDeployKeyConsentAndManualFallback"
     }
   }
 }

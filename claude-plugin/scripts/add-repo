@@ -1,0 +1,255 @@
+#!/bin/sh
+# Deterministic pieces of /oberth:add-repo. Never source repository data.
+set -eu
+LC_ALL=C
+export LC_ALL
+umask 077
+fail() { echo "oberth add-repo: $*" >&2; exit 1; }
+consent() { [ "${1:-}" = --consent ] || fail 'explicit user consent is required'; }
+find_cli() {
+ oberth_cli=$(command -v oberth || true)
+ if [ -z "$oberth_cli" ] && [ -n "${HOME:-}" ] && [ -x "$HOME/.local/bin/oberth" ]; then oberth_cli=$HOME/.local/bin/oberth; fi
+ [ -n "$oberth_cli" ] || fail 'run /oberth:install to fetch the verified Oberth CLI first'
+}
+safe_path() {
+ case "$1" in ''|/*|*/|*//*|*..*|*[!A-Za-z0-9_./-]*) return 1;; esac
+ old_ifs=$IFS; IFS=/; set -- $1; IFS=$old_ifs
+ for segment do case "$segment" in [A-Za-z0-9_]*) :;; *) return 1;; esac; done
+}
+root_at() {
+ root=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || fail 'choose a non-bare git repository'
+ [ -n "$root" ] || fail 'repository root unavailable'
+}
+detect() {
+ root_at "$1"
+ ssh_port=; web_port=
+ origin=$(git -C "$root" config --get remote.origin.url 2>/dev/null) || fail 'origin is missing; configure the forge origin first'
+ case "$origin" in
+ https://*|ssh://*) address=${origin#*://}; authority=${address%%/*}; [ "$address" != "$authority" ] || fail 'origin has no repository path'; host=${authority##*@}
+  case "$origin" in ssh://*) case "$host" in *:*) ssh_port=${host#*:};; esac;; https://*) case "$host" in *:*) web_port=${host#*:};; esac;; esac
+  host=${host%%:*}; slug=${address#*/};;
+ git@*:*) address=${origin#git@}; host=${address%%:*}; slug=${address#*:};;
+ *) fail 'origin must be an HTTPS or SSH forge URL';;
+ esac
+ host=$(printf '%s' "$host" | tr 'A-Z' 'a-z')
+ case "$host" in ''|*[!a-z0-9.-]*|.*|-*) fail 'unsupported forge host';; esac
+ for port in "$ssh_port" "$web_port"; do
+  [ -n "$port" ] || continue
+  case "$port" in *[!0-9]*) fail 'invalid port in origin';; esac
+  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail 'invalid port in origin'
+ done
+ web_host=$host${web_port:+:$web_port}
+ slug=${slug%/}; slug=${slug%.git}
+ safe_path "$slug" || fail 'unsupported repository path in origin'
+ case "$slug" in */*) organization=${slug%/*}; repository=${slug##*/};; *) fail 'origin needs an organization and repository';; esac
+ forge=${2:-}
+ if [ -z "$forge" ]; then
+  case "$host" in github.com) forge=github;; gitlab.com) forge=gitlab;; codeberg.org) forge=codeberg;; *) fail 'unknown forge: ask the user, then pass github, gitlab or codeberg explicitly';; esac
+ fi
+ case "$forge" in
+ github|codeberg) case "$organization" in */*) fail 'this forge requires a single organization segment';; esac; settings="https://$web_host/$slug/settings/keys";;
+ gitlab) settings="https://$web_host/$slug/-/settings/repository#js-deploy-keys-settings";;
+ *) fail 'forge must be github, gitlab or codeberg';;
+ esac
+ detect_language
+}
+detect_language() {
+ language=generic
+ if [ -f "$root/go.mod" ]; then language=go
+ elif [ -f "$root/package.json" ]; then language=node
+ elif [ -f "$root/pyproject.toml" ] || [ -f "$root/setup.py" ]; then language=python; fi
+}
+manual() { printf 'manual_key_settings=%s\n' "$settings"; echo 'Add the public deploy key with write access, then verify through Oberth. Do not paste a private key or token.'; }
+server() {
+ context=$1; namespace=$2; pod=$3; shift 3
+ [ -n "$context" ] && [ -n "$namespace" ] && [ -n "$pod" ] || fail 'explicit context, namespace and pod are required'
+ command -v kubectl >/dev/null 2>&1 || fail 'install kubectl yourself: https://kubernetes.io/docs/tasks/tools/'
+ kubectl --context="$context" exec -n "$namespace" "$pod" -c oberth -- /usr/local/bin/oberth "$@"
+}
+workflow() {
+ case "$language" in
+ go) image='golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd'; task='go test ./...';;
+ node) image='node:24-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d'; task='if [ -f package-lock.json ]; then npm ci; else npm install --package-lock=false; fi; npm test --if-present';;
+ python) image='python:3.14-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f'; task='python -m compileall -q .';;
+ *) image='debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258'; task='test -d /work/src';;
+ esac
+ cat <<YAML
+# Minimal $language smoke workflow. Review tool versions, resource needs and tests.
+# Node/Python images require an administrator-approved runner image prefix.
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: test
+  activeDeadlineSeconds: 600
+  templates:
+  - name: test
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    volumes:
+    - name: private-scratch
+      emptyDir:
+        sizeLimit: 1Gi
+    container:
+      image: $image
+      workingDir: /work/private
+      command: [/bin/sh, -ec]
+      args:
+      - |
+        mkdir -p /work/private/src
+        cp -R /work/src/. /work/private/src/
+        cd /work/private/src
+        $task
+      env:
+      - name: GOCACHE
+        value: /work/private/gocache
+      - name: GOMODCACHE
+        value: /work/private/gomod
+      - name: HOME
+        value: /work/private
+      volumeMounts:
+      - name: private-scratch
+        mountPath: /work/private
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+          ephemeral-storage: 512Mi
+        limits:
+          cpu: '1'
+          memory: 1Gi
+          ephemeral-storage: 1Gi
+YAML
+}
+[ "$#" -gt 0 ] || fail 'expected inspect, deploy-key, configure, workflow-preview, workflow-write, smoke, or a cluster action'
+action=$1; shift
+case "$action" in
+prerequisites)
+ for tool in git kubectl helm ssh ssh-keygen; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+   case "$tool" in kubectl) fail 'install kubectl yourself: https://kubernetes.io/docs/tasks/tools/';; helm) fail 'install Helm yourself: https://helm.sh/docs/intro/install/';; *) fail "install $tool before onboarding";; esac
+  fi
+ done
+ find_cli;;
+inspect)
+ [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'inspect <path> [forge]'
+ detect "$1" "${2:-}"
+ printf 'root=%s\nforge=%s\nhost=%s\norganization=%s\nrepository=%s\nroute_org=%s\nupstream_url=ssh://git@%s/%s\nkey_settings=%s\nlanguage=%s\n' "$root" "$forge" "$host" "$organization" "$repository" "${organization##*/}" "$host${ssh_port:+:$ssh_port}" "$organization" "$settings" "$language"
+ if [ -e "$root/.oberth" ] || [ -L "$root/.oberth" ]; then echo 'workflow=existing'; else echo 'workflow=missing'; fi;;
+contexts) kubectl config get-contexts;;
+pods)
+ [ "$#" -eq 2 ] || fail 'pods <chosen-context> <namespace>'
+ kubectl --context="$1" get pods -n "$2" -l app.kubernetes.io/name=oberth -o name;;
+upstreams)
+ [ "$#" -eq 3 ] || fail 'upstreams <context> <namespace> <pod>'
+ server "$1" "$2" "$3" upstream list --check;;
+public-key)
+ [ "$#" -eq 3 ] || fail 'public-key <context> <namespace> <pod>'
+ server "$1" "$2" "$3" admin read-file /run/oberth-identities/upstream/id_ed25519.pub;;
+prepare-upstream)
+ [ "$#" -eq 8 ] || fail 'prepare-upstream <context> <namespace> <pod> <name> <base-url> <repo> shared|dedicated --consent'
+ consent "$8"
+ case "$7" in
+ shared) server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --check-repo "$6" "$4" "$5";;
+ dedicated) server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --dedicated-key --check-repo "$6" "$4" "$5";;
+ *) fail 'key mode must be shared or dedicated';;
+ esac;;
+register)
+ [ "$#" -eq 7 ] || fail 'register <context> <namespace> <pod> <repo> <upstream> <default-branch> --consent'
+ consent "$7"
+ server "$1" "$2" "$3" repo add --default-branch "$6" "$4" "$5";;
+verify)
+ [ "$#" -eq 4 ] || fail 'verify <context> <namespace> <pod> <upstream/route-org/repo>'
+ server "$1" "$2" "$3" repo verify "$4";;
+deploy-key)
+ [ "$#" -ge 3 ] && [ "$#" -le 4 ] || fail 'deploy-key <path> <public-key-file> --consent [forge]'
+ consent "$3"; detect "$1" "${4:-}"
+ public_file=$2
+ case "$public_file" in /*) :;; *) public_file="$(pwd)/$public_file";; esac
+ [ -f "$public_file" ] && [ ! -L "$public_file" ] || fail 'provide a regular public key file'
+ ssh-keygen -l -f "$public_file" >/dev/null 2>&1 || fail 'invalid public key file'
+ IFS= read -r public_key < "$public_file" || fail 'public key must have a terminating newline'
+ case "$public_key" in ssh-*\ *|ecdsa-*\ *) :;; *) fail 'only an SSH public key is accepted';; esac
+ cd "$root"
+ case "$forge" in
+ github)
+  if ! command -v gh >/dev/null 2>&1 || ! gh auth status --hostname "$web_host" >/dev/null 2>&1; then manual; exit 2; fi
+  gh api --hostname "$web_host" --method POST "repos/$slug/keys" -f title=Oberth -F "key=@$public_file" -F read_only=false >/dev/null 2>&1 || { manual; exit 2; };;
+ gitlab)
+  if ! command -v glab >/dev/null 2>&1 || ! glab auth status --hostname "$web_host" >/dev/null 2>&1; then manual; exit 2; fi
+  project=$(printf '%s' "$slug" | sed 's#/#%2F#g')
+  glab api --hostname "$web_host" --method POST "projects/$project/deploy_keys" -f title=Oberth -f "key=$public_key" -F can_push=true >/dev/null 2>&1 || { manual; exit 2; };;
+ codeberg)
+  if ! command -v tea >/dev/null 2>&1; then manual; exit 2; fi
+  # tea versions differ in HTTP error exit handling: require HTTP success,
+  # not just exit zero. Keep all response headers out of the transcript.
+  status=$(tea api --remote origin --include --method GET /user 2>&1 >/dev/null | awk '/^HTTP\/[0-9.]+ [0-9][0-9][0-9]/ {code=$2} END {print code}')
+  case "$status" in 2[0-9][0-9]) :;; *) manual; exit 2;; esac
+  status=$(tea api --remote origin --include --method POST "/repos/$slug/keys" -f title=Oberth -F "key=@$public_file" -F read_only=false 2>&1 >/dev/null | awk '/^HTTP\/[0-9.]+ [0-9][0-9][0-9]/ {code=$2} END {print code}')
+  case "$status" in 2[0-9][0-9]) :;; *) manual; exit 2;; esac;;
+ esac
+ echo 'Deploy-key request accepted; verify repository access through Oberth before pushing.';;
+ssh-info)
+ [ "$#" -eq 1 ] || fail 'ssh-info <approved-host-or-alias>'
+ case "$1" in ''|-*|*[!A-Za-z0-9._:-]*) fail 'invalid SSH host or alias';; esac
+ ssh -G "$1" 2>/dev/null | awk '$1 ~ /^(hostname|port|user|identityfile|identitiesonly|stricthostkeychecking|userknownhostsfile)$/ {print}';;
+configure)
+ [ "$#" -eq 4 ] || fail 'configure <path> remote|replace-remote|push-url <oberth-ssh-url> --consent'
+ consent "$4"; root_at "$1"; mode=$2; target=$3
+ case "$target" in git@*:*|ssh://git@*/*) :;; *) fail 'Oberth remote must use SSH as git';; esac
+ case "$target" in *[!A-Za-z0-9_./:@\[\]-]*|*..*) fail 'unsupported SSH URL';; esac
+ authority=${target#git@}; authority=${authority#ssh://git@}
+ case "$authority" in *@*) fail 'credential-bearing SSH URLs are refused';; esac
+ case "$mode" in
+ remote)
+  existing=$(git -C "$root" config --local --get remote.oberth.url || true)
+  pushurl=$(git -C "$root" config --local --get-all remote.oberth.pushurl || true)
+  [ -z "$pushurl" ] || [ "$pushurl" = "$target" ] || fail 'oberth push URL differs; explicitly review replace-remote'
+  [ -z "$existing" ] || [ "$existing" = "$target" ] || fail 'oberth remote differs; review it and explicitly choose replace-remote'
+  if [ -z "$existing" ]; then git -C "$root" remote add oberth "$target"; fi;;
+ replace-remote)
+  git -C "$root" remote set-url oberth "$target"
+  if git -C "$root" config --local --get-all remote.oberth.pushurl >/dev/null; then git -C "$root" config --local --unset-all remote.oberth.pushurl; fi;;
+ push-url)
+  git -C "$root" config --get remote.origin.url >/dev/null || fail 'origin is missing'
+  git -C "$root" config --local --replace-all remote.origin.pushurl "$target";;
+ *) fail 'choose remote, replace-remote or push-url';;
+ esac
+ if ! git -C "$root" config --local --get-all push.pushOption | grep -Fxq oberth.assist=1; then
+  git -C "$root" config --local --add push.pushOption oberth.assist=1
+ fi
+ echo 'Configured this repository only; no commit was created.';;
+workflow-preview|workflow-write)
+ if [ "$action" = workflow-write ]; then [ "$#" -eq 2 ] || fail 'workflow-write <path> --consent'; consent "$2"
+ else [ "$#" -eq 1 ] || fail 'workflow-preview <path>'; fi
+ root_at "$1"; detect_language
+ if [ "$action" = workflow-preview ]; then workflow
+ else
+  [ ! -e "$root/.oberth" ] && [ ! -L "$root/.oberth" ] || fail '.oberth already exists; review it without overwriting'
+  mkdir "$root/.oberth"
+  (set -C; workflow > "$root/.oberth/build.yaml")
+  echo 'Wrote .oberth/build.yaml for review; nothing was staged or committed.'
+ fi;;
+validate)
+ [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'validate <path> [approved-runner-image-prefixes]'
+ find_cli
+ if [ "$#" -eq 2 ]; then "$oberth_cli" validate --runner-image-prefixes "$2" "$1"; else "$oberth_cli" validate "$1"; fi;;
+smoke)
+ [ "$#" -eq 5 ] || fail 'smoke <path> oberth|origin <new-branch> <approved-oberth-url> --consent'
+ consent "$5"; root_at "$1"; remote=$2; branch=$3; approved=$4
+ case "$remote" in oberth|origin) :;; *) fail 'choose the configured Oberth push remote';; esac
+ git check-ref-format "refs/heads/$branch" >/dev/null 2>&1 || fail 'invalid smoke branch'
+ git -C "$root" diff --quiet && git -C "$root" diff --cached --quiet || fail 'review and commit changes with approval before smoke testing'
+ git -C "$root" cat-file -e HEAD:.oberth/build.yaml 2>/dev/null || fail 'the workflow must be committed with approval before pushing'
+ target=$(git -C "$root" remote get-url --push "$remote")
+ [ "$target" = "$approved" ] || fail 'push URL differs from the reviewed Oberth URL'
+ case "$target" in git@*:*|ssh://git@*/*) :;; *) fail 'the smoke push target must be the approved Oberth SSH URL';; esac
+ authority=${target#git@}; authority=${authority#ssh://git@}
+ case "$authority" in *@*) fail 'credential-bearing SSH URLs are refused';; esac
+ existing=$(git -C "$root" ls-remote --heads "$target" "refs/heads/$branch") || fail 'cannot inspect smoke branch on Oberth'
+ [ -z "$existing" ] || fail 'smoke branch already exists; choose a new branch'
+ git -C "$root" push "--force-with-lease=refs/heads/$branch:" -- "$remote" "HEAD:refs/heads/$branch";;
+*) fail 'unknown add-repo action';;
+esac
