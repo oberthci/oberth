@@ -52,6 +52,7 @@ func PrintReviewJSON(w io.Writer, cfg Config) error {
 }
 
 type InstallResult struct {
+	SecretsValues []string       `json:"secrets_values,omitempty"`
 	Review        *InstallReview `json:"review,omitempty"`
 	Version       int            `json:"version"`
 	OK            bool           `json:"ok"`
@@ -185,6 +186,8 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 	deps.IsTerminal = func() bool { return false }
 	deps.OutputIsTerminal = func() bool { return false }
 	identity := ""
+	var values []string
+	deps.secretsSaved = func(keys []string) { values = append([]string(nil), keys...) }
 	deps.UplinkCreated = func(value string) { identity = value }
 	installErr := Execute(ctx, cfg, deps)
 	result := InstallResult{Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
@@ -194,6 +197,7 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 	review := Review(cfg)
 	result.Review = &review
 	result.FirstUplink = identity
+	result.SecretsValues = values
 	result.check("install", installErr == nil, "Inspect the selected cluster; finish pending onboarding and rerun --verify --json.")
 	if cfg.SecretsFile != "" {
 		if raw, err := os.ReadFile(cfg.SecretsFile); err == nil { //nolint:gosec // G304: operator-selected credential sink; only its digest is public

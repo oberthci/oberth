@@ -88,6 +88,7 @@ type InstallDeps struct {
 	// matched by the TUI's stepNameToIndex map.
 	StepProgressSink func(step, status string)
 	UplinkCreated    func(identity string)
+	secretsSaved     func(keys []string)
 	// ReleaseGetter fetches the signed release (default: HTTPS).
 	ReleaseGetter releaseverify.Getter
 	// releaseKey replaces the compiled-in release key in tests.
@@ -216,6 +217,9 @@ func executeWithCredentials(ctx context.Context, cfg Config, deps InstallDeps) (
 			secretsFileSink = true
 			defer func() {
 				secrets.finish(deps.Output)
+				if secrets.err == nil && secrets.written > 0 && deps.secretsSaved != nil {
+					deps.secretsSaved(secrets.keys)
+				}
 				if secrets.err != nil {
 					resultErr = errors.New("credentials could not all be saved; recover the store before continuing")
 				}

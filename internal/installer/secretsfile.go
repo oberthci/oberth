@@ -55,6 +55,7 @@ type secretsFile struct {
 	path      string
 	file      *os.File
 	written   int
+	keys      []string
 	err       error
 }
 
@@ -137,6 +138,7 @@ func (s *secretsFile) add(label, value string) {
 			s.err = err
 			return
 		}
+		s.keys = append(s.keys, secretsFileKey(label))
 		s.written++
 		return
 	}
@@ -148,6 +150,7 @@ func (s *secretsFile) add(label, value string) {
 		s.err = err
 		return
 	}
+	s.keys = append(s.keys, secretsFileKey(label))
 	s.written++
 }
 
@@ -181,9 +184,9 @@ func (s *secretsFile) finish(w io.Writer) {
 	}
 	sum := sha256.Sum256(raw)
 	clear(raw)
-	_, _ = fmt.Fprintf(w, "\nCredentials written to %s (mode 0600, %d values, sha256 %s).\n"+
+	_, _ = fmt.Fprintf(w, "\nCredentials written to %s (mode 0600, %d values: %s; sha256 %s).\n"+
 		"Nothing secret was printed. Move the file off this machine and delete it here; do not read it into a log or an AI session.\n",
-		s.path, s.written, hex.EncodeToString(sum[:]))
+		s.path, s.written, strings.Join(s.keys, ", "), hex.EncodeToString(sum[:]))
 }
 
 // mayCreateCredentials reports whether an install run can create a credential
