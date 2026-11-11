@@ -359,10 +359,10 @@ func TestWaitRejectsTimeoutAboveAdvertisedMaximum(t *testing.T) {
 	}
 }
 
-func TestNormalizeTriggerMapsCIToBranch(t *testing.T) {
+func TestNormalizeTriggerMapsReleaseToTag(t *testing.T) {
 	t.Parallel()
-	if got := normalizeTrigger("ci"); got != "branch" {
-		t.Fatalf("normalizeTrigger(ci) = %q, want branch", got)
+	if got := normalizeTrigger("ci"); got != "ci" {
+		t.Fatalf("normalizeTrigger(ci) = %q; the removed alias must not map", got)
 	}
 	if got := normalizeTrigger("branch"); got != "branch" {
 		t.Fatalf("normalizeTrigger(branch) = %q, want branch", got)

@@ -1,8 +1,11 @@
 package api
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
-func TestFourPriorityClassSchemasAndLegacyInputAliases(t *testing.T) {
+func TestFourPriorityClassSchemas(t *testing.T) {
 	for _, tool := range toolDefinitions() {
 		schema := tool["inputSchema"].(map[string]any)
 		properties, _ := schema["properties"].(map[string]any)
@@ -10,14 +13,8 @@ func TestFourPriorityClassSchemasAndLegacyInputAliases(t *testing.T) {
 		if !ok {
 			continue
 		}
-		names := map[string]bool{}
-		for _, name := range value["enum"].([]string) {
-			names[name] = true
-		}
-		for _, name := range []string{"low", "standard", "promotion", "high", "normal", "highest"} {
-			if !names[name] {
-				t.Errorf("%s missing canonical class/input alias %s", tool["name"], name)
-			}
+		if got := fmt.Sprint(value["enum"]); got != "[low standard promotion high]" {
+			t.Errorf("%s priority classes %s", tool["name"], got)
 		}
 	}
 }

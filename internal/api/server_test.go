@@ -691,18 +691,18 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 	want := map[string][]string{
 		"status":              {"ref", "repo"},
 		"logs":                {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
-		"run_get":             {"id", "run_id", "summary"},
+		"run_get":             {"id", "summary"},
 		"run_list":            {"before", "held", "limit", "own", "ref", "repo", "status", "superseded", "view"},
-		"run_resources":       {"burn", "format", "include_failed", "last", "ref", "repo", "resource_only", "run", "run_id", "step"},
-		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "run_id", "tail"},
-		"run_retry":           {"id", "priority", "priority_reason", "run_id"},
-		"run_cancel":          {"force", "id", "reason", "run_id"},
-		"run_purge":           {"id", "reason", "run_id", "what"},
-		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "run_id", "step", "tail"},
-		"wait":                {"id", "repo", "run_id", "sha", "timeout_s", "trigger"},
+		"run_resources":       {"burn", "format", "id", "include_failed", "last", "ref", "repo", "step"},
+		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "tail"},
+		"run_retry":           {"id", "priority", "priority_reason"},
+		"run_cancel":          {"force", "id", "reason"},
+		"run_purge":           {"id", "reason", "what"},
+		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "step", "tail"},
+		"wait":                {"id", "repo", "sha", "timeout_s", "trigger"},
 		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
 		"promote":             {"branch", "priority", "priority_reason", "prune_source", "repo", "sha", "skip_conflicting", "sources"},
-		"run_wait":            {"id", "run_id", "timeout_s", "until"},
+		"run_wait":            {"id", "timeout_s", "until"},
 		"events_since":        {"after_id", "kinds", "limit", "own", "refs_glob", "repos"},
 		"events_wait":         {"after_id", "kinds", "limit", "own", "refs_glob", "repos", "run_ids", "timeout_s"},
 		"issue_list":          {"active_stale_after", "before", "kind", "limit", "query", "repo", "stale_after", "state", "work_status"},
@@ -1158,7 +1158,7 @@ func TestRunsPagesWithBeforeCursor(t *testing.T) {
 func TestRunsViewParameter(t *testing.T) {
 	server, backend := testServer(t)
 	backend.runPage = []model.Run{{ID: "a", QueueSequence: 9, Status: model.RunPassed}, {ID: "b", QueueSequence: 7, Status: model.RunPassed}}
-	for _, view := range []string{"", "all", "history", "active"} {
+	for _, view := range []string{"", "all", "history"} {
 		request := httptest.NewRequest(http.MethodGet, "/api/runs?limit=2&view="+view, nil)
 		request.Header.Set("Authorization", "Bearer valid-token")
 		response := httptest.NewRecorder()
@@ -1166,21 +1166,19 @@ func TestRunsViewParameter(t *testing.T) {
 		if response.Code != http.StatusOK || backend.runFilter.View != view {
 			t.Fatalf("view=%q status=%d filter=%+v", view, response.Code, backend.runFilter)
 		}
-		want := "7"
-		if view == RunViewActive {
-			want = ""
-		}
-		if got := response.Header().Get("X-Oberth-Next-Before"); got != want {
+		if got := response.Header().Get("X-Oberth-Next-Before"); got != "7" {
 			t.Fatalf("view=%q next cursor = %q", view, got)
 		}
 	}
 	backend.runFilter = RunFilter{}
-	request := httptest.NewRequest(http.MethodGet, "/api/runs?view=queue", nil)
-	request.Header.Set("Authorization", "Bearer valid-token")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest || backend.runFilter.Limit != 0 {
-		t.Fatalf("unknown view status=%d filter=%+v", response.Code, backend.runFilter)
+	for _, view := range []string{"queue", "active"} {
+		request := httptest.NewRequest(http.MethodGet, "/api/runs?view="+view, nil)
+		request.Header.Set("Authorization", "Bearer valid-token")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest || backend.runFilter.Limit != 0 {
+			t.Fatalf("unknown view status=%d filter=%+v", response.Code, backend.runFilter)
+		}
 	}
 }
 
@@ -1226,8 +1224,12 @@ func TestRunsPageLimitCountsOnlyDatedRows(t *testing.T) {
 		if dated == 2 {
 			want = "7"
 		}
-		var rows []model.Run
-		if err := json.Unmarshal(response.Body.Bytes(), &rows); err != nil || len(rows) != 2+dated || response.Code != http.StatusOK || response.Header().Get("X-Oberth-Next-Before") != want {
+		var page struct {
+			Runs []model.Run `json:"runs"`
+		}
+		err := json.Unmarshal(response.Body.Bytes(), &page)
+		rows := page.Runs
+		if err != nil || len(rows) != 2+dated || response.Code != http.StatusOK || response.Header().Get("X-Oberth-Next-Before") != want {
 			t.Fatalf("dated=%d status=%d header=%v body=%s error=%v", dated, response.Code, response.Header(), response.Body, err)
 		}
 	}

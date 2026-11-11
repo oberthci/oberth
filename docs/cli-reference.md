@@ -1231,7 +1231,7 @@ Usage: oberth runs [flags]
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -json
-        emit {"runs":[...],"next_before":N}; --active emits the server's array unchanged
+        emit {"runs":[...],"next_before":N}; --active emits {"runs":[...]}
   -limit int
         runs per page (at most 100) (default 20)
   -ref string

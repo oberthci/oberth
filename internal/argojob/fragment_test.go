@@ -87,7 +87,7 @@ func remainingRefs(workflow *wfv1.Workflow) int {
 
 func TestBuildResolvesAFragmentBeforeAdmission(t *testing.T) {
 	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
+	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
 	workflow, err := Build(testConfig(), request)
@@ -176,7 +176,7 @@ func TestBuildRefusesAFragmentCarryingAConstructTheGateRejects(t *testing.T) {
         securityContext:
           privileged: true
 `)}
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
+	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
 	_, err := Build(testConfig(), request)
@@ -189,7 +189,7 @@ func TestBuildRefusesAFragmentCarryingAConstructTheGateRejects(t *testing.T) {
 }
 
 func TestBuildRefusesAReferenceMissingFromTheFragmentMap(t *testing.T) {
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", "transferz/absent@v9"),
+	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", "transferz/absent@v9"),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{})
 
 	_, err := Build(testConfig(), request)
@@ -202,7 +202,7 @@ func TestBuildRefusesAReferenceMissingFromTheFragmentMap(t *testing.T) {
 }
 
 func TestBuildRefusesFragmentReferencesWithoutAPreLoadedMap(t *testing.T) {
-	request := testRequest(pipeline.TriggerCI, consumingDocument("    oberth.ci/size: S\n", "transferz/x@v1"))
+	request := testRequest(pipeline.TriggerCI, consumingDocument("    example.com/tier: S\n", "transferz/x@v1"))
 	request.Fragments = nil
 
 	if _, err := Build(testConfig(), request); err == nil {
@@ -212,7 +212,7 @@ func TestBuildRefusesFragmentReferencesWithoutAPreLoadedMap(t *testing.T) {
 
 func TestBuildIsIdenticalWhenCalledTwice(t *testing.T) {
 	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
+	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
 	first, err := Build(testConfig(), request)
@@ -270,7 +270,7 @@ func TestBuildRefusesInliningPastTheTemplateCeiling(t *testing.T) {
 	}
 	key := argoworkflow.FragmentKey{Repo: "transferz/huge", Version: "v1"}
 	fragment := argoworkflow.Fragment{Key: key, SHA: testSHA, Source: fragmentDocument(templates.String())}
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
+	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
 	if _, err := Build(testConfig(), request); err == nil {
@@ -280,7 +280,7 @@ func TestBuildRefusesInliningPastTheTemplateCeiling(t *testing.T) {
 
 func TestBuildRecordsTheResolvedFragmentVersions(t *testing.T) {
 	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
+	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
 	workflow, err := Build(testConfig(), request)
@@ -311,7 +311,7 @@ func TestBuildRecordsTheResolvedFragmentVersions(t *testing.T) {
 
 func TestAMovedTagChangesTheRecordedSHA(t *testing.T) {
 	key, fragment := plainFragment(t, "transferz/maven-verify", "v3")
-	source := consumingDocument("    oberth.ci/size: S\n", key.String())
+	source := consumingDocument("    example.com/tier: S\n", key.String())
 
 	build := func(sha string) string {
 		moved := fragment
@@ -356,24 +356,13 @@ func exclusiveFragment(t *testing.T) (argoworkflow.FragmentKey, argoworkflow.Fra
 `)}
 }
 
-// The retired oberth.ci/exclusive annotation is inert: a fragment that still
-// carries it builds, the annotation stays on the template as plain Pod
-// metadata, and nothing about admission depends on it.
-func TestBuildIgnoresRetiredExclusiveAnnotationInFragments(t *testing.T) {
+// A fragment carrying the removed oberth.ci/exclusive annotation is refused,
+// naming the native Argo semaphore that replaced it.
+func TestBuildRefusesRemovedExclusiveAnnotationInFragments(t *testing.T) {
 	key, fragment := exclusiveFragment(t)
-	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
+	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
-	workflow, err := Build(testConfig(), request)
-	if err != nil {
-		t.Fatalf("retired annotation refused: %v", err)
-	}
-	found := false
-	for _, template := range workflow.Spec.Templates {
-		if template.Metadata.Annotations[argoworkflow.RetiredExclusiveAnnotation] == "kvm" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("fragment template lost its (inert) annotation")
+	if _, err := Build(testConfig(), request); err == nil || !strings.Contains(err.Error(), "oberth.ci/exclusive is removed") {
+		t.Fatalf("removed annotation built: %v", err)
 	}
 }

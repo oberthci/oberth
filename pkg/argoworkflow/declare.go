@@ -13,24 +13,6 @@ import (
 // Repository annotations are read statically so the reviewed source and
 // admission decision cannot diverge through evaluated repository code.
 const (
-	// SizeAnnotation names the pipeline's historical S/M/L/XL tier. It is
-	// recorded with the run and shown, nothing more: admission counts runs
-	// and Kubernetes places each Pod by its own resources block.
-	SizeAnnotation = "oberth.ci/size"
-
-	// RetiredExclusiveAnnotation is the former per-step exclusive-class
-	// declaration. Since v0.18.0 it is accepted and ignored, so documents
-	// that still carry it keep running; steps that need a shared limit
-	// declare native Argo synchronization instead.
-	RetiredExclusiveAnnotation = "oberth.ci/exclusive"
-
-	// RetiredConcurrencyGroupAnnotation and RetiredConcurrencyLimitAnnotation
-	// are the former repository concurrency-group declarations. Since v0.20.0
-	// they are accepted and ignored, like oberth.ci/exclusive: a run that
-	// must not overlap another declares a native Argo mutex or semaphore.
-	RetiredConcurrencyGroupAnnotation = "oberth.ci/concurrency-group"
-	RetiredConcurrencyLimitAnnotation = "oberth.ci/concurrency-limit"
-
 	// SecretPathsAnnotation declares the OpenBao paths credentialed steps
 	// intend to read through secretstore exec. Admission checks the approval
 	// table and chooses the trigger-appropriate ServiceAccount. OpenBao role
@@ -39,25 +21,6 @@ const (
 )
 
 const maxDeclaredSecretPaths = 32
-
-// DeclaredSize returns the scheduler admission weight the document requests.
-func DeclaredSize(workflow *wfv1.Workflow) (pipeline.Size, error) {
-	if workflow == nil {
-		return "", errors.New("argoworkflow: no Workflow to read")
-	}
-	declared, ok := workflow.Annotations[SizeAnnotation]
-	if !ok || strings.TrimSpace(declared) == "" {
-		return pipeline.M, nil
-	}
-	size := pipeline.Size(strings.TrimSpace(declared))
-	switch size {
-	case pipeline.S, pipeline.M, pipeline.L, pipeline.XL:
-		return size, nil
-	default:
-		return "", fmt.Errorf("argoworkflow: annotation %s declares unknown size %q; sizes are %q, %q, %q, and %q",
-			SizeAnnotation, declared, pipeline.S, pipeline.M, pipeline.L, pipeline.XL)
-	}
-}
 
 // DeclaredSecretPaths returns the OpenBao KV paths the document declares it
 // will read in-Pod, in declaration order with duplicates rejected.
@@ -174,4 +137,19 @@ func resourceUsageCommand(command []string) []string {
 		return command[3:]
 	}
 	return command
+}
+
+// removedAnnotations are pipeline annotations Oberth no longer reads. A
+// document that carries one is refused, naming what replaced it, instead of
+// running as if it took effect.
+var removedAnnotations = map[string]string{
+	"oberth.ci/size":              "admission counts runs and Kubernetes places each Pod by its resources block; delete the annotation",
+	"oberth.ci/size-by-trigger":   "admission counts runs and Kubernetes places each Pod by its resources block; delete the annotation",
+	"oberth.ci/concurrency-group": "declare a native Argo mutex or semaphore (spec.synchronization) instead",
+	"oberth.ci/concurrency-limit": "declare a native Argo mutex or semaphore (spec.synchronization) instead",
+	"oberth.ci/exclusive":         "declare a native Argo semaphore (template synchronization, configMapKeyRef oberth-sync-limits) instead",
+}
+
+func removedAnnotation(location, name string) error {
+	return fmt.Errorf("argoworkflow: %s annotation %s is removed: %s", location, name, removedAnnotations[name])
 }

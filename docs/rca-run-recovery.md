@@ -61,14 +61,13 @@ Audit actions identify whether a particular execution was automatic.
 ## Dashboard history
 
 With the `all` status chip selected, the dashboard lists the latest run for each
-`(repository, ref kind, ref)`. It also fetches the existing unpaged
-`/api/runs?view=active` view, scoped by repository when selected, on **every**
-page. Any active run missing from that page's heads appears first, without
+`(repository, ref kind, ref)`. It also fetches the first page of the default
+`/api/runs` view (which carries every queued and running run), scoped by
+repository when selected, on **every** page. Any active run missing from that page's heads appears first, without
 duplicating a head. Thus a running nightly hidden by a newer push, work in
 another schedule lane, a pending publication, and active heads outside the
 current page remain visible. Status and release filters still apply to the
-combined rows. The active endpoint retains its existing server bound of 500;
-the UI adds no further active-run limit.
+combined rows. The UI adds no active-run limit of its own.
 
 Selecting any status other than `all` requests the **flat retained list**, then
 filters its loaded page. In particular, `failed` can find a finished nightly

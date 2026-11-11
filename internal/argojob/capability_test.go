@@ -17,7 +17,7 @@ const operatorResourceDocument = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: main
   activeDeadlineSeconds: 300
@@ -94,7 +94,7 @@ func TestCapabilityBuildBindsOperatorIdentityAndRefusesEscapes(t *testing.T) {
 		t.Fatal("ungranted resource workflow accepted")
 	}
 	secret := "oberth/upstream/acme/oberth/test-secret"
-	r = requestWithCapability(t, strings.Replace(operatorResourceDocument, "oberth.ci/size: L", "oberth.ci/size: L\n    oberth.ci/secret-paths: "+secret, 1), c)
+	r = requestWithCapability(t, strings.Replace(operatorResourceDocument, "example.com/tier: L", "example.com/tier: L\n    oberth.ci/secret-paths: "+secret, 1), c)
 	r.ApprovedSecrets[secret] = true
 	if _, err = Build(testConfig(), r); err == nil {
 		t.Fatal("operator authority combined with secret access")

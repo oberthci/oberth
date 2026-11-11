@@ -21,7 +21,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/resourcesampler"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type resourceRecorder struct {
@@ -171,7 +170,6 @@ func TestResourceSessionCopiesOnlyAtSamplingBoundary(t *testing.T) {
 func TestResourceSizeComparisonUsesWorkflowNotTerminationClaims(t *testing.T) {
 	wf, _, pod, _ := diagnosticFixture()
 	pod.Spec.NodeName = "node-a"
-	wf.Annotations[argoworkflow.SizeAnnotation] = "XL"
 	pod.Status.ContainerStatuses[0].State.Terminated.Message = `{"workflow_size":"S","memory_peak_bytes":1}`
 	beforeWorkflow, _ := json.Marshal(wf.Spec)
 	beforePod, _ := json.Marshal(pod.Spec)
@@ -181,7 +179,7 @@ func TestResourceSizeComparisonUsesWorkflowNotTerminationClaims(t *testing.T) {
 	if err := c.sampleResourceUsage(t.Context(), wf, wf.Annotations[runIDAnnotation]); err != nil {
 		t.Fatal(err)
 	}
-	if len(recorder.values) != 1 || recorder.values[0].WorkflowSize != "XL" || recorder.values[0].MemoryPeakBytes != nil {
+	if len(recorder.values) != 1 || recorder.values[0].WorkflowSize != "M" || recorder.values[0].MemoryPeakBytes != nil {
 		t.Fatal("termination claim became report authority", recorder.values)
 	}
 	afterWorkflow, _ := json.Marshal(wf.Spec)
@@ -193,34 +191,6 @@ func TestResourceSizeComparisonUsesWorkflowNotTerminationClaims(t *testing.T) {
 		if action.GetVerb() != "list" {
 			t.Fatal("report sampler mutated Kubernetes", action)
 		}
-	}
-}
-
-func TestResourceSizeComparisonTriggerClassOrUnknown(t *testing.T) {
-	wf, _, _, _ := diagnosticFixture()
-	wf.Annotations[argoworkflow.SizeAnnotation] = "L"
-	wf.Annotations[argoworkflow.SizeByTriggerAnnotation] = "branch=M,promotion=XL"
-	wf.Spec.Arguments.Parameters = nil
-	if size := observedResourceWorkflowSize(wf); size != "" {
-		t.Fatal("missing trigger was guessed", size)
-	}
-	wf.Spec.Arguments.Parameters = []wfv1.Parameter{{Name: argoworkflow.TriggerParameter, Value: wfv1.AnyStringPtr("promotion")}}
-	if size := observedResourceWorkflowSize(wf); size != "XL" {
-		t.Fatal("bound promotion class ignored", size)
-	}
-	wf.Spec.Arguments.Parameters = append(wf.Spec.Arguments.Parameters, wf.Spec.Arguments.Parameters[0])
-	if size := observedResourceWorkflowSize(wf); size != "" {
-		t.Fatal("ambiguous trigger was guessed", size)
-	}
-	wf.Spec.Arguments.Parameters = nil
-	delete(wf.Annotations, argoworkflow.SizeByTriggerAnnotation)
-	wf.Annotations[argoworkflow.SizeAnnotation] = "invalid"
-	if size := observedResourceWorkflowSize(wf); size != "" {
-		t.Fatal("invalid class accepted", size)
-	}
-	delete(wf.Annotations, argoworkflow.SizeAnnotation)
-	if size := observedResourceWorkflowSize(wf); size != "M" {
-		t.Fatal("valid Workflow default not respected", size)
 	}
 }
 

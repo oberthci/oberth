@@ -72,7 +72,7 @@ console.log('Keyboard rows passed');
 
 // The runs page reads the repository summary, once per slow poll.
 const requested = [];
-run(`api = async path => { globalThis.requestedPaths.push(path); if (path.startsWith('/api/repos')) return [{id: 1, name: 'app', upstream_id: 1}]; if (path === '/api/runs/counts') return {total: 0, by_repo: {}}; if (path === '/api/status') return state.status; if (path.includes('view=active')) return []; return {body: [], next: ''}; };`);
+run(`api = async path => { globalThis.requestedPaths.push(path); if (path.startsWith('/api/repos')) return [{id: 1, name: 'app', upstream_id: 1}]; if (path === '/api/runs/counts') return {total: 0, by_repo: {}}; if (path === '/api/status') return state.status; if (/[?&]limit=1(&|$)/.test(path)) return []; return {body: [], next: ''}; };`);
 sandbox.requestedPaths = requested;
 run(`state.repos = []; replaceApp = () => {};`);
 await run('renderRuns(state.routeSeq)');

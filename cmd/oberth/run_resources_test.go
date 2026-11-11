@@ -65,12 +65,10 @@ func TestRunResourcesCLIPreservesSizingAcceptance(t *testing.T) {
 	}
 }
 
-func TestRunResourcesCLIOptsIntoResourceOnlyAdvice(t *testing.T) {
+func TestRunResourcesCLIRendersAdviceWithoutDeadline(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("resource_only") != "true" {
-			t.Errorf("CLI did not advertise safe resource-only rendering: %s", r.URL)
-			_, _ = w.Write([]byte(`{"steps":[{"suggested":null}]}`))
-			return
+		if r.URL.Query().Has("resource_only") {
+			t.Errorf("CLI sent the removed resource_only: %s", r.URL)
 		}
 		_, _ = w.Write([]byte(`{"steps":[{"deadline_no_suggestion":"Pod finalization is not measured","suggested":{"cpu_milli":100,"memory_request_bytes":67108864,"memory_limit_bytes":134217728,"ephemeral_request_bytes":67108864,"ephemeral_limit_bytes":134217728}}]}`))
 	}))
@@ -83,7 +81,7 @@ func TestRunResourcesCLIOptsIntoResourceOnlyAdvice(t *testing.T) {
 			t.Fatal(err)
 		}
 		if strings.Contains(out.String(), "activeDeadlineSeconds") || !strings.Contains(out.String(), "memory_limit_bytes") || !strings.Contains(out.String(), "finalization") || (format == "yaml" && !strings.Contains(out.String(), "paste_ready:")) {
-			t.Fatalf("resource-only transport lost advice or invented deadline: %s", &out)
+			t.Fatalf("lost advice or invented deadline: %s", &out)
 		}
 	}
 }

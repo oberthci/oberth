@@ -18,17 +18,35 @@ var removedChartValues = []string{
 	"admission.exclusiveClasses",
 	"admission.legacyResources",
 	"admission.maxHeadWait",
+	"admission.pressure.cpuSomeAvg10",
+	"admission.pressure.cpuSomeAvg60Max",
+	"admission.pressure.hysteresis",
+	"admission.pressure.ioFullAvg60Max",
+	"admission.pressure.ioSomeAvg10",
+	"admission.pressure.maxDefer",
+	"admission.pressure.maxWaitSeconds",
+	"admission.pressure.mode",
 	"admission.runtimeCapacity",
 	"admission.sizeWeights",
+	"argo.ciSecretsServiceAccount",
+	"argo.ciServiceAccount",
 	"argo.containerDiskPrefixes",
+	"argo.enabled",
 	"argo.kubevirtCeiling",
+	"argo.vault.ciSecretsRole",
 	"argo.vmLauncherServiceAccount",
 	"argoSync",
+	"auditAnchor.rootsKey",
 	"gitBackend",
 	"gitcache",
 	"maxConcurrentJobs",
+	"secretCreatePolicy",
 	"trustedTests",
+	"upstream.createSecrets",
+	"upstream.keySecret",
+	"upstream.knownHostsSecret",
 	"vm",
+	"watchTunnel",
 }
 
 // removedChartValue returns the removed value that key names or lies under.
@@ -91,6 +109,26 @@ func checkRemovedUpgradeValues(cfg UpgradeConfig, stored map[string]any) error {
 		return nil
 	}
 	return removedValuesError(sources)
+}
+
+// refuseRemovedReleaseValues refuses an install re-run or a restore, which
+// reuse the installed release's values with Helm --reuse-values, while those
+// values (its stored values over its chart's defaults) still carry a removed
+// chart value. oberth upgrade is the way out: it drops stored ones with the
+// flags it names and resets chart defaults to the current chart's.
+func refuseRemovedReleaseValues(installed map[string]any, command string) error {
+	var keys []string
+	for _, removed := range removedChartValues {
+		if value, ok := chartValueAt(installed, removed); ok && value != nil {
+			keys = append(keys, removed)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return &ErrSchemaValidation{Detail: fmt.Sprintf("the installed release values set chart values that no longer exist: %s; %s changed nothing. "+
+		"Run oberth upgrade first: it names each stored one with the --set <key>=null flag that drops it, and replaces the installed chart's defaults",
+		strings.Join(keys, ", "), command)}
 }
 
 func removedValuesError(sources map[string]string) error {

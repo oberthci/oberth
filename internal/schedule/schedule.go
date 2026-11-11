@@ -115,7 +115,7 @@ func Parse(raw []byte, limits Limits, now time.Time) (File, error) {
 			continue
 		}
 		file.Entries = append(file.Entries, Entry{
-			Priority: entry.Priority.Canonical(), Name: name, Cron: entry.Cron, Branch: strings.TrimSpace(entry.Branch), schedule: compiled,
+			Priority: entry.Priority, Name: name, Cron: entry.Cron, Branch: strings.TrimSpace(entry.Branch), schedule: compiled,
 		})
 	}
 	return file, nil

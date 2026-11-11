@@ -213,10 +213,7 @@ function displayRunStatus(run) {
   return run.status;
 }
 function scheduleBadge(run) { return run.trigger === "schedule" && run.schedule_entry ? `<span class="v4b dim" title="schedule entry">${esc(run.schedule_entry)}</span>` : ""; }
-function priorityClass(run) {
-  const name = run.priority_class || "standard";
-  return name === "normal" ? "standard" : name === "highest" ? "high" : name;
-}
+function priorityClass(run) { return run.priority_class || "standard"; }
 function priorityBadge(run) {
   const priority = priorityClass(run);
   const label = {low:"low priority", high:"high priority", promotion:"priority promotion"}[priority];
@@ -384,6 +381,13 @@ function clearToken() {
    moved on is discarded ("stale request"), and navigation aborts it. A
    detached request (opts.detached) belongs to no route — the background
    /api/status fetch — so only a change of token discards it. */
+/* Collection views are objects ({"runs": [...]}, {"repositories": [...]},
+   {"grants": [...]}); callers work on the rows. */
+const collectionFields = { "/api/runs": "runs", "/api/repos": "repositories", "/api/grants": "grants" };
+function collectionRows(url, body) {
+  const field = collectionFields[url.split("?")[0]];
+  return field && body && Array.isArray(body[field]) ? body[field] : body;
+}
 async function api(url, opts = {}) {
   const gen = state.authGen;
   const seq = state.routeSeq;
@@ -425,7 +429,7 @@ async function api(url, opts = {}) {
     throw error;
   }
   setConn(true, "connected");
-  const body = await response.json();
+  const body = collectionRows(url, await response.json());
   const etag = typeof response.headers?.get === "function" ? response.headers.get("ETag") : null;
   const next = opts.withNext || etag ? response.headers.get("X-Oberth-Next-Before") || "" : "";
   if (etag) rememberView(url, { etag, body, next, gen });
@@ -495,13 +499,15 @@ async function loadRepoRuns() {
   }
 }
 /* Fetch on every page: an active run may be behind a newer push, in another
-   schedule lane, or have its own head beyond the current page of 100 refs. */
+   schedule lane, or have its own head beyond the current page of 100 refs.
+   The first page carries every queued and running run; its one terminal row
+   is dropped. */
 async function loadActiveRuns() {
   const repo = state.repo;
-  const query = new URLSearchParams({ view: "active" });
+  const query = new URLSearchParams({ limit: "1" });
   if (repo !== "all") query.set("repo", repo);
   try {
-    state.activeRuns = await api("/api/runs?" + query) || [];
+    state.activeRuns = (await api("/api/runs?" + query) || []).filter(run => !isTerminalRun(run));
     state.activeRunsRepo = repo;
     state.activeRunsComplete = true;
   } catch (err) {

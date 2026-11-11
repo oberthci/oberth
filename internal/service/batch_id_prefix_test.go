@@ -25,7 +25,7 @@ func TestBatchRunPriorityUniquePrefixes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		value, err := control.CallTool(t.Context(), api.Actor{Identity: "admin", Admin: true}, "run_priority", json.RawMessage(fmt.Sprintf(`{"run_id":%q,"priority":"high","reason":"prioritize queued run"}`, run.ID[:n])))
+		value, err := control.CallTool(t.Context(), api.Actor{Identity: "admin", Admin: true}, "run_priority", json.RawMessage(fmt.Sprintf(`{"id":%q,"priority":"high","reason":"prioritize queued run"}`, run.ID[:n])))
 		if err != nil {
 			t.Errorf("%d characters: %v", n, err)
 			continue
@@ -125,13 +125,8 @@ func TestBatchToolAmbiguousPrefixes(t *testing.T) {
 				args := map[string]any{}
 				switch tool {
 				case "run_priority":
-					key = "run_id"
 					args["priority"] = "high"
 					args["reason"] = "release blocker"
-				case "admission_release":
-					key = "run_id"
-				case "run_resources":
-					key = "run"
 				case "run_list":
 					key = "before"
 				case "promotion_list":

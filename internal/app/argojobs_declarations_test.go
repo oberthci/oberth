@@ -60,7 +60,7 @@ const declarationWorkflow = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
     oberth.ci/secret-paths: "oberth/data/release/r2-token,oberth/data/release/cosign-key"
 spec:
   entrypoint: main
@@ -197,7 +197,7 @@ func TestRecordDeclarations_NoSecretPaths(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: S
+    example.com/tier: S
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600

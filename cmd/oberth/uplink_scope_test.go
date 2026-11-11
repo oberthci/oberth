@@ -18,18 +18,6 @@ import (
 	"github.com/oberthci/oberth/internal/storetest"
 )
 
-// The runs cursor is the oldest run's sequence, or its ID when a scoped
-// uplink's server withholds sequences (#073).
-func TestRunCursorFallsBackToTheRunID(t *testing.T) {
-	t.Parallel()
-	if runCursor(remoteRun{ID: "abc", QueueSequence: 7}) != "7" || runCursor(remoteRun{ID: "abc"}) != "abc" {
-		t.Fatal("run cursor")
-	}
-	if !cursorMovedBack("9", "7") || !cursorMovedBack("7", "9") || cursorMovedBack("abc", "abc") || !cursorMovedBack("abc", "def") || !cursorMovedBack("abc", "") {
-		t.Fatal("cursor progress")
-	}
-}
-
 func TestScopeFlagIsRepeatableAndCommaSeparated(t *testing.T) {
 	t.Parallel()
 	var scope []string

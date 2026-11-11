@@ -216,9 +216,9 @@ longer start.
 
 ## Migrating from concurrency groups
 
-`oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit` are accepted
-and ignored since v0.20.0, like `oberth.ci/exclusive` since v0.18.0: a
-document that still carries them runs, without the limit. A group of one is a
+`oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit` are removed,
+like `oberth.ci/exclusive`: admission and `oberth validate` refuse a document
+that carries one, naming the replacement. A group of one is a
 workflow-level native mutex; the name is shared across repositories and
 triggers, as the group was:
 

@@ -159,7 +159,7 @@ try {
       const start = requests.length;
       await page.locator(`[data-status-filter="${filter}"]`).click();
       await page.locator(`.runs-table > [data-run-id="${id}"]`).waitFor();
-      assert.ok(requests.slice(start).some(path=>path.startsWith('/api/runs?')&&!path.includes('view=active')&&!path.includes('latest_per_ref')));
+      assert.ok(requests.slice(start).some(path=>path.startsWith('/api/runs?')&&!/[?&]limit=1(&|$)/.test(path)&&!path.includes('latest_per_ref')));
       assert.ok((await page.locator('.runs-footer').textContent()).includes('All retained runs'));
     }
     await page.locator('[data-status-filter="all"]').click();
@@ -256,7 +256,7 @@ try {
   await page.locator('[data-status-filter="running"]').click();
   await page.locator('[data-status-filter="running"].on').waitFor();
   await page.locator('.runs-table > [data-run-id="scheduled-running"]').waitFor();
-  assert.ok(requests.slice(filterStart).some(path=>path.startsWith('/api/runs?')&&!path.includes('view=active')&&!path.includes('latest_per_ref')&&!path.includes('before=')),'changing status on page two resets to the flat first page');
+  assert.ok(requests.slice(filterStart).some(path=>path.startsWith('/api/runs?')&&!/[?&]limit=1(&|$)/.test(path)&&!path.includes('latest_per_ref')&&!path.includes('before=')),'changing status on page two resets to the flat first page');
   paging = false; sharedNames = true; delayStatus = true;
   const direct = await browser.newPage();
   await direct.addInitScript(()=>localStorage.setItem('oberth-token','fixture-token'));

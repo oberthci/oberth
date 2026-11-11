@@ -43,7 +43,7 @@ func queueDemandListFixture(t *testing.T, count int, reader *queueDemandReviewRe
 }
 
 func TestQueuedListsKeepSuccessfulDemandAcrossPolls(t *testing.T) {
-	for _, view := range []string{"", api.RunViewActive} {
+	for _, view := range []string{""} {
 		t.Run(view, func(t *testing.T) {
 			const count = 20
 			reader := &queueDemandReviewReader{read: func(context.Context) (*argoworkflow.PodDemand, error) {
@@ -62,8 +62,6 @@ func TestQueuedListsKeepSuccessfulDemandAcrossPolls(t *testing.T) {
 				switch list := value.(type) {
 				case []model.Run:
 					rows = len(list)
-				case []ActiveRun:
-					rows = len(list)
 				}
 				if rows != count || reader.calls.Load() != count {
 					t.Fatalf("poll %d rows=%d source reads=%d, want %d then zero more", poll, rows, reader.calls.Load(), count)
@@ -74,7 +72,7 @@ func TestQueuedListsKeepSuccessfulDemandAcrossPolls(t *testing.T) {
 }
 
 func TestQueuedListsShareOneDemandBudgetAndCacheFailures(t *testing.T) {
-	for _, view := range []string{"", api.RunViewActive} {
+	for _, view := range []string{""} {
 		for _, slow := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/timeout=%v", view, slow), func(t *testing.T) {
 				reader := &queueDemandReviewReader{read: func(ctx context.Context) (*argoworkflow.PodDemand, error) {

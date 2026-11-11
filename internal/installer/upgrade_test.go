@@ -119,7 +119,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
 	t.Parallel()
 	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
-	if err := os.WriteFile(valuesFile, []byte("watchTunnel:\n  enabled: true\n"), 0o600); err != nil {
+	if err := os.WriteFile(valuesFile, []byte("pushBannerURL: https://ci.example.invalid\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
@@ -343,7 +343,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
-	if err := os.WriteFile(valuesFile, []byte("watchTunnel:\n  enabled: true\n"), 0o600); err != nil {
+	if err := os.WriteFile(valuesFile, []byte("pushBannerURL: https://ci.example.invalid\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	withSignedRelease(t, &deps, targetVersion, targetImage)

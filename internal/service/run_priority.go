@@ -58,7 +58,7 @@ func (service *API) queuePriorityTool(ctx context.Context, actor api.Actor, name
 		return map[string]any{"rc_patterns": patterns, "starvation_minutes": 60}, nil
 	}
 	var args struct {
-		RunID    string            `json:"run_id"`
+		RunID    string            `json:"id"`
 		Priority model.RunPriority `json:"priority"`
 		Reason   string            `json:"reason"`
 	}

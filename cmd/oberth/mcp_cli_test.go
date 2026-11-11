@@ -417,9 +417,9 @@ func TestMCPStructuredResponseDecoding(t *testing.T) {
 	}
 }
 
-// Mixed-version rollouts must preserve text from old servers even when their
-// structuredContent is an array, null or scalar. Only objects supply a fallback.
-func TestMCPCallStructuredContentCompatibility(t *testing.T) {
+// Text content is printed as is; structured content is the fallback when no
+// text came.
+func TestMCPCallStructuredContentFallback(t *testing.T) {
 	for _, tc := range []struct {
 		name, structured, text, want string
 		isError                      bool
@@ -427,15 +427,8 @@ func TestMCPCallStructuredContentCompatibility(t *testing.T) {
 		{name: "object fallback", structured: `{"grants":[]}`, want: "{\"grants\":[]}\n"},
 		{name: "object with whitespace", structured: " \n{\"grants\":[]} \t", want: "{\"grants\":[]}\n"},
 		{name: "text preferred", structured: `{"grants":[]}`, text: "readable text", want: "readable text\n"},
-		{name: "legacy empty array", structured: `[]`, text: `[]`, want: "[]\n"},
-		{name: "legacy populated array", structured: `[{"id":"grant-1"}]`, text: `[{"id":"grant-1"}]`, want: "[{\"id\":\"grant-1\"}]\n"},
-		{name: "legacy null", structured: `null`, text: `null`, want: "null\n"},
-		{name: "legacy scalar", structured: `"legacy"`, text: "legacy text", want: "legacy text\n"},
-		{name: "text only", text: "legacy text", want: "legacy text\n"},
-		{name: "array without text", structured: `[]`},
-		{name: "null without text", structured: `null`},
-		{name: "scalar without text", structured: `true`},
-		{name: "legacy tool error", structured: `[]`, text: "forbidden", want: "forbidden\n", isError: true},
+		{name: "text only", text: "plain text", want: "plain text\n"},
+		{name: "tool error", structured: `{"error":"forbidden"}`, text: "forbidden", want: "forbidden\n", isError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

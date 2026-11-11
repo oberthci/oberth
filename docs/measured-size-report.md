@@ -4,8 +4,8 @@ This is a report-only follow-up to the opt-in trusted sampler. Admission does
 not use sizes: since v0.20.0 it counts runs, Argo controller `parallelism`
 bounds running Workflows and shared step limits are native Argo
 `synchronization` ([where limits live](where-limits-live.md)). The S/M/L/XL
-buckets below are the historical `oberth.ci/size` labels a Workflow still
-declares, kept only to group the measurements. Nothing in the report changes a
+buckets below group the measurements by the size recorded with each run; the
+`oberth.ci/size` annotations are removed, so new runs all record M. Nothing in the report changes a
 grant, authored request/limit, Workflow or retry policy. It supplies no
 automatic request recommendation.
 
@@ -29,14 +29,7 @@ Unknown values remain null/count0; a measured zero remains a counted zero.
 Counts are container incarnations in the bounded selected window, not an entire
 repository population, independent jobs, or a complete Workflow census.
 
-The size label comes from the verified observed Workflow declaration. A
-size-by-trigger annotation requires one valid server-bound oberth-trigger
-parameter; otherwise that observation's class is unknown. This cannot recover
-an unstamped trigger for old submitted objects or new Workflows declaring
-`oberth.ci/size-by-trigger` without declaring or referencing `oberth-trigger`
-in their spec: the server stamps the parameter only when the spec uses it.
-A valid ordinary Workflow with no size annotation uses its documented M default.
-Old stored observations with no class remain unknown; a later trusted
+Every observed Workflow records size M. Old stored observations with no class remain unknown; a later trusted
 observation may fill it. Conflicting
 labels clear it permanently and flag the observation without losing measured
 usage. Termination-message/progress-declared classes are never used as trusted

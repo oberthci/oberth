@@ -362,10 +362,10 @@ one with a non-admin token is still answered with the server's refusal.
 | `size_grant_get` | Read the size grant (`max_size`) and its state: `never_granted`, `granted`, or `revoked` (revoked disables automatic tag priority) |
 | `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
 | `queue_priority_get` | Read RC patterns and the 60-minute threshold after which a standard run ages into promotion; unscoped admin |
-| `priority_grant` | Allow `identity` to request priority up to `max_class` (`promotion` or `high`; legacy `highest` aliases high) until RFC3339 `expires`; unscoped admin, audited |
+| `priority_grant` | Allow `identity` to request priority up to `max_class` (`promotion` or `high`) until RFC3339 `expires`; unscoped admin, audited |
 | `priority_grant_list` | List priority grants and expiry; unscoped admin |
 | `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
-| `run_priority` | Set a waiting run using exact `run_id`, `priority` (`low`, `standard`, `promotion` or `high`; legacy aliases accepted) and `reason`; unscoped admin, audited |
+| `run_priority` | Set a waiting run using exact `id`, `priority` (`low`, `standard`, `promotion` or `high`) and `reason`; unscoped admin, audited |
 | `admission_hold` | Admin-only [admission hold](admission-hold.md) with allowed classes and bounded expiry; read through system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
@@ -748,9 +748,9 @@ Authenticated `GET` endpoints serve the same state as a web dashboard:
 
 | Endpoint | Content |
 |----------|---------|
-| `/api/runs` | All CI runs; `?view=history` for terminal runs, `?view=active` for the deprecated ordered active list |
+| `/api/runs` | `{"runs": [...]}`: all CI runs, the queue and running runs first; `?view=history` for terminal runs only |
 | `/api/runs/counts` | Total retained, queued and running counts, also per repository |
-| `/api/repos` | Registered repositories |
+| `/api/repos` | `{"repositories": [...]}`: registered repositories |
 | `/api/issues` | Paged issues with `total` for the selected filters and `counts` by state and kind |
 | `/api/status` | System health summary |
 
@@ -1049,20 +1049,18 @@ continue using only the server's bounded display_reason; no new status or layout
 is added. Standard has no priority prefix; explicit nonstandard classes and aging
 use the existing reason line. Automatic promotion/tag urgency is implied by ref.
 
-Deprecated input normal maps to standard; explicit authorized high/highest and
-legacy grants map to high. MCP enums retain the normal/highest input aliases for
-current clients, while responses use canonical names. Automatic historical rows
+Requests take only the four canonical names; `normal` and `highest` are
+refused. Stored rows an earlier server wrote as normal/highest read as
+standard/high. Automatic historical rows
 with requested='' remain protection evidence, never high authorization.
 The new timestamp migration preserves raw stored priority/audit evidence and all
 shipped migration semantics. See [execution priority](release-priority.md) for
 upgrade mapping, rollback and detailed authority/fairness rules.
 
-## Additive API names and conditional issue updates
+## API names and conditional issue updates
 
-See [HTTP/MCP compatibility](api-compatibility.md) for preferred snake_case
-fields, run ID aliases, opt-in collection envelopes and the deprecation policy.
-Existing names and default envelopes remain supported throughout v0.17.x,
-with the documented `/api/issues` privacy exception.
+See [HTTP/MCP compatibility](api-compatibility.md) for snake_case fields, the
+`id` run selector, collection envelopes and the removal policy.
 Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).

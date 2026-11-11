@@ -58,8 +58,12 @@ func TestRunListMCPMatchesHTTPOrderAndPassedAlias(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	var rows []model.Run
-	if err = json.Unmarshal(response.Body.Bytes(), &rows); err != nil || response.Code != http.StatusOK {
+	var page struct {
+		Runs []model.Run `json:"runs"`
+	}
+	err = json.Unmarshal(response.Body.Bytes(), &page)
+	rows := page.Runs
+	if err != nil || response.Code != http.StatusOK {
 		t.Fatalf("HTTP %d %s: %v", response.Code, response.Body, err)
 	}
 	value, err := reader.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_list", json.RawMessage(`{"limit":2}`))

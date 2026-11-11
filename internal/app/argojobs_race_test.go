@@ -134,7 +134,7 @@ func newRaceFixture(t *testing.T) *raceFixture {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600
@@ -339,7 +339,7 @@ func TestDeleteBeforeCreateSeeding(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600

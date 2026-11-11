@@ -22,11 +22,11 @@
     },
     "annotation:oberth.ci/concurrency-group": {
       "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitIgnoresRetiredConcurrencyGroupAnnotations"
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
     },
     "annotation:oberth.ci/concurrency-limit": {
       "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitIgnoresRetiredConcurrencyGroupAnnotations"
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
     },
     "value:releases": {
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",
@@ -40,9 +40,17 @@
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",
       "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
     },
+    "annotation:oberth.ci/size": {
+      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
+    "annotation:oberth.ci/size-by-trigger": {
+      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
     "annotation:oberth.ci/exclusive": {
       "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
-      "test_ref": "internal/argojob/fragment_test.go TestBuildIgnoresRetiredExclusiveAnnotationInFragments"
+      "test_ref": "internal/argojob/fragment_test.go TestBuildRefusesRemovedExclusiveAnnotationInFragments"
     },
     "annotation:oberth.ci/trigger": {
       "doc_anchor": "docs/assisted-continuation.md#capacity-supersession-and-bounds",

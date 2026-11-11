@@ -73,7 +73,7 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, st
 	dropClearedRemovedValues(cleared, values)
 	values["removedOldDefault"] = "not user configuration"
 	values["compatibility"] = map[string]any{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}
-	config := map[string]any{"image": map[string]any{"ref": "example.invalid/old@sha256:" + strings.Repeat("2", 64)}, "argo": map[string]any{"enabled": true, "goProxy": map[string]any{"enabled": false}}, "pushBannerURL": "", "retention": map[string]any{"keepNewestPerRef": 0}, "podAnnotations": map[string]any{"round17.example/stored": "kept"}}
+	config := map[string]any{"image": map[string]any{"ref": "example.invalid/old@sha256:" + strings.Repeat("2", 64)}, "argo": map[string]any{"goProxy": map[string]any{"enabled": false}}, "pushBannerURL": "", "retention": map[string]any{"keepNewestPerRef": 0}, "podAnnotations": map[string]any{"round17.example/stored": "kept"}}
 	if storedRemoved {
 		config["trustedTests"] = map[string]any{"runtime": "old"}
 		config["maxConcurrentJobs"] = 3

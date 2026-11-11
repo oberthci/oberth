@@ -11,7 +11,7 @@ func groupedPipeline(annotations string) string {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
 ` + annotations + `spec:
   entrypoint: main
   activeDeadlineSeconds: 3600

@@ -80,6 +80,14 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 			if err := recoverHelperStorage(&input, &r); err != nil {
 				t.Fatal(err)
 			}
+			if _, renamed := input.Annotations["oberth.ci/size"]; renamed {
+				renameRemovedSizeAnnotation(&input)
+				identity, err := specIdentity(&input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input.Annotations[identityAnnotation] = identity
+			}
 			current, err := Build(c, r)
 			if err != nil {
 				t.Fatal(err)
@@ -168,5 +176,21 @@ func assertWIFPodIsolation(t *testing.T, shape string, spec corev1.PodSpec) {
 	}
 	if !main || !executor {
 		t.Fatal("observation lost main or independent executor")
+	}
+}
+
+// renameRemovedSizeAnnotation moves a captured Workflow's removed
+// oberth.ci/size annotation to the inert key the current fixture documents
+// carry instead. Controller behaviour never read it, so the captured proof
+// stays pinned; only this metadata key and the spec identity follow.
+func renamedSpecIdentity(workflow *wfv1.Workflow) (string, error) {
+	renameRemovedSizeAnnotation(workflow)
+	return specIdentity(workflow)
+}
+
+func renameRemovedSizeAnnotation(workflow *wfv1.Workflow) {
+	if size, ok := workflow.Annotations["oberth.ci/size"]; ok {
+		delete(workflow.Annotations, "oberth.ci/size")
+		workflow.Annotations["example.com/tier"] = size
 	}
 }

@@ -13,7 +13,7 @@ const fragmentConsumer = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: S
+    example.com/tier: S
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -76,7 +76,7 @@ func TestValidateRefusesRetiredExecution(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: S
+    example.com/tier: S
     oberth.ci/kvm-templates: kernel-test
 spec:
   entrypoint: main

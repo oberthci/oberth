@@ -25,12 +25,12 @@ import (
 
 func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	dir := t.TempDir()
-	routed := strings.ReplaceAll(groupedPipeline("    oberth.ci/concurrency-group: deployment\n"), "name: main", "name: deploy")
+	routed := strings.ReplaceAll(groupedPipeline(""), "name: main", "name: deploy")
 	routed = strings.ReplaceAll(routed, "entrypoint: main", "entrypoint: root")
 	routed = strings.ReplaceAll(routed, "  templates:\n", "  templates:\n    - name: root\n      dag:\n        tasks:\n        - name: deploy\n          template: deploy\n")
 	writePipeline(t, dir, "deploy.yaml", routed)
-	writePipeline(t, dir, "build.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: S"))
-	writePipeline(t, dir, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: XL"))
+	writePipeline(t, dir, "build.yaml", strings.ReplaceAll(groupedPipeline(""), "example.com/tier: M", "example.com/tier: S"))
+	writePipeline(t, dir, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "example.com/tier: M", "example.com/tier: XL"))
 	jobs := &ArgoJobs{config: argojob.Config{ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}}
 	request := service.WorkflowRequest{SourceDir: dir, UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{Release: true, RefKind: model.RefTag, Ref: "deploy-1"}}
 	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
@@ -46,14 +46,14 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 		t.Fatalf("credentialed=%v err=%v", credentialed, err)
 	}
 	request.Run.Ref = "v1"
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.XL {
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
 		t.Fatalf("default release changed: %s %v", size, err)
 	}
 	request.Run.Release = false
 	request.Run.Trigger = "branch"
 	request.Run.Ref = "deploy-1"
 	request.Run.RefKind = model.RefBranch
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.S {
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
 		t.Fatalf("branch read release route: %s %v", size, err)
 	}
 	request.Run.Release = true
@@ -178,7 +178,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	git(work, "init", "-b", "main")
-	writePipeline(t, work, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: XL"))
+	writePipeline(t, work, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "example.com/tier: M", "example.com/tier: XL"))
 	writePipeline(t, work, "deploy.yaml", groupedPipeline(""))
 	git(work, "add", ".")
 	git(work, "commit", "-m", "release workflows")
@@ -237,7 +237,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	for _, tc := range []struct {
 		tag, file string
 		size      pipeline.Size
-	}{{"deploy-1", ".oberth/deploy.yaml", pipeline.M}, {"v1", ".oberth/release.yaml", pipeline.XL}} {
+	}{{"deploy-1", ".oberth/deploy.yaml", pipeline.M}, {"v1", ".oberth/release.yaml", pipeline.M}} {
 		git(work, "tag", "-a", tc.tag, "-m", tc.tag)
 		object := git(work, "rev-parse", "refs/tags/"+tc.tag)
 		commit := git(work, "rev-parse", "refs/tags/"+tc.tag+"^{commit}")

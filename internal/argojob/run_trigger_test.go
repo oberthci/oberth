@@ -15,10 +15,6 @@ import (
 const guardedDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
-metadata:
-  annotations:
-    oberth.ci/size: XL
-    oberth.ci/size-by-trigger: branch=M,promotion=XL,schedule=XL
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600

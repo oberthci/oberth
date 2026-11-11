@@ -193,39 +193,22 @@ func TestValidateWithoutReleaseYAMLShowsOptionalMessage(t *testing.T) {
 	}
 }
 
-// Since v0.20.0 the concurrency-group annotation is retired: `oberth
-// validate`, like server admission, accepts and ignores it whatever its value.
-func TestValidateIgnoresTheRetiredConcurrencyGroupAnnotation(t *testing.T) {
+// The removed concurrency-group annotation fails validation, naming the
+// native Argo synchronization that replaced it.
+func TestValidateRefusesTheRemovedConcurrencyGroupAnnotation(t *testing.T) {
 	t.Parallel()
-	const sizeLine = "    oberth.ci/size: S\n"
-	if !strings.Contains(buildYAMLDemo, sizeLine) {
-		t.Fatalf("the demo template no longer carries %q; update this fixture", sizeLine)
+	root := t.TempDir()
+	oberthDir := filepath.Join(root, ".oberth")
+	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		group string
-		pass  bool
-	}{
-		{"terraform-state", true},
-		{"Terraform_State", true},
-		{strings.Repeat("g", 64), true},
-	} {
-		root := t.TempDir()
-		oberthDir := filepath.Join(root, ".oberth")
-		if err := os.MkdirAll(oberthDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		document := strings.Replace(buildYAMLDemo, sizeLine, sizeLine+"    oberth.ci/concurrency-group: "+tc.group+"\n", 1)
-		if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte(document), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		var output bytes.Buffer
-		err := runValidate(context.Background(), []string{root}, &output)
-		switch {
-		case tc.pass && err != nil:
-			t.Fatalf("retired group annotation %q refused: %v\n%s", tc.group, err, output.String())
-		case !tc.pass && (err == nil || !strings.Contains(output.String(), "oberth.ci/concurrency-group") ||
-			!strings.Contains(output.String(), "result: FAIL")):
-			t.Fatalf("malformed group %q = %v\n%s", tc.group, err, output.String())
-		}
+	document := strings.Replace(buildYAMLDemo, "kind: Workflow\n", "kind: Workflow\nmetadata:\n  annotations:\n    oberth.ci/concurrency-group: terraform-state\n", 1)
+	if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte(document), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err := runValidate(context.Background(), []string{root}, &output)
+	if err == nil || !strings.Contains(output.String(), "oberth.ci/concurrency-group is removed") || !strings.Contains(output.String(), "result: FAIL") {
+		t.Fatalf("removed group annotation = %v\n%s", err, output.String())
 	}
 }

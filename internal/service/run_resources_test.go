@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -27,61 +28,32 @@ func (s *resourceHistoryStub) RunResources(_ context.Context, id int64, f store.
 	return s.history, nil
 }
 
-func TestRunResourcesRequiresResourceOnlyCapability(t *testing.T) {
-	for _, mode := range []string{"legacy", "explicit-false", "resource-only"} {
-		t.Run(mode, func(t *testing.T) {
-			f := newScopeFixture(t)
-			reader := &resourceHistoryStub{history: completeAdviceHistory(f.visible.Name)}
-			f.service.runResources = reader
-			args := map[string]any{"repo": f.visible.Name}
-			if mode != "legacy" {
-				args["resource_only"] = mode == "resource-only"
-			}
-			got, err := f.call(scopedActor, "run_resources", args)
-			if err != nil {
-				t.Fatal(err)
-			}
-			report := got.(measured.Report)
-			if len(report.Steps) != 1 {
-				t.Fatalf("missing measurements: %+v", report)
-			}
-			step := report.Steps[0]
-			if step.Attempts != 5 || step.Samples != 20 || *step.MemoryPeakBytes.Max != 512<<20 || *step.AverageCPUNanoCores.P95 != 500_000_000 || *step.EphemeralBytes.Max != 100<<20 || *step.DurationNS.Max != int64(10*time.Second) {
-				t.Fatalf("capability changed observations: %+v", step)
-			}
-			if mode == "resource-only" {
-				if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 2<<30 || step.Suggested.EphemeralLimitBytes != 512<<20 || step.Suggested.ActiveDeadlineSeconds != 0 || !strings.Contains(step.DeadlineNoSuggestion, "finalization") {
-					t.Fatalf("supported resource advice: %+v", step)
-				}
-				return
-			}
-			// Previous CLIs decode into an int64 deadline, then unconditionally
-			// re-encode it and copy it into YAML whenever suggested is non-null.
-			body, err := json.Marshal(report)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var legacy struct {
-				Steps []struct {
-					Suggested *struct {
-						ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds"`
-					} `json:"suggested"`
-					NoSuggestion []string `json:"no_suggestion"`
-					Semantics    string   `json:"semantics"`
-				} `json:"steps"`
-			}
-			if err := json.Unmarshal(body, &legacy); err != nil {
-				t.Fatal(err)
-			}
-			if legacy.Steps[0].Suggested != nil {
-				t.Fatalf("previous CLI would fabricate a zero deadline: %s", body)
-			}
-			if step.SizingAcceptance.Sufficient || !strings.Contains(strings.Join(legacy.Steps[0].NoSuggestion, " "), "resource_only") || !strings.Contains(report.Semantics, "finalization") {
-				t.Fatalf("legacy client lacks explanation: %s", body)
-			}
-		})
+// Every caller receives resource advice; a suggestion never carries a
+// deadline, absent rather than zero.
+func TestRunResourcesAdviceOmitsDeadline(t *testing.T) {
+	f := newScopeFixture(t)
+	reader := &resourceHistoryStub{history: completeAdviceHistory(f.visible.Name)}
+	f.service.runResources = reader
+	got, err := f.call(scopedActor, "run_resources", map[string]any{"repo": f.visible.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := got.(measured.Report)
+	if len(report.Steps) != 1 {
+		t.Fatalf("missing measurements: %+v", report)
+	}
+	step := report.Steps[0]
+	if step.Attempts != 5 || step.Samples != 20 || *step.MemoryPeakBytes.Max != 512<<20 || *step.AverageCPUNanoCores.P95 != 500_000_000 || *step.EphemeralBytes.Max != 100<<20 || *step.DurationNS.Max != int64(10*time.Second) {
+		t.Fatalf("observations: %+v", step)
+	}
+	if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 2<<30 || step.Suggested.EphemeralLimitBytes != 512<<20 || step.Suggested.ActiveDeadlineSeconds != 0 || !strings.Contains(step.DeadlineNoSuggestion, "finalization") {
+		t.Fatalf("resource advice: %+v", step)
+	}
+	if _, err := f.call(scopedActor, "run_resources", map[string]any{"repo": f.visible.Name, "resource_only": true}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("removed resource_only accepted: %v", err)
 	}
 }
+
 func TestRunResourcesAuthorizesBeforeHistoryAndDefaults(t *testing.T) {
 	f := newScopeFixture(t)
 	reader := &resourceHistoryStub{}

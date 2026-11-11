@@ -257,9 +257,8 @@ func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.Workflo
 	return jobs.create(ctx, request, pipeline.TriggerRelease)
 }
 
-// PipelineSize reads the run's declared scheduler weight from the checked-out
-// document without evaluating anything: the size-by-trigger entry for this
-// run's own trigger when the document names one, oberth.ci/size otherwise.
+// PipelineSize is the size recorded with the run: M for every run of a
+// readable document, since size annotations are removed.
 func (jobs *ArgoJobs) PipelineSize(ctx context.Context, request service.WorkflowRequest) (pipeline.Size, error) {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forRequest(ctx, request)

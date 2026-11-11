@@ -215,3 +215,30 @@ func TestUpgradeRefusesRemovedChartValues(t *testing.T) {
 		t.Fatalf("removed --set not named: %v", err)
 	}
 }
+
+// The chart test scripts strip the same removed values the upgrade refuses.
+func TestStripScriptListsEveryRemovedChartValue(t *testing.T) {
+	body, err := os.ReadFile("../../hack/strip-removed-chart-values.awk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `split("` + strings.Join(removedChartValues, " ") + `", list, " ")`
+	if !strings.Contains(string(body), want) {
+		t.Fatalf("hack/strip-removed-chart-values.awk lists other keys than removedChartValues: want %s", want)
+	}
+}
+
+// Install re-runs and restores reuse the installed values; removed ones are
+// refused there with the same names, pointing at oberth upgrade.
+func TestReuseValuesPathsRefuseRemovedChartValues(t *testing.T) {
+	installed := map[string]any{"auditAnchor": map[string]any{"rootsKey": "roots.pem"}, "upstream": map[string]any{"keySecret": "k", "name": "github"}, "vm": nil}
+	err := refuseRemovedReleaseValues(installed, "oberth restore")
+	want := "chart schema validation failed: the installed release values set chart values that no longer exist: auditAnchor.rootsKey, upstream.keySecret; oberth restore changed nothing. " +
+		"Run oberth upgrade first: it names each stored one with the --set <key>=null flag that drops it, and replaces the installed chart's defaults"
+	if err == nil || err.Error() != want {
+		t.Fatalf("refusal = %v", err)
+	}
+	if err := refuseRemovedReleaseValues(map[string]any{"upstream": map[string]any{"name": "github"}}, "oberth install"); err != nil {
+		t.Fatal(err)
+	}
+}

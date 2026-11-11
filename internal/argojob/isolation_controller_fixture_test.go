@@ -93,7 +93,7 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 					tmpl.PodSpecPatch = string(encoded)
 				}
 			})
-			translatedIdentity, err := specIdentity(&input)
+			translatedIdentity, err := renamedSpecIdentity(&input)
 			if err != nil {
 				t.Fatal(err)
 			}

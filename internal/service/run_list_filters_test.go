@@ -48,7 +48,7 @@ func TestRunListOwnAndHeldFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, view := range []string{"", "active"} {
+	for _, view := range []string{"", "all"} {
 		arguments := map[string]any{"own": true}
 		if view != "" {
 			arguments["view"] = view

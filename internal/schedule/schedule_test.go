@@ -265,9 +265,9 @@ func TestDuePendingCursorDoesNotDependOnNext(t *testing.T) {
 }
 
 func TestScheduleSubmissionPriorityDefault(t *testing.T) {
-	for _, priority := range []string{"normal", "high", "highest"} {
+	for _, priority := range []string{"standard", "high"} {
 		file, err := Parse([]byte("schedules:\n  - name: nightly\n    cron: '0 * * * *'\n    priority: "+priority+"\n"), Limits{}, time.Now())
-		if err != nil || len(file.Entries) != 1 || string(file.Entries[0].Priority) != map[string]string{"normal": "standard", "high": "high", "highest": "high"}[priority] {
+		if err != nil || len(file.Entries) != 1 || string(file.Entries[0].Priority) != priority {
 			t.Fatalf("priority %s: %+v %v", priority, file, err)
 		}
 	}

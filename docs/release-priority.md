@@ -59,7 +59,7 @@ priority. It cannot lower an existing run or modify one already admitted. Use
 unscoped-admin `run_priority` for explicit lowering:
 
 ```sh
-oberth mcp call run_priority '{"run_id":"01234567","priority":"promotion","reason":"Ordinary delivery can wait behind urgent work"}'
+oberth mcp call run_priority '{"id":"01234567","priority":"promotion","reason":"Ordinary delivery can wait behind urgent work"}'
 ```
 
 That tool accepts a full ID or unique 8+ hex prefix, any of the four classes and
@@ -118,30 +118,10 @@ newer siblings. A manual retry earns its normal new queue place. Replay retains
 its accepted authority/decision; revoking or expiring a grant affects future
 requests, not an already accepted run.
 
-## Compatibility and upgrade
+## Stored classes
 
-| Legacy context | Current interpretation |
-| --- | --- |
-| `normal` input or persisted override | `standard` |
-| Explicit authorized `high` input, override, accepted request or grant | `high` |
-| Explicit authorized `highest` input, override, accepted request or grant | `high` |
-| Automatic promotion/tag or RC classification formerly high/highest | `promotion`, subject to existing eligibility |
-| Automatic historical request with `requested=''` | Protection evidence only; never explicit high authority |
-| `low` | `low` |
-
-Canonical responses, reason text and dashboard detail use only low, standard,
-promotion and high. MCP schemas retain deprecated input aliases normal and
-highest for existing clients, with the same authentication. Old high and highest
-grants both authorize explicit high; an administrator can narrow a grant to
-promotion when delivery-only authority is intended. The compatibility Go identifiers
-`PriorityNormal` and `PriorityHighest` name the canonical standard/high values.
-
-The timestamp migration `20261104190000-priority-four-classes` extends the three
-priority tables' accepted vocabulary. It copies existing rows byte-for-byte:
-requested/accepted names, overrides, grants, actors, reasons and timestamps stay
-intact. Reads normalize legacy values; new writes use canonical accepted names
-and retain the raw requested input. Historical audit records and shipped integer
-migration 39 and the admin-lowering migration are unchanged. Take the normal
-pre-upgrade backup; rollback restores that backup because older binaries cannot
-interpret new classes. This is next-release work and does not alter the reviewed
-v0.17.85 candidate or its CI.
+Requests take exactly `low`, `standard`, `promotion` or `high`; `normal` and
+`highest` are refused. Rows an earlier server stored as `normal` or `highest`
+(overrides, accepted requests, grants) read as `standard` and `high`.
+Automatic historical requests with `requested=''` are protection evidence
+only, never explicit high authority.

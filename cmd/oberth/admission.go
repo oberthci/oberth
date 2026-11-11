@@ -65,7 +65,7 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	remote := remoteRunCanceller{config: config}
 	if release {
-		arguments := map[string]any{"run_id": positional[1]}
+		arguments := map[string]any{"id": positional[1]}
 		if force {
 			arguments["force"] = true
 		}

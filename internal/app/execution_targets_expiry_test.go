@@ -130,7 +130,7 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 				t.Fatal(namespace, err)
 			}
 			if owner != "running" {
-				if size, found, err := jobs.Adopt(ctx, request.Run); err != nil || !found || size != pipeline.L {
+				if size, found, err := jobs.Adopt(ctx, request.Run); err != nil || !found || size != pipeline.M {
 					t.Fatal("expired recovery", size, found, err)
 				}
 			}

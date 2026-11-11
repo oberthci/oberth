@@ -32,7 +32,7 @@ func TestDeclaredPodSubmissionBindsExactDemandAndRejectsChanges(t *testing.T) {
 		t.Fatalf("source change: %v", err)
 	}
 	r.PodDemand = nil
-	r.Source = []byte(strings.Replace(string(r.Source), "oberth.ci/size: XL", `oberth.ci/size: XL
+	r.Source = []byte(strings.Replace(string(r.Source), "example.com/tier: XL", `example.com/tier: XL
     oberth.ci/declared-pod-demand: '{"cpu_milli":1,"memory_bytes":1,"pods":1}'`, 1))
 	wf, err = Build(cfg, r)
 	if err != nil {

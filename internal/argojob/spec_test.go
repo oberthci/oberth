@@ -59,7 +59,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: main
   activeDeadlineSeconds: 999999
@@ -121,8 +121,8 @@ func TestBuildRefusesUnknownTriggers(t *testing.T) {
 }
 
 func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	release, err := Build(testConfig(), request)
@@ -315,8 +315,8 @@ func TestBuildIsDeterministic(t *testing.T) {
 }
 
 func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	// Release with an approved system-namespace path: admitted.
 	approvedRelease := testRequest(pipeline.TriggerRelease, withPaths)
 	approvedRelease.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
@@ -330,8 +330,8 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 		t.Fatal("expected a system-namespace path to be refused for CI")
 	}
 	// CI pipelines CAN declare upstream-scoped paths.
-	withUpstream := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withUpstream := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	ciUpstream := testRequest(pipeline.TriggerCI, withUpstream)
 	ciUpstream.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	if _, err := Build(testConfig(), ciUpstream); err != nil {
@@ -352,8 +352,8 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 // switch keys on trigger AND paths, so a branch push cannot present the
 // identity the release role binds.
 func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
@@ -415,8 +415,8 @@ func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 // configured the CI-secrets Vault role is refused at admission — it must not
 // fall back to the release-tier role.
 func TestBuildRefusesCICredentialedWithoutCISecretsRole(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	config := testConfig()
@@ -429,8 +429,8 @@ func TestBuildRefusesCICredentialedWithoutCISecretsRole(t *testing.T) {
 		t.Fatalf("refusal does not explain the tier boundary: %v", err)
 	}
 	// The release trigger is unaffected by the missing CI role.
-	release := releaseRequestWithAnchor(strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1))
+	release := releaseRequestWithAnchor(strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1))
 	release.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	if _, err := Build(config, release); err != nil {
 		t.Fatalf("release build must not depend on the CI-secrets role: %v", err)
@@ -452,8 +452,8 @@ func TestPipelineAndCredentialedServiceAccountsMustDiffer(t *testing.T) {
 // with declared secret paths receives the credentialed SA and the
 // credentialed Vault role.
 func TestReleaseWithSecretsGetsCredentialedIdentity(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	release, err := Build(testConfig(), request)
@@ -471,8 +471,8 @@ func TestReleaseWithSecretsGetsCredentialedIdentity(t *testing.T) {
 }
 
 func TestBuildRecordsDeclaredPathsForAudit(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	built, err := Build(testConfig(), request)
@@ -497,8 +497,8 @@ func TestConfigRefusesASharedIdentity(t *testing.T) {
 // admission when VaultAddress or VaultCredentialedRole is empty. Issue #27,
 // finding 11.
 func TestBuildRejectsCredentialedRunWithMissingVaultCoordinates(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 
@@ -615,17 +615,6 @@ spec:
 	}
 }
 
-func TestDeclaredSizeFlowsThroughTheEngine(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-	size, err := argoworkflow.DeclaredSize(built)
-	if err != nil || size != pipeline.L {
-		t.Fatalf("size = %q,%v; want L", size, err)
-	}
-}
-
 func environmentOf(t *testing.T, workflow *wfv1.Workflow, template string) map[string]string {
 	t.Helper()
 	for _, candidate := range workflow.Spec.Templates {
@@ -681,8 +670,8 @@ func containerEnv(container *corev1.Container) map[string]string {
 // logs in before any Oberth-authored process exists in that container, so the
 // anchor has to be mounted, not materialised by something running inside.
 func TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := releaseRequestWithAnchor(withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	workflow, err := Build(testConfig(), request)
@@ -793,8 +782,8 @@ func TestBuildWithholdsTheVaultTrustAnchorFromTheCITier(t *testing.T) {
 // cannot disagree: VAULT_CACERT pointing at a file that was never written
 // fails the login on a missing file and hides the real cause.
 func TestBuildAdvertisesNoAnchorWhenSeedingDeliveredNone(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := releaseRequestWithAnchor(withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	request.SourceVolume.VaultCASubPath = ""
@@ -868,8 +857,8 @@ func TestValidateRefusesAVaultCABundleThatIsNotAnAnchor(t *testing.T) {
 // TestBuildRejectsUnapprovedSecretPath proves that a pipeline declaring a
 // secret path not in the approval table is rejected at admission.
 func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	// ApprovedSecrets is set but empty — no grants.
 	request.ApprovedSecrets = map[string]bool{}
@@ -883,8 +872,8 @@ func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 // TestBuildAdmitsApprovedSecretPath proves that a pipeline declaring a path
 // present in the approval table is admitted.
 func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/upstream/acme/oberth/test-secret": true,
@@ -907,8 +896,8 @@ func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
 // system paths, so allowing them at admission would let the run proceed
 // and fail at Vault login time.
 func TestBuildRejectsCISystemPathWithApprovalTable(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
@@ -924,8 +913,8 @@ func TestBuildRejectsCISystemPathWithApprovalTable(t *testing.T) {
 // declaring a system-namespace path is admitted when the approval table
 // has a grant for it.
 func TestBuildAdmitsApprovedReleaseSystemPath(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
@@ -943,8 +932,8 @@ func TestBuildAdmitsApprovedReleaseSystemPath(t *testing.T) {
 // TestBuildRejectsUnapprovedReleaseSystemPath proves that a release pipeline
 // declaring a system-namespace path NOT in the approval table is rejected.
 func TestBuildRejectsUnapprovedReleaseSystemPath(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		// No grant for this path.
@@ -962,8 +951,8 @@ func TestBuildRejectsUnapprovedReleaseSystemPath(t *testing.T) {
 // namespace.
 func TestBuildRejectsCrossRepoUpstreamPathWithApprovalTable(t *testing.T) {
 	// Oberth trying to declare a path in terraform's namespace.
-	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/terraform/stolen-secret\n", 1)
+	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/terraform/stolen-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/upstream/acme/terraform/stolen-secret": true,
@@ -1484,7 +1473,7 @@ kind: Workflow
 metadata:
   annotations:
     oberth.ci/secret-paths: oberth/data/release/r2-upload-token,oberth/data/release/gar-image-key
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -1626,7 +1615,7 @@ kind: Workflow
 metadata:
   annotations:
     oberth.ci/secret-paths: oberth/data/release/r2-upload-token
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -1677,7 +1666,7 @@ kind: Workflow
 metadata:
   annotations:
     oberth.ci/secret-paths: oberth/data/release/r2-upload-token
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -1728,7 +1717,7 @@ kind: Workflow
 metadata:
   annotations:
     oberth.ci/secret-paths: oberth/data/release/r2-upload-token
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -1826,7 +1815,7 @@ kind: Workflow
 metadata:
   annotations:
     oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret
-    oberth.ci/size: L
+    example.com/tier: L
 spec:
   entrypoint: publish
   activeDeadlineSeconds: 600

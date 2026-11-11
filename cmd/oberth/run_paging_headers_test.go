@@ -15,10 +15,9 @@ func TestRunPagingUsesServerCursor(t *testing.T) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("before") == "opaque-cursor" {
-			_, _ = w.Write([]byte(`[{"id":"older","status":"passed","queued_at":"2026-01-01T00:00:00Z"}]`))
+			_, _ = w.Write([]byte(`{"runs":[{"id":"older","status":"passed","queued_at":"2026-01-01T00:00:00Z"}]}`))
 		} else {
-			w.Header().Set("X-Oberth-Next-Before", "opaque-cursor")
-			_, _ = w.Write([]byte(`[{"id":"newer","status":"passed","queued_at":"2026-01-02T00:00:00Z"}]`))
+			_, _ = w.Write([]byte(`{"runs":[{"id":"newer","status":"passed","queued_at":"2026-01-02T00:00:00Z"}],"next_cursor":"opaque-cursor"}`))
 		}
 	}))
 	defer server.Close()
@@ -40,11 +39,10 @@ func TestRunsJSONCarriesCursorAndAllFollowsPages(t *testing.T) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("before") == "41" {
-			_, _ = w.Write([]byte(`[{"id":"older","status":"passed"}]`))
+			_, _ = w.Write([]byte(`{"runs":[{"id":"older","status":"passed"}]}`))
 			return
 		}
-		w.Header().Set("X-Oberth-Next-Before", "41")
-		_, _ = w.Write([]byte(`[{"id":"newer","status":"passed","repo_id":9007199254740993}]`))
+		_, _ = w.Write([]byte(`{"runs":[{"id":"newer","status":"passed","repo_id":9007199254740993}],"next_before":41}`))
 	}))
 	defer server.Close()
 	configure(t, server)
@@ -78,8 +76,7 @@ func TestRunsJSONCarriesCursorAndAllFollowsPages(t *testing.T) {
 
 func TestRunsJSONScopedCursorIsNextCursor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Oberth-Next-Before", "0123456789abcdef")
-		_, _ = w.Write([]byte(`[]`))
+		_, _ = w.Write([]byte(`{"runs":[],"next_cursor":"0123456789abcdef"}`))
 	}))
 	defer server.Close()
 	configure(t, server)
@@ -92,9 +89,8 @@ func TestRunsJSONScopedCursorIsNextCursor(t *testing.T) {
 	}
 }
 
-// Snake_case-only rows (the default since v0.20.3) still yield the cursor.
 func TestRunsTableReadsSnakeCaseRows(t *testing.T) {
-	configure(t, remoteServer(t, `[{"id":"snake-run","status":"passed","ref":"main","queue_sequence":41}]`))
+	configure(t, remoteServer(t, `{"runs":[{"id":"snake-run","status":"passed","ref":"main","queue_sequence":41}],"next_before":41}`))
 	var out bytes.Buffer
 	if err := runRuns(t.Context(), []string{"--limit", "1"}, &out); err != nil {
 		t.Fatal(err)

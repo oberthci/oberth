@@ -71,7 +71,7 @@ func TestRepositorySummaryOmitsLatestRuns(t *testing.T) {
 		t.Fatalf("full view lost its runs: %s", full.Body)
 	}
 	body := summary.Body.String()
-	if summary.Code != http.StatusOK || strings.Contains(body, "run-1") || strings.Contains(body, "atest") || !strings.Contains(body, `"name":"app"`) || !strings.HasPrefix(body, "[") {
+	if summary.Code != http.StatusOK || strings.Contains(body, "run-1") || strings.Contains(body, "atest") || !strings.Contains(body, `"name":"app"`) || !strings.HasPrefix(body, `{"repositories":[`) {
 		t.Fatalf("summary view: %d %s", summary.Code, body)
 	}
 }

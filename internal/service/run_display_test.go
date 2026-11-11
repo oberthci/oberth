@@ -91,11 +91,7 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 		!strings.Contains(string(defaultJSON), `"display_reason":`) {
 		t.Fatalf("default list lacks display fields: %s", defaultJSON)
 	}
-	active, err := service.Runs(ctx, actor, api.RunFilter{View: api.RunViewActive})
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry := active.([]ActiveRun)[0]
+	entry := defaultRuns.([]model.Run)[0]
 	if entry.Status != model.RunWaiting || entry.DisplayStatus != "queued" || entry.Scheduling == nil {
 		t.Fatalf("active run = %+v", entry)
 	}
@@ -326,7 +322,7 @@ func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {
 	reader := fixture.api(t)
 	guard := &listPositionGuard{RunResolver: reader.runs}
 	reader.runs = guard
-	for _, view := range []string{"", api.RunViewActive} {
+	for _, view := range []string{""} {
 		if _, err := reader.Runs(t.Context(), api.Actor{Identity: "agent"}, api.RunFilter{View: view}); err != nil {
 			t.Fatal(err)
 		}

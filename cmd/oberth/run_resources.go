@@ -55,7 +55,7 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	if e != nil {
 		return e
 	}
-	query := map[string]string{"repo": *repo, "run": *run, "ref": *ref, "burn": *stage, "step": *step, "last": strconv.Itoa(*last), "include_failed": strconv.FormatBool(*includeFailed), "resource_only": "true"}
+	query := map[string]string{"repo": *repo, "run": *run, "ref": *ref, "burn": *stage, "step": *step, "last": strconv.Itoa(*last), "include_failed": strconv.FormatBool(*includeFailed)}
 	var report measured.Report
 	if e = api.Get(ctx, "/api/run-resources", query, &report); e != nil {
 		return e

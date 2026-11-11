@@ -20,39 +20,34 @@ records (`model.Run`) can use `internal/recordjson.Unmarshal`, which maps the
 snake_case names back to the Go field names.
 
 Names already written in snake_case retain their spelling. A name a record
-declares in lowerCamel (`maxNotStarted`, `activeDeadlineSeconds`) is not a
-Go-style duplicate: it is still sent next to its snake_case spelling. Dictionary keys,
+declares in lowerCamel (`activeDeadlineSeconds`) is sent under its snake_case
+spelling (`active_deadline_seconds`) only. Dictionary keys,
 such as step names, labels and resource names, are data and are not renamed.
 Wire names are generated after visibility checks and redaction, from fields
 already exposed in the response. Private storage fields remain private.
 
-A primary run record returns both `id` and `run_id`. Full run details also expose top-level `id` and `run_id`.
-Run log, artifact-list, artifact, cancel, rerun, preflight and HTTP live-log responses
-keep `run_id` and add `id`. A promotion's `id` still identifies the promotion;
-its related `run_id` never replaces it. Publication responses keep their distinct
-`publication_id`, `promotion_id` and `run_id` meanings.
+A run record carries its identity as `id`; responses about a run (logs,
+artifacts, cancel, rerun, live logs) carry it as `run_id`. A promotion's `id`
+identifies the promotion and its `run_id` the related run. Publication
+responses keep their distinct `publication_id`, `promotion_id` and `run_id`.
 
-The tools `run_get`, `run_logs`, `run_retry`, `run_cancel`, `run_rerun`,
-`run_hold_list`, `run_hold_exec`, `run_hold_patch`, `run_continue`, `run_hold_abandon`,
-`run_purge`, `artifacts`, `artifact_get` and ID-based `wait`
-accept preferred `run_id` alongside legacy `id`. `run_resources` accepts
-`run_id` alongside legacy `run`. If both spellings are sent, they must be equal;
-conflicting selectors are invalid input. Alias resolution uses the same scope
-checks and canonical run-ID resolver. HTTP resource-history queries also accept
-`run_id`; path and query aliases must not conflict.
+Every tool that selects one run takes it as `id`: `run_get`, `run_logs`,
+`run_retry`, `run_cancel`, `run_rerun`, `run_hold_list`, `run_hold_exec`,
+`run_hold_patch`, `run_continue`, `run_hold_abandon`, `run_purge`,
+`artifacts`, `artifact_get`, ID-based `wait`, `run_wait`, `run_resources`,
+`run_priority` and `admission_release`. No other spelling is accepted.
 
 ## Collection envelopes
 
-Default HTTP array responses are unchanged. To request the matching MCP object
-shape, append `envelope=1` to these HTTP GET routes:
+HTTP collections are objects, the same shape MCP returns:
 
-| HTTP route | Opt-in envelope / MCP collection field |
+| HTTP route | Collection field |
 | --- | --- |
 | `/api/runs` | `{"runs": [...]}` |
 | `/api/repos` | `{"repositories": [...]}` |
 | `/api/grants` | `{"grants": [...]}` |
 
-Run paging still returns `X-Oberth-Next-Before`. The opt-in object also includes
+Run paging also returns `X-Oberth-Next-Before`. The object includes
 `next_before` for an unscoped sequence cursor or `next_cursor` for a scoped run
 ID, matching `run_list`. Follow the returned cursor; do not derive it from the
 last record. No global sequence is added for scoped callers. Empty collections
@@ -88,38 +83,15 @@ from authenticated `GET /api/issues/{id}` and `issue_get`. These removed fields
 are an explicit v0.17.x privacy exception to the additive compatibility policy.
 The list includes no discussion fields or discussion API.
 
-## Resource-deadline safety exception
+## Resource advice
 
-Resource history no longer derives a Pod deadline from main-container runtime.
+Resource history does not derive a Pod deadline from main-container runtime.
 Pod initialization, helper execution and finalization are not captured by that
 runtime. Numeric `activeDeadlineSeconds` advice is withheld until complete Pod
-active lifetime is measured; declarations and actual resource measurements remain
-available.
+active lifetime is measured; a suggestion omits the deadline (absent, never
+zero) in JSON and in copy/paste YAML. Declarations and actual resource
+measurements remain available.
 
-Older CLIs decode a missing suggested deadline as integer zero and copy it into
-YAML. To keep server-first upgrades safe, HTTP and MCP callers receive
-`suggested: null` unless they explicitly send `resource_only=true`. For otherwise
-accepted histories, `no_suggestion` and `sizing_acceptance.reasons` explain that
-a compatible resource-only renderer is required. Those callers still receive
-the measurements, run identities, declarations and timing semantics. The
-compatibility refusal does not mean the retained samples were removed.
-
-`resource_only=true` is a caller capability: it promises to handle suggestions
-without `activeDeadlineSeconds`, preserving absence rather than inventing zero
-in JSON or copy/paste YAML. Updated CLIs send it automatically. HTTP clients use
-the query parameter; MCP `run_resources` clients use the boolean tool argument.
-The same sample sufficiency, comparability and censoring checks still apply;
-opting in cannot force a suggestion or restore unsupported deadline advice.
-
-Upgrade the server first; existing CLIs can continue reading measurements safely.
-Then upgrade the CLI to recover resource-only suggestions. Custom integrations
-may opt in after fixing their decoder and renderer. Older servers do not
-implement this safety behavior; an upgraded CLI alone cannot correct advice
-computed by an older server. This is an explicit v0.17.x safety exception to the
-previous suggestion semantics, not a removal of measurement fields or a change
-to execution resources.
-
-Resource-only capability does not waive measurement or safety requirements.
 Coverage counts, `advice_basis`, `safety_run_ids` and `safety_scope` are additive
 fields. A passed-only metric view still consults bounded retained failure
 evidence, and incomplete or missing executed-attempt coverage can return

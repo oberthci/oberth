@@ -136,9 +136,9 @@ func TestWaitResolvesAnnotatedTagAndPeeledCommit(t *testing.T) {
 			})
 		}
 	}
-	response, err := callWaitFixture(t, control, fixture.repo.Name, commitSHA, "ci")
+	response, err := callWaitFixture(t, control, fixture.repo.Name, commitSHA, "branch")
 	if err != nil || response.Run.ID != newerBranch.ID || !response.StillRunning {
-		t.Fatalf("branch alias selected the release: %#v, %v", response, err)
+		t.Fatalf("branch trigger selected the release: %#v, %v", response, err)
 	}
 	if _, err := callWaitFixture(t, control, fixture.repo.Name, strings.Repeat("9", 40), "release"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unknown SHA error = %v, want not found", err)

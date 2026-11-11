@@ -42,24 +42,16 @@ class ArgoSchemaTests(unittest.TestCase):
                     values.write_text(json.dumps({'sourceAccess': invalid}))
                     self.assert_schema_refuses({}, '-f', str(values))
 
-    def test_retired_secret_settings_are_optional_and_inert(self):
-        baseline = self.render({})
-        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+    def test_removed_secret_settings_are_refused(self):
         for settings in (
-            ['--set', 'secretCreatePolicy=null'],
-            ['--set', 'upstream.createSecrets=null', '--set', 'upstream.keySecret=null',
-             '--set', 'upstream.knownHostsSecret=null', '--set', 'auditAnchor.rootsKey=null'],
             ['--set', 'auditAnchor.rootsKey=old-roots.pem'],
-            ['--set', 'secretCreatePolicy.enabled=true'],
-            ['--set', 'upstream.keySecret=legacy', '--set', 'upstream.knownHostsSecret=legacy'],
+            ['--set', 'secretCreatePolicy.enabled=false'],
+            ['--set', 'upstream.createSecrets=false'],
+            ['--set', 'upstream.keySecret=old'],
+            ['--set', 'upstream.knownHostsSecret=old'],
         ):
             with self.subTest(settings=settings):
-                result = self.render({}, *settings)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, baseline.stdout)
-
-    def test_secret_creation_stays_disabled(self):
-        self.assert_schema_refuses({}, '--set', 'upstream.createSecrets=true')
+                self.assert_schema_refuses({}, *settings)
 
     def render(self, argo, *overrides):
         with tempfile.TemporaryDirectory() as directory:
@@ -128,9 +120,8 @@ class ArgoSchemaTests(unittest.TestCase):
             with self.subTest(argo=argo):
                 self.assert_schema_refuses(argo)
 
-    def test_valid_boundaries_and_legacy_values_render(self):
-        cases = [{}, {'enabled': True}, {'enabled': False}, {'ciSecrets': None}, {'ciServiceAccount': 'legacy-pipeline'},
-                 {'ciSecretsServiceAccount': ''}, {'vault': {'ciSecretsRole': ''}},
+    def test_valid_boundaries_render(self):
+        cases = [{}, {'ciSecrets': None},
                  {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'},
                   'controllerProfile': 'nonroot-static-v1', 'resourceSampler': SAMPLER},
                  {'resourceSampler': dict(SAMPLER, nodes={
@@ -147,15 +138,10 @@ class ArgoSchemaTests(unittest.TestCase):
                 result = self.render(argo)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_empty_ci_secret_names_preserve_defaults_for_one_release(self):
-        default = self.render({})
-        self.assertEqual(default.returncode, 0, default.stderr)
-        for ci_secrets in ({'serviceAccount': ''}, {'vaultRole': ''},
-                           {'serviceAccount': '', 'vaultRole': ''}):
+    def test_empty_ci_secret_names_are_refused(self):
+        for ci_secrets in ({'serviceAccount': ''}, {'vaultRole': ''}):
             with self.subTest(ciSecrets=ci_secrets):
-                result = self.render({'ciSecrets': ci_secrets})
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, default.stdout)
+                self.assert_schema_refuses({'ciSecrets': ci_secrets})
 
     def test_removed_vm_keys_are_refused(self):
         schema = json.loads((ROOT / 'charts/oberth/values.schema.json').read_text())
@@ -170,13 +156,11 @@ class ArgoSchemaTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(key, result.stderr)
 
-    def test_retired_aliases_still_report_migration(self):
-        for argo in ({'ciSecretsServiceAccount': 'retired-account'},
-                     {'vault': {'ciSecretsRole': 'retired-role'}}):
+    def test_removed_aliases_are_refused(self):
+        for argo in ({'ciSecretsServiceAccount': 'old-account'}, {'vault': {'ciSecretsRole': 'old-role'}},
+                     {'ciServiceAccount': 'old-pipeline'}, {'enabled': True}):
             with self.subTest(argo=argo):
-                result = self.render(argo)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn('retired', result.stderr.lower(), result.stderr)
+                self.assert_schema_refuses(argo)
 
 
 if __name__ == '__main__':

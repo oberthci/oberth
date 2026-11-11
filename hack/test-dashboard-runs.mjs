@@ -33,7 +33,7 @@ run(`
     if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1},{id:2,name:'theirs',upstream_id:1}];
     if(path==='/api/runs/counts')return {total:300,by_repo:{1:299,2:1}};
     const query=new URL(path,'https://example.test').searchParams;
-    if(query.get('view')==='active')return [scheduled,queued,head,...(query.has('repo')?[]:[makeRun('foreign-running',{repo_id:2,status:'running',finished_at:null})])];
+    if(query.get('limit')==='1')return [scheduled,queued,head,...(query.has('repo')?[]:[makeRun('foreign-running',{repo_id:2,status:'running',finished_at:null})])];
     let rows;
     if(query.has('latest_per_ref'))rows=query.has('before')?[makeRun('page-two-head',{ref:'old-ref'})]:[head,makeRun('retry-head',{ref:'feature'})];
     else if(flatPaging)rows=[head,...Array.from({length:100},(_,i)=>makeRun('flat-'+i,{ref:'ref-'+i}))];
@@ -57,7 +57,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F1'
   run(`changeRunRepo('github/org/ours');state.runCursor='page-two';requests=[];`);
   await run('renderRuns(0)');
   assert.ok(!ids().includes('foreign-running'),'active rows obey repository scope');
-  assert.ok(run(`requests.some(path=>path.includes('view=active')&&path.includes('repo=github%2Forg%2Fours')&&!path.includes('before='))`),'active fetch stays unpaged and repository-scoped');
+  assert.ok(run(`requests.some(path=>/[?&]limit=1(&|$)/.test(path)&&path.includes('repo=github%2Forg%2Fours')&&!path.includes('before='))`),'active fetch stays unpaged and repository-scoped');
   console.log('F1 passed: hidden scheduled/queued work, deduplication, page two and repository scope');
 }
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2') {
@@ -66,7 +66,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2'
     run(`state.filter=${JSON.stringify(status)};requests=[];`);
     await run('renderRuns(0)');
     assert.ok(ids().includes(id),`F2: ${status} must find a non-head run, including another schedule lane`);
-    assert.ok(run(`requests.some(path=>path.startsWith('/api/runs?')&&!path.includes('view=active')&&!path.includes('latest_per_ref'))`),'F2: status filters use the flat list');
+    assert.ok(run(`requests.some(path=>path.startsWith('/api/runs?')&&!/[?&]limit=1(&|$)/.test(path)&&!path.includes('latest_per_ref'))`),'F2: status filters use the flat list');
   }
   run(`state.filter='passed';flatPaging=true;listNext='opaque-flat-cursor';`);
   await run('renderRuns(0)');
@@ -97,7 +97,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
       if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
       if(path==='/api/runs/counts')return {total:9,by_repo:{1:9}};
       const query=new URL(path,'https://example.test').searchParams;
-      if(query.get('view')==='active')return [...f3Active,...f3Page.filter(row=>['queued','running'].includes(row.status))];
+      if(query.get('limit')==='1')return [...f3Active,...f3Page.filter(row=>['queued','running'].includes(row.status))];
       return {body:f3Page,next:''};
     };
   `);
@@ -119,14 +119,14 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
       if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
       if(path==='/api/runs/counts')return {total:4,by_repo:{1:4}};
       const query=new URL(path,'https://example.test').searchParams;
-      if(query.get('view')==='active')return [f3Scoped[2],f3Scoped[1],f3ScopedHidden];
+      if(query.get('limit')==='1')return [f3Scoped[2],f3Scoped[1],f3ScopedHidden];
       return {body:f3Scoped,next:''};
     };
   `);
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-normal-hidden','scoped-normal-old','scoped-high-new','scoped-passed'],
     'F3: without positions the queue reverses the active view order, not queue time');
-  run(`api=async path=>{ if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}]; if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
+  run(`api=async path=>{ if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}]; if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('limit')==='1')return []; return {body:f3Scoped,next:''}; };`);
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
     'F3: without positions or an active view reverse priority and reverse server FIFO within each class');
@@ -143,7 +143,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
       if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
       if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}};
       const query=new URL(path,'https://example.test').searchParams;
-      if(query.get('view')==='active')return [f3Claimed[2],f3Claimed[1],f3Claimed[0]];
+      if(query.get('limit')==='1')return [f3Claimed[2],f3Claimed[1],f3Claimed[0]];
       return {body:f3Claimed,next:''};
     };
   `);
@@ -162,7 +162,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4'
     setAuto=ms=>{pollMs=ms};hasToken=()=>true;setConn=()=>{};
     api=async path=>{
       const query=new URL(path,'https://example.test').searchParams;
-      if(query.get('view')==='active' && activeFailure)throw activeFailure;
+      if(query.get('limit')==='1' && activeFailure)throw activeFailure;
       return workingAPI(path);
     };
   `);
@@ -241,7 +241,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5B
   await run('route(true)');
   assert.ok(ids().includes('scheduled-running'),'R5B: a successful scoped active fetch must stay visible before status arrives');
   assert.ok(run('html').includes('all active runs included'));
-  run(`api=async path=>{if(path.includes('view=active'))throw Object.assign(new Error('offline'),{status:503});return apiFixture(path)};`);
+  run(`api=async path=>{if(/[?&]limit=1(&|$)/.test(path))throw Object.assign(new Error('offline'),{status:503});return apiFixture(path)};`);
   await run('route(true)');
   assert.ok(ids().includes('scheduled-running'),'same-selector cached rows remain usable without status');
   run(`changeRunRepo('github/org/theirs');`);
@@ -322,7 +322,7 @@ for (const latest of [false, true]) {
       api=async path=>{
         if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
         if(path==='/api/runs/counts')return {total:4,by_repo:{1:4}};
-        if(path.includes('view=active'))return claimOrderRows;
+        if(/[?&]limit=1(&|$)/.test(path))return claimOrderRows;
         claimListPath=path;
         return {body:claimOrderLatest?[claimOrderRows[2],claimOrderRows[0]]:claimOrderRows,next:''};
       };
@@ -342,12 +342,12 @@ run(`{
   const high=makeRun('cache-high',{ref:'cache/high',status:'queued',started_at:null,finished_at:null,priority_class:'promotion'});
   const normal=makeRun('cache-normal',{ref:'cache/normal',status:'queued',started_at:null,finished_at:null});
   const bumped=makeRun('cache-bumped',{ref:'cache/bumped',status:'queued',started_at:null,finished_at:null,priority_class:'high',priority_reason:'operator bump'});
-  state.activeRuns=[high,normal,{...bumped,priority_class:'normal'}];
+  state.activeRuns=[high,normal,{...bumped,priority_class:'standard'}];
   state.activeRunsRepo='all'; state.activeRunsComplete=true;
   api=async path=>{
     if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
     if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}};
-    if(path.includes('view=active'))throw Object.assign(new Error('offline'),{status:503});
+    if(/[?&]limit=1(&|$)/.test(path))throw Object.assign(new Error('offline'),{status:503});
     return {body:[bumped,normal],next:''};
   };
 }`);
@@ -429,8 +429,8 @@ run('state.activeRuns=[]');
 assert.deepEqual(JSON.parse(run(`JSON.stringify(orderRuns([
  ...['low','standard','promotion','high','low','standard','promotion','high'].map((priority,index)=>makeRun(priority+'-'+index,{status:'queued',started_at:null,finished_at:null,queue_position:0,priority_class:priority}))
 ]).map(row=>row.id))`)), ['low-4','low-0','standard-5','standard-1','promotion-6','promotion-2','high-7','high-3']);
-assert.equal(run(`prioritySummary({priority_class:'normal'})`), 'priority standard');
-assert.equal(run(`prioritySummary({priority_class:'highest'})`), 'priority high');
+assert.equal(run(`prioritySummary({priority_class:'standard'})`), 'priority standard');
+assert.equal(run(`prioritySummary({priority_class:'high'})`), 'priority high');
 console.log('Four canonical priority classes and legacy response aliases pass');
 
 // Detail polling explicitly selects the compact dashboard representation.
@@ -472,7 +472,7 @@ run(`
   api=async path=>{
     if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
     if(path==='/api/runs/counts')return {total:ownerRows.length,by_repo:{1:ownerRows.length}};
-    if(path.includes('view=active'))return [...ownerQueue,...ownerRunning];
+    if(/[?&]limit=1(&|$)/.test(path))return [...ownerQueue,...ownerRunning];
     return {body:ownerRows,next:''};
   };
 `);
@@ -493,11 +493,11 @@ for (const filter of ['all','queued']) {
   assert.equal(run('JSON.stringify(ownerRows)'),run('ownerWire'),'rendering never reverses or rewrites the API response');
 }
 assert.match(run(`runRow({...ownerQueue[0],priority_class:'promotion'})`),/>priority promotion</);
-for(const priority of ['standard','normal',undefined]) {
+for(const priority of ['standard',undefined]) {
   sandbox.labelPriority=priority;
   assert.doesNotMatch(run(`runRow({...ownerQueue[0],priority_class:labelPriority})`),/class="v4b|standard priority|priority standard/);
 }
-assert.match(run(`runRow({...ownerQueue[0],priority_class:'highest'})`),/>high priority</);
+assert.match(run(`runRow({...ownerQueue[0],priority_class:'high'})`),/>high priority</);
 assert.match(run(`runRow({...ownerQueue[0],priority_reason:'operator <unsafe>'})`),/title="operator &lt;unsafe&gt;"/);
 console.log('Owner layout passed: reversed queue, next at bottom, unchanged running/history order and wire data, and only named nonstandard priorities');
 // #1508: /repos shows a subtle, muted non-default branch count, only when non-zero.

@@ -63,40 +63,13 @@ func addRecordAliases(document any, value reflect.Value, changed *bool) {
 			if field.Alias == field.Name {
 				continue
 			}
+			// The snake_case name carries the value alone, also for a json
+			// tag spelled in lowerCamel (activeDeadlineSeconds). A name whose
+			// snake_case spelling is another field's key stays.
 			if _, exists := object[field.Alias]; !exists {
 				object[field.Alias] = item
+				delete(object, field.Name)
 				*changed = true
-				if recordjson.GoStyleName(field.Name) {
-					// The snake_case name now carries the value alone. A
-					// name whose alias is another field's key stays, and so
-					// does a name a json tag spells in lowerCamel
-					// (maxNotStarted, activeDeadlineSeconds): that is the
-					// field's declared wire name, not a Go-style duplicate.
-					delete(object, field.Name)
-				}
-			}
-		}
-		// Only primary run records get the identity alias. A promotion's run_id
-		// remains a related run and must never overwrite its promotion id.
-		switch typ.Name() {
-		case "Run", "RunSummaryResponse", "RunCancelResponse", "RunRerunResponse", "LogResponse", "ArtifactListResponse", "ArtifactResponse", "LiveLogResponse", "StatusResponse":
-			if id, ok := object["id"]; ok {
-				if _, exists := object["run_id"]; !exists {
-					object["run_id"] = id
-					*changed = true
-				}
-			} else if id, ok := object["run_id"]; ok {
-				object["id"] = id
-				*changed = true
-			}
-		case "RunDetailResponse":
-			if run, ok := object["run"].(map[string]any); ok {
-				if id, exists := run["id"]; exists {
-					object["id"] = id
-					*changed = true
-					object["run_id"] = id
-					*changed = true
-				}
 			}
 		}
 	case reflect.Slice, reflect.Array:
@@ -122,11 +95,10 @@ func addRecordAliases(document any, value reflect.Value, changed *bool) {
 	}
 }
 
-// Legacy collection arrays are the default throughout v0.17.x. Callers can
-// explicitly opt into the matching MCP object envelope without changing old
-// clients. The authoritative cursor is the same one supplied in HTTP headers.
+// writeCollectionView wraps a collection in the object MCP returns: the rows
+// under field and, for a full run page, the cursor of the next page.
 func (server *Server) writeCollectionView(w http.ResponseWriter, r *http.Request, field string, value any, err error) {
-	if err == nil && r.URL.Query().Get("envelope") == "1" {
+	if err == nil {
 		kind := reflect.Invalid
 		if value != nil {
 			kind = reflect.TypeOf(value).Kind()
@@ -151,16 +123,4 @@ func (server *Server) writeCollectionView(w http.ResponseWriter, r *http.Request
 		}
 	}
 	server.writeView(w, value, err)
-}
-
-// RunIDArgument identifies existing run-selector fields whose additive alias is
-// run_id. Kept in the wire package so schema advertisement and dispatch agree.
-func RunIDArgument(tool string) string {
-	switch tool {
-	case "run_get", "run_logs", "run_retry", "run_cancel", "run_rerun", "run_hold_list", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "run_purge", "artifacts", "artifact_get", "wait", "run_wait":
-		return "id"
-	case "run_resources":
-		return "run"
-	}
-	return ""
 }

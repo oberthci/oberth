@@ -19,50 +19,36 @@ import (
 func TestRecordFieldsAreSnakeCase(t *testing.T) {
 	server, backend := testServer(t)
 	backend.runPage = []model.Run{{ID: "aaaaaaaa", RepoID: 7, QueueSequence: 9007199254740993, Status: model.RunPassed, SHA: "commit"}}
-	for _, test := range []struct {
-		name string
-		path string
-	}{
-		{"array", "/api/runs?limit=1"},
-		{"envelope", "/api/runs?limit=1&envelope=1"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, test.path, nil)
-			req.Header.Set("Authorization", "Bearer valid-token")
-			out := httptest.NewRecorder()
-			server.Handler().ServeHTTP(out, req)
-			if out.Code != 200 {
-				t.Fatal(out.Code, out.Body)
+	for _, path := range []string{"/api/runs?limit=1", "/api/runs?limit=1&envelope=0"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer valid-token")
+		out := httptest.NewRecorder()
+		server.Handler().ServeHTTP(out, req)
+		if out.Code != 200 {
+			t.Fatal(out.Code, out.Body)
+		}
+		var object struct {
+			Runs       []map[string]json.RawMessage `json:"runs"`
+			NextBefore int64                        `json:"next_before"`
+		}
+		if err := json.Unmarshal(out.Body.Bytes(), &object); err != nil || len(object.Runs) != 1 {
+			t.Fatalf("not an envelope: %v %s", err, out.Body)
+		}
+		if object.NextBefore != 9007199254740993 {
+			t.Fatal("lost cursor", out.Body)
+		}
+		row := object.Runs[0]
+		for old, name := range map[string]string{"ID": "id", "RepoID": "repo_id", "QueueSequence": "queue_sequence", "Status": "status", "SHA": "sha"} {
+			if len(row[name]) == 0 {
+				t.Errorf("missing %s: %s", name, out.Body)
 			}
-			var rows []map[string]json.RawMessage
-			if strings.Contains(test.path, "envelope=1") {
-				var object struct {
-					Runs       []map[string]json.RawMessage `json:"runs"`
-					NextBefore int64                        `json:"next_before"`
-				}
-				if err := json.Unmarshal(out.Body.Bytes(), &object); err != nil {
-					t.Fatal(err)
-				}
-				rows = object.Runs
-				if object.NextBefore != 9007199254740993 {
-					t.Fatal("lost cursor", out.Body)
-				}
-			} else if err := json.Unmarshal(out.Body.Bytes(), &rows); err != nil {
-				t.Fatalf("array changed: %v %s", err, out.Body)
+			if _, present := row[old]; present {
+				t.Errorf("go name %s present: %s", old, out.Body)
 			}
-			row := rows[0]
-			for old, alias := range map[string]string{"ID": "id", "RepoID": "repo_id", "QueueSequence": "queue_sequence", "Status": "status", "SHA": "sha"} {
-				if len(row[alias]) == 0 {
-					t.Errorf("missing %s: %s", alias, out.Body)
-				}
-				if _, present := row[old]; present {
-					t.Errorf("go name %s present: %s", old, out.Body)
-				}
-			}
-			if string(row["run_id"]) != string(row["id"]) {
-				t.Error("run_id differs from id", out.Body)
-			}
-		})
+		}
+		if _, alias := row["run_id"]; alias {
+			t.Error("run record still carries the run_id identity alias", out.Body)
+		}
 	}
 }
 
@@ -91,7 +77,7 @@ func TestCompatibilityAddsObjectAliasesWithoutChangingDictionaryKeys(t *testing.
 	}
 }
 
-func TestCompatibilityLegacyCollectionsAndOptInEnvelopes(t *testing.T) {
+func TestCollectionsAreAlwaysEnvelopes(t *testing.T) {
 	for _, tc := range []struct {
 		path, field string
 		value       any
@@ -99,41 +85,22 @@ func TestCompatibilityLegacyCollectionsAndOptInEnvelopes(t *testing.T) {
 		{"/api/repos", "repositories", []model.Repository{{ID: 1, Name: "oberth"}}},
 		{"/api/grants", "grants", []map[string]any{}},
 	} {
-		for _, envelope := range []bool{false, true} {
-			server, backend := testServer(t)
-			switch tc.field {
-			case "rows":
-				backend.toolResult = tc.value
-			case "repositories":
-				server.views = &collectionViews{fakeBackend: backend, repos: tc.value}
-			case "grants":
-				server.views = &collectionViews{fakeBackend: backend, grants: tc.value}
-			}
-			path := tc.path
-			if envelope {
-				path += "?envelope=1"
-			}
-			request := httptest.NewRequest(http.MethodGet, path, nil)
-			request.Header.Set("Authorization", "Bearer valid-token")
-			out := httptest.NewRecorder()
-			server.Handler().ServeHTTP(out, request)
-			if out.Code != 200 {
-				t.Fatalf("%s: %d %s", path, out.Code, out.Body)
-			}
-			var decoded any
-			if err := json.Unmarshal(out.Body.Bytes(), &decoded); err != nil {
-				t.Fatal(err)
-			}
-			if envelope {
-				object, ok := decoded.(map[string]any)
-				if !ok || object[tc.field] == nil {
-					t.Fatalf("missing %s envelope: %s", tc.field, out.Body)
-				}
-			} else {
-				if _, ok := decoded.([]any); !ok {
-					t.Fatalf("legacy collection changed: %s", out.Body)
-				}
-			}
+		server, backend := testServer(t)
+		if tc.field == "repositories" {
+			server.views = &collectionViews{fakeBackend: backend, repos: tc.value}
+		} else {
+			server.views = &collectionViews{fakeBackend: backend, grants: tc.value}
+		}
+		request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		request.Header.Set("Authorization", "Bearer valid-token")
+		out := httptest.NewRecorder()
+		server.Handler().ServeHTTP(out, request)
+		if out.Code != 200 {
+			t.Fatalf("%s: %d %s", tc.path, out.Code, out.Body)
+		}
+		var object map[string]any
+		if err := json.Unmarshal(out.Body.Bytes(), &object); err != nil || object[tc.field] == nil {
+			t.Fatalf("missing %s envelope: %v %s", tc.field, err, out.Body)
 		}
 	}
 }
@@ -176,84 +143,61 @@ func TestCompatibilityKeepsHiddenFieldsAndCanonicalIDsDistinct(t *testing.T) {
 	}
 }
 
-func TestRunAliasSchemasRetainOldNamesAndAcceptPreferredName(t *testing.T) {
+// Every run selector is id; no tool publishes a run_id or run alias of it.
+func TestRunSelectorsAreID(t *testing.T) {
 	for _, definition := range toolDefinitions() {
 		name := definition["name"].(string)
-		key := RunIDArgument(name)
-		if key == "" {
-			continue
-		}
-		schema := definition["inputSchema"].(map[string]any)
-		properties := schema["properties"].(map[string]any)
-		if properties[key] == nil || properties["run_id"] == nil {
-			t.Fatalf("%s removed old selector or omitted alias", name)
+		properties := definition["inputSchema"].(map[string]any)["properties"].(map[string]any)
+		if _, alias := properties["run_id"]; alias {
+			t.Errorf("%s publishes run_id", name)
 		}
 	}
-}
-
-func TestAdditiveInputSchemasAcceptOldAndPreferredArguments(t *testing.T) {
-	for _, name := range []string{"run_get", "issue_update"} {
-		var schema spec.Schema
+	for _, name := range []string{"run_get", "run_resources", "run_priority", "admission_release", "wait", "run_wait"} {
 		for _, definition := range toolDefinitions() {
-			if definition["name"] == name {
-				raw, _ := json.Marshal(definition["inputSchema"])
-				if err := json.Unmarshal(raw, &schema); err != nil {
-					t.Fatal(err)
-				}
+			if definition["name"] != name {
+				continue
 			}
-		}
-		var good, bad []string
-		if name == "run_get" {
-			good = []string{`{"id":"aaaaaaaa"}`, `{"run_id":"aaaaaaaa"}`, `{"id":"aaaaaaaa","run_id":"aaaaaaaa"}`}
-			bad = []string{`{"run_id":4}`}
-		} else {
-			good = []string{`{"id":1}`, `{"id":1,"expected_revision":1}`}
-			bad = []string{`{"id":1,"expected_revision":0}`, `{"id":1,"expected_revision":null}`, `{"id":1,"expected_revision":"1"}`}
-		}
-		for _, cases := range []struct {
-			raw   []string
-			valid bool
-		}{{good, true}, {bad, false}} {
-			for _, raw := range cases.raw {
-				var args map[string]any
-				if err := json.Unmarshal([]byte(raw), &args); err != nil {
-					t.Fatal(err)
-				}
-				err := validate.AgainstSchema(&schema, args, strfmt.Default)
-				if (err == nil) != cases.valid {
-					t.Errorf("%s %s: %v (valid=%t)", name, raw, err, cases.valid)
-				}
+			properties := definition["inputSchema"].(map[string]any)["properties"].(map[string]any)
+			if properties["id"] == nil || properties["run"] != nil {
+				t.Errorf("%s selector: %v", name, properties)
 			}
 		}
 	}
-}
-
-func TestResourceQueryAcceptsRunIDAliasAndRejectsConflict(t *testing.T) {
-	for _, tc := range []struct {
-		query  string
-		status int
-	}{
-		{"run_id=aaaaaaaa", 200}, {"run=aaaaaaaa&run_id=aaaaaaaa", 200}, {"run=bbbbbbbb&run_id=aaaaaaaa", 400},
-	} {
-		server, backend := testServer(t)
-		request := httptest.NewRequest(http.MethodGet, "/api/run-resources?"+tc.query, nil)
-		request.Header.Set("Authorization", "Bearer valid-token")
-		out := httptest.NewRecorder()
-		server.Handler().ServeHTTP(out, request)
-		if out.Code != tc.status {
-			t.Fatalf("%s: %d %s", tc.query, out.Code, out.Body)
-		}
-		if tc.status == 200 {
-			var args map[string]any
-			if err := json.Unmarshal(backend.calledArguments, &args); err != nil {
+	var schema spec.Schema
+	for _, definition := range toolDefinitions() {
+		if definition["name"] == "run_get" {
+			raw, _ := json.Marshal(definition["inputSchema"])
+			if err := json.Unmarshal(raw, &schema); err != nil {
 				t.Fatal(err)
 			}
-			if args["run"] != "aaaaaaaa" {
-				t.Fatalf("lost alias: %s", backend.calledArguments)
-			}
-		} else if backend.calledName != "" {
-			t.Fatal("conflicting alias reached backend")
 		}
+	}
+	for raw, valid := range map[string]bool{`{"id":"aaaaaaaa"}`: true, `{"run_id":"aaaaaaaa"}`: false} {
+		var args map[string]any
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			t.Fatal(err)
+		}
+		if err := validate.AgainstSchema(&schema, args, strfmt.Default); (err == nil) != valid {
+			t.Errorf("run_get %s: %v", raw, err)
+		}
+	}
+}
+
+func TestResourceQueryRefusesRunIDAndPassesID(t *testing.T) {
+	server, backend := testServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/run-resources?run=aaaaaaaa&resource_only=true", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	out := httptest.NewRecorder()
+	server.Handler().ServeHTTP(out, request)
+	if out.Code != 200 {
+		t.Fatalf("%d %s", out.Code, out.Body)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(backend.calledArguments, &args); err != nil {
+		t.Fatal(err)
+	}
+	if args["id"] != "aaaaaaaa" || args["run"] != nil || args["resource_only"] != nil {
+		t.Fatalf("arguments: %s", backend.calledArguments)
 	}
 }
 
@@ -302,10 +246,9 @@ func keys(object map[string]json.RawMessage) []string {
 	return names
 }
 
-// A json tag that spells a lowerCamel wire name (a declaration's
-// activeDeadlineSeconds) is the field's declared name, not a Go-style
-// duplicate: it stays next to its snake_case spelling.
-func TestLowerCamelTaggedNamesStay(t *testing.T) {
+// A json tag spelled in lowerCamel (a declaration's activeDeadlineSeconds)
+// is sent under its snake_case name only.
+func TestLowerCamelTaggedNamesAreSnakeCase(t *testing.T) {
 	payload := struct {
 		Deadline int `json:"activeDeadlineSeconds"`
 		RepoID   int64
@@ -318,10 +261,11 @@ func TestLowerCamelTaggedNamesStay(t *testing.T) {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if fields["activeDeadlineSeconds"] != float64(30) || fields["active_deadline_seconds"] != float64(30) {
-		t.Fatalf("declared lowerCamel name: %s", raw)
+	if _, camel := fields["activeDeadlineSeconds"]; camel || fields["active_deadline_seconds"] != float64(30) {
+		t.Fatalf("lowerCamel name: %s", raw)
 	}
 	if _, goName := fields["RepoID"]; goName || fields["repo_id"] != float64(7) {
 		t.Fatalf("Go-style name was not replaced by snake_case: %s", raw)
 	}
+
 }

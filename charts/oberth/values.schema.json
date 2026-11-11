@@ -168,12 +168,6 @@
             "enabled": {
               "type": "boolean"
             },
-            "cpuSomeAvg10": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "ioSomeAvg10": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
             "hardCpu": {
               "type": "number",
               "exclusiveMinimum": 10,
@@ -183,24 +177,6 @@
               "type": "number",
               "exclusiveMinimum": 10,
               "maximum": 100
-            },
-            "maxWaitSeconds": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "mode": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "ioFullAvg60Max": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "cpuSomeAvg60Max": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "hysteresis": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
-            },
-            "maxDefer": {
-              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
             }
           }
         }
@@ -307,10 +283,6 @@
         },
         "rootsSecret": {
           "$ref": "#/definitions/optionalKubernetesName"
-        },
-        "rootsKey": {
-          "$ref": "#/definitions/secretDataKey",
-          "description": "Ignored legacy value; retained for upgrade compatibility."
         },
         "rekorCA": {
           "type": "string",
@@ -490,21 +462,8 @@
           "type": "string",
           "pattern": "^ssh://[^\\s]+$"
         },
-        "createSecrets": {
-          "type": "boolean",
-          "description": "Ignored legacy value; retained for upgrade compatibility.",
-          "const": false
-        },
-        "keySecret": {
-          "$ref": "#/definitions/kubernetesName",
-          "description": "Ignored legacy value; retained for upgrade compatibility."
-        },
         "keyFile": {
           "$ref": "#/definitions/secretDataKey"
-        },
-        "knownHostsSecret": {
-          "$ref": "#/definitions/kubernetesName",
-          "description": "Ignored legacy value; retained for upgrade compatibility."
         },
         "knownHostsKey": {
           "$ref": "#/definitions/secretDataKey"
@@ -532,9 +491,6 @@
     "resources": {
       "$ref": "#/definitions/resources"
     },
-    "watchTunnel": {
-      "description": "Retired compatibility key. Ignored; connectors are managed outside Oberth."
-    },
     "podAnnotations": {
       "type": "object",
       "additionalProperties": {
@@ -545,19 +501,6 @@
       "type": "object",
       "additionalProperties": {
         "type": "string"
-      }
-    },
-    "secretCreatePolicy": {
-      "description": "Retired compatibility key: accepted and ignored. Kubernetes Secret creation is not supported.",
-      "type": [
-        "object",
-        "null"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
       }
     },
     "networkPolicy": {
@@ -645,10 +588,6 @@
           "properties": {
             "enabled": {"type": "boolean", "default": true}
           }
-        },
-        "enabled": {
-          "type": "boolean",
-          "description": "Retired compatibility setting, accepted for stored values and ignored. Pipelines always use Argo Workflows."
         },
         "releaseTagRoutes": {
           "type": "object",
@@ -845,13 +784,13 @@
           "additionalProperties": false,
           "properties": {
             "serviceAccount": {
-              "$ref": "#/definitions/optionalKubernetesName",
-              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
+              "$ref": "#/definitions/kubernetesName",
+              "description": "Branch-tier CI secrets ServiceAccount; omit for oberth-argo-ci-secrets."
             },
             "vaultRole": {
               "type": "string",
-              "pattern": "^$|^[A-Za-z0-9._-]+$",
-              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "description": "Branch-tier CI secrets OpenBao role; omit for oberth-argo-ci-secrets."
             }
           }
         },
@@ -932,13 +871,6 @@
             }
           ]
         },
-        "ciServiceAccount": {
-          "$ref": "#/definitions/optionalKubernetesName"
-        },
-        "ciSecretsServiceAccount": {
-          "type": "string",
-          "description": "Retired; nonempty values are refused by the template. Use ciSecrets.serviceAccount."
-        },
         "namespace": {
           "type": "string",
           "description": "Namespace pipelines run in. Must differ from the release namespace: Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs."
@@ -984,10 +916,6 @@
         "vault": {
           "type": "object",
           "properties": {
-            "ciSecretsRole": {
-              "type": "string",
-              "description": "Retired; nonempty values are refused by the template. Use ciSecrets.vaultRole."
-            },
             "address": {
               "type": "string",
               "description": "OpenBao API base URL injected into credentialed containers as VAULT_ADDR. HTTPS required."

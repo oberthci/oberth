@@ -418,8 +418,6 @@ fi
 if render --set upstream.keyFile=. >/dev/null 2>&1; then
   exit 1
 fi
-# Retired Secret names are inert compatibility values, including equal names.
-render --set upstream.keySecret=shared --set upstream.knownHostsSecret=shared >/dev/null
 if render --set persistence.size=9Gi >/dev/null 2>&1; then
   exit 1
 fi
@@ -596,7 +594,10 @@ for removed in maxConcurrentJobs=0 argoSync.semaphores.kvm=1 admission.runtimeCa
   admission.exclusiveClasses.kvm=1 admission.sizeWeights.XL=0 admission.maxHeadWait=20m \
   admission.declaredResources.ioRuns=0 admission.legacyResources.L.cpu_milli=1 gitBackend=cli gitcache.shadow=false \
   vm.kvm.enabled=false trustedTests.runtime=old argo.vmLauncherServiceAccount=old \
-  argo.containerDiskPrefixes[0]=example argo.kubevirtCeiling.maxVMs=16; do
+  argo.containerDiskPrefixes[0]=example argo.kubevirtCeiling.maxVMs=16 watchTunnel.enabled=true \
+  upstream.keySecret=shared upstream.knownHostsSecret=shared upstream.createSecrets=false auditAnchor.rootsKey=roots.pem \
+  secretCreatePolicy.enabled=false argo.enabled=true argo.ciServiceAccount=old argo.ciSecretsServiceAccount=old \
+  argo.vault.ciSecretsRole=old admission.pressure.mode=observe argo.ciSecrets.serviceAccount= argo.ciSecrets.vaultRole=; do
   if render --set "$removed" >/dev/null 2>&1; then
     echo "removed value accepted: $removed" >&2
     exit 1
@@ -651,11 +652,6 @@ test "$(grep -c 'resources: \["serviceaccounts"\]' "$argo_vault_manifest")" -eq 
 grep -A1 'resources: \["serviceaccounts"\]' "$argo_vault_manifest" | \
   grep -q 'verbs: \["get"\]'
 
-# Retired instance connector settings are inert, including malformed old values.
-for retired in 'watchTunnel.enabled=true' 'watchTunnel.enabled=invalid' 'watchTunnel=invalid'; do
-  render --set "$retired" >"$package_dir/retired-connector.yaml"
-  if grep -q 'cloudflared' "$package_dir/retired-connector.yaml"; then exit 1; fi
-done
 
 helm package "$chart" --destination "$package_dir" >/dev/null
 set -- "$package_dir"/oberth-*.tgz

@@ -19,7 +19,7 @@ func resourceBoundsSource(resources string) string {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: XL
+    example.com/tier: XL
 spec:
   entrypoint: step-abc12345
   activeDeadlineSeconds: 3600

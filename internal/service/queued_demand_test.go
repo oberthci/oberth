@@ -32,7 +32,7 @@ func TestQueuedDemandVisibleWithinScopeAndCached(t *testing.T) {
 	reader := &queueDemandReaderStub{}
 	control.resourceDeclarations = reader
 	for _, actor := range []api.Actor{{Identity: "owner"}, {Identity: "scoped", Scope: []string{"codeberg"}}} {
-		for _, view := range []string{"", api.RunViewActive} {
+		for _, view := range []string{""} {
 			value, err := control.Runs(t.Context(), actor, api.RunFilter{Ref: queued.Ref, View: view})
 			if err != nil {
 				t.Fatal(err)
@@ -41,8 +41,6 @@ func TestQueuedDemandVisibleWithinScopeAndCached(t *testing.T) {
 			switch rows := value.(type) {
 			case []model.Run:
 				run = rows[0]
-			case []ActiveRun:
-				run = rows[0].Run
 			default:
 				t.Fatalf("%T", value)
 			}

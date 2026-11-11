@@ -38,7 +38,6 @@ const requestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE 
 const supersessionEligibleSQL = `NOT EXISTS (SELECT 1 FROM run_priority_overrides WHERE run_id=runs.id) AND NOT EXISTS (SELECT 1 FROM run_priority_requests WHERE run_id=runs.id AND accepted IN ('low','promotion','high','highest')) AND (` + basePrioritySQL + `) IN ('standard','low')`
 
 func (s *Store) SetPriorityGrant(ctx context.Context, actor string, grant model.PriorityGrant) (model.PriorityGrant, error) {
-	grant.MaxClass = grant.MaxClass.Canonical()
 	if strings.TrimSpace(grant.Identity) == "" || len(grant.Identity) > 256 || strings.IndexFunc(grant.Identity, unicode.IsControl) >= 0 || (grant.MaxClass != model.PriorityPromotion && grant.MaxClass != model.PriorityHigh) || (!grant.Expires.After(s.now()) || grant.Expires.UnixNano() <= s.now().UnixNano()) {
 		return model.PriorityGrant{}, fmt.Errorf("%w: identity, promotion/high max_class and future expires required", ErrInvalid)
 	}
@@ -108,7 +107,7 @@ func (s *Store) submissionPriorityTx(ctx context.Context, tx *sql.Tx, spec model
 	if spec.Priority == "" {
 		return "", "", "", nil
 	}
-	accepted := spec.Priority.Canonical()
+	accepted := spec.Priority
 	reason := strings.TrimSpace(spec.PriorityReason)
 	if reason == "" {
 		reason = "submission priority request"

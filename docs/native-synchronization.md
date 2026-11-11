@@ -139,9 +139,8 @@ that key for up to the step budget plus two `assist.holdTTL`.
 
 The per-step annotation `oberth.ci/exclusive: <class>`, the Helm
 `admission.exclusiveClasses` allowlist and the in-process class ledger are
-gone. The annotation is accepted and ignored, so a document that still carries
-it runs without a limit. To keep the limit, replace it with the native
-semaphore:
+gone. A document that still carries the annotation is refused at admission,
+naming the replacement. Replace it with the native semaphore:
 
 ```yaml
 # before
@@ -165,4 +164,5 @@ and define the limit once on the argo-workflows release
 
 Also removed: `admission.sizeWeights`, `admission.declaredResources`,
 `admission.maxHeadWait` and the server flags behind them. The historical
-`oberth.ci/size` annotation is still accepted and still has no effect.
+`oberth.ci/size` and `oberth.ci/size-by-trigger` annotations are refused at
+admission too; Kubernetes places each Pod by its resources block.

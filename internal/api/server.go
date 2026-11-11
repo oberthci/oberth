@@ -68,9 +68,8 @@ type RunFilter struct {
 	BeforeRun string
 	// View selects the list: "" or "all" lists the queue (the run admitted
 	// next at its top), then running runs newest start first, then
-	// terminal runs newest finish first; "history" keeps the old
-	// terminal-only paging; "active" is the unpaged compatibility view of
-	// non-terminal runs.
+	// terminal runs newest finish first; "history" lists terminal runs
+	// only.
 	View string
 	// Actor keeps only runs whose actor is this uplink identity: run_list
 	// own:true sets it to the caller.
@@ -80,14 +79,13 @@ type RunFilter struct {
 // Run list views accepted by RunFilter.View.
 const (
 	RunViewAll     = "all"
-	RunViewActive  = "active"
 	RunViewHistory = "history"
 )
 
 // ValidRunView reports whether view names a run list view; empty is "all".
 func ValidRunView(view string) bool {
 	switch view {
-	case "", RunViewAll, RunViewActive, RunViewHistory:
+	case "", RunViewAll, RunViewHistory:
 		return true
 	}
 	return false
@@ -404,11 +402,9 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	// ?view=history is terminal runs only, paged like the default list;
-	// ?view=active is the unpaged non-terminal list in scheduling order.
-	// Without view the body and its paging are unchanged.
+	// ?view=history is terminal runs only, paged like the default list.
 	if !ValidRunView(filter.View) {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "view must be all, active or history"})
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "view must be all or history"})
 		return
 	}
 	if raw := query.Get("before"); raw != "" {
@@ -430,9 +426,8 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		}
 	}
 	value, err := server.views.Runs(request.Context(), actorFrom(request.Context()), filter)
-	// The body remains a plain array. The default first page also carries
-	// every queued and running run, so only its terminal portion counts
-	// against the page limit.
+	// The default first page also carries every queued and running run, so
+	// only its terminal portion counts against the page limit.
 	if runs, ok := value.([]model.Run); ok && err == nil && RunPageFull(runs, filter) {
 		last := runs[len(runs)-1]
 		cursor := last.ID
@@ -448,7 +443,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 // default and latest-per-ref lists carry every queued and running run in
 // addition to their page of terminal runs, so only terminal rows count.
 func RunPageFull(runs []model.Run, filter RunFilter) bool {
-	if len(runs) == 0 || filter.View == RunViewActive {
+	if len(runs) == 0 {
 		return false
 	}
 	if filter.View == RunViewHistory {

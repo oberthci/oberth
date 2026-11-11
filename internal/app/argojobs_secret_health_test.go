@@ -63,7 +63,7 @@ func TestCredentialClassificationFailsClosedBeforeSecretAccess(t *testing.T) {
 			case "promotion-flag":
 				request.Run.Trigger, request.Run.Credentialed = "promotion", true
 			case "declared-path", "promotion-secrets":
-				source = strings.Replace(source, "    oberth.ci/size: M", "    oberth.ci/size: M\n    oberth.ci/secret-paths: secret/example/ci", 1)
+				source = strings.Replace(source, "    example.com/tier: M", "    example.com/tier: M\n    oberth.ci/secret-paths: secret/example/ci", 1)
 				if name == "promotion-secrets" {
 					request.Run.Trigger = "promotion"
 				}

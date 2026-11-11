@@ -125,8 +125,8 @@ func TestInitWritesValidArgoWorkflowYAML(t *testing.T) {
 	if !strings.Contains(text, "kind: Workflow") {
 		t.Fatal("generated build.yaml missing kind: Workflow")
 	}
-	if !strings.Contains(text, "oberth.ci/size:") {
-		t.Fatal("generated build.yaml missing size annotation")
+	if strings.Contains(text, "oberth.ci/size") {
+		t.Fatal("generated build.yaml carries the removed size annotation")
 	}
 	if !strings.Contains(text, "entrypoint: ci") {
 		t.Fatal("generated build.yaml missing entrypoint")

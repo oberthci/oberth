@@ -386,7 +386,7 @@ spec:
             - --argo-controller-profile-configmap={{ . }}
             {{- end }}
             {{- end }}
-            - --argo-pipeline-serviceaccount={{ .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
+            - --argo-pipeline-serviceaccount={{ .Values.argo.pipelineServiceAccount | default "oberth-argo-pipeline" }}
             - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
             - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}

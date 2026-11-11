@@ -203,7 +203,7 @@ func newTargetRouteFragmentsFixture(t *testing.T, withFragment bool) *targetRout
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := []byte(strings.Replace(string(fixture.Source), "oberth.ci/size: L", "oberth.ci/size: L\n    oberth.ci/concurrency-group: shared\n    oberth.ci/concurrency-limit: '2'", 1))
+	source := []byte(strings.Replace(string(fixture.Source), "metadata:\n  annotations:\n    oberth.ci/size: L\n", "", 1))
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
 		t.Fatal(err)
@@ -388,7 +388,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	f := newTargetRouteFixture(t)
 	ctx := t.Context()
 	request := f.request
-	if size, err := f.jobs.PipelineSize(ctx, request); err != nil || size != pipeline.L {
+	if size, err := f.jobs.PipelineSize(ctx, request); err != nil || size != pipeline.M {
 		t.Fatal(size, err)
 	}
 	if steps, err := f.jobs.PlannedSteps(ctx, request); err != nil || len(steps) != 1 {
@@ -442,7 +442,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if size, found, err := restarted.Adopt(ctx, run); err != nil || !found || size != pipeline.L {
+	if size, found, err := restarted.Adopt(ctx, run); err != nil || !found || size != pipeline.M {
 		t.Fatal(size, found, err)
 	}
 	if namespace, err := restarted.WorkflowNamespaceForRun(ctx, run); err != nil || namespace != f.definition.Config.Namespace {

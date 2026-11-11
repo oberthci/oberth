@@ -160,7 +160,7 @@ The reason identifies the successor, actor or retry action. `--json` keeps the u
 The limit counts terminal rows; queued and running rows are additional on page 1.
 `--all` follows the server cursor through terminal pages. `oberth runs --json`
 prints `{"runs": [...], "next_before": N}`, the envelope of `GET
-/api/runs?envelope=1` and MCP `run_list`: pass `next_before` to `--before` for
+/api/runs` and MCP `run_list`: pass `next_before` to `--before` for
 the next page (a scoped uplink gets `next_cursor`, a run ID, instead). After the
 oldest run neither field is present. `--all --json` prints every page's rows in
 one envelope. If a cursor run was

@@ -218,8 +218,6 @@ auditAnchor:
   gateTimeout: 2m
   verifyTimeout: 45s
   rootsSecret: ""
-  # Ignored legacy value, retained for upgrades.
-  rootsKey: roots.pem
   # Optional PEM bundle pinning the Rekor HTTPS TLS trust anchors. Public CA
   # material, delivered via ConfigMap. Enables self-hosted or air-gapped Rekor
   # deployments behind a private CA. When empty the system trust store is used.
@@ -318,12 +316,7 @@ ssh:
 upstream:
   name: github
   baseURL: ssh://git@github.com/your-org
-  # createSecrets, keySecret and knownHostsSecret are ignored legacy values.
-  # createSecrets must remain false; no Kubernetes Secret is created.
-  createSecrets: false
-  keySecret: oberth-upstream-key
   keyFile: id_ed25519
-  knownHostsSecret: oberth-known-hosts
   knownHostsKey: known_hosts
 
 # Argo Workflows execution engine. This is not optional: every pipeline runs as
@@ -419,9 +412,6 @@ argo:
   # oberth/data/upstream/* only and never receives approval-table grants.
   # `oberth install --install-secretstore` and setup-secretstore.sh create
   # the matching OpenBao policy and role under these default names.
-  # Deprecated: explicit empty serviceAccount/vaultRole strings select the
-  # defaults for this release only. Before the next chart release, omit those
-  # overrides or set oberth-argo-ci-secrets explicitly.
   ciSecrets:
     serviceAccount: "oberth-argo-ci-secrets"
     vaultRole: "oberth-argo-ci-secrets"
@@ -484,11 +474,7 @@ argo:
     #       policies=oberth-argo-credentialed ttl=20m
     #
     # A "*" on either bound field defeats the approval gate.
-    #
-    # (The retired aliases argo.ciSecretsServiceAccount and
-    # argo.vault.ciSecretsRole named THIS release-tier pair in older
-    # revisions; the chart refuses to render while either is still set, so a
-    # reused-values upgrade cannot silently misassign a tier.)
+
     address: ""
     credentialedRole: ""
     # Optional PEM bundle pinning the trust anchors a release-tier container

@@ -274,17 +274,16 @@ func runMCPCall(ctx context.Context, arguments []string, output io.Writer) error
 			}
 		}
 	}
-	// Older servers may return arrays or null here. Keep their text usable;
-	// only an object can supply the structured-only fallback.
+	// Structured content is always an object; print it when no text came.
 	structured := bytes.TrimSpace(result.StructuredContent)
-	if !printed && bytes.HasPrefix(structured, []byte("{")) {
+	if !printed && len(structured) > 0 {
 		if err := json.NewEncoder(output).Encode(json.RawMessage(structured)); err != nil {
 			return err
 		}
 	}
 	if (toolName == "run_logs" || toolName == "logs") && !result.IsError {
 		var log remoteLog
-		if recordjson.Unmarshal(structured, &log) == nil && log.ScanComplete != nil {
+		if recordjson.Unmarshal(structured, &log) == nil {
 			if _, err := fmt.Fprintln(os.Stderr, log.readSummary()); err != nil {
 				return err
 			}

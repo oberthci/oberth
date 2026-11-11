@@ -80,7 +80,7 @@ func TestPipelineSize_ValidFile(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
 spec:
   entrypoint: main
   templates:
@@ -127,7 +127,7 @@ func TestAuditSubmissionRecordsExecutedCommitNotTagObject(t *testing.T) {
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: M
+    example.com/tier: M
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600
@@ -254,7 +254,7 @@ func TestSelectedNonrootWithoutProofCannotBeAudited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source = []byte(strings.Replace(string(source), "oberth.ci/size: M", "oberth.ci/size: M\n    oberth.ci/nonroot-templates: main", 1))
+	source = []byte(strings.Replace(string(source), "example.com/tier: M", "example.com/tier: M\n    oberth.ci/nonroot-templates: main", 1))
 	if err := os.WriteFile(path, source, 0o600); err != nil {
 		t.Fatal(err)
 	}
