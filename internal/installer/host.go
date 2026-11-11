@@ -315,6 +315,10 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 
 	if !cfg.DryRun {
 		preflight := InstallResult{OK: true}
+		identity := publicClusterIdentity(cfg, restConfig, selectedContext)
+		if !checkClusterTrust(restConfig, identity, &preflight) {
+			return fmt.Errorf("%w: cluster_ca: %s", errInstallPreflight, preflight.Checks[0].Remedy)
+		}
 		preflightConfig := cfg
 		// RunCommand already carries an explicit kubeconfig, if supplied.
 		preflightConfig.KubeconfigPath = ""

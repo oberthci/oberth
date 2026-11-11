@@ -825,7 +825,7 @@ func TestKindNodePlatformArch(t *testing.T) {
 func TestExecuteRefusesNodePreflightBeforeInstalling(t *testing.T) {
 	kube := fake.NewClientset()
 	deps := InstallDeps{Output: io.Discard, GOOS: "linux", LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-		return kube, &rest.Config{Host: "https://api.example.test"}, "chosen", nil
+		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
 	}, RunHelm: func(context.Context, []string) ([]byte, error) {
 		t.Fatal("Helm called before preflight passed")
 		return nil, nil
