@@ -59,8 +59,10 @@ func TestUpstreamRepinRefusesAChangedRegistrationBeforeAnyPin(t *testing.T) {
 		arguments []string
 		want      string
 	}{
-		"another URL":   {[]string{"forge", "ssh://git@other.example/acme"}, "upstream remove"},
-		"dedicated key": {[]string{"--dedicated-key", "forge", "ssh://git@forge.example/acme"}, "without --dedicated-key"},
+		"add another URL":     {[]string{"forge", "ssh://git@other.example/acme"}, "upstream remove"},
+		"add dedicated key":   {[]string{"--dedicated-key", "forge", "ssh://git@forge.example/acme"}, "without --dedicated-key"},
+		"repin another URL":   {[]string{"--repin", "forge", "ssh://git@other.example/acme"}, "upstream remove"},
+		"repin dedicated key": {[]string{"--repin", "--dedicated-key", "forge", "ssh://git@forge.example/acme"}, "without --dedicated-key"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var operations []string
@@ -81,7 +83,7 @@ func TestUpstreamRepinRefusesAChangedRegistrationBeforeAnyPin(t *testing.T) {
 				},
 			}
 			arguments := append([]string{
-				"add", "--repin",
+				"add",
 				"--database", databasePath,
 				"--upstream-key", filepath.Join(directory, "projected", "id_ed25519"),
 				"--known-hosts", filepath.Join(directory, "projected-hosts", "known_hosts"),

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,5 +96,97 @@ func TestResumeEncryptedInputKeepsDecryptionPrivate(t *testing.T) {
 	defer clear(got)
 	if err != nil || string(got) != secret {
 		t.Fatal("private decryption contract failed")
+	}
+}
+
+func TestSSHSetupUpdatesValidHostHeaderForms(t *testing.T) {
+	ssh, err := exec.LookPath("ssh")
+	if err != nil {
+		t.Skip("OpenSSH is a test prerequisite")
+	}
+	for _, header := range []string{"Host\toberth", "Host=oberth", `Host "oberth" # managed alias`} {
+		t.Run(header, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Mkdir(filepath.Join(root, ".ssh"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			key := filepath.Join(root, ".ssh", "client")
+			if err := os.WriteFile(key, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, ".ssh", "config")
+			body := header + "\n HostName localhost\n Port 30022\n IdentityFile old-key\nMatch\thost other\n Port 2222\nHost other\n IdentityFile other-key\n"
+			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			deps := Deps{Output: &output, UserHomeDir: func() (string, error) { return root, nil }, ClientSSHPort: "31022"}
+			if err := offerSSHConfig(t.Context(), deps, key+".pub", newTableWriter(&output, false)); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(updated, []byte("Match\thost other\n Port 2222\nHost other\n IdentityFile other-key")) {
+				t.Fatal("unrelated SSH sections changed")
+			}
+			command := exec.CommandContext(t.Context(), ssh, "-G", "-F", path, "oberth")
+			command.Stderr = io.Discard
+			resolved, err := command.Output()
+			if err != nil {
+				t.Fatal("OpenSSH rejected the updated configuration")
+			}
+			if !bytes.Contains(resolved, []byte("port 31022\n")) || !bytes.Contains(resolved, []byte("identityfile "+key+"\n")) {
+				t.Fatal("OpenSSH did not select the updated port and identity")
+			}
+		})
+	}
+}
+
+func TestResumeEncryptedInputWithRealAge(t *testing.T) {
+	for _, tool := range []string{"age", "age-keygen"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip("age is a test prerequisite")
+		}
+	}
+	root := t.TempDir()
+	identity := filepath.Join(root, "identity")
+	command := exec.CommandContext(t.Context(), "age-keygen", "-o", identity)
+	command.Stdout = io.Discard
+	command.Stderr = io.Discard
+	if err := command.Run(); err != nil {
+		t.Fatal("age identity creation failed")
+	}
+	recipient, err := exec.CommandContext(t.Context(), "age-keygen", "-y", identity).Output()
+	if err != nil {
+		t.Fatal("age recipient read failed")
+	}
+	file := filepath.Join(root, "recovery.age")
+	sink, err := createSecretsFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.enableEncryption(t.Context(), strings.TrimSpace(string(recipient))); err != nil {
+		t.Fatal(err)
+	}
+	random := make([]byte, 32)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatal(err)
+	}
+	token := hex.EncodeToString(random)
+	sink.add("Root token", token)
+	var output bytes.Buffer
+	sink.finish(&output)
+	if sink.err != nil {
+		t.Fatal("recovery encryption failed")
+	}
+	got, err := readResumeRootToken(t.Context(), file, identity)
+	defer clear(got)
+	if err != nil || string(got) != token {
+		t.Fatal("encrypted recovery did not round trip")
+	}
+	if bytes.Contains(output.Bytes(), got) {
+		t.Fatal("root token appeared in output")
 	}
 }

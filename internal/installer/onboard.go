@@ -1879,16 +1879,61 @@ func privateKeyPath(pubPath string) string {
 	return strings.TrimSuffix(pubPath, ".pub")
 }
 
+// sshConfigFields reads directive boundaries without treating quoted comments
+// or separators as syntax. It does not evaluate Include or Match conditions.
+func sshConfigFields(line string) []string {
+	var fields []string
+	var value strings.Builder
+	quoted, escaped := false, false
+	flush := func() {
+		if value.Len() > 0 {
+			fields = append(fields, value.String())
+			value.Reset()
+		}
+	}
+	for _, r := range line {
+		if escaped {
+			value.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			quoted = !quoted
+			continue
+		}
+		if !quoted {
+			if r == '#' {
+				break
+			}
+			if r == ' ' || r == '\t' || r == '\r' {
+				flush()
+				continue
+			}
+			if r == '=' && (len(fields) == 0 || len(fields) == 1 && value.Len() == 0) {
+				flush()
+				continue
+			}
+		}
+		value.WriteRune(r)
+	}
+	if quoted {
+		return nil
+	}
+	flush()
+	return fields
+}
+
 // hasSSHHostBlock scans the content of an SSH config file for a "Host oberth"
 // block. Matching is case-insensitive for the keyword (ssh_config treats
 // "Host" and "host" equivalently) and case-sensitive for the host name.
 func hasSSHHostBlock(data []byte, hostName string) bool {
 	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if len(trimmed) <= 5 {
-			continue
-		}
-		if strings.EqualFold(trimmed[:5], "Host ") && strings.TrimSpace(trimmed[5:]) == hostName {
+		fields := sshConfigFields(line)
+		if len(fields) == 2 && strings.EqualFold(fields[0], "Host") && fields[1] == hostName {
 			return true
 		}
 	}
@@ -1943,16 +1988,9 @@ func updateSSHBlockIdentityFile(data []byte, hostName, newKeyPath string) []byte
 	inBlock := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if len(trimmed) > 5 && strings.EqualFold(trimmed[:5], "Host ") {
-			if strings.TrimSpace(trimmed[5:]) == hostName {
-				inBlock = true
-			} else {
-				inBlock = false
-			}
-			continue
-		}
-		if len(trimmed) > 6 && strings.EqualFold(trimmed[:6], "Match ") {
-			inBlock = false
+		fields := sshConfigFields(line)
+		if len(fields) > 0 && (strings.EqualFold(fields[0], "Host") || strings.EqualFold(fields[0], "Match")) {
+			inBlock = len(fields) == 2 && strings.EqualFold(fields[0], "Host") && fields[1] == hostName
 			continue
 		}
 		if !inBlock {
@@ -2196,7 +2234,7 @@ func updateSSHBlockPort(data []byte, hostName, port string) []byte {
 	out := make([]string, 0, len(lines)+1)
 	inBlock := false
 	for _, line := range lines {
-		fields := strings.Fields(strings.ReplaceAll(line, "=", " "))
+		fields := sshConfigFields(line)
 		if len(fields) > 0 && (strings.EqualFold(fields[0], "Host") || strings.EqualFold(fields[0], "Match")) {
 			inBlock = len(fields) == 2 && strings.EqualFold(fields[0], "Host") && fields[1] == hostName
 			out = append(out, line)
