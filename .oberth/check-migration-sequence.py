@@ -75,12 +75,14 @@ def main():
     sequence = read_sequence((args.root / SEQUENCE).read_text(encoding="utf-8"))
     base = None
     if args.base:
-        shown = subprocess.run(["git", "-C", str(args.root), "show", f"{args.base}:{SEQUENCE.as_posix()}"],
+        # Read the migration tree itself so the first sequence-file change also
+        # compares against every migration already shipped on the default branch.
+        shown = subprocess.run(["git", "-C", str(args.root), "ls-tree", "--name-only", args.base, f"{MIGRATIONS.as_posix()}/"],
                                check=False, capture_output=True, text=True)
         if shown.returncode != 0:
-            print(f"cannot read {SEQUENCE} at {args.base}: {shown.stderr.strip()}", file=sys.stderr)
+            print(f"cannot read migrations at {args.base}: {shown.stderr.strip()}", file=sys.stderr)
             return 2
-        base = read_sequence(shown.stdout)
+        base = sorted(Path(name).stem for name in shown.stdout.splitlines() if name.endswith(".sql"))
     problems = check(migration_files(args.root), sequence, base)
     for problem in problems:
         print(problem, file=sys.stderr)

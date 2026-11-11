@@ -30,6 +30,7 @@ func TestInfrastructureRetryPreservesOrdinaryAndAgedQueueOrder(t *testing.T) {
 			if sourcePriority != retryPriority {
 				t.Fatalf("priority changed %s -> %s", sourcePriority, retryPriority)
 			}
+			now = now.Add(automaticRetryDelay)
 			claimed, err := s.ClaimNextRun(t.Context())
 			if err != nil || claimed.ID != retry.ID {
 				t.Fatalf("retry sent to back: %+v %v", claimed, err)
@@ -51,29 +52,27 @@ func TestInfrastructureRetryRefusesTerminalObservationFailure(t *testing.T) {
 	}
 }
 
-func TestInfrastructureRetryLegacyLineageSurvivesRestart(t *testing.T) {
+func TestInfrastructureRetryLineageSurvivesRestart(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	source := autoRetrySource(t, s, repo.ID, "feature/legacy")
-	failed, err := s.FinishRun(t.Context(), source.ID, autoRetryResult())
+	source := autoRetrySource(t, s, repo.ID, "feature/restart")
+	_, err := s.FinishRun(t.Context(), source.ID, autoRetryResult())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`UPDATE runs SET reason=? WHERE id=?`, "automatic infrastructure retry of "+source.ID, failed.AutoRetriedBy); err != nil {
-		t.Fatal(err)
-	}
+	now = now.Add(automaticRetryDelay)
 	child, err := s.ClaimNextRun(t.Context())
 	if err != nil || child.AutoRetryOf != source.ID {
 		t.Fatal(child, err)
 	}
 	next, err := s.RequeueStrandedRun(t.Context(), child.ID)
 	if err != nil || next.AutoRetryOf != source.ID {
-		t.Fatalf("legacy lineage lost: %+v %v", next, err)
+		t.Fatalf("lineage lost: %+v %v", next, err)
 	}
 	terminal, err := s.FinishRun(t.Context(), next.ID, autoRetryResult())
 	if err != nil || terminal.AutoRetriedBy != "" {
-		t.Fatalf("legacy retry budget reset: %+v %v", terminal, err)
+		t.Fatalf("retry budget reset: %+v %v", terminal, err)
 	}
 }
 

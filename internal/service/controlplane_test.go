@@ -1305,9 +1305,14 @@ func (value *finalizeFailStore) ClaimNextRun(ctx context.Context) (model.Run, er
 
 func newControlFixture(t *testing.T, results ...JobResult) *controlFixture {
 	t.Helper()
+	return newControlFixtureWithOptions(t, store.Options{}, results...)
+}
+
+func newControlFixtureWithOptions(t *testing.T, options store.Options, results ...JobResult) *controlFixture {
+	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := openTestStore(t, ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
+	database, err := openTestStore(t, ctx, filepath.Join(root, "oberth.sqlite"), options)
 	if err != nil {
 		t.Fatal(err)
 	}

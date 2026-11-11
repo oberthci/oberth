@@ -224,6 +224,8 @@ prune.
 
 ## Tag after promotion
 
+`tag_after` refuses release-version names beginning `v<major>.<minor>.<patch>`, including prereleases and build suffixes. Push release tags through Oberth so release CI runs.
+
 `promote` with `tag_after: {name, message}` (single source or train) records
 the request with the promotion; a malformed name, an empty message or a tag
 that already exists is refused before admission. It needs an admin uplink: a

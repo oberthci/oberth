@@ -4,6 +4,9 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import subprocess
+import sys
+import tempfile
 
 SPEC = importlib.util.spec_from_file_location("check_migration_sequence", Path(__file__).with_name("check-migration-sequence.py"))
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -28,6 +31,31 @@ class MigrationSequenceTests(unittest.TestCase):
         self.assertTrue(any("numbered after main's latest" in problem for problem in problems), problems)
         problems = MODULE.check([A, B, C, older], [A, B, older, C], base=[A, B, C])
         self.assertTrue(any("unchanged prefix" in problem for problem in problems), problems)
+
+    def test_base_without_sequence_uses_shipped_migration_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            migrations = root / MODULE.MIGRATIONS
+            migrations.mkdir(parents=True)
+            (migrations / (B + ".sql")).write_text("-- shipped\n")
+            def git(*args):
+                return subprocess.run(["git", "-C", directory, *args], check=True, capture_output=True, text=True)
+            git("init", "-b", "main")
+            git("add", ".")
+            git("-c", "user.name=dima", "-c", "user.email=yellowmegaman@gmail.com", "commit", "-m", "migration baseline")
+            sequence = root / MODULE.SEQUENCE
+            sequence.parent.mkdir()
+            (migrations / (A + ".sql")).write_text("-- new but too old\n")
+            sequence.write_text(A + "\n" + B + "\n")
+            command = [sys.executable, str(MODULE.ROOT / ".oberth/check-migration-sequence.py"), "--root", directory, "--base", "main"]
+            refused = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(refused.returncode, 1, refused.stderr)
+            self.assertIn("unchanged prefix", refused.stderr)
+            (migrations / (A + ".sql")).unlink()
+            (migrations / (C + ".sql")).write_text("-- new and later\n")
+            sequence.write_text(B + "\n" + C + "\n")
+            accepted = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
     def test_collisions_are_refused(self):
         twin = "20261105050000-other-slug"

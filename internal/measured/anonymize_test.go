@@ -42,3 +42,12 @@ func TestAnonymizerHashesNamesWithAPerExportSalt(t *testing.T) {
 		t.Fatal("two exports share a salt")
 	}
 }
+
+func TestAnonymizerHashesRefsThatAlsoNameReportDefaults(t *testing.T) {
+	a := newAnonymizer([]byte("test salt"))
+	for _, ref := range []string{"any", "default"} {
+		if got := a.Report(Report{Ref: ref}).Ref; got == ref || !strings.HasPrefix(got, "ref-") {
+			t.Fatalf("ref %q disclosed as %q", ref, got)
+		}
+	}
+}

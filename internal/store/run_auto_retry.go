@@ -15,7 +15,6 @@ import (
 // These server-owned reasons preserve lineage without a schema migration.
 // Manual reruns append the operator's reason after a server-owned lineage
 // header. Only that header can determine the inherited automatic budget.
-const legacyAutoRetryOfPrefix = "automatic infrastructure retry of "
 const autoRetryOfPrefix = "automatic retry of "
 const autoRetryCauseSeparator = " after infrastructure failure: "
 const autoRetriedByPrefix = "infra error, retried as "
@@ -43,20 +42,14 @@ func autoRetryLineageTx(ctx context.Context, tx *sql.Tx, run model.Run) (string,
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", 0, err
 	}
-	origin, inherited := saved.String, saved.String != ""
-	if origin == "" && run.AutoRetryOf != "" {
-		origin, inherited = run.AutoRetryOf, true
-	}
+	origin := saved.String
 	if origin == "" {
 		origin = run.ID
 	}
 	var spent int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(COALESCE(json_extract(details,'$.attempt'),1)),0) FROM audit_actions
-WHERE action='run.retry.auto' AND resource_type='run' AND (json_extract(details,'$.origin_run_id')=? OR json_extract(details,'$.source_run_id')=?)`, origin, origin).Scan(&spent); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(json_extract(details,'$.attempt')),0) FROM audit_actions
+WHERE action='run.retry.auto' AND resource_type='run' AND json_extract(details,'$.origin_run_id')=?`, origin).Scan(&spent); err != nil {
 		return "", 0, err
-	}
-	if spent == 0 && (inherited || run.AutoRetriedBy != "") {
-		spent = 1 // a receipt older than attempt numbers spent one retry
 	}
 	return origin, spent, nil
 }
@@ -153,7 +146,7 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 	// Every automatic retry retains its source's admission position. The
 	// inherited sequence fences supersession away from all other queued work.
 	inheritedSequence := source.AdmissionSequence
-	next, err := s.enqueueRunTx(ctx, tx, model.RunSpec{RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: source.Actor, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry, TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA}, id, now, inheritedSequence)
+	next, err := s.enqueueRunTx(ctx, tx, model.RunSpec{RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: source.Actor, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry, TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA, Assist: source.AssistRequested}, id, now, inheritedSequence)
 	if err != nil {
 		return source, fmt.Errorf("enqueue automatic infrastructure retry: %w", err)
 	}
@@ -181,7 +174,7 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 	return source, nil
 }
 
-// Keep old receipts readable while the human reason now includes the cause.
+// Read the server-owned lineage header without interpreting operator prose.
 func automaticRetryOrigin(reason string) string {
 	reason = strings.TrimPrefix(strings.TrimSuffix(reason, "; "+PolicyRefreshWaitingReason), RestartRequeueReason+"; ")
 	if rest, ok := strings.CutPrefix(reason, "rerun of "); ok {
@@ -193,11 +186,9 @@ func automaticRetryOrigin(reason string) string {
 		}
 		return ""
 	}
-	for _, prefix := range []string{autoRetryOfPrefix, legacyAutoRetryOfPrefix} {
-		if rest, ok := strings.CutPrefix(reason, prefix); ok {
-			id, _, _ := strings.Cut(rest, autoRetryCauseSeparator)
-			return id
-		}
+	if rest, ok := strings.CutPrefix(reason, autoRetryOfPrefix); ok {
+		id, _, _ := strings.Cut(rest, autoRetryCauseSeparator)
+		return id
 	}
 	return ""
 }

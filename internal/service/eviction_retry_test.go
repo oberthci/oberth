@@ -9,6 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -67,7 +68,8 @@ func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
 }
 
 func TestEvictedStepAutomaticallyRetriesWithinBudget(t *testing.T) {
-	f := newRecoveryFixture(t)
+	now := time.Now()
+	f := newRecoveryFixtureWithOptions(t, store.Options{Now: func() time.Time { return now }})
 	run := f.enqueueAndClaim(t, "feature/eviction", strings.Repeat("b", 40))
 	for attempt := 0; attempt <= model.DefaultInfrastructureAutoRetryBudget; attempt++ {
 		name, err := deterministicWorkflowName(f.repo.Name, run.ID)
@@ -99,6 +101,7 @@ func TestEvictedStepAutomaticallyRetriesWithinBudget(t *testing.T) {
 		if failed.AutoRetriedBy == "" {
 			t.Fatalf("eviction not retried at attempt %d", attempt)
 		}
+		now = now.Add(5 * time.Second)
 		run, err = f.store.ClaimNextRun(t.Context())
 		if err != nil || run.ID != failed.AutoRetriedBy {
 			t.Fatalf("retry not queued: %+v %v", run, err)
@@ -112,7 +115,8 @@ func TestDeterministicAdmissionRefusalsDoNotAutoRetry(t *testing.T) {
 		"configuration": &argoworkflow.AdmissionError{Cause: fmt.Errorf("invalid workflow configuration")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newRecoveryFixture(t)
+			now := time.Now()
+			f := newRecoveryFixtureWithOptions(t, store.Options{Now: func() time.Time { return now }})
 			run := f.enqueueAndClaim(t, "feature/"+name, strings.Repeat("b", 40))
 			jobs := &rcaCreateFailure{createErr: fmt.Errorf("admission: %w", cause)}
 			if err := f.scheduler(t, jobs).executeAndCleanup(t.Context(), run); err != nil {
@@ -167,7 +171,8 @@ func TestPreparationRetryOnlyRejectsExplicitDeterministicRefusals(t *testing.T) 
 		{"ceiling", &argoworkflow.ResourceCeilingError{Detail: "requests.cpu exceeds administrator resource ceiling"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newRecoveryFixture(t)
+			now := time.Now()
+			f := newRecoveryFixtureWithOptions(t, store.Options{Now: func() time.Time { return now }})
 			run := f.enqueueAndClaim(t, "feature/"+tc.name, strings.Repeat("c", 40))
 			for attempt := 0; attempt <= model.DefaultInfrastructureAutoRetryBudget; attempt++ {
 				jobs := &rcaCreateFailure{createErr: &preparationRetryFailure{cause: tc.cause}}
@@ -184,6 +189,7 @@ func TestPreparationRetryOnlyRejectsExplicitDeterministicRefusals(t *testing.T) 
 				if failed.AutoRetriedBy == "" {
 					break
 				}
+				now = now.Add(5 * time.Second)
 				run, err = f.store.ClaimNextRun(t.Context())
 				if err != nil || run.ID != failed.AutoRetriedBy {
 					t.Fatalf("retry: %+v %v", run, err)

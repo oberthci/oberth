@@ -196,3 +196,16 @@ func TestPromotionTagAfterRequestedAfterTheEventIsSettled(t *testing.T) {
 		t.Fatalf("late request = %+v %v", tag, err)
 	}
 }
+
+func TestPromoteTagAfterRefusesReleaseVersionNames(t *testing.T) {
+	f, git := newTagPromotionFixture(t)
+	for _, name := range []string{"v1.2.3", "v1.2.3-rc.1", "v1.2.3+build", "v01.2.3", "v1.2.3-extra"} {
+		raw, _ := json.Marshal(map[string]any{"repo": f.repo.Name, "branch": "main", "sha": f.initial, "tag_after": map[string]any{"name": name, "message": "release"}})
+		if _, err := f.service.CallTool(t.Context(), pruneAdmin, "promote", raw); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "release-version") {
+			t.Fatalf("release name %q: %v", name, err)
+		}
+	}
+	if len(git.pushes) != 0 {
+		t.Fatal("refused names were pushed")
+	}
+}

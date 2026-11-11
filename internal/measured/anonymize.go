@@ -49,9 +49,7 @@ func (a *Anonymizer) token(kind, name string) string {
 func (a *Anonymizer) Report(report Report) Report {
 	out := report
 	out.Repository = a.token("repo", report.Repository)
-	if report.Ref != "" && report.Ref != "any" && report.Ref != "default" {
-		out.Ref = a.token("ref", report.Ref)
-	}
+	out.Ref = a.token("ref", report.Ref)
 	out.Run = a.token("run", report.Run)
 	out.NewestSHA = a.token("sha", report.NewestSHA)
 	out.SafetyRunIDs = a.tokens("run", report.SafetyRunIDs)

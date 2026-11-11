@@ -119,3 +119,23 @@ func TestRunListLatestPerRefGlob(t *testing.T) {
 		t.Fatalf("held latest: %v", err)
 	}
 }
+
+func TestRunListLatestRefGlobRespectsUpstreamScope(t *testing.T) {
+	f := newScopeFixture(t)
+	value, err := f.call(scopedActor, "run_list", map[string]any{"ref_glob": "feature/*", "latest": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.assertNoLeak(t, "run_list", value, err, "")
+	encoded, err := json.Marshal(value.(api.RunListResponse).Runs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runs []model.Run
+	if err := json.Unmarshal(encoded, &runs); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != len(f.runs["github"]) {
+		t.Fatalf("scoped count: %d", len(runs))
+	}
+}

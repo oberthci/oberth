@@ -10,10 +10,12 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 func TestInfrastructureRetryTrustedPolicyDeadlineKeepsQueuePosition(t *testing.T) {
-	f := newControlFixture(t)
+	now := time.Now()
+	f := newControlFixtureWithOptions(t, store.Options{Now: func() time.Time { return now }})
 	f.scheduler.git = &policyTestGit{controlGit: f.git, baselineErr: fmt.Errorf("%w: refresh upstream trusted test policy: %w", gitcache.ErrPolicyUpstreamUnavailable, context.DeadlineExceeded)}
 	f.scheduler.policyWaitTimeout = time.Millisecond
 	f.scheduler.capacityWait = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
@@ -44,6 +46,7 @@ func TestInfrastructureRetryTrustedPolicyDeadlineKeepsQueuePosition(t *testing.T
 	}
 	// The default budget allows a second retry of the same lineage (#1524):
 	// the first retry's reason links to it, the second names the origin.
+	now = now.Add(5 * time.Second)
 	if err = f.scheduler.ProcessNext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +63,7 @@ func TestInfrastructureRetryTrustedPolicyDeadlineKeepsQueuePosition(t *testing.T
 	if err != nil || json.Unmarshal([]byte(action.Details), &details) != nil || details["attempt"] != float64(2) || details["origin_run_id"] != source.ID || details["budget"] != float64(model.DefaultInfrastructureAutoRetryBudget) {
 		t.Fatalf("second retry audit: %+v %v", action, err)
 	}
+	now = now.Add(5 * time.Second)
 	if err = f.scheduler.ProcessNext(t.Context()); err != nil {
 		t.Fatal(err)
 	}

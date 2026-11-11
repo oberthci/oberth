@@ -97,3 +97,5 @@ compounds with the automatic infrastructure retry: the injected in-Workflow
 `retryStrategy` retries only a command that exited nonzero, a deadline-killed
 or evicted attempt is never held, and a hold that expires is a retained failed
 step, which this retry refuses as before.
+
+Automatic retries retain the assist request and wait five seconds before becoming eligible for dispatch. The wait survives server restarts and does not block unrelated queued work.

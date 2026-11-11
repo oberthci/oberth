@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 // target equals the promotion's result, on that result commit, and never
 // with force. A transient upstream failure is retried on the publication
 // retry schedule; every other outcome is recorded as failed with a reason.
+
+var releaseVersionTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+`)
 
 type annotatedTagPublisher interface {
 	PublishAnnotatedTag(context.Context, string, string, string, string) (string, error)
@@ -39,6 +42,9 @@ func (service *API) checkTagAfter(ctx context.Context, actor api.Actor, argument
 	}
 	if err := gitcache.ValidateTag(tag.Name); err != nil || strings.HasPrefix(tag.Name, "refs/") {
 		return refuse(ErrInvalidInput, "tag_after name %q is not a valid tag name (no refs/tags/ prefix)", tag.Name)
+	}
+	if releaseVersionTag.MatchString(tag.Name) {
+		return refuse(ErrInvalidInput, "tag_after refuses release-version names; push the release tag through Oberth to run release CI")
 	}
 	if strings.TrimSpace(tag.Message) == "" || len(tag.Message) > store.MaxPromotionTagMessage || strings.ContainsRune(tag.Message, 0) {
 		return refuse(ErrInvalidInput, "tag_after message is required, at most %d bytes", store.MaxPromotionTagMessage)

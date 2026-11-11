@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -189,6 +190,7 @@ func TestAutoRetryLineageSurvivesRestartAndCancelledManualReplay(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			now = now.Add(automaticRetryDelay)
 			child, err := s.ClaimNextRun(t.Context())
 			if err != nil || child.ID != failed.AutoRetriedBy {
 				t.Fatal(err, child)
@@ -240,5 +242,39 @@ func TestAutoRetryAuditFailureRollsBackFailureAndEnqueueTogether(t *testing.T) {
 	var count int
 	if err := s.db.QueryRow(`SELECT count(*) FROM runs`).Scan(&count); err != nil || count != 1 {
 		t.Fatal("orphan retry committed", count, err)
+	}
+}
+
+func TestAutomaticRetryPreservesAssistAndWaitsBeforeClaim(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	source, err := s.EnqueueRun(t.Context(), model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/assist", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "branch", Assist: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.FinishRun(t.Context(), source.ID, autoRetryResult())
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.Run(t.Context(), failed.AutoRetriedBy)
+	if err != nil || !next.AssistRequested {
+		t.Fatalf("assist lost: %+v %v", next, err)
+	}
+	if _, err := s.ClaimNextRun(t.Context()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("claimed during retry delay: %v", err)
+	}
+	if _, err := s.NextQueuedRun(t.Context()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("offered during retry delay: %v", err)
+	}
+	other := autoRetrySource(t, s, repo.ID, "feature/other")
+	claimed, err := s.ClaimNextRun(t.Context())
+	if err != nil || claimed.ID != other.ID {
+		t.Fatalf("delay blocked unrelated work: %+v %v", claimed, err)
+	}
+	now = now.Add(automaticRetryDelay)
+	claimed, err = s.ClaimNextRun(t.Context())
+	if err != nil || claimed.ID != next.ID || !claimed.AssistRequested {
+		t.Fatalf("retry did not become eligible: %+v %v", claimed, err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 // startupDeadlineResult is the engine verdict for a step whose Pod deadline
@@ -28,7 +29,8 @@ func startupDeadlineResult(runID, name string, at time.Time) JobResult {
 // (never "Execution deadline exceeded"), and is retried automatically within
 // the budget (#1524).
 func TestStartupDeadlineStepAutomaticallyRetriesWithinBudget(t *testing.T) {
-	f := newRecoveryFixture(t)
+	now := time.Now()
+	f := newRecoveryFixtureWithOptions(t, store.Options{Now: func() time.Time { return now }})
 	run := f.enqueueAndClaim(t, "feature/startup-deadline", strings.Repeat("b", 40))
 	for attempt := 0; attempt <= model.DefaultInfrastructureAutoRetryBudget; attempt++ {
 		name, err := deterministicWorkflowName(f.repo.Name, run.ID)
@@ -59,6 +61,7 @@ func TestStartupDeadlineStepAutomaticallyRetriesWithinBudget(t *testing.T) {
 		if failed.AutoRetriedBy == "" {
 			t.Fatal("startup deadline not retried")
 		}
+		now = now.Add(5 * time.Second)
 		run, err = f.store.ClaimNextRun(t.Context())
 		if err != nil || run.ID != failed.AutoRetriedBy {
 			t.Fatalf("retry not queued: %+v %v", run, err)

@@ -10,7 +10,7 @@ import (
 )
 
 func TestManualRerunPreservesReasonAndAutomaticLineage(t *testing.T) {
-	for _, mode := range []string{"child", "original", "cancelled", "legacy", "omitted-reason"} {
+	for _, mode := range []string{"child", "original", "cancelled", "omitted-reason"} {
 		t.Run(mode, func(t *testing.T) {
 			now := time.Now()
 			s := testStore(t, &now)
@@ -28,10 +28,6 @@ func TestManualRerunPreservesReasonAndAutomaticLineage(t *testing.T) {
 			switch mode {
 			case "original":
 				source = failed
-			case "legacy":
-				if _, err = s.db.Exec(`UPDATE runs SET reason=? WHERE id=?`, legacyAutoRetryOfPrefix+origin.ID, child.ID); err != nil {
-					t.Fatal(err)
-				}
 			case "cancelled":
 				if _, err = s.db.Exec(`UPDATE runs SET status='interrupted',phase='cancelled',reason='operator cancelled' WHERE id=?`, child.ID); err != nil {
 					t.Fatal(err)
