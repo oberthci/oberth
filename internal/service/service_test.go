@@ -353,7 +353,7 @@ func TestWaitRejectsTimeoutAboveAdvertisedMaximum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = control.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "wait", json.RawMessage(`{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","timeout":121}`))
+	_, err = control.CallTool(context.Background(), api.Actor{Identity: "agent@host"}, "wait", json.RawMessage(`{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","timeout_s":121}`))
 	if !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "exceeds maximum") {
 		t.Fatalf("oversized timeout error = %v, want explicit ErrInvalidInput", err)
 	}

@@ -14,21 +14,17 @@ import (
 const mcpDeadlineMargin = 30 * time.Second
 
 // mcpDeadline gives blocking tools room to return their terminal response.
-// The bound comes from the tool's own timeout argument, whatever its spelling
-// (timeout, timeout_s, timeout_seconds), and when that is omitted from the
-// bound the tool's published schema says the server applies. Tools without a
-// timeout argument keep the 60-second default; --timeout overrides both.
+// The bound comes from the tool's timeout_s argument, and when that is
+// omitted from the bound the tool's published schema says the server
+// applies. Tools without timeout_s keep the 60-second default; --timeout
+// overrides both.
 func mcpDeadline(cfg mcpFlagResult, params any) (time.Duration, time.Duration, error) {
 	var toolTimeout time.Duration
 	if call, ok := params.(toolsCallParams); ok {
 		toolTimeout = api.ToolTimeouts()[call.Name].Default
 		var arguments map[string]json.RawMessage
 		if json.Unmarshal(call.Arguments, &arguments) == nil {
-			for _, name := range mcpTimeoutArguments(call.Name) {
-				raw, exists := arguments[name]
-				if !exists {
-					continue
-				}
+			if raw, exists := arguments[api.ToolTimeoutArgument]; exists {
 				var seconds int64
 				if json.Unmarshal(raw, &seconds) == nil && seconds > 0 {
 					const maximumSeconds = int64((time.Duration(1<<63-1) - mcpDeadlineMargin) / time.Second)
@@ -37,7 +33,6 @@ func mcpDeadline(cfg mcpFlagResult, params any) (time.Duration, time.Duration, e
 					}
 					toolTimeout = time.Duration(seconds) * time.Second
 				}
-				break
 			}
 		}
 	}
@@ -49,16 +44,6 @@ func mcpDeadline(cfg mcpFlagResult, params any) (time.Duration, time.Duration, e
 		limit = toolTimeout + mcpDeadlineMargin
 	}
 	return limit, toolTimeout, nil
-}
-
-// mcpTimeoutArguments lists the argument names that may carry a tool's own
-// bound: the schema's documented spelling, then its aliases, for known tools;
-// every spelling for tools this client does not know (a newer server).
-func mcpTimeoutArguments(tool string) []string {
-	if known, ok := api.ToolTimeouts()[tool]; ok {
-		return append([]string{known.Argument}, known.Aliases...)
-	}
-	return api.ToolTimeoutArguments
 }
 
 func mcpDeadlineError(limit, toolTimeout time.Duration, err error) error {
@@ -81,8 +66,7 @@ func mcpRetryParams(params any, toolTimeout, remaining time.Duration) any {
 	if !ok || toolTimeout <= 0 {
 		return params
 	}
-	known, ok := api.ToolTimeouts()[call.Name]
-	if !ok {
+	if _, ok := api.ToolTimeouts()[call.Name]; !ok {
 		return params
 	}
 	seconds := int64((remaining - min(mcpDeadlineMargin, remaining/2)) / time.Second)
@@ -96,20 +80,7 @@ func mcpRetryParams(params any, toolTimeout, remaining time.Duration) any {
 	if arguments == nil {
 		arguments = map[string]json.RawMessage{}
 	}
-	// The bound is rewritten under the spelling the caller sent, else the
-	// one every server release accepts; one spelling only, since another
-	// left beside it with its old value would be refused as a conflict.
-	spelling := known.Argument
-	for _, name := range append([]string{known.Argument}, known.Aliases...) {
-		if _, given := arguments[name]; given {
-			spelling = name
-			break
-		}
-	}
-	for _, name := range append([]string{known.Argument}, known.Aliases...) {
-		delete(arguments, name)
-	}
-	arguments[spelling] = json.RawMessage(strconv.FormatInt(max(seconds, 1), 10))
+	arguments[api.ToolTimeoutArgument] = json.RawMessage(strconv.FormatInt(max(seconds, 1), 10))
 	encoded, err := json.Marshal(arguments)
 	if err != nil {
 		return params

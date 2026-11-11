@@ -34,7 +34,7 @@ func TestRunIDCompatibilityAliasesUseScopedResolution(t *testing.T) {
 func TestRunIDAliasNormalizationPreservesOtherArguments(t *testing.T) {
 	for _, tc := range []struct{ tool, raw, key string }{
 		{"run_resources", `{"run_id":"aaaaaaaa","last":9007199254740993}`, "run"},
-		{"wait", `{"run_id":"aaaaaaaa","timeout":1}`, "id"},
+		{"wait", `{"run_id":"aaaaaaaa","timeout_s":1}`, "id"},
 		{"run_get", `{"id":"aaaaaaaa","run_id":"aaaaaaaa"}`, "id"},
 	} {
 		raw, err := normalizeRunIDArgument(tc.tool, json.RawMessage(tc.raw))

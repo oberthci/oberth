@@ -39,8 +39,6 @@ replicaCount: 1
 # pipeline Workflows run at once is the argo-workflows release's
 # controller.parallelism, and shared step limits are the ConfigMap
 # oberth-sync-limits that release renders. Oberth submits every run at once.
-# The former keys maxConcurrentJobs, admission.runtimeCapacity and
-# argoSync.semaphores are accepted only at their old defaults.
 # One fresh attempt for eligible infrastructure failures; retains queue position.
 # The automatic retry budget is fixed at one and cannot be increased.
 autoRetryInfrastructure: true

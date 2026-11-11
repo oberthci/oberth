@@ -2,45 +2,19 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
 	"strconv"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/oberthci/oberth/internal/recordjson"
 )
 
-// GoFieldNamesHeader opts one HTTP or MCP request into the pre-v0.20.3 record
-// shape, where every Go-style field name (ID, RepoID, Steps) is sent next to
-// its snake_case name. The server echoes it on responses that honour it.
-const GoFieldNamesHeader = "X-Oberth-Go-Field-Names"
-
-type goFieldNamesKey struct{}
-
-// goFieldNamesRequested reports an explicit opt-in: the header, or the
-// go_field_names=1 query parameter on HTTP routes.
-func goFieldNamesRequested(request *http.Request) bool {
-	return request.Header.Get(GoFieldNamesHeader) == "1" || request.URL.Query().Get("go_field_names") == "1"
-}
-
-func withGoFieldNames(ctx context.Context) context.Context {
-	return context.WithValue(ctx, goFieldNamesKey{}, true)
-}
-
-func goFieldNames(ctx context.Context) bool {
-	goNames, _ := ctx.Value(goFieldNamesKey{}).(bool)
-	return goNames
-}
-
-// marshalCompatible renames typed public records to their snake_case wire
+// marshalRecords renames typed public records to their snake_case wire
 // names after authorization/redaction (ID -> id, RepoID -> repo_id, Steps ->
-// steps). With goNames set, the Go-style names are kept next to the
-// snake_case ones, the shape every release before v0.20.3 sent by default.
-// Map keys are dictionaries (step names, labels, etc.), not Go field names.
-func marshalCompatible(payload any, goNames bool) ([]byte, error) {
+// steps). Map keys are dictionaries (step names, labels, etc.), not Go field
+// names.
+func marshalRecords(payload any) ([]byte, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -52,14 +26,14 @@ func marshalCompatible(payload any, goNames bool) ([]byte, error) {
 		return nil, err
 	}
 	changed := false
-	addRecordAliases(document, reflect.ValueOf(payload), goNames, &changed)
+	addRecordAliases(document, reflect.ValueOf(payload), &changed)
 	if !changed {
 		return raw, nil
 	}
 	return json.Marshal(document)
 }
 
-func addRecordAliases(document any, value reflect.Value, goNames bool, changed *bool) {
+func addRecordAliases(document any, value reflect.Value, changed *bool) {
 	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
 		if value.IsNil() {
 			return
@@ -78,21 +52,21 @@ func addRecordAliases(document any, value reflect.Value, goNames bool, changed *
 		typ := value.Type()
 		for _, field := range recordjson.Plan(typ) {
 			if field.Embedded {
-				addRecordAliases(object, value.Field(field.Index), goNames, changed)
+				addRecordAliases(object, value.Field(field.Index), changed)
 				continue
 			}
 			item, exists := object[field.Name]
 			if !exists {
 				continue
 			}
-			addRecordAliases(item, value.Field(field.Index), goNames, changed)
+			addRecordAliases(item, value.Field(field.Index), changed)
 			if field.Alias == field.Name {
 				continue
 			}
 			if _, exists := object[field.Alias]; !exists {
 				object[field.Alias] = item
 				*changed = true
-				if !goNames && goStyleName(field.Name) {
+				if recordjson.GoStyleName(field.Name) {
 					// The snake_case name now carries the value alone. A
 					// name whose alias is another field's key stays, and so
 					// does a name a json tag spells in lowerCamel
@@ -131,7 +105,7 @@ func addRecordAliases(document any, value reflect.Value, goNames bool, changed *
 			return
 		}
 		for i := 0; i < value.Len() && i < len(rows); i++ {
-			addRecordAliases(rows[i], value.Index(i), goNames, changed)
+			addRecordAliases(rows[i], value.Index(i), changed)
 		}
 	case reflect.Map:
 		object, ok := document.(map[string]any)
@@ -142,17 +116,10 @@ func addRecordAliases(document any, value reflect.Value, goNames bool, changed *
 		for iterator.Next() {
 			key := iterator.Key().String()
 			if item, exists := object[key]; exists {
-				addRecordAliases(item, iterator.Value(), goNames, changed)
+				addRecordAliases(item, iterator.Value(), changed)
 			}
 		}
 	}
-}
-
-// goStyleName reports a Go field name (ID, RepoID, Steps): an exported
-// identifier, so it starts with an upper-case letter.
-func goStyleName(name string) bool {
-	first, _ := utf8.DecodeRuneInString(name)
-	return unicode.IsUpper(first)
 }
 
 // Legacy collection arrays are the default throughout v0.17.x. Callers can

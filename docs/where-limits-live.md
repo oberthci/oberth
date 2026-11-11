@@ -200,17 +200,10 @@ helm upgrade argo-workflows argo/argo-workflows -n oberth-argo --version 1.0.24 
   --reuse-values -f argo-limits.yaml   # the extraObjects above
 ```
 
-Then clear `argoSync.semaphores` in the Oberth release. `oberth install` and a
-`helm upgrade --reuse-values` keep every value the release already has, so a
-key merely deleted from your values file stays set; pass it as `null` once, in
-the values file you give the installer or with `--set argoSync.semaphores=null`:
-
-```yaml
-argoSync:
-  semaphores: null
-```
-
-The Oberth chart refuses a non-empty `argoSync.semaphores`, and refuses to
+Then drop `argoSync` from the Oberth release: the value no longer exists, and
+`oberth upgrade` refuses stored release values that still set it. Delete it
+from your values files and upgrade once with `--set argoSync=null`; Helm's merge
+drops a stored key that an override sets to null. The Oberth chart refuses to
 upgrade while the live ConfigMap still belongs to the Oberth release without
 `keep`, so it is never deleted by accident.
 

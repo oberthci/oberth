@@ -45,16 +45,14 @@ func TestUpgradeMergesNewChartDefaults(t *testing.T) {
 // a nonmutating kube client; HTTP supplies discovery metadata only.
 func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
 	for _, version := range []string{"0.17.53", "0.17.62"} {
-		t.Run(version, func(t *testing.T) { testUpgradeActualHelmPreservesOldValues(t, version, nil) })
+		t.Run(version, func(t *testing.T) { testUpgradeActualHelmPreservesOldValues(t, version, false) })
 	}
-	for _, shadow := range []bool{true, false} {
-		t.Run(fmt.Sprintf("0.17.62-stored-shadow-%t", shadow), func(t *testing.T) {
-			testUpgradeActualHelmPreservesOldValues(t, "0.17.62", &shadow)
-		})
-	}
+	t.Run("0.17.62-stored-removed-values", func(t *testing.T) {
+		testUpgradeActualHelmPreservesOldValues(t, "0.17.62", true)
+	})
 }
 
-func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, shadow *bool) {
+func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, storedRemoved bool) {
 	requireHelmForUpgradeTest(t)
 	old, err := os.ReadFile("../../hack/testdata/chart-values-v" + oldVersion + ".yaml")
 	if err != nil {
@@ -64,19 +62,24 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	if err := yaml.Unmarshal(old, &values); err != nil {
 		t.Fatal(err)
 	}
-	if oldVersion == "0.17.62" {
-		cache, ok := values["gitcache"].(map[string]any)
-		if values["gitBackend"] != "cli" || !ok || cache["shadow"] != false {
-			t.Fatal("v0.17.62 fixture lost raw legacy defaults")
-		}
+	// The old chart defaults carry values the target chart removed; the
+	// target schema refuses them, so a release whose chart defaults still
+	// hold them cannot be reused raw (install, restore). Upgrades reset to
+	// the target defaults and never read them.
+	cleared := UpgradeConfig{}
+	for _, removed := range removedChartValues {
+		cleared.UserSet = append(cleared.UserSet, removed+"=null")
 	}
+	dropClearedRemovedValues(cleared, values)
 	values["removedOldDefault"] = "not user configuration"
 	values["compatibility"] = map[string]any{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}
 	config := map[string]any{"image": map[string]any{"ref": "example.invalid/old@sha256:" + strings.Repeat("2", 64)}, "argo": map[string]any{"enabled": true, "goProxy": map[string]any{"enabled": false}}, "pushBannerURL": "", "retention": map[string]any{"keepNewestPerRef": 0}, "podAnnotations": map[string]any{"round17.example/stored": "kept"}}
-	if shadow != nil {
-		config["gitcache"] = map[string]any{"shadow": *shadow}
+	if storedRemoved {
+		config["trustedTests"] = map[string]any{"runtime": "old"}
+		config["maxConcurrentJobs"] = 3
+		config["admission"] = map[string]any{"sizeWeights": map[string]any{"XL": 8}}
 	}
-	values["pushBannerURL"], values["maxConcurrentJobs"] = "", 0 // v0.20.0 refuses a reused 0.17 ceiling of 3
+	values["pushBannerURL"] = ""
 	values["retention"].(map[string]any)["keepNewestPerRef"] = 0
 	values["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] = false
 	values["podAnnotations"] = map[string]any{"round17.example/stored": "kept"}
@@ -109,12 +112,13 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	if err := requireUpgradeHelmVersion(t.Context(), deps); err != nil {
 		t.Fatal(err)
 	}
+	if storedRemoved {
+		cfg.UserSet = requireRemovedValuesRefusal(t, cfg, deps, chart, image)
+	}
 	prepared, err := prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer prepared.cleanup()
-	cfg.storedValues = prepared.storedValues
 	compat := prepared.compatibility
 	if compat != testUpgradeCompatibility {
 		t.Fatalf("identities from installed chart defaults lost: %+v", compat)
@@ -126,7 +130,6 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	var upgraded struct {
 		Manifest string         `json:"manifest"`
 		Config   map[string]any `json:"config"`
@@ -157,19 +160,18 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 			t.Errorf("render dropped installed identity %q", want)
 		}
 	}
-	if shadow != nil {
-		if cache, ok := upgraded.Config["gitcache"].(map[string]any); ok {
-			if _, present := cache["shadow"]; present {
-				t.Fatalf("stored shadow survived actual Helm upgrade: %+v", cache)
-			}
+	if storedRemoved {
+		admission, _ := upgraded.Config["admission"].(map[string]any)
+		_, weights := admission["sizeWeights"]
+		_, ceiling := upgraded.Config["maxConcurrentJobs"]
+		_, tests := upgraded.Config["trustedTests"]
+		if weights || ceiling || tests {
+			t.Fatalf("cleared removed values survived the actual Helm upgrade: %+v", upgraded.Config)
 		}
-		unchanged, err := os.ReadFile(history)
-		if err != nil || string(unchanged) != string(encoded) {
-			t.Fatalf("migration changed prior release/rollback input: %v", err)
-		}
-		// Raw install/restore compatibility below is independent of this upgrade
-		// migration: it retains the original false-valued chart defaults.
-		delete(config, "gitcache")
+		delete(config, "trustedTests")
+		delete(config, "maxConcurrentJobs")
+		delete(config, "admission")
+		cfg.UserSet = nil
 	}
 	proxy := upgraded.Config["argo"].(map[string]any)["goProxy"].(map[string]any)
 	if proxy["enabled"] != false || upgraded.Config["pushBannerURL"] != "" {
@@ -225,14 +227,10 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	}
 	// A user-set removed key must be refused by the TARGET schema before upgrade.
 	// Exercise top-level and nested additionalProperties=false with real Helm.
-	for _, nested := range []string{"top", "retention", "gitcache"} {
+	for _, nested := range []string{"top", "retention"} {
 		parent := config
-		switch nested {
-		case "retention":
+		if nested == "retention" {
 			parent = config["retention"].(map[string]any)
-		case "gitcache":
-			config["gitcache"] = map[string]any{"shadow": true}
-			parent = config["gitcache"].(map[string]any)
 		}
 		parent["removedByTarget"] = true
 		encoded, err = json.Marshal(release)
@@ -242,36 +240,36 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 		if err := os.WriteFile(history, encoded, 0600); err != nil {
 			t.Fatal(err)
 		}
-		cfg.storedValues = ""
 		_, err = prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
 		var schemaErr *ErrSchemaValidation
 		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "removedByTarget") {
 			t.Fatalf("unknown stored key reached upgrade: %v", err)
 		}
 		delete(parent, "removedByTarget")
-		if nested == "gitcache" {
-			delete(config, "gitcache")
-		}
 	}
+}
 
-	// Malformed legacy values are not migrated into valid configuration.
-	for _, shadow := range []any{"true", 1, nil} {
-		config["gitcache"] = map[string]any{"shadow": shadow}
-		encoded, err = json.Marshal(release)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(history, encoded, 0600); err != nil {
-			t.Fatal(err)
-		}
-		cfg.storedValues = ""
-		_, err = prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
-		var schemaErr *ErrSchemaValidation
-		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "shadow") {
-			t.Fatalf("malformed stored shadow accepted: %v", err)
-		}
+// requireRemovedValuesRefusal checks the stored removed values are refused
+// with their names and clearing flags, and returns those flags: the
+// refusal's own instruction is the way through.
+func requireRemovedValuesRefusal(t *testing.T, cfg UpgradeConfig, deps Deps, chart, image string) []string {
+	t.Helper()
+	_, err := prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
+	var schemaErr *ErrSchemaValidation
+	want := "admission.sizeWeights (stored release values), maxConcurrentJobs (stored release values), trustedTests (stored release values); no upgrade applied. " +
+		"Delete them from any --values file and re-run the upgrade with --set admission.sizeWeights=null --set maxConcurrentJobs=null --set trustedTests=null"
+	if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("stored removed values not refused clearly: %v", err)
 	}
-
+	clears := []string{"admission.sizeWeights=null", "maxConcurrentJobs=null", "trustedTests=null"}
+	chartValues, err := os.ReadFile(filepath.Join(chart, "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateUserSetAgainstValues(chartValues, clears); err != nil {
+		t.Fatal(err)
+	}
+	return clears
 }
 
 var testUpgradeCompatibility = backupCompatibility{SchemaIdentity: "legacy-schema-v1", AuditDomain: "legacy-audit-v1", WitnessKeyInfo: "legacy-witness-v1"}

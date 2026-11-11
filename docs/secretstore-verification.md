@@ -96,7 +96,7 @@ For an agent using an admin MCP uplink, call `secretstore_verify` directly.
 To prove the identity a real repository release uses:
 
 ```json
-{"release_tier":true,"repo":"github/oberthci/oberth","paths":["oberth/upstream/oberthci/oberth/signing"],"timeout":45}
+{"release_tier":true,"repo":"github/oberthci/oberth","paths":["oberth/upstream/oberthci/oberth/signing"],"timeout_s":45}
 ```
 
 This runs the same verifier using the live server configuration, requests a

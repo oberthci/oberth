@@ -124,18 +124,8 @@ type AuditChainStatus struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
-type queueCapStatus struct {
-	MaxNotStarted int    `json:"max_not_started"`
-	NotStarted    int    `json:"not_started"`
-	Deferred      int    `json:"deferred"`
-	Reason        string `json:"reason,omitempty"`
-}
-
 type HealthStatus struct {
-	QueueCapCanonical *queueCapStatus `json:"queue_cap,omitempty"`
-	// QueueCap retains the legacy spelling for one more release.
-
-	QueueCap                *model.QueueCapStatus                     `json:"queueCap,omitempty"`
+	QueueCap                *model.QueueCapStatus                     `json:"queue_cap,omitempty"`
 	DatabaseRetries         uint64                                    `json:"database_retries_total,omitempty"`
 	ControllerProfile       *model.ControllerProfileStatus            `json:"controller_profile,omitempty"`
 	ExecutionTargetProfiles map[string]*model.ControllerProfileStatus `json:"execution_target_profiles,omitempty"`
@@ -280,7 +270,6 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		queueCapErr = err
 		if err == nil {
 			status.QueueCap = &cap
-			status.QueueCapCanonical = &queueCapStatus{MaxNotStarted: cap.MaxNotStarted, NotStarted: cap.NotStarted, Deferred: cap.Deferred, Reason: cap.Reason}
 		}
 	}
 	upstreams, upstreamErr := health.Store.ListUpstreams(ctx)

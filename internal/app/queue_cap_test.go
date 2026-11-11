@@ -25,15 +25,6 @@ func TestHealthReportsQueueCapOnlyForUnscopedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got struct {
-		Cap model.QueueCapStatus `json:"queueCap"`
-	}
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Cap.MaxNotStarted != 3 || got.Cap.NotStarted != 4 || got.Cap.Deferred != 2 {
-		t.Fatalf("queue cap missing from system_status: %s", body)
-	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		t.Fatal(err)
@@ -41,6 +32,9 @@ func TestHealthReportsQueueCapOnlyForUnscopedStatus(t *testing.T) {
 	var canonical map[string]any
 	if err := json.Unmarshal(fields["queue_cap"], &canonical); err != nil {
 		t.Fatal(err)
+	}
+	if _, lowerCamel := fields["queueCap"]; lowerCamel {
+		t.Fatalf("lowerCamel queueCap still sent: %s", body)
 	}
 	if len(canonical) != 4 || canonical["max_not_started"] != float64(3) || canonical["not_started"] != float64(4) || canonical["deferred"] != float64(2) {
 		t.Fatalf("canonical queue_cap: %s", body)

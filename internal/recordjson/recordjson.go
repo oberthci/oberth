@@ -78,9 +78,8 @@ var jsonUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
 
 // Unmarshal decodes an API response (snake_case record names) into a
 // Go record whose fields carry no json tags (model.Run and friends): each
-// snake_case wire name is mapped back to its Go field name first. Responses
-// that still carry the Go-style names (the go_field_names opt-in, older servers) decode
-// unchanged, so clients work against either shape.
+// snake_case wire name is mapped back to its Go field name first. A Go-style
+// name in the response (ID, RepoID) is not a wire name and is ignored.
 func Unmarshal(data []byte, into any) error {
 	target := reflect.TypeOf(into)
 	if target == nil || target.Kind() != reflect.Pointer {
@@ -123,10 +122,20 @@ func restoreRecordNames(document any, typ reflect.Type) bool {
 				changed = restoreRecordNames(object, fieldType) || changed
 				continue
 			}
-			if _, exists := object[field.Name]; !exists && field.Alias != field.Name {
-				if item, aliased := object[field.Alias]; aliased {
-					object[field.Name] = item
-					changed = true
+			if field.Alias != field.Name {
+				if GoStyleName(field.Name) {
+					// Only the snake_case spelling is read; a Go-style key
+					// in the document is dropped, not decoded.
+					if _, exists := object[field.Name]; exists {
+						delete(object, field.Name)
+						changed = true
+					}
+				}
+				if _, exists := object[field.Name]; !exists {
+					if item, aliased := object[field.Alias]; aliased {
+						object[field.Name] = item
+						changed = true
+					}
 				}
 			}
 			if item, exists := object[field.Name]; exists {
@@ -151,4 +160,14 @@ func restoreRecordNames(document any, typ reflect.Type) bool {
 		}
 	}
 	return changed
+}
+
+// GoStyleName reports a Go field name (ID, RepoID, Steps): an exported
+// identifier, so it starts with an upper-case letter. A json tag spelled in
+// lowerCamel (activeDeadlineSeconds) is a declared wire name instead.
+func GoStyleName(name string) bool {
+	for _, r := range name {
+		return unicode.IsUpper(r)
+	}
+	return false
 }

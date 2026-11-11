@@ -16,11 +16,11 @@ import (
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
-// Exercise --values, the CLI's UseNumber/JSON migration snapshot, real Helm
+// Exercise --values, stored values decoded with UseNumber, real Helm
 // upgrade serialization, and reuse of that serialized release. No cluster writes.
 func TestUpgradeIntegerFlagsThroughHelmRoundTrip(t *testing.T) {
 	requireHelmForUpgradeTest(t)
-	const numericValues = `{"admission":{"diskFloorBytes":21474836480},"kubernetesClient":{"burst":1000000,"qps":50.5},"argo":{"workflowTTL":2592000},"retention":{"logs":{"limitBytes":21474836480,"budgetBytes":21474836480},"artifacts":{"limitBytes":21474836480,"budgetBytes":21474836480},"keepNewestPerRef":0},"trustedTests":{"runtime":"generic-capability","kvmSupplementalGroup":2147483647,"recipes":[{"suite_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","guest_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","harness_image":"example.invalid/harness@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","suite_url":"https://example.invalid/suite","guest_url":"https://example.invalid/guest"}]}}`
+	const numericValues = `{"admission":{"diskFloorBytes":21474836480},"kubernetesClient":{"burst":1000000,"qps":50.5},"argo":{"workflowTTL":2592000},"retention":{"logs":{"limitBytes":21474836480,"budgetBytes":21474836480},"artifacts":{"limitBytes":21474836480,"budgetBytes":21474836480},"keepNewestPerRef":0}}`
 	expected := map[string]int64{
 		"admission-disk-floor-bytes": 21474836480, "kubernetes-client-burst": 1000000,
 		"argo-workflow-ttl":   2592000,
@@ -28,18 +28,17 @@ func TestUpgradeIntegerFlagsThroughHelmRoundTrip(t *testing.T) {
 		"artifacts-limit-bytes": 21474836480, "artifacts-budget-bytes": 21474836480,
 		"retention-keep-newest": 0,
 	}
-	for _, route := range []string{"values-file", "stored-migration"} {
+	for _, route := range []string{"values-file", "stored-values"} {
 		t.Run(route, func(t *testing.T) {
 			dir := t.TempDir()
 			history := filepath.Join(dir, "release.json")
 			config := map[string]any{}
-			if route == "stored-migration" {
+			if route == "stored-values" {
 				decoder := json.NewDecoder(strings.NewReader(numericValues))
 				decoder.UseNumber()
 				if err := decoder.Decode(&config); err != nil {
 					t.Fatal(err)
 				}
-				config["gitcache"] = map[string]any{"shadow": false}
 			}
 			release := map[string]any{"name": "oberth", "namespace": "oberth", "version": 1, "info": map[string]any{"status": "deployed"}, "chart": map[string]any{"metadata": map[string]any{"apiVersion": "v2", "name": "oberth", "version": "0.17.62"}, "values": map[string]any{"compatibility": map[string]any{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}}}, "config": config}
 			raw, err := json.Marshal([]any{release})
@@ -69,11 +68,6 @@ func TestUpgradeIntegerFlagsThroughHelmRoundTrip(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer prepared.cleanup()
-				cfg.storedValues = prepared.storedValues
-				if pass == 0 && route == "stored-migration" && cfg.storedValues == "" {
-					t.Fatal("did not exercise checked migration snapshot")
-				}
 				args, flags := upgradeHelmArgs(cfg, chart, image, prepared.compatibility)
 				args = append(args, flags...)
 				args = append(args, "--dry-run=client", "--output=json")
@@ -91,11 +85,6 @@ func TestUpgradeIntegerFlagsThroughHelmRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 				argsFound := upgradeServerArgs(t, rendered.Manifest)
-				for _, flag := range []string{"trusted-tests-kvm-group", "argo-kubevirt-max-vms", "argo-kubevirt-max-cores"} {
-					if _, ok := argsFound[flag]; ok {
-						t.Errorf("retired flag restored: %s", flag)
-					}
-				}
 				for flag, want := range expected {
 					value, ok := argsFound[flag]
 					got, err := strconv.ParseInt(value, 10, 64)
@@ -122,7 +111,6 @@ func TestUpgradeIntegerFlagsThroughHelmRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 				cfg.UserValues = nil
-				cfg.storedValues = ""
 			}
 		})
 	}

@@ -72,7 +72,7 @@ func streamRequest(body, accept, token string) *http.Request {
 	return req
 }
 
-const waitRPC = `{"jsonrpc":"2.0","id":"exact-request","method":"tools/call","params":{"name":"wait","arguments":{"sha":"0123456789abcdef","timeout":300}}}`
+const waitRPC = `{"jsonrpc":"2.0","id":"exact-request","method":"tools/call","params":{"name":"wait","arguments":{"sha":"0123456789abcdef","timeout_s":300}}}`
 
 func TestMCPStreamValidationAndCompatibility(t *testing.T) {
 	t.Parallel()

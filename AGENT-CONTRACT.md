@@ -665,8 +665,8 @@ containing CI and real workload qualification remain separately required.
   refusal, no scoping, no allowlist. Limits are operator-owned keys of the
   ConfigMap `oberth-sync-limits` in the pipeline namespace, rendered by the
   argo-workflows release (`oberth install --argo-sync-limit`) since v0.20.0;
-  the Oberth chart refuses `argoSync.semaphores`, `maxConcurrentJobs` and
-  `admission.runtimeCapacity` except at their former defaults, and refuses to
+  `argoSync`, `maxConcurrentJobs` and `admission.runtimeCapacity` are removed
+  chart values that the schema and `oberth upgrade` refuse, and the chart refuses to
   upgrade while the live ConfigMap still belongs to its release without
   `helm.sh/resource-policy: keep`. The Argo controller queues waiters
   (priority, then creation) and re-reads the ConfigMap. A Workflow or step Pending behind a

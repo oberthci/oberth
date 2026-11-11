@@ -208,14 +208,6 @@
       "doc_anchor": "docs/platform-protection.md#platform-protection",
       "test_ref": "hack/test-platform-protection.sh default renders no platform priority"
     },
-    "flag:go-field-names": {
-      "doc_anchor": "docs/api-compatibility.md#go-style-field-names",
-      "test_ref": "cmd/oberth/mcp_go_field_names_test.go TestMCPGoFieldNamesOptIn"
-    },
-    "env:OBERTH_GO_FIELD_NAMES": {
-      "doc_anchor": "docs/api-compatibility.md#go-style-field-names",
-      "test_ref": "cmd/oberth/mcp_go_field_names_test.go TestMCPGoFieldNamesOptIn"
-    },
     "flag:json": {
       "doc_anchor": "docs/remote-cli.md#configuration",
       "test_ref": "cmd/oberth/transport_test.go TestRESTAndMCPCommandsShareTheTransportFlags"

@@ -157,9 +157,7 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
 
 `oberth upgrade` keeps stored release configuration and merges new chart defaults
 for keys that were absent, then applies `--values`/`--set` overrides. It uses
-Helm's `--reset-then-reuse-values` mode. The chart also supports direct
-`--reuse-values` upgrades from v0.17.53: missing `utilityImage` falls back to the pinned BusyBox helper. Custom
-utility-image mirrors are preserved. Native Git is the only source backend.
+Helm's `--reset-then-reuse-values` mode. Native Git is the only source backend.
 
 Upgrades require Helm 3.14 or newer. Before applying changes, the CLI reads
 `helm get values --all` and pins the installed `compatibility.schemaIdentity`,
@@ -174,6 +172,19 @@ manager can use the [explicit Role ownership migration](docs/argo-role-migration
 before an upgrade. It preserves permissions and unrelated ownership. PVC update
 and list remain required for source-claim adoption and cleanup.
 
+Chart values that no longer exist are refused, never ignored or stripped:
+`gitBackend`, `gitcache`, `maxConcurrentJobs`, `argoSync`, `trustedTests`, `vm`,
+`argo.vmLauncherServiceAccount`, `argo.containerDiskPrefixes`,
+`argo.kubevirtCeiling` and `admission.` `exclusiveClasses`, `sizeWeights`,
+`maxHeadWait`, `declaredResources`, `legacyResources` and `runtimeCapacity`.
+When the stored release values, a `--values` file or a `--set` still sets one,
+`oberth upgrade` names each key with its source and stops before any write.
+Delete the keys from your values files and re-run the upgrade with
+`--set <key>=null` for each named key, for example
+`oberth upgrade --set trustedTests=null --set vm=null`. Helm's
+`--reset-then-reuse-values` merge drops a stored key that an override sets to
+null, so the key is gone from the stored values from then on.
+
 When a target chart removes a configured key, export the installed values,
 remove or migrate the unsupported keys in an explicit values file, and reconcile
 with `helm upgrade ... --reset-values --values cleaned.yaml` before retrying.
@@ -186,8 +197,9 @@ matching database backup before it can run.
 Re-running `oberth install` and restoring a backup intentionally retain
 `--reuse-values`: these paths preserve installed chart defaults, while restore
 sets only the database identities it needs. Every newly introduced value must
-therefore have a template fallback. The v0.17.53 raw-values render and actual
-Helm install/restore tests cover the `utilityImage` fallback.
+therefore have a template fallback. The v0.17.53 raw-values render (without
+the removed values) and actual Helm install/restore tests cover the
+`utilityImage` fallback.
 
 ## How it works
 
@@ -399,7 +411,7 @@ tools (a call to one is still refused by the server); available operations are:
 | `size_grant` | Raise (or set) the largest admission size a repository's branch, promotion and schedule runs may declare. The default without a grant is L; XL reserves the whole host and makes every other repository wait for a full drain. Re-enables automatic tag priority: only the oldest waiting tag per repository qualifies, and only within this size maximum. Ungranted repositories default to enabled within L. Admin uplink required; audited. |
 | `size_revoke` | Return a repository to maximum L and disable its automatic tag priority, even if never granted. Explicit admin overrides, promotions and 60-minute aging of standard runs into promotion still apply; running work continues. Admin uplink required; audited. |
 | `size_grant_get` | Read legacy admission size and priority policy, plus the independent numeric resource ceiling. Use resource_grant to change request/limit ceilings. |
-| `queue_cap_config` | Set the branch queue cap with maxNotStarted (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap (queueCap is a legacy alias for one more release). |
+| `queue_cap_config` | Set the branch queue cap with max_not_started (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap. |
 | `release_wif_list` | Read the release WIF capability map: boot default from Helm/flags, runtime overrides, the effective map used by preflight and admission, configured role names and any stored grant left inactive. Public data only. Unscoped admin only. |
 | `release_wif_grant` | Grant or replace one registered repository's release WIF entry at runtime (#1497): its release service_account_name and template-to-role map. Roles, namespace and dedicated step identities stay Helm configuration. Validated against the boot map; applies to the next preflight and tag admission without restart. Unscoped admin only; audited, reason required. |
 | `release_wif_revoke` | Revoke a repository's release WIF entry at runtime, including a Helm-configured entry or one for a retired, unregistered upstream/org/repo. New release admissions refuse its WIF leaves. Unscoped admin only; audited, reason required. |

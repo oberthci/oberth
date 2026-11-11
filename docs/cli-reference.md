@@ -657,13 +657,9 @@ Flags:
   --token-file <path>  Path to a file containing the bearer token (0600)
   --ca-file <path>     PEM CA certificate for TLS verification
   --timeout <duration> Client deadline override (e.g. 90s or 11m); by default
-                       at least 60s, or the tool's own timeout argument (timeout,
-                       timeout_s or timeout_seconds; when omitted, the server's
-                       bound for that tool) plus 30s
+                       at least 60s, or the tool's own timeout_s (when omitted,
+                       the server's bound for that tool) plus 30s
   --reconnect-window <duration>  Read reconnect window across server restarts
-  --go-field-names     Also return the Go-style record names (ID, RepoID, Steps)
-                       next to the snake_case ones; also set by
-                       OBERTH_GO_FIELD_NAMES=1
   -o <path>           Alias for --output
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
                        bypasses the shell argv length ceiling for large payloads
@@ -680,8 +676,6 @@ Usage: oberth mcp call [arguments] [flags]
         JSON file or - for stdin
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
-  -go-field-names
-        also send Go-style record names
   -o string
         output file
   -output string
@@ -704,8 +698,6 @@ Usage: oberth mcp tools [arguments] [flags]
         JSON file or - for stdin
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
-  -go-field-names
-        also send Go-style record names
   -o string
         output file
   -output string
@@ -1709,8 +1701,6 @@ Usage: oberth status [flags]
 Usage of upgrade:
   -allow-downgrade
         accept a CLI older than the installed release (a deliberate rollback within one database schema)
-  -allow-retired-execution
-        override retired resource/repository checks; accept orphaned resources and refused legacy runs
   -argo-controller-profile string
         explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
   -backup-dir DIR

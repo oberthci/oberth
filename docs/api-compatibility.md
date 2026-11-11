@@ -1,9 +1,9 @@
 # HTTP and MCP compatibility
 
-Except for the issue-list privacy and resource-deadline safety changes below,
-the v0.17.x API retains existing field names, tool arguments, value meanings
-and default response envelopes. New clients should use the additive names below.
-Older clients may continue using their existing names and array responses.
+Oberth is pre-launch: there is no backward-compatibility promise. Field
+names, tool arguments and envelopes change or disappear without aliases or
+deprecation windows, and each removal is listed as a breaking change in the
+release notes. This page describes the current wire shape.
 
 ## Record fields
 
@@ -13,11 +13,11 @@ snake_case field names: a run returns `id`, `repo_id`, `queue_sequence`,
 `repository`. Integers keep their full JSON integer precision. JavaScript
 clients should use an integer-preserving decoder for IDs above 2^53.
 
-Releases before v0.20.3 also sent every record's Go-style name (`ID`, `RepoID`,
-`QueueSequence`, `Run`, `Steps`, `Repository`) with the same value, on every
-nested record. That doubled each record and, for a full `run_get` whose steps
-carry resource samples, multiplied the reply about fourfold. Those duplicates
-are no longer sent by default; see [Go-style field names](#go-style-field-names).
+Go-style names (`ID`, `RepoID`, `Steps`) are never sent, and no request
+header or query parameter brings them back. The bundled CLI decodes the
+snake_case names only. Go programs that decode responses into untagged
+records (`model.Run`) can use `internal/recordjson.Unmarshal`, which maps the
+snake_case names back to the Go field names.
 
 Names already written in snake_case retain their spelling. A name a record
 declares in lowerCamel (`maxNotStarted`, `activeDeadlineSeconds`) is not a
@@ -58,34 +58,12 @@ ID, matching `run_list`. Follow the returned cursor; do not derive it from the
 last record. No global sequence is added for scoped callers. Empty collections
 are arrays (`[]`), not null. Existing object responses retain their envelope:
 `/api/issues` returns `issues` and `next_before`, matching the names in MCP
-`issue_list` (and `Issues` and `NextBefore` too with the Go-style opt-in).
+`issue_list`.
 
 Default MCP text and structured JSON carry the same snake_case names. Tools with a
 specialized text format, such as logs or YAML reports, keep that existing text
 format; their structured records receive the additive fields. JSON-RPC framing
 is unchanged.
-
-## Go-style field names
-
-A client that reads the Go-style names asks for them per request:
-
-- HTTP and MCP: send the header `X-Oberth-Go-Field-Names: 1`.
-- HTTP only: or add `go_field_names=1` to the query string.
-- CLI: `oberth mcp call --go-field-names`, or `OBERTH_GO_FIELD_NAMES=1` for
-  `oberth mcp call` and the REST commands (`oberth runs --json` and friends).
-
-The response then carries both spellings with the same value, the shape
-releases before v0.20.3 sent by default, and echoes
-`X-Oberth-Go-Field-Names: 1`. Without the opt-in only the snake_case names are
-sent. The bundled CLI and dashboard read the snake_case names and also accept
-the two-spelling shape, so either side may be upgraded first. Go programs that
-decode responses into untagged records (`model.Run`) can use
-`internal/recordjson.Unmarshal`, which maps the snake_case names back to the Go
-field names.
-
-The v0.20.3 default response shape is an announced exception to the additive
-policy below: the values are unchanged; only the duplicate spelling moved
-behind the opt-in.
 
 ## Conditional requests
 
@@ -95,24 +73,12 @@ with no body while the view is unchanged; other headers, such as
 `X-Oberth-Next-Before`, are still sent. `GET /api/repos?view=summary` returns
 the repository records without their latest runs. The dashboard uses both
 while polling.
-The validator covers the shape actually sent, so a Go-field-names response and
-a snake_case-only response of the same view carry different ETags; responses
-vary on `X-Oberth-Go-Field-Names` and `Accept-Encoding`.
 
-## Compatibility and deprecation policy
+## Removal policy
 
-Apart from the issue-list privacy and resource-deadline safety exceptions, no
-existing name, argument or default envelope is removed or repurposed in v0.17.x.
-Prefer the unified names for new integrations; legacy names remain
-supported aliases. Clients must tolerate additional object fields.
-
-A future removal requires an explicit deprecation announcement in release notes
-and this document, identifying the replacement and first eligible removal
-version. The deprecation window must span at least 90 days and one stable minor
-release after that announcement. Removal is permitted only in a later major
-version after both conditions are met. No removal announcement or deadline is
-established by this change. Envelope defaults also require that later-major
-migration process; opting into `envelope=1` does not change other callers.
+Removed names, arguments and envelopes are not kept as aliases. A release that
+removes one lists it under breaking changes in its release notes; clients
+update with the server. Clients must tolerate additional object fields.
 
 ## Issue-list privacy exception
 
@@ -167,6 +133,3 @@ and missing attempt coverage still refuse advice. Independent attempt inventory
 is stored through an additive migration; it adds no caller argument or run status.
 An omitted limit in an available current declaration cannot be replaced by a
 finite historical limit.
-
-The #1294 stage 3 retirement explicitly removes five legacy execution tools; see
-[the breaking change notice](releases/unreleased-v0.17.95.md#execution-retirement-1294).

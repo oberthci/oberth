@@ -272,9 +272,14 @@ func TestMCPInitializeAdvertisesAgentReadableDashboardState(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status", "has_more", "byte_offset", "offset=0", "empty window", "Record fields are snake_case", "X-Oberth-Go-Field-Names", "queue_cap", "one more release"} {
+	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status", "has_more", "byte_offset", "offset=0", "empty window", "Record fields are snake_case", "timeout_s"} {
 		if !strings.Contains(decoded.Result.Instructions, route) {
 			t.Fatalf("initialize instructions omit %s: %q", route, decoded.Result.Instructions)
+		}
+	}
+	for _, removed := range []string{"X-Oberth-Go-Field-Names", "queueCap", "one more release"} {
+		if strings.Contains(decoded.Result.Instructions, removed) {
+			t.Fatalf("initialize instructions mention removed %s: %q", removed, decoded.Result.Instructions)
 		}
 	}
 	if strings.Contains(strings.ToLower(decoded.Result.Instructions), "protected") {
@@ -694,16 +699,16 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_cancel":          {"force", "id", "reason", "run_id"},
 		"run_purge":           {"id", "reason", "run_id", "what"},
 		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "run_id", "step", "tail"},
-		"wait":                {"id", "repo", "run_id", "sha", "timeout", "timeout_s", "timeout_seconds", "trigger"},
+		"wait":                {"id", "repo", "run_id", "sha", "timeout_s", "trigger"},
 		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
 		"promote":             {"branch", "priority", "priority_reason", "prune_source", "repo", "sha", "skip_conflicting", "sources"},
-		"run_wait":            {"id", "run_id", "timeout", "timeout_s", "timeout_seconds", "until"},
+		"run_wait":            {"id", "run_id", "timeout_s", "until"},
 		"events_since":        {"after_id", "kinds", "limit", "own", "refs_glob", "repos"},
-		"events_wait":         {"after_id", "kinds", "limit", "own", "refs_glob", "repos", "run_ids", "timeout", "timeout_s", "timeout_seconds"},
+		"events_wait":         {"after_id", "kinds", "limit", "own", "refs_glob", "repos", "run_ids", "timeout_s"},
 		"issue_list":          {"active_stale_after", "before", "kind", "limit", "query", "repo", "stale_after", "state", "work_status"},
 		"issue_get":           {"active_stale_after", "body_limit", "fields", "id", "stale_after"},
 		"issue_get_many":      {"active_stale_after", "body_limit", "fields", "ids", "stale_after"},
-		"secretstore_verify":  {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
+		"secretstore_verify":  {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout_s"},
 		"publication_abandon": {"id", "reason"},
 		"issue_update":        {"body", "expected_body_sha256", "expected_revision", "id", "title", "upstream", "work_status"},
 	}

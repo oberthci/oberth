@@ -14,7 +14,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -874,27 +873,18 @@ func TestResolveChartImageRefEmpty(t *testing.T) {
 func TestRunUpgradeFullFlow(t *testing.T) {
 	t.Parallel()
 	for _, auditFails := range []bool{false, true} {
-		for _, shadow := range []string{"", "true", "false"} {
-			t.Run(fmt.Sprintf("audit-fails=%t/shadow=%s", auditFails, shadow), func(t *testing.T) {
-				testRunUpgradeFullFlow(t, auditFails, shadow, "0.12.34", "0.12.35")
+		for _, storedRemoved := range []bool{false, true} {
+			t.Run(fmt.Sprintf("audit-fails=%t/stored-removed=%t", auditFails, storedRemoved), func(t *testing.T) {
+				testRunUpgradeFullFlow(t, auditFails, storedRemoved, "0.12.34", "0.12.35")
 			})
 		}
 	}
 }
 
-func TestRunUpgradeAfterLegacyRemovalWithoutOverride(t *testing.T) {
-	testRunUpgradeFullFlow(t, false, "", "0.17.95", "0.17.96")
-}
-
-func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, target string) {
+func testRunUpgradeFullFlow(t *testing.T, auditFails, storedRemoved bool, installed, target string) {
 	t.Parallel()
 	var output bytes.Buffer
-	migrated := ""
 	details := map[string]string{"from": installed, "to": target}
-	if shadow != "" {
-		migrated = "gitcache.shadow=" + shadow
-		details["migrated"] = migrated
-	}
 	auditDetails, err := json.Marshal(details)
 	if err != nil {
 		t.Fatal(err)
@@ -926,20 +916,8 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, ta
 	}
 
 	kubeClient := fake.NewClientset(deployment)
-	var inventoryCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/apis/argoproj.io/v1alpha1":
-			_, _ = io.WriteString(w, `{"groupVersion":"argoproj.io/v1alpha1","resources":[{"name":"workflows","kind":"Workflow","namespaced":true,"verbs":["list"]}]}`)
-		case "/apis/argoproj.io/v1alpha1/namespaces/oberth-argo/workflows":
-			inventoryCalls.Add(1)
-			_, _ = io.WriteString(w, `{"apiVersion":"v1","kind":"List","items":[]}`)
-		case "/apis/kubevirt.io/v1":
-			http.Error(w, "not found", http.StatusNotFound)
-		default:
-			t.Errorf("unexpected inventory request: %s %s", r.Method, r.URL.Path)
-		}
+		t.Errorf("unexpected Kubernetes API request: %s %s", r.Method, r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -948,8 +926,8 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, ta
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if shadow != "" && args[0] == "get" && !slices.Contains(args, "--all") {
-				return []byte(fmt.Sprintf(`{"gitcache":{"shadow":%s}}`, shadow)), nil
+			if storedRemoved && args[0] == "get" && !slices.Contains(args, "--all") {
+				return []byte(`{"trustedTests":{"runtime":"old"},"vm":null,"argoSync":{"semaphores":{"kvm":1}}}`), nil
 			}
 			if out, ok := testUpgradeValuePreflight(args); ok {
 				if args[0] == "get" && args[1] == "values" && slices.Contains(args, "--all") {
@@ -984,9 +962,6 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, ta
 			}
 		},
 		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-			if strings.Contains(strings.Join(args, " "), "retirement-check") {
-				t.Fatal("post-removal server cannot supply retirement proof")
-			}
 			if strings.Contains(strings.Join(args, " "), "audit record") {
 				if !verified || name != "kubectl" {
 					t.Fatalf("audit before verification: %s %v", name, args)
@@ -1017,20 +992,24 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, ta
 		Timeout:       10 * time.Second,
 		NoBackup:      true,
 	}, deps)
+	if storedRemoved {
+		// A null stored value is already absent; the others are named with
+		// the exact flags that drop them.
+		want := "chart schema validation failed: chart values that no longer exist are set: argoSync (stored release values), trustedTests (stored release values); no upgrade applied. " +
+			"Delete them from any --values file and re-run the upgrade with --set argoSync=null --set trustedTests=null (Helm drops a null value from the stored release values)"
+		if err == nil || err.Error() != want || slices.Contains(helmCallLog, "upgrade") || recorded {
+			t.Fatalf("stored removed values: err=%v helm=%v recorded=%t", err, helmCallLog, recorded)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
-	}
-	if result.Migrated != migrated {
-		t.Fatalf("migration result = %q, want %q", result.Migrated, migrated)
 	}
 	if !recorded {
 		t.Fatal("upgrade completion was not recorded")
 	}
 	if auditFails && !strings.Contains(output.String(), "could not record upgrade.completed") {
 		t.Fatalf("missing warning: %s", output.String())
-	}
-	if installed == "0.17.95" && inventoryCalls.Load() != 2 {
-		t.Fatalf("resource inventory must run before preparation and after preview: %d", inventoryCalls.Load())
 	}
 	if !result.Upgraded {
 		t.Fatal("expected Upgraded")
@@ -1738,7 +1717,7 @@ func TestCheckPinnedKeyConflictsRefusesParentKey(t *testing.T) {
 
 func TestCheckPinnedKeyConflictsAllowsValidKey(t *testing.T) {
 	t.Parallel()
-	err := checkPinnedKeyConflicts([]string{"maxConcurrentJobs=5"}, nil)
+	err := checkPinnedKeyConflicts([]string{"replicaCount=5"}, nil)
 	if err != nil {
 		t.Fatalf("expected no error for valid key, got %v", err)
 	}
@@ -1760,7 +1739,7 @@ func TestCheckPinnedKeyConflictsInValuesFile(t *testing.T) {
 
 func TestCheckValuesPinnedConflictsAllowsNonPinnedKeys(t *testing.T) {
 	t.Parallel()
-	data := []byte("maxConcurrentJobs: 5\npushBannerURL: https://example.com\n")
+	data := []byte("replicaCount: 5\npushBannerURL: https://example.com\n")
 	if err := checkValuesPinnedConflicts(data); err != nil {
 		t.Fatalf("expected no error for non-pinned keys, got %v", err)
 	}
@@ -1768,7 +1747,7 @@ func TestCheckValuesPinnedConflictsAllowsNonPinnedKeys(t *testing.T) {
 
 func TestValidateUserSetAgainstValuesRefusesUnknownKey(t *testing.T) {
 	t.Parallel()
-	valuesYAML := []byte("maxConcurrentJobs: 3\nimage:\n  ref: x\n")
+	valuesYAML := []byte("replicaCount: 3\nimage:\n  ref: x\n")
 	err := validateUserSetAgainstValues(valuesYAML, []string{"nonexistent.key=42"})
 	var schema *ErrSchemaValidation
 	if !errors.As(err, &schema) || !strings.Contains(schema.Detail, "nonexistent.key") {
@@ -1778,8 +1757,8 @@ func TestValidateUserSetAgainstValuesRefusesUnknownKey(t *testing.T) {
 
 func TestValidateUserSetAgainstValuesAllowsKnownKey(t *testing.T) {
 	t.Parallel()
-	valuesYAML := []byte("maxConcurrentJobs: 3\nimage:\n  ref: x\n")
-	err := validateUserSetAgainstValues(valuesYAML, []string{"maxConcurrentJobs=5"})
+	valuesYAML := []byte("replicaCount: 3\nimage:\n  ref: x\n")
+	err := validateUserSetAgainstValues(valuesYAML, []string{"replicaCount=5"})
 	if err != nil {
 		t.Fatalf("expected no error for known key, got %v", err)
 	}
@@ -1792,7 +1771,7 @@ func TestUpgradeHelmArgsIncludesUserValues(t *testing.T) {
 		BinaryVersion: "0.16.20",
 		Timeout:       5 * time.Minute,
 		UserValues:    []string{"/tmp/custom.yaml"},
-		UserSet:       []string{"maxConcurrentJobs=5"},
+		UserSet:       []string{"replicaCount=5"},
 	}
 	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	args = append(args, flags...)
@@ -1800,7 +1779,7 @@ func TestUpgradeHelmArgsIncludesUserValues(t *testing.T) {
 	if !strings.Contains(joined, "--values /tmp/custom.yaml") {
 		t.Fatalf("missing --values in args: %q", joined)
 	}
-	if !strings.Contains(joined, "--set maxConcurrentJobs=5") {
+	if !strings.Contains(joined, "--set replicaCount=5") {
 		t.Fatalf("missing --set in args: %q", joined)
 	}
 }
@@ -1812,7 +1791,7 @@ func TestUpgradeHelmArgsUserValuesAfterPins(t *testing.T) {
 		BinaryVersion: "0.16.20",
 		Timeout:       5 * time.Minute,
 		UserValues:    []string{"/tmp/custom.yaml"},
-		UserSet:       []string{"maxConcurrentJobs=5"},
+		UserSet:       []string{"replicaCount=5"},
 	}
 	args, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	args = append(args, flags...)
@@ -1823,7 +1802,7 @@ func TestUpgradeHelmArgsUserValuesAfterPins(t *testing.T) {
 			goProxyIdx = i
 		case arg == "/tmp/custom.yaml" && i > 0 && args[i-1] == "--values":
 			valuesIdx = i
-		case arg == "maxConcurrentJobs=5" && i > 0 && args[i-1] == "--set":
+		case arg == "replicaCount=5" && i > 0 && args[i-1] == "--set":
 			userSetIdx = i
 		}
 	}
@@ -1907,13 +1886,13 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 		BinaryVersion: "0.16.19",
 		Namespace:     "oberth",
 		DryRun:        true,
-		UserSet:       []string{"maxConcurrentJobs=5"},
+		UserSet:       []string{"replicaCount=5"},
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := output.String()
-	if !strings.Contains(text, "maxConcurrentJobs=5") {
+	if !strings.Contains(text, "replicaCount=5") {
 		t.Fatalf("dry-run output missing user --set value: %q", text)
 	}
 }
@@ -1924,7 +1903,7 @@ func TestDryRunAndRealArgsAgree(t *testing.T) {
 		Namespace:     "oberth",
 		BinaryVersion: "0.16.20",
 		Timeout:       5 * time.Minute,
-		UserSet:       []string{"maxConcurrentJobs=5"},
+		UserSet:       []string{"replicaCount=5"},
 	}
 	realArgs, flags := upgradeHelmArgs(cfg, "oberth-charts/oberth", "img@sha256:0000000000000000000000000000000000000000000000000000000000000000", testUpgradeCompatibility)
 	realArgs = append(realArgs, flags...)
@@ -2112,9 +2091,10 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 	}
 }
 
-func TestUpgradeAcceptsRetiredValueOverrides(t *testing.T) {
-	for _, key := range []string{"trustedTests.recipes=[]", "trustedTests.runtime=legacy", "vm.kvm.enabled=true", "argo.kubevirtCeiling.maxVMs=4", "argo.vmLauncherServiceAccount=old"} {
-		if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{key}); err != nil {
+func TestUpgradeRefusesRemovedValueOverrides(t *testing.T) {
+	for _, key := range []string{"trustedTests.recipes=[]", "trustedTests.runtime=old", "vm.kvm.enabled=true", "argo.kubevirtCeiling.maxVMs=4", "argo.vmLauncherServiceAccount=old"} {
+		var schemaErr *ErrSchemaValidation
+		if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{key}); !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "no longer exist") {
 			t.Fatalf("%s: %v", key, err)
 		}
 	}

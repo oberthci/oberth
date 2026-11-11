@@ -8,7 +8,7 @@ type SecretStoreVerifyRequest struct {
 	Tier        string   `json:"tier,omitempty"`
 	Keys        bool     `json:"keys,omitempty"`
 	Expect      []string `json:"expect,omitempty"`
-	Timeout     int      `json:"timeout,omitempty"`
+	Timeout     int      `json:"timeout_s,omitempty"`
 }
 
 // SecretStoreVerifyResponse contains only the verifier's bounded, value-free

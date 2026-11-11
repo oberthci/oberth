@@ -33,24 +33,27 @@ func TestSnakeCase(t *testing.T) {
 	}
 }
 
-func TestUnmarshalReadsSnakeAndGoNames(t *testing.T) {
-	for name, body := range map[string]string{
-		"snake":    `{"id":"r","repo_id":9007199254740993,"sha":"s","queue_position":2,"started_at":"2026-11-10T00:00:00Z","steps":[{"exit_code":3,"tagged_name":"t"}],"by_repo":{"7":{"exit_code":4}},"labels":{"BuildMain":"kept"}}`,
-		"go names": `{"ID":"r","RepoID":9007199254740993,"SHA":"s","QueuePosition":2,"StartedAt":"2026-11-10T00:00:00Z","Steps":[{"ExitCode":3,"tagged_name":"t"}],"ByRepo":{"7":{"ExitCode":4}},"Labels":{"BuildMain":"kept"}}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			var got record
-			if err := Unmarshal([]byte(body), &got); err != nil {
-				t.Fatal(err)
-			}
-			if got.ID != "r" || got.RepoID != 9007199254740993 || got.SHA != "s" || got.QueuePosition != 2 || got.StartedAt == nil ||
-				len(got.Steps) != 1 || got.Steps[0].ExitCode != 3 || got.Steps[0].Tagged != "t" || got.ByRepo[7].ExitCode != 4 || got.Labels["BuildMain"] != "kept" {
-				t.Fatalf("decoded %+v", got)
-			}
-		})
+func TestUnmarshalReadsSnakeCaseOnly(t *testing.T) {
+	body := `{"id":"r","repo_id":9007199254740993,"sha":"s","queue_position":2,"started_at":"2026-11-10T00:00:00Z","steps":[{"exit_code":3,"tagged_name":"t"}],"by_repo":{"7":{"exit_code":4}},"labels":{"BuildMain":"kept"}}`
+	var got record
+	if err := Unmarshal([]byte(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "r" || got.RepoID != 9007199254740993 || got.SHA != "s" || got.QueuePosition != 2 || got.StartedAt == nil ||
+		len(got.Steps) != 1 || got.Steps[0].ExitCode != 3 || got.Steps[0].Tagged != "t" || got.ByRepo[7].ExitCode != 4 || got.Labels["BuildMain"] != "kept" {
+		t.Fatalf("decoded %+v", got)
+	}
+	// Go-style names are not wire names: they are ignored, also when the
+	// snake_case name is absent.
+	var goNames record
+	if err := Unmarshal([]byte(`{"ID":"r","RepoID":2,"QueuePosition":2,"Steps":[{"ExitCode":3}],"repo_id":1}`), &goNames); err != nil {
+		t.Fatal(err)
+	}
+	if goNames.ID != "" || goNames.RepoID != 1 || goNames.QueuePosition != 0 || len(goNames.Steps) != 0 {
+		t.Fatalf("Go-style names decoded: %+v", goNames)
 	}
 	var rows []record
-	if err := Unmarshal([]byte(`[{"repo_id":1},{"RepoID":2}]`), &rows); err != nil || rows[0].RepoID != 1 || rows[1].RepoID != 2 {
+	if err := Unmarshal([]byte(`[{"repo_id":1},{"RepoID":2}]`), &rows); err != nil || rows[0].RepoID != 1 || rows[1].RepoID != 0 {
 		t.Fatalf("rows %+v %v", rows, err)
 	}
 	if err := Unmarshal([]byte(`{"id":`), &rows); err == nil {

@@ -32,24 +32,22 @@ func TestMCPDeadlineDerivesToolTimeoutAndHonorsOverride(t *testing.T) {
 		want     time.Duration
 	}{
 		{"ordinary", "status", `{}`, 0, time.Minute},
-		{"short wait", "wait", `{"timeout":30}`, 0, time.Minute},
-		{"long wait", "wait", `{"timeout":600}`, 0, 630 * time.Second},
+		{"short wait", "wait", `{"timeout_s":30}`, 0, time.Minute},
+		{"long wait", "wait", `{"timeout_s":600}`, 0, 630 * time.Second},
+		{"removed spelling ignored", "wait", `{"timeout":30}`, 0, 630 * time.Second},
 		{"default wait", "wait", `{}`, 0, 630 * time.Second},
 		{"absent arguments", "wait", ``, 0, 630 * time.Second},
-		{"zero wait", "wait", `{"timeout":0}`, 0, 630 * time.Second},
+		{"zero wait", "wait", `{"timeout_s":0}`, 0, 630 * time.Second},
 		{"default promotion", "promote_status", `{}`, 0, 630 * time.Second},
-		{"generic tool", "custom_poll", `{"timeout":120}`, 0, 150 * time.Second},
-		{"generic tool seconds", "custom_poll", `{"timeout_s":120}`, 0, 150 * time.Second},
+		{"generic tool", "custom_poll", `{"timeout_s":120}`, 0, 150 * time.Second},
 		{"run wait default", "run_wait", `{"id":"f0ac7a40"}`, 0, 630 * time.Second},
 		{"run wait timeout_s", "run_wait", `{"id":"f0ac7a40","timeout_s":75}`, 0, 105 * time.Second},
-		{"run wait alias spelling", "run_wait", `{"id":"f0ac7a40","timeout":1}`, 0, time.Minute},
-		{"wait documented spelling", "wait", `{"timeout_s":600}`, 0, 630 * time.Second},
-		{"hold exec alias spelling", "run_hold_exec", `{"id":"f0ac7a40","argv":["true"],"timeout_s":50}`, 0, 80 * time.Second},
+		{"run wait short", "run_wait", `{"id":"f0ac7a40","timeout_s":1}`, 0, time.Minute},
 		{"events wait default", "events_wait", `{}`, 0, 630 * time.Second},
 		{"events wait bound", "events_wait", `{"after_id":3,"timeout_s":75}`, 0, 105 * time.Second},
 		{"hold exec default", "run_hold_exec", `{"id":"f0ac7a40","argv":["true"]}`, 0, 930 * time.Second},
-		{"hold exec bound", "run_hold_exec", `{"id":"f0ac7a40","argv":["true"],"timeout_seconds":50}`, 0, 80 * time.Second},
-		{"override shorter", "wait", `{"timeout":600}`, time.Second, time.Second},
+		{"hold exec bound", "run_hold_exec", `{"id":"f0ac7a40","argv":["true"],"timeout_s":50}`, 0, 80 * time.Second},
+		{"override shorter", "wait", `{"timeout_s":600}`, time.Second, time.Second},
 		{"override longer", "status", `{}`, 2 * time.Minute, 2 * time.Minute},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -59,7 +57,7 @@ func TestMCPDeadlineDerivesToolTimeoutAndHonorsOverride(t *testing.T) {
 			}
 		})
 	}
-	if _, _, err := mcpDeadline(mcpFlagResult{}, toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"timeout":9223372036854775807}`)}); !errors.Is(err, errUsage) {
+	if _, _, err := mcpDeadline(mcpFlagResult{}, toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"timeout_s":9223372036854775807}`)}); !errors.Is(err, errUsage) {
 		t.Fatalf("unrepresentable deadline accepted: %v", err)
 	}
 }
@@ -109,7 +107,7 @@ func TestMCPCallStreamsHeartbeatsBeyondSixtySeconds(t *testing.T) {
 		args     string
 		duration time.Duration
 	}{
-		{"generic timeout", "custom_poll", `{"timeout":300}`, 61 * time.Second},
+		{"generic timeout", "custom_poll", `{"timeout_s":300}`, 61 * time.Second},
 		// run_wait spells its bound timeout_s; the CLI once cut it at 60 s.
 		{"run_wait timeout_s", "run_wait", `{"id":"f0ac7a40","timeout_s":75}`, 70 * time.Second},
 	} {
@@ -204,7 +202,7 @@ func TestMCPCallDeadlineErrorNamesLimit(t *testing.T) {
 			defer withTestMCPClient(t, server)()
 			t.Setenv("OBERTH_TOKEN", "deadline-test-token")
 			var output strings.Builder
-			err := runMCPCall(t.Context(), []string{"wait", `{"timeout":600}`, "--url", server.URL, "--timeout=30ms"}, &output)
+			err := runMCPCall(t.Context(), []string{"wait", `{"timeout_s":600}`, "--url", server.URL, "--timeout=30ms"}, &output)
 			if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "client deadline 30ms") || !strings.Contains(err.Error(), "tool timeout 10m0s") {
 				t.Fatalf("deadline diagnostic = %v", err)
 			}

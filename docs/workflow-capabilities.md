@@ -126,29 +126,11 @@ Workflows. Grant their operator ServiceAccount only the required namespaced
 kinds/actions and extended resources. Existing KubeVirt grants do not become
 capability grants.
 
-A repository with a trusted suite cannot complete this migration before the
-server upgrade. The legacy engine refuses a candidate that deletes
-`.oberth/tests.yaml` with "candidate removed the upstream trusted test requirement".
-Use this order:
-
-1. Prepare the migration branch. Move the required test gate and cleanup into
-   the Workflow, remove `.oberth/tests.yaml`, `oberth.ci/kvm-templates` and
-   guest-test annotations, and arrange the capability grant and operator controls.
-   Keep the branch ready for promotion; the legacy server cannot admit it yet.
-2. Back up, drain old executions and confirm external resource cleanup, then
-   upgrade the server. While the default branch still contains the retired
-   contract, the repository retirement check blocks this upgrade. The planned
-   transition therefore needs `--allow-retired-execution`; this also bypasses
-   the resource inventory, so complete that cleanup before using it.
-3. Run and promote the migration branch immediately after the upgrade. Until
-   it is promoted, main still contains the retired contract and its runs are
-   refused. The upgraded server allows the migration candidate to delete the
-   contract even while it remains on main. Confirm the replacement Workflow gate
-   passes before promotion.
-
-After removal of the legacy engine, deleting the contract is allowed; the server
-no longer enforces that retired gate. Review and preserve the required test gate
-in the repository Workflow. See [upgrade preflight](ownership-handoff.md#retired-execution-preflight).
+Move the required test gate and cleanup into the Workflow, remove
+`.oberth/tests.yaml`, `oberth.ci/kvm-templates` and guest-test annotations,
+and arrange the capability grant and operator controls. The server does not
+enforce the removed test contract; review and preserve the required test gate
+in the repository Workflow.
 
 `OBERTH_KVM` and `OBERTH_GUEST_TEST` are no longer injected. The five legacy MCP
 tools and `oberth kubevirt` are removed. Historical runs, step usage and errors
@@ -158,9 +140,10 @@ Drain old executions and clean up their external resources with the old owner
 before upgrading. If an old execution is encountered at restart, Oberth fails
 its run with a workflow capability migration message and stops its owned Argo
 Workflow. It does not inspect or delete externally created resources. Operators
-must remove any remaining resources. Old `trustedTests.*`, `vm.*` and retired
-`argo` values are accepted, warned about and ignored; they cannot restore runtime
-or RBAC. Removed CLI serve flags must be removed from custom launch commands.
+must remove any remaining resources. Stored `trustedTests`, `vm` and the
+removed VM `argo` values refuse the upgrade until they are dropped; see
+[removed chart values](../README.md#upgrading). Removed CLI serve flags must be
+removed from custom launch commands.
 
 No migration is added. Existing migration SQL remains byte-identical; retired
 tables are inert and reserved for removal by a later migration. Take a database

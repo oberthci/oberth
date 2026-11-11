@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -404,7 +403,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 			"protocolVersion": version,
 			"capabilities":    capabilities,
 			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
-			"instructions":    "Record fields are snake_case (id, repo_id, steps); the Go-style duplicates (ID, RepoID, Steps) are no longer sent unless the request carries X-Oberth-Go-Field-Names: 1. system_status reports queue_cap with snake_case keys; queueCap remains for one more release. Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
+			"instructions":    "Record fields are snake_case (id, repo_id, steps). Blocking tools take their bound as timeout_s. Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
 		}
 		if server.pushAvailable() {
 			result := response.Result.(map[string]any)
@@ -452,7 +451,7 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if err != nil {
 			response.Result = server.classifyToolFailure(err)
 		} else {
-			response.Result = toolSuccess(request.Context(), result)
+			response.Result = toolSuccess(result)
 		}
 	default:
 		response.Error = &rpcError{Code: -32601, Message: "method not found"}
@@ -504,8 +503,8 @@ func writeRPC(writer http.ResponseWriter, response rpcResponse) {
 	_ = json.NewEncoder(writer).Encode(response)
 }
 
-func toolSuccess(ctx context.Context, payload any) map[string]any {
-	raw, err := marshalCompatible(payload, goFieldNames(ctx))
+func toolSuccess(payload any) map[string]any {
+	raw, err := marshalRecords(payload)
 	if err != nil || len(raw) == 0 || raw[0] != '{' {
 		return toolFailure(errors.New("internal error: tool result must be a JSON object"))
 	}
@@ -821,7 +820,7 @@ func toolDefinitions() []map[string]any {
 		tool("size_grant", "Raise (or set) the largest admission size a repository's branch, promotion and schedule runs may declare. The default without a grant is L; XL reserves the whole host and makes every other repository wait for a full drain. Re-enables automatic tag priority: only the oldest waiting tag per repository qualifies, and only within this size maximum. Ungranted repositories default to enabled within L. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name"), "max": map[string]any{"type": "string", "enum": []string{"L", "XL"}, "description": "Maximum size"}}, "repo", "max")),
 		tool("size_revoke", "Return a repository to maximum L and disable its automatic tag priority, even if never granted. Explicit admin overrides, promotions and 60-minute aging of standard runs into promotion still apply; running work continues. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
 		tool("size_grant_get", "Read legacy admission size and priority policy, plus the independent numeric resource ceiling. Use resource_grant to change request/limit ceilings.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
-		tool("queue_cap_config", "Set the branch queue cap with maxNotStarted (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap (queueCap is a legacy alias for one more release).", object(map[string]any{"maxNotStarted": map[string]any{"type": "integer", "minimum": 0}}, "maxNotStarted")),
+		tool("queue_cap_config", "Set the branch queue cap with max_not_started (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap.", object(map[string]any{"max_not_started": map[string]any{"type": "integer", "minimum": 0}}, "max_not_started")),
 		tool("release_wif_list", "Read the release WIF capability map: boot default from Helm/flags, runtime overrides, the effective map used by preflight and admission, configured role names and any stored grant left inactive. Public data only. Unscoped admin only.", object(map[string]any{})),
 		tool("release_wif_grant", "Grant or replace one registered repository's release WIF entry at runtime (#1497): its release service_account_name and template-to-role map. Roles, namespace and dedicated step identities stay Helm configuration. Validated against the boot map; applies to the next preflight and tag admission without restart. Unscoped admin only; audited, reason required.", object(map[string]any{"repo": stringProperty("Registered repository (any accepted spelling; stored canonical upstream/org/repo)"), "service_account_name": stringProperty("The repository's per-repo release ServiceAccount"), "templates": map[string]any{"type": "object", "minProperties": 1, "maxProperties": 64, "additionalProperties": map[string]any{"type": "string"}, "description": "Pod leaf template name -> configured role"}, "reason": stringProperty("Reason, 1..512 bytes")}, "repo", "service_account_name", "templates", "reason")),
 		tool("release_wif_revoke", "Revoke a repository's release WIF entry at runtime, including a Helm-configured entry or one for a retired, unregistered upstream/org/repo. New release admissions refuse its WIF leaves. Unscoped admin only; audited, reason required.", object(map[string]any{"repo": stringProperty("Repository or exact upstream/org/repo key"), "reason": stringProperty("Reason, 1..512 bytes")}, "repo", "reason")),
@@ -922,7 +921,7 @@ func toolDefinitions() []map[string]any {
 			"tier":         map[string]any{"type": "string", "enum": []string{"release", "ci"}, "default": "release", "description": "Per-repo identity tier; ci requires release_tier and repo"},
 			"keys":         map[string]any{"type": "boolean", "description": "List field names (server tier only)"},
 			"expect":       map[string]any{"type": "array", "items": stringProperty("Expected <path-base>/<field>[,<field>,...]"), "maxItems": 32, "description": "Assert field names; implies keys (server tier only)"},
-			"timeout":      map[string]any{"type": "integer", "minimum": 1, "maximum": 120, "default": 45, "description": "Overall deadline in seconds, including TokenRequest and login"},
+			"timeout_s":    map[string]any{"type": "integer", "minimum": 1, "maximum": 120, "default": 45, "description": "Overall deadline in seconds, including TokenRequest and login"},
 		})),
 		tool("promote_grant", "Create a time-bounded promotion grant authorizing any non-admin uplink to promote an exact (repository, SHA, target) tuple. Admin uplink required. The grant is single-use: consumed atomically when a matching promotion succeeds.", object(map[string]any{
 			"repo":    stringProperty("Repository name"),
@@ -995,14 +994,9 @@ func executionPriorityProperty() map[string]any {
 }
 
 // withTimeout adds a blocking tool's own bound as timeout_s, the one
-// documented spelling, and accepts timeout and timeout_seconds as aliases so
-// an agent that learned another tool is not refused; two different values
-// are refused.
+// spelling every blocking tool takes.
 func withTimeout(properties map[string]any, bound map[string]any) map[string]any {
-	properties["timeout_s"] = bound
-	for _, alias := range []string{"timeout", "timeout_seconds"} {
-		properties[alias] = map[string]any{"type": "integer", "minimum": bound["minimum"], "maximum": bound["maximum"], "description": "Alias of timeout_s"}
-	}
+	properties[ToolTimeoutArgument] = bound
 	return properties
 }
 

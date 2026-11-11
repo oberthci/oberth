@@ -1,7 +1,6 @@
 package api
 
 import (
-	"slices"
 	"strings"
 	"testing"
 )
@@ -27,8 +26,8 @@ func TestMCPLongPollDescriptionStatesEffectiveMaximum(t *testing.T) {
 			t.Fatalf("timeout_s schema = %#v", timeout)
 		}
 		for _, alias := range []string{"timeout", "timeout_seconds"} {
-			if property := properties[alias].(map[string]any); property["maximum"] != 600 || property["description"] != "Alias of timeout_s" {
-				t.Fatalf("%s schema = %#v", alias, property)
+			if _, present := properties[alias]; present {
+				t.Fatalf("%s still publishes the removed %s alias", definition["name"], alias)
 			}
 		}
 	}
@@ -37,25 +36,24 @@ func TestMCPLongPollDescriptionStatesEffectiveMaximum(t *testing.T) {
 	}
 }
 
-// Every long poll publishes timeout_s with the same aliases, and the client
-// deadline table sends the bound in the spelling every server accepts.
+// Every blocking tool publishes timeout_s and no other spelling of its bound.
 func TestToolTimeoutsSpellTimeoutSOnEveryLongPoll(t *testing.T) {
 	t.Parallel()
-	want := map[string]string{"wait": "timeout", "promote_status": "timeout", "run_wait": "timeout_s", "events_wait": "timeout_s", "run_hold_exec": "timeout_seconds"}
 	timeouts := ToolTimeouts()
-	for name, argument := range want {
-		timeout, ok := timeouts[name]
-		if !ok || timeout.Argument != argument || len(timeout.Aliases) != 2 {
-			t.Fatalf("%s timeout = %#v, want argument %s with two aliases", name, timeout, argument)
+	for _, name := range []string{"wait", "promote_status", "run_wait", "events_wait", "run_hold_exec", "secretstore_verify"} {
+		if _, ok := timeouts[name]; !ok {
+			t.Fatalf("%s lacks timeout_s", name)
 		}
-		spellings := append([]string{timeout.Argument}, timeout.Aliases...)
-		for _, spelling := range ToolTimeoutArguments {
-			if !slices.Contains(spellings, spelling) {
-				t.Fatalf("%s lacks %s: %v", name, spelling, spellings)
+	}
+	for _, definition := range toolDefinitions() {
+		properties := definition["inputSchema"].(map[string]any)["properties"].(map[string]any)
+		for _, removed := range []string{"timeout", "timeout_seconds"} {
+			if _, present := properties[removed]; present {
+				t.Fatalf("%s publishes %s", definition["name"], removed)
 			}
 		}
 	}
-	if timeouts["events_wait"].Default.Seconds() != 600 || timeouts["run_hold_exec"].Default.Seconds() != 900 {
-		t.Fatalf("defaults = %v %v", timeouts["events_wait"].Default, timeouts["run_hold_exec"].Default)
+	if timeouts["events_wait"].Default.Seconds() != 600 || timeouts["run_hold_exec"].Default.Seconds() != 900 || timeouts["secretstore_verify"].Default.Seconds() != 45 {
+		t.Fatalf("defaults = %v %v %v", timeouts["events_wait"].Default, timeouts["run_hold_exec"].Default, timeouts["secretstore_verify"].Default)
 	}
 }

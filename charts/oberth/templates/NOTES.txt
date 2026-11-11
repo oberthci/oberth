@@ -55,6 +55,3 @@ Deprecation: empty argo.ciSecrets.serviceAccount and argo.ciSecrets.vaultRole
 strings still select oberth-argo-ci-secrets for this release only. Before the
 next chart release, omit those overrides or set the default name explicitly.
 
-{{- if or (hasKey .Values "trustedTests") (hasKey .Values "vm") (hasKey .Values.argo "vmLauncherServiceAccount") (hasKey .Values.argo "containerDiskPrefixes") (hasKey .Values.argo "kubevirtCeiling") }}
-WARNING: retired trustedTests, vm and VM-specific argo values are ignored. Migrate pipelines to a workflow capability grant with allowlisted resource kinds and extended resources.
-{{- end }}

@@ -79,7 +79,7 @@ func TestEventsWaitTimesOutWithAMovedCursor(t *testing.T) {
 	run := f.enqueue(t, "land/a", "3", false)
 	f.finish(t, run)
 	latest := f.events(t, agentActor, map[string]any{}).LatestID
-	response, err := f.eventsWait(t, agentActor, map[string]any{"after_id": 0, "kinds": []string{model.AgentEventRunHeld}, "timeout": 1})
+	response, err := f.eventsWait(t, agentActor, map[string]any{"after_id": 0, "kinds": []string{model.AgentEventRunHeld}, "timeout_s": 1})
 	if err != nil || !response.TimedOut || len(response.Events) != 0 || response.NextAfterID != latest {
 		t.Fatalf("timeout = %+v, %v", response, err)
 	}
@@ -88,11 +88,12 @@ func TestEventsWaitTimesOutWithAMovedCursor(t *testing.T) {
 func TestEventsWaitRefusals(t *testing.T) {
 	f := newAgentFixture(t)
 	for name, arguments := range map[string]map[string]any{
-		"conflicting timeouts": {"timeout_s": 1, "timeout": 2},
-		"over the maximum":     {"timeout_s": 601},
-		"bad kind":             {"kinds": []string{"run.bogus"}},
-		"negative cursor":      {"after_id": -1},
-		"unknown argument":     {"since": 1},
+		"removed timeout alias": {"timeout": 1},
+		"removed seconds alias": {"timeout_seconds": 1},
+		"over the maximum":      {"timeout_s": 601},
+		"bad kind":              {"kinds": []string{"run.bogus"}},
+		"negative cursor":       {"after_id": -1},
+		"unknown argument":      {"since": 1},
 	} {
 		if _, err := f.eventsWait(t, agentActor, arguments); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s = %v", name, err)
@@ -101,30 +102,27 @@ func TestEventsWaitRefusals(t *testing.T) {
 	if _, err := f.eventsWait(t, agentActor, map[string]any{"run_ids": []string{strings.Repeat("e", 32)}}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing run = %v", err)
 	}
-	// Equal values under two spellings are one timeout.
-	if response, err := f.eventsWait(t, agentActor, map[string]any{"timeout_s": 1, "timeout_seconds": 1}); err != nil || !response.TimedOut {
-		t.Fatalf("equal spellings = %+v, %v", response, err)
-	}
 }
 
-// Every long poll accepts the three spellings of its bound; different values
-// are refused instead of one silently winning.
-func TestLongPollsAcceptTimeoutAliases(t *testing.T) {
+// Every long poll takes timeout_s; the removed timeout and timeout_seconds
+// spellings are refused as unknown arguments.
+func TestLongPollsTakeOnlyTimeoutS(t *testing.T) {
 	f := newAgentFixture(t)
 	run := f.enqueue(t, "land/alias", "4", false)
-	for _, spelling := range []string{"timeout_s", "timeout", "timeout_seconds"} {
-		raw, _ := json.Marshal(map[string]any{"id": run.ID, spelling: 1})
-		value, err := f.service.CallTool(t.Context(), agentActor, "run_wait", raw)
-		if response, _ := value.(RunWaitResponse); err != nil || response.State != runWaitTimeout {
-			t.Fatalf("run_wait %s = %+v, %v", spelling, value, err)
-		}
-		raw, _ = json.Marshal(map[string]any{"id": run.ID, spelling: 1})
-		if _, err := f.service.CallTool(t.Context(), agentActor, "wait", raw); err != nil {
-			t.Fatalf("wait %s = %v", spelling, err)
-		}
+	raw, _ := json.Marshal(map[string]any{"id": run.ID, "timeout_s": 1})
+	value, err := f.service.CallTool(t.Context(), agentActor, "run_wait", raw)
+	if response, _ := value.(RunWaitResponse); err != nil || response.State != runWaitTimeout {
+		t.Fatalf("run_wait timeout_s = %+v, %v", value, err)
 	}
-	raw, _ := json.Marshal(map[string]any{"id": run.ID, "timeout_s": 1, "timeout": 5})
-	if _, err := f.service.CallTool(t.Context(), agentActor, "wait", raw); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "pass timeout_s alone") {
-		t.Fatalf("conflicting wait timeouts = %v", err)
+	if _, err := f.service.CallTool(t.Context(), agentActor, "wait", raw); err != nil {
+		t.Fatalf("wait timeout_s = %v", err)
+	}
+	for _, tool := range []string{"run_wait", "wait"} {
+		for _, removed := range []string{"timeout", "timeout_seconds"} {
+			raw, _ := json.Marshal(map[string]any{"id": run.ID, removed: 1})
+			if _, err := f.service.CallTool(t.Context(), agentActor, tool, raw); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("%s accepted removed %s: %v", tool, removed, err)
+			}
+		}
 	}
 }

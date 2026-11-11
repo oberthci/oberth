@@ -15,10 +15,10 @@ func TestRunPagingUsesServerCursor(t *testing.T) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("before") == "opaque-cursor" {
-			_, _ = w.Write([]byte(`[{"ID":"older","Status":"passed","QueuedAt":"2026-01-01T00:00:00Z"}]`))
+			_, _ = w.Write([]byte(`[{"id":"older","status":"passed","queued_at":"2026-01-01T00:00:00Z"}]`))
 		} else {
 			w.Header().Set("X-Oberth-Next-Before", "opaque-cursor")
-			_, _ = w.Write([]byte(`[{"ID":"newer","Status":"passed","QueuedAt":"2026-01-02T00:00:00Z"}]`))
+			_, _ = w.Write([]byte(`[{"id":"newer","status":"passed","queued_at":"2026-01-02T00:00:00Z"}]`))
 		}
 	}))
 	defer server.Close()

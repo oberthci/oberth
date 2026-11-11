@@ -157,23 +157,18 @@ class ArgoSchemaTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, default.stdout)
 
-    def test_retired_vm_keys_accept_and_ignore_saved_values(self):
+    def test_removed_vm_keys_are_refused(self):
         schema = json.loads((ROOT / 'charts/oberth/values.schema.json').read_text())
         argo = schema['properties']['argo']
         self.assertIs(argo['additionalProperties'], False)
-        saved = {'kubevirtCeiling': {'maxVMs': 2, 'maxCores': 6, 'maxMemory': '12Gi'},
-                 'vmLauncherServiceAccount': 'legacy-vm-launcher',
-                 'containerDiskPrefixes': ['registry.example.com/disks/']}
-        result = self.render(saved)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        baseline = self.render({})
-        self.assertEqual(baseline.returncode, 0, baseline.stderr)
-        self.assertEqual(result.stdout, baseline.stdout, 'retired values must not change resources')
-        for key in saved:
+        for key, value in (('kubevirtCeiling', {'maxVMs': 2}),
+                           ('vmLauncherServiceAccount', 'old-vm-launcher'),
+                           ('containerDiskPrefixes', ['registry.example.com/disks/'])):
             with self.subTest(key=key):
-                description = argo['properties'][key]['description'].lower()
-                self.assertIn('removed', description)
-                self.assertIn('accept and ignore historical values', description)
+                self.assertNotIn(key, argo['properties'])
+                result = self.render({key: value})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(key, result.stderr)
 
     def test_retired_aliases_still_report_migration(self):
         for argo in ({'ciSecretsServiceAccount': 'retired-account'},

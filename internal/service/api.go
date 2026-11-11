@@ -584,10 +584,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		timeout, err := arguments.seconds()
-		if err != nil {
-			return nil, err
-		}
+		timeout := arguments.seconds()
 		return service.execRunHold(ctx, actor, arguments.ID, arguments.Step, arguments.Argv, arguments.Stdin, timeout)
 	case "run_hold_patch":
 		var arguments struct {
