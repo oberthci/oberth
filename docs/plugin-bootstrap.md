@@ -29,7 +29,9 @@ that directory; remove the empty directory only after checking that no
 fetch is running, then retry.
 
 The plugin commands' `allowed-tools` entries permit only their own
-scripts. Other shell operations in the guided install still use Claude
+scripts. The install wrapper checks Helm and kubectl, calls the verified
+`~/.local/bin/oberth` directly for plan, install and verify, and refuses an
+install without an explicit nonempty `--secrets-file`. Other shell operations in the guided install still use Claude
 Code's normal permission checks. The Review confirmation remains the
 explicit gate for installing into the context the user chose.
 

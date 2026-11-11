@@ -213,6 +213,9 @@ func TestPluginCommandsOnlyAllowOwnScripts(t *testing.T) {
 	for skill, script := range map[string]string{"install": "fetch-oberth", "connect": "trust"} {
 		body := string(mustRead(t, pluginPath(t, "skills", skill, "SKILL.md")))
 		want := `allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/` + script + `" *)`
+		if skill == "install" {
+			want += `, Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" *)`
+		}
 		for _, line := range strings.Split(body, "\n") {
 			if strings.HasPrefix(line, "allowed-tools:") && line != want {
 				t.Fatalf("%s grants an unexpected tool: %s", skill, line)
@@ -296,5 +299,68 @@ func TestPluginFetchOverHTTPS(t *testing.T) {
 	}
 	if string(mustRead(t, filepath.Join(root, "home", ".local", "bin", "oberth-v1.2.3"))) != string(binary) {
 		t.Fatal("HTTPS fetch installed different bytes")
+	}
+}
+
+func TestPluginInstallRequiresRecoveryFile(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"bin/helm", "bin/kubectl", ".local/bin/oberth"} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'installer-called\\n'\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script, err := filepath.Abs("../../claude-plugin/scripts/install")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"run"}, {"run", "--secrets-file", ""}, {"run", "--secrets-file="}, {"run", "--secrets-file"}, {"run", "--secrets-file", "--yes"}, {"run", "--secrets-file", "recovery.txt"}} {
+		cmd := exec.Command(script, args...)
+		cmd.Env = []string{"HOME=" + root, "PATH=" + filepath.Join(root, "bin")}
+		out, err := cmd.CombinedOutput()
+		want := args[len(args)-1] == "recovery.txt"
+		if (err == nil) != want || strings.Contains(string(out), "installer-called") != want {
+			t.Fatalf("wrapper accepted invalid recovery path: %v", args)
+		}
+	}
+}
+
+func TestPluginInstallUsesVerifiedCLIAndSharedModes(t *testing.T) {
+	root := t.TempDir()
+	for name, body := range map[string]string{
+		"bin/helm":          "#!/bin/sh\nexit 0\n",
+		"bin/kubectl":       "#!/bin/sh\nexit 0\n",
+		"bin/oberth":        "#!/bin/sh\nexit 93\n",
+		".local/bin/oberth": "#!/bin/sh\nprintf '%s\\n' \"$@\"\n",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for mode, want := range map[string]string{
+		"plan":   "install\n--plan\n--json\n--context\nchosen cluster\n",
+		"verify": "install\n--verify\n--json\n--context\nchosen cluster\n",
+	} {
+		cmd := exec.CommandContext(t.Context(), "/bin/sh", pluginPath(t, "scripts", "install"), mode, "--context", "chosen cluster")
+		cmd.Env = []string{"HOME=" + root, "PATH=" + filepath.Join(root, "bin")}
+		out, err := cmd.CombinedOutput()
+		if err != nil || string(out) != want {
+			t.Fatalf("%s did not delegate to the verified CLI: %v %q", mode, err, out)
+		}
+	}
+	if err := os.Remove(filepath.Join(root, "bin", "helm")); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", pluginPath(t, "scripts", "install"), "run", "--secrets-file", "recovery.txt")
+	cmd.Env = []string{"HOME=" + root, "PATH=" + filepath.Join(root, "bin")}
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "Install helm first") || strings.Contains(string(out), "--secrets-file") {
+		t.Fatalf("missing prerequisite reached the installer: %v %q", err, out)
 	}
 }

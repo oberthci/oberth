@@ -2,7 +2,7 @@
 name: install
 description: Install a new Oberth server on the Kubernetes cluster the user's KUBECONFIG names, without any secret entering this session. Use when the user runs /oberth:install, asks to install or set up Oberth, or the session-start note says no Oberth server is configured and the user wants one.
 argument-hint: "[kubeconfig context]"
-allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth" *)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth" *), Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" *)
 ---
 
 # Install Oberth
@@ -17,29 +17,18 @@ Arguments given to the command: `$ARGUMENTS`
 
 ## Steps
 
-1. **Prerequisites.** Run `command -v kubectl helm`. If either is missing,
-   stop and tell the user to install it (kubectl:
-   https://kubernetes.io/docs/tasks/tools/, helm:
-   https://helm.sh/docs/intro/install/; a k3s host has kubectl). Never install
-   them yourself.
-2. **The CLI.** Fetch and verify the newest CLI with the plugin's pinned
-   release key. Always use this verified copy for the install:
-
-   ```sh
-   sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth"
-   ```
-
-   An explicit version is the script's one optional argument, for example
-   `v0.21.5`. It requires curl or wget, openssl, and sha256sum or shasum;
-   it installs `~/.local/bin/oberth-<version>` and the `oberth` symlink.
-   If verification fails, stop and explain the message. Never substitute
-   a website script or an unverified binary. Use `"$HOME/.local/bin/oberth"`
-   for the remaining commands when that directory is not on PATH.
-3. **The cluster.** List the contexts with `kubectl config get-contexts`. Any
-   cluster they reach is a valid target, local or remote. With one context,
-   name it and its API server. With several, ask the user which one, or take
-   the context given as the argument. Never pick one yourself. The chosen
-   name becomes `--context`.
+1. **Prerequisites.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" prerequisites`.
+   Missing Helm or kubectl stops the flow with installation links. Never install
+   either tool yourself.
+2. **The CLI.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth"` (or pass an
+   explicit release version). It uses the plugin's pinned release key, OpenSSL
+   and SHA-256 to verify before installing into `~/.local/bin`. It needs no
+   sudo, cosign, jq or Python. A verification failure stops the flow.
+3. **The cluster.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" plan` with the
+   chosen `--context` and answers file when available. Show its kubeconfig
+   files, API URL, CA pin, node facts and remedies. Any chosen context is a valid
+   target; never add a local/remote gate. With multiple contexts, ask the user.
+   Never pick one yourself.
 4. **Ask, in plain words, four things:**
    1. Real use or a quick evaluation? Real use is `--install-secretstore`
       (OpenBao in production mode; the user keeps the unseal key). An
@@ -61,8 +50,9 @@ Arguments given to the command: `$ARGUMENTS`
    "install". Nothing runs before that.
 
    ```sh
-   oberth install --context '<context>' --install-secretstore \
+   sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" run --yes --json --context '<context>' --install-secretstore \
      --secrets-file "$HOME/oberth-install-secrets.txt" \
+     --admin-ssh-public-key '<local SSH public key file>' \
      --forge github --organization '<org>' --client-host localhost
    ```
 
@@ -107,7 +97,7 @@ Arguments given to the command: `$ARGUMENTS`
   an earlier one. The install refuses a path that exists; choose a new name
   instead of removing the old file.
 - A `--dry-run` prints a plan and installs nothing. After the approved
-  install, check the server with `oberth status` (with
-  `~/.config/oberth/env` sourced).
+  install, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" verify --context
+  '<context>'` and explain every failing check and remedy.
 - Never disable TLS verification, and never trust the server's CA any other
   way than `/oberth:connect` with the pin.
