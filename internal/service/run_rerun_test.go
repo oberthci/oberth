@@ -63,7 +63,12 @@ type rerunHarness struct {
 
 func newRerunHarness(t *testing.T, results ...JobResult) *rerunHarness {
 	t.Helper()
-	fixture := newControlFixture(t, results...)
+	return newRerunHarnessWithOptions(t, store.Options{}, results...)
+}
+
+func newRerunHarnessWithOptions(t *testing.T, options store.Options, results ...JobResult) *rerunHarness {
+	t.Helper()
+	fixture := newControlFixtureWithOptions(t, options, results...)
 	harness := &rerunHarness{fixture: fixture, git: &tagPushGit{controlGit: fixture.git},
 		refs: stubRefResolver{branches: map[string]map[string]string{"codeberg/acme/oberth": {rerunBranch: rerunSHA, "refs/tags/" + rerunTag: rerunTagObject}}}}
 	var err error
@@ -365,7 +370,8 @@ func (s stubRefResolver) TagObjectSHA(ctx context.Context, repo, tag string) (st
 }
 
 func TestRunRerunKeepsOperatorReasonInAutomaticLineage(t *testing.T) {
-	harness := newRerunHarness(t, infraFailure, infraFailure)
+	now := time.Now()
+	harness := newRerunHarnessWithOptions(t, store.Options{Now: func() time.Time { return now }}, infraFailure, infraFailure)
 	harness.scheduler.infrastructureAutoRetryBudget = 1 // spend the lineage's whole budget
 	first, err := harness.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "manual-reason", Repository: harness.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "operator"})
 	if err != nil {
@@ -376,6 +382,7 @@ func TestRunRerunKeepsOperatorReasonInAutomaticLineage(t *testing.T) {
 	if failed.AutoRetriedBy == "" {
 		t.Fatal("missing automatic successor")
 	}
+	now = now.Add(5 * time.Second)
 	harness.process(t)
 	const reason = "fixture repaired; check the same commit again"
 	response := harness.rerun(t, rerunUplink, map[string]any{"id": failed.AutoRetriedBy, "reason": reason})

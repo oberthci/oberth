@@ -17,6 +17,7 @@ func TestRunPolicyWaitPreservesRetryLineageAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	now = now.Add(automaticRetryDelay)
 	run, err := s.ClaimNextRun(t.Context())
 	if err != nil || run.ID != failed.AutoRetriedBy {
 		t.Fatalf("claim = %#v, %v", run, err)

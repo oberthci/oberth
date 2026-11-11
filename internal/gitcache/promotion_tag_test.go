@@ -50,6 +50,14 @@ func TestPublishAnnotatedTag(t *testing.T) {
 		t.Fatalf("refused tag stayed on the mirror: %s", out)
 	}
 	// Another writer's annotated tag on the same commit is never pushed.
+	// Seed the same fresh admission anchor a normal receive prepares.
+	lock := cache.repoLock(ready.Path)
+	lock.Lock()
+	_, err = cache.prepareReleaseAdmissionLocked(context.Background(), ready.Path, true)
+	lock.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
 	runGit(t, repository.work, "tag", "-a", "-m", "release", "deploy/4", repository.initialSHA)
 	runGit(t, repository.work, "push", ready.Path, "refs/tags/deploy/4")
 	if _, err := cache.PublishAnnotatedTag(context.Background(), "example", "deploy/4", repository.initialSHA, "not ours"); !errors.Is(err, ErrTagExists) {
