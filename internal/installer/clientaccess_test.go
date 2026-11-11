@@ -175,6 +175,10 @@ func TestClientAccessNotesReadTheTokenFromTheSecretsFile(t *testing.T) {
 	if got := storeFromSecretsFile("security add-generic-password -s oberth-token -a \"$USER\" -w", "/s"); !strings.HasSuffix(got, `-w "$(sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s)"`) {
 		t.Fatalf("macOS store command: %s", got)
 	}
+	// pass insert asks twice on a pipe; -e reads the one line.
+	if got := storeFromSecretsFile("pass insert oberth/token", "/s"); got != "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s | pass insert -e -f oberth/token" {
+		t.Fatalf("pass store command: %s", got)
+	}
 }
 
 func assertExists(t *testing.T, path string, want bool) {

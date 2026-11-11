@@ -189,6 +189,7 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	// Credentials shown once never go into a log or a transcript: without a
 	// terminal they go to --secrets-file, and without one the install refuses
 	// before anything exists that could be lost.
+	secretsFileSink := false
 	if !cfg.DryRun && deps.CredentialSink == nil {
 		switch {
 		case cfg.SecretsFile != "":
@@ -198,6 +199,7 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 			}
 			cfg.SecretsFile = secrets.path
 			deps.CredentialSink = secrets.add
+			secretsFileSink = true
 			defer secrets.finish(deps.Output)
 		case !deps.OutputIsTerminal() && cfg.mayCreateCredentials(deps.IsTerminal != nil && deps.IsTerminal()):
 			return errors.New("this install can create credentials that are shown once (the OpenBao root token and unseal key, " +
@@ -334,22 +336,23 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
 
 	return Run(ctx, cfg, Deps{
-		Output:           deps.Output,
-		Input:            deps.Input,
-		RunHelm:          runHelm,
-		RunCommand:       deps.RunCommand,
-		RunInteractive:   deps.RunInteractive,
-		IsTerminal:       deps.IsTerminal,
-		KubeClient:       kubeClient,
-		RestConfig:       restConfig,
-		ContextName:      selectedContext,
-		KindClusterName:  kindClusterName,
-		ReadPassword:     readPw,
-		MakeRaw:          makeRaw,
-		CredentialSink:   deps.CredentialSink,
-		StepProgressSink: deps.StepProgressSink,
-		ReleaseGetter:    deps.ReleaseGetter,
-		releaseKey:       deps.releaseKey,
+		Output:            deps.Output,
+		Input:             deps.Input,
+		RunHelm:           runHelm,
+		RunCommand:        deps.RunCommand,
+		RunInteractive:    deps.RunInteractive,
+		IsTerminal:        deps.IsTerminal,
+		KubeClient:        kubeClient,
+		RestConfig:        restConfig,
+		ContextName:       selectedContext,
+		KindClusterName:   kindClusterName,
+		ReadPassword:      readPw,
+		MakeRaw:           makeRaw,
+		CredentialSink:    deps.CredentialSink,
+		credentialsAtOnce: secretsFileSink,
+		StepProgressSink:  deps.StepProgressSink,
+		ReleaseGetter:     deps.ReleaseGetter,
+		releaseKey:        deps.releaseKey,
 	})
 }
 

@@ -485,6 +485,12 @@ func storeFromSecretsFile(storeCommand, secretsFile string) string {
 	if strings.HasSuffix(storeCommand, " -w") {
 		return storeCommand + ` "$(` + read + `)"`
 	}
+	if rest, ok := strings.CutPrefix(storeCommand, "pass insert "); ok {
+		// Without a terminal pass insert asks for the value twice and
+		// confirms an overwrite on the same stdin, so one piped line fails:
+		// -e reads a single line, -f replaces an earlier token.
+		storeCommand = "pass insert -e -f " + rest
+	}
 	return read + " | " + storeCommand
 }
 

@@ -136,9 +136,15 @@ func (s *secretsFile) add(label, value string) {
 // finish closes the file and reports it by path and SHA-256 only. A run that
 // created no credential leaves no file behind.
 func (s *secretsFile) finish(w io.Writer) {
+	// The empty file is removed by name, so make sure the name still is the
+	// file this run created: one that was put there since belongs to the
+	// operator and stays.
+	created, createdErr := s.file.Stat()
 	closeErr := s.file.Close()
 	if s.written == 0 && s.err == nil {
-		_ = os.Remove(s.path)
+		if current, err := os.Lstat(s.path); createdErr == nil && err == nil && os.SameFile(created, current) {
+			_ = os.Remove(s.path)
+		}
 		_, _ = fmt.Fprintf(w, "\nNo new credentials were created; %s was not kept.\n", s.path)
 		return
 	}

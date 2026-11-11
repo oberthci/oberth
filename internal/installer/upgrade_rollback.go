@@ -314,8 +314,8 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		_, _ = fmt.Fprintln(w, "No changes were made (--dry-run).")
 		return nil
 	}
-	// A restore replaces the database, on a local cluster too: like oberth
-	// restore, it never runs on the record's name alone.
+	// A restore replaces the database: like oberth restore, it never runs on
+	// the record's name alone.
 	if needRestore && !cfg.Yes {
 		return errors.New("this rollback replaces the server database with the pre-upgrade backup; review the plan above and rerun with --yes")
 	}

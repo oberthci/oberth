@@ -440,42 +440,42 @@ func SetupDevSecretStore(ctx context.Context, cfg Config, deps Deps, openbao Ope
 	return nil
 }
 
-// SetupProductionSecretStoreDeferred retains newly created credentials for the
-// caller to display once, including when a later setup step fails.
-func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interactiveDeps, quietDeps Deps, openbao OpenBaoResult) (SecretStoreResult, *baoInitResult, error) {
+// setupProductionSecretStoreDeferred hands newly created credentials to onInit
+// the moment a fresh `operator init` returns them, before any later step
+// runs, so the caller keeps them when one of those steps fails.
+func setupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interactiveDeps, quietDeps Deps, openbao OpenBaoResult, onInit func(baoInitResult)) (SecretStoreResult, error) {
 	client, status, err := waitForOpenBaoStatus(ctx, cfg, quietDeps, openbao.Namespace)
 	if err != nil {
-		return SecretStoreResult{}, nil, err
+		return SecretStoreResult{}, err
 	}
 	if isInMemoryStorage(status) {
-		return SecretStoreResult{}, nil, fmt.Errorf("the OpenBao release in namespace %s runs in dev mode (in-memory storage); production mode cannot adopt it. "+
+		return SecretStoreResult{}, fmt.Errorf("the OpenBao release in namespace %s runs in dev mode (in-memory storage); production mode cannot adopt it. "+
 			"Re-run with --upgrade to reinstall it in production mode, or uninstall it first (helm uninstall openbao -n %s). "+
 			"(Right after a mode-switch upgrade the dev pod may still be terminating — re-run in a moment.)",
 			openbao.Namespace, openbao.Namespace)
 	}
 
 	var rootToken string
-	var captured *baoInitResult
 	switch {
 	case !status.Initialized:
 		initResult, err := client.operatorInit(ctx)
 		if initResult.RootToken != "" || len(initResult.UnsealKeysB64) > 0 {
-			captured = &initResult
+			onInit(initResult)
 		}
 		if err != nil {
-			return SecretStoreResult{}, captured, err
+			return SecretStoreResult{}, err
 		}
 
 		rootToken = initResult.RootToken
 		unsealStatus, err := client.unseal(ctx, initResult.UnsealKeysB64[0])
 		if err != nil {
-			return SecretStoreResult{}, captured, err
+			return SecretStoreResult{}, err
 		}
 		if unsealStatus.Sealed {
-			return SecretStoreResult{}, captured, errors.New("OpenBao is still sealed after submitting the unseal key")
+			return SecretStoreResult{}, errors.New("OpenBao is still sealed after submitting the unseal key")
 		}
 	case status.Sealed:
-		return SecretStoreResult{}, nil, fmt.Errorf("OpenBao in namespace %s is initialized but sealed (the pod restarted). Unseal it with your saved unseal key:\n\n"+
+		return SecretStoreResult{}, fmt.Errorf("OpenBao in namespace %s is initialized but sealed (the pod restarted). Unseal it with your saved unseal key:\n\n"+
 			"    kubectl exec -it -n %s %s -- bao operator unseal\n\nthen re-run oberth install. "+
 			"To unseal automatically on a single node, see deploy/systemd/README.md",
 			openbao.Namespace, openbao.Namespace, client.pod)
@@ -487,7 +487,7 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			tokenBytes, err := interactiveDeps.ReadPassword()
 			_, _ = fmt.Fprintln(interactiveDeps.Output)
 			if err != nil {
-				return SecretStoreResult{}, nil, fmt.Errorf("read root token: %w", err)
+				return SecretStoreResult{}, fmt.Errorf("read root token: %w", err)
 			}
 			rootToken = strings.TrimSpace(string(tokenBytes))
 			clear(tokenBytes)
@@ -501,23 +501,23 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Keep every install flag unchanged, especially --namespace, --openbao-namespace, --chart-version and --openbao-chart-version.")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Or run scripts/setup-secretstore.sh from an already-authenticated bao CLI session.")
-			return SecretStoreResult{}, nil, fmt.Errorf("%s is required to verify production Transit provisioning before Oberth can be enabled", baoTokenEnvVar)
+			return SecretStoreResult{}, fmt.Errorf("%s is required to verify production Transit provisioning before Oberth can be enabled", baoTokenEnvVar)
 		}
 		_, _ = fmt.Fprintf(interactiveDeps.Output, "Using the root token to verify the secret-store configuration.\n")
 	}
 
 	if err := waitForPodReady(ctx, quietDeps, openbao.Namespace, openBaoPodSelector, cfg.Timeout); err != nil {
-		return SecretStoreResult{}, captured, fmt.Errorf("wait for OpenBao: %w", err)
+		return SecretStoreResult{}, fmt.Errorf("wait for OpenBao: %w", err)
 	}
 
 	configured, err := ConfigureSecretStore(ctx, cfg, quietDeps, client, rootToken)
 	if err != nil {
-		return SecretStoreResult{}, captured, fmt.Errorf("configure secret store: %w", err)
+		return SecretStoreResult{}, fmt.Errorf("configure secret store: %w", err)
 	}
 	if !configured.TrustedTransitVerified {
-		return SecretStoreResult{}, captured, errors.New("production secret-store setup completed without verified Transit provisioning")
+		return SecretStoreResult{}, errors.New("production secret-store setup completed without verified Transit provisioning")
 	}
-	return configured, captured, nil
+	return configured, nil
 }
 
 // setupProductionSecretStoreCollect runs the deferred production setup and
@@ -527,8 +527,10 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 // (unseal, pod readiness, configuration) must still surface them through
 // the caller's deferred flush instead of losing them forever.
 func setupProductionSecretStoreCollect(ctx context.Context, cfg Config, interactiveDeps, quietDeps Deps, openbao OpenBaoResult, creds *heldCredentials) (SecretStoreResult, error) {
-	configured, initResult, err := SetupProductionSecretStoreDeferred(ctx, cfg, interactiveDeps, quietDeps, openbao)
-	if initResult != nil {
+	// Recorded the moment init returns, before unseal, pod readiness and
+	// configuration: with a secrets file the credentials are then on disk
+	// while those steps run.
+	record := func(initResult baoInitResult) {
 		creds.add("Root token", initResult.RootToken)
 		for i, key := range initResult.UnsealKeysB64 {
 			label := "Unseal key"
@@ -538,7 +540,7 @@ func setupProductionSecretStoreCollect(ctx context.Context, cfg Config, interact
 			creds.add(label, key)
 		}
 	}
-	return configured, err
+	return setupProductionSecretStoreDeferred(ctx, cfg, interactiveDeps, quietDeps, openbao, record)
 }
 
 // --- Secret store configuration (setup-secretstore.sh port) ---

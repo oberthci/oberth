@@ -64,13 +64,20 @@ Arguments given to the command: `$ARGUMENTS`
 
    The secrets file must be a new file outside any git worktree. The install
    refuses anything else.
-6. **Run it** exactly as reviewed. The output names the secrets file and its
-   SHA-256, and nothing secret. Tell the user to move that file off this
-   machine (a password manager, an offline copy) and to delete it here.
+6. **Run it** exactly as reviewed. It takes several minutes: run it in the
+   background or with the longest command timeout, and never interrupt it.
+   The output names the secrets file and its SHA-256, and nothing secret.
+   Tell the user to move that file off this machine (a password manager, an
+   offline copy) and to delete it here.
+
+   When the install stops part-way, the secrets file it names is kept and
+   may hold the only copy of the OpenBao root token and unseal key. Leave it
+   where it is, tell the user, and give a rerun a new `--secrets-file` name.
 7. **Finish what the output asks for:**
    - When a deploy key is printed, the user adds it at the forge as a key with
      write access to the organization's repositories. Then run the `upstream
-     add` command the output printed.
+     add` command the output printed, exactly as printed: it names the
+     cluster that was installed on.
    - The install configured this machine's client files (`~/.config/oberth`)
      and, when Claude Code is on PATH, its CA trust and this plugin. The user
      then enters the server in `/plugin configure oberth@oberthci`: the URL is
@@ -89,6 +96,9 @@ Arguments given to the command: `$ARGUMENTS`
   token or a key on a command line. Moving the token into a secret store goes
   through the command the install printed, which reads the file without
   showing it.
+- Never delete, move, truncate or overwrite a secrets file, from this run or
+  an earlier one. The install refuses a path that exists; choose a new name
+  instead of removing the old file.
 - A `--dry-run` prints a plan and installs nothing. After the approved
   install, check the server with `oberth status` (with
   `~/.config/oberth/env` sourced).

@@ -273,6 +273,23 @@ func kubectlOberthArgs(cfg Config, deps Deps, stdinAttached bool, command ...str
 	return append(args, command...)
 }
 
+// printedKubectl is a kubectl command line printed for the operator (or an
+// agent) to run later: the argv the installer itself runs, which names the
+// install's context, plus the --kubeconfig the install was given, so the
+// command reaches the cluster that was installed on and never whatever the
+// current context is by then. Each word is quoted for a shell.
+func printedKubectl(cfg Config, args []string) string {
+	words := []string{"kubectl"}
+	if cfg.KubeconfigPath != "" {
+		words = append(words, "--kubeconfig", cfg.KubeconfigPath)
+	}
+	words = append(words, args...)
+	for i, word := range words {
+		words[i] = shellQuoteWord(word)
+	}
+	return strings.Join(words, " ")
+}
+
 // upstreamConfigured reports whether at least one upstream is registered, by
 // listing them in-pod. Right after the pod turns Running the exec subresource
 // and the admin database may need a moment, so transient failures are
@@ -465,11 +482,8 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	pubKeyPath, identity, token, uplinkOutput, uplinkErr := onboardUplink(ctx, cfg, deps, tw)
 	if uplinkErr != nil {
 		tw.WriteFooter()
-		ns := cfg.Namespace
-		if ns == "" {
-			ns = DefaultNamespace
-		}
-		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    kubectl exec -i -n %s deploy/oberth -- /usr/local/bin/oberth uplink add - you@host < ~/.ssh/id_ed25519.pub\n\n", uplinkErr, ns)
+		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    %s < ~/.ssh/id_ed25519.pub\n\n", uplinkErr,
+			printedKubectl(cfg, kubectlOberthArgs(cfg, deps, true, "uplink", "add", "-", "you@host")))
 		if deps.StepProgressSink != nil {
 			deps.StepProgressSink("mint uplink", "pending")
 		}
@@ -523,7 +537,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		} else {
 			_, _ = fmt.Fprintf(w, "Retrieve the upstream public key, register it with your forge account, then verify the connection:\n")
 		}
-		_, _ = fmt.Fprintf(w, "\n    kubectl exec -n %s deploy/oberth -- /usr/local/bin/oberth %s\n", cfg.Namespace, strings.Join(cfg.upstreamAddArgs(name, baseURL), " "))
+		_, _ = fmt.Fprintf(w, "\n    %s\n", printedKubectl(cfg, kubectlOberthArgs(cfg, deps, false, cfg.upstreamAddArgs(name, baseURL)...)))
 		return ErrOnboardingPartial
 	}
 
@@ -584,8 +598,7 @@ func printAlsoUpstreamCommands(w io.Writer, cfg Config, deps Deps, existing []Ne
 	}
 	_, _ = fmt.Fprintln(w, "\nThe further organizations (--also-upstream) were not connected. Once the first upstream works, connect each with:")
 	for _, u := range PlanAlsoUpstreams(firstName, firstURL, cfg.AlsoUpstreams) {
-		args := append([]string{"kubectl"}, kubectlOberthArgs(cfg, deps, false, "upstream", "add", "--yes", u.Name, u.BaseURL)...)
-		_, _ = fmt.Fprintln(w, "    "+strings.Join(args, " "))
+		_, _ = fmt.Fprintln(w, "    "+printedKubectl(cfg, kubectlOberthArgs(cfg, deps, false, "upstream", "add", "--yes", u.Name, u.BaseURL)))
 	}
 }
 

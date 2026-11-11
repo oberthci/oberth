@@ -95,7 +95,7 @@ rehearse_rollback() {
   rg -qF "ref: ${candidate_refs[$b]}" "$private/source-$b/charts/oberth/values.yaml"
   # A private HOME: the backup key and client configuration of the operator
   # running this rehearsal are never read or written.
-  HOME=$home nice "$cli" upgrade --chart "$private/source-$b/charts/oberth" --yes --backup-dir "$out" \
+  HOME=$home nice "$cli" upgrade --chart "$private/source-$b/charts/oberth" --backup-dir "$out" \
     --set image.pullPolicy=Never --timeout 5m >"$out/upgrade.log" 2>&1 || { cat "$out/upgrade.log" >&2; return 1; }
   rehearsal_version "${candidate_versions[$b]}" upgraded
   record=$(find "$out" -maxdepth 1 -name 'oberth-upgrade-*.json' -print -quit)
@@ -192,7 +192,7 @@ rehearse_rollback_to_published() {
   awk -v ref="${candidate_refs[$b]}" '/^image:/{img=1} img && /^  ref:/{print "  ref: " ref; img=0; next} {print}' \
     "$private/source-$b/charts/oberth/values.yaml" >"$private/rehearsal-values.yaml"
   mv "$private/rehearsal-values.yaml" "$private/source-$b/charts/oberth/values.yaml"
-  HOME=$home nice "$cli" upgrade --chart "$private/source-$b/charts/oberth" --yes --backup-dir "$out" \
+  HOME=$home nice "$cli" upgrade --chart "$private/source-$b/charts/oberth" --backup-dir "$out" \
     --set image.pullPolicy=Never --timeout 5m >"$out/upgrade.log" 2>&1 || { cat "$out/upgrade.log" >&2; return 1; }
   # The backup must have been taken while the seed hold still held the runs.
   (( $(date +%s) < hold_until )) || { echo "the seed hold lapsed before the upgrade finished; the backup may hold no queued runs" >&2; return 1; }

@@ -205,12 +205,15 @@ func TestNonInteractiveInstallWithoutUpstreamWritesClientFiles(t *testing.T) {
 // reaches the pod's upstream add.
 func TestNonInteractiveOnboardingFromFlags(t *testing.T) {
 	t.Parallel()
-	host := &fakeOberthHost{t: t, uplinkOutput: "Uplink token for tester@box (shown once):\n" + testOnceCredential + "\n"}
+	// The forge has not accepted the new deploy key yet: the upstream add
+	// prints the key and registers nothing, as on a real first install.
+	host := &fakeOberthHost{t: t, uplinkOutput: "Uplink token for tester@box (shown once):\n" + testOnceCredential + "\n",
+		addResults: []fakeAddResult{{out: fakeDeployKeyLine + "\n"}}}
 	var buf bytes.Buffer
 	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
 	home, _ := deps.UserHomeDir()
 	var delivered []string
-	cfg := Config{ForgeURL: "ssh://git@forge.example.test/acme", ExpectedHostFingerprint: "SHA256:" + strings.Repeat("A", 43), ClientAccess: "none"}
+	cfg := Config{ForgeURL: "ssh://git@forge.example.test/acme", ExpectedHostFingerprint: "SHA256:" + strings.Repeat("A", 43), ClientAccess: "none", KubeconfigPath: "/srv/kube/lab config"}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +222,7 @@ func TestNonInteractiveOnboardingFromFlags(t *testing.T) {
 	tw.WriteFooter()
 	var creds heldCredentials
 	deps.CredentialSink = func(label, value string) { delivered = append(delivered, label) }
-	if err := FinishInstall(context.Background(), cfg, deps, tw, &creds); err != nil && !errors.Is(err, ErrOnboardingPartial) {
+	if err := FinishInstall(context.Background(), cfg, deps, tw, &creds); !errors.Is(err, ErrOnboardingPartial) {
 		t.Fatalf("%v\n%s", err, buf.String())
 	}
 	if len(host.addArgv) == 0 || !slices.Contains(host.addArgv[0], "--expected-host-fingerprint") || !slices.Contains(host.addArgv[0], cfg.ExpectedHostFingerprint) {
@@ -237,6 +240,89 @@ func TestNonInteractiveOnboardingFromFlags(t *testing.T) {
 	}
 	if !slices.Contains(delivered, "Bearer token") || strings.Contains(buf.String(), testOnceCredential) {
 		t.Fatalf("token delivery %v; output:\n%s", delivered, buf.String())
+	}
+	// The command printed for later names the install's kubeconfig and
+	// context: it must not reach whatever the current context is by then.
+	if deps.ContextName == "" {
+		t.Fatal("the fixture names no context")
+	}
+	want := "kubectl --kubeconfig '/srv/kube/lab config' exec --context " + deps.ContextName + " -c oberth -n oberth deploy/oberth -- /usr/local/bin/oberth upstream add --yes --no-wait --expected-host-fingerprint " + cfg.ExpectedHostFingerprint
+	if !strings.Contains(buf.String(), want) {
+		t.Fatalf("the printed upstream add lacks the install's target (%s):\n%s", want, buf.String())
+	}
+}
+
+// With a secrets file the root token and unseal key are on disk the moment
+// `operator init` returns, before unseal and every later step: a killed
+// install must not leave an initialized store whose only keys were in memory.
+func TestSecretsFileReceivesInitCredentialsBeforeTheNextStep(t *testing.T) {
+	t.Parallel()
+	const rootToken, unsealKey = "s.at-once-root", "at-once-unseal"
+	responses := freshStoreResponses()
+	responses["status -format=json"] = fakeBaoResponse{out: `{"initialized":false,"sealed":true,"storage_type":"file"}`}
+	responses["operator init -key-shares=1 -key-threshold=1 -format=json"] = fakeBaoResponse{
+		out: `{"unseal_keys_b64":["` + unsealKey + `"],"root_token":"` + rootToken + `"}`,
+	}
+	responses["write -format=json sys/unseal -"] = fakeBaoResponse{out: "connection refused", err: errors.New("exit status 1")}
+	var buf bytes.Buffer
+	runner := &fakeBaoRunner{t: t, responses: responses}
+	deps := secretStoreTestDeps(runner, &buf, runningOpenBaoPod())
+	cfg := Config{InstallSecretStore: true}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "secrets.txt")
+	secrets, err := createSecretsFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lastCommandAtWrite []string
+	creds := heldCredentials{atOnce: func(label, value string) {
+		secrets.add(label, value)
+		lastCommandAtWrite = append(lastCommandAtWrite, runner.calls[len(runner.calls)-1].command)
+	}}
+	if _, err := setupProductionSecretStoreCollect(context.Background(), cfg, deps, deps, productionOpenBaoResult(), &creds); err == nil {
+		t.Fatal("the unseal failure must surface")
+	}
+	if len(lastCommandAtWrite) != 2 || !strings.HasPrefix(lastCommandAtWrite[0], "operator init") || !strings.HasPrefix(lastCommandAtWrite[1], "operator init") {
+		t.Fatalf("credentials were written after %q, not right after operator init", lastCommandAtWrite)
+	}
+	// On disk before finish runs, which is all a killed process leaves.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"OPENBAO_ROOT_TOKEN=" + rootToken + "\n", "OPENBAO_UNSEAL_KEY=" + unsealKey + "\n"} {
+		if !bytes.Contains(raw, []byte(line)) {
+			t.Errorf("the secrets file lacks %s before the install ended", strings.SplitN(line, "=", 2)[0])
+		}
+	}
+	var out bytes.Buffer
+	secrets.finish(&out)
+	emitCredentials(&creds, deps, &out, false)
+	if strings.Contains(out.String()+buf.String(), rootToken) || strings.Contains(out.String()+buf.String(), unsealKey) {
+		t.Fatal("a credential reached the output")
+	}
+}
+
+// The empty secrets file is removed by name only while that name is still the
+// file the run created: a file the operator put there since is kept.
+func TestSecretsFileCleanupKeepsAFileItDidNotCreate(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "secrets.txt")
+	secrets, err := createSecretsFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("the operator's own\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secrets.finish(io.Discard)
+	if raw, err := os.ReadFile(path); err != nil || string(raw) != "the operator's own\n" {
+		t.Fatalf("the operator's file was touched: %q %v", raw, err)
 	}
 }
 

@@ -616,10 +616,19 @@ func (tw *tableWriter) writeDataLine(component, detail, status string, sensitive
 type heldCredentials struct {
 	rows    []credentialRow
 	printed bool
+	// atOnce, when set, receives each credential the moment it is added and
+	// nothing is held: the secrets file is durable, so a credential must not
+	// wait in this process for the end of an install that can still be
+	// killed.
+	atOnce func(label, value string)
 }
 
 // add appends one label/value pair. Must be called before flush.
 func (h *heldCredentials) add(label, value string) {
+	if h.atOnce != nil {
+		h.atOnce(label, value)
+		return
+	}
 	h.rows = append(h.rows, credentialRow{Label: label, Value: value})
 }
 

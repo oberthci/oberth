@@ -510,6 +510,10 @@ type Deps struct {
 	// InstallDeps.CredentialSink. Output-stream text must never be the
 	// delivery channel for a secret when this is set.
 	CredentialSink func(label, value string)
+	// credentialsAtOnce hands each credential to CredentialSink the moment it
+	// exists instead of after the install table closes. Set for the secrets
+	// file, which is written and synced per credential.
+	credentialsAtOnce bool
 	// StepProgressSink, when non-nil, receives structured step completion
 	// events for TUI progress tracking. Step names are stable identifiers
 	// (e.g., "deploy oberth", "rollout ready") matched by the TUI's
@@ -893,6 +897,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	_, _ = fmt.Fprintf(w, "oberth install %s\n", displayVersion(cfg.BinaryVersion))
 
 	var creds heldCredentials
+	if deps.credentialsAtOnce {
+		creds.atOnce = deps.CredentialSink
+	}
 
 	// Safety net: if any later step errors out or panics, captured
 	// credentials are still released. Registered before the secret-store
@@ -2106,6 +2113,15 @@ func PrintNextSteps(cfg Config, w io.Writer) error {
 		ns = DefaultNamespace
 	}
 	endpoint := withClientPorts(cfg, WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType}))
+	// The commands name the cluster the install named, never whatever the
+	// current context is when they are run.
+	target := ""
+	if cfg.KubeconfigPath != "" {
+		target += " --kubeconfig " + shellQuoteWord(cfg.KubeconfigPath)
+	}
+	if cfg.ContextName != "" && !cfg.CreateKind {
+		target += " --context " + shellQuoteWord(cfg.ContextName)
+	}
 	installed := "Oberth is installed."
 	if cfg.InstallSecretStore {
 		installed = "Oberth is installed and connected to OpenBao."
@@ -2120,13 +2136,13 @@ Next steps:
 
   1. Register the upstream (interactive — generates and persists the deploy key):
 
-       kubectl exec -it -n %[1]s deploy/oberth -- \
+       kubectl%[5]s exec -it -n %[1]s deploy/oberth -- \
          /usr/local/bin/oberth upstream add <name> ssh://git@<forge>/<org>
 
   2. Add your first uplink (prints its bearer token once; store it, and pin
      the CA that oberth client pin prints):
 
-       kubectl exec -i -n %[1]s deploy/oberth -- \
+       kubectl%[5]s exec -i -n %[1]s deploy/oberth -- \
          /usr/local/bin/oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
 
   3. Clone an existing repository through Oberth:
@@ -2144,12 +2160,12 @@ Next steps:
      grant from an admin uplink, which the first uplink is not. Register one
      for a person, with a key no agent holds, and issue the grant with it:
 
-       kubectl exec -it -n %[1]s deploy/oberth -- \
+       kubectl%[5]s exec -it -n %[1]s deploy/oberth -- \
          /usr/local/bin/oberth uplink add --admin - admin@host < admin.pub
        oberth mcp call --token-file <admin token file> promote_grant \
          '{"repo":"<upstream>/<org>/<repo>","sha":"<green sha>","branch":"main"}'
 
-`, ns, installed, URLHost(endpoint.ClientHost), endpoint.ClientSSHPort)
+`, ns, installed, URLHost(endpoint.ClientHost), endpoint.ClientSSHPort, target)
 	return err
 }
 
