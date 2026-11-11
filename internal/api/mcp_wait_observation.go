@@ -120,6 +120,13 @@ func (server *Server) classifyWaitFailure(err error, trace *mcpWaitObservation) 
 }
 
 func (server *Server) handleMCPLongPoll(writer http.ResponseWriter, request *http.Request, response rpcResponse, call callParams) {
+	release, ok := server.longPolls.acquire(sessionOwner(actorFrom(request.Context())))
+	if !ok {
+		response.Result = toolFailure(errors.New(server.longPolls.refusal()))
+		writeRPC(writer, response)
+		return
+	}
+	defer release()
 	observerCtx, cancel := context.WithCancel(request.Context())
 	stop := context.AfterFunc(server.drainContext, cancel)
 	defer stop()

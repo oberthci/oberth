@@ -158,6 +158,7 @@ type Server struct {
 	mcpHeartbeatInterval  time.Duration
 	mcpStreamWriteTimeout time.Duration
 	sessions              *mcpSessions
+	longPolls             longPollLimiter
 	mux                   *http.ServeMux
 }
 
