@@ -1,0 +1,442 @@
+#!/bin/sh
+# CA trust of the Oberth plugin. Claude Code reads its TLS trust once, when
+# it starts, from env.NODE_EXTRA_CA_CERTS of its settings.json; a plugin
+# cannot change it for a running session.
+#
+#   trust connect --url <server URL> --pin <CA SHA-256> [--ca-file <PEM>]
+#       Reads the certificates the server presents without trusting them (or
+#       the given PEM file), and takes the one whose SHA-256 fingerprint
+#       equals the pin. Without a match nothing is changed: there is no
+#       trust on first use. The server's certificate must be issued by that
+#       CA. The CA is stored as oberth/ca.crt in Claude Code's directory and
+#       env.NODE_EXTRA_CA_CERTS in settings.json is made to hold it; every
+#       other setting and an existing bundle are kept. The operating
+#       system's trust store is never touched.
+#
+#   trust hint
+#       The SessionStart hook: prints one paragraph for Claude when the CA
+#       is not trusted yet, and nothing otherwise. It never fails a session.
+#
+# Needs sh, awk and openssl. No token is read, and nothing is logged.
+set -eu
+umask 077
+LC_ALL=C
+export LC_ALL
+
+variable=NODE_EXTRA_CA_CERTS
+
+fail() {
+	echo "oberth: $*" >&2
+	exit 1
+}
+
+# normal_pin prints a pin as 64 lowercase hex digits, or nothing when it is
+# not a SHA-256 fingerprint. Colons, spaces and a sha256: prefix are allowed.
+normal_pin() {
+	value=$(printf '%s' "$1" | tr -d ' :\t\r\n' | tr 'A-Z' 'a-z')
+	value=${value#sha256}
+	value=${value#fingerprint=}
+	case "$value" in
+	*[!0-9a-f]*) return 0 ;;
+	esac
+	[ "${#value}" -eq 64 ] || return 0
+	printf '%s' "$value"
+}
+
+# fingerprint prints the SHA-256 of the first certificate of a PEM file.
+fingerprint() {
+	openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//' | tr -d ':\r\n' | tr 'A-F' 'a-f'
+}
+
+# shown is an address as a message prints it: without user information.
+shown() {
+	printf '%s' "$1" | sed 's#^\([A-Za-z][A-Za-z0-9+.-]*://\)[^/]*@#\1#' | tr -d '\000-\037'
+}
+
+# split_certificates writes each certificate of the PEM text on stdin as
+# <directory>/<prefix>-<n>.pem and prints how many there were.
+split_certificates() {
+	awk -v directory="$1" -v prefix="$2" '
+		/-----BEGIN CERTIFICATE-----/ { count++; inside = 1; file = directory "/" prefix "-" count ".pem" }
+		inside { print > file }
+		/-----END CERTIFICATE-----/ { if (inside) close(file); inside = 0 }
+		END { print count + 0 }'
+}
+
+# holds reports whether the PEM bundle $1 holds the certificate of $2.
+holds() {
+	[ -r "$1" ] || return 1
+	awk '
+		function body(line) { gsub(/[ \t\r]/, "", line); return line }
+		FNR == 1 { file++; inside = 0 }
+		/-----BEGIN CERTIFICATE-----/ { inside = 1; current = ""; next }
+		/-----END CERTIFICATE-----/ {
+			if (inside && file == 1 && want == "") want = current
+			if (inside && file == 2 && current == want) found = 1
+			inside = 0; next
+		}
+		inside { current = current body($0) }
+		END { exit (want != "" && found) ? 0 : 1 }' "$2" "$1"
+}
+
+# settings reads or sets env.NODE_EXTRA_CA_CERTS of a settings.json without
+# reformatting it: "get" prints the current value (nothing when unset), "set"
+# prints the whole file with the value in OBERTH_TRUST_VALUE. The file must
+# be one JSON object (or empty); anything else is refused.
+settings() {
+	awk -v mode="$1" -v key="$variable" '
+		function refuse(message) { print "oberth: settings.json: " message > "/dev/stderr"; failed = 1; exit 2 }
+		function space(p) { while (p <= n && index(" \t\r\n", substr(s, p, 1))) p++; return p }
+		function closing(p,   d) {
+			p++
+			while (p <= n) {
+				d = substr(s, p, 1)
+				if (d == "\\") { p += 2; continue }
+				if (d == "\"") return p
+				p++
+			}
+			return 0
+		}
+		function encoded(text,   out, p, d) {
+			out = ""
+			for (p = 1; p <= length(text); p++) {
+				d = substr(text, p, 1)
+				if (d == "\\" || d == "\"") out = out "\\"
+				out = out d
+			}
+			return "\"" out "\""
+		}
+		function decoded(text,   out, p, d) {
+			out = ""
+			for (p = 1; p <= length(text); p++) {
+				d = substr(text, p, 1)
+				if (d == "\\") {
+					d = substr(text, ++p, 1)
+					if (d != "\\" && d != "\"" && d != "/") refuse(key " holds an escape this command does not read")
+				}
+				out = out d
+			}
+			return out
+		}
+		BEGIN { RS = "\001" }
+		{ s = s (NR > 1 ? "\001" : "") $0 }
+		END {
+			if (failed) exit 2
+			value = encoded(ENVIRON["OBERTH_TRUST_VALUE"])
+			n = length(s)
+			i = space(1)
+			if (i > n) {
+				if (mode == "set") printf "{\n  \"env\": {\n    \"%s\": %s\n  }\n}\n", key, value
+				exit 0
+			}
+			if (substr(s, i, 1) != "{") refuse("is not a JSON object")
+			top = i; depth = 0; finished = 0; inside = 0
+			environment = 0; from = 0; to = 0
+			while (i <= n) {
+				c = substr(s, i, 1)
+				if (finished) {
+					if (!index(" \t\r\n", c)) refuse("has data after the object")
+					i++
+					continue
+				}
+				if (c == "\"") {
+					j = closing(i)
+					if (!j) refuse("has an unterminated string")
+					k = space(j + 1)
+					if (substr(s, k, 1) != ":") { i = j + 1; continue }
+					name = substr(s, i + 1, j - i - 1)
+					v = space(k + 1)
+					if (depth == 1 && name == "env") {
+						if (substr(s, v, 1) != "{") refuse("env is not an object")
+						environment = v; from = 0; to = 0
+					} else if (depth == 2 && inside && name == key) {
+						if (substr(s, v, 1) != "\"") refuse("env." key " is not a string")
+						from = v; to = closing(v)
+						if (!to) refuse("has an unterminated string")
+					}
+					i = v
+					continue
+				}
+				if (c == "{" || c == "[") {
+					depth++
+					if (depth == 2) inside = (i == environment)
+				} else if (c == "}" || c == "]") {
+					if (depth == 2) inside = 0
+					depth--
+					if (depth < 0) refuse("is not a JSON object")
+					if (depth == 0) finished = 1
+				}
+				i++
+			}
+			if (!finished) refuse("is not a complete JSON object")
+			if (mode == "get") {
+				if (from) printf "%s", decoded(substr(s, from + 1, to - from - 1))
+				exit 0
+			}
+			if (from) {
+				printf "%s", substr(s, 1, from - 1) value substr(s, to + 1)
+			} else if (environment) {
+				rest = space(environment + 1)
+				if (substr(s, rest, 1) == "}") printf "%s", substr(s, 1, environment) "\n    \"" key "\": " value "\n  " substr(s, rest)
+				else printf "%s", substr(s, 1, environment) "\n    \"" key "\": " value "," substr(s, environment + 1)
+			} else {
+				member = "\n  \"env\": {\n    \"" key "\": " value "\n  }"
+				rest = space(top + 1)
+				if (substr(s, rest, 1) == "}") printf "%s", substr(s, 1, top) member "\n" substr(s, rest)
+				else printf "%s", substr(s, 1, top) member "," substr(s, top + 1)
+			}
+		}' "$2"
+}
+
+# current_trust prints env.NODE_EXTRA_CA_CERTS of the settings file.
+current_trust() {
+	[ -e "$1" ] || return 0
+	settings get "$1"
+}
+
+claude_directory() {
+	if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+		printf '%s' "$CLAUDE_CONFIG_DIR"
+	else
+		[ -n "${HOME:-}" ] || fail "HOME is not set"
+		printf '%s' "$HOME/.claude"
+	fi
+}
+
+# trusted reports whether the stored CA is the pinned one (when a pin is
+# given) and the settings name a bundle that holds it.
+trusted() {
+	[ -r "$store/ca.crt" ] || return 1
+	if [ -n "$1" ]; then
+		[ -r "$store/ca.sha256" ] && [ "$(tr -d ' \r\n' <"$store/ca.sha256")" = "$1" ] || return 1
+	fi
+	named=$(current_trust "$claude/settings.json" 2>/dev/null) || return 1
+	[ -n "$named" ] || return 1
+	holds "$named" "$store/ca.crt"
+}
+
+hint() {
+	claude=$(claude_directory) || exit 0
+	store="$claude/oberth"
+	url=$(shown "${CLAUDE_PLUGIN_OPTION_URL:-}")
+	[ -n "$url" ] || exit 0
+	given=${CLAUDE_PLUGIN_OPTION_CA_PIN:-}
+	pin=$(normal_pin "$given")
+	if trusted "$pin"; then
+		exit 0
+	fi
+	if [ -z "$given" ]; then
+		echo "Oberth plugin: no CA pin is configured for $url. This is right only when that server has a publicly trusted certificate. If the oberth MCP server fails to connect with a certificate error, offer the user /oberth:connect <CA SHA-256 pin> (the pin comes from their Oberth admin: oberth client pin); otherwise do not bring this up."
+		exit 0
+	fi
+	if [ -z "$pin" ]; then
+		echo "Oberth plugin: the configured CA pin is not a SHA-256 fingerprint (64 hex digits), so Claude Code cannot trust the Oberth server at $url and the oberth MCP tools will not connect. Tell the user to correct it with /plugin configure oberth, then run /oberth:connect."
+		exit 0
+	fi
+	echo "Oberth plugin: Claude Code does not trust the CA of the Oberth server at $url yet, so the oberth MCP tools cannot connect in this session. Offer the user to run /oberth:connect now. It accepts the server's CA only when its SHA-256 equals the configured pin, stores it under $store, adds it to env.$variable in $claude/settings.json (other settings and an existing bundle are kept, the operating system's trust store is not touched), and needs one restart of Claude Code afterwards. Do not disable TLS verification or trust the certificate any other way."
+	exit 0
+}
+
+# write_file replaces $1 with the content of $2, through a symbolic link
+# when $1 is one, keeping the mode of an existing file.
+write_file() {
+	if [ -L "$1" ]; then
+		cat "$2" >"$1"
+		rm -f "$2"
+	else
+		mv -f "$2" "$1"
+	fi
+}
+
+connect() {
+	url=
+	given=
+	file=
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--url) url=${2:-}; shift ;;
+		--pin) given=${2:-}; shift ;;
+		--ca-file) file=${2:-}; shift ;;
+		*) fail "unknown argument $1; usage: trust connect --url <server URL> --pin <CA SHA-256> [--ca-file <PEM>]" ;;
+		esac
+		shift || true
+	done
+	command -v openssl >/dev/null 2>&1 || fail "openssl is not installed; it reads the server's certificates"
+	pin=$(normal_pin "$given")
+	[ -n "$pin" ] || fail "no CA pin: a pin is the SHA-256 fingerprint of the server's CA certificate (64 hex digits). Ask your Oberth admin for it (oberth client pin), save it with /plugin configure oberth or pass it to /oberth:connect. Nothing was changed."
+
+	case "$url" in
+	https://*) ;;
+	*) fail "the server URL must start with https:// (set it with /plugin configure oberth). Nothing was changed." ;;
+	esac
+	authority=${url#https://}
+	authority=${authority%%[/?#]*}
+	authority=${authority##*@}
+	case "$authority" in
+	\[*\]:*) host=${authority%%\]*}; host=${host#\[}; port=${authority##*\]:} ;;
+	\[*\]) host=${authority#\[}; host=${host%\]}; port=443 ;;
+	*:*) host=${authority%:*}; port=${authority##*:} ;;
+	*) host=$authority; port=443 ;;
+	esac
+	case "$host" in
+	'' | -* | *[!A-Za-z0-9.:_-]*) fail "the server URL names no usable host. Nothing was changed." ;;
+	esac
+	case "$port" in
+	'' | *[!0-9]*) fail "the server URL names no usable port. Nothing was changed." ;;
+	esac
+	target=$host:$port
+	name="-servername $host"
+	case "$host" in
+	*:*) target="[$host]:$port"; name= ;;
+	*[!0-9.]*) ;;
+	*) name= ;;
+	esac
+
+	claude=$(claude_directory)
+	store="$claude/oberth"
+	work=$(mktemp -d "${TMPDIR:-/tmp}/oberth-trust.XXXXXX")
+	trap 'rm -f "$work"/* 2>/dev/null; rmdir "$work" 2>/dev/null || true' EXIT
+
+	bound=
+	if command -v timeout >/dev/null 2>&1; then
+		bound="timeout 30"
+	fi
+	# The handshake is read without verification: what it presents is only
+	# a candidate until its fingerprint equals the pin.
+	# shellcheck disable=SC2086
+	$bound openssl s_client -connect "$target" $name -showcerts </dev/null >"$work/handshake" 2>/dev/null || true
+	presented=$(split_certificates "$work" chain <"$work/handshake")
+	[ "$presented" -gt 0 ] || fail "no certificate was read from $target: the server did not answer a TLS handshake. Nothing was changed."
+
+	candidates=$presented
+	prefix=chain
+	if [ -n "$file" ]; then
+		[ -r "$file" ] || fail "cannot read $file. Nothing was changed."
+		candidates=$(split_certificates "$work" given <"$file")
+		prefix=given
+		[ "$candidates" -gt 0 ] || fail "$file holds no PEM certificate. Nothing was changed."
+	fi
+	anchor=
+	seen=
+	index=1
+	while [ "$index" -le "$candidates" ]; do
+		print=$(fingerprint "$work/$prefix-$index.pem")
+		if [ "$print" = "$pin" ]; then
+			anchor="$work/$prefix-$index.pem"
+			break
+		fi
+		seen="$seen
+    $print"
+		index=$((index + 1))
+	done
+	if [ -z "$anchor" ]; then
+		where="presented by $target"
+		advice="If the pin is right, the server may not present its CA (Oberth before v0.21.3): get the CA certificate from your admin and pass --ca-file."
+		if [ -n "$file" ]; then
+			where="in $file"
+			advice="Check the pin and the file with your Oberth admin."
+		fi
+		fail "refused: no certificate $where has the pinned SHA-256
+    $pin
+  seen:$seen
+  $advice Nothing was changed."
+	fi
+	openssl x509 -in "$anchor" -noout -text 2>/dev/null | grep -q 'CA:TRUE' ||
+		fail "refused: the pinned certificate is not a CA certificate. Nothing was changed."
+	# The server must hold a certificate this CA issued.
+	# Whatever else it presented may complete the path; the leaf itself keeps
+	# the file from being empty.
+	cat "$work/chain-1.pem" >"$work/others.pem"
+	index=2
+	while [ "$index" -le "$presented" ]; do
+		cat "$work/chain-$index.pem" >>"$work/others.pem"
+		index=$((index + 1))
+	done
+	openssl verify -CAfile "$anchor" -untrusted "$work/others.pem" "$work/chain-1.pem" 2>/dev/null | grep -q ': OK$' ||
+		fail "refused: the certificate $target presents is not issued by the pinned CA. Nothing was changed."
+
+	settings_file="$claude/settings.json"
+	current=$(current_trust "$settings_file") || fail "$settings_file was not read. Nothing was changed."
+	case "$store" in
+	*[[:cntrl:]]*) fail "the Claude Code directory has a control character in its path. Nothing was changed." ;;
+	esac
+	sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' "$anchor" >"$work/ca.crt"
+	want="$store/ca.crt"
+	origin=
+	note=
+	case "$current" in
+	'' | "$store/ca.crt") ;;
+	"$store/bundle.pem")
+		want=$current
+		[ -r "$store/bundle.source" ] && origin=$(cat "$store/bundle.source")
+		;;
+	*)
+		if holds "$current" "$work/ca.crt"; then
+			want=$current
+			note="kept $current, which already holds the Oberth CA"
+		else
+			[ -r "$current" ] || fail "env.$variable in $settings_file names $current, which cannot be read; repair or remove that setting first. Nothing was changed."
+			want="$store/bundle.pem"
+			origin=$current
+		fi
+		;;
+	esac
+	if [ "$want" = "$store/bundle.pem" ]; then
+		[ -n "$origin" ] && [ -r "$origin" ] || fail "the bundle $store/bundle.pem was built from a file that cannot be read any more; repair env.$variable in $settings_file first. Nothing was changed."
+		cat "$origin" >"$work/bundle.pem"
+		printf '\n' >>"$work/bundle.pem"
+		cat "$work/ca.crt" >>"$work/bundle.pem"
+		note="$store/bundle.pem holds a copy of $origin and the Oberth CA; run /oberth:connect again when $origin changes"
+	fi
+	if [ "$want" != "$current" ]; then
+		input=$settings_file
+		if [ ! -e "$input" ]; then
+			input="$work/empty"
+			: >"$input"
+		fi
+		OBERTH_TRUST_VALUE=$want settings set "$input" >"$work/settings.json" || fail "$settings_file was not changed. Nothing was changed."
+		[ "$(settings get "$work/settings.json")" = "$want" ] || fail "$settings_file was not changed: the edit did not read back. Nothing was changed."
+	fi
+
+	mkdir -p "$store"
+	chmod 700 "$store"
+	if [ -n "$origin" ]; then
+		cp "$work/bundle.pem" "$store/bundle.pem.new"
+		mv -f "$store/bundle.pem.new" "$store/bundle.pem"
+		printf '%s\n' "$origin" >"$store/bundle.source"
+	fi
+	cp "$work/ca.crt" "$store/ca.crt.new"
+	chmod 644 "$store/ca.crt.new"
+	mv -f "$store/ca.crt.new" "$store/ca.crt"
+	printf '%s\n' "$pin" >"$store/ca.sha256"
+	echo "Oberth CA $pin: stored as $store/ca.crt"
+	if [ "$want" != "$current" ]; then
+		if [ -e "$settings_file" ]; then
+			cp -p "$settings_file" "$settings_file.oberth-new"
+		else
+			: >"$settings_file.oberth-new"
+			chmod 600 "$settings_file.oberth-new"
+		fi
+		cat "$work/settings.json" >"$settings_file.oberth-new"
+		write_file "$settings_file" "$settings_file.oberth-new"
+		echo "$settings_file: env.$variable is now $want"
+	else
+		echo "$settings_file: env.$variable already names $want; not changed"
+	fi
+	[ -z "$note" ] || echo "Note: $note"
+	echo "Restart Claude Code once: it reads its CA trust only when it starts. The operating system's trust store was not touched."
+}
+
+case "${1:-}" in
+connect)
+	shift
+	connect "$@"
+	;;
+hint)
+	# A session never fails on this hook.
+	(hint) 2>/dev/null || true
+	;;
+*)
+	fail "usage: trust connect --url <server URL> --pin <CA SHA-256> [--ca-file <PEM>] | trust hint"
+	;;
+esac

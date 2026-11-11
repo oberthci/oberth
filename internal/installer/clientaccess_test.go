@@ -156,41 +156,34 @@ func assertExists(t *testing.T, path string, want bool) {
 }
 
 // Writing ~/.config/oberth/mcp.json configures nothing: no client reads that
-// path. Claude Code has a documented command for registering a server, so the
-// install offers to run it rather than leaving the operator to merge JSON into
-// a file by hand.
-func TestClientAccessRegistersWithClaudeCodeWhenItIsPresent(t *testing.T) {
+// path. When Claude Code is on PATH the install sets up its plugin through
+// Claude Code's own commands, registers no MCP server besides it, and passes
+// the token in no argument list.
+func TestClientAccessInstallsThePluginWhenClaudeCodeIsPresent(t *testing.T) {
 	deps, _, _ := clientAccessDeps(t, "\n")
-	var ran [][]string
-	deps.LookPath = func(name string) (string, error) { return "/usr/local/bin/" + name, nil }
-	deps.RunCommand = func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+	claude := &fakeClaude{t: t}
+	deps.LookPath = claude.deps().LookPath
+	deps.RunCommand = func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 		if name == "kubectl" && len(args) > 0 && strings.Contains(strings.Join(args, " "), "/usr/local/bin/oberth admin read-file /run/oberth-identities/server/ca.crt") {
 			return []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"), nil
 		}
-		ran = append(ran, append([]string{name}, args...))
-		return nil, nil
+		return claude.run(ctx, input, name, args...)
 	}
 	tw := newTableWriter(deps.Output, false)
 
 	if err := offerClientAccess(context.Background(), Config{}, deps, tw, testToken); err != nil {
 		t.Fatal(err)
 	}
-
-	var registered []string
-	for _, command := range ran {
-		if len(command) > 2 && command[0] == "claude" && command[1] == "mcp" {
-			registered = command
+	if !claude.installed {
+		t.Fatalf("claude is on PATH but the plugin was never installed; commands run: %v", claude.commands())
+	}
+	for _, command := range claude.commands() {
+		if strings.Contains(command, " mcp ") {
+			t.Errorf("an MCP server was registered besides the plugin: %s", command)
 		}
-	}
-	if registered == nil {
-		t.Fatalf("claude is on PATH but the server was never registered; commands run: %v", ran)
-	}
-	joined := strings.Join(registered, " ")
-	if !strings.Contains(joined, "add-json") || !strings.Contains(joined, "oberth") {
-		t.Errorf("registration command is not an add-json for oberth: %s", joined)
-	}
-	if strings.Contains(joined, testToken) {
-		t.Error("the registration command carries the token in its arguments")
+		if strings.Contains(command, testToken) {
+			t.Error("a command carries the token in its arguments")
+		}
 	}
 }
 

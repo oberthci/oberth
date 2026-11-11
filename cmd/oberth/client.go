@@ -6,36 +6,54 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/installer"
 )
 
-const clientHelp = `Usage: oberth client setup [flags]
+const clientHelp = `Usage: oberth client <command> [flags]
 Configure this machine's MCP client (Claude Code) for an Oberth server.
-Use oberth client setup --help for its flags.`
+
+Commands:
+  setup   trust the server's CA in Claude Code and install the Oberth plugin
+  pin     print the SHA-256 pin of the server's CA, for /oberth:connect
+
+Use oberth client <command> --help for its flags.`
 
 const clientSetupUsage = `Usage: oberth client setup [flags]
-Register Oberth as a user-scope Claude Code MCP server and trust its CA.
+Make Claude Code trust the Oberth server's CA and install the Oberth plugin.
 
-The server entry is an HTTP url, a headersHelper that reads the token when
-Claude Code connects (no token is written to any file), and a 630000 ms
-timeout so run_wait's 600 s server-side wait is not cut at 60 s. The CA is
-trusted through env.NODE_EXTRA_CA_CERTS in ~/.claude/settings.json (other
-keys are kept), or the operating system trust store with --ca-trust system.
+The CA is stored as oberth/ca.crt in Claude Code's directory (~/.claude) and
+env.NODE_EXTRA_CA_CERTS in its settings.json is made to hold it; other keys
+and an existing bundle are kept, and the operating system's trust store is
+never touched. The plugin (` + installer.ClaudePluginID + `) carries the MCP server entry, the
+agent-loop skill and /oberth:connect; no user-scope MCP server is registered.
+Its options are set to the server's MCP URL and the CA pin. A token this
+machine already holds is passed to Claude Code's credential store on
+standard input; without one the plugin asks for it in Claude Code.
 
 Unset flags fall back to OBERTH_MCP_URL, OBERTH_BASE_URL, OBERTH_CA_CERT,
-OBERTH_TOKEN_COMMAND, the files oberth install writes in ~/.config/oberth,
-and the server Claude Code already has registered. A working headersHelper
-already registered is kept unless --token-file or --token-command is given.
-Running it again changes nothing. --dry-run prints what would change.`
+OBERTH_TOKEN, OBERTH_TOKEN_COMMAND and the files oberth install writes in
+~/.config/oberth. Running it again changes nothing. --dry-run prints what
+would change. Restart Claude Code once afterwards.`
+
+const clientPinUsage = `Usage: oberth client pin [--ca-file <path>]
+Print the SHA-256 pin of the Oberth server's CA certificate: 64 hex digits.
+
+Give it to the people who connect Claude Code with the Oberth plugin. Its
+/oberth:connect trusts the CA the server presents only when the fingerprint
+equals this pin. The CA is --ca-file, else OBERTH_CA_CERT, else the ca.crt
+oberth install writes in ~/.config/oberth; the server is not contacted.`
 
 // clientSetupDeps lets tests stub the claude command.
 var clientSetupDeps = func(output io.Writer) installer.Deps { return installer.Deps{Output: output} }
 
 func runClient(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: client setup", errUsage)
+		return fmt.Errorf("%w: client setup|pin", errUsage)
 	}
 	switch arguments[0] {
 	case "--help", "-h":
@@ -43,6 +61,8 @@ func runClient(ctx context.Context, arguments []string, output io.Writer) error 
 		return err
 	case "setup":
 		return runClientSetup(ctx, arguments[1:], output)
+	case "pin":
+		return runClientPin(arguments[1:], output)
 	default:
 		return fmt.Errorf("%w: unknown client command %q", errUsage, arguments[0])
 	}
@@ -53,9 +73,9 @@ func runClientSetup(ctx context.Context, arguments []string, output io.Writer) e
 	flags := flag.NewFlagSet("client setup", flag.ContinueOnError)
 	flags.StringVar(&options.URL, "url", "", "server MCP endpoint or base address, e.g. https://localhost:30443/mcp")
 	flags.StringVar(&options.CAFile, "ca-file", "", "the deployment's CA certificate (PEM)")
-	flags.StringVar(&options.TokenFile, "token-file", "", "owner-only (0600) file holding the bearer token; the headersHelper reads it")
-	flags.StringVar(&options.TokenCommand, "token-command", "", "command that prints the bearer token; the headersHelper runs it")
+	flags.StringVar(&options.TokenFile, "token-file", "", "owner-only (0600) file holding the bearer token; it replaces the token the plugin holds")
 	flags.StringVar(&options.CATrust, "ca-trust", installer.CATrustSettings, "how Claude Code trusts the CA: "+strings.Join(installer.CATrustChoices, ", "))
+	flags.StringVar(&options.Marketplace, "marketplace", "", "plugin marketplace source: owner/repo, a git URL or a path (default "+installer.DefaultClaudePluginMarketplace+")")
 	flags.BoolVar(&options.DryRun, "dry-run", false, "print what would change and change nothing")
 	positional, help, err := parseOperatorFlags(flags, arguments)
 	if err != nil {
@@ -72,11 +92,10 @@ func runClientSetup(ctx context.Context, arguments []string, output io.Writer) e
 	if err != nil {
 		return err
 	}
-	deps := clientSetupDeps(output)
 	if setup.DryRun {
 		_, _ = fmt.Fprintln(output, "Dry run: nothing is changed.")
 	}
-	changes, setupErr := installer.SetupClaudeCode(ctx, deps, setup)
+	changes, setupErr := installer.SetupClaudeCode(ctx, clientSetupDeps(output), setup)
 	changed := false
 	for _, change := range changes {
 		_, _ = fmt.Fprint(output, change.String())
@@ -88,16 +107,49 @@ func runClientSetup(ctx context.Context, arguments []string, output io.Writer) e
 	if setupErr != nil {
 		return setupErr
 	}
-	if !changed {
-		_, _ = fmt.Fprintln(output, "No change: Claude Code is already configured.")
+	switch {
+	case !changed:
+		_, err = fmt.Fprintln(output, "No change: Claude Code is already configured.")
+	case !setup.DryRun:
+		_, err = fmt.Fprintln(output, "Restart Claude Code to apply this.")
 	}
-	if setup.DryRun {
-		return nil
-	}
-	status, err := installer.VerifyClaudeCode(ctx, deps)
+	return err
+}
+
+func runClientPin(arguments []string, output io.Writer) error {
+	flags := flag.NewFlagSet("client pin", flag.ContinueOnError)
+	caFile := flags.String("ca-file", "", "the deployment's CA certificate (PEM)")
+	positional, help, err := parseOperatorFlags(flags, arguments)
 	if err != nil {
-		return errors.Join(errors.New("the server is registered but Claude Code does not connect"), err)
+		return err
 	}
-	_, err = fmt.Fprintf(output, "claude mcp get oberth: %s\n", status)
+	if help {
+		return commandFlagHelp(flags, clientPinUsage)
+	}
+	if len(positional) != 0 {
+		return fmt.Errorf("%w: client pin takes no arguments", errUsage)
+	}
+	authority := strings.TrimSpace(*caFile)
+	if authority == "" {
+		authority = client.FromEnv().CACert
+	}
+	if authority == "" {
+		root, err := client.ConfigDir()
+		if err != nil {
+			return err
+		}
+		if err := client.TrustClientFiles(root); err != nil {
+			return fmt.Errorf("pass --ca-file: the client files were not read: %w", err)
+		}
+		authority = filepath.Join(root, "ca.crt")
+		if _, err := os.Stat(authority); err != nil {
+			return errors.New("no CA certificate: pass --ca-file, set OBERTH_CA_CERT, or keep the ca.crt oberth install writes in ~/.config/oberth")
+		}
+	}
+	pin, err := installer.CAPin(authority)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(output, pin)
 	return err
 }

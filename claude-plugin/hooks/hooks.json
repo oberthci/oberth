@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/trust", "hint"],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

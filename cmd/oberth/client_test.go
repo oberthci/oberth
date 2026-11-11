@@ -39,14 +39,18 @@ func TestClientSetupDryRunPrintsAndChangesNothing(t *testing.T) {
 	t.Cleanup(func() { clientSetupDeps = previous })
 
 	var out strings.Builder
-	err := runCLI(t.Context(), []string{"client", "setup", "--dry-run", "--url", "https://oberth.example:30443", "--ca-file", caFile, "--token-command", "pass show oberth/token"}, strings.NewReader(""), &out)
+	err := runCLI(t.Context(), []string{"client", "setup", "--dry-run", "--url", "https://oberth.example:30443", "--ca-file", caFile}, strings.NewReader(""), &out)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, &out)
 	}
 	if len(ran) != 0 {
 		t.Errorf("dry run ran %v", ran)
 	}
-	for _, want := range []string{"Dry run: nothing is changed.", "would be registered", `"timeout":630000`, "url: https://oberth.example:30443/mcp", "would be set", "NODE_EXTRA_CA_CERTS: unset -> " + caFile} {
+	for _, want := range []string{
+		"Dry run: nothing is changed.", "would be set", "NODE_EXTRA_CA_CERTS: unset -> " + filepath.Join(home, ".claude", "oberth", "ca.crt"),
+		"Claude Code plugin oberth@oberthci: would be installed or configured", "claude plugin install oberth --marketplace oberthci/oberth",
+		"url: https://oberth.example:30443/mcp", "ca_pin: " + testClientCAPin, "/plugin configure oberth@oberthci", "Note: no token is saved for the plugin",
+	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, &out)
 		}
@@ -54,6 +58,45 @@ func TestClientSetupDryRunPrintsAndChangesNothing(t *testing.T) {
 	entries, err := os.ReadDir(home)
 	if err != nil || len(entries) != 1 {
 		t.Errorf("dry run wrote files: %v %v", entries, err)
+	}
+}
+
+// `oberth client pin` prints the SHA-256 of the CA certificate and nothing
+// else, from --ca-file, OBERTH_CA_CERT or the saved ca.crt, without a server.
+func TestClientPinPrintsTheCAFingerprint(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("OBERTH_CA_CERT", "")
+	pin := func(arguments ...string) (string, error) {
+		var out strings.Builder
+		err := runCLI(t.Context(), append([]string{"client", "pin"}, arguments...), strings.NewReader(""), &out)
+		return out.String(), err
+	}
+	if out, err := pin(); err == nil || !strings.Contains(err.Error(), "--ca-file") {
+		t.Fatalf("pin without a CA = %q %v", out, err)
+	}
+	caFile := filepath.Join(home, "ca.crt")
+	if err := os.WriteFile(caFile, []byte(testClientCA), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := pin("--ca-file", caFile); err != nil || out != testClientCAPin+"\n" {
+		t.Fatalf("pin --ca-file = %q %v", out, err)
+	}
+	t.Setenv("OBERTH_CA_CERT", caFile)
+	if out, err := pin(); err != nil || out != testClientCAPin+"\n" {
+		t.Fatalf("pin from OBERTH_CA_CERT = %q %v", out, err)
+	}
+	t.Setenv("OBERTH_CA_CERT", "")
+	root := filepath.Join(home, ".config", "oberth")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ca.crt"), []byte(testClientCA), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := pin(); err != nil || out != testClientCAPin+"\n" {
+		t.Fatalf("pin from the saved ca.crt = %q %v", out, err)
 	}
 }
 
@@ -70,3 +113,6 @@ WYWRbwFNAoJ1SijtWfCekh76Y0RP50+tNOsCIQD/vTLvEsxSj4cZT5b6zXmvzqlo
 hQYLBiw8ggdESYG5lg==
 -----END CERTIFICATE-----
 `
+
+// testClientCAPin is the SHA-256 fingerprint of testClientCA.
+const testClientCAPin = "7f7cf166d591b21aa64197407e41cb5cd2959d63e7ec9d5d0a8acf07f6bef75a"

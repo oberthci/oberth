@@ -65,37 +65,57 @@ its upstreams, through any of these paths.
 
 ### Claude Code
 
-Configure Claude Code once per machine with `oberth client setup` (see
-[MCP setup](mcp-setup.md#oberth-client-setup)). It registers Oberth as a
-user-scope HTTP server whose `headersHelper` reads the token at connect time,
-with `"timeout": 630000`, and trusts the CA through `env.NODE_EXTRA_CA_CERTS`
-in `~/.claude/settings.json`. No environment variable, token in a file or
-launcher script is needed. What a session then gets depends on one flag.
+Connect Claude Code once per machine with the Oberth plugin (see
+[MCP setup](mcp-setup.md#2-configure-claude-code)): the plugin carries the
+server entry with `"timeout": 630000` and the token in Claude Code's
+credential store, `/oberth:connect` or `oberth client setup` trusts the CA
+through `env.NODE_EXTRA_CA_CERTS` in `~/.claude/settings.json`. No environment
+variable, token file or launcher script is needed.
 
-**Plain `claude` (and `claude -p`, the Agent SDK): tools, `run_wait` and
-`events_since`; no push.** Every Oberth tool works. Waiting is a tool call:
-`run_wait {id, timeout_s: 600}` blocks server-side until the run finishes,
-holds or times out. Verified with Claude Code 2.1.322 in `-p` mode: a
-`run_wait {timeout_s: 600}` on a running run returned `state: timeout` after
-10 m 0 s, with no client timeout. In an interactive session Claude Code
-documents moving an MCP call that runs longer than 120 s into a background
-task (`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`) and delivering its result when it
-returns, so the agent keeps working and still hears the outcome; `-p` mode
-waits for the call in the foreground. After a
+**The default loop, in every session: one `events_wait` kept open.** While a
+session has runs in flight it keeps one call open:
+
+```
+events_wait {kinds: [run.held, run.finished], own: true, after_id: <cursor>, timeout_s: 600}
+```
+
+The call blocks server-side until one of the caller's own runs holds or
+finishes. In an interactive session Claude Code moves an MCP call that runs
+longer than 120 s into a background task
+(`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`) and delivers its result when it
+returns, so the agent keeps working and the result wakes the session: a held
+run is serviced within seconds, long before `abandon_at`. `-p` mode and the
+Agent SDK wait for the call in the foreground. On a result, or on
+`timed_out`, the agent acts on the events and calls again with
+`next_after_id` as `after_id`; it stops when nothing is in flight. Without
+`after_id` the call waits for the next event only, so the first wait starts
+before the push, or the run is read once with `run_get` after it.
+
+Events carry an increasing `id`. An agent remembers the highest one it has
+handled and skips anything at or below it, which makes a pushed copy of the
+same event (below) harmless. The plugin's `oberth-agent-loop` skill and the
+server's MCP instructions both state this loop, so a session follows it
+without being told.
+
+`run_wait {id, timeout_s: 600}` is the same wait for one run. Verified with
+Claude Code 2.1.322 in `-p` mode: a `run_wait {timeout_s: 600}` on a running
+run returned `state: timeout` after 10 m 0 s, with no client timeout. After a
 reconnect or a long gap, `events_since {after_id}` reads what happened in
-order. Pushed events do not arrive in this mode, so do not wait for them.
+order.
 
 The 630 s timeout matters here: Claude Code's default per-request timeout for
-an HTTP MCP server is 60 s, which cuts a 600 s `run_wait` at one minute. The
-registered timeout covers the longest wait plus its final heartbeat. An entry
-registered by hand needs the same field (`claude mcp get oberth` shows
-`Timeout: 630000ms`).
+an HTTP MCP server is 60 s, which cuts a 600 s wait at one minute. The
+plugin's timeout covers the longest wait plus its final heartbeat. An entry
+written by hand needs the same field.
 
-**Push: interactive sessions started with the development-channels flag.**
+**Optional push: interactive sessions started with the development-channels flag.**
 
 ```sh
 claude --dangerously-load-development-channels server:oberth
 ```
+
+`server:oberth` names a server entry registered by hand under that name; for
+the plugin, Claude Code's form is `plugin:oberth@oberthci`.
 
 Claude Code's channels are a research preview. A session receives channel
 notifications only from servers named for that session: `--channels` accepts
@@ -104,12 +124,14 @@ only plugins on Anthropic's channel allowlist (or an organisation's
 included, needs `--dangerously-load-development-channels`, which shows a
 confirmation dialog at each start. The flag is ignored in `-p` mode and in the
 Agent SDK, and no settings key, environment variable or `.mcp.json` field
-replaces it. With it, Claude Code 2.1.322 logs `Channel notifications
-registered` for `oberth` over HTTP and holds one of the credential's GET
-streams; events then arrive in the session as
+replaces it. With a hand-registered entry, Claude Code 2.1.322 logs `Channel
+notifications registered` for `oberth` over HTTP and holds one of the
+credential's GET streams (the same has not been checked through the plugin's
+entry); events then arrive in the session as
 `<channel source="oberth" kind="run.held" step="test" abandon_at="..." ...>`.
-Confirm on your client version with `/mcp` and `claude --debug`, and keep
-`run_wait` and `events_since` as the fallback either way.
+Confirm on your client version with `/mcp` and `claude --debug`. The
+`events_wait` loop stays the protocol either way; a pushed event only arrives
+a little earlier, and its `id` lets the agent skip the copy.
 
 Claude Code's v2 runtime does not register a channel from a server that
 negotiates MCP revision 2026-07-28; Oberth negotiates 2025-06-18 and is

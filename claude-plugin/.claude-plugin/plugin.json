@@ -1,6 +1,6 @@
 {
   "name": "oberth",
-  "description": "Oberth CI over MCP: run_wait and events_wait instead of polling, assisted-continuation holds serviced within their TTL, and the rule that an assisted run is never evidence.",
+  "description": "Oberth CI over MCP: one events_wait kept open instead of polling, assisted-continuation holds serviced within their TTL, and the rule that an assisted run is never evidence.",
   "author": {
     "name": "Oberth"
   },
@@ -9,5 +9,25 @@
     "mcp",
     "oberth",
     "argo"
-  ]
+  ],
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "Oberth MCP URL",
+      "description": "MCP endpoint of your Oberth server, for example https://oberth.example.test:30443/mcp",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Uplink token",
+      "description": "Bearer token of your Oberth uplink. Kept in Claude Code's credential store.",
+      "sensitive": true,
+      "required": true
+    },
+    "ca_pin": {
+      "type": "string",
+      "title": "CA SHA-256 pin",
+      "description": "SHA-256 fingerprint of the server's CA certificate, from your Oberth admin (oberth client pin). /oberth:connect trusts the CA only when it matches. Leave empty when the server has a publicly trusted certificate."
+    }
+  }
 }

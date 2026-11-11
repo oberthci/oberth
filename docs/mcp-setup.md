@@ -69,106 +69,148 @@ sequence number.
 
 ## 2. Configure Claude Code
 
-### As a plugin
+Claude Code connects through the Oberth plugin. It needs three values (the
+server's MCP URL, an uplink token and the SHA-256 pin of the server's CA) and
+one restart. Nothing else is installed on the machine, and no token is
+written to a file of Oberth's.
 
-The repository is also a Claude Code plugin marketplace. Its `oberth` plugin
-registers the MCP server (`type: http`, `timeout: 630000`) with a
-headersHelper that reads the token from `OBERTH_TOKEN_COMMAND` or the
-owner-only `~/.config/oberth/token`, and adds the `oberth-agent-loop` skill
-(waiting with `run_wait`/`events_wait`, servicing holds before `abandon_at`,
-assisted runs are never evidence). The URL is `OBERTH_MCP_URL`, by default
-`https://localhost:30443/mcp`; Claude Code must trust the server's CA, as
-below.
+### The plugin
 
-The saved token file is sent only to the server the client files name
-(`OBERTH_BASE_URL` or `OBERTH_MCP_URL` in `~/.config/oberth/env`, else the url
-in `mcp.json`), compared like the CLI does; any other URL gets nothing and the
-helper says why. On the server host, where the files usually name the public
-address while the plugin defaults to localhost, set `OBERTH_MCP_URL` to the
-address the files name. `OBERTH_TOKEN_COMMAND` serves any URL. Client files
-someone else can change (not owned by you, or group/world-writable, the
-directory included) are not read.
+The repository is a Claude Code plugin marketplace (`oberthci`) with one
+plugin, `oberth`:
 
 ```bash
-claude plugin marketplace add <path or git URL of the oberth repository>
-claude plugin install oberth@oberth
+claude plugin marketplace add oberthci/oberth
+claude plugin install oberth@oberthci
 ```
+
+or `/plugin install oberth@oberthci` inside Claude Code. The plugin carries:
+
+- the MCP server entry: `type: http`, the URL and an `Authorization: Bearer`
+  header taken from the plugin's options, and `timeout: 630000`;
+- three options Claude Code asks for when the plugin is enabled (change them
+  later with `/plugin configure oberth@oberthci`): the MCP URL, for example
+  `https://oberth.example.test:30443/mcp`; the uplink token, which is marked
+  sensitive, so Claude Code masks it and keeps it in its own credential store
+  (the system keychain, or `~/.claude/.credentials.json` with mode 0600 where
+  there is none); and the CA pin;
+- the `oberth-agent-loop` skill: one `events_wait` kept open while runs are
+  in flight, holds serviced before `abandon_at`, assisted runs never taken as
+  evidence (see [agent events](agent-events.md#claude-code));
+- the `/oberth:connect` command and a session-start hook, below.
+
+### `/oberth:connect`: trusting the CA by its pin
+
+Claude Code reads its TLS trust once, when it starts, from
+`env.NODE_EXTRA_CA_CERTS` in `~/.claude/settings.json`. A plugin cannot change
+that for a running session, so trust is one command and one restart.
+
+The admin reads the pin on a machine that has the Oberth CLI and the CA
+(`~/.config/oberth/ca.crt` after `oberth install`), and gives it to the user
+together with the URL and the token:
+
+```bash
+oberth client pin
+```
+
+It prints the SHA-256 fingerprint of the CA certificate as 64 hex digits, the
+same value as `openssl x509 -noout -fingerprint -sha256` without the colons.
+The server is not contacted.
+
+In Claude Code, `/oberth:connect` (or `/oberth:connect <pin>` to give the pin
+there) then:
+
+1. reads the certificates the server presents, without trusting them;
+2. takes the one whose SHA-256 equals the pin. Without a match it refuses and
+   changes nothing: there is no trust on first use, and a fingerprint the
+   server shows is never offered as a pin;
+3. checks that the pinned certificate is a CA and that the server's own
+   certificate is issued by it;
+4. stores the CA as `~/.claude/oberth/ca.crt` (its pin as `ca.sha256`) and
+   makes `env.NODE_EXTRA_CA_CERTS` in `~/.claude/settings.json` hold it. The
+   file is edited in place: every other setting, and its formatting, stays.
+   When the variable already names another bundle, that bundle is kept if it
+   holds the CA; otherwise `~/.claude/oberth/bundle.pem` becomes a copy of it
+   plus the Oberth CA (the origin is recorded in `bundle.source`) and the
+   setting names the copy. Run the command again when the original bundle
+   changes;
+5. says that Claude Code needs one restart.
+
+The operating system's trust store is never touched. The command needs `sh`,
+`awk` and `openssl`, reads no token and prints none. The Oberth CA is
+name-constrained to the server's own names, so trusting it in Claude Code
+cannot vouch for any other site.
+
+A server presents its CA in the handshake from v0.21.3 on. For an earlier
+server, pass the CA as a file; it is checked against the same pin:
+`sh <plugin>/scripts/trust connect --url <url> --pin <pin> --ca-file ca.crt`.
+
+While the plugin has a pin and the CA is not trusted yet, the session-start
+hook tells Claude so, and Claude offers `/oberth:connect`. With trust in
+place the hook prints nothing. Leave the pin empty only for a server behind a
+publicly trusted certificate.
 
 ### `oberth client setup`
 
-On any machine that holds the token (in `~/.config/oberth/token`, mode 0600,
-or a secret store) and the deployment's CA (`~/.config/oberth/ca.crt`, see
-[below](#via-the-https-nodeport)), one command configures Claude Code:
+On a machine that has the Oberth CLI and the deployment's CA (the files
+`oberth install` writes in `~/.config/oberth`), one command does both steps:
 
 ```bash
 oberth client setup --url https://localhost:30443/mcp
 ```
 
-It registers Oberth with `claude mcp add-json oberth --scope user` as:
+It is CA trust plus the plugin, and nothing else:
 
-```json
-{
-  "type": "http",
-  "url": "https://localhost:30443/mcp",
-  "headersHelper": "printf '{\"Authorization\":\"Bearer %s\"}' \"$(cat \"${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token\")\"",
-  "timeout": 630000
-}
-```
-
-and adds `env.NODE_EXTRA_CA_CERTS` (the absolute CA path) to
-`~/.claude/settings.json`, keeping every other key. Then plain `claude` connects
-with no environment variables and no launcher; `claude mcp get oberth` shows
-`Status: ✔ Connected` and `Timeout: 630000ms`, and the command checks that
-itself at the end.
-
-- **What it changes is printed**, one line per target with each difference;
-  `--dry-run` prints the same, including the `claude` commands, and changes
-  nothing. Running it again prints `no change`. An entry registered by hand
-  that already has an HTTP url, a working `headersHelper` and the timeout is
-  kept as it is.
-- **No secret is written.** The token is read by the `headersHelper` command
-  each time Claude Code connects; neither `~/.claude.json` nor the settings
-  file holds it. A literal `Authorization` header or a `${OBERTH_TOKEN}`
-  header from an older setup is replaced. A literal `OBERTH_TOKEN` in the
-  environment is ignored.
-- **Where the values come from.** Each flag falls back to the CLI's own
-  configuration: `--url` to `OBERTH_MCP_URL`, `OBERTH_BASE_URL` (plus `/mcp`),
-  the `env` and `mcp.json` files `oberth install` writes, then the server
-  Claude Code already has registered; `--ca-file` to `OBERTH_CA_CERT`, the
-  `env` file, then `~/.config/oberth/ca.crt`. The token command is
-  `--token-command`, or `cat` of `--token-file` (refused unless mode 0600),
-  else `OBERTH_TOKEN_COMMAND`, the `env` file, the token file in
-  `~/.config/oberth`, and finally the platform secret store (`security`,
-  `secret-tool` or `pass`). An existing working `headersHelper` is replaced
-  only when `--token-command` or `--token-file` is given.
-- **CA trust.** `--ca-trust settings` (the default) uses the settings `env`
-  block, which Claude Code applies to its own process. When
-  `NODE_EXTRA_CA_CERTS` already names another bundle, the command keeps it if
-  the bundle holds the Oberth CA and otherwise stops with an error rather than
-  replacing it (the variable names a single file). `--ca-trust system` relies
-  on the operating system trust store, which Claude Code's native binary reads
-  by default; the command checks it and, when the CA is missing, prints the
-  `sudo` command that adds it. `--ca-trust none` is for a server behind a
+- **CA trust.** The same layout as `/oberth:connect`: the CA goes to
+  `~/.claude/oberth/ca.crt`, `env.NODE_EXTRA_CA_CERTS` in
+  `~/.claude/settings.json` is made to hold it with every other key kept, an
+  existing bundle is kept or copied as above, and the operating system's
+  trust store is never touched. `--ca-trust none` is for a server behind a
   publicly trusted certificate.
-- **Claude Code settings location.** `CLAUDE_CONFIG_DIR`, when set, holds both
-  `.claude.json` and `settings.json`, as it does for Claude Code itself.
+- **The plugin.** It runs `claude plugin install oberth --marketplace
+  oberthci/oberth` when the plugin is missing (`--marketplace` names a path
+  or another git source), enables it when it is disabled, and sets its URL
+  and CA pin with `claude plugin configure oberth@oberthci --values-stdin`.
+  No user-scope MCP server is registered: the plugin's entry is the only one.
+  An entry named `oberth` that Claude Code still holds outside the plugin
+  would offer every tool twice, so the command names it and the
+  `claude mcp remove` line that deletes it.
+- **The token.** When this machine has one (`--token-file`, `OBERTH_TOKEN`,
+  `OBERTH_TOKEN_COMMAND`, or the token saved in `~/.config/oberth` for the
+  same server), it is handed to Claude Code's credential store on standard
+  input: it reaches no argument list, no output and no file of Oberth's. A
+  token the plugin already holds is kept unless `--token-file` is given.
+  Without a token the command says so and the plugin asks for it in Claude
+  Code.
+- **What it changes is printed**, one line per target with each difference;
+  `--dry-run` prints the same and changes nothing. Running it again prints
+  `no change`. Restart Claude Code once afterwards.
+- **Where the values come from.** The same resolver as every remote command:
+  `--url`, then `OBERTH_MCP_URL` or `OBERTH_BASE_URL`, then the files in
+  `~/.config/oberth`; `--ca-file`, then `OBERTH_CA_CERT`, then
+  `~/.config/oberth/ca.crt`. The saved token and CA are used only for the
+  server those files name.
+- **Claude Code settings location.** `CLAUDE_CONFIG_DIR`, when set, holds
+  `settings.json` and the `oberth/` directory, as it does for Claude Code
+  itself.
 
 `oberth install` uses the same path for the machine it runs on when you choose
-MCP access, timeout and CA trust included, and also writes the entry to
-`~/.config/oberth/mcp.json` for other clients.
+MCP access (the plugin then asks for the token in Claude Code), and also
+writes a server entry to `~/.config/oberth/mcp.json` for other MCP clients.
 
-The `"timeout"` field is required for long waits: Claude Code's default
-per-request timeout for an HTTP MCP server is 60 s, and `run_wait`, `wait` and
-`promote_status` block for up to 600 s. With the timeout, a 600 s `run_wait`
-through Claude Code 2.1.322 returns after the full wait. An interactive
-session moves a call that runs longer than 120 s into a background task and
-delivers its result when it returns; `-p` mode waits in the foreground. Server push to a Claude Code session needs a per-session flag; see
-[agent events](agent-events.md#claude-code).
+The plugin's `"timeout"` is required for long waits: Claude Code's default
+per-request timeout for an HTTP MCP server is 60 s, and `run_wait`,
+`events_wait`, `wait` and `promote_status` block for up to 600 s. With the
+timeout, a 600 s `run_wait` through Claude Code 2.1.322 returns after the full
+wait. An interactive session moves a call that runs longer than 120 s into a
+background task and delivers its result when it returns; `-p` mode waits in
+the foreground. Server push to a Claude Code session needs a per-session
+flag and is optional; see [agent events](agent-events.md#claude-code).
 
-### Keep the token out of the file
+### Other MCP clients: keep the token out of the file
 
-This and the next sections are what `oberth client setup` does, by hand, and
-why it is shaped the way it is.
+The plugin is Claude Code's. A server entry written by hand, for another
+client or a project-scope `.mcp.json`, has to carry the credential itself.
 
 The obvious configuration puts the bearer token in a literal header, and then a
 credential lives in a file for as long as the file does. `headersHelper` names a
@@ -251,18 +293,12 @@ kubectl exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth admin re
 openssl x509 -in ~/.config/oberth/ca.crt -noout -fingerprint -sha256
 ```
 
-Claude Code reads extra trust anchors from `NODE_EXTRA_CA_CERTS`. Set it in
-`~/.claude/settings.json` so every launch, including terminal multiplexers,
-sees it:
-
-```json
-{ "env": { "NODE_EXTRA_CA_CERTS": "/home/you/.config/oberth/ca.crt" } }
-```
-
-`claude mcp list` should then show the server as connected. For other clients,
-add the CA to the system trust store instead (`update-ca-certificates` on
-Debian/Ubuntu, `security add-trusted-cert` on macOS); the name constraints
-keep it from vouching for any other host.
+`oberth client pin` prints the same fingerprint as the 64 hex digits
+`/oberth:connect` takes. Claude Code trusts the CA through
+[`/oberth:connect`](#oberthconnect-trusting-the-ca-by-its-pin) or
+`oberth client setup`. For other clients, add the CA to the system trust store
+(`update-ca-certificates` on Debian/Ubuntu, `security add-trusted-cert` on
+macOS); the name constraints keep it from vouching for any other host.
 
 ## 3. Verify the connection
 
@@ -792,7 +828,7 @@ The observed Cloudflare HTTP 524 at approximately 125 seconds is one such
 failure; extending the origin write deadline alone does not prevent it.
 Heartbeats do not extend a client's total MCP request deadline. Keep the tool's
 `timeout` below that configured deadline (for Codex, `tool_timeout_sec`; for
-Claude Code, the server entry's `"timeout"`, which `oberth client setup` sets
+Claude Code, the server entry's `"timeout"`, which the Oberth plugin sets
 to 630000 ms against a 60 s default). JSON
 clients behind an idle proxy should use shorter waits and retry; 100 seconds
 is below the observed edge limit. A transport failure leaves the run or

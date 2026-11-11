@@ -184,7 +184,7 @@
       "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
       "test_ref": "cmd/oberth/client_test.go TestClientSetupDryRunPrintsAndChangesNothing"
     },
-    "flag:token-command": {
+    "flag:marketplace": {
       "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
       "test_ref": "cmd/oberth/client_test.go TestClientSetupDryRunPrintsAndChangesNothing"
     },
@@ -194,7 +194,7 @@
     },
     "flag:ca-trust": {
       "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
-      "test_ref": "internal/installer/claudecode_test.go TestClaudeCodeSetupSystemTrustPrintsTheCommand"
+      "test_ref": "internal/installer/claudecode_test.go TestClaudeCodeSetupWithoutACA"
     },
     "flag:dry-run": {
       "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
@@ -202,7 +202,7 @@
     },
     "env:CLAUDE_CONFIG_DIR": {
       "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
-      "test_ref": "internal/installer/claudecode_test.go TestClaudeCodeSetupRegistersAndMergesSettings"
+      "test_ref": "internal/installer/claudecode_test.go TestClaudeCodeSetupTrustsTheCAAndInstallsThePlugin"
     },
     "env:OBERTH_MCP_URL": {
       "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",

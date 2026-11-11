@@ -153,6 +153,14 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
 }
 ```
 
+Claude Code connects through the Oberth plugin instead: it asks for the URL,
+the token and the CA pin (`oberth client pin`), and `/oberth:connect` trusts
+the CA only when it matches the pin.
+
+```
+/plugin install oberth --marketplace oberthci/oberth
+```
+
 ## Upgrading
 
 `oberth upgrade` keeps stored release configuration and merges new chart defaults

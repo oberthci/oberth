@@ -362,3 +362,21 @@ func TestMCPWithoutEventFeedHasNoPush(t *testing.T) {
 		t.Fatalf("initialize without feed = %s", response.Body.String())
 	}
 }
+
+// A server that records agent events teaches the one-call loop in its
+// initialize instructions: events_wait kept open with own, the two kinds and
+// the cursor, deduplicated by event id.
+func TestMCPInitializeTeachesTheEventsWaitLoop(t *testing.T) {
+	url, _, _ := eventServer(t)
+	_, decoded := postMCP(t, url, "valid-token", "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}`)
+	result, _ := decoded["result"].(map[string]any)
+	instructions, _ := result["instructions"].(string)
+	for _, want := range []string{
+		"keep one events_wait {kinds:[run.held,run.finished], own:true, after_id, timeout_s:600} open",
+		"next_after_id as after_id", "skip any id at or below the highest one handled", "never wait for them", "abandon_at",
+	} {
+		if !strings.Contains(instructions, want) {
+			t.Errorf("initialize instructions lack %q:\n%s", want, instructions)
+		}
+	}
+}

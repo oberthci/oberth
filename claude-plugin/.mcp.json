@@ -2,8 +2,10 @@
   "mcpServers": {
     "oberth": {
       "type": "http",
-      "url": "${OBERTH_MCP_URL:-https://localhost:30443/mcp}",
-      "headersHelper": "\"${CLAUDE_PLUGIN_ROOT}/scripts/auth-header\"",
+      "url": "${user_config.url}",
+      "headers": {
+        "Authorization": "Bearer ${user_config.token}"
+      },
       "timeout": 630000
     }
   }

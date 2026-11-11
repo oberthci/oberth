@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -36,9 +38,40 @@ func loadServedCertificate(certPath, keyPath string) (*servedCertificate, error)
 			return nil, err
 		}
 	}
+	// The CA is the identity file next to the leaf, when there is one.
+	if authority, readErr := os.ReadFile(filepath.Join(filepath.Dir(certPath), "ca.crt")); readErr == nil { //nolint:gosec // G304: the server's own identity directory.
+		presentAuthority(&pair, authority)
+	}
 	served := &servedCertificate{}
 	served.current.Store(&pair)
 	return served, nil
+}
+
+// presentAuthority appends the issuing CA to the chain the server presents.
+// A client that pins the CA by its SHA-256 (the plugin's /oberth:connect)
+// reads it from the handshake and compares it with the pin before trusting
+// anything; a verifying client ignores it. Only a certificate that issued
+// the last one of the chain is added, and never one already in it.
+func presentAuthority(pair *tls.Certificate, authorityPEM []byte) {
+	for {
+		var block *pem.Block
+		block, authorityPEM = pem.Decode(authorityPEM)
+		if block == nil {
+			return
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		authority, err := x509.ParseCertificate(block.Bytes)
+		if err != nil || !authority.IsCA {
+			continue
+		}
+		last, err := x509.ParseCertificate(pair.Certificate[len(pair.Certificate)-1])
+		if err != nil || last.Equal(authority) || last.CheckSignatureFrom(authority) != nil {
+			continue
+		}
+		pair.Certificate = append(pair.Certificate, block.Bytes)
+	}
 }
 
 func (served *servedCertificate) readyAt(now time.Time) error {
@@ -185,6 +218,7 @@ func replaceServedLeaf(files map[string][]byte, served *servedCertificate) error
 			return err
 		}
 	}
+	presentAuthority(&pair, files["ca.crt"])
 	if err := materializeIdentity("server", files); err != nil {
 		return err
 	}

@@ -480,10 +480,11 @@ func (server *Server) pushAvailable() bool {
 }
 
 // agentLoopInstructions extend the initialize instructions when the server
-// can push. Whether a client displays pushed events is the client's choice
-// (Claude Code needs a per-session flag), so the instructions cover both
-// modes rather than promising notifications.
-const agentLoopInstructions = " Agent events: when this session receives pushed events (notifications/claude/channel on the session's GET stream: run.finished, run.held with abandon_at to service it before, run.lock_wait, promotion.finished, release.published, publication.failed), act on them instead of polling; events_subscribe narrows them. When no pushed events arrive in this session, do not wait for them: run_wait blocks server-side until the run finishes or holds (timeout_s up to 600), and events_since {after_id} reads what happened in order after a gap or reconnect. run_get retry_hint says whether a failure is infrastructure (retry unchanged) or code."
+// records agent events. The protocol is one open events_wait, which works in
+// every client; whether a client also displays pushed events is its own
+// choice (Claude Code needs a per-session flag), and event ids make such a
+// copy harmless.
+const agentLoopInstructions = " Agent loop: while this session has runs in flight, keep one events_wait {kinds:[run.held,run.finished], own:true, after_id, timeout_s:600} open (in the background when the client offers that for long tool calls) instead of polling. Act on every returned event (run.held: service the hold before abandon_at; run.finished: read status and retry_hint), then call it again with next_after_id as after_id, also after timed_out; stop when nothing is in flight. Without after_id it waits for the next event only, so start it before the push or check the run once with run_get. Events carry an increasing id: skip any id at or below the highest one handled, which makes a pushed copy harmless (some interactive sessions also receive notifications/claude/channel for run.finished, run.held, run.lock_wait, promotion.finished, release.published and publication.failed; events_subscribe narrows those; never wait for them). run_wait blocks on one run (timeout_s up to 600), and events_since {after_id} reads what happened in order after a gap or reconnect. run_get retry_hint says whether a failure is infrastructure (retry unchanged) or code."
 
 // handleMCPSessionDelete ends a session (streamable-HTTP DELETE).
 func (server *Server) handleMCPSessionDelete(writer http.ResponseWriter, request *http.Request) {

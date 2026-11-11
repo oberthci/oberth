@@ -726,40 +726,61 @@ Usage: oberth mcp tools [arguments] [flags]
 ## oberth client
 
 ```text
-Usage: oberth client setup [flags]
+Usage: oberth client <command> [flags]
 Configure this machine's MCP client (Claude Code) for an Oberth server.
-Use oberth client setup --help for its flags.
+
+Commands:
+  setup   trust the server's CA in Claude Code and install the Oberth plugin
+  pin     print the SHA-256 pin of the server's CA, for /oberth:connect
+
+Use oberth client <command> --help for its flags.
 ```
 
 ## oberth client setup
 
 ```text
 Usage: oberth client setup [flags]
-Register Oberth as a user-scope Claude Code MCP server and trust its CA.
+Make Claude Code trust the Oberth server's CA and install the Oberth plugin.
 
-The server entry is an HTTP url, a headersHelper that reads the token when
-Claude Code connects (no token is written to any file), and a 630000 ms
-timeout so run_wait's 600 s server-side wait is not cut at 60 s. The CA is
-trusted through env.NODE_EXTRA_CA_CERTS in ~/.claude/settings.json (other
-keys are kept), or the operating system trust store with --ca-trust system.
+The CA is stored as oberth/ca.crt in Claude Code's directory (~/.claude) and
+env.NODE_EXTRA_CA_CERTS in its settings.json is made to hold it; other keys
+and an existing bundle are kept, and the operating system's trust store is
+never touched. The plugin (oberth@oberthci) carries the MCP server entry, the
+agent-loop skill and /oberth:connect; no user-scope MCP server is registered.
+Its options are set to the server's MCP URL and the CA pin. A token this
+machine already holds is passed to Claude Code's credential store on
+standard input; without one the plugin asks for it in Claude Code.
 
 Unset flags fall back to OBERTH_MCP_URL, OBERTH_BASE_URL, OBERTH_CA_CERT,
-OBERTH_TOKEN_COMMAND, the files oberth install writes in ~/.config/oberth,
-and the server Claude Code already has registered. A working headersHelper
-already registered is kept unless --token-file or --token-command is given.
-Running it again changes nothing. --dry-run prints what would change.
+OBERTH_TOKEN, OBERTH_TOKEN_COMMAND and the files oberth install writes in
+~/.config/oberth. Running it again changes nothing. --dry-run prints what
+would change. Restart Claude Code once afterwards.
   -ca-file string
         the deployment's CA certificate (PEM)
   -ca-trust string
-        how Claude Code trusts the CA: settings, system, none (default "settings")
+        how Claude Code trusts the CA: settings, none (default "settings")
   -dry-run
         print what would change and change nothing
-  -token-command string
-        command that prints the bearer token; the headersHelper runs it
+  -marketplace string
+        plugin marketplace source: owner/repo, a git URL or a path (default oberthci/oberth)
   -token-file string
-        owner-only (0600) file holding the bearer token; the headersHelper reads it
+        owner-only (0600) file holding the bearer token; it replaces the token the plugin holds
   -url string
         server MCP endpoint or base address, e.g. https://localhost:30443/mcp
+```
+
+## oberth client pin
+
+```text
+Usage: oberth client pin [--ca-file <path>]
+Print the SHA-256 pin of the Oberth server's CA certificate: 64 hex digits.
+
+Give it to the people who connect Claude Code with the Oberth plugin. Its
+/oberth:connect trusts the CA the server presents only when the fingerprint
+equals this pin. The CA is --ca-file, else OBERTH_CA_CERT, else the ca.crt
+oberth install writes in ~/.config/oberth; the server is not contacted.
+  -ca-file string
+        the deployment's CA certificate (PEM)
 ```
 
 ## oberth outbox

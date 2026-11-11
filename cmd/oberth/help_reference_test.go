@@ -56,6 +56,7 @@ mcp call
 mcp tools
 client
 client setup
+client pin
 outbox
 preflight
 preflight drift

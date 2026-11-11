@@ -126,3 +126,46 @@ func TestLongPollsTakeOnlyTimeoutS(t *testing.T) {
 		}
 	}
 }
+
+// The agent loop's one call: events_wait with the kinds run.held and
+// run.finished, own and the cursor of the previous page. It returns the
+// caller's own events after the cursor, skips another uplink's, and with
+// next_after_id as the next cursor never returns an event twice.
+func TestEventsWaitServesTheAgentLoopCall(t *testing.T) {
+	f := newAgentFixture(t)
+	loop := func(actor api.Actor, after int64) EventsWaitResponse {
+		t.Helper()
+		response, err := f.eventsWait(t, actor, map[string]any{
+			"kinds": []string{model.AgentEventRunHeld, model.AgentEventRunFinished}, "own": true, "after_id": after, "timeout_s": 1,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	first := f.enqueue(t, "land/first", "1", false)
+	f.finish(t, first)
+	page := loop(agentActor, 0)
+	if page.TimedOut || len(page.Events) != 1 || page.Events[0].Kind != model.AgentEventRunFinished || page.Events[0].RunID != first.ID {
+		t.Fatalf("first page = %+v", page)
+	}
+	cursor := page.NextAfterID
+	if cursor != page.Events[0].ID {
+		t.Fatalf("next_after_id = %d, want the event's id %d", cursor, page.Events[0].ID)
+	}
+	// Nothing new: the wait times out and the cursor does not move back.
+	if page = loop(agentActor, cursor); !page.TimedOut || len(page.Events) != 0 || page.NextAfterID < cursor {
+		t.Fatalf("idle page = %+v", page)
+	}
+	second := f.enqueue(t, "land/second", "2", false)
+	f.finish(t, second)
+	page = loop(agentActor, cursor)
+	if len(page.Events) != 1 || page.Events[0].RunID != second.ID || page.Events[0].ID <= cursor {
+		t.Fatalf("second page = %+v", page)
+	}
+	// Another uplink sees none of these runs as its own.
+	other := api.Actor{Identity: "other@host", Admin: true}
+	if page = loop(other, 0); !page.TimedOut || len(page.Events) != 0 {
+		t.Fatalf("another uplink's own events = %+v", page)
+	}
+}

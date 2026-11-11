@@ -1,25 +1,41 @@
 package installer
 
 import (
+	"crypto/ecdsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"io/fs"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/oberthci/oberth/internal/client"
 )
 
+func pluginPath(t *testing.T, elements ...string) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join(append([]string{"..", "..", "claude-plugin"}, elements...)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // The repository is a Claude Code plugin marketplace with one plugin,
-// claude-plugin/: its manifests must parse, name each other and register
-// the same MCP entry oberth client setup does (http, 630 s timeout, a
-// headersHelper rather than a literal token), with a configurable URL.
+// claude-plugin/. Its manifests must parse and name each other; the plugin
+// asks for the URL, the token (sensitive) and the CA pin, and its MCP entry
+// uses them in a plain url and Authorization header with the 630 s timeout.
 func TestClaudePluginManifests(t *testing.T) {
-	root := filepath.Join("..", "..")
 	read := func(path string, into any) {
 		t.Helper()
-		body, err := os.ReadFile(filepath.Join(root, path))
+		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -36,276 +52,531 @@ func TestClaudePluginManifests(t *testing.T) {
 			Description string `json:"description"`
 		} `json:"plugins"`
 	}
-	read(".claude-plugin/marketplace.json", &marketplace)
-	if marketplace.Name == "" || marketplace.Owner.Name == "" || len(marketplace.Plugins) != 1 {
+	read(filepath.Join("..", "..", ".claude-plugin", "marketplace.json"), &marketplace)
+	if marketplace.Name != ClaudePluginMarketplaceName || marketplace.Owner.Name == "" || len(marketplace.Plugins) != 1 {
 		t.Fatalf("marketplace = %+v", marketplace)
 	}
 	entry := marketplace.Plugins[0]
-	if entry.Name != "oberth" || entry.Source != "./claude-plugin" || entry.Description == "" {
+	if entry.Name != ClaudePluginName || entry.Source != "./claude-plugin" || entry.Description == "" {
 		t.Fatalf("marketplace plugin = %+v", entry)
 	}
-	var plugin struct {
-		Name        string  `json:"name"`
-		Description string  `json:"description"`
-		Version     *string `json:"version"`
+	type option struct {
+		Type        string `json:"type"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Sensitive   bool   `json:"sensitive"`
+		Required    bool   `json:"required"`
 	}
-	read("claude-plugin/.claude-plugin/plugin.json", &plugin)
+	var plugin struct {
+		Name        string            `json:"name"`
+		Description string            `json:"description"`
+		Version     *string           `json:"version"`
+		UserConfig  map[string]option `json:"userConfig"`
+	}
+	read(pluginPath(t, ".claude-plugin", "plugin.json"), &plugin)
 	// No fixed version: Claude Code then tracks the commit, so an update
-	// reaches installed copies without a manual bump (review P2-1).
-	if plugin.Name != entry.Name || plugin.Description == "" || plugin.Version != nil {
+	// reaches installed copies without a manual bump.
+	if plugin.Name != ClaudePluginName || plugin.Description == "" || plugin.Version != nil {
 		t.Fatalf("plugin = %+v", plugin)
 	}
+	if len(plugin.UserConfig) != 3 {
+		t.Fatalf("userConfig = %+v", plugin.UserConfig)
+	}
+	for key, want := range map[string]option{
+		"url":    {Required: true},
+		"token":  {Required: true, Sensitive: true},
+		"ca_pin": {},
+	} {
+		got := plugin.UserConfig[key]
+		if got.Type != "string" || got.Title == "" || got.Description == "" || got.Sensitive != want.Sensitive || got.Required != want.Required {
+			t.Errorf("userConfig.%s = %+v", key, got)
+		}
+	}
+
 	var servers struct {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	read("claude-plugin/.mcp.json", &servers)
+	read(pluginPath(t, ".mcp.json"), &servers)
 	server := servers.MCPServers[claudeCodeServerName]
 	if len(servers.MCPServers) != 1 || server["type"] != "http" || server["timeout"] != float64(ClaudeCodeMCPTimeoutMS) {
 		t.Fatalf(".mcp.json = %+v", servers)
 	}
-	if url, _ := server["url"].(string); !strings.HasPrefix(url, "${OBERTH_MCP_URL:-https://") || !strings.HasSuffix(url, "/mcp}") {
-		t.Fatalf("url %q is not configured through OBERTH_MCP_URL with an https default", url)
+	if server["url"] != "${user_config.url}" {
+		t.Fatalf("url = %v", server["url"])
 	}
-	if helper, _ := server["headersHelper"].(string); helper != `"${CLAUDE_PLUGIN_ROOT}/scripts/auth-header"` {
-		t.Fatalf("headersHelper = %q", helper)
+	if !reflect.DeepEqual(server["headers"], map[string]any{"Authorization": "Bearer ${user_config.token}"}) {
+		t.Fatalf("headers = %v", server["headers"])
 	}
-	if _, literal := server["headers"]; literal {
-		t.Fatal(".mcp.json carries a literal header")
+	// Claude Code refuses ${user_config.*} in a headersHelper, and a helper
+	// would need a token file: the header is the one credential path.
+	if _, helper := server["headersHelper"]; helper {
+		t.Fatal(".mcp.json carries a headersHelper")
 	}
-	skill, err := os.ReadFile(filepath.Join(root, "claude-plugin", "skills", "oberth-agent-loop", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
+	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 1 || entries[0].Name() != "trust" {
+		t.Fatalf("scripts = %v %v", entries, err)
 	}
-	for _, want := range []string{"name: oberth-agent-loop", "description:", "run_wait", "events_wait", "abandon_at", "never evidence"} {
-		if !strings.Contains(string(skill), want) {
-			t.Errorf("SKILL.md lacks %q", want)
-		}
-	}
-}
 
-// pluginShell, when set, runs the helper under that shell instead of its
-// #!/bin/sh, so the comparison is checked under bash too (macOS sh).
-var pluginShell string
+	var hooks struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Type    string   `json:"type"`
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	read(pluginPath(t, "hooks", "hooks.json"), &hooks)
+	start := hooks.Hooks["SessionStart"]
+	if len(hooks.Hooks) != 1 || len(start) != 1 || len(start[0].Hooks) != 1 {
+		t.Fatalf("hooks = %+v", hooks)
+	}
+	// Exec form: the script path is one argument, with no shell quoting.
+	if hook := start[0].Hooks[0]; hook.Type != "command" || hook.Command != "sh" || !reflect.DeepEqual(hook.Args, []string{"${CLAUDE_PLUGIN_ROOT}/scripts/trust", "hint"}) {
+		t.Fatalf("SessionStart hook = %+v", hook)
+	}
 
-// pluginHelper runs the plugin's headersHelper with the client files in
-// config and the given environment.
-func pluginHelper(t *testing.T, config string, environment ...string) (string, error) {
-	t.Helper()
-	helper, err := filepath.Abs(filepath.Join("..", "..", "claude-plugin", "scripts", "auth-header"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(helper)
-	if pluginShell != "" {
-		command = exec.Command(pluginShell, helper)
-	}
-	command.Env = append([]string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir(), "XDG_CONFIG_HOME=" + config}, environment...)
-	out, err := command.Output()
-	return string(out), err
-}
-
-func pluginFiles(t *testing.T, env string) string {
-	t.Helper()
-	config := t.TempDir()
-	directory := filepath.Join(config, "oberth")
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if env != "" {
-		if err := os.WriteFile(filepath.Join(directory, "env"), []byte(env), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(directory, "token"), []byte("file-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return config
-}
-
-// The headersHelper prints the header from OBERTH_TOKEN_COMMAND for any
-// server, else from the owner-only token file, refuses a file others can
-// read and a token that would need JSON escaping.
-func TestClaudePluginHeadersHelper(t *testing.T) {
-	helper, err := filepath.Abs(filepath.Join("..", "..", "claude-plugin", "scripts", "auth-header"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info, err := os.Stat(helper); err != nil || info.Mode().Perm()&0o111 == 0 {
-		t.Fatalf("helper not executable: %v %v", info, err)
-	}
-	if _, err := pluginHelper(t, t.TempDir()); err == nil {
-		t.Fatal("helper printed a header without a token")
-	}
-	config := pluginFiles(t, "export OBERTH_BASE_URL=\"https://localhost:30443\"\n")
-	token := filepath.Join(config, "oberth", "token")
-	if err := os.Chmod(token, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pluginHelper(t, config); err == nil {
-		t.Fatal("helper read a token file others can read")
-	}
-	if err := os.Chmod(token, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, unsafe := range []string{`printf 'a"b'`, `printf 'a\\b'`, `printf 'a b'`} {
-		if out, err := pluginHelper(t, config, "OBERTH_TOKEN_COMMAND="+unsafe); err == nil {
-			t.Fatalf("%s printed %q", unsafe, out)
-		}
-	}
-	for _, test := range []struct {
-		environment []string
-		want        string
-	}{
-		{nil, "file-token"},
-		{[]string{"OBERTH_TOKEN_COMMAND=printf command-token"}, "command-token"},
-		// A token command serves any server.
-		{[]string{"OBERTH_TOKEN_COMMAND=printf command-token", "OBERTH_MCP_URL=https://other.example.test/mcp"}, "command-token"},
+	for skill, wants := range map[string][]string{
+		"oberth-agent-loop": {
+			"name: oberth-agent-loop", "description:",
+			`events_wait {"kinds": ["run.held", "run.finished"], "own": true, "after_id": <cursor>, "timeout_s": 600}`,
+			"next_after_id", "at or below", "run_wait", "abandon_at", "never evidence", "/oberth:connect",
+		},
+		"connect": {
+			"name: connect", "description:", `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" connect --url`,
+			"${user_config.url}", "${user_config.ca_pin}", "$ARGUMENTS", "no trust on first use", "restart Claude Code once",
+		},
 	} {
-		out, err := pluginHelper(t, config, test.environment...)
-		var header map[string]string
-		if err != nil || json.Unmarshal([]byte(out), &header) != nil || header["Authorization"] != "Bearer "+test.want {
-			t.Fatalf("%v: %q %v", test.environment, out, err)
-		}
-	}
-}
-
-// The saved token goes only to the server the client files name, by the
-// same rule as the CLI (client.SameServer); on a mismatch stdout stays
-// empty (review: the plugin path of P2-2).
-func TestClaudePluginHelperSendsTheSavedTokenOnlyToItsServer(t *testing.T) {
-	for _, shell := range []string{"", "bash"} {
-		if shell != "" {
-			if _, err := exec.LookPath(shell); err != nil {
-				continue
-			}
-		}
-		t.Run("shell "+shell, func(t *testing.T) {
-			pluginShell = shell
-			defer func() { pluginShell = "" }()
-			helperComparison(t)
-		})
-	}
-}
-
-func helperComparison(t *testing.T) {
-	const saved = "https://a.example.test:30443"
-	targets := []string{
-		saved, saved + "/", saved + "/mcp", saved + "/mcp/", "HTTPS://A.Example.Test:30443/mcp", "https://user@a.example.test:30443/mcp",
-		"https://a.example.test", "https://a.example.test:443", "https://a.example.test:30444", "http://a.example.test:30443",
-		"https://a.example.test.:30443", "https://a.example.test:30443@b.example.test", "https://a.example.test:30443.b.example.test",
-		"https://b.example.test:30443", "https://a.example.test:30443/prefix", "https://xn--a-0ga.example.test:30443", "a.example.test:30443",
-		"https://a.example.test:30443/mcp?x=1", "https://a.example.test:30443/%6dcp", "https://a.example.test:30443//mcp",
-	}
-	for _, savedAs := range []string{
-		"export OBERTH_BASE_URL=\"" + saved + "\"\n",
-		"export OBERTH_MCP_URL=\"" + saved + "/mcp\"\n",
-		"# written by a test\nexport OBERTH_BASE_URL=\"https://old.example.test\"\nexport OBERTH_BASE_URL=\"" + saved + "\"\n",
-		"", // mcp.json only
-	} {
-		config := pluginFiles(t, savedAs)
-		if savedAs == "" {
-			body := `{"mcpServers":{"oberth":{"type":"http","url":"` + saved + `/mcp","timeout":630000}}}`
-			if err := os.WriteFile(filepath.Join(config, "oberth", "mcp.json"), []byte(body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		for _, target := range targets {
-			out, err := pluginHelper(t, config, "OBERTH_MCP_URL="+target)
-			if want := client.SameServer(target, saved); (err == nil) != want {
-				t.Errorf("saved as %q, target %s: helper sent=%v, client.SameServer=%v (%q)", savedAs, target, err == nil, want, out)
-			}
-			if err != nil && out != "" {
-				t.Errorf("target %s: refusal printed %q on stdout", target, out)
-			}
-		}
-	}
-	// Unset, the URL is the plugin's localhost default.
-	local := pluginFiles(t, "export OBERTH_BASE_URL=\"https://LOCALHOST:30443/\"\n")
-	if _, err := pluginHelper(t, local); err != nil {
-		t.Fatalf("default URL and saved localhost: %v", err)
-	}
-	if out, err := pluginHelper(t, pluginFiles(t, "export OBERTH_BASE_URL=\""+saved+"\"\n")); err == nil {
-		t.Fatalf("default URL received the token of %s: %q", saved, out)
-	}
-	if out, err := pluginHelper(t, pluginFiles(t, "")); err == nil {
-		t.Fatalf("a token file naming no server was sent: %q", out)
-	}
-}
-
-// Client files someone else can change are not read by the helper.
-func TestClaudePluginHelperRefusesClientFilesOthersCanChange(t *testing.T) {
-	for _, name := range []string{"", "env", "token", "ca.crt"} {
-		config := pluginFiles(t, "export OBERTH_BASE_URL=\"https://localhost:30443\"\n")
-		if name == "ca.crt" {
-			if err := os.WriteFile(filepath.Join(config, "oberth", name), []byte("pem"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		target := filepath.Join(config, "oberth", name)
-		info, err := os.Stat(target)
+		body, err := os.ReadFile(pluginPath(t, "skills", skill, "SKILL.md"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(target, info.Mode().Perm()|0o020); err != nil {
-			t.Fatal(err)
+		for _, want := range wants {
+			if !strings.Contains(string(body), want) {
+				t.Errorf("skills/%s/SKILL.md lacks %q", skill, want)
+			}
 		}
-		if out, err := pluginHelper(t, config); err == nil || out != "" {
-			t.Errorf("group-writable %s: %q %v", target, out, err)
-		}
-	}
-	// A symbolic link to the directory is followed, as the CLI does: the
-	// target's owner and mode decide.
-	config := pluginFiles(t, "export OBERTH_BASE_URL=\"https://localhost:30443\"\n")
-	linked := t.TempDir()
-	if err := os.Symlink(filepath.Join(config, "oberth"), filepath.Join(linked, "oberth")); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := pluginHelper(t, linked); err != nil || !strings.Contains(out, "Bearer file-token") {
-		t.Errorf("symbolic link to trusted client files: %q %v", out, err)
-	}
-	if err := os.Chmod(filepath.Join(config, "oberth"), 0o770); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := pluginHelper(t, linked); err == nil || out != "" {
-		t.Errorf("symbolic link to a group-writable directory: %q %v", out, err)
-	}
-}
-
-// The helper reads mcpServers.oberth.url, as client.ConfigMCPURL does; a url
-// elsewhere in mcp.json (another server, a header value) names no server.
-func TestClaudePluginHelperReadsOnlyTheOberthServerURL(t *testing.T) {
-	const server = "https://a.example.test:30443"
-	for body, sends := range map[string]bool{
-		`{"mcpServers":{"oberth":{"type":"http","url":"` + server + `/mcp","headers":{"url":"https://other.example.test"}}}}`: true,
-		`{"mcpServers":{"other":{"url":"` + server + `/mcp"}}}`:                                                               false,
-		`{"url":"` + server + `/mcp","mcpServers":{"oberth":{"type":"http"}}}`:                                                false,
-		`{"mcpServers":{"other":{"url":"https://b.example.test/mcp"},"oberth":{"url":"` + server + `/mcp"}}}`:                 true,
-	} {
-		config := pluginFiles(t, "")
-		if err := os.WriteFile(filepath.Join(config, "oberth", "mcp.json"), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if want := client.ConfigMCPURL(filepath.Join(config, "oberth", "mcp.json")) != ""; want != sends {
-			t.Fatalf("fixture disagrees with client.ConfigMCPURL: %s", body)
-		}
-		out, err := pluginHelper(t, config, "OBERTH_MCP_URL="+server+"/mcp")
-		if (err == nil) != sends {
-			t.Errorf("mcp.json %s: helper sent=%v, want %v (%q)", body, err == nil, sends, out)
+		// A sensitive option is never substituted into skill text.
+		if strings.Contains(string(body), "${user_config.token}") {
+			t.Errorf("skills/%s/SKILL.md references the token", skill)
 		}
 	}
 }
 
-// A refusal names both addresses without their user information.
-func TestClaudePluginHelperMismatchDropsUserInformation(t *testing.T) {
-	config := pluginFiles(t, "export OBERTH_BASE_URL=\"https://saved:hunter2@a.example.test:30443\"\n")
-	helper, err := filepath.Abs(filepath.Join("..", "..", "claude-plugin", "scripts", "auth-header"))
+// trustShells are the shells the script is checked under: its #!/bin/sh and,
+// where installed, bash (the sh of macOS).
+func trustShells() []string {
+	shells := []string{"sh"}
+	if _, err := exec.LookPath("bash"); err == nil {
+		shells = append(shells, "bash")
+	}
+	return shells
+}
+
+// runTrust runs the plugin's trust script with Claude Code's directory at
+// claudeDir. HOME is a separate empty directory: nothing may be written
+// outside claudeDir.
+func runTrust(t *testing.T, shell, claudeDir string, environment []string, args ...string) (string, error) {
+	t.Helper()
+	command := exec.Command(shell, append([]string{pluginPath(t, "scripts", "trust")}, args...)...)
+	// The caller's PATH finds sh, awk and openssl; nothing of a real Claude
+	// Code session or Oberth client configuration is passed on.
+	for _, variable := range os.Environ() {
+		if !strings.HasPrefix(variable, "CLAUDE_") && !strings.HasPrefix(variable, "OBERTH_") && !strings.HasPrefix(variable, "NODE_") {
+			command.Env = append(command.Env, variable)
+		}
+	}
+	command.Env = append(command.Env, "HOME="+t.TempDir(), "TMPDIR="+t.TempDir(), "CLAUDE_CONFIG_DIR="+claudeDir)
+	command.Env = append(command.Env, environment...)
+	out, err := command.CombinedOutput()
+	return string(out), err
+}
+
+// servePresenting starts a TLS server that presents the given chain and
+// returns its https://localhost:<port>/mcp address.
+func servePresenting(t *testing.T, key *ecdsa.PrivateKey, chain ...[]byte) string {
+	t.Helper()
+	server := httptest.NewUnstartedServer(http.NotFoundHandler())
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{{Certificate: chain, PrivateKey: key}}}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(helper)
-	command.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir(), "XDG_CONFIG_HOME=" + config, "OBERTH_MCP_URL=https://other:pass@b.example.test/mcp"}
-	out, err := command.CombinedOutput()
-	if err == nil || strings.Contains(string(out), "hunter2") || strings.Contains(string(out), "pass@") || !strings.Contains(string(out), "https://a.example.test:30443") || !strings.Contains(string(out), "https://b.example.test/mcp") {
-		t.Fatalf("mismatch refusal: %q %v", out, err)
+	return "https://localhost:" + port + "/mcp"
+}
+
+func requireOpenSSL(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl is not installed")
+	}
+}
+
+func emptyDirectory(t *testing.T, path string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries) == 0
+}
+
+// /oberth:connect trusts nothing on first use: a CA is accepted only when
+// its SHA-256 equals the pin, the server must hold a leaf that CA issued,
+// and on any refusal Claude Code's directory is left as it was.
+func TestPluginConnectRefusesWithoutAMatchingPin(t *testing.T) {
+	requireOpenSSL(t)
+	authority := newTestAuthority(t, "Oberth test CA")
+	other := newTestAuthority(t, "Another CA")
+	leaf, key := authority.issue(t)
+	address := servePresenting(t, key, leaf, authority.certificate.Raw)
+	pin := CertificatePin(authority.certificate)
+	otherFile := filepath.Join(t.TempDir(), "other.pem")
+	if err := os.WriteFile(otherFile, other.pem, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A server whose leaf the pinned CA did not issue, presenting that CA.
+	forged, forgedKey := other.issue(t)
+	impostor := servePresenting(t, forgedKey, forged, authority.certificate.Raw)
+	leafOnly := servePresenting(t, key, leaf)
+
+	for _, shell := range trustShells() {
+		for name, test := range map[string]struct {
+			args []string
+			want string
+		}{
+			"no pin":                  {[]string{"--url", address, "--pin", ""}, "no CA pin"},
+			"unsubstituted pin":       {[]string{"--url", address, "--pin", "${user_config.ca_pin}"}, "no CA pin"},
+			"short pin":               {[]string{"--url", address, "--pin", pin[:62]}, "no CA pin"},
+			"another CA's pin":        {[]string{"--url", address, "--pin", CertificatePin(other.certificate)}, "refused: no certificate presented"},
+			"one digit off":           {[]string{"--url", address, "--pin", flipDigit(pin)}, "refused: no certificate presented"},
+			"the leaf's own pin":      {[]string{"--url", address, "--pin", testPin(t, pemOf(leaf))}, "is not a CA certificate"},
+			"leaf of another CA":      {[]string{"--url", impostor, "--pin", pin}, "is not issued by the pinned CA"},
+			"CA not presented":        {[]string{"--url", leafOnly, "--pin", pin}, "pass --ca-file"},
+			"CA file of another CA":   {[]string{"--url", address, "--pin", pin, "--ca-file", otherFile}, "refused: no certificate in"},
+			"plain http":              {[]string{"--url", strings.Replace(address, "https://", "http://", 1), "--pin", pin}, "must start with https://"},
+			"no server":               {[]string{"--url", "https://localhost:1/mcp", "--pin", pin}, "no certificate was read"},
+			"an option for the shell": {[]string{"--url", "https://-oProxyCommand=x/mcp", "--pin", pin}, "no usable host"},
+		} {
+			t.Run(shell+" "+name, func(t *testing.T) {
+				claudeDir := filepath.Join(t.TempDir(), ".claude")
+				out, err := runTrust(t, shell, claudeDir, nil, append([]string{"connect"}, test.args...)...)
+				if err == nil || !strings.Contains(out, test.want) || !strings.Contains(out, "Nothing was changed.") {
+					t.Fatalf("connect = %v\n%s", err, out)
+				}
+				if !emptyDirectory(t, claudeDir) {
+					t.Fatalf("a refused connect wrote into %s", claudeDir)
+				}
+			})
+		}
+	}
+}
+
+func flipDigit(pin string) string {
+	if pin[0] == '0' {
+		return "1" + pin[1:]
+	}
+	return "0" + pin[1:]
+}
+
+func pemOf(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// With the right pin the CA is stored under Claude Code's directory and
+// env.NODE_EXTRA_CA_CERTS is merged into settings.json without touching any
+// other setting. Each case is also given to `oberth client setup`'s own
+// merge: both must leave the same settings and the same trusted bundle.
+func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
+	requireOpenSSL(t)
+	authority := newTestAuthority(t, "Oberth test CA")
+	leaf, key := authority.issue(t)
+	address := servePresenting(t, key, leaf, authority.certificate.Raw)
+	pin := CertificatePin(authority.certificate)
+	other := newTestAuthority(t, "Corporate CA")
+	shared := t.TempDir()
+	holding := filepath.Join(shared, "holding.pem")
+	lacking := filepath.Join(shared, "lacking.pem")
+	if err := os.WriteFile(holding, append(append([]byte{}, other.pem...), authority.pem...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lacking, other.pem, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const missing = "\x00missing"
+	for name, test := range map[string]struct {
+		settings string
+		// trusted is what NODE_EXTRA_CA_CERTS names afterwards, relative
+		// to Claude Code's directory unless absolute.
+		trusted string
+		// kept are fragments of the original that must survive, in order.
+		kept []string
+	}{
+		"no settings file": {missing, "oberth/ca.crt", nil},
+		"empty file":       {"", "oberth/ca.crt", nil},
+		"empty object":     {"{}\n", "oberth/ca.crt", nil},
+		"other settings": {
+			"{\n  \"model\": \"opus\",\n  \"permissions\": {\"allow\": [\"Bash(ls:*)\"]}\n}\n", "oberth/ca.crt",
+			[]string{"\"model\": \"opus\",\n  \"permissions\": {\"allow\": [\"Bash(ls:*)\"]}\n}\n"},
+		},
+		"an env with other variables": {
+			"{\"env\":{\"FOO\":\"bar\",\"PATH_EXTRA\":\"/a b\"},\"model\":\"opus\"}", "oberth/ca.crt",
+			[]string{"\"FOO\":\"bar\",\"PATH_EXTRA\":\"/a b\"},\"model\":\"opus\"}"},
+		},
+		"an empty env": {"{\n  \"env\": {},\n  \"model\": \"opus\"\n}\n", "oberth/ca.crt", []string{",\n  \"model\": \"opus\"\n}\n"}},
+		"an unset variable": {
+			"{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"\", \"FOO\": \"bar\"}}", "oberth/ca.crt", []string{", \"FOO\": \"bar\"}}"},
+		},
+		"decoys and awkward strings": {
+			"{\n  \"statusLine\": \"a \\\"} { [ \\\\\",\n  \"hooks\": {\"env\": {\"NODE_EXTRA_CA_CERTS\": \"decoy\"}},\n  \"list\": [{\"env\": {}}, \"env\"],\n  \"env\": {\n    \"FOO\": \"{\\\"env\\\":1}\"\n  },\n  \"tail\": \"env\"\n}\n",
+			"oberth/ca.crt",
+			[]string{"\"statusLine\": \"a \\\"} { [ \\\\\",\n  \"hooks\": {\"env\": {\"NODE_EXTRA_CA_CERTS\": \"decoy\"}},\n  \"list\": [{\"env\": {}}, \"env\"],\n  \"env\": {", "\n    \"FOO\": \"{\\\"env\\\":1}\"\n  },\n  \"tail\": \"env\"\n}\n"},
+		},
+		"a bundle that holds the CA": {
+			"{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"" + holding + "\"}, \"model\": \"opus\"}\n", holding,
+			[]string{"{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"" + holding + "\"}, \"model\": \"opus\"}\n"},
+		},
+		"a bundle without the CA": {
+			"{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"" + lacking + "\"}, \"model\": \"opus\"}\n", "oberth/bundle.pem",
+			[]string{"{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"", "\"}, \"model\": \"opus\"}\n"},
+		},
+	} {
+		for _, shell := range trustShells() {
+			t.Run(shell+" "+name, func(t *testing.T) {
+				claudeDir := filepath.Join(t.TempDir(), ".claude")
+				settings := filepath.Join(claudeDir, "settings.json")
+				reference := claudeCodeFiles{settings: filepath.Join(t.TempDir(), "settings.json")}
+				reference.store = filepath.Join(filepath.Dir(reference.settings), "oberth")
+				if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if test.settings != missing {
+					for _, path := range []string{settings, reference.settings} {
+						if err := os.WriteFile(path, []byte(test.settings), 0o640); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				// A pin is accepted with colons, in upper case, with a prefix.
+				given := "sha256:" + strings.ToUpper(pin[:2]) + ":" + pin[2:]
+				out, err := runTrust(t, shell, claudeDir, nil, "connect", "--url", address, "--pin", given)
+				if err != nil {
+					t.Fatalf("connect: %v\n%s", err, out)
+				}
+				if !strings.Contains(out, "Restart Claude Code once") || !strings.Contains(out, "trust store was not touched") {
+					t.Errorf("connect does not ask for the restart:\n%s", out)
+				}
+				want := test.trusted
+				if !filepath.IsAbs(want) {
+					want = filepath.Join(claudeDir, filepath.FromSlash(want))
+				}
+				body := mustRead(t, settings)
+				var merged map[string]any
+				if err := json.Unmarshal(body, &merged); err != nil {
+					t.Fatalf("settings.json is not JSON any more: %v\n%s", err, body)
+				}
+				environment, _ := merged["env"].(map[string]any)
+				if environment["NODE_EXTRA_CA_CERTS"] != want {
+					t.Fatalf("NODE_EXTRA_CA_CERTS = %v, want %s\n%s", environment["NODE_EXTRA_CA_CERTS"], want, body)
+				}
+				if !inOrder(string(body), test.kept) {
+					t.Errorf("settings were reformatted:\n%s\nwant, in order: %q", body, test.kept)
+				}
+				if test.settings != missing && test.settings != "" {
+					if info, err := os.Stat(settings); err != nil || info.Mode().Perm() != 0o640 {
+						t.Errorf("settings mode = %v %v", info, err)
+					}
+				}
+				stored := parsePEMCertificates(mustRead(t, filepath.Join(claudeDir, "oberth", "ca.crt")))
+				if len(stored) != 1 || !stored[0].Equal(authority.certificate) {
+					t.Fatalf("oberth/ca.crt holds %d certificates, want the pinned CA", len(stored))
+				}
+				if got := strings.TrimSpace(string(mustRead(t, filepath.Join(claudeDir, "oberth", "ca.sha256")))); got != pin {
+					t.Errorf("oberth/ca.sha256 = %q", got)
+				}
+				trusted := parsePEMCertificates(mustRead(t, want))
+				if !containsAll(trusted, stored) {
+					t.Fatal("the bundle Claude Code is pointed at does not hold the CA")
+				}
+
+				// `oberth client setup` merges the same way.
+				if _, err := ensureSettingsCATrust(reference, authority.pem, stored, pin, false); err != nil {
+					t.Fatal(err)
+				}
+				var expected map[string]any
+				rebased := strings.ReplaceAll(string(mustRead(t, reference.settings)), filepath.Dir(reference.settings), claudeDir)
+				if err := json.Unmarshal([]byte(rebased), &expected); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(merged, expected) {
+					t.Errorf("the script and oberth client setup disagree:\n%s\n%s", body, rebased)
+				}
+				referenceTrusted := strings.Replace(want, claudeDir, filepath.Dir(reference.settings), 1)
+				if held := parsePEMCertificates(mustRead(t, referenceTrusted)); len(held) != len(trusted) || !containsAll(held, trusted) {
+					t.Errorf("the bundles differ: %d and %d certificates", len(trusted), len(held))
+				}
+				if strings.HasSuffix(want, "bundle.pem") {
+					if len(trusted) != 2 || !containsAll(trusted, []*x509.Certificate{other.certificate}) {
+						t.Errorf("bundle.pem holds %d certificates, want the existing one too", len(trusted))
+					}
+					if got := strings.TrimSpace(string(mustRead(t, filepath.Join(claudeDir, "oberth", "bundle.source")))); got != lacking {
+						t.Errorf("bundle.source = %q", got)
+					}
+				}
+
+				// A second run changes nothing, and the session hint is quiet.
+				out, err = runTrust(t, shell, claudeDir, nil, "connect", "--url", address, "--pin", pin)
+				if err != nil || !strings.Contains(out, "not changed") {
+					t.Fatalf("second connect: %v\n%s", err, out)
+				}
+				if again := mustRead(t, settings); string(again) != string(body) {
+					t.Errorf("a second connect rewrote the settings:\n%s", again)
+				}
+				hint, err := runTrust(t, shell, claudeDir, []string{"CLAUDE_PLUGIN_OPTION_URL=" + address, "CLAUDE_PLUGIN_OPTION_CA_PIN=" + pin}, "hint")
+				if err != nil || hint != "" {
+					t.Errorf("hint after connect = %q %v", hint, err)
+				}
+			})
+		}
+	}
+}
+
+// Settings the script cannot edit safely are refused and left byte for
+// byte; `oberth client setup` refuses the same files.
+func TestPluginConnectRefusesSettingsItCannotMerge(t *testing.T) {
+	requireOpenSSL(t)
+	authority := newTestAuthority(t, "Oberth test CA")
+	leaf, key := authority.issue(t)
+	address := servePresenting(t, key, leaf, authority.certificate.Raw)
+	pin := CertificatePin(authority.certificate)
+	for name, settings := range map[string]string{
+		"an array":              "[1]\n",
+		"env is an array":       "{\"env\": []}\n",
+		"the value is a number": "{\"env\": {\"NODE_EXTRA_CA_CERTS\": 5}}\n",
+		"truncated":             "{\"model\": \"opus\", \"env\": {",
+		"trailing data":         "{} {}\n",
+		"an unreadable bundle":  "{\"env\": {\"NODE_EXTRA_CA_CERTS\": \"/nonexistent/bundle.pem\"}}\n",
+	} {
+		for _, shell := range trustShells() {
+			t.Run(shell+" "+name, func(t *testing.T) {
+				claudeDir := filepath.Join(t.TempDir(), ".claude")
+				path := filepath.Join(claudeDir, "settings.json")
+				if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(settings), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				out, err := runTrust(t, shell, claudeDir, nil, "connect", "--url", address, "--pin", pin)
+				if err == nil || !strings.Contains(out, "Nothing was changed.") {
+					t.Fatalf("connect = %v\n%s", err, out)
+				}
+				if string(mustRead(t, path)) != settings {
+					t.Fatal("refused settings were changed")
+				}
+				if _, err := os.Stat(filepath.Join(claudeDir, "oberth")); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("a refused connect stored a CA: %v", err)
+				}
+				reference := claudeCodeFiles{settings: path, store: filepath.Join(claudeDir, "oberth")}
+				if _, err := ensureSettingsCATrust(reference, authority.pem, []*x509.Certificate{authority.certificate}, pin, false); err == nil {
+					t.Fatal("oberth client setup merged settings the script refuses")
+				}
+			})
+		}
+	}
+}
+
+// A server before v0.21.3 presents only its leaf: the CA then comes from a
+// file, checked against the same pin and the same server.
+func TestPluginConnectTakesTheCAFromAFile(t *testing.T) {
+	requireOpenSSL(t)
+	authority := newTestAuthority(t, "Oberth test CA")
+	leaf, key := authority.issue(t)
+	address := servePresenting(t, key, leaf)
+	file := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(file, authority.pem, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	claudeDir := filepath.Join(t.TempDir(), ".claude")
+	out, err := runTrust(t, "sh", claudeDir, nil, "connect", "--url", address, "--pin", CertificatePin(authority.certificate), "--ca-file", file)
+	if err != nil {
+		t.Fatalf("connect: %v\n%s", err, out)
+	}
+	stored := parsePEMCertificates(mustRead(t, filepath.Join(claudeDir, "oberth", "ca.crt")))
+	if len(stored) != 1 || !stored[0].Equal(authority.certificate) {
+		t.Fatal("the CA of the file was not stored")
+	}
+}
+
+// The SessionStart hook tells Claude to offer /oberth:connect while the CA
+// is not trusted, says nothing once it is, never prints the token it finds
+// in its environment, and never fails.
+func TestPluginSessionHint(t *testing.T) {
+	authority := newTestAuthority(t, "Oberth test CA")
+	pin := CertificatePin(authority.certificate)
+	const address = "https://user:hunter2@oberth.example.test:30443/mcp"
+	for _, shell := range trustShells() {
+		t.Run(shell, func(t *testing.T) {
+			claudeDir := filepath.Join(t.TempDir(), ".claude")
+			hint := func(pin string) string {
+				t.Helper()
+				out, err := runTrust(t, shell, claudeDir, []string{"CLAUDE_PLUGIN_OPTION_URL=" + address, "CLAUDE_PLUGIN_OPTION_CA_PIN=" + pin, "CLAUDE_PLUGIN_OPTION_TOKEN=" + testToken}, "hint")
+				if err != nil {
+					t.Fatalf("hint failed: %v\n%s", err, out)
+				}
+				if strings.Contains(out, testToken) || strings.Contains(out, "hunter2") {
+					t.Fatal("the hint prints a credential")
+				}
+				return out
+			}
+			if out := hint(pin); !inOrder(out, []string{"does not trust the CA", "https://oberth.example.test:30443/mcp", "/oberth:connect", "restart", "Do not disable TLS verification"}) {
+				t.Fatalf("hint without trust = %q", out)
+			}
+			if out := hint("not-a-pin"); !strings.Contains(out, "not a SHA-256 fingerprint") {
+				t.Fatalf("hint with a malformed pin = %q", out)
+			}
+			if out := hint(""); !strings.Contains(out, "no CA pin is configured") || !strings.Contains(out, "otherwise do not bring this up") {
+				t.Fatalf("hint without a pin = %q", out)
+			}
+			// An unconfigured plugin has nothing to connect to.
+			if out, err := runTrust(t, shell, claudeDir, nil, "hint"); err != nil || out != "" {
+				t.Fatalf("hint without a URL = %q %v", out, err)
+			}
+
+			// What `oberth client setup` writes counts as trust.
+			paths := claudeCodeFiles{settings: filepath.Join(claudeDir, "settings.json"), store: filepath.Join(claudeDir, "oberth")}
+			if _, err := ensureSettingsCATrust(paths, authority.pem, []*x509.Certificate{authority.certificate}, pin, false); err != nil {
+				t.Fatal(err)
+			}
+			if out := hint(pin); out != "" {
+				t.Fatalf("hint with trust = %q", out)
+			}
+			if out := hint(strings.ToUpper(pin)); out != "" {
+				t.Fatalf("hint with the pin in upper case = %q", out)
+			}
+			// Another pin (a rotated CA) is not the stored one.
+			if out := hint(flipDigit(pin)); !strings.Contains(out, "/oberth:connect") {
+				t.Fatalf("hint with another pin = %q", out)
+			}
+			// Settings that no longer name the CA.
+			if err := os.WriteFile(paths.settings, []byte("{}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out := hint(pin); !strings.Contains(out, "/oberth:connect") {
+				t.Fatalf("hint with the setting removed = %q", out)
+			}
+			// Broken settings never fail the session.
+			if err := os.WriteFile(paths.settings, []byte("{\"env\": ["), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out := hint(pin); !strings.Contains(out, "/oberth:connect") {
+				t.Fatalf("hint with broken settings = %q", out)
+			}
+		})
 	}
 }

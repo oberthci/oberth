@@ -171,10 +171,11 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 			tw.AppendRow("MCP access", displayPath(path), "✗ error", false)
 		default:
 			// The file alone configures nothing: no client reads this path. It
-			// is written as the record, and Claude Code is configured through
-			// the same path as `oberth client setup`.
+			// is written as the record for other MCP clients, and Claude Code
+			// is configured through the same path as `oberth client setup`:
+			// CA trust plus the plugin, which asks for the token itself.
 			configureClaudeCodeFromInstall(ctx, deps, tw, path, ClaudeCodeSetup{
-				URL: baseURL + "/mcp", TokenCommand: tokenCommand, CAFile: caPath, CATrust: CATrustSettings,
+				URL: baseURL + "/mcp", CA: caPath, CATrust: CATrustSettings,
 			})
 		}
 	}
@@ -189,22 +190,19 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 // failure is a row, never a failed install.
 func configureClaudeCodeFromInstall(ctx context.Context, deps Deps, tw *tableWriter, path string, setup ClaudeCodeSetup) {
 	changes, err := SetupClaudeCode(ctx, deps, setup)
+	tw.AppendRow("MCP access", displayPath(path), "✓ written", false)
 	if errors.Is(err, ErrClaudeCodeMissing) {
-		tw.AppendRow("MCP access", displayPath(path), "✓ written", false)
 		return
 	}
-	registered := false
 	for _, change := range changes {
 		switch {
-		case strings.HasPrefix(change.Target, "Claude Code MCP server"):
-			registered = true
-			tw.AppendRow("MCP access", "registered with Claude Code", "✓ ready", false)
+		case strings.HasPrefix(change.Target, "Claude Code plugin"):
+			tw.AppendRow("Claude Code plugin", change.Action, "✓ ready", false)
 		case strings.HasPrefix(change.Target, "Claude Code CA trust"):
 			tw.AppendRow("Claude Code CA", change.Action, "✓ ready", false)
+		case change.Action == "manual":
+			tw.AppendRow("Claude Code", "another MCP entry named "+claudeCodeServerName+": run oberth client setup --dry-run", "⚠ manual", false)
 		}
-	}
-	if !registered {
-		tw.AppendRow("MCP access", displayPath(path), "✓ written", false)
 	}
 	if err != nil {
 		tw.AppendRow("Claude Code", err.Error(), "⚠ manual", false)
@@ -233,8 +231,8 @@ export OBERTH_TOKEN_COMMAND=%q
 // header, so the same token command serves both clients and neither config
 // file holds a credential. The helper is Claude Code's; a client that does not
 // implement it needs a literal header, which is why the install prints that
-// rather than writing a credential for a client we cannot check. The entry is
-// the one SetupClaudeCode registers, timeout included.
+// rather than writing a credential for a client we cannot check. The timeout
+// is the one the plugin's entry carries.
 func renderMCPConfig(mcpURL, tokenCommand string) ([]byte, error) {
 	document := map[string]map[string]claudeCodeServer{
 		"mcpServers": {claudeCodeServerName: newClaudeCodeServer(mcpURL, headersHelperFor(tokenCommand))},
@@ -366,11 +364,15 @@ func printClientAccessNotes(w io.Writer, root string, choice int, storeCommand s
 	}
 	if choice == clientAccessBoth || choice == clientAccessMCP {
 		_, _ = fmt.Fprintf(w,
-			"\nMCP: Claude Code on this machine is configured when it is on PATH; on any\n"+
-				"other machine run `oberth client setup`. %s is the same entry for\n"+
-				"other clients. It uses headersHelper, which Claude Code implements; a\n"+
-				"client without it needs a literal \"Authorization\": \"Bearer <token>\"\n"+
-				"header instead.\n",
+			"\nMCP: when Claude Code is on PATH, it now trusts this server's CA and has\n"+
+				"the Oberth plugin (%s); the plugin asks for the uplink token when Claude\n"+
+				"Code starts, and keeps it in its own credential store. On any other\n"+
+				"machine run `oberth client setup`, or install the plugin and run\n"+
+				"/oberth:connect with the pin `oberth client pin` prints. %s is the\n"+
+				"entry for other clients. It uses headersHelper, which Claude Code\n"+
+				"implements; a client without it needs a literal\n"+
+				"\"Authorization\": \"Bearer <token>\" header instead.\n",
+			ClaudePluginID,
 			displayPath(filepath.Join(root, "mcp.json")))
 	}
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "oberth",
+  "name": "oberthci",
   "description": "Oberth CI for Claude Code: the MCP server of your own Oberth installation and the agent loop skill.",
   "owner": {
     "name": "Oberth"
@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "oberth",
-      "description": "Connect Claude Code to an Oberth CI server over MCP (URL from OBERTH_MCP_URL, token from OBERTH_TOKEN_COMMAND or ~/.config/oberth/token) and follow its agent loop: run_wait/events_wait, holds serviced within their TTL, assisted runs never taken as evidence.",
+      "description": "Connect Claude Code to your Oberth CI server over MCP (URL and token asked once, the token kept in Claude Code's credential store), trust its CA by an explicit SHA-256 pin with /oberth:connect, and follow the agent loop: one events_wait kept open, holds serviced within their TTL, assisted runs never taken as evidence.",
       "source": "./claude-plugin",
       "category": "development"
     }

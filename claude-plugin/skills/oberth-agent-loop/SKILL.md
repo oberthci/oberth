@@ -9,21 +9,37 @@ Oberth runs CI for every push to its git remote. The `oberth` MCP server
 (this plugin) and the `oberth` CLI reach the same server. Record fields are
 snake_case.
 
-## Waiting: block on the server, never poll
+## Waiting: keep one events_wait open, never poll
 
-- One run: `run_wait {"id": "<run-id>", "until": "finished"}` blocks up to
+While this session has runs in flight (a push, a retry, a promotion), keep
+exactly one call open:
+
+```json
+events_wait {"kinds": ["run.held", "run.finished"], "own": true, "after_id": <cursor>, "timeout_s": 600}
+```
+
+- Start it right after the push, in the background when the client offers
+  that for long tool calls, and go on working: its result wakes the session.
+  `own` limits it to runs this uplink pushed; add `promotion.finished` to
+  `kinds` while a promotion runs.
+- On a result, act on every event (`run.held`: service the hold before
+  `abandon_at`; `run.finished`: read `status` and `retry_hint`), then call it
+  again with the returned `next_after_id` as `after_id`. On `timed_out` do the
+  same. Stop when nothing is in flight.
+- The first call may omit `after_id`: it then waits for the next event and
+  does not return one recorded before the call. So start the first wait
+  before the push, or check the run once after starting it
+  (`run_get {"id": "<run-id>"}`).
+- Events carry an increasing `id`. Remember the highest one handled and skip
+  anything at or below it: a pushed copy of the same event (some interactive
+  sessions receive `notifications/claude/channel`) is then harmless. Never
+  wait for pushed events; they are an extra, not the protocol.
+- One run only: `run_wait {"id": "<run-id>", "until": "finished"}` blocks up to
   `timeout_s` (default and maximum 600) and returns `state` (`finished`,
   `held`, `changed`, `timeout`), the run summary, its holds and `retry_hint`.
-  On `timeout`, call it again.
-- Several runs, holds, promotions: `events_wait {"after_id": <cursor>, "own": true}`
-  blocks until any matching event after the cursor (filters: `repos`,
-  `refs_glob`, `kinds`, `run_ids`, `own`), or `timed_out`. Always pass the
-  returned `next_after_id` as the next `after_id`; without `after_id` it waits
-  for the next event. One call covers every run and hold of a worker.
-- After a gap or a restart, read what happened in order with `events_since`.
-- Pushed events (notifications on the MCP session) arrive only in some
-  interactive sessions; do not wait for them. `run_wait` and `events_wait`
-  work everywhere.
+- After a restart or a gap, read what happened in order with
+  `events_since {"after_id": <cursor>}`.
+- Other `events_wait` filters: `repos`, `refs_glob`, `run_ids`.
 - CLI equivalents: `oberth run wait <id>`, `oberth events --since <n> --wait`,
   `oberth sync status` for native Argo locks.
 - Lists: `run_list {"own": true}` is your runs, `run_list {"held": true}`
@@ -61,10 +77,9 @@ of failing the run: event `run.held` with `step`, `pod` and `abandon_at`.
 
 ## Connection
 
-The plugin's server URL is `OBERTH_MCP_URL` (default
-`https://localhost:30443/mcp`). The token comes from `OBERTH_TOKEN_COMMAND`
-or the owner-only file `~/.config/oberth/token`; that file is sent only to the
-server `~/.config/oberth/env` (or `mcp.json`) names, so set `OBERTH_MCP_URL` to
-that address when using it. Claude Code must trust the
-server's CA (`oberth client setup` configures it, or set
-`NODE_EXTRA_CA_CERTS` to the CA file).
+The plugin asks for the server's MCP URL, the uplink token (kept in Claude
+Code's credential store) and the CA SHA-256 pin; change them with
+`/plugin configure oberth`. Claude Code must trust the server's CA:
+`/oberth:connect` checks it against the pin and stores it, then one restart
+is needed. `oberth client setup` does both from a machine that has the
+Oberth CLI.
