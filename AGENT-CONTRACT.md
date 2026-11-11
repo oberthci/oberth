@@ -1872,7 +1872,7 @@ containing CI and real workload qualification remain separately required.
   YAML document per file is accepted.
 - Admission enforces administrator-owned resource ceilings before submission:
   per-container CPU (8), memory (16Gi), ephemeral-storage (32Gi); retry limit
-  (10, a literal integer, on templates, template defaults and the
+  (10, a literal integer, required on every `retryStrategy`: templates, template defaults and the
   workflow-wide `spec.retryStrategy`); DAG tasks (64), step invocations (64); withItems/withSequence
   cardinality (100); workflow/template parallelism (32); memory-backed emptyDir
   sizeLimit (8Gi, required when medium is Memory); PVC capacity (64Gi). GPU and

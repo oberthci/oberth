@@ -777,6 +777,9 @@ func TestAdmitRefusesUnboundedRetryLimitsEverywhere(t *testing.T) {
 	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy:\n    limit: 1000\n", 1), Policy{}, "spec.retryStrategy.limit 1000 exceeds")
 	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  templateDefaults:\n    retryStrategy:\n      limit: 50\n", 1), Policy{}, "spec.templateDefaults.retryStrategy.limit 50 exceeds")
 	refuse(t, strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        limit: \"{{inputs.parameters.n}}\"\n      container:", 1), Policy{}, "must be a literal integer")
+	// No limit is no bound: the controller retries until the step passes.
+	refuse(t, strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        retryPolicy: Always\n      container:", 1), Policy{}, "retryStrategy.limit is required")
+	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy: {}\n", 1), Policy{}, "spec.retryStrategy.limit is required")
 	mustAdmit(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy:\n    limit: 2\n", 1), Policy{})
 }
 

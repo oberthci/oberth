@@ -237,10 +237,14 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 }
 
 // admitRetryLimit bounds a retryStrategy's limit. A templated limit is
-// refused: its value is only known at run time, past this ceiling.
+// refused: its value is only known at run time, past this ceiling. So is a
+// strategy without a limit: the controller then retries without end.
 func admitRetryLimit(location string, strategy *wfv1.RetryStrategy) []error {
-	if strategy == nil || strategy.Limit == nil {
+	if strategy == nil {
 		return nil
+	}
+	if strategy.Limit == nil {
+		return []error{fmt.Errorf("argoworkflow: %s.limit is required (a literal integer of at most %d): without it the controller retries without end", location, MaxRetryLimit)}
 	}
 	limit, err := strconv.Atoi(strategy.Limit.String())
 	if err != nil {
