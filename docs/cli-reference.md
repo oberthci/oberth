@@ -404,8 +404,12 @@ Usage: oberth install [flags]
 Flags:
   -accept-witness-genesis string
         one-shot acknowledgment of the existing deployment's exact audit chain head (<auditID>:<sha256hex>, from 'oberth audit head') when enabling --install-rekor on a deployment that already has audit history
+  -admin-ssh-public-key string
+        local SSH public key for the first admin uplink (file or - for stdin; never a private key)
   -also-upstream value
         another organization to connect with the same upstream key, host/organization or ssh:// URL (repeatable), e.g. codeberg.org/acme
+  -answers string
+        version 1 YAML/JSON install answers; explicit flags override scalar answers
   -argo-chart-version string
         argo-workflows chart version
   -argo-controller-profile string
@@ -462,6 +466,8 @@ Flags:
         also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, root token and unseal key shown once, on the terminal or in --secrets-file) and configure it as Oberth's release secret store
   -install-secretstore-dev
         also install a dev-mode OpenBao (in-memory, auto-unsealed, well-known root token) and configure it as Oberth's release secret store — evaluation only
+  -json
+        emit the public install result and verification checks as JSON
   -kubeconfig string
         kubeconfig file for an existing cluster
   -namespace string
@@ -486,6 +492,8 @@ Flags:
         fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
   -replace-client-files
         without a terminal: replace this machine's client files (~/.config/oberth) when they exist with other content, such as another server's; by default they are kept and nothing is written
+  -secrets-age-recipient string
+        age recipient for encrypting --secrets-file; requires age on PATH
   -secrets-file string
         write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) to this new file (mode 0600; refused when it exists or lies in a git worktree) and print only its path and SHA-256; required when the output is not a terminal
   -service-type string
@@ -516,6 +524,10 @@ Flags:
         file-tool image for cache preparation and database helpers (air-gapped mirror)
   -values value
         helm values file applied to the Oberth release (repeatable, applied in order); the installer's own settings still win, so a value it computed cannot be overridden by a stale one in a file
+  -verify
+        check an existing installation without changing it
+  -yes
+        confirm the reviewed install on the selected kubeconfig context
 ```
 
 ## oberth issues
@@ -1741,6 +1753,8 @@ Usage: oberth setup [flags]
 Flags:
   -accessible
         screen reader mode (sequential prompts, no cursor addressing)
+  -answers-out string
+        write the reviewed answers to a new JSON file, also with --dry-mode
   -chart string
         local chart for development
   -dry-mode

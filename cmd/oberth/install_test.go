@@ -184,3 +184,11 @@ func TestRunCLIRoutesEveryCommandViaHelp(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallRequiresReviewedConfirmation(t *testing.T) {
+	var output bytes.Buffer
+	err := runInstall(context.Background(), []string{"--context", "review-target"}, strings.NewReader(""), &output)
+	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "--yes") || !strings.Contains(output.String(), "review-target") {
+		t.Fatal("install did not enforce its review gate")
+	}
+}

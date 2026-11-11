@@ -18,6 +18,7 @@ func runSetup(ctx context.Context, arguments []string, input io.Reader, output i
 	flags.SetOutput(io.Discard)
 
 	var opts setuptui.Options
+	flags.StringVar(&opts.AnswersOut, "answers-out", "", "write the reviewed answers to a new JSON file, also with --dry-mode")
 	flags.StringVar(&opts.ChartPath, "chart", "", "local chart for development")
 	flags.StringVar(&opts.ImageRef, "image", "", "local server image for development")
 	flags.BoolVar(&opts.DryMode, "dry-mode", false,

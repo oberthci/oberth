@@ -317,6 +317,13 @@ type Config struct {
 	// root token and unseal key, the first uplink's bearer token) instead of
 	// the output. It must be a new file outside any git worktree.
 	SecretsFile string
+	// AdminSSHPublicKeyPath explicitly provisions the first admin from a public
+	// key generated on the client machine. '-' reads the key from stdin.
+	AdminSSHPublicKeyPath string
+	SecretsAgeRecipient   string
+	adminSSHPublicKey     []byte
+	uplinkOnboarded       bool
+	adminToken            string
 }
 
 // wantsSecretStore reports whether either secret-store mode was requested.
@@ -524,6 +531,7 @@ type Deps struct {
 	// (e.g., "deploy oberth", "rollout ready") matched by the TUI's
 	// stepNameToIndex map. Status is "done".
 	StepProgressSink func(step, status string)
+	UplinkCreated    func(identity string)
 	// ReleaseGetter fetches published release objects for oberth upgrade;
 	// nil selects HTTPS (releaseverify.HTTPSGetter).
 	ReleaseGetter releaseverify.Getter
@@ -626,6 +634,9 @@ type RekorResult struct {
 
 // Validate checks Config for invalid flag combinations and applies defaults.
 func (cfg *Config) Validate() error {
+	if cfg.SecretsAgeRecipient != "" && cfg.SecretsFile == "" {
+		return errors.New("--secrets-age-recipient requires --secrets-file")
+	}
 	if err := validateServerTLSFlags(cfg); err != nil {
 		return err
 	}

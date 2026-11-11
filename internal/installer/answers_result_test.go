@@ -1,0 +1,278 @@
+package installer
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"golang.org/x/crypto/ssh"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+)
+
+func TestAnswersStrictRoundTrip(t *testing.T) {
+	cfg := Config{ContextName: "selected", InstallSecretStore: true, ClientAccess: "none", AlsoUpstreams: []string{"codeberg.org/acme"}, TLSExtraIPs: []string{"::1"}, SecretsFile: "/secure/install", AdminSSHPublicKeyPath: "-"}
+	path := filepath.Join(t.TempDir(), "answers.json")
+	if err := WriteAnswers(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := ReadAnswers(path)
+	if err != nil || !reflect.DeepEqual(cfg, actual) {
+		t.Fatal("answers did not round trip")
+	}
+	if err := WriteAnswers(path, cfg); err == nil {
+		t.Fatal("overwrote answers")
+	}
+	for _, raw := range []string{`version: 1
+config:
+  Unknown: hidden`, `version: 1
+version: 1
+config: {}`, `version: 2
+config: {}`, `version: 1
+config:
+  Release: {Unknown: hidden}`} {
+		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadAnswers(path); err == nil || strings.Contains(err.Error(), "hidden") {
+			t.Fatal("invalid answers accepted or echoed")
+		}
+	}
+	if err := os.WriteFile(path, []byte("version: 1\nconfig:\n  ContextName: selected\n  InstallSecretStore: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	actual, err = ReadAnswers(path)
+	if err != nil || actual.ContextName != "selected" || !actual.InstallSecretStore {
+		t.Fatal("YAML answers not read")
+	}
+}
+
+func TestVerificationJSONRedactsDependencyErrors(t *testing.T) {
+	var output bytes.Buffer
+	marker := "sensitive-dependency-diagnostic"
+	deps := InstallDeps{Output: &output, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+		return nil, nil, "", errors.New(marker)
+	}}
+	if err := PrintVerification(context.Background(), Config{}, deps, true); err == nil {
+		t.Fatal("failed verification succeeded")
+	}
+	var result InstallResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.OK || len(result.Checks) != 1 || result.Checks[0].Code != "kubeconfig" || result.Checks[0].Remedy == "" || strings.Contains(output.String(), marker) {
+		t.Fatal("unsafe or incomplete verification response")
+	}
+}
+
+func TestAdminKeyStdinRejectsPrivateBeforeSideEffects(t *testing.T) {
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := ssh.MarshalPrivateKey(private, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	err = Execute(context.Background(), Config{AdminSSHPublicKeyPath: "-"}, InstallDeps{Input: bytes.NewReader(body.Bytes), LookPath: func(string) (string, error) { called = true; return "", nil }})
+	if err == nil || called {
+		t.Fatal("private key reached install side effects")
+	}
+}
+
+func TestSecretsAgeRoundTrip(t *testing.T) {
+	if _, err := exec.LookPath("age"); err != nil {
+		t.Skip("age is a test prerequisite")
+	}
+	if _, err := exec.LookPath("age-keygen"); err != nil {
+		t.Skip("age-keygen is a test prerequisite")
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	identity := filepath.Join(directory, "identity")
+	command := exec.Command("age-keygen", "-o", identity)
+	command.Stdout, command.Stderr = io.Discard, io.Discard
+	if command.Run() != nil {
+		t.Fatal("identity creation failed")
+	}
+	recipient, err := exec.Command("age-keygen", "-y", identity).Output()
+	if err != nil {
+		t.Fatal("recipient read failed")
+	}
+	path := filepath.Join(directory, "secrets.age")
+	secrets, err := createSecretsFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.enableEncryption(context.Background(), strings.TrimSpace(string(recipient))); err != nil {
+		t.Fatal(err)
+	}
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		t.Fatal(err)
+	}
+	credential := fmt.Sprintf("%x", value)
+	secrets.add("Unseal key", credential)
+	secrets.add("Bearer token", credential+"-second")
+	var output bytes.Buffer
+	secrets.finish(&output)
+	if secrets.err != nil {
+		t.Fatal("secret encryption failed")
+	}
+	if strings.Contains(output.String(), credential) {
+		t.Fatal("secret appeared in output")
+	}
+	ciphertext, err := os.ReadFile(path)
+	if err != nil || bytes.Contains(ciphertext, []byte(credential)) {
+		t.Fatal("plaintext reached disk")
+	}
+	plaintext, err := exec.Command("age", "-d", "-i", identity, path).Output()
+	defer clear(plaintext)
+	if err != nil || !bytes.Contains(plaintext, []byte(credential+"-second")) {
+		t.Fatal("encrypted credentials did not round trip")
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("incorrect encrypted file permissions")
+	}
+}
+
+func TestFirstAdminBeforeForge(t *testing.T) {
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ssh.NewPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &fakeOberthHost{t: t, uplinkOutput: "Uplink token for admin@workstation (shown once):\n" + testOnceCredential + "\n"}
+	var output bytes.Buffer
+	deps := onboardingDeps(t, host, &output, strings.NewReader(""), false)
+	identity := ""
+	deps.UplinkCreated = func(value string) { identity = value }
+	cfg := Config{AdminSSHPublicKeyPath: "-", SSHPublicKeyPath: "-", adminSSHPublicKey: ssh.MarshalAuthorizedKey(key), UplinkIdentity: "admin@workstation", ClientAccess: "none"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	tw := newTableWriter(&output, false)
+	tw.WriteHeader()
+	tw.WriteFooter()
+	delivered := false
+	creds := heldCredentials{atOnce: func(label, value string) {
+		if label == "Bearer token" && value == testOnceCredential {
+			delivered = true
+		}
+	}}
+	if err := FinishInstall(context.Background(), cfg, deps, tw, &creds); !errors.Is(err, ErrOnboardingPartial) {
+		t.Fatal("expected pending forge")
+	}
+	if !delivered || identity != cfg.UplinkIdentity || !strings.Contains(strings.Join(host.uplinkArgv, " "), "uplink add --admin - admin@workstation") || strings.Contains(output.String(), testOnceCredential) {
+		t.Fatal("first admin flow failed or leaked a credential")
+	}
+}
+
+func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer server.Close()
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicas := int32(1)
+	kube := fake.NewClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}})
+	deps := InstallDeps{LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+		return kube, &rest.Config{Host: "https://127.0.0.1:6443"}, "selected", nil
+	}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+		command := strings.Join(args, " ")
+		if strings.Contains(command, "upstream list") {
+			return []byte("NAME KIND URL\nforge ssh ssh://git@forge.example/acme\n"), nil
+		}
+		if strings.Contains(command, "admin read-file") {
+			return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), nil
+		}
+		return nil, errors.New("unexpected command")
+	}}
+	cfg := Config{ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port}
+	result := VerifyInstall(context.Background(), cfg, deps)
+	digest := sha256.Sum256(server.Certificate().Raw)
+	if !result.OK || result.CAPin != hex.EncodeToString(digest[:]) || result.ServerURL != server.URL || result.MCPURL != server.URL+"/mcp" || result.Context != "selected" {
+		t.Fatalf("public verification failed: checks=%v", result.Checks)
+	}
+	cfg.ClientHost = "invalid.example.test"
+	result = VerifyInstall(context.Background(), cfg, deps)
+	if result.OK {
+		t.Fatal("unreachable advertised address accepted")
+	}
+}
+
+func TestUpstreamRecoverySavedBeforeImport(t *testing.T) {
+	saved := false
+	var recovery string
+	creds := heldCredentials{atOnce: func(label, value string) {
+		if label == "Upstream private key" {
+			recovery = value
+			saved = true
+		}
+	}}
+	calls := 0
+	deps := Deps{RunCommand: func(_ context.Context, input []byte, _ string, args ...string) ([]byte, error) {
+		calls++
+		if strings.Contains(strings.Join(args, " "), "admin read-file") {
+			return nil, errors.New("not present")
+		}
+		if !saved || recovery != string(input) {
+			t.Fatal("new key used before recovery was saved")
+		}
+		if _, err := ssh.ParsePrivateKey(input); err != nil {
+			t.Fatal("invalid generated key")
+		}
+		if strings.Contains(strings.Join(args, " "), recovery) {
+			t.Fatal("key on argv")
+		}
+		return nil, nil
+	}}
+	provided, err := prepareUpstreamRecovery(context.Background(), Config{SecretsFile: "/secure/recovery", ForgeURL: "ssh://git@forge.example/acme"}, deps, &creds, false)
+	if err != nil || !provided || calls != 2 {
+		t.Fatal("recovery generation failed")
+	}
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ssh.NewPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
+		return ssh.MarshalAuthorizedKey(key), nil
+	}
+	saved = false
+	provided, err = prepareUpstreamRecovery(context.Background(), Config{SecretsFile: "/secure/recovery"}, deps, &creds, false)
+	if err != nil || provided || saved {
+		t.Fatal("existing upstream key was replaced")
+	}
+}

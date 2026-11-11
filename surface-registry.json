@@ -375,6 +375,26 @@
     "value:autoRetryInfrastructureBudget": {
       "doc_anchor": "docs/infrastructure-retries.md#administration",
       "test_ref": "cmd/oberth/infra_retry_test.go TestChartInfrastructureRetryBudget"
+    },
+    "flag:answers": {
+      "doc_anchor": "docs/install-answers.md",
+      "test_ref": "internal/installer/answers_result_test.go TestAnswersStrictRoundTrip"
+    },
+    "flag:answers-out": {
+      "doc_anchor": "docs/install-answers.md",
+      "test_ref": "internal/installer/answers_result_test.go TestAnswersStrictRoundTrip"
+    },
+    "flag:admin-ssh-public-key": {
+      "doc_anchor": "docs/install-answers.md",
+      "test_ref": "internal/installer/answers_result_test.go TestAnswersStrictRoundTrip"
+    },
+    "flag:secrets-age-recipient": {
+      "doc_anchor": "docs/install-answers.md",
+      "test_ref": "internal/installer/answers_result_test.go TestAnswersStrictRoundTrip"
+    },
+    "flag:verify": {
+      "doc_anchor": "docs/install-answers.md",
+      "test_ref": "internal/installer/answers_result_test.go TestAnswersStrictRoundTrip"
     }
   }
 }
