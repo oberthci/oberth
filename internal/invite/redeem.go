@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/oberthci/oberth/internal/clientcert"
 )
 
@@ -72,13 +74,19 @@ func Redeem(ctx context.Context, file File, csr, sshKey string) (Certificate, er
 	if !file.ExpiresAt.After(time.Now()) {
 		return result, errors.New("invite has expired")
 	}
-	if _, err := clientcert.ParseCSR([]byte(csr)); err != nil {
+	parsedCSR, err := clientcert.ParseCSR([]byte(csr))
+	if err != nil {
 		return result, errors.New("invalid local client CSR")
 	}
-	sshFingerprint, err := SSHFingerprint([]byte(sshKey))
+	publicSSH, err := parseSSHKey([]byte(sshKey))
 	if err != nil {
 		return result, err
 	}
+	// Parsers can ignore comments and leading text. Serialize only the public
+	// objects they validated, never the original file contents.
+	csr = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: parsedCSR.Raw}))
+	sshKey = string(ssh.MarshalAuthorizedKey(publicSSH))
+	sshFingerprint := ssh.FingerprintSHA256(publicSSH)
 	client, err := PinnedClient(file.ServerURL, file.CAPin)
 	if err != nil {
 		return result, err

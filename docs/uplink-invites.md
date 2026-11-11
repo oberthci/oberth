@@ -21,6 +21,9 @@ contents in an agent session. The file contains a random 32-byte one-time
 credential, the HTTPS MCP URL, the server CA's DER SHA-256 pin, the identity,
 scope and expiry. The `secret` field is unpadded base64url of the 32 random
 bytes; `secret_digest` is lowercase hex SHA-256 of those decoded bytes.
+Use a DNS name such as `localhost`, the host name or `host.local` in the
+server URL. IP connections are refused; IP name constraints remain deferred
+until Bun releases its fix, and DNS CA constraints remain enforced.
 The default lifetime is 24 hours; the maximum is 168 hours.
 The invitation grants regular uplink access, with the selected upstream
 scope; it cannot grant admin rights or replace an existing identity/key.
@@ -61,7 +64,8 @@ The certificate output and its `.ca.crt` and `.url` companions must all be new.
 They are reserved before sending the request. Refused requests remove only
 those newly reserved public output files. A successful redemption followed
 by a disk failure keeps its output files and explains how to recover.
-No command reads or transmits the local private keys.
+Only canonical public CSR and SSH key bytes are transmitted; comments and
+ignored text from public-input files never enter the request.
 
 ## Enrollment boundary and recovery
 
@@ -72,7 +76,9 @@ Request sizes and operation time are bounded, failed credentials use the
 server's authentication failure limiter, and responses prohibit caching.
 No other API or MCP tool is available through enrollment.
 
-The database holds only the credential digest. Redemption checks that the
+The database holds only the credential digest. Unknown, expired and spent
+credentials are rejected through reserved readers before requesting the
+serialized writer. Redemption checks that the
 invite is unused, unexpired and bound to the supplied URL and current server
 CA pin. Consumption, creation of the certificate-only uplink, SSH fingerprint,
 scope, certificate SPKI binding and audit receipts commit in one transaction.

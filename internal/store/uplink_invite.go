@@ -77,6 +77,11 @@ func (s *Store) RedeemUplinkInvite(ctx context.Context, digest, address, pin, fi
 	if invite.ValidatePin(digest) != nil || invite.ValidatePin(pin) != nil || invite.ValidateURL(address) != nil || fingerprint == "" || issue == nil {
 		return binding, "", ErrInvalid
 	}
+	// Reject unknown, expired or spent credentials through the reserved read pool.
+	// The writer still repeats every predicate atomically for the one winner.
+	if err := s.checkUplinkInvite(ctx, digest, address, pin); err != nil {
+		return binding, "", err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return binding, "", err
@@ -127,4 +132,21 @@ func (s *Store) RedeemUplinkInvite(ctx context.Context, digest, address, pin, fi
 		return binding, "", err
 	}
 	return binding, certificate, nil
+}
+
+func (s *Store) checkUplinkInvite(ctx context.Context, digest, address, pin string) error {
+	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
+	if err != nil {
+		return err
+	}
+	defer release()
+	var valid bool
+	err = s.authReader().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM uplink_invites WHERE secret_digest=? AND server_url=? AND ca_pin=? AND redeemed_at IS NULL AND expires_at>?)`, digest, address, pin, unixNano(s.now())).Scan(&valid)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrNotFound
+	}
+	return nil
 }

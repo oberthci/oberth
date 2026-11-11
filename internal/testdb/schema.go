@@ -281,5 +281,5 @@ DELETE FROM schema_migrations WHERE id='20261111200000-canonical-priorities';
 // PostUplinkInvitesDowngrade removes enrollment state from disposable migration fixtures.
 const PostUplinkInvitesDowngrade = `
 DROP TABLE IF EXISTS uplink_invites;
-DELETE FROM schema_migrations WHERE id='20261111200000-uplink-invites';
+DELETE FROM schema_migrations WHERE id='20261111202000-uplink-invites';
 `

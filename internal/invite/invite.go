@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -51,6 +52,9 @@ func ValidateURL(address string) error {
 	u, err := url.Parse(address)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "/mcp" || u.RawPath != "" {
 		return errors.New("invite server URL must be an HTTPS /mcp URL without credentials, query or fragment")
+	}
+	if _, err := netip.ParseAddr(u.Hostname()); err == nil {
+		return errors.New("invite server URL must use a DNS name, not an IP address")
 	}
 	return nil
 }

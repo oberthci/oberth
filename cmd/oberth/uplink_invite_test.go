@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,7 +40,7 @@ func TestUplinkInviteWritesPrivateHandoffWithoutPrintingSecret(t *testing.T) {
 	if err := os.WriteFile(tokenPath, []byte(secret), 0600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+secret {
 			t.Error("admin credential was not supplied")
 		}
@@ -66,9 +65,13 @@ func TestUplinkInviteWritesPrivateHandoffWithoutPrintingSecret(t *testing.T) {
 		binding := invite.Binding{ID: "public-id", Identity: request.Params.Arguments.Identity, ServerURL: request.Params.Arguments.ServerURL, CAPin: strings.Repeat("a", 64), ExpiresAt: time.Now().Add(time.Hour)}
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"structuredContent": binding}})
 	}))
+	identity, serverCA := inviteCLIIdentity(t)
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{identity}}
+	server.StartTLS()
+	server.URL = strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
 	defer server.Close()
 	caPath := filepath.Join(root, "ca.pem")
-	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCA.Raw}), 0600); err != nil {
 		t.Fatal(err)
 	}
 	outPath := filepath.Join(root, "invite.json")
@@ -118,7 +121,7 @@ func inviteCLIIdentity(t *testing.T) (tls.Certificate, *x509.Certificate) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{"localhost"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, leaf, ca, leafKey.Public(), key)
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +170,7 @@ func TestClientRedeemPinsBeforeSendingAndKeepsSecretsLocal(t *testing.T) {
 				Arguments struct {
 					Secret string `json:"secret"`
 					CSR    string `json:"csr"`
+					SSHKey string `json:"ssh_public_key"`
 				} `json:"arguments"`
 			} `json:"params"`
 		}
@@ -177,6 +181,9 @@ func TestClientRedeemPinsBeforeSendingAndKeepsSecretsLocal(t *testing.T) {
 		if request.Params.Arguments.Secret != secret {
 			t.Error("wrong one-time credential")
 		}
+		if request.Params.Arguments.CSR != string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr})) || request.Params.Arguments.SSHKey != string(ssh.MarshalAuthorizedKey(public)) {
+			t.Error("enrollment transmitted data outside canonical public inputs")
+		}
 		certificate, _, err := issuer.Issue("agent@example.test", []byte(request.Params.Arguments.CSR), 0)
 		if err != nil {
 			t.Error("cannot issue test certificate")
@@ -186,6 +193,7 @@ func TestClientRedeemPinsBeforeSendingAndKeepsSecretsLocal(t *testing.T) {
 	}))
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{identity}}
 	server.StartTLS()
+	server.URL = strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
 	defer server.Close()
 	root := t.TempDir()
 	path := filepath.Join(root, "invite.json")
@@ -227,7 +235,21 @@ func TestClientRedeemPinsBeforeSendingAndKeepsSecretsLocal(t *testing.T) {
 	if err := runClientRedeem(t.Context(), arguments, &output); err == nil || calls.Load() != 0 {
 		t.Fatal("private SSH material was sent as a public key")
 	}
-	if err := os.WriteFile(sshPath, ssh.MarshalAuthorizedKey(public), 0600); err != nil {
+	for _, bad := range [][]byte{
+		append([]byte("-----BEGIN PRIVATE KEY-----\nprivate-data\n-----END PRIVATE KEY-----\n"), ssh.MarshalAuthorizedKey(public)...),
+		append(ssh.MarshalAuthorizedKey(public), []byte("-----BEGIN PRIVATE KEY-----\nprivate-data\n-----END PRIVATE KEY-----\n")...),
+	} {
+		if err := os.WriteFile(sshPath, bad, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := runClientRedeem(t.Context(), arguments, &output); err == nil || calls.Load() != 0 {
+			t.Fatal("mixed SSH input was transmitted")
+		}
+	}
+	if err := os.WriteFile(sshPath, append(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public)), []byte(" private-comment-must-stay-local\n")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(csrPath, append([]byte("private-prefix-must-stay-local\n"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr})...), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := runClientRedeem(t.Context(), arguments, &output); err != nil {

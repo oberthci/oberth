@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -36,7 +37,7 @@ func inviteServerIdentity(t *testing.T) (tls.Certificate, *x509.Certificate) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Enrollment test CA"}, IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour)}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Enrollment test CA"}, IsCA: true, BasicConstraintsValid: true, PermittedDNSDomainsCritical: true, PermittedDNSDomains: []string{"localhost"}, KeyUsage: x509.KeyUsageCertSign, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour)}
 	rootDER, err := x509.CreateCertificate(rand.Reader, template, template, rootKey.Public(), rootKey)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +50,7 @@ func inviteServerIdentity(t *testing.T) (tls.Certificate, *x509.Certificate) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	raw, err := x509.CreateCertificate(rand.Reader, leaf, root, leafKey.Public(), rootKey)
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +99,7 @@ func TestInviteRedemptionOverMCPAndMutualTLS(t *testing.T) {
 	pool.AddCert(authority.Certificate)
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{identity}, ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: pool}
 	server.StartTLS()
+	server.URL = strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
 	defer server.Close()
 	secret, hash, err := invite.NewSecret()
 	if err != nil {
@@ -133,9 +135,21 @@ func TestInviteRedemptionOverMCPAndMutualTLS(t *testing.T) {
 	if enrollmentRequests.Load() != 0 {
 		t.Fatal("credential sent before checking the CA pin")
 	}
-	wrong = envelope
-	wrong.ServerURL = strings.Replace(envelope.ServerURL, "127.0.0.1", "localhost", 1)
-	if _, err := invite.Redeem(t.Context(), wrong, csr, string(ssh.MarshalAuthorizedKey(sshKey))); err == nil {
+	wrongURL := strings.Replace(envelope.ServerURL, "localhost", "wrong.example.test", 1)
+	wrongClient, err := invite.PinnedClient(wrongURL, envelope.CAPin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrongClient.CloseIdleConnections()
+	wrongClient.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	wrongRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, wrongURL+"/enroll", strings.NewReader("credential-must-not-arrive"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response, err := wrongClient.Do(wrongRequest); err == nil {
+		_ = response.Body.Close()
 		t.Fatal("hostname mismatch accepted")
 	}
 	if enrollmentRequests.Load() != 0 {

@@ -152,3 +152,22 @@ func TestUplinkInviteAuditFailureRollsBackEveryBinding(t *testing.T) {
 		t.Fatal("failed audit consumed invite", err)
 	}
 }
+
+// Public enrollment must not consume the serialized writer for bad credentials.
+func TestUnknownInviteRefusedDuringWriterHold(t *testing.T) {
+	s, _ := authReaderFixture(t)
+	tx, err := s.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	_, _, err = s.RedeemUplinkInvite(ctx, strings.Repeat("c", 64), "https://localhost/mcp", strings.Repeat("a", 64), "SHA256:unknown", func(*InviteEnrollment) (string, error) {
+		t.Error("unknown invite reached issuance")
+		return "", errors.New("unknown invite")
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown invite blocked on writer: %v", err)
+	}
+}
