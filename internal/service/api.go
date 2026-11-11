@@ -2575,6 +2575,9 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if strings.TrimSpace(target) == "" {
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion target is required")
 	}
+	if err := validatePromotionTarget(target); err != nil {
+		return model.Promotion{}, err
+	}
 	if !validOID(selector) {
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion requires a full SHA")
 	}
@@ -2587,6 +2590,19 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 		return model.Promotion{}, err
 	}
 	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion, priority...)
+}
+
+// validatePromotionTarget accepts a branch name only. A full ref was admitted
+// and audited before, then failed when the merge was prepared, and again on
+// every retry.
+func validatePromotionTarget(target string) error {
+	if strings.HasPrefix(target, "refs/") {
+		return refuse(ErrInvalidInput, "promotion target %q is a ref; name the target branch, e.g. %q", target, strings.TrimPrefix(target, "refs/heads/"))
+	}
+	if err := gitcache.ValidateBranch(target); err != nil {
+		return refuse(ErrInvalidInput, "promotion target: %v", err)
+	}
+	return nil
 }
 
 // admitPromotion authorizes and durably admits a green branch candidate or

@@ -984,7 +984,7 @@ func promotionInputSchema() map[string]any {
 			"priority_reason":  map[string]any{"type": "string", "description": "Reason for submission priority"},
 			"repo":             map[string]any{"type": "string", "description": "Repository; required when a source SHA is ambiguous"},
 			"sha":              map[string]any{"type": "string", "description": "Single full SHA; mutually exclusive with sources"},
-			"branch":           map[string]any{"type": "string", "description": "Target branch"},
+			"branch":           map[string]any{"type": "string", "description": "Target branch name, e.g. main (not refs/heads/main)"},
 			"sources":          map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Sources in merge order; optional ref must match the tested branch", "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"sha"}, "properties": map[string]any{"sha": map[string]any{"type": "string"}, "ref": map[string]any{"type": "string"}}}},
 			"skip_conflicting": map[string]any{"type": "boolean", "description": "Train only: drop conflicting sources and keep their paths in the promotion reason"},
 			"prune_source":     map[string]any{"type": "boolean", "description": "Single source into the default branch only: after the promotion passed and the upstream target equals its result, delete the source branch (head still the promoted SHA) on the mirror and queue its upstream deletion. Any other outcome keeps the branch with a recorded reason, shown in promote_status prune_source and the promotion.finished event"},
