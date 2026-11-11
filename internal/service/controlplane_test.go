@@ -1675,7 +1675,7 @@ func TestDashboardRunDetailAndLogViewsAreReadOnly(t *testing.T) {
 	}
 
 	mcpDetailValue, err := control.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get",
-		json.RawMessage(`{"id":"`+enqueued.ID+`"}`))
+		json.RawMessage(`{"id":"`+enqueued.ID+`","summary":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}

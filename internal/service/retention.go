@@ -24,13 +24,19 @@ type RetentionPolicy struct {
 }
 
 type RetentionStatus struct {
-	LogsBytes      int64     `json:"logs_bytes"`
-	ArtifactsBytes int64     `json:"artifacts_bytes"`
-	FreeBytes      int64     `json:"free_bytes"`
-	DiskFloorBytes int64     `json:"disk_floor_bytes"`
-	BelowFloor     bool      `json:"below_floor"`
-	LastSweep      time.Time `json:"last_sweep,omitempty"`
-	LastError      string    `json:"last_error,omitempty"`
+	LogsBytes      int64 `json:"logs_bytes"`
+	ArtifactsBytes int64 `json:"artifacts_bytes"`
+	FreeBytes      int64 `json:"free_bytes"`
+	DiskFloorBytes int64 `json:"disk_floor_bytes"`
+	BelowFloor     bool  `json:"below_floor"`
+	// DatabaseBytes is the live database plus its write-ahead log, measured
+	// at the last sweep; backups refuse a snapshot above their size ceiling.
+	DatabaseBytes int64 `json:"database_bytes"`
+	// TimingPruned counts runs whose Workflow and step timing records the
+	// last sweep removed (older than the newest store.RunTimingRetainedRuns).
+	TimingPruned int64     `json:"timing_pruned,omitempty"`
+	LastSweep    time.Time `json:"last_sweep,omitempty"`
+	LastError    string    `json:"last_error,omitempty"`
 }
 
 // Retention shares the same protected, audited purge for timer and admin work.
@@ -160,6 +166,7 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 		status.DiskFloorBytes = r.DiskFloorBytes
 		status.FreeBytes = statfsFreeBytes(r.DataRoot)
 		status.BelowFloor = status.DiskFloorBytes > 0 && status.FreeBytes < status.DiskFloorBytes
+		status.DatabaseBytes = r.Database.DatabaseBytes()
 		r.statusMu.Lock()
 		r.status = status
 		r.statusMu.Unlock()
@@ -167,6 +174,15 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 	// Resource telemetry is independently bounded even with log/artifact
 	// retention disabled. Its sweeper uses a separate SQLite connection.
 	defer func() { resultErr = errors.Join(resultErr, r.pruneResourceUsage(ctx)) }()
+	// Run timing detail is bounded by count whatever the evidence policies say.
+	defer func() {
+		pruned, err := r.Database.PruneRunTiming(ctx, store.RunTimingRetainedRuns, r.KeepNewest)
+		status.TimingPruned = pruned
+		if store.IsTransientLockError(err) || (errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil) {
+			err = nil // contention or an exhausted pass budget; the next sweep continues
+		}
+		resultErr = errors.Join(resultErr, err)
+	}()
 	logs, err := r.Logs.UsageByRun()
 	if err != nil {
 		return err

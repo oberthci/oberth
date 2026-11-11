@@ -309,8 +309,8 @@ external busy wait may still take up to the busy timeout to return. Failed
 authority reads, including non-context database errors, fail closed with
 retryable HTTP 503. Only invalid credentials receive an invalid-token HTTP 401.
 CPU scheduling or a stuck kernel file read can still delay wall-clock return;
-cancellation is checked between bounded reads. `run_get` does not fetch pod logs; use `summary:true` when timing
-and repository details are unnecessary. This does not change artifact reads or
+cancellation is checked between bounded reads. `run_get` does not fetch pod logs and returns the summary by default; pass
+`summary:false` only when timing and repository details are needed. This does not change artifact reads or
 live log streaming.
 
 The `[burn/step] ` prefix is stripped from each line, since the step is already

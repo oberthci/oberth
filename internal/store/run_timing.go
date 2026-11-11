@@ -277,6 +277,9 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	if err != nil {
 		return value, err
 	}
+	// PruneRunTiming keeps the milestones and drops the Workflow and step
+	// records; a Workflow creation time without its record marks that.
+	pruned := created.Valid && !workflow.Valid
 	epoch, err := runTimingEpoch(ctx, s.reader(), id)
 	if err != nil {
 		return value, err
@@ -289,6 +292,10 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 		}
 	}
 	value.ClaimedAt, value.CheckoutReadyAt, value.SourceSeedStartedAt, value.SourceReadyAt, value.WorkflowCreatedAt, value.TerminalAt = nullableTime(claimed), nullableTime(checkout), nullableTime(seed), nullableTime(source), nullableTime(created), nullableTime(terminal)
+	if pruned {
+		value.Unavailable = "pruned"
+		workflow = sql.NullString{}
+	}
 	if workflow.Valid {
 		var binding model.WorkflowTiming
 		if len(workflow.String) > 256<<10 || decodeTiming(workflow.String, &binding) != nil || binding.Validate() != nil || binding.RunID != id || binding.Name != run.WorkflowName {
@@ -312,6 +319,9 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return value, err
+	}
+	if pruned {
+		return value, nil
 	}
 	if epoch == 0 {
 		rows, err = s.reader().QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM step_timings WHERE run_id=? ORDER BY ordinal,node_id`, id)

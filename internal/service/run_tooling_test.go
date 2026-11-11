@@ -30,7 +30,7 @@ func TestRunGetAcceptsPushFeedbackID(t *testing.T) {
 	}
 	for _, id := range []string{run.ID, run.ID[:8], run.ID[:12]} {
 		value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get",
-			json.RawMessage(fmt.Sprintf(`{"id":%q}`, id)))
+			json.RawMessage(fmt.Sprintf(`{"id":%q,"summary":false}`, id)))
 		if err != nil {
 			t.Fatalf("run_get(%q): %v", id, err)
 		}

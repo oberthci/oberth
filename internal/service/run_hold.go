@@ -57,9 +57,11 @@ const (
 const maxConcurrentHoldActions = 64
 
 // assistGate serializes hold actions per run and caps them installation-wide.
+// busy holds only the runs with an action in flight, so it never outgrows
+// the slot count.
 type assistGate struct {
 	mu    sync.Mutex
-	runs  map[string]*sync.Mutex
+	busy  map[string]bool
 	slots chan struct{}
 }
 
@@ -67,31 +69,31 @@ func newAssistGate(limit int) *assistGate {
 	if limit <= 0 {
 		limit = 2
 	}
-	return &assistGate{runs: map[string]*sync.Mutex{}, slots: make(chan struct{}, limit)}
+	return &assistGate{busy: map[string]bool{}, slots: make(chan struct{}, limit)}
 }
 
-// acquire takes the run's lock and one global slot without waiting: an
+// acquire takes the run's turn and one global slot without waiting: an
 // agent that races itself or a saturated installation is refused, not queued.
 func (gate *assistGate) acquire(runID string) (func(), error) {
 	gate.mu.Lock()
-	lock := gate.runs[runID]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		gate.runs[runID] = lock
-	}
-	gate.mu.Unlock()
-	if !lock.TryLock() {
+	defer gate.mu.Unlock()
+	if gate.busy[runID] {
 		return nil, refuse(ErrUnavailable, "another hold action on this run is in progress")
 	}
 	select {
 	case gate.slots <- struct{}{}:
 	default:
-		lock.Unlock()
 		return nil, refuse(ErrUnavailable, "the installation's concurrent hold action limit is reached; retry shortly")
 	}
+	gate.busy[runID] = true
+	var once sync.Once
 	return func() {
-		<-gate.slots
-		lock.Unlock()
+		once.Do(func() {
+			gate.mu.Lock()
+			delete(gate.busy, runID)
+			gate.mu.Unlock()
+			<-gate.slots
+		})
 	}, nil
 }
 
@@ -273,7 +275,7 @@ func (service *API) heldStep(ctx context.Context, run model.Run, step string) (m
 
 func (service *API) recordAssist(ctx context.Context, actor api.Actor, run model.Run, event model.RunAssistEvent) (model.Run, error) {
 	event.Actor = actor.Identity
-	updated, err := service.runAssists.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: event, Authorize: func(current model.Run) error {
+	updated, err := service.runAssists.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: event, Authorize: func(current model.Run, upstream string) error {
 		if !current.Status.Active() && event.Kind != model.RunAssistAbandon {
 			return fmt.Errorf("%w: run %s is %s", store.ErrInvalidState, shortRunID(current.ID), current.Status)
 		}
@@ -282,6 +284,12 @@ func (service *API) recordAssist(ctx context.Context, actor api.Actor, run model
 		}
 		if err := service.authorizeHoldServicer(actor, current); err != nil {
 			return err
+		}
+		// The scope view was resolved at call start; the repository's upstream
+		// is read again in this transaction, so a repository moved out of the
+		// caller's scope since then is refused.
+		if !actor.Admin && current.Actor != actor.Identity && actor.Scoped() && !actor.SeesUpstream(upstream) {
+			return refuse(ErrForbidden, "hold actions on run %s need an uplink whose scope covers its repository, or an admin", shortRunID(current.ID))
 		}
 		return nil
 	}})

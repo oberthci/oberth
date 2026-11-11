@@ -270,20 +270,23 @@ func TestRunGetSummary(t *testing.T) {
 			t.Fatalf("summary includes extra data: %s", encoded)
 		}
 	}
-	for _, suffix := range []string{"", `,"summary":false`} {
-		value, err := service.CallTool(ctx, api.Actor{Identity: "reader"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q%s}`, run.ID, suffix)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := value.(RunDetailResponse); !ok {
-			t.Fatalf("default shape changed: %T", value)
-		}
+	// The summary is the default; summary:false returns the full record.
+	value, err := service.CallTool(ctx, api.Actor{Identity: "reader"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID)))
+	if _, ok := value.(RunSummaryResponse); err != nil || !ok {
+		t.Fatalf("default shape = %T, %v; want the summary", value, err)
+	}
+	value, err = service.CallTool(ctx, api.Actor{Identity: "reader"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q,"summary":false}`, run.ID)))
+	if _, ok := value.(RunDetailResponse); err != nil || !ok {
+		t.Fatalf("summary:false shape = %T, %v; want the full record", value, err)
 	}
 	service.history = noSummaryTiming{service.history}
 	if _, err := service.CallTool(ctx, api.Actor{Identity: "reader"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q,"summary":true}`, run.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CallTool(ctx, api.Actor{Identity: "reader"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID))); err == nil {
+	if _, err := service.CallTool(ctx, api.Actor{Identity: "reader"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID))); err != nil {
+		t.Fatal("the default summary read timing", err)
+	}
+	if _, err := service.CallTool(ctx, api.Actor{Identity: "reader"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q,"summary":false}`, run.ID))); err == nil {
 		t.Fatal("test timing reader was not exercised")
 	}
 }

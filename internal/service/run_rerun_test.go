@@ -182,7 +182,7 @@ func TestRunRerunAfterTestFailurePassesAndStatusReportsNewestRun(t *testing.T) {
 	if wait := value.(WaitResponse); wait.Run.ID != rerun.ID || wait.StillRunning {
 		t.Fatalf("wait on %s = %#v, want the rerun", rerunSHA, wait.Run)
 	}
-	value, err = harness.call(rerunUplink, "run_get", map[string]any{"id": rerun.ID})
+	value, err = harness.call(rerunUplink, "run_get", map[string]any{"id": rerun.ID, "summary": false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestRunRerunKeepsOperatorReasonInAutomaticLineage(t *testing.T) {
 	harness.process(t)
 	const reason = "fixture repaired; check the same commit again"
 	response := harness.rerun(t, rerunUplink, map[string]any{"id": failed.AutoRetriedBy, "reason": reason})
-	value, err := harness.call(rerunUplink, "run_get", map[string]any{"id": response.RunID})
+	value, err := harness.call(rerunUplink, "run_get", map[string]any{"id": response.RunID, "summary": false})
 	if err != nil {
 		t.Fatal(err)
 	}

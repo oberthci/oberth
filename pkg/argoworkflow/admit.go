@@ -236,8 +236,29 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 	return problems
 }
 
+// admitRetryLimit bounds a retryStrategy's limit. A templated limit is
+// refused: its value is only known at run time, past this ceiling. So is a
+// strategy without a limit: the controller then retries without end.
+func admitRetryLimit(location string, strategy *wfv1.RetryStrategy) []error {
+	if strategy == nil {
+		return nil
+	}
+	if strategy.Limit == nil {
+		return []error{fmt.Errorf("argoworkflow: %s.limit is required (a literal integer of at most %d): without it the controller retries without end", location, MaxRetryLimit)}
+	}
+	limit, err := strconv.Atoi(strategy.Limit.String())
+	if err != nil {
+		return []error{fmt.Errorf("argoworkflow: %s.limit %q must be a literal integer of at most %d", location, strategy.Limit.String(), MaxRetryLimit)}
+	}
+	if limit > MaxRetryLimit {
+		return []error{fmt.Errorf("argoworkflow: %s.limit %d exceeds the %d ceiling", location, limit, MaxRetryLimit)}
+	}
+	return nil
+}
+
 func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	var problems []error
+	problems = append(problems, admitRetryLimit("spec.retryStrategy", workflow.Spec.RetryStrategy)...)
 	if len(workflow.Spec.Templates) == 0 {
 		problems = append(problems, errors.New("argoworkflow: spec.templates is required"))
 	}
@@ -413,12 +434,7 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.parallelism %d exceeds the %d ceiling",
 			location, *template.Parallelism, MaxParallelism))
 	}
-	if template.RetryStrategy != nil && template.RetryStrategy.Limit != nil {
-		if limit, err := strconv.Atoi(template.RetryStrategy.Limit.String()); err == nil && limit > MaxRetryLimit {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.retryStrategy.limit %d exceeds the %d ceiling",
-				location, limit, MaxRetryLimit))
-		}
-	}
+	problems = append(problems, admitRetryLimit(location+".retryStrategy", template.RetryStrategy)...)
 	problems = append(problems, admitPodSecurityContext(location+".securityContext", template.SecurityContext)...)
 	problems = append(problems, admitVolumes(location+".volumes", template.Volumes)...)
 	problems = append(problems, admitContainers(location, template, policy)...)

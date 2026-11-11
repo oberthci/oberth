@@ -93,7 +93,7 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	if _, err := f.call(scopedActor, "run_get", map[string]any{"id": f.runs["codeberg"][0].ID}); err == nil || reader.stepCalls != 0 {
 		t.Fatal("hidden run reached resource storage", err)
 	}
-	value, err := f.call(scopedActor, "run_get", map[string]any{"id": run.ID})
+	value, err := f.call(scopedActor, "run_get", map[string]any{"id": run.ID, "summary": false})
 	if err != nil {
 		t.Fatal(err)
 	}

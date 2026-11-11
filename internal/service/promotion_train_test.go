@@ -288,3 +288,23 @@ func TestPromotionTrainScopedGrantAdmissionNeedsEverySource(t *testing.T) {
 		}
 	}
 }
+
+// The promote target is a branch name: a full ref or an invalid name is
+// refused before anything is admitted or audited.
+func TestPromoteRefusesARefOrInvalidTarget(t *testing.T) {
+	for target, want := range map[string]string{"refs/heads/main": `name the target branch, e.g. "main"`, "-main": "promotion target"} {
+		f := newControlFixture(t)
+		sha := strings.Repeat("1", 40)
+		seedGreenPromotionCandidate(t, f, sha)
+		c := f.api(t)
+		body := fmt.Sprintf(`{"repo":%q,"sha":%q,"branch":%q}`, f.repo.Name, sha, target)
+		_, err := c.CallTool(t.Context(), api.Actor{Identity: "admin@host", Admin: true}, "promote", json.RawMessage(body))
+		if !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("target %q: %v", target, err)
+		}
+		page, err := f.store.ListPromotions(t.Context(), model.PromotionListFilter{})
+		if err != nil || len(page.Promotions) != 0 {
+			t.Fatalf("target %q admitted: %+v %v", target, page, err)
+		}
+	}
+}

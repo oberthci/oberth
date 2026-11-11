@@ -76,7 +76,7 @@ func TestInPodCommandOffPodNamesWhereToRunIt(t *testing.T) {
 		if !errors.As(err, &hint) {
 			t.Fatalf("%s: err = %v", command, err)
 		}
-		for _, want := range []string{"oberth " + command + " reads the server database", "kubectl exec -n oberth deploy/oberth -- oberth " + command, remote} {
+		for _, want := range []string{"oberth " + command + " reads the server database", "kubectl exec -n <namespace> deploy/<release> -- oberth " + command, "kubectl exec -n oberth deploy/oberth -- oberth " + command, remote} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("%s: message omits %q:\n%v", command, want, err)
 			}

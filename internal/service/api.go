@@ -521,7 +521,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "run_get":
 		var arguments struct {
 			ID      string `json:"id"`
-			Summary bool   `json:"summary"`
+			Summary *bool  `json:"summary"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -529,7 +529,9 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if strings.TrimSpace(arguments.ID) == "" {
 			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 		}
-		return service.readRun(ctx, actor, arguments.ID, arguments.Summary)
+		// The summary is the default; the full record (timing, diagnostics,
+		// the repository record) only on an explicit summary:false.
+		return service.readRun(ctx, actor, arguments.ID, arguments.Summary == nil || *arguments.Summary)
 	case "run_resources":
 		return service.readRunResources(ctx, raw)
 	case "run_retry":
@@ -2573,6 +2575,9 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if strings.TrimSpace(target) == "" {
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion target is required")
 	}
+	if err := validatePromotionTarget(target); err != nil {
+		return model.Promotion{}, err
+	}
 	if !validOID(selector) {
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion requires a full SHA")
 	}
@@ -2585,6 +2590,19 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 		return model.Promotion{}, err
 	}
 	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion, priority...)
+}
+
+// validatePromotionTarget accepts a branch name only. A full ref was admitted
+// and audited before, then failed when the merge was prepared, and again on
+// every retry.
+func validatePromotionTarget(target string) error {
+	if strings.HasPrefix(target, "refs/") {
+		return refuse(ErrInvalidInput, "promotion target %q is a ref; name the target branch, e.g. %q", target, strings.TrimPrefix(target, "refs/heads/"))
+	}
+	if err := gitcache.ValidateBranch(target); err != nil {
+		return refuse(ErrInvalidInput, "promotion target: %v", err)
+	}
+	return nil
 }
 
 // admitPromotion authorizes and durably admits a green branch candidate or

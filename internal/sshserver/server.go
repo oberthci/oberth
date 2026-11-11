@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -488,19 +489,47 @@ func gitFailureText(err error) (text string, internal bool) {
 	}
 	var delivery *gitcache.ReceiveDeliveryError
 	if !errors.As(err, &delivery) {
+		var blocked *gitcache.ReceiveBlockedError
+		if errors.As(err, &blocked) {
+			cause := err
+			if blocked.Err != nil {
+				cause = blocked.Err
+			}
+			return fmt.Sprintf("oberth: push refused: an earlier accepted push to %s could not be replayed: %s\n"+
+				"oberth: nothing from this push was applied; an admin runs: oberth outbox show %s\n",
+				blocked.Repo, boundedCause(cause), blocked.Repo), true
+		}
+		// Short one-line failures are shown as they are; anything longer or
+		// carrying control characters is cut to one bounded line and the
+		// whole chain goes to the server log.
+		if text := boundedCause(err); text != err.Error() {
+			return "oberth: " + text + "\n", true
+		}
 		return "oberth: " + err.Error() + "\n", false
 	}
 	cause := boundedCause(delivery.Err)
+	record := receiveRecordID(delivery.EventID)
 	if delivery.Earlier {
 		return fmt.Sprintf("oberth: push refused: an earlier accepted push to %s (%s, record %s) has not created its run yet: %s\n"+
 			"oberth: nothing from this push was applied. Push again to retry that delivery first; if it keeps failing,\n"+
 			"oberth: an admin runs: oberth outbox show %s, then oberth outbox retry %s (or abandon it with --id and --reason)\n",
-			delivery.Repo, delivery.Ref, delivery.EventID, cause, delivery.Repo, delivery.Repo), true
+			delivery.Repo, delivery.Ref, record, cause, delivery.Repo, delivery.Repo), true
 	}
 	return fmt.Sprintf("oberth: refs accepted, but creating the run for %s failed: %s\n"+
 		"oberth: the push is kept (record %s) and is delivered again by the next push to %s or a server restart;\n"+
 		"oberth: an admin can inspect it with: oberth outbox show %s, and retry it with: oberth outbox retry %s\n",
-		delivery.Ref, cause, delivery.EventID, delivery.Repo, delivery.Repo, delivery.Repo), true
+		delivery.Ref, cause, record, delivery.Repo, delivery.Repo, delivery.Repo), true
+}
+
+// receiveRecordID is the record ID oberth outbox abandon --id takes: the
+// event ID without its ":<update index>" suffix.
+func receiveRecordID(eventID string) string {
+	if index := strings.LastIndexByte(eventID, ':'); index > 0 {
+		if _, err := strconv.Atoi(eventID[index+1:]); err == nil {
+			return eventID[:index]
+		}
+	}
+	return eventID
 }
 
 // boundedCause is the innermost readable reason on one line, at most 200

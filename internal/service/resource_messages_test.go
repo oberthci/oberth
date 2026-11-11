@@ -70,11 +70,11 @@ func TestResourceCoverageScopesBeforeReadingMessageMetadata(t *testing.T) {
 	}
 	defer func() { _ = service.Shutdown(t.Context()) }()
 	actor := api.Actor{Identity: "repo-01", Scope: []string{"repo-01"}}
-	raw, _ := json.Marshal(map[string]any{"id": hidden})
+	raw, _ := json.Marshal(map[string]any{"id": hidden, "summary": false})
 	if _, err := service.CallTool(t.Context(), actor, "run_get", raw); err == nil || reader.calls != 0 {
 		t.Fatal("hidden run reached resource metadata")
 	}
-	raw, _ = json.Marshal(map[string]any{"id": visible})
+	raw, _ = json.Marshal(map[string]any{"id": visible, "summary": false})
 	if _, err := service.CallTool(t.Context(), actor, "run_get", raw); err != nil {
 		t.Fatal(err)
 	}

@@ -116,9 +116,12 @@ A leaf is held only when it has no credentials and no identity of its own:
 
 - a single-main `container` or `script` template (no DAG, steps,
   ContainerSet, resource, suspend, data, HTTP or plugin template);
-- no authored `retryStrategy`, and no `templateDefaults.retryStrategy` in
-  the document (an injected strategy would silently replace the default, so
-  such a document never holds);
+- no authored `retryStrategy`, and no `templateDefaults.retryStrategy` or
+  workflow-wide `spec.retryStrategy` in the document (an injected strategy
+  would silently replace the default, so such a document never holds);
+- no `timeout` on the template or in `templateDefaults`: Argo resets the
+  Pod deadline to it after the hold's patch, so a parked attempt would die
+  at the timeout;
 - no `oberth secretstore exec` or envconsul command, no
   `oberth.ci/release-wif-role`, no per-step `serviceAccountName`, no
   `automountServiceAccountToken: true`, no token, secret or WIF volume

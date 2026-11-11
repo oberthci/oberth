@@ -3,7 +3,7 @@
     "oberth": {
       "type": "http",
       "url": "${OBERTH_MCP_URL:-https://localhost:30443/mcp}",
-      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/scripts/auth-header",
+      "headersHelper": "\"${CLAUDE_PLUGIN_ROOT}/scripts/auth-header\"",
       "timeout": 630000
     }
   }

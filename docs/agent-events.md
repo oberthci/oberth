@@ -174,7 +174,7 @@ unaffected.
   `agentEvents.syncRetention` intervals. A scoped uplink sees only its own
   runs.
 - `promote {..., prune_source: true}`: see below.
-- `run_get` and `run_get {summary: true}` include `retry_hint`.
+- `run_get` (summary by default) and `run_get {summary: false}` include `retry_hint`.
 
 ## Safe land: promote with prune_source
 

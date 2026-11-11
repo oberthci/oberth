@@ -46,7 +46,7 @@ func (service *API) prepareEventsWait(ctx context.Context, actor api.Actor, raw 
 		return nil, err
 	}
 	if arguments.Limit < 0 || arguments.Limit > maxEventPage {
-		return nil, fmt.Errorf("%w: limit is 1..%d", ErrInvalidInput, maxEventPage)
+		return nil, fmt.Errorf("%w: limit is 1..%d (0 or omitted: the default page)", ErrInvalidInput, maxEventPage)
 	}
 	if len(arguments.RunIDs) > maxEventsWaitRuns {
 		return nil, fmt.Errorf("%w: at most %d run_ids", ErrInvalidInput, maxEventsWaitRuns)

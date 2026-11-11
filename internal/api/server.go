@@ -158,6 +158,7 @@ type Server struct {
 	mcpHeartbeatInterval  time.Duration
 	mcpStreamWriteTimeout time.Duration
 	sessions              *mcpSessions
+	longPolls             longPollLimiter
 	mux                   *http.ServeMux
 }
 
@@ -906,6 +907,11 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	}
 	body := append(raw, '\n')
 	writer.Header().Set("Content-Type", "application/json")
+	if writer.Header().Get("Cache-Control") == "" {
+		// Per-caller views: no shared cache may keep them, and a private one
+		// revalidates against the ETag before every reuse.
+		writer.Header().Set("Cache-Control", "private, no-cache")
+	}
 	if status == http.StatusOK {
 		// The digest is of the shape actually sent, so the snake_case-only and
 		// Go-field-names responses of one view never share a validator.

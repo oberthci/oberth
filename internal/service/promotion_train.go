@@ -79,9 +79,8 @@ func (service *API) promoteTrain(ctx context.Context, actor api.Actor, args prom
 	if _, ok := service.promotions.(promotionTrainPlanner); !ok {
 		return model.Promotion{}, refuse(ErrUnavailable, "promotion train records")
 	}
-	args.Branch = strings.TrimPrefix(args.Branch, "refs/heads/")
-	if err := gitcache.ValidateBranch(args.Branch); err != nil {
-		return model.Promotion{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+	if err := validatePromotionTarget(args.Branch); err != nil {
+		return model.Promotion{}, err
 	}
 	if len(args.Sources) == 0 || len(args.Sources) > model.MaxPromotionSources {
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion train requires 1..32 sources")

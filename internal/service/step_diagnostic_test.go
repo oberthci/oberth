@@ -35,7 +35,7 @@ func TestRunGetRetainsBoundTerminationAndUnavailableHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value, err := f.api(t).CallTool(ctx, api.Actor{Identity: "reader@host"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID)))
+	value, err := f.api(t).CallTool(ctx, api.Actor{Identity: "reader@host"}, "run_get", json.RawMessage(fmt.Sprintf(`{"id":%q,"summary":false}`, run.ID)))
 	if err != nil {
 		t.Fatal(err)
 	}

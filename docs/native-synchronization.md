@@ -115,14 +115,14 @@ that key for up to the step budget plus two `assist.holdTTL`.
 
 ## Security
 
-- A semaphore reads one integer from a ConfigMap key in the run's namespace,
-  through the Argo controller's own RBAC (its single-namespace Role grants
-  `configmaps` get/list/watch). The ConfigMap name is an argument to the
-  controller, not a mount or an environment variable; no ConfigMap content
-  reaches a Pod through `synchronization`.
-- A `namespace` override on a lock refers to a ConfigMap the controller can
-  only read where its Role allows; with the installer's single-namespace
-  controller that is the pipeline namespace alone.
+- A semaphore reads one integer from a key of the `oberth-sync-limits`
+  ConfigMap in the run's namespace, through the Argo controller's own RBAC
+  (its single-namespace Role grants `configmaps` get/list/watch). Admission
+  refuses any other ConfigMap, a `namespace` override and a `database`
+  semaphore: the controller copies a value it cannot parse into the
+  Workflow's status message, so another ConfigMap key would be readable
+  through a run. No ConfigMap content reaches a Pod through
+  `synchronization`.
 - A mutex is a name. A repository that names another repository's lock delays
   it, bounded by its own `activeDeadlineSeconds`; the former shared
   concurrency groups allowed the same. The reason line names the lock so this

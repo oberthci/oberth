@@ -187,3 +187,31 @@ func TestReservedRefusalNamesTheFix(t *testing.T) {
 		t.Fatalf("refusal must say how to fix it, got %v", err)
 	}
 }
+
+// A semaphore limit is read only from oberth-sync-limits in the Workflow's
+// namespace: the controller echoes an unparsable value into the status, so
+// another ConfigMap (or namespace, or a database) would leak through a run.
+func TestAdmitRefusesSemaphoresOutsideTheSyncLimits(t *testing.T) {
+	for name, semaphore := range map[string]string{
+		"other ConfigMap": "      - configMapKeyRef:\n          name: app-settings\n          key: password\n",
+		"other namespace": "      - configMapKeyRef:\n          name: oberth-sync-limits\n          key: kvm\n        namespace: kube-system\n",
+		"database":        "      - database:\n          key: kvm\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := reservedBase + "  synchronization:\n    semaphores:\n" + semaphore + "  templates:" + reservedLeaf
+			refuse(t, document, Policy{}, "semaphores[0] is refused")
+			template := reservedBase + "  templates:" + reservedLeaf + "      synchronization:\n        semaphores:\n" + indent(semaphore, "    ")
+			refuse(t, template, Policy{}, "semaphores[0] is refused")
+		})
+	}
+}
+
+func indent(text, prefix string) string {
+	lines := strings.SplitAfter(text, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "")
+}

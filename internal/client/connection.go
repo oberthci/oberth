@@ -251,14 +251,14 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 		}
 		connection.Token = token
 	case filesTrust != nil:
-		return connection, fmt.Errorf("no credential for %s: the client files were not read: %w", connection.BaseURL, filesTrust)
+		return connection, fmt.Errorf("no credential for %s: the client files were not read: %w", DisplayAddress(connection.BaseURL), filesTrust)
 	case !filesServer && rootErr == nil && (regularFile(filepath.Join(root, "token")) != "" || ReadConfigEnv(filepath.Join(root, "env"))["OBERTH_TOKEN_COMMAND"] != ""):
 		saved := "names no server address"
 		if filesAddress != "" {
-			saved = "belongs to " + filesAddress
+			saved = "belongs to " + DisplayAddress(filesAddress)
 		}
 		return connection, fmt.Errorf("no credential for %s: the token saved in ~/.config/oberth %s and is never sent to another server; "+
-			"pass --token-file, or set OBERTH_TOKEN or OBERTH_TOKEN_COMMAND, for this address", connection.BaseURL, saved)
+			"pass --token-file, or set OBERTH_TOKEN or OBERTH_TOKEN_COMMAND, for this address", DisplayAddress(connection.BaseURL), saved)
 	default:
 		return connection, errNoCredential
 	}
@@ -266,10 +266,11 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 }
 
 // TrustClientFiles refuses the client files when someone other than the
-// user can change them: the directory, env, mcp.json or token is not owned
-// by the user, or is writable by its group or by others. Missing files pass.
+// user can change them: the directory, env, mcp.json, token or ca.crt is not
+// owned by the user, or is writable by its group or by others. Missing files
+// pass.
 func TrustClientFiles(root string) error {
-	for _, path := range []string{root, filepath.Join(root, "env"), filepath.Join(root, "mcp.json"), filepath.Join(root, "token")} {
+	for _, path := range []string{root, filepath.Join(root, "env"), filepath.Join(root, "mcp.json"), filepath.Join(root, "token"), filepath.Join(root, "ca.crt")} {
 		if _, err := os.Lstat(path); err != nil {
 			continue
 		}
@@ -278,6 +279,23 @@ func TrustClientFiles(root string) error {
 		}
 	}
 	return nil
+}
+
+// DisplayAddress is an address as messages print it: any user information
+// (a password among it) is dropped, so a refusal never echoes a credential.
+func DisplayAddress(address string) string {
+	scheme, rest, found := strings.Cut(address, "://")
+	if !found {
+		return address
+	}
+	authority, path, _ := strings.Cut(rest, "/")
+	if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+		authority = authority[at+1:]
+	}
+	if path != "" || strings.Contains(rest, "/") {
+		return scheme + "://" + authority + "/" + path
+	}
+	return scheme + "://" + authority
 }
 
 // SavedServer returns the address the client files in root name: the env

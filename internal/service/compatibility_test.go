@@ -12,6 +12,7 @@ func TestRunIDCompatibilityAliasesUseScopedResolution(t *testing.T) {
 	f := newScopeFixture(t)
 	run := f.runs["github"][0]
 	for _, args := range []map[string]any{{"id": run.ID}, {"run_id": run.ID}, {"id": run.ID, "run_id": run.ID}} {
+		args["summary"] = false
 		value, err := f.call(scopedActor, "run_get", args)
 		if err != nil {
 			t.Fatal(err)
