@@ -11,6 +11,12 @@ import (
 // declared budget because Pod start-up consumed the rest.
 const StartupDeadlineReasonPrefix = "Startup deadline: "
 
+const NodeRebootReasonPrefix = "Node reboot: "
+
+func IsNodeRebootReason(message string) bool {
+	return strings.HasPrefix(message, NodeRebootReasonPrefix)
+}
+
 // IsStartupDeadlineReason reports the engine's startup-deadline reason.
 func IsStartupDeadlineReason(message string) bool {
 	return strings.HasPrefix(message, StartupDeadlineReasonPrefix)
@@ -30,6 +36,7 @@ type RunObservedStep struct {
 	// StartupDeadline is set only from owned Pod deadline evidence that the
 	// step command did not exhaust its declared budget (#1499).
 	StartupDeadline bool       `json:"startup_deadline,omitempty"`
+	NodeReboot      bool       `json:"node_reboot,omitempty"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	FinishedAt      *time.Time `json:"finished_at,omitempty"`
 	Stage           string     `json:"burn"`
@@ -103,7 +110,7 @@ func IsInfrastructureRunFailure(status RunStatus, phase, failedStep string) bool
 }
 
 // EvictionOnly requires a complete terminal snapshot whose every failed attempt
-// has a kubelet eviction or startup-deadline (#1499) cause. Unknown, timed-out
+// has a kubelet eviction, startup-deadline (#1499) or node-reboot cause. Unknown, timed-out
 // and earlier real failures cannot be hidden by a later eviction of the same
 // logical step.
 func (o *RunTerminalObservation) EvictionOnly() bool {
@@ -127,7 +134,7 @@ func (o *RunTerminalObservation) EvictionOnly() bool {
 
 // Infrastructure reports owned evidence that the attempt failed for a node or
 // Pod start-up cause rather than for its own command.
-func (s RunObservedStep) Infrastructure() bool { return s.Evicted || s.StartupDeadline }
+func (s RunObservedStep) Infrastructure() bool { return s.Evicted || s.StartupDeadline || s.NodeReboot }
 
 // EvictedAttempt binds retained failure evidence to its exact observed attempt.
 // It does not erase step status, logs, exit code or diagnostic history.

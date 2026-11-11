@@ -21,10 +21,15 @@ func evictionResult(name string, at time.Time) JobResult {
 }
 
 func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
-	for _, kind := range []string{"eviction", "storage limit", "real failure", "earlier failure", "other step", "unknown attempt", "incomplete", "wrong workflow", "empty workflow", "already retried"} {
+	for _, kind := range []string{"eviction", "reboot", "reboot earlier failure", "reboot mixed observation", "storage limit", "real failure", "earlier failure", "other step", "unknown attempt", "incomplete", "wrong workflow", "empty workflow", "already retried"} {
 		t.Run(kind, func(t *testing.T) {
 			at := time.Now().UTC()
 			result := evictionResult("workflow", at)
+			if strings.HasPrefix(kind, "reboot") {
+				result.Error = model.NodeRebootReasonPrefix + "node worker restarted"
+				result.TerminalObservation.Steps[0].Evicted = false
+				result.TerminalObservation.Steps[0].NodeReboot = true
+			}
 			logs, err := runlog.Open(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -37,9 +42,12 @@ func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
 			switch kind {
 			case "real failure":
 				result.TerminalObservation.Steps[0].Evicted = false
-			case "earlier failure":
+			case "earlier failure", "reboot earlier failure":
 				old := at.Add(-time.Minute)
 				event.StartedAt, event.FinishedAt = &old, &old
+			case "reboot mixed observation":
+				result.TerminalObservation.Nodes++
+				result.TerminalObservation.Steps = append(result.TerminalObservation.Steps, model.RunObservedStep{Stage: "ci", Step: "real", Status: model.StepFailed, Started: true, StartedAt: &at, FinishedAt: &at})
 			case "other step":
 				event.Step = "unit"
 			case "unknown attempt":
@@ -60,7 +68,7 @@ func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := (&Scheduler{logs: logs}).infrastructureAutoRetryEligible(run, result)
-			if got != (kind == "eviction") {
+			if got != (kind == "eviction" || kind == "reboot") {
 				t.Fatalf("retry=%v", got)
 			}
 		})

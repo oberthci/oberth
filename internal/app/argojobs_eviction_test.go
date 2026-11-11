@@ -27,3 +27,18 @@ func TestArgoResultPreservesEvictionProofAndFailedStep(t *testing.T) {
 		t.Fatal("ambiguous attempt became an eviction")
 	}
 }
+
+func TestArgoResultPreservesRebootAndSkippedPublication(t *testing.T) {
+	at := time.Now().UTC()
+	failed := argojob.StepResult{Stage: "ci", Step: "test", Status: runprogress.StepFailed, ExitCode: 255, StartedAt: &at, FinishedAt: &at, InfrastructureReason: model.NodeRebootReasonPrefix + "node worker restarted"}
+	skipped := argojob.StepResult{Stage: "publish", Step: "push", Status: runprogress.StepSkipped, StartedAt: &at, FinishedAt: &at}
+	c := argojob.Completion{Name: "workflow", Terminal: true, ObservationComplete: true, ObservedNodes: 3, Infrastructure: true, Reason: failed.InfrastructureReason, Steps: []argojob.StepResult{failed, skipped}, ReplayAttempts: []argojob.StepResult{failed, skipped}}
+	result := (&ArgoJobs{}).result(c)
+	if result.Phase != "infrastructure" || !result.TerminalObservation.EvictionOnly() || !result.TerminalObservation.Steps[0].NodeReboot || result.TerminalObservation.Steps[1].Started {
+		t.Fatalf("evidence: %+v", result.TerminalObservation)
+	}
+	c.Steps, c.ReplayAttempts = []argojob.StepResult{skipped}, []argojob.StepResult{skipped}
+	if result = (&ArgoJobs{}).result(c); result.ObservedStepStart {
+		t.Fatal("skipped node timestamp counted as execution")
+	}
+}

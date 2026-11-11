@@ -1,11 +1,12 @@
 # Infrastructure recovery and the run list
 
-A branch run can receive **one** automatic retry for an eligible infrastructure
-or workflow-level `job` failure without a failed step, matching the failure
+A branch run can receive a bounded number of automatic retries for an eligible infrastructure
+or workflow-level `job` failure without a code failure, matching the failure
 classes accepted by `run_retry`. Trusted-policy-refresh deadlines and lost
 executors qualify once cleanup is settled. Release/tag, promotion, plan, apply,
-user/admin cancellation and failed steps never qualify, including
-infrastructure-classified step failures. Execution deadlines qualify only before
+user/admin cancellation and command/test failures never qualify. Retained failed
+steps qualify only with complete owned eviction, startup-deadline or reboot
+evidence for every failed attempt. Execution deadlines qualify only before
 any step started or passed. The administrator
 setting `autoRetryInfrastructureBudget` defaults to two retries per lineage.
 See [configuration and upgrade behavior](infrastructure-retries.md).
@@ -34,12 +35,12 @@ queue priority, while receiving a new unique history sequence. The existing
 reason line and audit say `automatic retry of <id> after infrastructure failure:
 <reason>`; the retry is not inferred from stderr or client-side timeouts.
 
-The one-retry marker survives restart requeue and the existing `run_rerun` replay lineage. Human reasons carry its fast
+The spent retry budget survives restart requeue and the existing `run_rerun` replay lineage. Human reasons carry its fast
 read-side projection; immutable `run.auto-retry-lineage` receipts preserve it if
 cancellation/supersession replaces the human reason. Explicit `run_retry` creates
 a fresh manual request at the normal queue position, without inheriting the
-automatic reason or lineage. That request can receive its own single eligible
-automatic retry. A separate new push is also independent.
+automatic reason or lineage. That request gets its own bounded automatic retry
+budget. A separate new push is also independent.
 Retry creation is atomic with failure, so failed audit/enqueue writes leave no
 partial retry or amber claim. Transient first-attempt infrastructure failures
 that were retried do not create a CI-red issue; an exhausted attempt retains the

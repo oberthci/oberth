@@ -30,6 +30,7 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	pods, snapshotReason := controller.timingPodSnapshot(readCtx, workflow)
+	reboots := controller.nodeRebootReasons(readCtx, workflow, pods, restartedAt)
 	for i := range completion.Steps {
 		step := &completion.Steps[i]
 		node, ok := workflow.Status.Nodes[step.NodeID]
@@ -76,6 +77,8 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 				step.InfrastructureReason = reason
 			} else if reason := podStartupDeadlineReason(workflow, node, pod, step.Stage, step.Step); reason != "" {
 				step.InfrastructureReason = reason
+			} else if reason := reboots[step.NodeID]; reason != "" {
+				step.InfrastructureReason = reason
 			}
 		}
 		if adopted && ok && step.StartedAt != nil && !step.StartedAt.After(restartedAt) && !step.AttemptAmbiguous && reason != "binding-mismatch" && reason != "ambiguous-attempt" {
@@ -96,6 +99,8 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 			} else if reason := podInfrastructureReason(workflow, node, pods[step.PodName]); reason != "" {
 				step.InfrastructureReason = reason
 			} else if reason := podStartupDeadlineReason(workflow, node, pods[step.PodName], step.Stage, step.Step); reason != "" {
+				step.InfrastructureReason = reason
+			} else if reason := reboots[step.NodeID]; reason != "" {
 				step.InfrastructureReason = reason
 			}
 		}

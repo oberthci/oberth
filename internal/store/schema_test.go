@@ -976,6 +976,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"issue_trailer_publications",
 		"issues",
 		"kubevirt_grants",
+		"node_boot_observations",
 		"pending_token_credentials",
 		"pod_resource_dispositions",
 		"priority_grants",
@@ -1147,6 +1148,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	})
 
 	expectedColumns := map[string][]string{
+		"node_boot_observations":         {"run_id", "workflow_name", "workflow_uid", "node_id", "pod_uid", "node_name", "node_uid", "boot_id", "started_at", "observed_at", "changed_at"},
 		"queue_cap":                      {"singleton", "max_not_started"},
 		"deferred_branch_receives":       {"sequence", "event_id", "run_spec", "reason"},
 		"release_wif_overrides":          {"repo", "revoked", "grant_json", "reason", "actor", "updated_at"},

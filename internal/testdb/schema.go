@@ -273,6 +273,8 @@ DELETE FROM schema_migrations WHERE id='20261111190000-client-certificates';
 
 // PostCanonicalPrioritiesDowngrade removes the receipt in disposable fixtures.
 const PostCanonicalPrioritiesDowngrade = `
+DROP TABLE IF EXISTS node_boot_observations;
+DELETE FROM schema_migrations WHERE id='20261111220000-node-boot-observations';
 DROP INDEX IF EXISTS runs_ref_prefix_idx;
 DELETE FROM schema_migrations WHERE id='20261111201000-run-ref-prefix-index';
 DELETE FROM schema_migrations WHERE id='20261111200000-canonical-priorities';

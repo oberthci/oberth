@@ -34,6 +34,9 @@ func failedRunDisplayReason(run model.Run) string {
 	if reason := evictionDisplayReason(run); reason != "" {
 		return reason
 	}
+	if reason := nodeRebootDisplayReason(run); reason != "" {
+		return reason
+	}
 	if run.FailureCause != "" {
 		return listFailureCause(run)
 	}
@@ -80,6 +83,13 @@ func failedRunDisplayReason(run model.Run) string {
 		return phase + " error"
 	}
 	return phase + " error: " + run.Error
+}
+
+func nodeRebootDisplayReason(run model.Run) string {
+	if !model.IsInfrastructureRunFailure(run.Status, run.Phase, run.FailedStep) || !model.IsNodeRebootReason(run.Error) || len(run.Error) > 1024 {
+		return ""
+	}
+	return strings.TrimPrefix(run.Error, model.NodeRebootReasonPrefix)
 }
 
 // Persisted structured causes retain their full stage/step identity. Project

@@ -20,3 +20,4 @@
 20261111190000-client-certificates
 20261111200000-canonical-priorities
 20261111201000-run-ref-prefix-index
+20261111220000-node-boot-observations

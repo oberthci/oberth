@@ -133,6 +133,9 @@ func buildArgoEngine(
 	if recorder, ok := auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}
+	if recorder, ok := auditor.(argojob.NodeBootRecorder); ok {
+		controller.WithNodeBootRecorder(recorder)
+	}
 	if options.argoResourceSamplerConfig != "" {
 		samplerConfig, err := resourcesampler.ReadConfig(options.argoResourceSamplerConfig)
 		if err != nil {

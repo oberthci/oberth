@@ -255,6 +255,22 @@ type targetCore struct {
 	clients *TargetClients
 }
 
+func (k *targetCore) Nodes() typedcore.NodeInterface {
+	return &targetNodes{NodeInterface: k.CoreV1Interface.Nodes(), clients: k.clients}
+}
+
+type targetNodes struct {
+	typedcore.NodeInterface
+	clients *TargetClients
+}
+
+func (n *targetNodes) Get(ctx context.Context, name string, options metav1.GetOptions) (*corev1.Node, error) {
+	if err := n.clients.verifyCluster(ctx); err != nil {
+		return nil, err
+	}
+	return n.NodeInterface.Get(ctx, name, options)
+}
+
 func (k *targetCore) Pods(namespace string) typedcore.PodInterface {
 	return &targetPods{PodInterface: k.CoreV1Interface.Pods(namespace), clients: k.clients, namespace: namespace}
 }
