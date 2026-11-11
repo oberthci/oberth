@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 	"time"
 
@@ -21,8 +20,6 @@ import (
 // target contains the promotion's result, on that result commit, and never
 // with force. A transient upstream failure is retried on the publication
 // retry schedule; every other outcome is recorded as failed with a reason.
-
-var releaseVersionTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+`)
 
 type annotatedTagPublisher interface {
 	PublishAnnotatedTag(context.Context, string, string, string, string) (string, error)
@@ -43,13 +40,13 @@ func (service *API) checkTagAfter(ctx context.Context, actor api.Actor, argument
 	if err := gitcache.ValidateTag(tag.Name); err != nil || strings.HasPrefix(tag.Name, "refs/") {
 		return refuse(ErrInvalidInput, "tag_after name %q is not a valid tag name (no refs/tags/ prefix)", tag.Name)
 	}
-	if releaseVersionTag.MatchString(tag.Name) {
+	if model.IsReleaseVersionTag(tag.Name) {
 		return refuse(ErrInvalidInput, "tag_after refuses release-version names; push the release tag through Oberth to run release CI")
 	}
 	if strings.TrimSpace(tag.Message) == "" || len(tag.Message) > store.MaxPromotionTagMessage || strings.ContainsRune(tag.Message, 0) {
 		return refuse(ErrInvalidInput, "tag_after message is required, at most %d bytes", store.MaxPromotionTagMessage)
 	}
-	if _, ok := service.git.(annotatedTagPublisher); !ok || service.agentEvents == nil {
+	if _, ok := service.git.(annotatedTagPublisher); !ok || service.agentEvents == nil || service.tags == nil || service.tags.accepted == nil {
 		return refuse(ErrUnavailable, "tag_after")
 	}
 	sha := arguments.SHA
@@ -59,6 +56,11 @@ func (service *API) checkTagAfter(ctx context.Context, actor api.Actor, argument
 	repository, _, err := service.resolvePromotionSource(ctx, arguments.Repo, sha)
 	if err != nil {
 		return err
+	}
+	if release, err := service.tags.isReleaseTag(ctx, repository, tag.Name); err != nil {
+		return err
+	} else if release {
+		return refuse(ErrInvalidInput, "tag_after refuses administrator release routes")
 	}
 	if reader, ok := service.git.(mirrorTagReader); ok {
 		if existing, err := reader.TagSHA(ctx, service.cacheInputFor(ctx, repository), tag.Name); err == nil && existing != "" {
@@ -136,6 +138,20 @@ func (service *API) decidePromotionTag(ctx context.Context, promotion model.Prom
 		return failed("repository unavailable; tag %s not pushed", request.Name)
 	}
 	input := service.cacheInputFor(ctx, repository)
+	// The receive and run commit together. If settlement crashed afterward,
+	// reuse that durable outcome even when upstream branches have since moved.
+	if service.tags != nil && service.tags.accepted != nil {
+		event, readErr := service.tags.accepted.ReceiveEvent(ctx, "promotion-tag:"+promotion.ID)
+		if readErr == nil {
+			if event.RepoID != promotion.RepoID || event.Actor != request.Actor || event.RefKind != model.RefTag || event.Ref != request.Name || event.Outcome != "queued" || event.RunID == "" || !sameOID(event.CommitSHA, promotion.ResultSHA) || !validOID(event.ObjectSHA) {
+				return failed("tag CI receipt does not match the promotion")
+			}
+			return model.PromotionTagPushed, fmt.Sprintf("pushed annotated tag %s; CI run %s queued", request.Name, event.RunID), event.ObjectSHA, true, false
+		}
+		if !errors.Is(readErr, store.ErrNotFound) {
+			return model.PromotionTagPending, "tag CI receipt unavailable", "", false, true
+		}
+	}
 	target := strings.TrimPrefix(promotion.TargetRef, "refs/heads/")
 	upstream, exists, err := remote.RemoteRef(ctx, input, "refs/heads/"+target)
 	if err != nil {
@@ -157,6 +173,16 @@ func (service *API) decidePromotionTag(ctx context.Context, promotion model.Prom
 	if !verified {
 		return failed("upstream %s is not the promotion result and no longer contains it; tag %s not pushed", target, request.Name)
 	}
+	if service.tags == nil {
+		return failed("tag CI admission is unavailable; tag %s not pushed", request.Name)
+	}
+	push, err := service.tags.PrepareTagCI(ctx, TagPush{EventID: "promotion-tag:" + promotion.ID, Repository: input, Tag: request.Name, Actor: request.Actor}, promotion.ResultSHA)
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) || errors.Is(err, ErrReleaseUnreachable) || errors.Is(err, store.ErrRepositoryArchived) {
+			return failed("tag CI admission refused: %s", boundedText(err.Error(), agentEventDataErrorLength))
+		}
+		return model.PromotionTagPending, "tag CI preflight unavailable", "", false, true
+	}
 	err = auditedGitMutation(ctx, service.auditor, request.Actor, "promotion.tag_after.push", "promotion", promotion.ID,
 		map[string]any{"tag": request.Name, "commit": promotion.ResultSHA, "target": target, "observed_target": upstream}, func() error {
 			object, err = publisher.PublishAnnotatedTag(ctx, input, request.Name, promotion.ResultSHA, request.Message)
@@ -164,8 +190,16 @@ func (service *API) decidePromotionTag(ctx context.Context, promotion model.Prom
 		})
 	switch {
 	case err == nil:
-		return model.PromotionTagPushed, fmt.Sprintf("pushed annotated tag %s (object %s) on %s after verifying upstream %s contains the promotion result",
-			request.Name, shortSHA(object), shortSHA(promotion.ResultSHA), target), object, true, false
+		push.NewOID = object
+		admitted, admitErr := service.tags.Tag(ctx, push)
+		if admitErr != nil {
+			return model.PromotionTagPending, "tag pushed; CI admission unavailable: " + boundedText(admitErr.Error(), agentEventDataErrorLength), object, true, true
+		}
+		if admitted.Run == nil {
+			return failed("tag pushed; CI admission refused: %s", admitted.Reason)
+		}
+		return model.PromotionTagPushed, fmt.Sprintf("pushed annotated tag %s (object %s) on %s after verifying upstream %s contains the promotion result; CI run %s queued",
+			request.Name, shortSHA(object), shortSHA(promotion.ResultSHA), target, admitted.Run.ID), object, true, false
 	case errors.Is(err, gitcache.ErrTagExists):
 		return model.PromotionTagFailed, fmt.Sprintf("tag %s already exists at another commit; never moved", request.Name), "", true, false
 	case pushretry.Transient(err):

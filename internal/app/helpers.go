@@ -25,6 +25,8 @@ func runKind(run model.Run) (argoworkflow.RunTrigger, error) {
 		return argoworkflow.RunTriggerBranch, nil
 	case string(argoworkflow.RunTriggerPromotion):
 		return argoworkflow.RunTriggerPromotion, nil
+	case string(argoworkflow.RunTriggerTag):
+		return argoworkflow.RunTriggerTag, nil
 	case string(argoworkflow.RunTriggerSchedule):
 		return argoworkflow.RunTriggerSchedule, nil
 	default:

@@ -13,6 +13,8 @@ import (
 )
 
 type PushConfig struct {
+	// ReleaseTagRoute is pinned administrator policy for non-version release tags.
+	ReleaseTagRoute func(string, string) (bool, error)
 	// DeletionQueued wakes the upstream deletion propagator; optional.
 	DeletionQueued func()
 	Repositories   RepositoryWriter
@@ -25,15 +27,17 @@ type PushConfig struct {
 }
 
 type PushIngestor struct {
-	repositories RepositoryWriter
-	discoverer   RepositoryDiscoverer
-	git          PushGit
-	receives     ReceiveRecorder
-	branches     CIQueue
-	releases     ReleaseAdmission
-	auditor      Auditor
-	accepted     receiveEventReader
-	queued       func()
+	releaseTagRoute func(string, string) (bool, error)
+	qualifiedRepo   func(context.Context, int64) (string, error)
+	repositories    RepositoryWriter
+	discoverer      RepositoryDiscoverer
+	git             PushGit
+	receives        ReceiveRecorder
+	branches        CIQueue
+	releases        ReleaseAdmission
+	auditor         Auditor
+	accepted        receiveEventReader
+	queued          func()
 }
 
 type receiveEventReader interface {
@@ -45,7 +49,18 @@ func NewPushIngestor(config PushConfig) (*PushIngestor, error) {
 		return nil, errors.New("service: repository store/discoverer, push Git, and receive recorder are required")
 	}
 	accepted, _ := config.Receives.(receiveEventReader)
+	var qualifiedRepo func(context.Context, int64) (string, error)
+	if reader, ok := config.Repositories.(interface {
+		QualifiedRepoName(context.Context, int64) (string, error)
+	}); ok {
+		qualifiedRepo = reader.QualifiedRepoName
+	}
+	if config.ReleaseTagRoute != nil && qualifiedRepo == nil {
+		return nil, errors.New("service: release tag routing requires canonical repository identities")
+	}
+
 	return &PushIngestor{
+		releaseTagRoute: config.ReleaseTagRoute, qualifiedRepo: qualifiedRepo,
 		repositories: databaseRepositories{config.Repositories},
 		discoverer:   config.Discoverer,
 		git:          config.Git,
@@ -204,9 +219,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		}
 		return PushResult{Repository: repository, Duplicate: duplicate, Reason: "release tags are immutable"}, nil
 	}
-	if ingestor.releases == nil {
-		return PushResult{}, refuse(ErrUnavailable, "release admission")
-	}
+
 	if !validOID(push.NewOID) {
 		return PushResult{}, fmt.Errorf("%w: tag object ID is invalid", ErrInvalidInput)
 	}
@@ -220,10 +233,20 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 	if !sameOID(peeled.ObjectSHA, push.NewOID) || !validOID(peeled.CommitSHA) {
 		return PushResult{}, errors.New("service: peeled tag did not resolve to a commit")
 	}
+	release, err := ingestor.isReleaseTag(ctx, repository, push.Tag)
+	if err != nil {
+		return PushResult{}, err
+	}
+	if release && ingestor.releases == nil {
+		return PushResult{}, refuse(ErrUnavailable, "release admission")
+	}
+	if !release && ingestor.branches == nil {
+		return PushResult{}, refuse(ErrUnavailable, "tag CI admission")
+	}
 	// Release provenance requires an annotated tag object. A lightweight tag
 	// is a commit OID, not a tag object; accepting it would grant release-tier
 	// execution without the annotated-tag provenance the contract requires.
-	if peeled.ObjectType != "tag" {
+	if release && peeled.ObjectType != "tag" {
 		duplicate, recordErr := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(
 			push.EventID, push.Actor, repository.ID, model.RefTag, push.Tag,
 			push.OldOID, peeled.ObjectSHA, peeled.CommitSHA, "release_rejected",
@@ -259,7 +282,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		return PushResult{}, fmt.Errorf("preflight upstream release tag: %w", err)
 	}
 	if exists {
-		if sameOID(remoteObject, peeled.ObjectSHA) {
+		if sameOID(remoteObject, peeled.ObjectSHA) && release {
 			duplicate, recordErr := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(
 				push.EventID, push.Actor, repository.ID, model.RefTag, push.Tag,
 				push.OldOID, peeled.ObjectSHA, peeled.CommitSHA, "release_delivered",
@@ -269,17 +292,19 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 			}
 			return PushResult{Repository: repository, Duplicate: duplicate, Reason: "tag already delivered upstream"}, nil
 		}
-		duplicate, recordErr := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(
-			push.EventID, push.Actor, repository.ID, model.RefTag, push.Tag,
-			push.OldOID, peeled.ObjectSHA, peeled.CommitSHA, "release_rejected",
-		))
-		if recordErr != nil {
-			return PushResult{}, recordErr
+		if !sameOID(remoteObject, peeled.ObjectSHA) {
+			duplicate, recordErr := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefTag, push.Tag, push.OldOID, peeled.ObjectSHA, peeled.CommitSHA, "release_rejected"))
+			return PushResult{Repository: repository, Duplicate: duplicate, Reason: "upstream tag already exists at a different object"}, recordErr
 		}
-		return PushResult{
-			Repository: repository, Duplicate: duplicate,
-			Reason: "upstream tag already exists at a different object",
-		}, nil
+	}
+	if !release {
+		enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{PriorityRequest: push.PriorityRequest,
+			RefKind: model.RefTag, EventID: push.EventID, Repository: repository, Branch: push.Tag,
+			OldSHA: push.OldOID, SHA: strings.ToLower(peeled.ObjectSHA), TestedSHA: strings.ToLower(peeled.CommitSHA), Actor: push.Actor, Trigger: "tag"})
+		if err != nil {
+			return PushResult{}, fmt.Errorf("admit reachable tag CI: %w", err)
+		}
+		return pushRunResult(repository, enqueued), nil
 	}
 	enqueued, err := ingestor.releases.AdmitRelease(ctx, ReleaseRequest{PriorityRequest: push.PriorityRequest,
 		EventID:    push.EventID,

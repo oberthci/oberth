@@ -19,13 +19,17 @@ import (
 // taggingGit records annotated tag pushes over the fixed upstream head.
 type taggingGit struct {
 	*upstreamGit
-	pushes     []string
-	err        error
-	contains   bool
-	beforePush func()
+	pushes      []string
+	err         error
+	contains    bool
+	commit      string
+	published   bool
+	unreachable bool
+	beforePush  func()
 }
 
 func (g *taggingGit) PublishAnnotatedTag(_ context.Context, _, tag, commit, _ string) (string, error) {
+	g.commit = commit
 	if g.beforePush != nil {
 		g.beforePush()
 	}
@@ -33,6 +37,7 @@ func (g *taggingGit) PublishAnnotatedTag(_ context.Context, _, tag, commit, _ st
 	if g.err != nil {
 		return "", g.err
 	}
+	g.published = true
 	return strings.Repeat("e", 40), nil
 }
 
@@ -40,8 +45,12 @@ func newTagPromotionFixture(t *testing.T) (*pruneFixture, *taggingGit) {
 	t.Helper()
 	f, upstream := newPrunePromotionFixture(t)
 	git := &taggingGit{upstreamGit: upstream}
+	pushes, err := NewPushIngestor(PushConfig{Repositories: f.store, Discoverer: stubRepositoryDiscoverer{}, Git: git, Receives: f.store, Branches: f.scheduler, Releases: f.scheduler, Auditor: f.store})
+	if err != nil {
+		t.Fatal(err)
+	}
 	service, err := NewAPI(APIConfig{
-		Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store,
+		Tags: pushes, Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store,
 		Enqueues: f.scheduler, Git: git, Logs: f.logs, Auditor: f.store,
 		BranchPrune: f.cache, BranchDeletions: f.store, DeletionQueued: func() { f.queued++ },
 		AgentEvents: f.store,
@@ -249,4 +258,20 @@ func TestPromotionTagRetryRechecksMovedTargetAndAuditsIntent(t *testing.T) {
 	if got.Status == model.PromotionTagPushed || len(g.pushes) != 0 {
 		t.Fatal("push ran without durable intent")
 	}
+}
+
+func (g *taggingGit) Ensure(context.Context, string) (gitcache.Repository, error) {
+	return gitcache.Repository{DefaultBranch: "main"}, nil
+}
+func (g *taggingGit) PeelObject(_ context.Context, _, object string) (gitcache.PeeledObject, error) {
+	return gitcache.PeeledObject{ObjectSHA: object, CommitSHA: g.commit, ObjectType: "tag"}, nil
+}
+func (g *taggingGit) ReleaseReachable(context.Context, string, string, string) (bool, error) {
+	return !g.unreachable, nil
+}
+func (g *taggingGit) RemoteRef(ctx context.Context, repo, ref string) (string, bool, error) {
+	if strings.HasPrefix(ref, "refs/tags/") {
+		return strings.Repeat("e", 40), g.published, nil
+	}
+	return g.upstreamGit.RemoteRef(ctx, repo, ref)
 }

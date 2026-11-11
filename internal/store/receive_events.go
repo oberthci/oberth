@@ -161,8 +161,11 @@ func matchReceiveRun(event model.ReceiveEventSpec, run model.RunSpec) error {
 		return fmt.Errorf("%w: receive event and run identity differ", ErrInvalid)
 	}
 	if event.RefKind == model.RefTag {
-		if !run.Release || !sameStoredOID(event.ObjectSHA, run.SHA) || !sameStoredOID(event.CommitSHA, run.TestedSHA) {
-			return fmt.Errorf("%w: release run does not preserve tag object and commit", ErrInvalid)
+		if !run.Release && model.IsReleaseVersionTag(event.Ref) {
+			return fmt.Errorf("%w: release-version tag requires release admission", ErrInvalid)
+		}
+		if !sameStoredOID(event.ObjectSHA, run.SHA) || !sameStoredOID(event.CommitSHA, run.TestedSHA) {
+			return fmt.Errorf("%w: tag run does not preserve tag object and commit", ErrInvalid)
 		}
 		return nil
 	}

@@ -90,7 +90,6 @@ func TestBuildRefusesARunTriggerOutsideItsTier(t *testing.T) {
 		tier    pipeline.Trigger
 		trigger argoworkflow.RunTrigger
 	}{
-		{pipeline.TriggerCI, argoworkflow.RunTriggerTag},
 		{pipeline.TriggerRelease, argoworkflow.RunTriggerBranch},
 		{pipeline.TriggerRelease, argoworkflow.RunTriggerPromotion},
 		{pipeline.TriggerCI, argoworkflow.RunTrigger("push")},
@@ -100,5 +99,26 @@ func TestBuildRefusesARunTriggerOutsideItsTier(t *testing.T) {
 		if _, err := Build(testConfig(), request); err == nil || !strings.Contains(err.Error(), "run trigger") {
 			t.Fatalf("%s run under %s tier: %v", testCase.trigger, testCase.tier, err)
 		}
+	}
+}
+
+func TestTagCIStampsTagWithoutReleaseTier(t *testing.T) {
+	request := testRequest(pipeline.TriggerCI, guardedDocument)
+	request.RunTrigger = argoworkflow.RunTriggerTag
+	built, err := Build(testConfig(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.Spec.ServiceAccountName == testConfig().CredentialedServiceAccount {
+		t.Fatal("ordinary tag acquired release service account")
+	}
+	found := false
+	for _, p := range built.Spec.Arguments.Parameters {
+		if p.Name == argoworkflow.TriggerParameter && p.Value != nil && p.Value.String() == "tag" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ordinary tag lost its trigger")
 	}
 }

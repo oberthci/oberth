@@ -62,3 +62,20 @@ func TestReleaseTagRoutesInvalidConfiguration(t *testing.T) {
 		t.Fatal("unbounded routes")
 	}
 }
+
+func TestReleaseTagRouteMatchIncludesExplicitDefaultFile(t *testing.T) {
+	routes := ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/release.yaml"}}}
+	if err := routes.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if matched, err := routes.Matches("github/org/repo", "deploy-1"); err != nil || !matched {
+		t.Fatal("explicit default-file release route lost its authority")
+	}
+	if matched, err := routes.Matches("github/org/repo", "ordinary"); err != nil || matched {
+		t.Fatal("unmatched tag acquired release authority")
+	}
+	routes["github/org/repo"] = append(routes["github/org/repo"], ReleaseTagRoute{Pattern: "deploy-?", File: ".oberth/deploy.yaml"})
+	if _, err := routes.Matches("github/org/repo", "deploy-1"); err == nil {
+		t.Fatal("ambiguous tag policy accepted")
+	}
+}

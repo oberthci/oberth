@@ -49,8 +49,13 @@ func TestDescribePushResultCoversDurableOutcomes(t *testing.T) {
 		},
 		{
 			name: "release admitted", event: tag,
-			result: PushResult{Run: run, Admitted: true},
+			result: PushResult{Run: &model.Run{ID: run.ID, Release: true}, Admitted: true},
 			want:   "release tag accepted · release run run-01234567 queued (acme-cli/v1.2.3)",
+		},
+		{
+			name: "ordinary tag CI", event: tag,
+			result: PushResult{Run: run},
+			want:   "tag accepted · CI run run-01234567 queued (acme-cli/v1.2.3)",
 		},
 		{
 			name: "release rejected", event: tag,

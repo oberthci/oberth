@@ -2473,7 +2473,7 @@ func (request Request) validate() error {
 		switch {
 		case !request.RunTrigger.Valid():
 			problems = append(problems, fmt.Errorf("argojob: run trigger %q is invalid", request.RunTrigger))
-		case request.RunTrigger.Tier() != request.Trigger:
+		case !request.RunTrigger.AllowsTier(request.Trigger):
 			problems = append(problems, fmt.Errorf("argojob: run trigger %q does not run under the %s tier", request.RunTrigger, request.Trigger))
 		}
 	}

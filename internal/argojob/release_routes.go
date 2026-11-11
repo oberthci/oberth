@@ -106,3 +106,10 @@ func (routes ReleaseTagRoutes) Files(repo string) []string {
 	}
 	return files
 }
+
+// Matches reports an explicit administrator route, even when it selects the
+// default release file. An ambiguous match fails closed at admission too.
+func (routes ReleaseTagRoutes) Matches(repo, tag string) (bool, error) {
+	route, err := routes.resolveRoute(repo, model.RefTag, tag)
+	return route.Pattern != "", err
+}

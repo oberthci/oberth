@@ -515,6 +515,10 @@
     "value:plugin.add-repo.actions": {
       "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",
       "test_ref": "internal/installer/plugin_add_repo_test.go TestAddRepoDeployKeyConsentAndManualFallback"
+    },
+    "value:ordinary-tag-ci": {
+      "doc_anchor": "docs/tag-runs.md#ordinary-tag-runs-and-release-tags",
+      "test_ref": "internal/service/tag_ci_test.go TestPromotionTagRealPublisherEnqueuesOrdinaryTagRun"
     }
   }
 }

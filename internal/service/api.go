@@ -54,6 +54,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	Tags                      *PushIngestor
 	IssueStaleAfter           time.Duration
 	IssueActiveStaleAfter     time.Duration
 	WorkflowCapabilities      WorkflowCapabilityStore
@@ -130,6 +131,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	tags                      *PushIngestor
 	branchPrune               BranchPruneGit
 	branchDeletions           BranchDeletionRecords
 	deletionQueued            func()
@@ -291,7 +293,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
-		enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
+		tags: config.Tags, enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,

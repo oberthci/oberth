@@ -376,8 +376,19 @@ func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testin
 	}
 	for _, trigger := range []string{"branch", "tag", "release"} {
 		branch, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "priority-branch-" + trigger, Repository: f.repo, Branch: "release/" + trigger, SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: trigger})
-		if err != nil || branch.Priority != model.PriorityStandard || branch.RefKind != model.RefBranch {
-			t.Fatalf("branch transport claimed release urgency: %+v %v", branch, err)
+		if trigger == "tag" {
+			// Event identity now requires a tag ref, independently of release
+			// authority. A branch transport cannot forge that identity.
+			if !errors.Is(err, ErrInvalidInput) || branch.ID != "" {
+				t.Fatalf("branch transport forged a tag event: %+v %v", branch, err)
+			}
+			if _, err := f.store.ReceiveEvent(ctx, "priority-branch-"+trigger); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("invalid branch/tag request persisted a receive: %v", err)
+			}
+			continue
+		}
+		if err != nil || branch.Priority != model.PriorityStandard || branch.RefKind != model.RefBranch || branch.Release || branch.Credentialed {
+			t.Fatalf("branch transport claimed release urgency or authority: %+v %v", branch, err)
 		}
 	}
 	release, err := f.scheduler.AdmitRelease(ctx, ReleaseRequest{EventID: "priority-tag", Repository: f.repo, Tag: "v1.2.3", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})

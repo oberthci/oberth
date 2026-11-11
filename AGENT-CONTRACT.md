@@ -266,8 +266,9 @@ trust assumptions and complete invalidation rules.
   feature. See [release WIF](docs/release-wif.md) for separate acceptance gates.
 - Administrator-only `argo.releaseTagRoutes` / `--argo-release-tag-routes-config`
   maps canonical repository and tag globs to clean `.oberth/<DNS-label>.yaml`
-  release documents. Defaults remain release.yaml for tags and build.yaml for
-  branch/promotion/schedule. Ambiguous matches, invalid/reserved paths and missing
+  release documents. Version tags and explicit administrator routes retain the
+  release tier; ordinary tags share build.yaml with branches, promotions and
+  schedules. Ambiguous matches, invalid/reserved paths and missing
   selected files refuse. The selected file supplies its own normal size and
   resource contract consistently for sizing, planning, inspection and execution;
   the audit binds its path and commit. Default-branch tag admission and all
@@ -490,7 +491,7 @@ containing CI and real workload qualification remain separately required.
   pusher's branch run can plant `GOCACHE` objects that the next run links in
   (pre-existing for default-mode leaves). So `cache` is refused on CI-tier
   leaves that run a credential chain, and admitted on release leaves,
-  credentialed or not, because only tag runs write the release root. It is
+  credentialed or not, because only admitted release runs write the release root. It is
   also refused on nonroot leaves, which take no host cache mount. Any
   other value is refused by admission and `oberth validate`.
   `readonly` covers shared aliases and Argo wait mirrors. Authored read-only
@@ -1830,9 +1831,10 @@ containing CI and real workload qualification remain separately required.
   fetch) is a fast-forward creation of the tested source; the promotion row
   records the zero OID as its planned base and delivery expects the ref to be
   absent, failing closed if the target appeared concurrently.
-- A reachable tag runs the release burn with the release-only cache and
-  store-sourced credentials; an unreachable tag receives no release credentials
-  and is not synced.
+- A reachable release tag runs the release burn with the release-only cache
+  and store-sourced credentials; an unreachable tag receives no release
+  credentials and is not synced. Ordinary tags run CI under its own cache and
+  credential policy, as described in [ordinary tag runs](docs/tag-runs.md).
   After every burn is terminal green, Oberth publishes the exact admitted tag
   object—not merely another tag that peels to the same commit—and fails closed
   if the upstream tag appeared first. Run success requires BOTH a Succeeded

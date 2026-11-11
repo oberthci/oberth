@@ -19,6 +19,7 @@ func TestRunKindReadsOnlyTheDurableRun(t *testing.T) {
 		{model.Run{Trigger: "branch"}, argoworkflow.RunTriggerBranch},
 		{model.Run{Trigger: "promotion"}, argoworkflow.RunTriggerPromotion},
 		{model.Run{Trigger: "schedule"}, argoworkflow.RunTriggerSchedule},
+		{model.Run{Trigger: "tag", RefKind: model.RefTag}, argoworkflow.RunTriggerTag},
 		{model.Run{Trigger: "tag", Release: true}, argoworkflow.RunTriggerTag},
 		// Release decides the tier even when the column says otherwise.
 		{model.Run{Trigger: "promotion", Release: true}, argoworkflow.RunTriggerTag},
@@ -74,7 +75,7 @@ func writeBuild(t *testing.T, document string) string {
 
 func TestCreateWorkflowStampsTheRunsOwnTrigger(t *testing.T) {
 	fixture := newRaceFixture(t)
-	for name, trigger := range map[string]string{"wf-branch": "branch", "wf-promotion": "promotion", "wf-schedule": "schedule"} {
+	for name, trigger := range map[string]string{"wf-branch": "branch", "wf-promotion": "promotion", "wf-schedule": "schedule", "wf-tag": "tag"} {
 		request := fixture.request(name, "run-"+name)
 		request.Run.Trigger = trigger
 		if trigger == "schedule" {
