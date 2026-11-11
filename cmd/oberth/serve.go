@@ -1198,7 +1198,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		api.WithMetrics(func(w io.Writer) {
 			served.writeMetrics(w)
 			database.WriteTokenUseMetrics(w)
-			health.Readiness.WriteMetrics(w)
+			writeHealthMetrics(w, health)
 			scheduler.WritePressureMetrics(w)
 			argoJobs.WriteResourceMetrics(w)
 		}),
@@ -2341,4 +2341,13 @@ func warnRetiredCapacityOverride(ctx context.Context, logger *log.Logger, reader
 	}
 	logger.Printf("WARN: the runtime run ceiling %d (set by %s) has no effect since v0.20.0; set the Argo controller parallelism instead (docs/where-limits-live.md)",
 		override.MaxConcurrentJobs, override.Actor)
+}
+
+// writeHealthMetrics exports the readiness sampler and the operator status
+// gauges; the status reads share one bounded budget per scrape.
+func writeHealthMetrics(w io.Writer, health app.Health) {
+	health.Readiness.WriteMetrics(w)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	health.WriteStatusMetrics(ctx, w)
 }
