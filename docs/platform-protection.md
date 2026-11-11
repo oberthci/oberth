@@ -103,5 +103,3 @@ retain their admitted numeric priority until replaced.
 Charts predating this feature may reject stored `platformProtection` values.
 Prepare compatible older-chart values explicitly instead of blindly reusing
 new settings. Retention annotations are not a substitute for orderly migration.
-For resources from a release that previously owned external ingress, use the
-[ownership handoff and keep procedure](ownership-handoff.md) before upgrading.

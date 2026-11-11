@@ -29,7 +29,6 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
-	OwnershipHandoff      string        // operator-verified connector/site handoff receipt
 	WaitTimeout           time.Duration // independent queue-observation limit
 	WaitFor               string        // all or critical; a nonempty selection enables waiting
 	WaitIdle              bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
@@ -372,9 +371,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
-		return result, err
-	}
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
 		return result, err
@@ -483,9 +479,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	// Recheck after preview/drain, immediately before the first live write.
-	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
-		return result, err
-	}
 
 	// The backup and the rollback record come last before the first write,
 	// so they hold the state the upgrade starts from.

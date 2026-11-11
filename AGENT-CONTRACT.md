@@ -2877,9 +2877,7 @@ commit, reflected by `updated_at`/`UpdatedAt`. Reads never finalize a publicatio
 
 The chart and installer manage Oberth and its CI dependencies. Operators own
 external ingress and connectors separately. The `watchTunnel` value is
-removed; an upgrade refuses stored values that still set it. Before upgrading a release that formerly managed a connector, annotate needed
-live resources `helm.sh/resource-policy=keep`, verify their retention and
-complete the [external ownership handoff](docs/ownership-handoff.md). The push banner remains an optional, display-only dashboard URL.
+removed; an upgrade refuses stored values that still set it. The push banner remains an optional, display-only dashboard URL.
 
 ## Keyless GAR publication and verification (#557)
 

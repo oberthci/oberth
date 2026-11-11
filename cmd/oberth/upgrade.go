@@ -30,7 +30,6 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "", "OpenBao namespace (default: openbao)")
 	flags.StringVar(&cfg.Namespace, "namespace", "", "Oberth namespace (default: oberth)")
 	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
-	flags.StringVar(&cfg.OwnershipHandoff, "ownership-handoff", "", "verified connector/site ownership handoff receipt required before retirement")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
 	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
 	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for all queued/running runs before upgrading (advisory, not an admission freeze)")

@@ -1739,8 +1739,6 @@ Usage of upgrade:
         upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)
   -openbao-namespace string
         OpenBao namespace (default: openbao)
-  -ownership-handoff string
-        verified connector/site ownership handoff receipt required before retirement
   -release-dir DIR
         read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
   -release-origin string
