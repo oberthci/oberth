@@ -1,0 +1,41 @@
+#!/bin/sh
+# Narrow entrypoint for the plugin's installer commands.
+set -eu
+command=${1:-}
+[ "$#" -gt 0 ] && shift
+for tool in kubectl helm; do
+ if ! command -v "$tool" >/dev/null 2>&1; then
+  printf 'Install %s first (kubectl: https://kubernetes.io/docs/tasks/tools/; Helm: https://helm.sh/docs/intro/install/).\n' "$tool" >&2
+  exit 1
+ fi
+done
+[ "$command" != prerequisites ] || exit 0
+cli=$HOME/.local/bin/oberth
+[ -x "$cli" ] || { printf 'Run the plugin scripts/fetch-oberth first.\n' >&2; exit 1; }
+case "$command" in
+ plan) exec "$cli" install --plan --json "$@" ;;
+ verify) exec "$cli" install --verify --json "$@" ;;
+ run)
+  have_secrets_file=false
+  need_path=false
+  for option do
+   if [ "$need_path" = true ]; then
+    case "$option" in ''|--*) printf 'A nonempty secrets file path is required.\n' >&2; exit 1 ;; esac
+    have_secrets_file=true
+    need_path=false
+   else
+    case "$option" in
+     --secrets-file) need_path=true ;;
+     --secrets-file=) printf 'A nonempty secrets file path is required.\n' >&2; exit 1 ;;
+     --secrets-file=?*) have_secrets_file=true ;;
+    esac
+   fi
+  done
+  [ "$need_path" = false ] || exit 1
+  if [ "$have_secrets_file" != true ]; then
+   printf 'Plugin installs require --secrets-file outside the repository.\n' >&2
+   exit 1
+  fi
+  exec "$cli" install "$@" ;;
+ *) printf 'Usage: scripts/install prerequisites|plan|verify|run [installer options]\n' >&2; exit 1 ;;
+esac

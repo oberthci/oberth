@@ -1,0 +1,63 @@
+#!/bin/sh
+# Verify public release bytes before installing or executing anything.
+set -eu
+umask 077
+fail() { printf 'Oberth fetch refused: %s\n' "$1" >&2; exit 1; }
+[ "$#" -le 1 ] || fail 'usage: fetch-oberth [vMAJOR.MINOR.PATCH]'
+for tool in openssl awk mktemp; do command -v "$tool" >/dev/null 2>&1 || fail "install $tool first"; done
+if command -v sha256sum >/dev/null 2>&1; then hash=sha256sum
+elif command -v shasum >/dev/null 2>&1; then hash=shasum
+else fail 'install sha256sum or shasum first'; fi
+if command -v curl >/dev/null 2>&1; then downloader=curl
+elif command -v wget >/dev/null 2>&1; then downloader=wget
+else fail 'install curl or wget first'; fi
+origin=https://releases.oberth.ci
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+key=$script_dir/../pins/release.pub
+[ -f "$key" ] && [ ! -L "$key" ] || fail 'plugin release key is missing or unsafe'
+case "$(uname -s)" in Linux) os=linux ;; Darwin) os=darwin ;; *) fail 'supported systems are Linux and macOS' ;; esac
+case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) fail 'supported architectures are amd64 and arm64' ;; esac
+bin_dir=$HOME/.local/bin
+mkdir -p "$bin_dir"
+work=$(mktemp -d "$bin_dir/.oberth-fetch.XXXXXXXX") || fail 'cannot create private staging directory'
+trap 'rm -rf -- "$work"' EXIT HUP INT TERM
+fetch() {
+ if [ "$downloader" = curl ]; then
+  curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 --max-filesize 536870912 --output "$2" "$1" >/dev/null 2>&1 || fail 'release download failed'
+ else
+  wget --quiet --https-only --timeout=180 -O "$2" "$1" >/dev/null 2>&1 || fail 'release download failed'
+ fi
+}
+version=${1:-}
+if [ -z "$version" ]; then
+ fetch "$origin/oberth/latest/VERSION" "$work/VERSION"
+ [ "$(wc -c <"$work/VERSION")" -le 128 ] || fail 'invalid release version'
+ version=$(cat "$work/VERSION")
+fi
+printf '%s\n' "$version" | awk 'NR != 1 || $0 !~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$/ { exit 1 }' || fail 'invalid release version'
+base=$origin/oberth/$version
+fetch "$base/SHA256SUMS" "$work/SHA256SUMS"
+fetch "$base/SHA256SUMS.sig" "$work/SHA256SUMS.sig"
+[ "$(wc -c <"$work/SHA256SUMS")" -le 8192 ] && [ "$(wc -c <"$work/SHA256SUMS.sig")" -le 80 ] || fail 'invalid release proof size'
+openssl dgst -sha256 -verify "$key" -signature "$work/SHA256SUMS.sig" "$work/SHA256SUMS" >/dev/null 2>&1 || fail 'release signature verification failed'
+artifact=oberth-$os-$arch
+awk -v chart="oberth-${version#v}.tgz" '
+ NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ { exit 1 }
+ ($2 !~ /^oberth-(linux|darwin)-(amd64|arm64)$/ && $2 != chart) || seen[$2]++ { exit 1 }
+ END { if (NR != 5) exit 1 }
+' "$work/SHA256SUMS" || fail 'invalid signed artifact list'
+fetch "$base/$artifact" "$work/$artifact"
+awk -v name="$artifact" '$2 == name { print }' "$work/SHA256SUMS" >"$work/selected.sha256"
+if [ "$hash" = sha256sum ]; then
+ (cd "$work" && sha256sum -c selected.sha256) >/dev/null 2>&1 || fail 'binary checksum verification failed'
+else
+ (cd "$work" && shasum -a 256 -c selected.sha256) >/dev/null 2>&1 || fail 'binary checksum verification failed'
+fi
+target=$bin_dir/oberth-$version
+[ ! -L "$target" ] && [ ! -d "$target" ] || fail 'versioned destination is unsafe'
+[ ! -d "$bin_dir/oberth" ] || fail 'oberth destination is a directory'
+chmod 755 "$work/$artifact"
+mv -f "$work/$artifact" "$target"
+ln -s "oberth-$version" "$work/oberth"
+mv -f "$work/oberth" "$bin_dir/oberth"
+printf 'Verified Oberth %s installed at %s\n' "$version" "$target"

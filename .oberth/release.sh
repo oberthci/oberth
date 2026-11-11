@@ -146,7 +146,8 @@ require_artifacts() {
 		SHA256SUMS; do
 		test -s "$release_dir/$file" || fail "missing release artifact $file"
 	done
-	[ "$(wc -l <"$release_dir/SHA256SUMS" | tr -d ' ')" = 4 ] || fail "SHA256SUMS must bind exactly four executables"
+	lines=$(wc -l <"$release_dir/SHA256SUMS" | tr -d ' ')
+	case "$lines" in 4|5) ;; *) fail "SHA256SUMS must bind four executables and, after packaging, the chart" ;; esac
 	(cd "$release_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "local release artifact checksum mismatch"
 }
 
@@ -410,11 +411,34 @@ publish_signed_bundle() {
 	wait_for_exact_public_object "$public_url" "$bundle"
 }
 
+# Export exactly the signature already authenticated by cosign, never sign twice.
+export_checksum_signature() {
+	/usr/bin/python3 -I -S -B - "$1/SHA256SUMS.sigstore.json" "$1/SHA256SUMS.sig" "$2" <<'PYSIG' || fail "checksum signature differs from its Sigstore bundle"
+import base64, json, sys
+with open(sys.argv[1], "rb") as stream:
+    bundle = json.load(stream)
+signature = base64.b64decode(bundle["messageSignature"]["signature"], validate=True)
+if not 8 <= len(signature) <= 80:
+    raise ValueError("invalid ECDSA signature size")
+if sys.argv[3] == "write":
+    with open(sys.argv[2], "wb") as stream:
+        stream.write(signature)
+else:
+    with open(sys.argv[2], "rb") as stream:
+        if stream.read(81) != signature:
+            raise ValueError("signature mismatch")
+PYSIG
+	openssl dgst -sha256 -verify "$release_public_key" -signature "$1/SHA256SUMS.sig" "$1/SHA256SUMS" >/dev/null || fail "OpenSSL rejected the checksum signature"
+}
+
 sign_binaries() {
 	validate_source
 	require_artifacts
+	require_chart
+	(cd "$release_dir" && sha256sum oberth-linux-amd64 oberth-linux-arm64 oberth-darwin-amd64 oberth-darwin-arm64 "oberth-${tag#v}.tgz" >SHA256SUMS)
 	prepare_signing_identity
 	stage_signed_bundle "$release_dir/SHA256SUMS" "$release_dir/SHA256SUMS.sigstore.json"
+	export_checksum_signature "$release_dir" write
 	clear_signing_identity
 }
 
@@ -429,13 +453,15 @@ publish_public_release() {
 			fail "public publication requires a valid staged signature"
 	done
 	initialize_authoritative_r2
-	for file in oberth-linux-amd64 oberth-linux-arm64 oberth-darwin-amd64 oberth-darwin-arm64 SHA256SUMS cosign.pub release.json; do
+	for file in oberth-linux-amd64 oberth-linux-arm64 oberth-darwin-amd64 oberth-darwin-arm64 SHA256SUMS cosign.pub release.json "oberth-${tag#v}.tgz"; do
 		publish_exact_object "oberth/$tag/$file" "$release_dir/$file" "$(artifact_content_type "$file")" "$release_origin/oberth/$tag/$file"
 	done
 	for payload in SHA256SUMS release.json; do
 		publish_signed_bundle "oberth/$tag/$payload.sigstore.json" "$release_origin/oberth/$tag/$payload.sigstore.json" \
 			"$release_dir/$payload" "$release_dir/$payload.sigstore.json"
 	done
+	export_checksum_signature "$release_dir" write
+	publish_exact_object "oberth/$tag/SHA256SUMS.sig" "$release_dir/SHA256SUMS.sig" application/octet-stream "$release_origin/oberth/$tag/SHA256SUMS.sig"
 	chart_name=oberth-${tag#v}.tgz
 	publish_exact_object "oberth/$chart_name" "$release_dir/$chart_name" application/gzip "$chart_repo/$chart_name"
 	publish_exact_object "oberth/cosign.pub" "$release_dir/cosign.pub" 'text/plain; charset=utf-8' "$chart_repo/cosign.pub"
@@ -459,6 +485,7 @@ files = {
     "oberth-darwin-amd64": 512 << 20,
     "oberth-darwin-arm64": 512 << 20,
     "SHA256SUMS": 8192,
+    "SHA256SUMS.sig": 80,
     "SHA256SUMS.sigstore.json": 1 << 20,
     "cosign.pub": 8192,
     "release.json": 65536,
@@ -896,6 +923,8 @@ verify_public_binaries() {
 		oberth-darwin-amd64 \
 		oberth-darwin-arm64 \
 		SHA256SUMS \
+		SHA256SUMS.sig \
+		"oberth-${tag#v}.tgz" \
 		SHA256SUMS.sigstore.json \
 		cosign.pub \
 		release.json \
@@ -908,6 +937,7 @@ verify_public_binaries() {
 		fail "downloaded binary signature bundle is invalid"
 	"$cosign_tool" verify-blob --key "$verify_dir/cosign.pub" --bundle "$verify_dir/release.json.sigstore.json" "$verify_dir/release.json" >/dev/null || \
 		fail "downloaded release.json signature bundle is invalid"
+	export_checksum_signature "$verify_dir" check
 	# Cross-check: release.json server image ref must match the published one.
 	/usr/bin/python3 -I -S -B -c '
 import json, sys
@@ -934,12 +964,13 @@ verify_pinned_public_key() {
 
 verify_runtime_payload() {
 	verify_pinned_public_key "$release_dir/cosign.pub"
+	export_checksum_signature "$release_dir" check
 	# Bound checksum paths before sha256sum reads anything from a download.
-	awk '
+	awk -v chart="oberth-${tag#v}.tgz" '
 		NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ { exit 1 }
-		$2 !~ /^oberth-(linux|darwin)-(amd64|arm64)$/ || seen[$2]++ { exit 1 }
-		END { if (NR != 4) exit 1 }
-	' "$release_dir/SHA256SUMS" || fail "downloaded checksums must name exactly four release binaries"
+		($2 !~ /^oberth-(linux|darwin)-(amd64|arm64)$/ && $2 != chart) || seen[$2]++ { exit 1 }
+		END { if (NR != 5) exit 1 }
+	' "$release_dir/SHA256SUMS" || fail "downloaded checksums must name four release binaries and the chart"
 	(cd "$release_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "downloaded artifact checksum mismatch"
 	# This leaf executes the downloaded binary between two checks. A TUF
 	# cache it could have rewritten would be a substitute trust anchor, so
@@ -972,6 +1003,8 @@ verify_public_runtime() {
 		oberth-darwin-amd64 \
 		oberth-darwin-arm64 \
 		SHA256SUMS \
+		SHA256SUMS.sig \
+		"oberth-${tag#v}.tgz" \
 		SHA256SUMS.sigstore.json \
 		cosign.pub; do
 		download_public_object "$release_origin/oberth/$tag/$file" "$release_dir/$file"
@@ -1149,6 +1182,8 @@ stage_versioned_release() (
 		oberth-darwin-amd64 \
 		oberth-darwin-arm64 \
 		SHA256SUMS \
+		SHA256SUMS.sig \
+		"oberth-${tag#v}.tgz" \
 		SHA256SUMS.sigstore.json \
 		cosign.pub \
 		release.json \
@@ -1165,6 +1200,7 @@ stage_versioned_release() (
 		fail "versioned release $stage_version has an invalid signature bundle"
 	"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --bundle "$stage_dir/release.json.sigstore.json" "$stage_dir/release.json" >/dev/null || \
 		fail "versioned release $stage_version has an invalid release.json signature bundle"
+	export_checksum_signature "$stage_dir" check
 	# Only this tag's receipt authorizes these bytes. Newer releases are
 	# handled as supersession before staging, never by executing their data.
 )
@@ -1185,6 +1221,8 @@ converge_latest_aliases() {
 			oberth-darwin-amd64 \
 			oberth-darwin-arm64 \
 			SHA256SUMS \
+			SHA256SUMS.sig \
+			"oberth-${tag#v}.tgz" \
 			SHA256SUMS.sigstore.json \
 			cosign.pub \
 			release.json \
@@ -1202,6 +1240,8 @@ converge_latest_aliases() {
 				oberth-darwin-amd64 \
 				oberth-darwin-arm64 \
 				SHA256SUMS \
+				SHA256SUMS.sig \
+				"oberth-${tag#v}.tgz" \
 				SHA256SUMS.sigstore.json \
 				cosign.pub \
 				release.json \
@@ -1320,7 +1360,7 @@ finalize_release() {
 	/usr/bin/python3 -I -S -B -c '
 import sys, xml.etree.ElementTree as ET
 sumsf, listf, pfx = sys.argv[1], sys.argv[2], sys.argv[3]
-fixed = {"VERSION", "SHA256SUMS", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json"}
+fixed = {"VERSION", "SHA256SUMS", "SHA256SUMS.sigstore.json", "cosign.pub", "SHA256SUMS.sig", "release.json", "release.json.sigstore.json"}
 artifacts = set()
 for line in open(sumsf):
     parts = line.strip().split("  ", 1)

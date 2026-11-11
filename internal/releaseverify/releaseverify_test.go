@@ -36,6 +36,10 @@ func TestPinnedKeyIsTheReleasePipelinePin(t *testing.T) {
 	if !bytes.Contains(script, []byte(ReleasePublicKeySHA256)) {
 		t.Fatal("release.sh pins a different release key digest")
 	}
+	pluginPin, err := os.ReadFile(filepath.Join("..", "..", "claude-plugin", "pins", "release.pub"))
+	if err != nil || !bytes.Equal(pin, pluginPin) {
+		t.Fatal("plugin release key differs from the pipeline and CLI pin")
+	}
 	if _, err := PinnedKey(); err != nil {
 		t.Fatal(err)
 	}

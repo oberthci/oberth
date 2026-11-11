@@ -56,7 +56,7 @@ func newReleaseRuntimeFixture(t *testing.T) *releaseRuntimeFixture {
 	f.write("objects/oberth/cosign.pub", string(pin))
 	f.write("objects/oberth/index.yaml", "fixture-index")
 	f.version(runtimeFixtureTag, string(pin), false)
-	for _, file := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json"} {
+	for _, file := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sig", "oberth-1.2.3.tgz", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json"} {
 		b, e := os.ReadFile(filepath.Join(f.root, "objects", "oberth", runtimeFixtureTag, file))
 		if e != nil {
 			t.Fatal(e)
@@ -78,12 +78,13 @@ func newReleaseRuntimeFixture(t *testing.T) *releaseRuntimeFixture {
 if [ -n "${COSIGN_PASSWORD:-}" ]; then printf 'cosign-password:%s\n' "$1" >>"$FIXTURE_TRACE"; fi
 case "$1" in
  public-key) cat "$FIXTURE_ROOT/.oberth/pins/release-cosign.pub";;
- verify-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; grep -qx valid "$1" || exit 91; fi; shift; done;;
+ verify-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; grep -Eq '^(valid|\{"messageSignature":\{"signature":"Zml4dHVyZS1zaWc="\}\})$' "$1" || exit 91; fi; shift; done;;
  verify) if [ -e "$FIXTURE_ROOT/require-signature" ] && [ ! -e "$FIXTURE_ROOT/registry-signed" ]; then exit 1; fi;;
  sign) touch "$FIXTURE_ROOT/registry-signed";;
- sign-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; printf "valid\n" >"$1"; fi; shift; done;;
+ sign-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; printf '%s\n' '{"messageSignature":{"signature":"Zml4dHVyZS1zaWc="}}' >"$1"; fi; shift; done;;
  *) exit 90;;
 esac`)
+	f.tool("openssl", `test "$1" = dgst`)
 	f.tool("trivy", ":")
 	f.tool("oberth-release-image", `case "$1" in
  static-sbom) printf 'fixture SBOM\n' >"$3";;
@@ -170,8 +171,11 @@ func (f *releaseRuntimeFixture) version(tag, key string, mutate bool) {
 		f.write("objects/oberth/"+tag+"/"+name, body)
 		fmt.Fprintf(&checks, "%x  %s\n", sha256.Sum256([]byte(body)), name)
 	}
+	fmt.Fprintf(&checks, "%x  oberth-%s.tgz\n", sha256.Sum256([]byte("fixture-chart")), strings.TrimPrefix(tag, "v"))
+	f.write("objects/oberth/"+tag+"/oberth-"+strings.TrimPrefix(tag, "v")+".tgz", "fixture-chart")
+	f.write("objects/oberth/"+tag+"/SHA256SUMS.sig", "fixture-sig")
 	f.write("objects/oberth/"+tag+"/SHA256SUMS", checks.String())
-	f.write("objects/oberth/"+tag+"/SHA256SUMS.sigstore.json", "valid")
+	f.write("objects/oberth/"+tag+"/SHA256SUMS.sigstore.json", `{"messageSignature":{"signature":"Zml4dHVyZS1zaWc="}}`)
 	f.write("objects/oberth/"+tag+"/cosign.pub", key)
 	serverRef := "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:" + strings.Repeat("b", 64)
 	f.write("objects/oberth/"+tag+"/release.json", fmt.Sprintf(`{"schemaVersion":1,"component":"oberth","version":"%s","source":{"repository":"github.com/oberthci/oberth","sha":"%s"},"images":{"server":{"ref":"%s"}}}`, tag, runtimeFixtureSHA, serverRef))
@@ -373,7 +377,7 @@ func TestFinalizeRequiresBoundReceiptAndNeverExecutesOtherPayload(t *testing.T) 
 				if err != nil {
 					t.Fatalf("finalize: %v\n%s\n%s", err, out, f.log())
 				}
-				for _, name := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json"} {
+				for _, name := range []string{"oberth-linux-amd64", "oberth-linux-arm64", "oberth-darwin-amd64", "oberth-darwin-arm64", "SHA256SUMS", "SHA256SUMS.sig", "oberth-1.2.3.tgz", "SHA256SUMS.sigstore.json", "cosign.pub", "release.json", "release.json.sigstore.json"} {
 					got, e := os.ReadFile(filepath.Join(f.root, "objects/oberth/latest", name))
 					if e != nil {
 						t.Fatal(e)
