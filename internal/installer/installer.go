@@ -249,9 +249,11 @@ type Config struct {
 	// empty; the chart is deployed only after it verified.
 	Release ReleaseSource
 	// verifiedChart and verifiedImage are the private chart file of the
-	// verified signed release and the server image its record pins.
-	verifiedChart string
-	verifiedImage string
+	// verified signed release and the server image its record pins;
+	// verifiedVersion is the ChartVersion they were verified for.
+	verifiedChart   string
+	verifiedImage   string
+	verifiedVersion string
 	// UtilityImage overrides the chart file-tool image; empty preserves values files and chart defaults.
 	UtilityImage  string
 	Timeout       time.Duration

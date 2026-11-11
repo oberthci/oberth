@@ -116,9 +116,15 @@ type UpgradeBackup struct {
 // signed release of cfg.ChartVersion is verified and its chart written to a
 // private file, the chart's default server image must be the one the record
 // pins, and an explicit --image must be that image too. It is idempotent on
-// one cfg; the returned cleanup removes the chart file.
+// one cfg and one version; the returned cleanup removes the chart file. A
+// cfg whose ChartVersion changed since it was verified (a reconcile at the
+// installed version of a release newer than this CLI) is verified again for
+// that version: the chart of another version must never reach the release.
 func verifyInstallRelease(ctx context.Context, cfg *Config, deps Deps) (func(), error) {
-	if strings.TrimSpace(cfg.ChartPath) != "" || cfg.verifiedChart != "" {
+	if strings.TrimSpace(cfg.ChartPath) != "" {
+		return func() {}, nil
+	}
+	if cfg.verifiedChart != "" && cfg.verifiedVersion == canonicalChartVersion(cfg.ChartVersion) {
 		return func() {}, nil
 	}
 	if deps.RunHelm == nil {
@@ -147,6 +153,7 @@ func verifyInstallRelease(ctx context.Context, cfg *Config, deps Deps) (func(), 
 	}
 	cfg.verifiedChart = signed.chartPath
 	cfg.verifiedImage = recordImage
+	cfg.verifiedVersion = canonicalChartVersion(cfg.ChartVersion)
 	return signed.cleanup, nil
 }
 
