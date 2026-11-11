@@ -1940,46 +1940,6 @@ func hasSSHHostBlock(data []byte, hostName string) bool {
 	return false
 }
 
-// extractSSHBlockIdentityFile returns the IdentityFile value from the named
-// Host block in an SSH config, or "" if not found. Quotes around the value are
-// stripped; the keyword is matched case-insensitively (ssh_config convention).
-func extractSSHBlockIdentityFile(data []byte, hostName string) string {
-	lines := strings.Split(string(data), "\n")
-	inBlock := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Host keyword starts a new block.
-		if len(trimmed) > 5 && strings.EqualFold(trimmed[:5], "Host ") {
-			if inBlock {
-				return "" // hit next Host block without finding IdentityFile
-			}
-			if strings.TrimSpace(trimmed[5:]) == hostName {
-				inBlock = true
-			}
-			continue
-		}
-		// Match keyword also starts a new block.
-		if len(trimmed) > 6 && strings.EqualFold(trimmed[:6], "Match ") {
-			if inBlock {
-				return ""
-			}
-			continue
-		}
-		if !inBlock {
-			continue
-		}
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "identityfile") {
-			rest := strings.TrimSpace(trimmed[len("identityfile"):])
-			if len(rest) >= 2 && rest[0] == '"' && rest[len(rest)-1] == '"' {
-				rest = rest[1 : len(rest)-1]
-			}
-			return rest
-		}
-	}
-	return ""
-}
-
 // updateSSHBlockIdentityFile replaces the IdentityFile line within the named
 // Host block. The replacement preserves leading whitespace. If no IdentityFile
 // line is found the original data is returned unchanged.
