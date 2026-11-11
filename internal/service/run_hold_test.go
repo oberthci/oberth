@@ -334,6 +334,14 @@ func TestRunHoldStepSelectionAndAbandon(t *testing.T) {
 		t.Fatal(err)
 	} else {
 		release2()
+		release2() // idempotent: the slot is returned once
+	}
+	// Finished runs leave nothing behind in the gate.
+	gate.mu.Lock()
+	left := len(gate.busy)
+	gate.mu.Unlock()
+	if left != 0 || len(gate.slots) != 0 {
+		t.Fatalf("gate kept %d runs and %d slots after release", left, len(gate.slots))
 	}
 }
 
