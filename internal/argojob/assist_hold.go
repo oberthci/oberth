@@ -82,13 +82,16 @@ const (
 // floored step budget and exited 143 (137 once the grace period ran out); a
 // command that failed on its own did so with another code, before the
 // budget. Only the latter is retried and held. A command that happens to
-// exit 137 or 143 itself, or one that outlives its budget during the
+// exit 137, 143 or 255 itself, or one that outlives its budget during the
 // kubelet's check interval, is not held: conservative, and it keeps #1499
 // start-up classification and the run-level infrastructure retry exactly as
 // for an unassisted run, as is a genuine failure after a long Pending phase
 // that pushed the duration past the budget.
 func assistCommandFailure(budget int64) string {
-	return fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != %d && asInt(lastRetry.exitCode) != %d && asFloat(lastRetry.duration) < %d", exitCodeSIGKILL, exitCodeSIGTERM, budget)
+	// Argo prefixes main's kubelet termination reason before its message.
+	// Unknown/other terminations must settle for run-level classification,
+	// rather than creating a paused retry before reboot evidence is read.
+	return fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != %d && asInt(lastRetry.exitCode) != %d && asInt(lastRetry.exitCode) != 255 && (lastRetry.message startsWith 'main: Error (exit code ') && asFloat(lastRetry.duration) < %d", exitCodeSIGKILL, exitCodeSIGTERM, budget)
 }
 
 // assistRetryExpression retries only a genuine command failure (see

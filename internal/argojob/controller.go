@@ -78,6 +78,7 @@ type Controller struct {
 	profileBackoff   time.Duration
 	profileLogAt     time.Time
 	timings          TimingRecorder
+	nodeBoots        NodeBootRecorder
 	resourceSource   ResourceUsageSource
 	resourceRecorder ResourceUsageRecorder
 	workflows        WorkflowClient
@@ -541,6 +542,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			live.observe(workflow)
 		}
 		session.update(workflow)
+		if !workflow.Status.Phase.Completed() {
+			controller.observeRunningNodeBoots(ctx, workflow)
+		}
 		if err := controller.checkAdmissionProgress(ctx, workflow, &admissionWatch, delivered); err != nil {
 			return completionFor(workflow), err
 		}
@@ -930,7 +934,7 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 			return false
 		}
 	}
-	if !seen && terminal(step.Status) {
+	if !seen && terminal(step.Status) && step.Status != runprogress.StepSkipped {
 		// A step observed for the first time already finished (a fast step
 		// between two polls). Emit its running event first so the log reads
 		// as a sequence rather than a jump.

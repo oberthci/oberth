@@ -18,6 +18,12 @@ configuration and workload objects. The same authenticated transport constructs
 Workflow, Kubernetes, logs, exec, dynamic-resource and cleanup clients. There is
 no second scheduler or external success-result API.
 
+Reboot attribution uses read-only `get` on the target's `nodes`, through this
+same authenticated and cluster-pinned transport. Grant it to the target server
+identity to retain boot IDs for owned running step Pods. It requires no node
+list/watch, node proxy, kubelet endpoint or write permission. Missing permissions
+or a missing pre-reboot observation leave the failure unclassified as a reboot.
+
 `config.ExecutionPlacement` must use the closed
 `oberth.execution-placement/branch-v2` form. It retains the version-one cluster,
 endpoint/CA, node, controller, admission, source and native configuration pins.

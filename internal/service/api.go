@@ -1806,6 +1806,8 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 		visible.DisplayReason = "retried as " + shortRunID(run.AutoRetriedBy)
 		if cause := evictionDisplayReason(run); cause != "" {
 			visible.DisplayReason = joinRunMessage(cause, visible.DisplayReason)
+		} else if cause := nodeRebootDisplayReason(run); cause != "" {
+			visible.DisplayReason = joinRunMessage(cause, visible.DisplayReason)
 		}
 	}
 	if run.Priority != "" {
@@ -1822,9 +1824,8 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 		visible.DisplayReason = joinRunMessage(priorityPrefix(visible), visible.DisplayReason)
 	}
 	if visible.DisplayStatus != model.DisplayQueued {
-		// Eviction wording is a fixed, bounded projection. Keep its remediation and
-		// retry link intact instead of clipping either halfway through a word.
-		if evictionDisplayReason(run) == "" {
+		// Keep bounded eviction/reboot evidence and the retry link intact.
+		if evictionDisplayReason(run) == "" && nodeRebootDisplayReason(run) == "" {
 			visible.DisplayReason = displayFailureText(visible.DisplayReason)
 		}
 		visible.DisplayReason = parkPolicyDisplayReason(run, visible.DisplayReason)

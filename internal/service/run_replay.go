@@ -90,7 +90,29 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 	for _, step := range planned {
 		labels[step.Stage+"\x00"+step.Step] = step.Secrets || step.Credentialed
 	}
+	// A skipped Argo node has timestamps and can have a synthesized running
+	// marker, but no Pod ever ran. Require both the complete all-attempt tree
+	// and the owned non-execution diagnostic before resolving that ambiguity.
+	allSkipped, seen := map[string]bool{}, map[string]bool{}
+	for _, observed := range observation.Steps {
+		key := observed.Stage + "\x00" + observed.Step
+		if !seen[key] {
+			allSkipped[key] = true
+			seen[key] = true
+		}
+		allSkipped[key] = allSkipped[key] && observed.Status == model.StepSkipped
+	}
+	unexecuted := map[string]bool{}
+	for _, step := range attempt.Steps {
+		key := step.Stage + "\x00" + step.Step
+		if allSkipped[key] && step.Status == model.StepSkipped && step.Termination != nil && !step.Termination.Available && step.Termination.Unavailable == "not-executed" {
+			unexecuted[key] = true
+		}
+	}
 	started := func(step model.StepResult) bool {
+		if step.Status == model.StepSkipped && step.Termination != nil && !step.Termination.Available && step.Termination.Unavailable == "not-executed" {
+			return false
+		}
 		if step.StartedAt != nil || step.LogEnd > step.LogStart {
 			return true
 		}
@@ -111,6 +133,16 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 		return !started(step) || (known && !secret)
 	}
 	for _, event := range events {
+		// The progress protocol requires timestamps even for skipped nodes;
+		// those timestamps and the marker's log bytes are not execution.
+		// Running events without non-execution proof and all terminal execution
+		// events remain checked.
+		if event.Status == runprogress.StepSkipped {
+			continue
+		}
+		if event.Status == runprogress.StepRunning && unexecuted[event.Stage+"\x00"+event.Step] {
+			continue
+		}
 		if !check(progressStepResult(run.ID, event)) {
 			return len(planned), false
 		}
@@ -121,6 +153,9 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 		}
 	}
 	for _, observed := range observation.Steps {
+		if unexecuted[observed.Stage+"\x00"+observed.Step] {
+			continue
+		}
 		result := model.StepResult{Stage: observed.Stage, Step: observed.Step, Status: observed.Status}
 		// Started is retained independently of the final/latest attempt status.
 		if observed.Started {

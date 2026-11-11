@@ -266,6 +266,8 @@ DELETE FROM schema_migrations WHERE id='20261111132749-promotion-tags-c5ec022389
 
 // PostClientCertificatesDowngrade reconstructs pre-certificate fixtures.
 const PostClientCertificatesDowngrade = `
+DROP TABLE IF EXISTS node_boot_observations;
+DELETE FROM schema_migrations WHERE id='20261111220000-node-boot-observations';
 DROP TABLE IF EXISTS uplink_client_pins;
 ALTER TABLE token_credentials DROP COLUMN certificate_only;
 DELETE FROM schema_migrations WHERE id='20261111190000-client-certificates';

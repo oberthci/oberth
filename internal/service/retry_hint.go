@@ -78,6 +78,8 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 		return infrastructure("image_pull", "run_rerun", "the step image could not be pulled")
 	case model.IsStartupDeadlineReason(message):
 		return infrastructure("startup_deadline", "run_retry", "the step never started within its startup allowance")
+	case model.IsNodeRebootReason(message):
+		return infrastructure("node_reboot", "run_retry", message)
 	case strings.HasPrefix(message, "OOM kill at "):
 		return code("oom", "raise the step's memory limit in git (run_resources)", "the step exceeded its memory limit")
 	}

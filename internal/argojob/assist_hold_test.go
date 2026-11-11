@@ -142,7 +142,7 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 	if test.RetryStrategy == nil || test.RetryStrategy.Limit.String() != "1" || test.RetryStrategy.RetryPolicy != wfv1.RetryPolicyOnFailure || test.RetryStrategy.Expression != assistRetryExpression(floored) {
 		t.Fatalf("test retryStrategy = %+v", test.RetryStrategy)
 	}
-	if want := fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) < %d", floored); test.RetryStrategy.Expression != want {
+	if want := fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137 && asInt(lastRetry.exitCode) != 143 && asInt(lastRetry.exitCode) != 255 && (lastRetry.message startsWith 'main: Error (exit code ') && asFloat(lastRetry.duration) < %d", floored); test.RetryStrategy.Expression != want {
 		t.Fatalf("test retry expression = %q, want %q", test.RetryStrategy.Expression, want)
 	}
 	if !strings.HasPrefix(test.PodSpecPatch, "{{= asInt(retries) > 0 ? '") {
@@ -414,7 +414,7 @@ func TestAssistRetryRefusesDeadlineKills(t *testing.T) {
 	floored := DefaultStepStartupAllowance.Floored(600)
 	retries := func(exitCode, duration string) bool {
 		t.Helper()
-		scope := map[string]any{"retries": "0", "lastRetry.exitCode": exitCode, "lastRetry.status": "Failed", "lastRetry.duration": duration, "lastRetry.message": "Pod was active on the node longer than the specified deadline"}
+		scope := map[string]any{"retries": "0", "lastRetry.exitCode": exitCode, "lastRetry.status": "Failed", "lastRetry.duration": duration, "lastRetry.message": "main: Error (exit code " + exitCode + ")"}
 		retry, err := argoexpr.EvalBool(expression, argoexprenv.GetFuncMap(scope))
 		if err != nil {
 			t.Fatalf("retry expression %q: %v", expression, err)
@@ -436,7 +436,7 @@ func TestAssistRetryRefusesDeadlineKills(t *testing.T) {
 	if retries("0", "12") {
 		t.Fatal("a passed attempt was retried")
 	}
-	if retries("143", "12") || retries("137", "12") {
+	if retries("143", "12") || retries("137", "12") || retries("255", "12") {
 		t.Fatal("a command that exited 143 or 137 by itself must not be retried into a hold (conservative)")
 	}
 	if !retries("1", "12") || !retries("2", fmt.Sprint(float64(floored)-0.5)) {

@@ -47,7 +47,9 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
 
 - a server-owned `retryStrategy`: `limit: 1`, `retryPolicy: OnFailure`,
   `expression: asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) !=
-  137 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) <
+  137 && asInt(lastRetry.exitCode) != 143 && asInt(lastRetry.exitCode) != 255
+  && (lastRetry.message startsWith 'main: Error (exit code ')
+  && asFloat(lastRetry.duration) <
   <floored step budget>`. Only a command that failed on its own is retried:
   it exited nonzero, not by SIGKILL or SIGTERM, and its attempt finished
   before the step's floored budget (the node duration is the main container's
@@ -60,7 +62,9 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   code alone is not enough; an eviction or executor error has no exit code
   (`-1`). None of them is retried, so attempt 1 is classified exactly as
   before (#1499 start-up deadlines included) and the run-level infrastructure
-  retry is unchanged. A command that exits 137 or 143 by itself, or that
+  retry is unchanged. Unknown/other kubelet termination reasons and exit 255
+  settle without a hold, so the server can check retained node boot evidence.
+  A command that exits 137, 143 or 255 by itself, or that
   outlives its budget during the kubelet's check interval, is conservatively
   not held either. The budget is the leaf's own floored deadline, else the
   floored `templateDefaults.activeDeadlineSeconds` Argo merges into every

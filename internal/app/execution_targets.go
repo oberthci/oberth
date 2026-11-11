@@ -299,6 +299,9 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	if recorder, ok := r.owner.auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}
+	if recorder, ok := r.owner.auditor.(argojob.NodeBootRecorder); ok {
+		controller.WithNodeBootRecorder(recorder)
+	}
 	if definition.ResourceSource != nil {
 		recorder, ok := r.owner.auditor.(argojob.ResourceUsageRecorder)
 		if !ok {
