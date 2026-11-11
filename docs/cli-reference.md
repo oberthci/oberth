@@ -148,11 +148,12 @@ the cluster changes.
     oberth restore                   # later, on a fresh install: restores the newest backup here
 
 The file is encrypted to ~/.config/oberth/backup/recipient.key, created by
-the first backup. Keep a copy of that key OFF this machine: no backup can be
-restored without it.
+the first backup on a terminal (without one: oberth backup keygen). Keep a
+copy of that key OFF this machine: no backup can be restored without it.
 
 Also:
-    oberth backup key [--print]           where the backup key is; --print shows it to store in a password manager
+    oberth backup key [--print|--stored]  where the backup key is; --print shows it to store in a password manager,
+                                          --stored records that a copy is off this machine
     oberth backup export-secrets [FILE]   the secrets as plain JSON any OpenBao/Vault can import
     oberth backup keygen [--dir DIR]      create the key pair ahead of time
 
@@ -211,17 +212,19 @@ Advanced:
 ## oberth backup key
 
 ```text
-Usage: oberth backup key [--print]
+Usage: oberth backup key [--print | --stored]
 
 Show the key every backup on this machine is encrypted to, which certificate
 it belongs to (what oberth restore --inspect names), and whether you
 confirmed a copy exists off this machine. --print shows the private key so
 you can paste it into a password manager; it prints only to a terminal.
+--stored records that a copy is kept off this machine, for this key only.
 Restoring needs that file back as ~/.config/oberth/backup/recipient.key, or
 next to the backup, or passed with --key.
 
 Advanced:
   --print                      print the private key (PEM) to store it in a password manager; refuses anything but a terminal
+  --stored                     record that a copy of the key is kept off this machine (what typing stored at the backup prompt records), for hosts without a terminal
 ```
 
 ## oberth backup keygen
@@ -395,12 +398,16 @@ Usage of install:
         Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value, none on a fresh install) (default -1)
   -argo-sync-limit value
         semaphore limit key=N in the ConfigMap oberth-sync-limits, rendered by the argo-workflows release (repeatable; the set given replaces the previous one; see docs/where-limits-live.md)
+  -argo-values-reviewed sha256:DIGEST
+        keep stored argo-workflows values the nonroot profile does not know: sha256:DIGEST of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)
   -argo-vault-address string
         OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
         Kubernetes-auth role credentialed pipelines log in with; bind it to exactly (--argo-namespace, the credentialed ServiceAccount)
   -chart string
-        install the Oberth chart from this local directory or archive instead of the published repository
+        install the Oberth chart from this local directory or archive instead of the signed release (development only: not verified)
+  -chart-repository string
+        fetch the chart from this HTTPS origin instead of https://charts.oberth.ci
   -chart-version string
         Oberth chart version (default: binary version)
   -client-access string
@@ -420,7 +427,7 @@ Usage of install:
   -forge string
         upstream name (github, codeberg, or gitlab)
   -image string
-        server image the chart deploys, overriding the chart default (used with --chart for local iteration)
+        server image the chart deploys, overriding the chart default (used with --chart for local iteration; without --chart it must be the signed release's image)
   -install-rekor
         also install a local Rekor transparency-log stack (MySQL + Trillian + Rekor) for the audit witness
   -install-secretstore
@@ -445,6 +452,10 @@ Usage of install:
         Rekor chart version
   -rekor-namespace string
         Rekor namespace (default: rekor)
+  -release-dir DIR
+        read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
+  -release-origin string
+        fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
   -service-type string
         Oberth Service type: NodePort (default for a fresh install; clients use NodePorts 30022/30443), LoadBalancer (on k3s, servicelb also takes host ports 2222 and 443 on the node) or ClusterIP; an upgrade keeps the release's current type unless this is set
   -skip-argo-workflows
@@ -1048,7 +1059,8 @@ Flags:
   --yes                        skip the confirmation (for scripts)
 Advanced:
   --argo-namespace NAMESPACE   pipeline NAMESPACE (default oberth-argo)
-  --chart CHART                local Oberth CHART for the Helm upgrade (default: the published chart at the running version)
+  --chart CHART                local Oberth CHART for the Helm upgrade (development only: not verified; default: the signed release at the running version)
+  --chart-repository string    fetch the chart from this HTTPS origin instead of https://charts.oberth.ci
   --context NAME               kubeconfig context NAME
   -i FILE                      shorthand for --input FILE
   --input FILE                 the backup FILE (same as the argument)
@@ -1058,6 +1070,8 @@ Advanced:
   --namespace NAMESPACE        Oberth NAMESPACE (default oberth)
   --openbao-namespace NAMESPACE OpenBao NAMESPACE (default openbao)
   --private-key KEY            same as --key KEY
+  --release-dir DIR            read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
+  --release-origin string      fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
   --timeout duration           wait timeout for pods
   --utility-image string       file-tool image for database helpers (default: installed utility image)
 
@@ -1713,6 +1727,8 @@ Usage of upgrade:
         override retired resource/repository checks; accept orphaned resources and refused legacy runs
   -argo-controller-profile string
         explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
+  -argo-values-reviewed sha256:DIGEST
+        keep stored argo-workflows values the nonroot profile does not know: sha256:DIGEST of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)
   -backup-dir DIR
         write the pre-upgrade backup and the rollback record to DIR (default: the current directory)
   -chart string
