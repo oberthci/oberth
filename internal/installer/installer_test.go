@@ -2712,11 +2712,11 @@ type fakeBaoRunner struct {
 func (f *fakeBaoRunner) run(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
 	f.t.Helper()
 	if name != "kubectl" {
-		f.t.Fatalf("unexpected host command %q %v", name, args)
+		f.t.Fatal("unexpected host command in secret-store fixture")
 	}
 	command, authenticated, err := stripKubectlBaoPlumbing(args)
 	if err != nil {
-		f.t.Fatalf("%v (argv: %v)", err, args)
+		f.t.Fatal("invalid kubectl command in secret-store fixture")
 	}
 	call := fakeBaoCall{
 		command:       command,
@@ -2727,7 +2727,7 @@ func (f *fakeBaoRunner) run(_ context.Context, input []byte, name string, args .
 	f.calls = append(f.calls, call)
 	response, ok := f.responses[command]
 	if !ok {
-		f.t.Fatalf("unscripted bao command %q (stdin %q)", command, string(input))
+		f.t.Fatal("unscripted bao command in secret-store fixture")
 	}
 	return []byte(response.out), response.err
 }
@@ -3584,7 +3584,7 @@ const testServerCAPEM = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE
 func (f *fakeOberthHost) run(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
 	f.t.Helper()
 	if name != "kubectl" {
-		f.t.Fatalf("unexpected host command %q %v", name, args)
+		f.t.Fatal("unexpected host command in secret-store fixture")
 	}
 	joined := strings.Join(args, " ")
 	switch {
