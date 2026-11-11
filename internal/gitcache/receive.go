@@ -93,7 +93,7 @@ func (c *Cache) receiveWithTransport(ctx context.Context, input, actor, protocol
 			maximumPublicRefs,
 		)
 	} else if repository.Stale && stderr != nil {
-		_, _ = io.WriteString(stderr, "remote: oberth: upstream unavailable; serving cached repository\n")
+		_, _ = io.WriteString(stderr, repository.StaleNotice())
 	}
 	return c.receiveTransactionSerialized(ctx, identity, path, actor, repository.recoveryOnly, func() (ReleaseAdmission, error) {
 		admission, err := c.prepareReleaseAdmissionLocked(ctx, path, !repository.Stale && !repository.recoveryOnly)

@@ -614,7 +614,7 @@ func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string
 		return fmt.Errorf("prepare repository: %w", err)
 	}
 	if repository.Stale {
-		_, _ = io.WriteString(channel.Stderr(), "remote: oberth: upstream unavailable; serving cached repository\n")
+		_, _ = io.WriteString(channel.Stderr(), repository.StaleNotice())
 	}
 	return s.git.Serve(ctx, repoInput, command.service, protocol, channel, channel, channel.Stderr())
 }

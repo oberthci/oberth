@@ -98,6 +98,9 @@ func (c *Cache) fetchPolicyLocked(ctx context.Context, path string) (string, str
 	ref := upstreamRefPrefix + "heads/" + branch
 	sha, err := c.capture(ctx, path, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
+		if absent, readErr := c.trackingBranchAbsent(ctx, path, branch); readErr == nil && absent {
+			return ref, "", nil // The default branch is unborn: no policy exists yet.
+		}
 		return "", "", fmt.Errorf("resolve required upstream policy: %w", err)
 	}
 	sha = strings.TrimSpace(sha)

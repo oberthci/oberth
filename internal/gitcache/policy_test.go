@@ -119,11 +119,18 @@ func TestDefaultPolicyProvesUnbornBaselineWithoutIgnoringCandidate(t *testing.T)
 	if _, _, exists, err := cache.ReadDefaultBlob(ctx, "example", ".oberth/tests.yaml", 4096); err != nil || exists {
 		t.Fatalf("local candidate invented default: %v %v", exists, err)
 	}
-	// An upstream with objects/refs but no declared main is not empty.
+	// Refs elsewhere do not give the upstream a default branch: while HEAD's
+	// branch is unborn there is still no baseline, and the candidate's own
+	// requirement is still not read as the default.
 	runGit(t, work, "tag", "only-tag")
 	runGit(t, work, "push", upstream, "refs/tags/only-tag")
-	if _, _, _, err := cache.ReadDefaultBlob(ctx, "example", ".oberth/tests.yaml", 4096); err == nil {
-		t.Fatal("nonempty missing-default upstream treated as unborn")
+	if sha, _, exists, err := cache.ReadDefaultBlob(ctx, "example", ".oberth/tests.yaml", 4096); err != nil || exists || sha != "" {
+		t.Fatalf("unborn default beside other refs: %q %v %v", sha, exists, err)
+	}
+	// Once the default branch exists upstream, its policy is authoritative.
+	runGit(t, work, "push", upstream, "HEAD:refs/heads/main")
+	if sha, body, exists, err := cache.ReadDefaultBlob(ctx, "example", ".oberth/tests.yaml", 4096); err != nil || !exists || sha != candidateSHA || string(body) != contract {
+		t.Fatalf("born default policy: %q %q %v %v", sha, body, exists, err)
 	}
 }
 

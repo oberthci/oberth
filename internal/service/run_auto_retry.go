@@ -1,6 +1,9 @@
 package service
 
 import (
+	"strings"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -10,7 +13,7 @@ import (
 // cleanup has settled. The store rechecks durable cancellation, publication,
 // preflight cleanup, failed-step evidence and lineage atomically with enqueue.
 func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobResult) bool {
-	if scheduler.disableInfrastructureAutoRetry || run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || !model.IsInfrastructureRunFailure(result.Status, result.Phase, result.FailedStep) || result.FailedStage != "" || pushretry.PublicationFailure(result.Error) {
+	if scheduler.disableInfrastructureAutoRetry || run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || !model.IsInfrastructureRunFailure(result.Status, result.Phase, result.FailedStep) || result.FailedStage != "" || pushretry.PublicationFailure(result.Error) || upstreamConfigurationFailure(result.Error) {
 		return false
 	}
 	eviction := result.Phase == "infrastructure" && result.TerminalObservation.EvictionOnly() && (run.WorkflowName != "" && result.TerminalObservation.WorkflowName == run.WorkflowName)
@@ -46,4 +49,10 @@ func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobRes
 		}
 	}
 	return true
+}
+
+// upstreamConfigurationFailure reports a failure that the forge's own
+// configuration causes; retrying unchanged repeats it.
+func upstreamConfigurationFailure(message string) bool {
+	return strings.Contains(message, gitcache.ErrUpstreamDefaultBranch.Error())
 }
