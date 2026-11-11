@@ -66,7 +66,7 @@ func TestClaudePluginManifests(t *testing.T) {
 	if url, _ := server["url"].(string); !strings.HasPrefix(url, "${OBERTH_MCP_URL:-https://") || !strings.HasSuffix(url, "/mcp}") {
 		t.Fatalf("url %q is not configured through OBERTH_MCP_URL with an https default", url)
 	}
-	if helper, _ := server["headersHelper"].(string); helper != "${CLAUDE_PLUGIN_ROOT}/scripts/auth-header" {
+	if helper, _ := server["headersHelper"].(string); helper != `"${CLAUDE_PLUGIN_ROOT}/scripts/auth-header"` {
 		t.Fatalf("headersHelper = %q", helper)
 	}
 	if _, literal := server["headers"]; literal {
@@ -234,8 +234,13 @@ func helperComparison(t *testing.T) {
 
 // Client files someone else can change are not read by the helper.
 func TestClaudePluginHelperRefusesClientFilesOthersCanChange(t *testing.T) {
-	for _, name := range []string{"", "env", "token"} {
+	for _, name := range []string{"", "env", "token", "ca.crt"} {
 		config := pluginFiles(t, "export OBERTH_BASE_URL=\"https://localhost:30443\"\n")
+		if name == "ca.crt" {
+			if err := os.WriteFile(filepath.Join(config, "oberth", name), []byte("pem"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		target := filepath.Join(config, "oberth", name)
 		info, err := os.Stat(target)
 		if err != nil {
@@ -263,5 +268,44 @@ func TestClaudePluginHelperRefusesClientFilesOthersCanChange(t *testing.T) {
 	}
 	if out, err := pluginHelper(t, linked); err == nil || out != "" {
 		t.Errorf("symbolic link to a group-writable directory: %q %v", out, err)
+	}
+}
+
+// The helper reads mcpServers.oberth.url, as client.ConfigMCPURL does; a url
+// elsewhere in mcp.json (another server, a header value) names no server.
+func TestClaudePluginHelperReadsOnlyTheOberthServerURL(t *testing.T) {
+	const server = "https://a.example.test:30443"
+	for body, sends := range map[string]bool{
+		`{"mcpServers":{"oberth":{"type":"http","url":"` + server + `/mcp","headers":{"url":"https://other.example.test"}}}}`: true,
+		`{"mcpServers":{"other":{"url":"` + server + `/mcp"}}}`:                                                               false,
+		`{"url":"` + server + `/mcp","mcpServers":{"oberth":{"type":"http"}}}`:                                                false,
+		`{"mcpServers":{"other":{"url":"https://b.example.test/mcp"},"oberth":{"url":"` + server + `/mcp"}}}`:                 true,
+	} {
+		config := pluginFiles(t, "")
+		if err := os.WriteFile(filepath.Join(config, "oberth", "mcp.json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if want := client.ConfigMCPURL(filepath.Join(config, "oberth", "mcp.json")) != ""; want != sends {
+			t.Fatalf("fixture disagrees with client.ConfigMCPURL: %s", body)
+		}
+		out, err := pluginHelper(t, config, "OBERTH_MCP_URL="+server+"/mcp")
+		if (err == nil) != sends {
+			t.Errorf("mcp.json %s: helper sent=%v, want %v (%q)", body, err == nil, sends, out)
+		}
+	}
+}
+
+// A refusal names both addresses without their user information.
+func TestClaudePluginHelperMismatchDropsUserInformation(t *testing.T) {
+	config := pluginFiles(t, "export OBERTH_BASE_URL=\"https://saved:hunter2@a.example.test:30443\"\n")
+	helper, err := filepath.Abs(filepath.Join("..", "..", "claude-plugin", "scripts", "auth-header"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(helper)
+	command.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir(), "XDG_CONFIG_HOME=" + config, "OBERTH_MCP_URL=https://other:pass@b.example.test/mcp"}
+	out, err := command.CombinedOutput()
+	if err == nil || strings.Contains(string(out), "hunter2") || strings.Contains(string(out), "pass@") || !strings.Contains(string(out), "https://a.example.test:30443") || !strings.Contains(string(out), "https://b.example.test/mcp") {
+		t.Fatalf("mismatch refusal: %q %v", out, err)
 	}
 }

@@ -174,6 +174,28 @@ func TestEnvFileTokenCommandNeedsAFileOnlyTheUserCanChange(t *testing.T) {
 	if _, err := ResolveConnection(ConnectionFlags{}); err == nil || !strings.Contains(err.Error(), "writable by others") {
 		t.Fatalf("group-writable env = %v", err)
 	}
+	// A saved CA someone else can change is refused the same way.
+	if err := os.Chmod(env, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(directory, "ca.crt"), "pem", 0o666)
+	if err := os.Chmod(filepath.Join(directory, "ca.crt"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveConnection(ConnectionFlags{}); err == nil || !strings.Contains(err.Error(), "ca.crt is writable by others") {
+		t.Fatalf("world-writable ca.crt = %v", err)
+	}
+}
+
+// A refusal naming two servers never echoes user information from either.
+func TestMismatchMessageDropsUserInformation(t *testing.T) {
+	directory := isolate(t)
+	write(t, filepath.Join(directory, "env"), "export OBERTH_BASE_URL=\"https://saved:hunter2@a.example.test:30443\"\n", 0o600)
+	write(t, filepath.Join(directory, "token"), "token-of-a", 0o600)
+	_, err := ResolveConnection(ConnectionFlags{URL: "https://other:pass@b.example.test"})
+	if err == nil || strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), "pass@") || !strings.Contains(err.Error(), "a.example.test:30443") {
+		t.Fatalf("mismatch message = %v", err)
+	}
 }
 
 // OBERTH_BASE_URL and OBERTH_MCP_URL can name two servers; the saved token
@@ -260,5 +282,19 @@ func TestClientFilesOthersCanChangeAreNotRead(t *testing.T) {
 				t.Fatalf("an explicit credential = %+v %v", connection, err)
 			}
 		})
+	}
+}
+
+func TestDisplayAddressDropsUserInformation(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://user:secret@a.example.test:30443/mcp": "https://a.example.test:30443/mcp",
+		"https://a:b@c@host.example.test":              "https://host.example.test",
+		"https://host.example.test:30443":              "https://host.example.test:30443",
+		"https://host.example.test/":                   "https://host.example.test/",
+		"host.example.test":                            "host.example.test",
+	} {
+		if got := DisplayAddress(input); got != want {
+			t.Errorf("DisplayAddress(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
