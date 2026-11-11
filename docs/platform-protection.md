@@ -8,7 +8,9 @@ workloads they are an explicit choice. (Chart versions v0.17.79 through v0.20.x
 defaulted to true. Since v0.21.0 an `oberth upgrade` of an install that never
 set the key removes the server's `priorityClassName` and the Oberth class and
 prints which classes go; the Argo controller and OpenBao classes carry
-`helm.sh/resource-policy: keep` and stay. If a Pod outside the release uses a
+`helm.sh/resource-policy: keep` and stay. If a Pod outside the release, or the Pod
+template of a Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob
+outside it (a workload scaled to zero or between runs has no Pod), uses a
 class the upgrade would delete, the upgrade refuses and names it. Pass
 `--set platformProtection.enabled=true` once to keep protection.) Run admission capacity
 is unchanged. External ingress, connectors and other projects have their own

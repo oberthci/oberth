@@ -2,12 +2,15 @@ package installer
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -96,6 +99,29 @@ func TestUpgradePlatformProtectionFlip(t *testing.T) {
 	_, err = reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, foreign), "7", []byte(v021Defaults))
 	if err == nil || !strings.Contains(err.Error(), "tools/proxy-0") || !strings.Contains(err.Error(), "--set platformProtection.enabled=true") {
 		t.Fatalf("foreign user of a deleted class: %v", err)
+	}
+	// A workload without a Pod right now (scaled to zero, a CronJob between
+	// runs) names the class in its Pod template: refuse as well.
+	template := corev1.PodTemplateSpec{Spec: corev1.PodSpec{PriorityClassName: server.Name}}
+	zero := int32(0)
+	for _, workload := range []runtime.Object{
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.DeploymentSpec{Replicas: &zero, Template: template}},
+		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.StatefulSetSpec{Template: template}},
+		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: appsv1.DaemonSetSpec{Template: template}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: batchv1.JobSpec{Template: template}},
+		&batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Namespace: "tools", Name: "idle"}, Spec: batchv1.CronJobSpec{JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: template}}}},
+	} {
+		kind := fmt.Sprintf("%T", workload)
+		_, err = reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, workload), "7", []byte(v021Defaults))
+		if err == nil || !strings.Contains(err.Error(), "tools/idle") {
+			t.Fatalf("%s template naming a deleted class: %v", kind, err)
+		}
+	}
+	// The release's own Deployment is not a foreign user.
+	ownDeployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "oberth", Name: "oberth", Labels: map[string]string{"app.kubernetes.io/instance": "oberth"}},
+		Spec: appsv1.DeploymentSpec{Template: template}}
+	if _, err := reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, all, server, argo, own, ownDeployment), "7", []byte(v021Defaults)); err != nil {
+		t.Fatalf("own Deployment refused: %v", err)
 	}
 	// A pod on a kept class is no reason to refuse.
 	onKept := podWithClass("oberth-argo", "controller-0", argo.Name, nil)

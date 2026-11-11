@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
@@ -130,17 +131,14 @@ func platformProtectionRemoval(ctx context.Context, cfg UpgradeConfig, deps Deps
 		}
 	}
 	if len(deleted) > 0 {
-		pods, err := deps.KubeClient.CoreV1().Pods(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+		user, err := priorityClassUser(ctx, deps, cfg.Namespace, deleted)
 		if err != nil {
-			return "", fmt.Errorf("platformProtection: list Pods using the release's PriorityClasses: %w", err)
+			return "", fmt.Errorf("platformProtection: %w", err)
 		}
-		for _, pod := range pods.Items {
-			if !deleted[pod.Spec.PriorityClassName] || (pod.Namespace == cfg.Namespace && pod.Labels["app.kubernetes.io/instance"] == "oberth") {
-				continue
-			}
+		if user.name != "" {
 			return "", fmt.Errorf("platformProtection.enabled defaults to false since v0.21.0, and this release never set it: the upgrade would delete PriorityClass %s, "+
-				"which Pod %s/%s outside the release uses (its next replacement would be refused). Keep the classes with --set platformProtection.enabled=true, "+
-				"or move that workload off the class first", pod.Spec.PriorityClassName, pod.Namespace, pod.Name)
+				"which %s %s/%s outside the release uses (its next Pod would be refused). Keep the classes with --set platformProtection.enabled=true, "+
+				"or move that workload off the class first", user.class, user.kind, user.namespace, user.name)
 		}
 	}
 	names := make([]string, 0, len(deleted))
@@ -155,6 +153,92 @@ func platformProtectionRemoval(ctx context.Context, cfg UpgradeConfig, deps Deps
 		note += "; kept (resource-policy keep): " + strings.Join(kept, ", ")
 	}
 	return note + ". Keep protection with --set platformProtection.enabled=true", nil
+}
+
+// classUser is one object outside the release that names a PriorityClass.
+type classUser struct{ kind, namespace, name, class string }
+
+// priorityClassUser finds a Pod, or a Pod template of a Deployment,
+// StatefulSet, DaemonSet, ReplicaSet, Job or CronJob, outside the Oberth
+// release that names one of classes. Templates matter as much as Pods: a
+// Deployment scaled to zero or a CronJob between runs has no Pod, and its
+// next one would be refused once the class is gone.
+func priorityClassUser(ctx context.Context, deps Deps, releaseNamespace string, classes map[string]bool) (classUser, error) {
+	own := func(meta metav1.ObjectMeta) bool {
+		return meta.Namespace == releaseNamespace && meta.Labels["app.kubernetes.io/instance"] == "oberth"
+	}
+	check := func(kind string, meta metav1.ObjectMeta, spec corev1.PodSpec) (classUser, bool) {
+		if !classes[spec.PriorityClassName] || own(meta) {
+			return classUser{}, false
+		}
+		return classUser{kind: kind, namespace: meta.Namespace, name: meta.Name, class: spec.PriorityClassName}, true
+	}
+	all := metav1.ListOptions{}
+	client := deps.KubeClient
+	pods, err := client.CoreV1().Pods(metav1.NamespaceAll).List(ctx, all)
+	if err != nil {
+		return classUser{}, fmt.Errorf("list Pods using the release's PriorityClasses: %w", err)
+	}
+	for _, item := range pods.Items {
+		if user, ok := check("Pod", item.ObjectMeta, item.Spec); ok {
+			return user, nil
+		}
+	}
+	deployments, err := client.AppsV1().Deployments(metav1.NamespaceAll).List(ctx, all)
+	if err != nil {
+		return classUser{}, fmt.Errorf("list Deployments using the release's PriorityClasses: %w", err)
+	}
+	for _, item := range deployments.Items {
+		if user, ok := check("Deployment", item.ObjectMeta, item.Spec.Template.Spec); ok {
+			return user, nil
+		}
+	}
+	statefulSets, err := client.AppsV1().StatefulSets(metav1.NamespaceAll).List(ctx, all)
+	if err != nil {
+		return classUser{}, fmt.Errorf("list StatefulSets using the release's PriorityClasses: %w", err)
+	}
+	for _, item := range statefulSets.Items {
+		if user, ok := check("StatefulSet", item.ObjectMeta, item.Spec.Template.Spec); ok {
+			return user, nil
+		}
+	}
+	daemonSets, err := client.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, all)
+	if err != nil {
+		return classUser{}, fmt.Errorf("list DaemonSets using the release's PriorityClasses: %w", err)
+	}
+	for _, item := range daemonSets.Items {
+		if user, ok := check("DaemonSet", item.ObjectMeta, item.Spec.Template.Spec); ok {
+			return user, nil
+		}
+	}
+	replicaSets, err := client.AppsV1().ReplicaSets(metav1.NamespaceAll).List(ctx, all)
+	if err != nil {
+		return classUser{}, fmt.Errorf("list ReplicaSets using the release's PriorityClasses: %w", err)
+	}
+	for _, item := range replicaSets.Items {
+		if user, ok := check("ReplicaSet", item.ObjectMeta, item.Spec.Template.Spec); ok {
+			return user, nil
+		}
+	}
+	jobs, err := client.BatchV1().Jobs(metav1.NamespaceAll).List(ctx, all)
+	if err != nil {
+		return classUser{}, fmt.Errorf("list Jobs using the release's PriorityClasses: %w", err)
+	}
+	for _, item := range jobs.Items {
+		if user, ok := check("Job", item.ObjectMeta, item.Spec.Template.Spec); ok {
+			return user, nil
+		}
+	}
+	cronJobs, err := client.BatchV1().CronJobs(metav1.NamespaceAll).List(ctx, all)
+	if err != nil {
+		return classUser{}, fmt.Errorf("list CronJobs using the release's PriorityClasses: %w", err)
+	}
+	for _, item := range cronJobs.Items {
+		if user, ok := check("CronJob", item.ObjectMeta, item.Spec.JobTemplate.Spec.Template.Spec); ok {
+			return user, nil
+		}
+	}
+	return classUser{}, nil
 }
 
 // runningControllerProfile is the profile ConfigMap the running controller
