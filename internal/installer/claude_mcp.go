@@ -135,6 +135,13 @@ func configureClaudeCertificate(paths claudeCodeFiles, cert, key string) error {
 	if err != nil {
 		return err
 	}
+	if cert == "" && key == "" {
+		_, hasCert := env.values["CLAUDE_CODE_CLIENT_CERT"]
+		_, hasKey := env.values["CLAUDE_CODE_CLIENT_KEY"]
+		if !hasCert && !hasKey {
+			return nil
+		}
+	}
 	for name, value := range map[string]string{"CLAUDE_CODE_CLIENT_CERT": cert, "CLAUDE_CODE_CLIENT_KEY": key} {
 		if value == "" {
 			env.remove(name)
