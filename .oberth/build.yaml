@@ -180,7 +180,7 @@ spec:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/sh", "-ec"]
-      args: ["/usr/bin/python3 -I -B hack/test-new-migration.py; /usr/bin/python3 -I -B .oberth/test_check_migration_sequence.py; git fetch --no-tags --depth=1 https://github.com/oberthci/oberth.git main; /usr/bin/python3 -I -B .oberth/check-migration-sequence.py --base FETCH_HEAD; /usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
+      args: ["/usr/bin/python3 -I -B hack/test-new-migration.py; /usr/bin/python3 -I -B .oberth/test_check_migration_sequence.py; git init -q --bare /tmp/migration-base && git --git-dir /tmp/migration-base fetch -q --no-tags --depth=1 https://github.com/oberthci/oberth.git main && /usr/bin/python3 -I -B .oberth/check-migration-sequence.py --base-git-dir /tmp/migration-base --base FETCH_HEAD; /usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
       # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
       # Observed CPU avg max 894.1m, memory peak 142.6Mi, pod storage 0.1Mi.
       # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.

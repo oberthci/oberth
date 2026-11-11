@@ -71,13 +71,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--base", help="git ref whose list must be a prefix, e.g. origin/main")
+    parser.add_argument("--base-git-dir", type=Path, help="git directory holding --base (default: the checkout at --root)")
     args = parser.parse_args()
     sequence = read_sequence((args.root / SEQUENCE).read_text(encoding="utf-8"))
     base = None
     if args.base:
         # Read the migration tree itself so the first sequence-file change also
         # compares against every migration already shipped on the default branch.
-        shown = subprocess.run(["git", "-C", str(args.root), "ls-tree", "--name-only", args.base, f"{MIGRATIONS.as_posix()}/"],
+        git = ["git", "--git-dir", str(args.base_git_dir)] if args.base_git_dir else ["git", "-C", str(args.root)]
+        shown = subprocess.run([*git, "ls-tree", "--name-only", args.base, f"{MIGRATIONS.as_posix()}/"],
                                check=False, capture_output=True, text=True)
         if shown.returncode != 0:
             print(f"cannot read migrations at {args.base}: {shown.stderr.strip()}", file=sys.stderr)
