@@ -82,7 +82,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			if model.DisplayRunStatus(run) == model.DisplayQueued {
 				prefix = fmt.Sprintf("Priority %s.", priority)
 			}
-			if priority != model.PriorityNormal && (result.State == "queued" || result.State == "waiting") {
+			if priority != model.PriorityStandard && (result.State == "queued" || result.State == "waiting") {
 				prefix = fmt.Sprintf("priority %s: next when a run slot opens. %s", priority, prefix)
 			}
 			result.Message = prefix + " " + result.Message

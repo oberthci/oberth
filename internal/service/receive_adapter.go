@@ -107,7 +107,7 @@ func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 		}
 		if result.Run.PriorityRefusal != "" {
 			line += " · " + result.Run.PriorityRefusal
-		} else if result.Run.Priority != "" && result.Run.Priority != model.PriorityNormal {
+		} else if result.Run.Priority != "" && result.Run.Priority != model.PriorityStandard {
 			line += " · priority " + string(result.Run.Priority) + ": next when capacity frees"
 		}
 		if result.Duplicate {

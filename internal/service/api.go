@@ -1839,7 +1839,7 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 
 // priorityPrefix uses server-owned provenance, with structural boosts implied by ref.
 func priorityPrefix(run model.Run) string {
-	priority := run.Priority.Canonical()
+	priority := run.Priority
 	if priority == "" || priority == model.PriorityStandard || run.PriorityReason == "promotion run" || run.PriorityReason == model.TagReleasePriorityReason {
 		return ""
 	}

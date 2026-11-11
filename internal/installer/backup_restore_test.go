@@ -452,6 +452,8 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			}
 		}
 		return []byte(strings.Join(lines, "\n") + "\n"), nil
+	case len(command) == 4 && command[0] == "oberth" && command[1] == "admin" && command[2] == "read-file":
+		return c.rawFiles[command[3]], nil
 	case command[0] == "cat":
 		return c.rawFiles[command[1]], nil
 	case container == restoreHelperContainer && command[2] == stageResetScript:
@@ -765,6 +767,12 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 	t.Parallel()
 	archive, runID, source := backupFixtureArchive(t, false)
 	target := restoreTargetCluster(t, runID)
+	public, private := newEd25519HostKey(t)
+	publicLine := strings.TrimSpace(knownHostsLine("", public, ""))
+	if target.rawFiles == nil {
+		target.rawFiles = map[string][]byte{}
+	}
+	target.rawFiles["/run/oberth-identities/upstream/id_ed25519.pub"] = []byte(publicLine + "\n")
 	var out bytes.Buffer
 	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second, UtilityImage: "registry.internal/busybox@sha256:fixture"}
 	cfg.applyDefaults()
@@ -773,6 +781,9 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 	}
 	assertUtilityHelperImage(t, target, "registry.internal/busybox@sha256:fixture")
 	text := out.String()
+	if !strings.Contains(text, publicLine) || !strings.Contains(text, "with write access") || bytes.Contains(out.Bytes(), private) {
+		t.Fatal("restore did not safely print the current forge deploy key")
+	}
 	if strings.Contains(text, testSecretValue) {
 		t.Fatal("restore output prints a secret value")
 	}

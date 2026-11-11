@@ -629,3 +629,30 @@ func TestSingleSourcePromotionRetryNamesNewestRunAndGuidesRerun(t *testing.T) {
 		})
 	}
 }
+
+func TestPromotionRetryCarriesTagWithAdminAuthority(t *testing.T) {
+	fixture, _, service := newPromotionRetryHarness(t, &scriptedPromotionGit{})
+	service.agentEvents = newAgentEventRecorder(service, fixture.store, AgentEventPolicy{})
+	failed, err := fixture.store.AppendPromotion(t.Context(), model.PromotionSpec{RepoID: fixture.repo.ID, SourceBranch: "feature/promote", SourceSHA: retrySourceSHA, TargetRef: "main", Actor: "agent@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.RequestPromotionTag(t.Context(), failed.ID, "agent@host", "deploy/retry", "promoted result"); err != nil {
+		t.Fatal(err)
+	}
+	failed, err = fixture.store.FinishPromotion(t.Context(), failed.ID, model.PromotionFailed, "", "failed before delivery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := service.admitPromotionRetry(t.Context(), api.Actor{Identity: "agent@host"}, failed, model.PromotionRetryManual); !errors.Is(err, ErrForbidden) {
+		t.Fatal("tag retry accepted without admin authority", err)
+	}
+	_, _, retried, err := service.admitPromotionRetry(t.Context(), api.Actor{Identity: "agent@host", Admin: true}, failed, model.PromotionRetryManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, err := fixture.store.PromotionTag(t.Context(), retried.ID)
+	if err != nil || tag.Name != "deploy/retry" || tag.Message != "promoted result" || tag.Status != model.PromotionTagPending {
+		t.Fatal("promotion retry lost tag request", err)
+	}
+}

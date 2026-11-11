@@ -122,6 +122,14 @@ func TestRunListLatestPerRefGlob(t *testing.T) {
 
 func TestRunListLatestRefGlobRespectsUpstreamScope(t *testing.T) {
 	f := newScopeFixture(t)
+	old := f.runs["github"][0]
+	newer, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("f", 40), Actor: scopedActor.Identity, Trigger: "push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.hidden.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("e", 40), Actor: scopedActor.Identity, Trigger: "push"}); err != nil {
+		t.Fatal(err)
+	}
 	value, err := f.call(scopedActor, "run_list", map[string]any{"ref_glob": "feature/*", "latest": true})
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +142,9 @@ func TestRunListLatestRefGlobRespectsUpstreamScope(t *testing.T) {
 	var runs []model.Run
 	if err := json.Unmarshal(encoded, &runs); err != nil {
 		t.Fatal(err)
+	}
+	if slices.Contains(runIDs(runs), old.ID) || !slices.Contains(runIDs(runs), newer.ID) {
+		t.Fatal("scoped latest did not select the newest visible attempt")
 	}
 	if len(runs) != len(f.runs["github"]) {
 		t.Fatalf("scoped count: %d", len(runs))

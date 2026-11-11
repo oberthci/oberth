@@ -25,7 +25,7 @@ func TestEffectivePriorityAgesNormalIntoHighOnlyAndFreezes(t *testing.T) {
 			if p != want {
 				t.Fatalf("boundary priority/reason=%s/%s, want high", p, reason)
 			}
-			if base == PriorityNormal && (!strings.Contains(reason, "aged") || strings.Contains(reason, "highest")) {
+			if base == PriorityStandard && (!strings.Contains(reason, "aged") || strings.Contains(reason, "highest")) {
 				t.Fatalf("aged reason=%q", reason)
 			}
 			if base == PriorityHigh && reason != "base" {
@@ -45,7 +45,7 @@ func TestEffectivePriorityAgesNormalIntoHighOnlyAndFreezes(t *testing.T) {
 			}
 		})
 	}
-	if p, _ := (Run{Priority: PriorityHighest, QueuedAt: queued}).EffectivePriority(queued.Add(2 * time.Hour)); p != PriorityHigh {
+	if p, _ := (Run{Priority: PriorityHigh, QueuedAt: queued}).EffectivePriority(queued.Add(2 * time.Hour)); p != PriorityHigh {
 		t.Fatalf("highest work changed class: %s", p)
 	}
 }

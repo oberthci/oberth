@@ -316,7 +316,7 @@ func (g *parkWorkspaceGit) ReadDefaultBlob(context.Context, string, string, int)
 
 func TestParkPromotionUsesExistingReasonLine(t *testing.T) {
 	for _, status := range []model.RunStatus{model.RunQueued, model.RunRunning, model.RunPassed, model.RunFailed, model.RunInterrupted} {
-		run := model.Run{Trigger: "promotion", Status: status, Reason: "promoted without branch CI", Priority: model.PriorityHighest}
+		run := model.Run{Trigger: "promotion", Status: status, Reason: "promoted without branch CI", Priority: model.PriorityHigh}
 		visible := presentationRun(run)
 		if !strings.Contains(visible.Reason, "promoted without branch CI") {
 			t.Fatalf("status=%s reason=%q", status, visible.DisplayReason)

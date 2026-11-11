@@ -59,10 +59,10 @@ const legacyBasePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest
 const legacyPriorityReasonSQL = `CASE WHEN trigger='promotion' THEN 'promotion run' WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + requestedPrioritySQL + ` IS NOT NULL THEN 'submission priority: ' || (SELECT reason FROM run_priority_requests WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END ELSE 'ordinary run' END`
 
 // The legacy expressions above are frozen inputs to shipped migration 39.
-// Live projections normalize old policy values without rewriting their receipts.
-const currentOverridePrioritySQL = `(SELECT CASE priority WHEN 'normal' THEN 'standard' WHEN 'highest' THEN 'high' ELSE priority END FROM run_priority_overrides WHERE run_id=id)`
-const currentRequestedPrioritySQL = `(SELECT CASE accepted WHEN 'normal' THEN 'standard' WHEN 'highest' THEN 'high' ELSE accepted END FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('low','normal','standard','promotion','high','highest') AND refusal='')`
-const currentRequestedPriorityReasonSQL = `(SELECT reason FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('low','normal','standard','promotion','high','highest') AND refusal='')`
+// Live projections read only the four stored priority classes.
+const currentOverridePrioritySQL = `(SELECT priority FROM run_priority_overrides WHERE run_id=id)`
+const currentRequestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('low','standard','promotion','high') AND refusal='')`
+const currentRequestedPriorityReasonSQL = `(SELECT reason FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('low','standard','promotion','high') AND refusal='')`
 const basePrioritySQL = `CASE
  WHEN ` + currentOverridePrioritySQL + ` IS NOT NULL THEN ` + currentOverridePrioritySQL + `
  WHEN ` + currentRequestedPrioritySQL + `='low' THEN 'low'

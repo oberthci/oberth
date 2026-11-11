@@ -119,10 +119,16 @@ func TestPromotionRetryAdmissionLineageAndGuards(t *testing.T) {
 		}
 	}
 
+	if err := s.RequestPromotionTag(ctx, pending.ID, spec.Actor, "deploy/retry", "deliver it"); err != nil {
+		t.Fatal(err)
+	}
 	retry.RetryMode = model.PromotionRetryAuto
 	first, err := s.AppendPromotion(ctx, retry)
 	if err != nil {
 		t.Fatalf("retry of an interrupted promotion: %v", err)
+	}
+	if tag, err := s.PromotionTag(ctx, first.ID); err != nil || tag.Name != "deploy/retry" || tag.Status != model.PromotionTagPending {
+		t.Fatalf("retry lost tag request: %+v %v", tag, err)
 	}
 	if _, err := s.AppendPromotion(ctx, retry); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("second retry of the same promotion error = %v, want ErrInvalidState", err)

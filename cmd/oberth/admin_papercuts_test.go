@@ -111,7 +111,7 @@ func TestAdminPapercutPriorityCLIAndReadback(t *testing.T) {
 		if err = json.Unmarshal(reply.Body.Bytes(), &detail); err != nil {
 			t.Fatal(err)
 		}
-		if reply.Code != http.StatusOK || detail.Run.Priority != model.RunPriority(priority).Canonical() || !strings.Contains(detail.Run.PriorityReason, "let the queue move") {
+		if reply.Code != http.StatusOK || detail.Run.Priority != model.RunPriority(priority) || !strings.Contains(detail.Run.PriorityReason, "let the queue move") {
 			t.Fatalf("priority REST readback=%d %s", reply.Code, reply.Body)
 		}
 	}

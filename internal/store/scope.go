@@ -50,6 +50,17 @@ func runRestriction(filter model.RunListFilter) (string, []any) {
 		args = append(args, filter.Actor)
 	}
 	if filter.RefGlob != "" {
+		if prefix := refGlobPrefix(filter.RefGlob); prefix != "" {
+			upper := []byte(prefix)
+			for len(upper) > 0 && upper[len(upper)-1] == 255 {
+				upper = upper[:len(upper)-1]
+			}
+			if len(upper) > 0 {
+				upper[len(upper)-1]++
+				restriction += " AND queue_sequence IN (SELECT queue_sequence FROM runs INDEXED BY runs_ref_prefix_idx WHERE ref>=? AND ref<?)"
+				args = append(args, prefix, string(upper))
+			}
+		}
 		restriction += " AND oberth_ref_glob(?, ref)"
 		args = append(args, filter.RefGlob)
 	}
@@ -232,4 +243,26 @@ func scopeAuditValue(scopes []string) []string {
 		return []string{}
 	}
 	return scopes
+}
+
+// refGlobPrefix extracts literal bytes before the first path.Match wildcard.
+func refGlobPrefix(pattern string) string {
+	var prefix strings.Builder
+	escaped := false
+	for _, r := range pattern {
+		if escaped {
+			prefix.WriteRune(r)
+			escaped = false
+			continue
+		}
+		switch r {
+		case '\\':
+			escaped = true
+		case '*', '?', '[':
+			return prefix.String()
+		default:
+			prefix.WriteRune(r)
+		}
+	}
+	return prefix.String()
 }

@@ -59,8 +59,10 @@ func TestUpstreamRepinRefusesAChangedRegistrationBeforeAnyPin(t *testing.T) {
 		arguments []string
 		want      string
 	}{
-		"another URL":   {[]string{"forge", "ssh://git@other.example/acme"}, "upstream remove"},
-		"dedicated key": {[]string{"--dedicated-key", "forge", "ssh://git@forge.example/acme"}, "without --dedicated-key"},
+		"add another URL":     {[]string{"forge", "ssh://git@other.example/acme"}, "upstream remove"},
+		"add dedicated key":   {[]string{"--dedicated-key", "forge", "ssh://git@forge.example/acme"}, "without --dedicated-key"},
+		"repin another URL":   {[]string{"--repin", "forge", "ssh://git@other.example/acme"}, "upstream remove"},
+		"repin dedicated key": {[]string{"--repin", "--dedicated-key", "forge", "ssh://git@forge.example/acme"}, "without --dedicated-key"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var operations []string
@@ -81,7 +83,7 @@ func TestUpstreamRepinRefusesAChangedRegistrationBeforeAnyPin(t *testing.T) {
 				},
 			}
 			arguments := append([]string{
-				"add", "--repin",
+				"add",
 				"--database", databasePath,
 				"--upstream-key", filepath.Join(directory, "projected", "id_ed25519"),
 				"--known-hosts", filepath.Join(directory, "projected-hosts", "known_hosts"),
@@ -101,5 +103,55 @@ func TestUpstreamRepinRefusesAChangedRegistrationBeforeAnyPin(t *testing.T) {
 				t.Fatalf("a refused re-pin wrote identities: %v", secretPatchNames(client))
 			}
 		})
+	}
+}
+
+// A restored DB retains the registration while a fresh installation has no
+// persisted deploy identity. Plain upstream add must generate it and keep the row.
+func TestUpstreamAddAfterRestoreRegeneratesIdentityAndKeepsRegistration(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "state.sqlite")
+	database, err := storetest.OpenAdminClient(ctx, databasePath, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := database.RegisterUpstream(ctx, "admin", model.UpstreamSpec{Name: "forge", Kind: "ssh", BaseURL: "ssh://git@forge.example/acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	client := newBootstrapClient("ci", "oberth-upstream-key", "oberth-known-hosts")
+	hostKey := codebergSSHHostKey(t)
+	dependencies := upstreamDependencies{input: strings.NewReader("yes\nyes\n"), mutationGate: allowTestMutation, identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) { return client, nil }), scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) { return []ssh.PublicKey{hostKey}, nil }, probe: func(_ context.Context, _ string, private, pins []byte) error {
+		if _, err := ssh.ParsePrivateKey(private); err != nil {
+			t.Error("regenerated identity is invalid")
+		}
+		if len(pins) == 0 {
+			t.Error("host pins missing")
+		}
+		return nil
+	}}
+	var output bytes.Buffer
+	args := []string{"add", "--database", databasePath, "--namespace", "ci", "--upstream-key", filepath.Join(root, "projected", "id_ed25519"), "--known-hosts", filepath.Join(root, "hosts", "known_hosts"), "forge", "ssh://git@forge.example/acme"}
+	if err := runUpstreamWithDependencies(ctx, args, &output, dependencies); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "identical registration kept") || strings.Contains(output.String(), "PRIVATE KEY") {
+		t.Fatal("restore registration guidance or secret boundary failed")
+	}
+	database, err = storetest.OpenAdminClient(ctx, databasePath, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	rows, err := database.ListUpstreams(ctx)
+	if err != nil || len(rows) != 1 || rows[0].ID != original.ID {
+		t.Fatal("restored registration was changed")
+	}
+	if len(secretPatchNames(client)) == 0 {
+		t.Fatal("missing regenerated install identity")
 	}
 }

@@ -464,6 +464,10 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
+	// Admin operations require the database already created by the server.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := newBootstrapClient("ci", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	scanCalls := 0
@@ -664,6 +668,10 @@ func TestUpstreamAddRegistrationWaitCancelsCleanly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	directory := t.TempDir()
+	// Admin operations require the database already created by the server.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := newBootstrapClient("ci", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	dependencies := upstreamDependencies{
@@ -778,6 +786,10 @@ func TestUpstreamAddDedicatedKeyRerunHintPreservesFlag(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
+	// Admin operations require the database already created by the server.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := newBootstrapClient("ci", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	dependencies := upstreamDependencies{
@@ -824,6 +836,10 @@ func TestUpstreamAddRerunHintPreservesNonDefaultFlags(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	directory := t.TempDir()
+	// Admin operations require the database already created by the server.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := newBootstrapClient("custom-ns", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey := codebergSSHHostKey(t)
 	dependencies := upstreamDependencies{
@@ -922,6 +938,10 @@ func TestUpstreamAddHelpIncludesExpectedHostFingerprint(t *testing.T) {
 func TestUpstreamAddExpectedHostFingerprintFlagPlumbed(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
+	// Admin operations require the database already created by the server.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	client := newBootstrapClient("oberth", "oberth-upstream-key", "oberth-known-hosts")
 	hostKey, _, _ := testSSHIdentity(t)
 	var output bytes.Buffer
@@ -991,6 +1011,10 @@ func TestUpstreamAddRequiresBothExplicitConfirmations(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			directory := t.TempDir()
+			// Admin operations require the database already created by the server.
+			if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+				t.Fatal(err)
+			}
 			client := newBootstrapClient("oberth", "oberth-upstream-key", "oberth-known-hosts")
 			scans := 0
 			var output bytes.Buffer
@@ -1081,6 +1105,10 @@ func TestUpstreamAddUsesProvidedProjectedMaterialWithoutKubernetes(t *testing.T)
 func TestUpstreamAddProjectedProbeFailureReadvertisesOnlyPublicKey(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
+	// Admin operations require the database already created by the server.
+	if err := storetest.EnsureDatabase(t.Context(), filepath.Join(directory, "oberth.sqlite"), store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	hostKey, privateBody, publicBody := testSSHIdentity(t)
 	privatePath := filepath.Join(directory, "id_ed25519")
 	knownHostsPath := filepath.Join(directory, "known_hosts")

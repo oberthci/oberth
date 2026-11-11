@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -304,4 +305,64 @@ func TestContinuityCompleteRetryCursorDoesNotRepeatAttemptHeader(t *testing.T) {
 	if output.Len() != 0 {
 		t.Fatal("complete retry cursor appended duplicate header", output.String())
 	}
+}
+
+func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
+	sink := durableLogFixture(t)
+	wf := singleStepWorkflow()
+	wf.UID = "retry-workflow"
+	wf.Annotations[PodNameVersionAnnotation] = "v1"
+	prototype := wf.Status.Nodes["compile-pod"]
+	delete(wf.Status.Nodes, "compile-pod")
+	wf.Status.Nodes["retry"] = wfv1.NodeStatus{ID: "retry", Name: "wf.build.compile", Type: wfv1.NodeTypeRetry, BoundaryID: "build-burn", Children: []string{"attempt-0", "attempt-1"}}
+	for i, id := range []string{"attempt-0", "attempt-1"} {
+		node := prototype
+		node.ID = id
+		node.Name = fmt.Sprintf("wf.build.compile(%d)", i)
+		node.DisplayName = fmt.Sprintf("compile(%d)", i)
+		node.Phase = wfv1.NodeFailed
+		wf.Status.Nodes[id] = node
+	}
+	firstStep := stepAttempts(wf)[0]
+	first := testLogWorker(&runBudgetWriter{destination: sink, remaining: 1 << 20})
+	first.step = firstStep
+	first.workflow = wf
+	first.key = string(wf.UID) + "/" + firstStep.NodeID + "/" + firstStep.PodName
+	first.container = "main"
+	if err := first.consume(strings.NewReader(stamped("FAIL first attempt"))); err != nil {
+		t.Fatal(err)
+	}
+	first.complete = true
+	if err := first.flush(true); err != nil {
+		t.Fatal(err)
+	}
+	logs := newStepLogFollowers(t.Context(), func(_ context.Context, _, pod string, o corev1.PodLogOptions) (io.ReadCloser, error) {
+		if pod != "attempt-1" {
+			t.Errorf("replayed completed attempt: %s", pod)
+		}
+		if o.SinceTime != nil {
+			return io.NopCloser(strings.NewReader(stamped("exit status 1"))), nil
+		}
+		return io.NopCloser(strings.NewReader(stamped("FAIL retried script before hold", "exit status 1"))), nil
+	}, &runBudgetWriter{destination: sink, remaining: 1 << 20}, []runprogress.Event{{Stage: firstStep.Stage, Step: firstStep.Step, Status: runprogress.StepRunning}})
+	logs.drain(wf)
+	logs.close()
+	body, err := os.ReadFile(sink.file.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"] FAIL first attempt\n", "] FAIL retried script before hold\n", "] exit status 1\n"} {
+		if bytes.Count(body, []byte(line)) != 1 {
+			t.Fatalf("missing/duplicate attempt output %q", line)
+		}
+	}
+	reader, err := runlog.Open(filepath.Dir(sink.file.Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepLog, err := reader.ReadActive("run", firstStep.Stage, firstStep.Step)
+	if err != nil || !bytes.Contains(stepLog, []byte("FAIL retried script before hold")) {
+		t.Fatal("per-step reader lost the script failure")
+	}
+
 }
