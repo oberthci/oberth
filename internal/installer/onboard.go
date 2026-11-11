@@ -11,6 +11,7 @@ package installer
 // over kubectl exec, and only then waits for readiness.
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -69,6 +70,25 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		deps.StepProgressSink("rollout ready", "done")
 	}
 
+	// The admin identity is independent of forge registration. Save its token
+	// immediately, including when subsequent onboarding is partial.
+	if cfg.AdminSSHPublicKeyPath != "" {
+		if err := defaultOnboardingIdentity(&cfg, deps, tw); err != nil {
+			return err
+		}
+		_, identity, token, _, err := onboardUplink(ctx, cfg, deps, tw)
+		if err != nil {
+			return errors.New("first admin uplink could not be created; inspect cluster administration")
+		}
+		if token == "" {
+			return errors.New("first admin uplink did not return a recognized credential")
+		}
+		creds.add("Bearer token", token)
+		cfg.uplinkOnboarded, cfg.adminToken, cfg.UplinkIdentity = true, token, identity
+		if deps.UplinkCreated != nil {
+			deps.UplinkCreated(identity)
+		}
+	}
 	existing, err := listUpstreams(ctx, cfg, deps)
 	configured := len(existing) > 0
 	if err != nil {
@@ -402,6 +422,11 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		return err
 	}
 
+	keyProvided, err = prepareUpstreamRecovery(ctx, cfg, deps, creds, keyProvided)
+	if err != nil {
+		return err
+	}
+
 	// --- Register upstream (quiet, with result as table row) ---
 	registration, err := registerUpstream(ctx, cfg, deps, name, baseURL)
 	if err != nil {
@@ -482,7 +507,12 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	upstreams := append(first, connectAlsoUpstreams(ctx, cfg, deps, tw, first)...)
 
 	// --- Uplink ---
-	pubKeyPath, identity, token, uplinkOutput, uplinkErr := onboardUplink(ctx, cfg, deps, tw)
+	pubKeyPath, identity, token := cfg.SSHPublicKeyPath, cfg.UplinkIdentity, cfg.adminToken
+	var uplinkOutput string
+	var uplinkErr error
+	if !cfg.uplinkOnboarded {
+		pubKeyPath, identity, token, uplinkOutput, uplinkErr = onboardUplink(ctx, cfg, deps, tw)
+	}
 	if uplinkErr != nil {
 		tw.WriteFooter()
 		_, _ = fmt.Fprintf(w, "Uplink setup did not complete (%v).\nAdd one later with:\n\n    %s < ~/.ssh/id_ed25519.pub\n\n", uplinkErr,
@@ -492,14 +522,22 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		}
 		return ErrOnboardingPartial
 	}
+	if token != "" && !cfg.uplinkOnboarded {
+		creds.add("Bearer token", token)
+	}
+	if deps.UplinkCreated != nil && !cfg.uplinkOnboarded {
+		deps.UplinkCreated(identity)
+	}
 	tw.AppendRow("Uplink", identity, "✓ registered", false)
 	if deps.StepProgressSink != nil {
 		deps.StepProgressSink("mint uplink", "done")
 	}
 
 	// --- SSH config ---
-	if err := offerSSHConfig(ctx, deps, pubKeyPath, tw); err != nil {
-		return err
+	if pubKeyPath != "-" {
+		if err := offerSSHConfig(ctx, deps, pubKeyPath, tw); err != nil {
+			return err
+		}
 	}
 	sshConfigured := sshHostBlockExists()
 
@@ -507,9 +545,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	// When extraction fails, print the sanitized pod output instead —
 	// the token is shown exactly once and silently discarding an
 	// unrecognized format would lose it forever.
-	if token != "" {
-		creds.add("Bearer token", token)
-	} else if strings.TrimSpace(uplinkOutput) != "" {
+	if token == "" && strings.TrimSpace(uplinkOutput) != "" {
 		_, _ = fmt.Fprintln(w, strings.TrimRight(uplinkOutput, "\n"))
 	}
 
@@ -716,6 +752,32 @@ func upstreamFromInput(raw string) (string, string, error) {
 	}
 	name := strings.Split(parsed.Hostname(), ".")[0]
 	return name, parsed.String(), nil
+}
+
+func prepareUpstreamRecovery(ctx context.Context, cfg Config, deps Deps, creds *heldCredentials, keyProvided bool) (bool, error) {
+	if !keyProvided && cfg.SecretsFile != "" {
+		public, readErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "admin", "read-file", "/run/oberth-identities/upstream/id_ed25519.pub")...)
+		if readErr != nil || validatePublicKeyFile(public) != nil {
+			_, private, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				return false, errors.New("cannot generate upstream identity")
+			}
+			defer clear(private)
+			block, err := ssh.MarshalPrivateKey(private, "Oberth upstream")
+			if err != nil {
+				return false, errors.New("cannot encode upstream identity")
+			}
+			encoded := pem.EncodeToMemory(block)
+			defer clear(encoded)
+			creds.add("Upstream private key", string(encoded))
+			if err := applyProvidedDeployKey(ctx, cfg, deps, encoded); err != nil {
+				return false, errors.New("cannot import new upstream key; existing keys are never replaced; the generated recovery copy is in the secrets file")
+			}
+			return true, nil
+		}
+	}
+
+	return keyProvided, nil
 }
 
 // promptDeployKey asks whether to generate the deploy key in-pod or provide
@@ -1164,20 +1226,19 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 		}
 	}
 
-	expanded, expandErr := expandSSHKeyPath(pubKeyPath)
-	if expandErr != nil {
-		if isInteractive(deps) {
-			completePrompt(w, color, "Uplink key", pubKeyPath, "✗ error")
+	expanded := pubKeyPath
+	publicKey := cfg.adminSSHPublicKey
+	if len(publicKey) == 0 {
+		var expandErr error
+		expanded, expandErr = expandSSHKeyPath(pubKeyPath)
+		if expandErr != nil {
+			return "", "", "", "", expandErr
 		}
-		return "", "", "", "", expandErr
-	}
-	// #nosec G304 -- the operator explicitly names their own public-key file.
-	publicKey, readFileErr := os.ReadFile(expanded)
-	if readFileErr != nil {
-		if isInteractive(deps) {
-			completePrompt(w, color, "Uplink key", pubKeyPath, "✗ error")
+		var readErr error
+		publicKey, readErr = os.ReadFile(expanded) //nolint:gosec // G304: selected public key
+		if readErr != nil {
+			return "", "", "", "", errors.New("cannot read SSH public key file")
 		}
-		return "", "", "", "", fmt.Errorf("read public key %s: %w", pubKeyPath, readFileErr)
 	}
 	if err := validatePublicKeyFile(publicKey); err != nil {
 		if isInteractive(deps) {
@@ -1223,7 +1284,12 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	out, cmdErr := run(ctx, publicKey, "kubectl", kubectlOberthArgs(cfg, deps, true, "uplink", "add", "-", identity)...)
+	args := []string{"uplink", "add"}
+	if cfg.AdminSSHPublicKeyPath != "" {
+		args = append(args, "--admin")
+	}
+	args = append(args, "-", identity)
+	out, cmdErr := run(ctx, publicKey, "kubectl", kubectlOberthArgs(cfg, deps, true, args...)...)
 	if cmdErr != nil {
 		return "", "", "", "", fmt.Errorf("uplink add: %w%s", cmdErr, commandOutputSuffix([]byte(sanitizeExecOutput(string(out)))))
 	}
@@ -1363,8 +1429,12 @@ func validatePublicKeyFile(data []byte) error {
 		return errors.New("that is a PRIVATE key, not a public key — provide the .pub file instead (e.g. ~/.ssh/id_ed25519.pub)")
 	}
 	// Try parsing as an authorized_keys line (the expected format).
-	if _, _, _, _, err := ssh.ParseAuthorizedKey(data); err != nil {
+	_, _, _, rest, err := ssh.ParseAuthorizedKey(data)
+	if err != nil {
 		return fmt.Errorf("file does not contain a valid SSH public key: %w", err)
+	}
+	if len(bytes.TrimSpace(rest)) != 0 {
+		return errors.New("file must contain exactly one SSH public key and no other material")
 	}
 	return nil
 }

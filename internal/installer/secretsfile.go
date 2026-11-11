@@ -1,7 +1,9 @@
 package installer
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -26,9 +28,10 @@ import (
 // secretsFileKeys names each credential in the file. The names are stable:
 // the install output tells the operator which line to read.
 var secretsFileKeys = map[string]string{ //nolint:gosec // G101: line names in the secrets file, not credentials
-	"Root token":   "OPENBAO_ROOT_TOKEN",
-	"Unseal key":   "OPENBAO_UNSEAL_KEY",
-	"Bearer token": "OBERTH_UPLINK_TOKEN",
+	"Root token":           "OPENBAO_ROOT_TOKEN",
+	"Unseal key":           "OPENBAO_UNSEAL_KEY",
+	"Bearer token":         "OBERTH_UPLINK_TOKEN",
+	"Upstream private key": "OBERTH_UPSTREAM_PRIVATE_KEY_BASE64",
 }
 
 // SecretsFileTokenKey is the line of the secrets file that holds the first
@@ -46,10 +49,14 @@ func secretsFileKey(label string) string {
 }
 
 type secretsFile struct {
-	path    string
-	file    *os.File
-	written int
-	err     error
+	recipient string
+	plaintext []byte
+	ctx       context.Context
+	path      string
+	file      *os.File
+	written   int
+	keys      []string
+	err       error
 }
 
 // CheckSecretsFilePath refuses a secrets-file path that would put credentials
@@ -121,7 +128,20 @@ func (s *secretsFile) add(label, value string) {
 			"# Move this file off this machine (a password manager, an offline copy) and delete it here.\n",
 			time.Now().UTC().Format(time.RFC3339))
 	}
+	if label == "Upstream private key" {
+		value = base64.StdEncoding.EncodeToString([]byte(value))
+	}
 	fmt.Fprintf(&line, "%s=%s\n", secretsFileKey(label), strings.TrimSpace(value))
+	if s.recipient != "" {
+		s.plaintext = append(s.plaintext, []byte(line.String())...)
+		if err := s.writeEncrypted(); err != nil {
+			s.err = err
+			return
+		}
+		s.keys = append(s.keys, secretsFileKey(label))
+		s.written++
+		return
+	}
 	if _, err := io.WriteString(s.file, line.String()); err != nil {
 		s.err = err
 		return
@@ -130,12 +150,14 @@ func (s *secretsFile) add(label, value string) {
 		s.err = err
 		return
 	}
+	s.keys = append(s.keys, secretsFileKey(label))
 	s.written++
 }
 
 // finish closes the file and reports it by path and SHA-256 only. A run that
 // created no credential leaves no file behind.
 func (s *secretsFile) finish(w io.Writer) {
+	defer clear(s.plaintext)
 	// The empty file is removed by name, so make sure the name still is the
 	// file this run created: one that was put there since belongs to the
 	// operator and stays.
@@ -162,14 +184,14 @@ func (s *secretsFile) finish(w io.Writer) {
 	}
 	sum := sha256.Sum256(raw)
 	clear(raw)
-	_, _ = fmt.Fprintf(w, "\nCredentials written to %s (mode 0600, %d values, sha256 %s).\n"+
+	_, _ = fmt.Fprintf(w, "\nCredentials written to %s (mode 0600, %d values: %s; sha256 %s).\n"+
 		"Nothing secret was printed. Move the file off this machine and delete it here; do not read it into a log or an AI session.\n",
-		s.path, s.written, hex.EncodeToString(sum[:]))
+		s.path, s.written, strings.Join(s.keys, ", "), hex.EncodeToString(sum[:]))
 }
 
 // mayCreateCredentials reports whether an install run can create a credential
 // that is shown once: a production secret store (its init), or onboarding,
 // which registers the first uplink and receives its bearer token.
 func (cfg Config) mayCreateCredentials(interactive bool) bool {
-	return cfg.InstallSecretStore || cfg.InstallRekor || cfg.ForgeURL != "" || cfg.ForgeOrg != "" || interactive
+	return cfg.AdminSSHPublicKeyPath != "" || cfg.InstallSecretStore || cfg.InstallRekor || cfg.ForgeURL != "" || cfg.ForgeOrg != "" || interactive
 }

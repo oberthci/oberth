@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/oberthci/oberth/internal/installer"
 )
 
 // ---------- main menu ----------
@@ -300,6 +302,13 @@ func (r *reviewScreen) proceed(w *wizard) tea.Cmd {
 	}
 	if r.checking || !r.checked {
 		return nil
+	}
+	if w.opts.AnswersOut != "" {
+		if err := installer.WriteAnswers(w.opts.AnswersOut, installConfig(&w.state)); err != nil {
+			r.errMsg = err.Error()
+			return nil
+		}
+		w.opts.AnswersOut = ""
 	}
 	w.state.done[stepReview] = true
 	if w.opts.DryMode {

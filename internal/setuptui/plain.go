@@ -288,6 +288,12 @@ func (p *plainRun) review() (bool, error) {
 		}
 		result.apply(p.st)
 	}
+	if p.opts.AnswersOut != "" {
+		if err := installer.WriteAnswers(p.opts.AnswersOut, installConfig(p.st)); err != nil {
+			return false, err
+		}
+		p.opts.AnswersOut = ""
+	}
 	p.st.done[stepReview] = true
 	if !p.opts.DryMode {
 		p.say("\n  Equivalent command:\n  %s\n", BuildCommandLine(p.st))

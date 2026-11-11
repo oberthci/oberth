@@ -87,6 +87,8 @@ type InstallDeps struct {
 	// events for TUI progress tracking. Step names are stable identifiers
 	// matched by the TUI's stepNameToIndex map.
 	StepProgressSink func(step, status string)
+	UplinkCreated    func(identity string)
+	secretsSaved     func(keys []string)
 	// ReleaseGetter fetches the signed release (default: HTTPS).
 	ReleaseGetter releaseverify.Getter
 	// releaseKey replaces the compiled-in release key in tests.
@@ -171,6 +173,9 @@ func CheckHostTools(goos string, lookPath func(string) (string, error)) error {
 // kubeconfig, and runs the cluster install flow.
 func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	deps = deps.withDefaults()
+	if err := prepareInstallInputs(ctx, &cfg, deps); err != nil {
+		return err
+	}
 	if cfg.CreateKind && cfg.KubeconfigPath != "" {
 		return errors.New("choose either --kubeconfig for an existing cluster or --create-kind")
 	}
@@ -186,6 +191,10 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		}
 	}
 
+	return executeWithCredentials(ctx, cfg, deps)
+}
+
+func executeWithCredentials(ctx context.Context, cfg Config, deps InstallDeps) (resultErr error) {
 	// Credentials shown once never go into a log or a transcript: without a
 	// terminal they go to --secrets-file, and without one the install refuses
 	// before anything exists that could be lost.
@@ -197,10 +206,24 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 			if err != nil {
 				return err
 			}
+			if cfg.SecretsAgeRecipient != "" {
+				if err := secrets.enableEncryption(ctx, cfg.SecretsAgeRecipient); err != nil {
+					secrets.finish(io.Discard)
+					return err
+				}
+			}
 			cfg.SecretsFile = secrets.path
 			deps.CredentialSink = secrets.add
 			secretsFileSink = true
-			defer secrets.finish(deps.Output)
+			defer func() {
+				secrets.finish(deps.Output)
+				if secrets.err == nil && secrets.written > 0 && deps.secretsSaved != nil {
+					deps.secretsSaved(secrets.keys)
+				}
+				if secrets.err != nil {
+					resultErr = errors.New("credentials could not all be saved; recover the store before continuing")
+				}
+			}()
 		case !deps.OutputIsTerminal() && cfg.mayCreateCredentials(deps.IsTerminal != nil && deps.IsTerminal()):
 			return errors.New("this install can create credentials that are shown once (the OpenBao root token and unseal key, " +
 				"the first uplink's bearer token), and its output is not a terminal: pass --secrets-file PATH " +
@@ -216,9 +239,13 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		}
 	}
 
+	return executeCluster(ctx, cfg, deps, secretsFileSink)
+}
+
+func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFileSink bool) error {
 	contextName := cfg.ContextName
 	kindClusterName := ""
-	if cfg.CreateKind || (deps.GOOS == "darwin" && cfg.KubeconfigPath == "" && cfg.ContextName == "") {
+	if cfg.CreateKind {
 		kindClusterName = KindClusterName
 		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForKind(cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 		cacheRoot, err := deps.UserCacheDir()
@@ -284,6 +311,27 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		return fmt.Errorf("load kubeconfig: %w", err)
 	}
 
+	if !cfg.DryRun {
+		preflight := InstallResult{OK: true}
+		identity := publicClusterIdentity(cfg, restConfig, selectedContext)
+		if !checkClusterTrust(restConfig, identity, &preflight) {
+			return fmt.Errorf("%w: cluster_ca: %s", errInstallPreflight, preflight.Checks[0].Remedy)
+		}
+		preflightConfig := cfg
+		// RunCommand already carries an explicit kubeconfig, if supplied.
+		preflightConfig.KubeconfigPath = ""
+		inspectClusterPreflight(ctx, preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: deps.RunCommand}, &ClusterIdentity{}, &preflight)
+		if !preflight.OK {
+			var failures []string
+			for _, check := range preflight.Checks {
+				if !check.OK {
+					failures = append(failures, check.Code+": "+check.Remedy)
+				}
+			}
+			return fmt.Errorf("%w:\n%s", errInstallPreflight, strings.Join(failures, "\n"))
+		}
+	}
+
 	// Wire the production ReadPassword and MakeRaw defaults when the session
 	// is interactive: x/term.ReadPassword and x/term.MakeRaw on the stdin fd.
 	// Non-interactive sessions leave both nil (the callers check isInteractive
@@ -332,10 +380,7 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	if cfg.KubeconfigPath != "" {
 		helmKubeArgs = []string{"--kubeconfig", cfg.KubeconfigPath, "--kube-context", selectedContext}
 	} else {
-		helmKubeArgs, _, err = ResolveHelmKubeArgs(contextName)
-		if err != nil {
-			return fmt.Errorf("resolve Helm cluster target: %w", err)
-		}
+		helmKubeArgs = []string{"--kube-context", selectedContext}
 	}
 	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
 
@@ -355,9 +400,44 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		CredentialSink:    deps.CredentialSink,
 		credentialsAtOnce: secretsFileSink,
 		StepProgressSink:  deps.StepProgressSink,
+		UplinkCreated:     deps.UplinkCreated,
 		ReleaseGetter:     deps.ReleaseGetter,
 		releaseKey:        deps.releaseKey,
 	})
+}
+
+func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) error {
+	if cfg.AdminSSHPublicKeyPath != "" {
+		if cfg.SSHPublicKeyPath != "" && cfg.SSHPublicKeyPath != cfg.AdminSSHPublicKeyPath {
+			return errors.New("choose --admin-ssh-public-key or --ssh-public-key")
+		}
+		var key []byte
+		var err error
+		if cfg.AdminSSHPublicKeyPath == "-" {
+			key, err = io.ReadAll(io.LimitReader(deps.Input, 16385))
+		} else {
+			var file *os.File
+			file, err = os.Open(cfg.AdminSSHPublicKeyPath)
+			if err == nil {
+				key, err = io.ReadAll(io.LimitReader(file, 16385))
+				_ = file.Close()
+			}
+		}
+		if err != nil || len(key) > 16384 || validatePublicKeyFile(key) != nil {
+			return errors.New("admin SSH key must be one valid public key (maximum 16 KiB); private keys are refused")
+		}
+		cfg.adminSSHPublicKey = key
+		cfg.SSHPublicKeyPath = cfg.AdminSSHPublicKeyPath
+	}
+	if cfg.SecretsAgeRecipient != "" {
+		if cfg.SecretsFile == "" {
+			return errors.New("--secrets-age-recipient requires --secrets-file")
+		}
+		if err := checkAgeRecipient(ctx, cfg.SecretsAgeRecipient); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RequireContextChoice refuses to act on a kubeconfig with several contexts
@@ -956,11 +1036,6 @@ func oberthChartValuesArgs(cfg Config) []string {
 	// promise, and fails outright when the binary's version is not a published
 	// chart version, which is true of every fork build.
 	return []string{"show", "values", oberthChart(cfg)}
-}
-
-func kindNameFromContext(contextName string) (string, bool) {
-	name, found := strings.CutPrefix(contextName, "kind-")
-	return name, found && name != ""
 }
 
 func commandOutputSuffix(output []byte) string {

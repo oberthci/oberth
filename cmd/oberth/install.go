@@ -6,15 +6,43 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
 )
 
-func runInstall(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
+type installFlagOptions struct {
+	answersPath              *string
+	yes                      *bool
+	verify                   *bool
+	plan                     *bool
+	jsonOutput               *bool
+	timeout                  *time.Duration
+	argoParallelism          *int
+	argoNamespaceParallelism *int
+	alsoUpstreams            stringList
+	credentialedSecretPaths  stringList
+	argoSyncLimits           stringList
+	tlsExtraDNSNames         stringList
+	tlsExtraIPs              stringList
+	tlsRemoveDNSNames        stringList
+	tlsRemoveIPs             stringList
+	valuesFiles              stringList
+}
+
+func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags := flag.NewFlagSet("install", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 
 	var cfg installer.Config
+	var options installFlagOptions
+	options.answersPath = flags.String("answers", "", "version 1 YAML/JSON install answers; explicit flags override scalar answers")
+	options.yes = flags.Bool("yes", false, "confirm the reviewed install on the selected kubeconfig context")
+	options.plan = flags.Bool("plan", false, "inspect the selected cluster and preflight checks without installing")
+	options.verify = flags.Bool("verify", false, "check an existing installation without changing it")
+	options.jsonOutput = flags.Bool("json", false, "emit the public install result and verification checks as JSON")
+	flags.StringVar(&cfg.AdminSSHPublicKeyPath, "admin-ssh-public-key", "", "local SSH public key for the first admin uplink (file or - for stdin; never a private key)")
+	flags.StringVar(&cfg.SecretsAgeRecipient, "secrets-age-recipient", "", "age recipient for encrypting --secrets-file; requires age on PATH")
 	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "kubeconfig file for an existing cluster")
 	flags.StringVar(&cfg.ContextName, "context", "", "kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)")
 	flags.BoolVar(&cfg.CreateKind, "create-kind", false, "create or use the local oberth kind cluster")
@@ -42,8 +70,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.ClientHTTPSPort, "client-https-port", "",
 		"HTTPS port clients reach the server on, when it is not the Service's (default: the NodePort 30443, or the Service port); "+
 			"client files, the push banner and printed URLs use it")
-	var alsoUpstreams stringList
-	flags.Var(&alsoUpstreams, "also-upstream",
+	flags.Var(&options.alsoUpstreams, "also-upstream",
 		"another organization to connect with the same upstream key, host/organization or ssh:// URL (repeatable), "+
 			"e.g. codeberg.org/acme")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")
@@ -101,42 +128,41 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.ArgoVaultCredentialedRole, "argo-vault-credentialed-role", "",
 		"Kubernetes-auth role credentialed pipelines log in with; bind it to exactly "+
 			"(--argo-namespace, the credentialed ServiceAccount)")
-	argoParallelism := flags.Int("argo-parallelism", -1,
+	options.argoParallelism = flags.Int("argo-parallelism", -1,
 		"Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; "+
 			"the excess waits Pending as postponed (default: keep the release's value, none on a fresh install)")
-	argoNamespaceParallelism := flags.Int("argo-namespace-parallelism", -1,
+	options.argoNamespaceParallelism = flags.Int("argo-namespace-parallelism", -1,
 		"Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value)")
-	var argoSyncLimits stringList
-	flags.Var(&argoSyncLimits, "argo-sync-limit",
+	flags.Var(&options.argoSyncLimits, "argo-sync-limit",
 		"semaphore limit key=N in the ConfigMap oberth-sync-limits, rendered by the argo-workflows release (repeatable; "+
 			"the set given replaces the previous one; see docs/where-limits-live.md)")
-	var credentialedSecretPaths stringList
-	flags.Var(&credentialedSecretPaths, "credentialed-secret-path",
+	flags.Var(&options.credentialedSecretPaths, "credentialed-secret-path",
 		"full KV data path approved in the secret-access table (repeatable, exactly the string "+
 			"`oberth access allow` records, e.g. oberth/data/release/cosign-secret); synced into the "+
 			"RELEASE-tier credentialed Vault policy as an exact read grant when --install-secretstore "+
 			"reconciles the store — the branch-tier ci-secrets policy never receives grants")
-	var tlsExtraDNSNames stringList
-	flags.Var(&tlsExtraDNSNames, "tls-extra-dns-name",
+	flags.Var(&options.tlsExtraDNSNames, "tls-extra-dns-name",
 		"additional DNS name the generated server certificate is issued for (repeatable), beyond the "+
 			"in-cluster names; a client reaching the server on any other name hits a hostname mismatch "+
 			"that no trust anchor can fix. A macOS kind install adds localhost automatically")
-	var tlsExtraIPs stringList
-	var tlsRemoveDNSNames, tlsRemoveIPs stringList
-	flags.Var(&tlsRemoveDNSNames, "tls-remove-dns-name", "remove a permitted DNS name; refused while the served certificate contains it (repeatable)")
-	flags.Var(&tlsRemoveIPs, "tls-remove-ip", "remove a permitted IP; refused while the served certificate contains it (repeatable)")
-	flags.Var(&tlsExtraIPs, "tls-extra-ip",
+	flags.Var(&options.tlsRemoveDNSNames, "tls-remove-dns-name", "remove a permitted DNS name; refused while the served certificate contains it (repeatable)")
+	flags.Var(&options.tlsRemoveIPs, "tls-remove-ip", "remove a permitted IP; refused while the served certificate contains it (repeatable)")
+	flags.Var(&options.tlsExtraIPs, "tls-extra-ip",
 		"additional IP address the generated server certificate is issued for (repeatable); an address "+
 			"reached as an IP needs an IP SAN, because a DNS name never matches one. A macOS kind "+
 			"install adds 127.0.0.1 automatically")
-	var valuesFiles stringList
-	flags.Var(&valuesFiles, "values",
+	flags.Var(&options.valuesFiles, "values",
 		"helm values file applied to the Oberth release (repeatable, applied in order); "+
 			"the installer's own settings still win, so a value it computed cannot be "+
 			"overridden by a stale one in a file")
-	flags.Var(&valuesFiles, "f", "shorthand for --values")
-	timeout := flags.Duration("timeout", installer.DefaultTimeout, "wait timeout for pod readiness")
+	flags.Var(&options.valuesFiles, "f", "shorthand for --values")
+	options.timeout = flags.Duration("timeout", installer.DefaultTimeout, "wait timeout for pod readiness")
 
+	return flags, &cfg, &options
+}
+
+func runInstall(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
+	flags, cfg, options := installFlags()
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -144,6 +170,28 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			return nil
 		}
 		return usageError(err)
+	}
+	if *options.answersPath != "" {
+		loaded, err := installer.ReadAnswers(*options.answersPath)
+		if err != nil {
+			return usageError(err)
+		}
+		*cfg = loaded
+		options.alsoUpstreams = append(stringList(nil), cfg.AlsoUpstreams...)
+		options.credentialedSecretPaths = append(stringList(nil), cfg.CredentialedSecretPaths...)
+		options.tlsExtraDNSNames = append(stringList(nil), cfg.TLSExtraDNSNames...)
+		options.tlsExtraIPs = append(stringList(nil), cfg.TLSExtraIPs...)
+		options.tlsRemoveDNSNames = append(stringList(nil), cfg.TLSRemoveDNSNames...)
+		options.tlsRemoveIPs = append(stringList(nil), cfg.TLSRemoveIPs...)
+		options.valuesFiles = append(stringList(nil), cfg.ValuesFiles...)
+		options.argoSyncLimits = nil
+		*options.timeout = cfg.Timeout
+		if *options.timeout == 0 {
+			*options.timeout = installer.DefaultTimeout
+		}
+		if err := flags.Parse(arguments); err != nil {
+			return usageError(err)
+		}
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: install accepts flags only, no positional arguments", errUsage)
@@ -157,27 +205,29 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			cfg.AcceptWitnessGenesisSet = true
 		}
 	})
-	cfg.Timeout = *timeout
+	cfg.Timeout = *options.timeout
 	cfg.BinaryVersion = version
-	cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev
-	cfg.CredentialedSecretPaths = credentialedSecretPaths
-	cfg.TLSExtraDNSNames = tlsExtraDNSNames
-	cfg.TLSExtraIPs = tlsExtraIPs
-	cfg.TLSRemoveDNSNames = tlsRemoveDNSNames
-	cfg.TLSRemoveIPs = tlsRemoveIPs
-	cfg.AlsoUpstreams = alsoUpstreams
-	cfg.ValuesFiles = valuesFiles
+	if *options.answersPath == "" {
+		cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev
+	}
+	cfg.CredentialedSecretPaths = options.credentialedSecretPaths
+	cfg.TLSExtraDNSNames = options.tlsExtraDNSNames
+	cfg.TLSExtraIPs = options.tlsExtraIPs
+	cfg.TLSRemoveDNSNames = options.tlsRemoveDNSNames
+	cfg.TLSRemoveIPs = options.tlsRemoveIPs
+	cfg.AlsoUpstreams = options.alsoUpstreams
+	cfg.ValuesFiles = options.valuesFiles
 	flags.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "argo-parallelism":
-			cfg.ArgoParallelism = argoParallelism
+			cfg.ArgoParallelism = options.argoParallelism
 		case "argo-namespace-parallelism":
-			cfg.ArgoNamespaceParallelism = argoNamespaceParallelism
+			cfg.ArgoNamespaceParallelism = options.argoNamespaceParallelism
 		}
 	})
-	if len(argoSyncLimits) > 0 {
+	if len(options.argoSyncLimits) > 0 {
 		cfg.ArgoSyncLimits = map[string]int{}
-		for _, value := range argoSyncLimits {
+		for _, value := range options.argoSyncLimits {
 			key, limit, err := installer.ParseArgoSyncLimit(value)
 			if err != nil {
 				return usageError(err)
@@ -186,8 +236,38 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		}
 	}
 
-	return installer.Execute(ctx, cfg, installer.InstallDeps{
-		Output: output,
-		Input:  input,
-	})
+	deps := installer.InstallDeps{Output: output, Input: input}
+	if *options.answersPath != "" {
+		deps.IsTerminal = func() bool { return false }
+	}
+	if *options.plan && *options.verify {
+		return usageError(errors.New("choose --plan or --verify"))
+	}
+	if *options.plan {
+		if err := cfg.Validate(); err != nil {
+			return usageError(err)
+		}
+		return installer.PrintPlan(ctx, *cfg, deps, *options.jsonOutput)
+	}
+	if *options.verify {
+		return installer.PrintVerification(ctx, *cfg, deps, *options.jsonOutput)
+	}
+	if err := cfg.Validate(); err != nil {
+		return usageError(err)
+	}
+	if !*options.jsonOutput {
+		installer.PrintReview(output, *cfg)
+	}
+	if !cfg.DryRun && !*options.yes {
+		if *options.jsonOutput {
+			if err := installer.PrintReviewJSON(output, *cfg); err != nil {
+				return err
+			}
+		}
+		return usageError(errors.New("review the selected context and install answers, then pass --yes to confirm install"))
+	}
+	if *options.jsonOutput {
+		return installer.ExecuteJSON(ctx, *cfg, deps)
+	}
+	return installer.Execute(ctx, *cfg, deps)
 }

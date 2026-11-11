@@ -1,0 +1,357 @@
+package installer
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+)
+
+const k3sCopyCommand = `mkdir -p "$HOME/.kube" && chmod 700 "$HOME/.kube" && sudo install -m 600 -o "$(id -u)" -g "$(id -g)" /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"`
+
+var errInstallPreflight = errors.New("install preflight failed")
+
+var errFreshK3s = errors.New("fresh k3s has no user kubeconfig")
+
+// Only suggest the operator's copy command when no user configuration exists.
+// Never select the root kubeconfig or change its permissions automatically.
+func freshK3sHint(rules *clientcmd.ClientConfigLoadingRules, path string) error {
+	if path == "" || rules.ExplicitPath != "" || os.Getenv("KUBECONFIG") != "" {
+		return nil
+	}
+	for _, candidate := range rules.Precedence {
+		if _, err := os.Stat(candidate); !errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+	}
+	if _, err := os.Stat(path); err == nil || errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("%w; run this command yourself, then retry (the server address remains 127.0.0.1):\n%s", errFreshK3s, k3sCopyCommand)
+	}
+	return nil
+}
+
+type NodeIdentity struct {
+	Name              string  `json:"name"`
+	Architecture      string  `json:"architecture"`
+	KubernetesVersion string  `json:"kubernetes_version"`
+	AvailableBytes    *uint64 `json:"available_bytes,omitempty"`
+}
+
+type ClusterIdentity struct {
+	Files        []string       `json:"files"`
+	Context      string         `json:"context"`
+	Server       string         `json:"api_server"`
+	CAPin        string         `json:"ca_sha256,omitempty"`
+	Distribution string         `json:"distribution"`
+	Nodes        []NodeIdentity `json:"nodes"`
+}
+
+type InstallPlan struct {
+	Version  int             `json:"version"`
+	OK       bool            `json:"ok"`
+	Identity ClusterIdentity `json:"identity"`
+	Review   InstallReview   `json:"review"`
+	Checks   []CheckResult   `json:"checks"`
+}
+
+func selectedRules(cfg Config) *clientcmd.ClientConfigLoadingRules {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules.ExplicitPath = cfg.KubeconfigPath
+	return rules
+}
+
+func publicClusterIdentity(cfg Config, config *rest.Config, selected string) ClusterIdentity {
+	identity := ClusterIdentity{Context: selected, Files: []string{}, Nodes: []NodeIdentity{}}
+	rules := selectedRules(cfg)
+	candidates := rules.Precedence
+	if rules.ExplicitPath != "" {
+		candidates = []string{rules.ExplicitPath}
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			identity.Files = append(identity.Files, path)
+		}
+	}
+	if config == nil {
+		return identity
+	}
+	if parsed, err := url.Parse(config.Host); err == nil {
+		parsed.User = nil
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		identity.Server = parsed.String()
+	}
+	ca := config.CAData
+	if len(ca) == 0 && config.CAFile != "" {
+		ca, _ = os.ReadFile(config.CAFile)
+	} //nolint:gosec // G304: public CA from the selected kubeconfig
+	if certificate, err := parseCertificatePEM(ca); err == nil {
+		sum := sha256.Sum256(certificate.Raw)
+		identity.CAPin = hex.EncodeToString(sum[:])
+	}
+	return identity
+}
+
+func PlanInstall(ctx context.Context, cfg Config, host InstallDeps) InstallPlan {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	host.Output = io.Discard
+	host = host.withDefaults()
+	r := InstallResult{OK: true, Checks: []CheckResult{}}
+	plan := InstallPlan{Version: 1, Review: Review(cfg), Identity: ClusterIdentity{Context: cfg.ContextName, Files: []string{}, Nodes: []NodeIdentity{}}}
+	rules := selectedRules(cfg)
+	plan.Identity = publicClusterIdentity(cfg, nil, cfg.ContextName)
+	for _, tool := range []string{"helm", "kubectl"} {
+		_, err := host.LookPath(tool)
+		r.check("tool_"+tool, err == nil, "Install "+tool+" yourself and put it on PATH; the installer never installs prerequisites.")
+	}
+	if host.KubeContexts != nil {
+		err := RequireContextChoice("install on", cfg.ContextName, cfg.KubeconfigPath, host.KubeContexts)
+		r.check("context_choice", err == nil, "Select the intended context with --context; every cluster uses the same Review confirmation.")
+		if err != nil {
+			plan.OK, plan.Checks = r.OK, r.Checks
+			return plan
+		}
+	}
+	var kube kubernetes.Interface
+	var config *rest.Config
+	var selected string
+	var err error
+	if cfg.KubeconfigPath != "" {
+		kube, config, selected, err = loadKubeConfigWithRules(rules, cfg.ContextName, "", io.Discard)
+	} else {
+		kube, config, selected, err = host.LoadKubeConfig(cfg.ContextName)
+	}
+	remedy := "Select a readable kubeconfig and context with valid credentials. KUBECONFIG may list files separated by the platform path separator."
+	if errors.Is(err, errFreshK3s) {
+		remedy = k3sCopyCommand
+	}
+	r.check("kubeconfig", err == nil, remedy)
+	if err != nil {
+		plan.OK, plan.Checks = r.OK, r.Checks
+		return plan
+	}
+	plan.Identity = publicClusterIdentity(cfg, config, selected)
+	plan.Review.Context = selected
+	if !checkClusterTrust(config, plan.Identity, &r) {
+		plan.OK, plan.Checks = r.OK, r.Checks
+		return plan
+	}
+	run := host.RunCommand
+	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run}
+	inspectClusterPreflight(ctx, cfg, deps, &plan.Identity, &r)
+	plan.OK, plan.Checks = r.OK, r.Checks
+	return plan
+}
+
+func inspectClusterPreflight(ctx context.Context, cfg Config, deps Deps, identity *ClusterIdentity, r *InstallResult) {
+	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	r.check("nodes", err == nil && len(nodes.Items) > 0, "Grant read access to nodes and bring at least one node Ready.")
+	if err != nil {
+		return
+	}
+	identity.Distribution = DetectEngine(nodes.Items)
+	if identity.Distribution == "unknown" {
+		for _, node := range nodes.Items {
+			if node.Spec.ProviderID != "" {
+				identity.Distribution = "managed"
+				break
+			}
+		}
+	}
+	sort.Slice(nodes.Items, func(i, j int) bool { return nodes.Items[i].Name < nodes.Items[j].Name })
+	for _, node := range nodes.Items {
+		item := NodeIdentity{Name: node.Name, Architecture: node.Status.NodeInfo.Architecture, KubernetesVersion: node.Status.NodeInfo.KubeletVersion}
+		r.check("architecture/"+node.Name, item.Architecture == "amd64" || item.Architecture == "arm64", "Use an amd64 or arm64 node supported by the published Oberth images.")
+		ready, diskPressure := false, false
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == corev1.NodeReady {
+				ready = condition.Status == corev1.ConditionTrue
+			}
+			if condition.Type == corev1.NodeDiskPressure {
+				diskPressure = condition.Status == corev1.ConditionTrue
+			}
+		}
+		r.check("node_ready/"+node.Name, ready, "Restore node readiness before installing.")
+		args := []string{"--context", deps.ContextName, "get", "--raw", "/api/v1/nodes/" + url.PathEscape(node.Name) + "/proxy/stats/summary"}
+		if cfg.KubeconfigPath != "" {
+			args = append([]string{"--kubeconfig", cfg.KubeconfigPath}, args...)
+		}
+		raw, readErr := deps.RunCommand(ctx, nil, "kubectl", args...)
+		var stats struct {
+			Node struct {
+				FS struct {
+					AvailableBytes *uint64 `json:"availableBytes"`
+				} `json:"fs"`
+			} `json:"node"`
+		}
+		if readErr == nil && json.Unmarshal(raw, &stats) == nil {
+			item.AvailableBytes = stats.Node.FS.AvailableBytes
+		}
+		r.check("disk/"+node.Name, !diskPressure && item.AvailableBytes != nil && *item.AvailableBytes >= 1<<30, "Free at least 1 GiB on the node filesystem and allow the administrator to read node stats; unknown free space fails this check.")
+		identity.Nodes = append(identity.Nodes, item)
+	}
+	classes, err := deps.KubeClient.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+	defaultClass := false
+	if err == nil {
+		for _, class := range classes.Items {
+			if class.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" {
+				defaultClass = true
+			}
+		}
+	}
+	r.check("default_storage_class", defaultClass, "Configure a default StorageClass with a working provisioner for persistent OpenBao and Oberth data.")
+	enforcement := networkPolicyController(ctx, deps, nodes.Items)
+	r.check("network_policy", enforcement && cfg.NetworkPolicy != "false", "Enable an enforcing NetworkPolicy controller (Calico, Cilium, kube-router, or the k3s built-in controller) and pipeline network policy. Unknown enforcement fails this check.")
+}
+
+func networkPolicyController(ctx context.Context, deps Deps, nodes []corev1.Node) bool {
+	allK3s := len(nodes) > 0
+	for _, node := range nodes {
+		args, known := node.Annotations["k3s.io/node-args"]
+		var parsed []string
+		if !strings.Contains(node.Status.NodeInfo.KubeletVersion, "+k3s") || !known || json.Unmarshal([]byte(args), &parsed) != nil || len(parsed) == 0 || strings.Contains(args, "disable-network-policy") {
+			allK3s = false
+		}
+	}
+	if allK3s {
+		return true
+	}
+	controllers, err := deps.KubeClient.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false
+	}
+	for _, ds := range controllers.Items {
+		if int(ds.Status.DesiredNumberScheduled) < len(nodes) || ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady < ds.Status.DesiredNumberScheduled || ds.Status.ObservedGeneration < ds.Generation || ds.Status.UpdatedNumberScheduled < ds.Status.DesiredNumberScheduled {
+			continue
+		}
+		switch ds.Name {
+		case "calico-node":
+			return true
+		case "cilium", "kube-router":
+			if controllerPolicyEnabled(ctx, deps, ds.Name, ds.Namespace, ds.Spec.Template.Spec.Containers) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func PrintPlan(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) error {
+	plan := PlanInstall(ctx, cfg, deps)
+	if asJSON {
+		if err := json.NewEncoder(deps.Output).Encode(plan); err != nil {
+			return err
+		}
+	} else {
+		_, _ = fmt.Fprintf(deps.Output, "Cluster: %s %s; CA sha256 %s; files %v\n", plan.Identity.Context, plan.Identity.Server, plan.Identity.CAPin, plan.Identity.Files)
+		PrintReview(deps.Output, cfg)
+		for _, check := range plan.Checks {
+			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s\n", check.Code, check.OK, check.Remedy)
+		}
+	}
+	if !plan.OK {
+		return errors.New("install preflight failed; follow the reported remedies")
+	}
+	return nil
+}
+
+// A rejected trust check must stop before credentials are sent to the API.
+func checkClusterTrust(config *rest.Config, identity ClusterIdentity, result *InstallResult) bool {
+	trusted := config != nil && !config.Insecure && identity.CAPin != "" && strings.HasPrefix(identity.Server, "https://")
+	result.check("cluster_ca", trusted, "Use an HTTPS kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
+	return trusted
+}
+
+// Read the controller's policy settings, not just its name and readiness.
+// Unresolved settings fail closed; a traffic test remains a separate check.
+func controllerPolicyEnabled(ctx context.Context, deps Deps, name, namespace string, containers []corev1.Container) bool {
+	settings := map[string]string{}
+	if name == "cilium" {
+		config, err := deps.KubeClient.CoreV1().ConfigMaps(namespace).Get(ctx, "cilium-config", metav1.GetOptions{})
+		if err != nil || !policySettingsSafe(name, config.Data) {
+			return false
+		}
+	}
+	for _, container := range containers {
+		if container.Name != name && (name != "cilium" || container.Name != "cilium-agent") {
+			continue
+		}
+		if len(container.EnvFrom) != 0 {
+			return false
+		}
+		for _, env := range container.Env {
+			key := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(env.Name, "CILIUM_"), "_", "-"))
+			if !policySetting(name, key) {
+				continue
+			}
+			if env.ValueFrom != nil {
+				return false
+			}
+			settings[key] = env.Value
+		}
+		if !policySettingsSafe(name, settings) {
+			return false
+		}
+		args := append(append([]string(nil), container.Command...), container.Args...)
+		for i := 0; i < len(args); i++ {
+			key, value, equal := strings.Cut(strings.TrimPrefix(args[i], "--"), "=")
+			if !policySetting(name, key) {
+				continue
+			}
+			if !equal {
+				value = "true"
+				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+					i++
+					value = args[i]
+				}
+			}
+			if !policySettingsSafe(name, map[string]string{key: value}) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func policySetting(controller, key string) bool {
+	if controller == "kube-router" {
+		return key == "run-firewall"
+	}
+	return key == "enable-policy" || key == "enable-k8s-networkpolicy" || key == "policy-audit-mode"
+}
+
+func policySettingsSafe(controller string, settings map[string]string) bool {
+	for key, value := range settings {
+		if !policySetting(controller, key) {
+			continue
+		}
+		if key == "enable-policy" {
+			if value != "default" && value != "always" {
+				return false
+			}
+			continue
+		}
+		active, err := strconv.ParseBool(value)
+		if err != nil || (key == "policy-audit-mode" && active) || (key != "policy-audit-mode" && !active) {
+			return false
+		}
+	}
+	return true
+}

@@ -15,6 +15,7 @@ import (
 
 // Options holds the CLI-level options for the setup wizard.
 type Options struct {
+	AnswersOut string
 	ChartPath  string
 	ImageRef   string
 	DryMode    bool // wizard only, print the command, no apply

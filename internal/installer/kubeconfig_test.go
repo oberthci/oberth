@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,14 +70,11 @@ func TestK3sFallbackNoStandardConfigReadableK3s(t *testing.T) {
 	}
 	var output bytes.Buffer
 	_, _, selectedCtx, err := loadKubeConfigWithRules(rules, "", k3sPath, &output)
-	if err != nil {
-		t.Fatalf("expected k3s fallback to succeed, got: %v", err)
+	if !errors.Is(err, errFreshK3s) || selectedCtx != "" || !strings.Contains(err.Error(), "sudo install -m 600") || strings.Contains(err.Error(), "644") {
+		t.Fatal("fresh k3s must require the operator's private copy")
 	}
-	if selectedCtx != "test" {
-		t.Fatalf("selected context = %q, want %q", selectedCtx, "test")
-	}
-	if !strings.Contains(output.String(), "k3s kubeconfig") {
-		t.Fatalf("expected k3s fallback message, got: %q", output.String())
+	if output.Len() != 0 {
+		t.Fatal("root configuration was selected")
 	}
 }
 
