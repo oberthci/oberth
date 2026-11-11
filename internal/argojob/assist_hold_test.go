@@ -530,6 +530,25 @@ func TestBuildAssistRefusesExecutorEnvAndSkipsDefaultRetries(t *testing.T) {
 	if templateNamed(t, wf, "test").RetryStrategy != nil {
 		t.Fatal("leaf gained an injected retryStrategy over the document default")
 	}
+	// A workflow-wide retryStrategy or a default timeout keeps every leaf
+	// unheld, and a leaf timeout keeps that leaf unheld: Argo resets the Pod
+	// deadline to the timeout, so a parked attempt would die at it.
+	for name, document := range map[string]string{
+		"spec.retryStrategy":       strings.Replace(assistDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy:\n    limit: 1\n", 1),
+		"templateDefaults.timeout": strings.Replace(assistDocument, "  entrypoint: main\n", "  entrypoint: main\n  templateDefaults:\n    timeout: 5m\n", 1),
+		"template timeout":         strings.Replace(assistDocument, "    - name: test\n      activeDeadlineSeconds: 600\n", "    - name: test\n      activeDeadlineSeconds: 600\n      timeout: 5m\n", 1),
+	} {
+		if document == assistDocument {
+			t.Fatalf("%s: fixture unchanged", name)
+		}
+		wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, document))
+		if err != nil {
+			t.Fatalf("%s: build: %v", name, err)
+		}
+		if test := templateNamed(t, wf, "test"); test.Metadata.Annotations[AssistHoldAnnotation] != "" {
+			t.Fatalf("%s: leaf is hold-eligible", name)
+		}
+	}
 }
 
 // A held retry keeps its template lock. Argo acquires a template-level

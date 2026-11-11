@@ -233,10 +233,12 @@ func assistActive(config Config, request Request, credentialed bool) bool {
 // assistHoldEligible reports whether one leaf may park a failed retry. The
 // leaf must be a single-main container or script template that Argo runs as
 // a Pod, with no authored retryStrategy (its own retries keep their meaning),
-// no credential chain, no step identity, no token, and no nonroot launcher
+// no template timeout (Argo resets the Pod deadline to it after the hold's
+// podSpecPatch, so the parked attempt would die at the timeout), no
+// credential chain, no step identity, no token, and no nonroot launcher
 // (those lanes forbid exec and own their Pod patch).
 func assistHoldEligible(t *wfv1.Template, workflowServiceAccount string, nonroot map[string]bool) bool {
-	if t == nil || t.RetryStrategy != nil || t.DAG != nil || len(t.Steps) != 0 || t.Suspend != nil || t.Resource != nil || t.ContainerSet != nil || t.Data != nil || t.HTTP != nil || t.Plugin != nil {
+	if t == nil || t.RetryStrategy != nil || t.Timeout != "" || t.DAG != nil || len(t.Steps) != 0 || t.Suspend != nil || t.Resource != nil || t.ContainerSet != nil || t.Data != nil || t.HTTP != nil || t.Plugin != nil {
 		return false
 	}
 	if usageContainer(t) == nil || nonroot[t.Name] {
@@ -275,10 +277,11 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 	if !assistActive(config, request, credentialed) {
 		return nil
 	}
-	// A default retryStrategy would be replaced on every eligible leaf by
-	// the injected one; rather than change the document's retry meaning,
-	// such a document never holds.
-	if workflow.Spec.TemplateDefaults != nil && workflow.Spec.TemplateDefaults.RetryStrategy != nil {
+	// A default or workflow-wide retryStrategy would be replaced on every
+	// eligible leaf by the injected one; rather than change the document's
+	// retry meaning, such a document never holds. A default timeout would
+	// cut every parked attempt short, as a template timeout does.
+	if defaults := workflow.Spec.TemplateDefaults; (defaults != nil && (defaults.RetryStrategy != nil || defaults.Timeout != "")) || workflow.Spec.RetryStrategy != nil {
 		return nil
 	}
 	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)

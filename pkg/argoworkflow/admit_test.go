@@ -770,6 +770,16 @@ func TestAdmitRefusesExcessiveRetryLimit(t *testing.T) {
 	refuse(t, document, Policy{}, "retryStrategy.limit 99 exceeds")
 }
 
+// The ceiling also binds the workflow-wide retryStrategy and the template
+// defaults, and a templated limit (known only at run time) is refused.
+func TestAdmitRefusesUnboundedRetryLimitsEverywhere(t *testing.T) {
+	t.Parallel()
+	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy:\n    limit: 1000\n", 1), Policy{}, "spec.retryStrategy.limit 1000 exceeds")
+	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  templateDefaults:\n    retryStrategy:\n      limit: 50\n", 1), Policy{}, "spec.templateDefaults.retryStrategy.limit 50 exceeds")
+	refuse(t, strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        limit: \"{{inputs.parameters.n}}\"\n      container:", 1), Policy{}, "must be a literal integer")
+	mustAdmit(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy:\n    limit: 2\n", 1), Policy{})
+}
+
 func TestAdmitAcceptsRetryLimitAtCeiling(t *testing.T) {
 	t.Parallel()
 	document := strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        limit: \"10\"\n      container:", 1)
