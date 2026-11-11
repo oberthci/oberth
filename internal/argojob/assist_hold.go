@@ -325,20 +325,6 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 		}
 		t.Metadata.Annotations[AssistHoldAnnotation] = strconv.FormatInt(budget+assistHoldAllowance(ttl), 10)
 		eligible++
-		if request.binaryDelivered() && request.SourceVolume.ClaimName != "" {
-			// run_hold_patch applies files through this server's own static
-			// executable, not through whatever shell the image may lack. The
-			// mount is the read-only one measured steps already receive;
-			// wrapStepUsage still wraps only leaves above its memory floor.
-			main := usageContainer(t)
-			mounts := main.VolumeMounts[:0:0]
-			for _, m := range main.VolumeMounts {
-				if m.MountPath != usageBinMountPath {
-					mounts = append(mounts, m)
-				}
-			}
-			main.VolumeMounts = append(mounts, corev1.VolumeMount{Name: SourceVolumeName, MountPath: usageBinMountPath, SubPath: request.SourceVolume.BinarySubPath, ReadOnly: true})
-		}
 	})
 	if eligible == 0 {
 		return nil
@@ -422,6 +408,35 @@ func injectAssistHolds(workflow *wfv1.Workflow, assist AssistConfig) error {
 		t.RetryStrategy = &wfv1.RetryStrategy{Limit: &limit, RetryPolicy: wfv1.RetryPolicyOnFailure, Expression: assistRetryExpression(budget)}
 	})
 	return failure
+}
+
+// injectAssistHelperMounts gives every hold-eligible leaf the server helper
+// (run_hold_patch applies files through this server's own static executable,
+// not through whatever shell the image may lack). It runs after
+// injectServerVolumes, which replaces every mount of a server-owned volume,
+// so the helper survives on leaves below the step-usage memory floor too;
+// wrapStepUsage still wraps only leaves above that floor. The mount is the
+// read-only one measured steps already receive.
+func injectAssistHelperMounts(workflow *wfv1.Workflow, request Request) {
+	if !request.binaryDelivered() || request.SourceVolume.ClaimName == "" {
+		return
+	}
+	walkTemplates(workflow, func(t *wfv1.Template) {
+		if _, marked := t.Metadata.Annotations[AssistHoldAnnotation]; !marked {
+			return
+		}
+		main := usageContainer(t)
+		if main == nil {
+			return
+		}
+		mounts := main.VolumeMounts[:0:0]
+		for _, m := range main.VolumeMounts {
+			if m.MountPath != usageBinMountPath {
+				mounts = append(mounts, m)
+			}
+		}
+		main.VolumeMounts = append(mounts, corev1.VolumeMount{Name: SourceVolumeName, MountPath: usageBinMountPath, SubPath: request.SourceVolume.BinarySubPath, ReadOnly: true})
+	})
 }
 
 // assistHoldPatch is the Pod patch of a held attempt: the base server patch

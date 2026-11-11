@@ -576,3 +576,55 @@ func TestBuildAssistHoldKeepsTemplateSynchronization(t *testing.T) {
 		t.Fatalf("held leaf lost its template lock: %+v", test.Synchronization)
 	}
 }
+
+// A leaf below the step-usage memory floor is not measured, but its held
+// attempt still carries the server helper, so run_hold_patch works on any
+// image. injectServerVolumes replaces every mount of the source volume; the
+// helper mount must be added after it (it was silently dropped before).
+func TestBuildAssistGivesLowMemoryLeavesThePatchHelper(t *testing.T) {
+	document := `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: test
+            template: test
+          - name: unlimited
+            template: unlimited
+    - name: test
+      activeDeadlineSeconds: 600
+      script:
+        image: debian:trixie-slim@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [sh]
+        source: sh ./test.sh
+        resources:
+          requests: {cpu: 100m, memory: 64Mi}
+          limits: {cpu: 500m, memory: 64Mi}
+    - name: unlimited
+      activeDeadlineSeconds: 600
+      container:
+        image: debian:trixie-slim@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [sh, ./test.sh]
+`
+	wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, document))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for _, name := range []string{"test", "unlimited"} {
+		template := templateNamed(t, wf, name)
+		main := usageContainer(template)
+		if _, held := template.Metadata.Annotations[AssistHoldAnnotation]; !held {
+			t.Fatalf("%s is not hold-eligible", name)
+		}
+		if !hasUsageBinary(main) {
+			t.Fatalf("%s lost the patch helper mount: %+v", name, main.VolumeMounts)
+		}
+		if len(main.Command) > 0 && main.Command[0] == usageBinPath {
+			t.Fatalf("%s below the usage memory floor was wrapped for measurement: %v", name, main.Command)
+		}
+	}
+}
