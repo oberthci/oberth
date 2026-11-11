@@ -829,16 +829,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	if cfg.DryRun {
 		return printDryRunPlan(cfg, deps.Output, cluster)
 	}
-	// Before any release is touched: a version change of an existing Oberth
-	// release belongs to oberth upgrade, and an older installer must never
-	// force-bump the Argo, OpenBao or Rekor releases on its way to refusing.
-	if err := preflightInstallVersionMove(ctx, cfg, deps); err != nil {
-		return err
-	}
-	// Verify the signed release before anything is installed: every Helm
-	// call below (preview, TLS bootstrap image, the install itself) uses
-	// the verified chart file, never the chart repository.
-	cleanupRelease, err := verifyInstallRelease(ctx, &cfg, deps)
+	cleanupRelease, err := preflightInstallRelease(ctx, &cfg, deps)
 	if err != nil {
 		return err
 	}

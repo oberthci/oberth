@@ -8,6 +8,19 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// preflightInstallRelease runs before any release is touched. A version
+// change of an existing Oberth release belongs to oberth upgrade, and an
+// older installer must never force-bump the Argo, OpenBao or Rekor releases
+// on its way to refusing. Then the signed release is verified: every Helm
+// call of the install (preview, TLS bootstrap image, the install itself)
+// uses the verified chart file, never a chart repository.
+func preflightInstallRelease(ctx context.Context, cfg *Config, deps Deps) (func(), error) {
+	if err := preflightInstallVersionMove(ctx, *cfg, deps); err != nil {
+		return nil, err
+	}
+	return verifyInstallRelease(ctx, cfg, deps)
+}
+
 // preflightInstallVersionMove refuses, before anything is installed, an
 // install or install --upgrade rerun that would move an existing Oberth
 // release to another chart version. Same-version reconciliation (adding a
