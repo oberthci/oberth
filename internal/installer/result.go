@@ -125,7 +125,10 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	}
 	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run}
 	identity := publicClusterIdentity(cfg, config, selected)
-	r.check("cluster_ca", identity.CAPin != "" && !config.Insecure, "Use a kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
+	if !checkClusterTrust(config, identity, &r) {
+		r.Cluster = &identity
+		return r
+	}
 	preflightDeps := deps
 	preflightDeps.RunCommand = host.RunCommand
 	inspectClusterPreflight(ctx, cfg, preflightDeps, &identity, &r)
