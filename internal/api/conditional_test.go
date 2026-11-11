@@ -35,8 +35,8 @@ func TestJSONViewsAnswerConditionalPolls(t *testing.T) {
 	server.views = views
 	first := getAPI(t, server, "/api/repos", nil)
 	etag := first.Header().Get("ETag")
-	if first.Code != http.StatusOK || !strings.HasPrefix(etag, `W/"`) {
-		t.Fatalf("first poll: %d etag=%q", first.Code, etag)
+	if first.Code != http.StatusOK || !strings.HasPrefix(etag, `W/"`) || first.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("first poll: %d etag=%q cache-control=%q", first.Code, etag, first.Header().Get("Cache-Control"))
 	}
 	for _, encoding := range []string{"", "gzip"} {
 		again := getAPI(t, server, "/api/repos", map[string]string{"If-None-Match": etag, "Accept-Encoding": encoding})
