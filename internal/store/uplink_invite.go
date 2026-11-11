@@ -63,11 +63,11 @@ func (e *InviteEnrollment) CertificateUplink(_ context.Context, identity, finger
 	}
 	return e.uplink, nil
 }
-func (e *InviteEnrollment) BindClientPin(ctx context.Context, actor string, id int64, pin string, expiry time.Time) error {
-	if id != e.uplink.ID {
+func (e *InviteEnrollment) BindClientPin(ctx context.Context, actor string, id int64, credentialID, pin string, expiry time.Time) error {
+	if id != e.uplink.ID || credentialID != e.uplink.TokenCredentialID {
 		return ErrInvalid
 	}
-	return e.store.bindClientPin(ctx, e.tx, actor, id, pin, expiry)
+	return e.store.bindClientPin(ctx, e.tx, actor, id, credentialID, pin, expiry)
 }
 
 // The first statement takes the write reservation. Failed issuance rolls back

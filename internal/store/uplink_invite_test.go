@@ -32,7 +32,7 @@ func TestUplinkInviteAtomicEnrollment(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
-		if err := e.BindClientPin(t.Context(), u.Identity, u.ID, strings.Repeat("b", 64), now.Add(time.Hour)); err != nil {
+		if err := e.BindClientPin(t.Context(), u.Identity, u.ID, u.TokenCredentialID, strings.Repeat("b", 64), now.Add(time.Hour)); err != nil {
 			return "", err
 		}
 		return "public certificate", nil
@@ -131,7 +131,7 @@ func TestUplinkInviteAuditFailureRollsBackEveryBinding(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
-		if err := e.BindClientPin(t.Context(), u.Identity, u.ID, strings.Repeat("b", 64), now.Add(time.Hour)); err != nil {
+		if err := e.BindClientPin(t.Context(), u.Identity, u.ID, u.TokenCredentialID, strings.Repeat("b", 64), now.Add(time.Hour)); err != nil {
 			return "", err
 		}
 		return "public certificate", nil
