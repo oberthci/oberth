@@ -293,7 +293,7 @@ func TestPreflightCertLacksGoProxySANsRotates(t *testing.T) {
 		ContextName: "test-ctx",
 	}
 
-	cfg := Config{InstallSecretStore: true}
+	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
 	if err != nil {
 		t.Fatalf("preflight failed: %v", err)
@@ -543,7 +543,7 @@ func TestPreflightDryRunMissingSANsPrintsPlanNoWrite(t *testing.T) {
 		ContextName: "test-ctx",
 	}
 
-	cfg := Config{InstallSecretStore: true}
+	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, true)
 	if err != nil {
 		t.Fatalf("dry-run should succeed: %v", err)
@@ -928,7 +928,7 @@ func TestPreflightCertWithoutSvcNameRotatesAllFour(t *testing.T) {
 		ContextName: "test-ctx",
 	}
 
-	cfg := Config{InstallSecretStore: true}
+	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)
 	if err != nil {
 		t.Fatalf("rotation should succeed: %v", err)
@@ -1098,7 +1098,7 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 		},
 		ContextName: "test-ctx",
 	}
-	cfg := Config{InstallSecretStore: true}
+	cfg := Config{InstallSecretStore: true, ReissueServerCA: true}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight failed: %v", err)
 	}

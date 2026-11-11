@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+cli=$HOME/.local/bin/oberth
+[ -x "$cli" ] || { printf 'Run the plugin fetch-oberth script first.\n' >&2; exit 1; }
+exec "$cli" unseal "$@"

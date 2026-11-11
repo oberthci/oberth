@@ -10,47 +10,44 @@ import (
 	"github.com/oberthci/oberth/internal/installer"
 )
 
-func runUnseal(ctx context.Context, arguments []string, output io.Writer) error {
-	var cfg installer.UnsealConfig
-	var credential string
-	var acknowledge bool
+func runUnseal(ctx context.Context, args []string, output io.Writer) error {
 	flags := flag.NewFlagSet("unseal", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	flags.StringVar(&cfg.SecretsFile, "secrets-file", "", "owner-only installer secrets file; contents are never displayed")
-	flags.StringVar(&cfg.AgeIdentity, "age-identity", "", "age identity file used to decrypt an encrypted secrets file")
-	flags.StringVar(&cfg.Context, "context", "", "Kubernetes context chosen by the user (required)")
-	flags.StringVar(&cfg.Namespace, "namespace", "openbao", "OpenBao namespace")
-	flags.StringVar(&cfg.Pod, "pod", "openbao-0", "OpenBao pod")
-	flags.StringVar(&credential, "seal-to-tpm2", "", "create a new TPM2-bound systemd credential file instead of unsealing")
-	flags.BoolVar(&acknowledge, "acknowledge-host-risk", false, "accept that anyone who boots this disk on this machine gets the secrets")
-	if err := flags.Parse(arguments); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			flags.SetOutput(output)
-			printFlagUsage(flags)
-			return nil
-		}
+	var cfg installer.UnsealConfig
+	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "Kubernetes config file (default: KUBECONFIG or ~/.kube/config)")
+	flags.StringVar(&cfg.ContextName, "context", "", "selected kubeconfig context")
+	flags.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", installer.DefaultOpenBaoNamespace, "OpenBao namespace")
+	flags.StringVar(&cfg.SecretsFile, "secrets-file", "", "owner-only installer recovery file; never printed")
+	flags.StringVar(&cfg.AgeIdentity, "age-identity", "", "owner-only age identity file for encrypted recovery")
+	flags.StringVar(&cfg.SealToHost, "seal-to-host", "", "write a TPM2-bound systemd credential to a new file on this single Linux node; anyone booting its disk here gets the secrets")
+	flags.BoolVar(&cfg.Yes, "yes", false, "accept the host-bound auto-unseal risk shown by --seal-to-host")
+	flags.BoolVar(&cfg.StatusOnly, "status", false, "read seal status only; do not read recovery material")
+	jsonOutput := flags.Bool("json", false, "print only initialized/sealed status as JSON")
+	positional, help, err := parseOperatorFlags(flags, args)
+	if help {
+		_, _ = fmt.Fprintln(output, "Usage: oberth unseal --secrets-file FILE [--age-identity FILE] [--context NAME]\nRead the saved key privately and unseal OpenBao. --status reads only seal status.")
+		flags.SetOutput(output)
+		flags.PrintDefaults()
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("%w: invalid unseal arguments; see oberth unseal --help", errUsage)
 	}
-	if flags.NArg() != 0 || cfg.SecretsFile == "" || cfg.Context == "" {
-		return fmt.Errorf("%w: unseal needs --secrets-file and an explicit --context", errUsage)
+	if len(positional) != 0 {
+		return fmt.Errorf("%w: unseal takes no positional arguments", errUsage)
 	}
-	if credential != "" {
-		if !acknowledge {
-			return errors.New("auto-unseal is off by default: anyone who boots the disk on this machine gets the secrets; explicit --acknowledge-host-risk is required")
-		}
-		if err := installer.SealUnsealCredential(ctx, cfg, credential, nil); err != nil {
-			return err
-		}
-		_, err := fmt.Fprintln(output, "TPM2-bound auto-unseal credential created")
-		return err
+	if cfg.StatusOnly && (cfg.SecretsFile != "" || cfg.AgeIdentity != "" || cfg.SealToHost != "") {
+		return usageError(errors.New("--status cannot be combined with recovery or TPM2 options"))
 	}
-	if acknowledge {
-		return fmt.Errorf("%w: --acknowledge-host-risk requires --seal-to-tpm2", errUsage)
+	if !cfg.StatusOnly && cfg.SecretsFile == "" {
+		return usageError(errors.New("--secrets-file is required; never paste an unseal key into the command"))
 	}
-	sealed, err := installer.Unseal(ctx, cfg, nil)
+	if cfg.SealToHost != "" && !cfg.Yes {
+		return usageError(errors.New("anyone who boots this disk on this machine gets the secrets with auto-unseal; pass --yes only after accepting that risk"))
+	}
+	status, err := installer.ExecuteUnseal(ctx, cfg, installer.InstallDeps{Output: output})
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "sealed: %t\n", sealed)
-	return err
+	return installer.PrintSealStatus(output, status, *jsonOutput)
 }

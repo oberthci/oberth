@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -20,6 +21,7 @@ var errNoCluster = errors.New("no Kubernetes cluster configured")
 
 // clusterInfoMsg carries the result of the cluster preflight probe.
 type clusterInfoMsg struct {
+	nodes     []corev1.Node
 	context   string
 	server    string
 	version   string
@@ -137,6 +139,7 @@ func probeClusterWithPath(contextName, path string) tea.Cmd {
 		}
 
 		return clusterInfoMsg{
+			nodes:     nodes.Items,
 			context:   selectedContext,
 			server:    restConfig.Host,
 			version:   serverVersion.GitVersion,

@@ -330,7 +330,7 @@ exec "$REAL_GIT" "$@"
 	if _, err := f.call(t, "configure", f.root, "remote", target, "--consent"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, "--consent"); err == nil {
+	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, f.git(t, "rev-parse", "HEAD"), "--consent"); err == nil {
 		t.Fatal("pushed without committed workflow")
 	}
 	if _, err := f.call(t, "workflow-write", f.root, "--consent"); err != nil {
@@ -338,28 +338,39 @@ exec "$REAL_GIT" "$@"
 	}
 	f.git(t, "add", ".oberth/build.yaml")
 	f.git(t, "-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "approved fixture workflow")
-	for _, args := range [][]string{{"smoke", f.root, "oberth", "smoke", target, "no"}, {"smoke", f.root, "oberth", "smoke", "git@oberth:wrong/acme/project.git", "--consent"}, {"smoke", f.root, "oberth", "../bad", target, "--consent"}} {
+	approvedCommit := f.git(t, "rev-parse", "HEAD")
+	for _, args := range [][]string{{"smoke", f.root, "oberth", "smoke", target, approvedCommit, "no"}, {"smoke", f.root, "oberth", "smoke", "git@oberth:wrong/acme/project.git", approvedCommit, "--consent"}, {"smoke", f.root, "oberth", "../bad", target, approvedCommit, "--consent"}} {
 		if _, err := f.call(t, args...); err == nil {
 			t.Fatal("unsafe smoke push accepted")
 		}
 	}
 	f.env = append(f.env, "EXISTING_BRANCH=yes")
-	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, "--consent"); err == nil {
+	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, f.git(t, "rev-parse", "HEAD"), "--consent"); err == nil {
 		t.Fatal("overwrote existing branch")
 	}
 	f.env = append(f.env, "EXISTING_BRANCH=no")
 	if err := os.WriteFile(filepath.Join(f.root, "README.md"), []byte("unapproved change\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, "--consent"); err == nil {
+	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, f.git(t, "rev-parse", "HEAD"), "--consent"); err == nil {
 		t.Fatal("pushed dirty tracked files")
 	}
 	f.git(t, "checkout", "--", "README.md")
-	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, "--consent"); err != nil {
+	f.git(t, "config", "--local", "--add", "remote.oberth.pushurl", target)
+	f.git(t, "config", "--local", "--add", "remote.oberth.pushurl", "git@elsewhere:acme/project.git")
+	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, approvedCommit, "--consent"); err == nil {
+		t.Fatal("accepted multiple push destinations")
+	}
+	f.git(t, "config", "--local", "--unset-all", "remote.oberth.pushurl")
+	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, strings.Repeat("f", 40), "--consent"); err == nil {
+		t.Fatal("accepted an unapproved HEAD")
+	}
+
+	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, approvedCommit, "--consent"); err != nil {
 		t.Fatal(err)
 	}
 	calls, err := os.ReadFile(f.trace)
-	if err != nil || !strings.Contains(string(calls), "HEAD:refs/heads/smoke") || !strings.Contains(string(calls), "--force-with-lease=refs/heads/smoke:") || strings.Contains(string(calls), "\n--force\n") {
+	if err != nil || !strings.Contains(string(calls), approvedCommit+":refs/heads/smoke") || !strings.Contains(string(calls), "\n"+target+"\n") || !strings.Contains(string(calls), "--force-with-lease=refs/heads/smoke:") || strings.Contains(string(calls), "\n--force\n") {
 		t.Fatal("wrong smoke push")
 	}
 }
@@ -386,5 +397,49 @@ func TestAddRepoReusesThePluginCLIOutsidePATH(t *testing.T) {
 	calls, err := os.ReadFile(f.trace)
 	if err != nil || !strings.Contains(string(calls), "validate") {
 		t.Fatal("the plugin CLI was not used")
+	}
+}
+
+func TestAddRepoDeployKeyRejectsTrailingMaterialAndStripsComments(t *testing.T) {
+	for _, forge := range []struct{ host, tool string }{{"github.com", "gh"}, {"gitlab.com", "glab"}, {"codeberg.org", "tea"}} {
+		t.Run(forge.tool, func(t *testing.T) {
+			f := newAddRepoFixture(t, "git@"+forge.host+":acme/project.git")
+			public := addRepoPublicKey(t)
+			original, err := os.ReadFile(public)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.fake(t, forge.tool, `for arg do
+ case "$arg" in
+ key=@*) cat "${arg#key=@}" > "$CALL_TRACE";;
+ key=*) printf '%s\n' "${arg#key=}" > "$CALL_TRACE";;
+ esac
+done
+printf 'HTTP/2.0 201 Created\n' >&2
+`)
+			if err := os.WriteFile(public, append(append([]byte(nil), original...), []byte("-----BEGIN PRIVATE KEY-----\nprivate material\n-----END PRIVATE KEY-----\n")...), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.call(t, "deploy-key", f.root, public, "--consent"); err == nil {
+				t.Fatal("uploaded trailing private material")
+			}
+			if _, err := os.Stat(f.trace); !os.IsNotExist(err) {
+				t.Fatal("forge received an invalid public input")
+			}
+			commented := append(append([]byte(nil), bytes.TrimSpace(original)...), []byte(" private-comment-must-stay-local\n")...)
+			if err := os.WriteFile(public, commented, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.call(t, "deploy-key", f.root, public, "--consent"); err != nil {
+				t.Fatal("canonical public upload failed")
+			}
+			uploaded, err := os.ReadFile(f.trace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(uploaded, original) {
+				t.Fatal("forge received data outside the canonical public key")
+			}
+		})
 	}
 }

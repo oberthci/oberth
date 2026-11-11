@@ -45,7 +45,6 @@ fragments show
 git-ssh
 init
 install
-unseal
 issues
 issues update
 log
@@ -118,6 +117,7 @@ size get
 size grant
 size revoke
 status
+unseal
 upgrade
 uplink
 uplink add

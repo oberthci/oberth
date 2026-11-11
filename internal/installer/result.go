@@ -29,6 +29,7 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
+	ReissueServerCA bool     `json:"reissue_server_ca"`
 	Context         string   `json:"context"`
 	Namespace       string   `json:"namespace"`
 	ArgoNamespace   string   `json:"argo_namespace"`
@@ -41,7 +42,7 @@ type InstallReview struct {
 }
 
 func Review(cfg Config) InstallReview {
-	return InstallReview{Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
+	return InstallReview{ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -125,10 +126,15 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	}
 	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run}
 	identity := publicClusterIdentity(cfg, config, selected)
-	r.check("cluster_ca", identity.CAPin != "" && !config.Insecure, "Use a kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
+	if !checkClusterTrust(config, identity, &r) {
+		r.Cluster = &identity
+		return r
+	}
 	preflightDeps := deps
 	preflightDeps.RunCommand = host.RunCommand
-	inspectClusterPreflight(ctx, cfg, preflightDeps, &identity, &r)
+	inspectClusterPreflight(ctx, &cfg, preflightDeps, &identity, &r)
+	review := Review(cfg)
+	r.Review = &review
 	r.Cluster = &identity
 	service, serviceErr := kube.CoreV1().Services(cfg.Namespace).Get(ctx, "oberth", metav1.GetOptions{})
 	deps.ClientServiceType = cfg.ServiceType
@@ -208,9 +214,12 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 		plan := PlanInstall(ctx, cfg, deps)
 		result.Checks = plan.Checks
 		result.Cluster = &plan.Identity
+		result.Review = &plan.Review
 	}
-	review := Review(cfg)
-	result.Review = &review
+	if result.Review == nil {
+		review := Review(cfg)
+		result.Review = &review
+	}
 	result.FirstUplink = identity
 	result.SecretsValues = values
 	result.check("install", installErr == nil, "Inspect the selected cluster; finish pending onboarding and rerun --verify --json.")

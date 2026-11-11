@@ -2,20 +2,29 @@ package main
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 )
 
-func TestUnsealRequiresCoordinatesAndExplicitHostRisk(t *testing.T) {
-	for _, args := range [][]string{{"unseal"}, {"unseal", "--secrets-file", "/private/file"}, {"unseal", "--context", "chosen", "--secrets-file", "/private/file", "--seal-to-tpm2", "/private/credential"}} {
+func TestUnsealHelpAndRecoveryGates(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"--status", "--secrets-file", "file"}, {"--seal-to-host", "file", "--secrets-file", "recovery"}, nil} {
 		var output bytes.Buffer
-		err := runCLI(t.Context(), args, strings.NewReader(""), &output)
-		if err == nil || output.Len() != 0 {
-			t.Fatal("expected refusal without output")
+		err := runUnseal(t.Context(), args, &output)
+		help := len(args) > 0 && args[0] == "--help"
+		if (err == nil) != help {
+			t.Fatalf("unexpected argument validation for %v", args)
+		}
+		if help && !bytes.Contains(output.Bytes(), []byte("anyone booting its disk here gets the secrets")) {
+			t.Fatal("help omits host-binding risk")
 		}
 	}
-	var output bytes.Buffer
-	if err := runCLI(t.Context(), []string{"unseal", "--help"}, strings.NewReader(""), &output); err != nil || !strings.Contains(output.String(), "-secrets-file") {
-		t.Fatal("help must work offline")
+}
+
+func TestUnsealParseErrorsDoNotEchoArguments(t *testing.T) {
+	for _, args := range [][]string{{"--unknown=private-input"}, {"--yes=private-input"}, {"--age-identity", "--private-input"}} {
+		var out bytes.Buffer
+		err := runUnseal(t.Context(), args, &out)
+		if err == nil || bytes.Contains([]byte(err.Error()), []byte("private-input")) || out.Len() != 0 {
+			t.Fatal("unseal parsing echoed supplied data")
+		}
 	}
 }

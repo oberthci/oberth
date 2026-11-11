@@ -97,7 +97,9 @@ available node filesystem space, missing default StorageClass, and unknown
 NetworkPolicy enforcement. Free space comes from the kubelet stats API, not
 from capacity or allocatable estimates; unreadable stats fail the check.
 NetworkPolicy detection recognizes ready Calico, Cilium and kube-router
-DaemonSets or the k3s built-in controller when node arguments do not disable
-it. This checks controller configuration, not a traffic isolation probe;
+DaemonSets covering the nodes, including Cilium policy/audit settings and
+kube-router firewall settings, or the k3s built-in controller when node
+arguments do not disable it. Plan, Verify and install refuse untrusted or
+plaintext Kubernetes endpoints before contacting the API. This checks controller configuration, not a traffic isolation probe;
 the bootstrap acceptance cell tests traffic behavior. An unfamiliar controller
 fails closed and needs explicit support before its plan can pass.

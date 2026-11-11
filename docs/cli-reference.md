@@ -484,6 +484,8 @@ Flags:
         inspect the selected cluster and preflight checks without installing
   -push-banner-url string
         push feedback URL; omitted preserves the live URL, explicit empty clears it
+  -reissue-server-ca
+        allow server CA replacement after reviewing its planned names; clients must refresh the CA pin
   -rekor-chart-version string
         Rekor chart version
   -rekor-namespace string
@@ -530,28 +532,6 @@ Flags:
         check an existing installation without changing it
   -yes
         confirm the reviewed install on the selected kubeconfig context
-```
-
-## oberth unseal
-
-```text
-Usage: oberth unseal [flags]
-
-Flags:
-  -acknowledge-host-risk
-        accept that anyone who boots this disk on this machine gets the secrets
-  -age-identity string
-        age identity file used to decrypt an encrypted secrets file
-  -context string
-        Kubernetes context chosen by the user (required)
-  -namespace string
-        OpenBao namespace (default "openbao")
-  -pod string
-        OpenBao pod (default "openbao-0")
-  -seal-to-tpm2 string
-        create a new TPM2-bound systemd credential file instead of unsealing
-  -secrets-file string
-        owner-only installer secrets file; contents are never displayed
 ```
 
 ## oberth issues
@@ -1844,6 +1824,31 @@ Usage: oberth status [flags]
         server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
+## oberth unseal
+
+```text
+Usage: oberth unseal --secrets-file FILE [--age-identity FILE] [--context NAME]
+Read the saved key privately and unseal OpenBao. --status reads only seal status.
+  -age-identity string
+        owner-only age identity file for encrypted recovery
+  -context string
+        selected kubeconfig context
+  -json
+        print only initialized/sealed status as JSON
+  -kubeconfig string
+        Kubernetes config file (default: KUBECONFIG or ~/.kube/config)
+  -openbao-namespace string
+        OpenBao namespace (default "openbao")
+  -seal-to-host string
+        write a TPM2-bound systemd credential to a new file on this single Linux node; anyone booting its disk here gets the secrets
+  -secrets-file string
+        owner-only installer recovery file; never printed
+  -status
+        read seal status only; do not read recovery material
+  -yes
+        accept the host-bound auto-unseal risk shown by --seal-to-host
+```
+
 ## oberth upgrade
 
 ```text
@@ -1878,6 +1883,8 @@ Flags:
         upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)
   -openbao-namespace string
         OpenBao namespace (default: openbao)
+  -reissue-server-ca
+        allow server CA replacement after reviewing its planned names; clients must refresh the CA pin
   -release-dir DIR
         read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
   -release-origin string

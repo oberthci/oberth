@@ -1,98 +1,83 @@
 package installer
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"runtime"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// SealUnsealCredential explicitly opts a single local node into TPM2-bound
-// recovery. No software key fallback is permitted.
-func SealUnsealCredential(ctx context.Context, cfg UnsealConfig, path string, run CommandRunner) error {
-	if runtime.GOOS != "linux" {
-		return errors.New("TPM2 auto-unseal requires Linux with systemd and TPM2; nothing was written")
+func sealUnsealKeyToHost(ctx context.Context, cfg UnsealConfig, deps Deps, key []byte) error {
+	if !cfg.Yes {
+		return errors.New("host-bound auto-unseal means anyone who boots this disk on this machine gets the secrets; explicitly accept with --yes")
 	}
-	machineID, err := os.ReadFile("/etc/machine-id")
+	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
+		return errors.New("TPM2 credential setup must run as root on the single Linux node")
+	}
+	machine, err := os.ReadFile("/etc/machine-id")
 	if err != nil {
-		return errors.New("cannot verify this host's machine ID")
+		return errors.New("cannot identify this host for TPM2 binding")
 	}
-	return sealUnsealCredential(ctx, cfg, path, machineID, run)
+	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return errors.New("cannot inspect nodes for host-bound unseal")
+	}
+	if err := validateAutoUnsealNode(nodes.Items, strings.TrimSpace(string(machine))); err != nil {
+		return err
+	}
+	out, err := deps.RunCommand(ctx, nil, "systemctl", "is-active", "--quiet", "k3s.service")
+	clear(out)
+	if err != nil {
+		return errors.New("host-bound boot unseal requires the local k3s system service")
+	}
+	return writeTPMCredential(ctx, cfg.SealToHost, key, deps.RunCommand)
 }
 
-func sealUnsealCredential(ctx context.Context, cfg UnsealConfig, path string, machineID []byte, run CommandRunner) error {
-	if cfg.Context == "" || len(bytes.TrimSpace(machineID)) == 0 {
-		return errors.New("TPM2 auto-unseal needs an explicit context and this host's machine ID")
+func validateAutoUnsealNode(nodes []corev1.Node, machine string) error {
+	if len(nodes) != 1 || machine == "" || nodes[0].Status.NodeInfo.MachineID != machine {
+		return errors.New("host-bound auto-unseal requires exactly one node whose machine ID matches this host")
 	}
-	if run == nil {
-		run = privateUnsealCommand
+	provider := nodes[0].Spec.ProviderID
+	if provider != "" && !strings.HasPrefix(provider, "k3s://") {
+		return errors.New("host-bound auto-unseal is not available on managed clusters")
 	}
-	probe, err := run(ctx, nil, "systemd-creds", "has-tpm2")
-	clear(probe)
-	if err != nil {
-		return errors.New("TPM2 auto-unseal refused: systemd TPM2 support is unavailable")
-	}
-	nodes, err := run(ctx, nil, "kubectl", "--context", cfg.Context, "get", "nodes", "-o", "json")
-	defer clear(nodes)
-	var cluster struct {
-		Items []struct {
-			Spec struct {
-				ProviderID string `json:"providerID"`
-			} `json:"spec"`
-			Status struct {
-				NodeInfo struct {
-					MachineID string `json:"machineID"`
-				} `json:"nodeInfo"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if err != nil || json.Unmarshal(nodes, &cluster) != nil || len(cluster.Items) != 1 {
-		return errors.New("TPM2 auto-unseal refused: requires exactly one verified local node")
-	}
-	node := cluster.Items[0]
-	if (node.Spec.ProviderID != "" && !strings.HasPrefix(node.Spec.ProviderID, "k3s://")) || node.Status.NodeInfo.MachineID != string(bytes.TrimSpace(machineID)) {
-		return errors.New("TPM2 auto-unseal refused on managed clusters or a node other than this host")
-	}
-	checked, err := CheckSecretsFilePath(path)
-	if err != nil {
-		return errors.New("auto-unseal credential needs a new path outside a git worktree")
-	}
-	key, err := ReadUnsealSecret(ctx, cfg.SecretsFile, cfg.AgeIdentity, run)
+	return nil
+}
+
+func writeTPMCredential(ctx context.Context, path string, key []byte, run CommandRunner) error {
+	file, err := createSecretsFile(path)
 	if err != nil {
 		return err
 	}
-	defer clear(key)
-	plain := append([]byte("OPENBAO_UNSEAL_KEY="), key...)
-	plain = append(plain, '\n')
-	defer clear(plain)
-	encrypted, err := run(ctx, plain, "systemd-creds", "encrypt", "--with-key=tpm2", "--tpm2-device=auto", "--name=oberth-secrets", "-", "-")
-	defer clear(encrypted)
-	if err != nil || len(encrypted) == 0 {
-		return errors.New("TPM2 credential encryption failed; nothing was written")
-	}
-	file, err := os.OpenFile(checked, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: validated new operator-selected path
-	if err != nil {
-		return errors.New("cannot create auto-unseal credential; existing files are never overwritten")
-	}
-	keep := false
+	committed := false
 	defer func() {
-		_ = file.Close()
-		if !keep {
-			_ = os.Remove(checked)
+		_ = file.file.Close()
+		if !committed {
+			_ = os.Remove(file.path)
 		}
 	}()
-	if _, err := file.Write(encrypted); err != nil {
-		return errors.New("cannot write encrypted auto-unseal credential")
+	input := append([]byte("OPENBAO_UNSEAL_KEY="), key...)
+	input = append(input, '\n')
+	defer clear(input)
+	// An explicit TPM2 key type refuses missing TPM support; never use auto/host/null.
+	out, err := run(ctx, input, "systemd-creds", "encrypt", "--with-key=tpm2", "--tpm2-device=auto", "--name=unseal-key", "-", "-")
+	defer clear(out)
+	if err != nil || len(out) == 0 {
+		return errors.New("TPM2 sealing failed; systemd-creds and a usable TPM2 are required; no auto-unseal credential was saved")
 	}
-	if err := file.Sync(); err != nil {
-		return errors.New("cannot sync encrypted auto-unseal credential")
+	if _, err := file.file.Write(out); err != nil {
+		return errors.New("cannot save TPM2 credential")
 	}
-	if err := file.Close(); err != nil {
-		return errors.New("cannot close encrypted auto-unseal credential")
+	if err := file.file.Sync(); err != nil {
+		return errors.New("cannot sync TPM2 credential")
 	}
-	keep = true
+	if err := file.file.Close(); err != nil {
+		return errors.New("cannot close TPM2 credential")
+	}
+	committed = true
 	return nil
 }

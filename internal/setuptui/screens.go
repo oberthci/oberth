@@ -181,7 +181,8 @@ func stepSummary(st *WizardState, step stepID) string {
 		return "OpenBao production"
 	case stepTLS:
 		dnsNames, ips := serverCertificateNames(st)
-		extra := append(append([]string{}, c.TLSExtraDNSNames...), c.TLSExtraIPs...)
+		extraDNS, extraIPs := wizardTLSNames(st)
+		extra := append(append([]string{}, extraDNS...), extraIPs...)
 		s := fmt.Sprintf("%d names", len(dnsNames)+len(ips))
 		if len(extra) > 0 {
 			s += " incl. " + strings.Join(extra, ", ")

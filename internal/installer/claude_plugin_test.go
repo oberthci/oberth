@@ -114,7 +114,7 @@ func TestClaudePluginManifests(t *testing.T) {
 	if _, helper := server["headersHelper"]; helper {
 		t.Fatal(".mcp.json carries a headersHelper")
 	}
-	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 2 || entries[0].Name() != "add-repo" || entries[1].Name() != "trust" {
+	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 5 || entries[0].Name() != "add-repo" || entries[1].Name() != "fetch-oberth" || entries[2].Name() != "install" || entries[3].Name() != "trust" || entries[4].Name() != "unseal" {
 		t.Fatalf("scripts = %v %v", entries, err)
 	}
 
@@ -145,14 +145,11 @@ func TestClaudePluginManifests(t *testing.T) {
 		},
 		"install": {
 			"name: install", "description:", "$ARGUMENTS", "--secrets-file", "--context", "--expected-host-fingerprint",
-			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "OBERTH_INSTALL_DIR", "trust on first",
+			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "scripts/fetch-oberth", "allowed-tools:", "trust on first",
 			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "exactly as printed", "--replace-client-files",
 		},
 		"add-repo": {
 			"name: add-repo", "allowed-tools:", "--consent", "push.pushOption=oberth.assist=1", "Never set assist globally", "settings URL", "Never overwrite", "events_wait", "run_wait", "No token",
-		},
-		"unseal": {
-			"name: unseal", "description:", "--secrets-file", "--age-identity", "--context", "Never read, cat, grep, source or preview", "TPM2 is mandatory",
 		},
 		"connect": {
 			"name: connect", "description:", `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" connect --url`,
@@ -448,7 +445,7 @@ func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
 					}
 				}
 
-				// A second run changes nothing; the hint still explains sealed recovery.
+				// A second run changes nothing, and the session hint is quiet.
 				out, err = runTrust(t, shell, claudeDir, nil, "connect", "--url", address, "--pin", pin)
 				if err != nil || !strings.Contains(out, "not changed") {
 					t.Fatalf("second connect: %v\n%s", err, out)

@@ -205,6 +205,11 @@ pressure percentages and timing details. `/metrics` answers only a metrics-scope
 
 ## Release signature verification
 
+The plugin bootstrap verifies the release with OpenSSL and a checksum tool;
+see [verified plugin bootstrap](plugin-bootstrap.md) for its pinned-key
+protocol and manual verification commands. Release CI also verifies the
+Sigstore proof and compares the signed manifests before publication.
+
 Each release publishes `SHA256SUMS`, `release.json` and the Helm chart with a
 Sigstore bundle (`<file>.sigstore.json`), and signs the server image and the
 OCI chart in GAR. All are signed with one pinned key whose `cosign.pub` has

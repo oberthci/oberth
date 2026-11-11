@@ -404,29 +404,49 @@
       "doc_anchor": "docs/install-answers.md#cluster-plan-and-preflight",
       "test_ref": "internal/installer/cluster_plan_test.go TestMultifileKubeconfigKeepsExplicitContext"
     },
+    "flag:reissue-server-ca": {
+      "doc_anchor": "docs/single-host-tls.md",
+      "test_ref": "internal/installer/single_host_tls_test.go TestExistingCARequiresExplicitReissue"
+    },
     "flag:age-identity": {
-      "doc_anchor": "deploy/systemd/README.md#private-recovery",
-      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsCredentialsOnStdin"
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
     },
-    "flag:seal-to-tpm2": {
-      "doc_anchor": "deploy/systemd/README.md#private-recovery",
-      "test_ref": "internal/installer/unseal_test.go TestTPMUnsealRefusesUnsupportedHosts"
+    "flag:seal-to-host": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
     },
-    "flag:acknowledge-host-risk": {
-      "doc_anchor": "deploy/systemd/README.md#private-recovery",
-      "test_ref": "internal/installer/unseal_test.go TestTPMUnsealRefusesUnsupportedHosts"
+    "flag:status": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
     },
-    "flag:pod": {
-      "doc_anchor": "deploy/systemd/README.md#private-recovery",
-      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsCredentialsOnStdin"
+    "flag:kubeconfig": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
     },
-    "flag:namespace": {
-      "doc_anchor": "deploy/systemd/README.md#private-recovery",
-      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsCredentialsOnStdin"
+    "flag:openbao-namespace": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
+    },
+    "value:plugin-fetch-oberth": {
+      "doc_anchor": "docs/plugin-bootstrap.md#verified-plugin-bootstrap",
+      "test_ref": "internal/installer/plugin_fetch_test.go TestPluginFetchVerifiedRelease"
+    },
+    "value:SHA256SUMS.sig": {
+      "doc_anchor": "docs/plugin-bootstrap.md#release-verification",
+      "test_ref": "internal/argojob/release_public_test.go TestPublicChecksumProofsRefuseDisagreement"
+    },
+    "env:OPENBAO_CONTEXT": {
+      "doc_anchor": "deploy/systemd/README.md#tpm2-bound-openbao-auto-unseal",
+      "test_ref": "internal/installer/unseal_review_test.go TestBootUnsealRequiresAndPreservesSelectedContext"
+    },
+    "env:OPENBAO_NAMESPACE": {
+      "doc_anchor": "deploy/systemd/README.md#tpm2-bound-openbao-auto-unseal",
+      "test_ref": "internal/installer/unseal_review_test.go TestBootUnsealRequiresAndPreservesSelectedContext"
     },
     "env:PATH": {
-      "doc_anchor": "deploy/systemd/README.md#private-recovery",
-      "test_ref": "internal/installer/unseal_test.go TestUnsealSubprocessDoesNotExposeCredentials"
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_review_test.go TestUnsealSubprocessDoesNotExposeCredentials"
     },
     "flag:consent": {
       "doc_anchor": "claude-plugin/skills/add-repo/SKILL.md#add-a-repository",

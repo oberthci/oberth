@@ -813,7 +813,8 @@ containing CI and real workload qualification remain separately required.
 - **AI-CONTRACT:** No unlisted objects survive in `oberth/latest/` after
   `release-finalize`. After alias convergence, the finalizer LISTs
   `oberth/latest/` and DELETEs every key not in the converged set ({VERSION,
-  SHA256SUMS, SHA256SUMS.sigstore.json, cosign.pub} union {binaries from
+  SHA256SUMS, SHA256SUMS.sig, SHA256SUMS.sigstore.json, cosign.pub,
+  release.json, release.json.sigstore.json} union {binaries and chart from
   SHA256SUMS}); it fails closed on list failure, truncation, or any key
   outside the `oberth/latest/` prefix (#703/#719).
 

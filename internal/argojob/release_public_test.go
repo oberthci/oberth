@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -95,5 +96,89 @@ func TestPublicSnapshotRefusesUntrustedFileTypesAndMissingProof(t *testing.T) {
 				t.Fatalf("unsafe %s reached cloud publication: %v %s %s", scenario, err, output, fixture.log())
 			}
 		})
+	}
+}
+
+// Both signature forms, the authenticated bundle digest and the release
+// record must agree before the first remote write. Crypto uses an ephemeral
+// test key; only external Sigstore services are faked by the fixture.
+func TestPublicChecksumProofsRefuseDisagreement(t *testing.T) {
+	for _, scenario := range []string{"signature", "bundle-digest", "bundle-signature", "record-binary", "record-chart", "record-version"} {
+		t.Run(scenario, func(t *testing.T) {
+			fixture := newReleaseRuntimeFixture(t)
+			fixture.absolute(filepath.Join(fixture.candidate, "oberth-1.2.3.tgz.sigstore.json"), "valid", 0600)
+			name := "SHA256SUMS.sig"
+			switch scenario {
+			case "signature":
+				fixture.absolute(filepath.Join(fixture.candidate, name), "invalid", 0600)
+			case "bundle-digest", "bundle-signature":
+				name = "SHA256SUMS.sigstore.json"
+				var bundle map[string]any
+				if err := json.Unmarshal(mustReleaseFile(t, filepath.Join(fixture.candidate, name)), &bundle); err != nil {
+					t.Fatal(err)
+				}
+				message := bundle["messageSignature"].(map[string]any)
+				if scenario == "bundle-digest" {
+					message["messageDigest"].(map[string]any)["digest"] = strings.Repeat("A", 44)
+				} else {
+					message["signature"] = strings.Repeat("A", 96)
+				}
+				body, err := json.Marshal(bundle)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixture.absolute(filepath.Join(fixture.candidate, name), string(body), 0600)
+			default:
+				name = "release.json"
+				var record map[string]any
+				if err := json.Unmarshal(mustReleaseFile(t, filepath.Join(fixture.candidate, name)), &record); err != nil {
+					t.Fatal(err)
+				}
+				switch scenario {
+				case "record-binary":
+					record["artifacts"].(map[string]any)["oberth-linux-amd64"] = "sha256:" + strings.Repeat("0", 64)
+				case "record-chart":
+					record["chart"].(map[string]any)["digest"] = "sha256:" + strings.Repeat("0", 64)
+				case "record-version":
+					record["version"] = "v9.9.9"
+				}
+				body, err := json.Marshal(record)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixture.absolute(filepath.Join(fixture.candidate, name), string(body), 0600)
+			}
+			output, err := fixture.run("publish-public", true)
+			if err == nil || strings.Contains(fixture.log(), "curl:") {
+				t.Fatalf("%s reached publication: %v %s %s", scenario, err, output, fixture.log())
+			}
+		})
+	}
+}
+
+func mustReleaseFile(t *testing.T, path string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func TestPublicChecksumSignatureRetryReusesAuthoritativeBundle(t *testing.T) {
+	fixture := newReleaseRuntimeFixture(t)
+	fixture.absolute(filepath.Join(fixture.candidate, "oberth-1.2.3.tgz.sigstore.json"), "valid", 0600)
+	previous := mustReleaseFile(t, filepath.Join(fixture.root, "objects/oberth/v1.2.3/SHA256SUMS.sig"))
+	if output, err := fixture.run("sign-binaries", true); err != nil {
+		t.Fatalf("sign: %v %s", err, output)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if output, err := fixture.run("publish-public", true); err != nil {
+			t.Fatalf("publish: %v %s %s", err, output, fixture.log())
+		}
+		current := mustReleaseFile(t, filepath.Join(fixture.root, "objects/oberth/v1.2.3/SHA256SUMS.sig"))
+		if string(current) != string(previous) {
+			t.Fatal("retry replaced the immutable DER signature")
+		}
 	}
 }

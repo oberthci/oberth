@@ -130,7 +130,7 @@ spec:
         depends: release-setup && release-scan
       - name: release-sign-binaries
         template: release-sign-binaries
-        depends: release-build
+        depends: release-package-chart
       - name: release-publish-images
         template: release-publish-images
         depends: release-build

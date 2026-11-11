@@ -231,7 +231,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		"release-chart-test":             "release-setup && release-scan",
 		"release-build":                  "release-test && release-chart-test && release-verify-publisher-tools",
 		"release-verify-publisher-tools": "release-setup && release-scan",
-		"release-sign-binaries":          "release-build",
+		"release-sign-binaries":          "release-package-chart",
 		"release-publish-images":         "release-build",
 		"release-publish-homebrew":       "release-publish-public",
 		"release-package-chart":          "release-publish-images",

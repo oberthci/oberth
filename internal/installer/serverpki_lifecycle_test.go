@@ -256,7 +256,7 @@ func TestUpgradeReconcilesPKIBeforeHelmAndDryRunNeverWrites(t *testing.T) {
 					return nil, fmt.Errorf("unexpected helm call: %v", args)
 				}
 			}
-			result, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.17.80", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true, TLSExtraDNSNames: []string{"new.example.com"}}, deps)
+			result, err := RunUpgrade(t.Context(), UpgradeConfig{ReissueServerCA: true, BinaryVersion: "0.17.80", ChartOverride: "fixture", DryRun: dryRun, NoBackup: true, TLSExtraDNSNames: []string{"new.example.com"}}, deps)
 			if result.AlreadyUpToDate || (!dryRun && (!errors.Is(err, stop) || !applied)) || (dryRun && (err != nil || applied)) {
 				t.Fatalf("upgrade result=%+v applied=%v err=%v", result, applied, err)
 			}

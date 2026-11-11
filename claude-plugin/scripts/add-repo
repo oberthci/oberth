@@ -169,9 +169,15 @@ deploy-key)
  public_file=$2
  case "$public_file" in /*) :;; *) public_file="$(pwd)/$public_file";; esac
  [ -f "$public_file" ] && [ ! -L "$public_file" ] || fail 'provide a regular public key file'
- ssh-keygen -l -f "$public_file" >/dev/null 2>&1 || fail 'invalid public key file'
- IFS= read -r public_key < "$public_file" || fail 'public key must have a terminating newline'
- case "$public_key" in ssh-*\ *|ecdsa-*\ *) :;; *) fail 'only an SSH public key is accepted';; esac
+ # Canonicalize a single public line before any forge CLI can read it. Never
+ # pass the original file: ssh-keygen accepts a public line before other data.
+ key_directory=$(mktemp -d "${TMPDIR:-/tmp}/oberth-deploy-key.XXXXXX")
+ trap 'rm -rf "$key_directory"' EXIT
+ canonical_key=$key_directory/key.pub
+ awk 'NF { if (++lines != 1 || NF < 2 || $1 !~ /^(ssh-|ecdsa-)/) exit 1; print $1 " " $2 } END { if (lines != 1) exit 1 }' "$public_file" >"$canonical_key" || fail 'provide exactly one SSH public key and no other material'
+ ssh-keygen -l -f "$canonical_key" >/dev/null 2>&1 || fail 'invalid public key file'
+ IFS= read -r public_key < "$canonical_key" || fail 'invalid public key file'
+ public_file=$canonical_key
  cd "$root"
  case "$forge" in
  github)
@@ -237,19 +243,22 @@ validate)
  find_cli
  if [ "$#" -eq 2 ]; then "$oberth_cli" validate --runner-image-prefixes "$2" "$1"; else "$oberth_cli" validate "$1"; fi;;
 smoke)
- [ "$#" -eq 5 ] || fail 'smoke <path> oberth|origin <new-branch> <approved-oberth-url> --consent'
- consent "$5"; root_at "$1"; remote=$2; branch=$3; approved=$4
+ [ "$#" -eq 6 ] || fail 'smoke <path> oberth|origin <new-branch> <approved-oberth-url> <approved-commit> --consent'
+ consent "$6"; root_at "$1"; remote=$2; branch=$3; approved=$4; approved_commit=$5
  case "$remote" in oberth|origin) :;; *) fail 'choose the configured Oberth push remote';; esac
  git check-ref-format "refs/heads/$branch" >/dev/null 2>&1 || fail 'invalid smoke branch'
  git -C "$root" diff --quiet && git -C "$root" diff --cached --quiet || fail 'review and commit changes with approval before smoke testing'
- git -C "$root" cat-file -e HEAD:.oberth/build.yaml 2>/dev/null || fail 'the workflow must be committed with approval before pushing'
- target=$(git -C "$root" remote get-url --push "$remote")
+ current_commit=$(git -C "$root" rev-parse --verify HEAD) || fail 'repository has no committed HEAD'
+ [ "$current_commit" = "$approved_commit" ] || fail 'HEAD differs from the approved commit; review the new SHA before pushing'
+ git -C "$root" cat-file -e "$approved_commit:.oberth/build.yaml" 2>/dev/null || fail 'the workflow must be committed with approval before pushing'
+ target=$(git -C "$root" remote get-url --push --all "$remote")
  [ "$target" = "$approved" ] || fail 'push URL differs from the reviewed Oberth URL'
+ case "$target" in *[!A-Za-z0-9_./:@\[\]-]*|*..*) fail 'smoke requires one safe SSH URL';; esac
  case "$target" in git@*:*|ssh://git@*/*) :;; *) fail 'the smoke push target must be the approved Oberth SSH URL';; esac
  authority=${target#git@}; authority=${authority#ssh://git@}
  case "$authority" in *@*) fail 'credential-bearing SSH URLs are refused';; esac
  existing=$(git -C "$root" ls-remote --heads "$target" "refs/heads/$branch") || fail 'cannot inspect smoke branch on Oberth'
  [ -z "$existing" ] || fail 'smoke branch already exists; choose a new branch'
- git -C "$root" push "--force-with-lease=refs/heads/$branch:" -- "$remote" "HEAD:refs/heads/$branch";;
+ git -C "$root" push "--force-with-lease=refs/heads/$branch:" -- "$target" "$approved_commit:refs/heads/$branch";;
 *) fail 'unknown add-repo action';;
 esac

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,20 +148,26 @@ func PlanInstall(ctx context.Context, cfg Config, host InstallDeps) InstallPlan 
 	}
 	plan.Identity = publicClusterIdentity(cfg, config, selected)
 	plan.Review.Context = selected
-	r.check("cluster_ca", plan.Identity.CAPin != "" && !config.Insecure, "Use a kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
+	if !checkClusterTrust(config, plan.Identity, &r) {
+		plan.OK, plan.Checks = r.OK, r.Checks
+		return plan
+	}
 	run := host.RunCommand
 	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run}
-	inspectClusterPreflight(ctx, cfg, deps, &plan.Identity, &r)
+	inspectClusterPreflight(ctx, &cfg, deps, &plan.Identity, &r)
+	plan.Review = Review(cfg)
+	plan.Review.Context = selected
 	plan.OK, plan.Checks = r.OK, r.Checks
 	return plan
 }
 
-func inspectClusterPreflight(ctx context.Context, cfg Config, deps Deps, identity *ClusterIdentity, r *InstallResult) {
+func inspectClusterPreflight(ctx context.Context, cfg *Config, deps Deps, identity *ClusterIdentity, r *InstallResult) {
 	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	r.check("nodes", err == nil && len(nodes.Items) > 0, "Grant read access to nodes and bring at least one node Ready.")
 	if err != nil {
 		return
 	}
+	cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = SingleHostTLSNames(nodes.Items, cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 	identity.Distribution = DetectEngine(nodes.Items)
 	if identity.Distribution == "unknown" {
 		for _, node := range nodes.Items {
@@ -220,24 +227,29 @@ func networkPolicyController(ctx context.Context, deps Deps, nodes []corev1.Node
 	allK3s := len(nodes) > 0
 	for _, node := range nodes {
 		args, known := node.Annotations["k3s.io/node-args"]
-		if !strings.Contains(node.Status.NodeInfo.KubeletVersion, "+k3s") || !known || strings.Contains(args, "disable-network-policy") {
+		var parsed []string
+		if !strings.Contains(node.Status.NodeInfo.KubeletVersion, "+k3s") || !known || json.Unmarshal([]byte(args), &parsed) != nil || len(parsed) == 0 || strings.Contains(args, "disable-network-policy") {
 			allK3s = false
 		}
 	}
 	if allK3s {
 		return true
 	}
-	controllers, err := deps.KubeClient.AppsV1().DaemonSets("kube-system").List(ctx, metav1.ListOptions{})
+	controllers, err := deps.KubeClient.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return false
 	}
 	for _, ds := range controllers.Items {
-		if ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady < ds.Status.DesiredNumberScheduled {
+		if int(ds.Status.DesiredNumberScheduled) < len(nodes) || ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady < ds.Status.DesiredNumberScheduled || ds.Status.ObservedGeneration < ds.Generation || ds.Status.UpdatedNumberScheduled < ds.Status.DesiredNumberScheduled {
 			continue
 		}
 		switch ds.Name {
-		case "calico-node", "cilium", "kube-router":
+		case "calico-node":
 			return true
+		case "cilium", "kube-router":
+			if controllerPolicyEnabled(ctx, deps, ds.Name, ds.Namespace, ds.Spec.Template.Spec.Containers) {
+				return true
+			}
 		}
 	}
 	return false
@@ -260,4 +272,89 @@ func PrintPlan(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) e
 		return errors.New("install preflight failed; follow the reported remedies")
 	}
 	return nil
+}
+
+// A rejected trust check must stop before credentials are sent to the API.
+func checkClusterTrust(config *rest.Config, identity ClusterIdentity, result *InstallResult) bool {
+	trusted := config != nil && !config.Insecure && identity.CAPin != "" && strings.HasPrefix(identity.Server, "https://")
+	result.check("cluster_ca", trusted, "Use an HTTPS kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
+	return trusted
+}
+
+// Read the controller's policy settings, not just its name and readiness.
+// Unresolved settings fail closed; a traffic test remains a separate check.
+func controllerPolicyEnabled(ctx context.Context, deps Deps, name, namespace string, containers []corev1.Container) bool {
+	settings := map[string]string{}
+	if name == "cilium" {
+		config, err := deps.KubeClient.CoreV1().ConfigMaps(namespace).Get(ctx, "cilium-config", metav1.GetOptions{})
+		if err != nil || !policySettingsSafe(name, config.Data) {
+			return false
+		}
+	}
+	for _, container := range containers {
+		if container.Name != name && (name != "cilium" || container.Name != "cilium-agent") {
+			continue
+		}
+		if len(container.EnvFrom) != 0 {
+			return false
+		}
+		for _, env := range container.Env {
+			key := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(env.Name, "CILIUM_"), "_", "-"))
+			if !policySetting(name, key) {
+				continue
+			}
+			if env.ValueFrom != nil {
+				return false
+			}
+			settings[key] = env.Value
+		}
+		if !policySettingsSafe(name, settings) {
+			return false
+		}
+		args := append(append([]string(nil), container.Command...), container.Args...)
+		for i := 0; i < len(args); i++ {
+			key, value, equal := strings.Cut(strings.TrimPrefix(args[i], "--"), "=")
+			if !policySetting(name, key) {
+				continue
+			}
+			if !equal {
+				value = "true"
+				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+					i++
+					value = args[i]
+				}
+			}
+			if !policySettingsSafe(name, map[string]string{key: value}) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func policySetting(controller, key string) bool {
+	if controller == "kube-router" {
+		return key == "run-firewall"
+	}
+	return key == "enable-policy" || key == "enable-k8s-networkpolicy" || key == "policy-audit-mode"
+}
+
+func policySettingsSafe(controller string, settings map[string]string) bool {
+	for key, value := range settings {
+		if !policySetting(controller, key) {
+			continue
+		}
+		if key == "enable-policy" {
+			if value != "default" && value != "always" {
+				return false
+			}
+			continue
+		}
+		active, err := strconv.ParseBool(value)
+		if err != nil || (key == "policy-audit-mode" && active) || (key != "policy-audit-mode" && !active) {
+			return false
+		}
+	}
+	return true
 }
