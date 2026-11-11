@@ -413,17 +413,27 @@ three times. Without a terminal it needs `--yes`.
 
 ### What the restore does
 
-1. If the compatibility values differ, resolves the chart
-   (`helm show chart`) before changing anything, so a missing chart cannot
-   leave the server scaled down.
-2. With `secrets`: writes every KV secret that differs from the target's
+1. If the compatibility values differ, resolves the chart before changing
+   anything: the signed release at the version the release runs, verified
+   against the key compiled into the CLI (`--release-dir`, `--release-origin`
+   and `--chart-repository` choose the source), or `--chart` (development;
+   not verified). A missing or unverifiable chart cannot leave the server
+   scaled down.
+2. With `history`, when the backup's schema is older than the target
+   server's: rehearses the migration that server runs on its first start on a
+   copy of the restored database, and stops before anything changes if it
+   fails. The rehearsal uses the CLI's migrations, so it runs when the CLI's
+   schema is the target's; otherwise the plan says the first start migrates
+   unrehearsed. For a stopped server this happens once the restore pod has
+   read the server image's schema, still before the swap.
+3. With `secrets`: writes every KV secret that differs from the target's
    (JSON on stdin), every policy and role, and reads each one back: secrets
    and policies must match exactly, roles field-for-field. Any difference
    stops the restore before the server is touched.
-3. Scales `deploy/oberth` to 0 through the scale subresource (so Helm's
+4. Scales `deploy/oberth` to 0 through the scale subresource (so Helm's
    server-side apply keeps owning `.spec.replicas`) and waits for its pods to
    exit.
-4. With `history`: starts a short-lived pod with the server's image, identity
+5. With `history`: starts a short-lived pod with the server's image, identity
    and placement that mounts the server's PersistentVolumeClaim (no host
    paths, so any storage class works), uploads the database over stdin,
    checks the size the pod received and re-checks the SHA-256 on the volume,
@@ -431,10 +441,10 @@ three times. Without a terminal it needs `--yes`.
    `/data/pre-restore-<UTC timestamp>/`, moves the restored files into place,
    and checks they are owned by the server user with mode 0600. A swap that
    fails midway puts the previous files back.
-5. With `secrets`: writes the `oberth-secret-access` ConfigMap. The server
+6. With `secrets`: writes the `oberth-secret-access` ConfigMap. The server
    reconciles grants from it at startup, so it must be in place before the
    server starts.
-6. With `history`: lists the Argo Workflows again, now that no server can
+7. With `history`: lists the Argo Workflows again, now that no server can
    submit new ones, and deletes those whose `oberth.ci/run` label names a run
    the restored database does not know: they belong to the replaced database
    and would otherwise keep running and hold pipeline slots. Runs the backup
@@ -449,11 +459,13 @@ three times. Without a terminal it needs `--yes`.
    and they are cancelled, because they may already have run on the version
    the rollback undoes. Re-run one deliberately if needed. The server removes
    the marker once it has handled it.
-7. With `history`, if they differ: sets the compatibility values with
-   `helm upgrade --reuse-values` (published chart at the release's current
-   version, or `--chart`). If Helm reports a field conflict on
+8. With `history`, if they differ: sets the compatibility values with
+   `helm upgrade --reuse-values` (the chart verified in step 1). If Helm reports a field conflict on
    `.spec.replicas`, it retries once with `--force-conflicts`.
-8. Scales the server back up and waits for it to become ready.
+9. Scales the server back up and waits for it to become ready. If it does
+   not, the restore says where the previous files are: a server that cannot
+   open or migrate the restored database is scaled to 0 and those files are
+   moved back to `/data`.
 
 If a step after the scale-down fails, the error says whether the previous or
 the restored database is in place and how to get back to a running server;

@@ -259,6 +259,11 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 }
 
 // restoreTarget is what the plan learned about the target installation.
+// previousFiles is where the swap moves the target's previous database.
+func (t restoreTarget) previousFiles() string {
+	return fmt.Sprintf("/data/pre-restore-%s/ on PVC %s", t.Timestamp, t.Server.ClaimName)
+}
+
 type restoreTarget struct {
 	Server       serverDeployment
 	Pod          string
@@ -541,16 +546,23 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 				err, cfg.Namespace, replicas)
 		}
 		return fmt.Errorf("%w\nThe restore stopped with deploy/oberth scaled to 0 and the RESTORED database already in place "+
-			"(the previous files are in /data/pre-restore-%s/ on PVC %s). Fix the cause and rerun oberth restore. "+
+			"(the previous files are in %s). Fix the cause and rerun oberth restore. "+
 			"Scaling up now runs the restored database, which needs the restored compatibility values; "+
 			"to return to the previous state instead, move those files back to /data first",
-			err, target.Timestamp, target.Server.ClaimName)
+			err, target.previousFiles())
 	}
 
 	if parts.History {
 		var err error
 		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
 			return err
+		}
+		// A stopped server's schema is known only once the restore pod
+		// starts; swapDatabase rehearses the migration then.
+		if target.Schema > 0 {
+			if err := preflightRestoreMigration(ctx, archive, target.Schema, target.previousFiles(), w); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -569,7 +581,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			return stopped(err)
 		}
 		swapped = true
-		_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in /data/pre-restore-%s/ on PVC %s\n", target.Timestamp, target.Server.ClaimName)
+		_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in %s\n", target.previousFiles())
 	}
 
 	if parts.Secrets && archive.Grants.Present {
@@ -613,6 +625,9 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	}
 	if err := waitForPodReady(ctx, deps.Deps, cfg.Namespace, target.Server.Selector, cfg.Timeout); err != nil {
 		_, _ = fmt.Fprintf(w, "  ⚠ the server is not ready yet (%v); check: kubectl -n %s logs deploy/oberth\n", err, cfg.Namespace)
+		if parts.History {
+			_, _ = fmt.Fprintf(w, "    If it cannot open or migrate the restored database, scale it to 0 and move the previous files back from %s to /data\n", target.previousFiles())
+		}
 	} else {
 		_, _ = fmt.Fprintln(w, "  ✓ server ready")
 		if pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, target.Server.Selector); err == nil && pod != "" {
@@ -794,6 +809,13 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		}
 		if schema < archive.Manifest.Database.Schema {
 			return fmt.Errorf("the target server image writes schema %d but the backup holds schema %d; upgrade the target first", schema, archive.Manifest.Database.Schema)
+		}
+		output := deps.Output
+		if output == nil {
+			output = io.Discard
+		}
+		if err := preflightRestoreMigration(ctx, archive, schema, target.previousFiles(), output); err != nil {
+			return err
 		}
 	}
 
