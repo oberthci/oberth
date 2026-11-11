@@ -514,6 +514,20 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			return err
 		}
 	}
+	if parts.History {
+		var err error
+		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
+			return err
+		}
+		// A stopped server's schema is known only once the restore pod
+		// starts; swapDatabase rehearses the migration then.
+		if target.Schema > 0 {
+			if err := preflightRestoreMigration(ctx, archive, target.Schema, target.previousFiles(), w); err != nil {
+				return err
+			}
+		}
+	}
+
 	if parts.Secrets {
 		_, _ = fmt.Fprintln(w, "Restoring OpenBao...")
 		written, err := restoreOpenBao(ctx, bao, deps.rootToken, target.KV, archive.Policies, archive.Roles)
@@ -550,20 +564,6 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			"Scaling up now runs the restored database, which needs the restored compatibility values; "+
 			"to return to the previous state instead, move those files back to /data first",
 			err, target.previousFiles())
-	}
-
-	if parts.History {
-		var err error
-		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
-			return err
-		}
-		// A stopped server's schema is known only once the restore pod
-		// starts; swapDatabase rehearses the migration then.
-		if target.Schema > 0 {
-			if err := preflightRestoreMigration(ctx, archive, target.Schema, target.previousFiles(), w); err != nil {
-				return err
-			}
-		}
 	}
 
 	_, _ = fmt.Fprintln(w, "Stopping the server...")
