@@ -226,6 +226,7 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	if deps.RestConfig != nil {
 		server = deps.RestConfig.Host
 	}
+	_, _ = fmt.Fprintf(w, "Target: %s (%s)\n", deps.ContextName, server)
 	if record.APIServer != "" && server != record.APIServer {
 		return fmt.Errorf("the record is for API server %s, but context %q is %s; select the cluster the upgrade ran on", record.APIServer, deps.ContextName, server)
 	}

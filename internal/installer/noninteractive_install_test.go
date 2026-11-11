@@ -157,6 +157,18 @@ func TestInstallReservesTheSecretsFileFirst(t *testing.T) {
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("a secrets file without credentials was kept: %v", statErr)
 	}
+	// A dry run checks the path the same way and creates nothing.
+	dry := Config{InstallSecretStore: true, SecretsFile: path, DryRun: true}
+	if err := Execute(context.Background(), dry, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
+		t.Fatalf("dry run with a usable path: %v", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("a dry run created the secrets file: %v", statErr)
+	}
+	dry.SecretsFile = filepath.Join(dir, "missing", "secrets.txt")
+	if err := Execute(context.Background(), dry, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "--secrets-file directory") {
+		t.Fatalf("dry run with an unusable path: %v", err)
+	}
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -323,6 +335,76 @@ func TestSecretsFileCleanupKeepsAFileItDidNotCreate(t *testing.T) {
 	secrets.finish(io.Discard)
 	if raw, err := os.ReadFile(path); err != nil || string(raw) != "the operator's own\n" {
 		t.Fatalf("the operator's file was touched: %q %v", raw, err)
+	}
+}
+
+// The default uplink key is id_ed25519 or the pair the install generates,
+// never some other key that happens to lie in ~/.ssh, and a generated private
+// key does not outlive a failed write of its public half.
+func TestDefaultUplinkKeyNeverPicksAnotherKey(t *testing.T) {
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Another system's deploy key, alphabetically first.
+	for name, body := range map[string]string{"aws_deploy": "-----BEGIN OPENSSH PRIVATE KEY-----\n", "aws_deploy.pub": fakeDeployKeyLine + "\n"} {
+		if err := os.WriteFile(filepath.Join(sshDir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deps := Deps{UserHomeDir: func() (string, error) { return home, nil }}
+	newTable := func() *tableWriter { return newTableWriter(io.Discard, false) }
+
+	// The public half cannot be written: the private key this run made goes.
+	write := writeUplinkPublicKey
+	writeUplinkPublicKey = func(string, []byte) error { return errors.New("disk full") }
+	cfg := Config{}
+	err := defaultOnboardingIdentity(&cfg, deps, newTable())
+	writeUplinkPublicKey = write
+	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.Contains(err.Error(), "--ssh-public-key") {
+		t.Fatalf("got %v", err)
+	}
+	generated := filepath.Join(sshDir, generatedUplinkKeyName)
+	if _, statErr := os.Lstat(generated); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("an orphaned private key was left: %v", statErr)
+	}
+
+	// Generated, not aws_deploy; a second run reuses the generated pair.
+	for range 2 {
+		cfg = Config{}
+		if err := defaultOnboardingIdentity(&cfg, deps, newTable()); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.SSHPublicKeyPath != generated+".pub" {
+			t.Fatalf("picked %s", cfg.SSHPublicKeyPath)
+		}
+	}
+
+	// id_ed25519 wins once it exists.
+	for name, body := range map[string]string{"id_ed25519": "-----BEGIN OPENSSH PRIVATE KEY-----\n", "id_ed25519.pub": fakeDeployKeyLine + "\n"} {
+		if err := os.WriteFile(filepath.Join(sshDir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg = Config{}
+	if err := defaultOnboardingIdentity(&cfg, deps, newTable()); err != nil || cfg.SSHPublicKeyPath != filepath.Join(sshDir, "id_ed25519.pub") {
+		t.Fatalf("picked %s (%v)", cfg.SSHPublicKeyPath, err)
+	}
+
+	// A private key that was already there is not this run's to remove.
+	other := filepath.Join(t.TempDir(), ".ssh")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, generatedUplinkKeyName), []byte("the operator's own\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := generateUplinkKey(other); err == nil {
+		t.Fatal("an existing private key was overwritten")
+	}
+	if raw, _ := os.ReadFile(filepath.Join(other, generatedUplinkKeyName)); string(raw) != "the operator's own\n" {
+		t.Fatalf("an existing private key was touched: %q", raw)
 	}
 }
 

@@ -87,7 +87,8 @@ curl -fsSL https://oberth.ci/install.sh | sh
 Any cluster your kubeconfig reaches is a valid target, local or remote: the
 install names the context and its API server before it changes anything.
 When the kubeconfig (`--kubeconfig`, else `KUBECONFIG`, else `~/.kube/config`)
-has more than one context, name the one to use with `--context`.
+has more than one context, name the one to use with `--context`. `oberth
+upgrade` follows the same rule.
 
 ### Without a terminal: scripts and AI agents
 
@@ -110,11 +111,14 @@ Everything the interactive install asks is a flag. `--upstream-url
 ssh://git@forge.example.test:2222/acme` names any other forge; add
 `--expected-host-fingerprint SHA256:...` (the forge's SSH host-key fingerprint
 as its admin publishes it) so it is trusted without a prompt. The uplink
-identity defaults to `user@host`, and its key to `~/.ssh/id_ed25519.pub`
-(else the first key pair in `~/.ssh`, else a new `~/.ssh/oberth_ed25519`).
-This machine's client files (`~/.config/oberth`) and, when Claude Code is
-installed, its CA trust and the Oberth plugin are set up as on a terminal;
-`--client-access none` skips them. When clients reach the server on other
+identity defaults to `user@host`, and its key to `~/.ssh/id_ed25519.pub`,
+else to `~/.ssh/oberth_ed25519`, a pair the install generates; no other key
+in `~/.ssh` is picked, and `--ssh-public-key` names one. This machine's
+client files (`~/.config/oberth`) and, when Claude Code is installed, its CA
+trust and the Oberth plugin are set up as on a terminal; `--client-access
+none` skips them. Client files that already exist with other content, such as
+another server's, are kept and nothing is written, unless
+`--replace-client-files` is given. When clients reach the server on other
 ports than the NodePorts 30022/30443 (a port forward, a container runtime
 publishing them elsewhere), say so with `--client-ssh-port` and
 `--client-https-port`: the client files, the push banner and every printed

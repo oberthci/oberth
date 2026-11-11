@@ -654,10 +654,11 @@ func finishLines(w *wizard, v *verifyResult) []string {
 		add(installer.NextSteps(installer.NextStepsInput{
 			Host:    host,
 			SSHPort: endpoint.ClientSSHPort, HTTPSPort: endpoint.ClientHTTPSPort, ServiceType: endpoint.ClientServiceType,
-			Context:   st.contextForCommands(),
-			Namespace: st.namespace(),
-			Upstreams: nextStepsUpstreams(st, v),
-			SSHAlias:  installer.SSHAliasConfigured(),
+			Kubeconfig: st.Config.KubeconfigPath,
+			Context:    st.contextForCommands(),
+			Namespace:  st.namespace(),
+			Upstreams:  nextStepsUpstreams(st, v),
+			SSHAlias:   installer.SSHAliasConfigured(),
 			// The pending forge authorization is explained above.
 			OmitPendingHelp: pendingForge,
 		})...)

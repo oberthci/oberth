@@ -121,9 +121,10 @@ const generatedUplinkKeyName = "oberth_ed25519"
 
 // defaultOnboardingIdentity fills the uplink answers a non-interactive
 // onboarding has no prompt for: the identity user@host, and this machine's
-// SSH public key (~/.ssh/id_ed25519.pub, else the first key pair in ~/.ssh,
-// else a new ed25519 pair generated here; its private key never leaves this
-// machine).
+// SSH public key: ~/.ssh/id_ed25519.pub, else ~/.ssh/oberth_ed25519.pub, a
+// pair generated here on the first run (its private key never leaves this
+// machine). No other key in ~/.ssh is ever picked: which of them is the
+// operator's own is not for the install to guess; --ssh-public-key names one.
 func defaultOnboardingIdentity(cfg *Config, deps Deps, tw *tableWriter) error {
 	if cfg.UplinkIdentity == "" {
 		cfg.UplinkIdentity = defaultUplinkIdentity()
@@ -143,11 +144,7 @@ func defaultOnboardingIdentity(cfg *Config, deps Deps, tw *tableWriter) error {
 		return fmt.Errorf("find this machine's SSH key: %w; pass --ssh-public-key", err)
 	}
 	sshDir := filepath.Join(home, ".ssh")
-	candidates := []string{filepath.Join(sshDir, "id_ed25519.pub")}
-	for _, key := range listSSHKeys(sshDir, true) {
-		candidates = append(candidates, filepath.Join(sshDir, strings.TrimPrefix(key, "~/.ssh/")))
-	}
-	for _, candidate := range candidates {
+	for _, candidate := range []string{filepath.Join(sshDir, "id_ed25519.pub"), filepath.Join(sshDir, generatedUplinkKeyName+".pub")} {
 		if _, err := os.Stat(privateKeyPath(candidate)); err == nil && isSSHKeyFile(candidate, true) {
 			cfg.SSHPublicKeyPath = candidate
 			return nil
@@ -155,7 +152,7 @@ func defaultOnboardingIdentity(cfg *Config, deps Deps, tw *tableWriter) error {
 	}
 	path, err := generateUplinkKey(sshDir)
 	if err != nil {
-		return fmt.Errorf("no SSH key pair in %s to register as this machine's uplink, and generating one failed: %w; pass --ssh-public-key", sshDir, err)
+		return fmt.Errorf("%s has no id_ed25519 key pair to register as this machine's uplink, and generating one failed: %w; pass --ssh-public-key", sshDir, err)
 	}
 	tw.AppendRow("Uplink key", displayPath(path), "✓ generated", false)
 	cfg.SSHPublicKeyPath = path
@@ -164,7 +161,8 @@ func defaultOnboardingIdentity(cfg *Config, deps Deps, tw *tableWriter) error {
 
 // generateUplinkKey writes a new ed25519 key pair to dir/oberth_ed25519
 // (private 0600, public 0644) and returns the public key path. An existing
-// file is never overwritten.
+// file is never overwritten, and a private key this call created does not
+// outlive a failure to write its public half.
 func generateUplinkKey(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
@@ -204,11 +202,16 @@ func generateUplinkKey(dir string) (string, error) {
 		return "", writeErr
 	}
 	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPublic))) + " " + comment + "\n"
-	if err := atomicWriteFile(publicPath, []byte(line), 0o644); err != nil {
+	if err := writeUplinkPublicKey(publicPath, []byte(line)); err != nil {
+		// O_EXCL above proves this call created the private key.
+		_ = os.Remove(privatePath)
 		return "", err
 	}
 	return publicPath, nil
 }
+
+// writeUplinkPublicKey writes the generated public key; tests replace it.
+var writeUplinkPublicKey = func(path string, line []byte) error { return atomicWriteFile(path, line, 0o644) }
 
 // expectedFingerprintFor is --expected-host-fingerprint for an upstream on
 // the first upstream's host; another host has another key.

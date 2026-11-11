@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -95,7 +96,8 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	color := isColor(deps)
 
 	choice, decided := clientAccessDecided(cfg)
-	if !decided && (deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil) {
+	unattended := deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil
+	if !decided && unattended {
 		// Without a terminal the offer takes its default, as Enter would:
 		// both clients. --client-access none declines in advance.
 		choice, decided = clientAccessBoth, true
@@ -140,18 +142,43 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 		tw.AppendRow("Client access", "TLS certificate unreadable", "⚠ manual", false)
 		return nil
 	}
+	_, httpsPort := clientPorts(deps)
+	baseURL := "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsPort
+	tokenCommand, tokenHint := tokenCommandForHost()
+	envBody := []byte(renderClientEnv(baseURL, caPath, tokenCommand))
+	mcpBody, marshalErr := renderMCPConfig(baseURL+"/mcp", tokenCommand)
+
+	// Nobody is there to ask, so files that are already here and say
+	// something else (another server, other ports, an edited token command)
+	// are the operator's: they stay unless --replace-client-files says
+	// otherwise. All or nothing, so the files never describe two servers.
+	if unattended && !cfg.ReplaceClientFiles {
+		planned := map[string][]byte{caPath: authority}
+		if choice == clientAccessBoth || choice == clientAccessCLI {
+			planned[filepath.Join(root, "env")] = envBody
+		}
+		if (choice == clientAccessBoth || choice == clientAccessMCP) && marshalErr == nil {
+			planned[filepath.Join(root, "mcp.json")] = mcpBody
+		}
+		if differing := differingFiles(planned); len(differing) > 0 {
+			tw.AppendRow("Client access", "existing files differ", "⚠ kept", false)
+			tw.WriteFooter()
+			_, _ = fmt.Fprintf(w, "\nThis machine's client files were not written: %s already exist and differ from this install's "+
+				"(another server, other ports, or your own edits). They were left as they are, and Claude Code was not changed. "+
+				"Rerun with --replace-client-files to replace them, or with --client-access none to keep them.\n",
+				strings.Join(differing, ", "))
+			return nil
+		}
+	}
+
 	if err := atomicWriteFile(caPath, authority, 0600); err != nil {
 		tw.AppendRow("Client access", displayPath(caPath), "✗ error", false)
 		return nil
 	}
 
-	_, httpsPort := clientPorts(deps)
-	baseURL := "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsPort
-	tokenCommand, tokenHint := tokenCommandForHost()
-
 	if choice == clientAccessBoth || choice == clientAccessCLI {
 		path := filepath.Join(root, "env")
-		if err := atomicWriteFile(path, []byte(renderClientEnv(baseURL, caPath, tokenCommand)), 0600); err != nil {
+		if err := atomicWriteFile(path, envBody, 0600); err != nil {
 			tw.AppendRow("CLI access", displayPath(path), "✗ error", false)
 		} else {
 			tw.AppendRow("CLI access", displayPath(path), "✓ written", false)
@@ -159,11 +186,10 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	}
 	if choice == clientAccessBoth || choice == clientAccessMCP {
 		path := filepath.Join(root, "mcp.json")
-		body, marshalErr := renderMCPConfig(baseURL+"/mcp", tokenCommand)
 		switch {
 		case marshalErr != nil:
 			tw.AppendRow("MCP access", displayPath(path), "✗ error", false)
-		case atomicWriteFile(path, body, 0600) != nil:
+		case atomicWriteFile(path, mcpBody, 0600) != nil:
 			tw.AppendRow("MCP access", displayPath(path), "✗ error", false)
 		default:
 			// The file alone configures nothing: no client reads this path. It
@@ -179,6 +205,21 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 	tw.WriteFooter()
 	printClientAccessNotes(w, root, choice, tokenHint, freshToken, cfg.SecretsFile)
 	return nil
+}
+
+// differingFiles names, sorted, the planned files that already exist with
+// other content. A file that cannot be read counts: it is not known to match.
+func differingFiles(planned map[string][]byte) []string {
+	var differing []string
+	for path, body := range planned {
+		existing, err := os.ReadFile(path) //nolint:gosec // G304: the client config directory
+		if errors.Is(err, os.ErrNotExist) || (err == nil && bytes.Equal(existing, body)) {
+			continue
+		}
+		differing = append(differing, displayPath(path))
+	}
+	sort.Strings(differing)
+	return differing
 }
 
 // configureClaudeCodeFromInstall reports SetupClaudeCode as table rows. A
@@ -478,12 +519,17 @@ func refreshPinnedServerCA(ctx context.Context, cfg Config, deps Deps, tw *table
 }
 
 // storeFromSecretsFile is the store command fed from the secrets file's token
-// line, so the token moves into the secret store without reaching a screen.
-// macOS security(1) takes the value only as an argument, never from stdin.
+// line, so the token moves into the secret store without reaching a screen or
+// a process argument list.
 func storeFromSecretsFile(storeCommand, secretsFile string) string {
 	read := "sed -n 's/^" + SecretsFileTokenKey + "=//p' " + shellQuoteWord(secretsFile)
-	if strings.HasSuffix(storeCommand, " -w") {
-		return storeCommand + ` "$(` + read + `)"`
+	if rest, ok := strings.CutPrefix(storeCommand, "security "); ok && strings.HasSuffix(rest, " -w") {
+		// security(1) takes the value of -w only as an argument, where ps
+		// shows it. Its -i mode reads whole commands from stdin instead, so
+		// sed writes the command with the token in it and nothing carries
+		// the token in argv. -U replaces an earlier item.
+		command := strings.Replace(strings.Replace(rest, "add-generic-password ", "add-generic-password -U ", 1), `"$USER"`, "$USER", 1)
+		return `sed -n "s|^` + SecretsFileTokenKey + `=\(.*\)|` + command + ` \1|p" ` + shellQuoteWord(secretsFile) + " | security -i"
 	}
 	if rest, ok := strings.CutPrefix(storeCommand, "pass insert "); ok {
 		// Without a terminal pass insert asks for the value twice and

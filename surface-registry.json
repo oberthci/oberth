@@ -340,6 +340,10 @@
       "doc_anchor": "docs/installer-reruns.md",
       "test_ref": "cmd/oberth/upgrade_backup_recipient_test.go TestUpgradeBackupRecipientFlag"
     },
+    "flag:replace-client-files": {
+      "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
+      "test_ref": "internal/installer/clientaccess_test.go TestClientAccessDefaultsToBothWithoutATerminal"
+    },
     "flag:yes": {
       "doc_anchor": "docs/installer-reruns.md",
       "test_ref": "cmd/oberth/upgrade_backup_recipient_test.go TestUpgradeBackupRecipientFlag"

@@ -25,6 +25,10 @@ Version changes go through one command:
 oberth upgrade                  # from the directory where the backup and rollback record should go
 ```
 
+When the kubeconfig has more than one context, name the cluster with
+`--context`; the upgrade refuses to pick one and lists them. It prints
+`Target: <context> (<server>)` before anything else.
+
 It, in order:
 
 1. refuses an installed release newer than the CLI (`--allow-downgrade` accepts one within the same database schema) and a running schema newer than the CLI's;

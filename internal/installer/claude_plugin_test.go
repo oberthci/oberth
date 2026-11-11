@@ -146,7 +146,7 @@ func TestClaudePluginManifests(t *testing.T) {
 		"install": {
 			"name: install", "description:", "$ARGUMENTS", "--secrets-file", "--context", "--expected-host-fingerprint",
 			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "OBERTH_INSTALL_DIR", "trust on first",
-			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "exactly as printed",
+			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "exactly as printed", "--replace-client-files",
 		},
 		"connect": {
 			"name: connect", "description:", `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" connect --url`,

@@ -29,7 +29,7 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	flags.Var(&removeIPs, "tls-remove-ip", "remove a permitted IP SAN; refused while served (repeatable)")
 	flags.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "", "OpenBao namespace (default: openbao)")
 	flags.StringVar(&cfg.Namespace, "namespace", "", "Oberth namespace (default: oberth)")
-	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
+	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to upgrade (required when the kubeconfig has more than one context)")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
 	flags.StringVar(&cfg.ArgoValuesReviewed, "argo-values-reviewed", "", argoValuesReviewedHelp)
 	flags.BoolVar(&cfg.WaitIdle, "wait-idle", false, "wait for all queued/running runs before upgrading (advisory, not an admission freeze)")
@@ -121,6 +121,9 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 		}
 	}
 
+	if err := installer.RequireContextChoice("upgrade", kubeContext, "", kubeconfigContexts); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
 	kubeClient, restConfig, selectedContext, err := installer.LoadKubeConfigForContext(kubeContext, output)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)
@@ -145,6 +148,10 @@ func runUpgrade(ctx context.Context, arguments []string, input io.Reader, output
 	}
 	return upgradeCompletionError(cfg.DryRun, result)
 }
+
+// kubeconfigContexts lists the contexts an upgrade could reach; tests replace
+// it.
+var kubeconfigContexts = installer.KubeconfigContexts
 
 func upgradeCompletionError(dryRun bool, result installer.UpgradeResult) error {
 	if dryRun || result.Upgraded || result.AlreadyUpToDate {
@@ -195,6 +202,9 @@ func addReleaseSourceFlags(flags *flag.FlagSet, dir, origin, repository *string)
 // runUpgradeRollback rolls back one recorded upgrade; a restore of the
 // pre-upgrade backup runs through oberth restore --only history.
 func runUpgradeRollback(ctx context.Context, record, kubeContext string, cfg installer.UpgradeConfig, forceRecord bool, timeout time.Duration, input io.Reader, output io.Writer) error {
+	if err := installer.RequireContextChoice("roll back", kubeContext, "", kubeconfigContexts); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
 	kubeClient, restConfig, selectedContext, err := installer.LoadKubeConfigForContext(kubeContext, output)
 	if err != nil {
 		return fmt.Errorf("load kubeconfig: %w", err)

@@ -531,6 +531,9 @@ func installConfig(st *WizardState) installer.Config {
 	cfg.UplinkIdentity = st.UplinkIdentity
 	cfg.SSHPublicKeyPath = st.SSHKeyPath
 	cfg.ClientAccess = st.ClientAccess
+	// The wizard's client-access step and its review are the consent an
+	// install without a terminal otherwise needs a flag for.
+	cfg.ReplaceClientFiles = true
 	cfg.SecretStoreUndecided = false
 	// Dev builds stamp BinaryVersion as "dev-<sha>"; let the installer pick
 	// the published chart instead of deriving a version from the stamp.

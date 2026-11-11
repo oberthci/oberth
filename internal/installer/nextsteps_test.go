@@ -89,6 +89,19 @@ func TestAlsoUpstreamNameAvoidsNamesAndOrganizations(t *testing.T) {
 	}
 }
 
+// An install given --kubeconfig prints commands that name that file, so they
+// reach the cluster that was installed on.
+func TestNextStepsNameTheKubeconfig(t *testing.T) {
+	t.Parallel()
+	text := strings.Join(NextSteps(NextStepsInput{Kubeconfig: "/srv/kube/lab config", Context: "lab", Namespace: "oberth"}), "\n")
+	if want := "kubectl --kubeconfig '/srv/kube/lab config' --context lab exec -i -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth uplink add - you@laptop"; !strings.Contains(text, want) {
+		t.Fatalf("next steps lack %q:\n%s", want, text)
+	}
+	if strings.Contains(text, "kubectl --context lab") {
+		t.Fatalf("a command without the kubeconfig:\n%s", text)
+	}
+}
+
 func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 	t.Parallel()
 	lines := NextSteps(NextStepsInput{

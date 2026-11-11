@@ -484,6 +484,8 @@ Flags:
         read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
   -release-origin string
         fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
+  -replace-client-files
+        without a terminal: replace this machine's client files (~/.config/oberth) when they exist with other content, such as another server's; by default they are kept and nothing is written
   -secrets-file string
         write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) to this new file (mode 0600; refused when it exists or lies in a git worktree) and print only its path and SHA-256; required when the output is not a terminal
   -service-type string
@@ -491,7 +493,7 @@ Flags:
   -skip-argo-workflows
         do not install the Argo Workflows controller, because this cluster already runs one watching --argo-namespace (the install still binds Oberth to it and still verifies it is ready)
   -ssh-public-key string
-        workstation SSH public key path (default without a terminal: ~/.ssh/id_ed25519.pub, else the first key pair in ~/.ssh, else a new ~/.ssh/oberth_ed25519)
+        workstation SSH public key path (default without a terminal: ~/.ssh/id_ed25519.pub, else ~/.ssh/oberth_ed25519.pub, generated on the first run)
   -timeout duration
         wait timeout for pod readiness (default 15m0s)
   -tls-extra-dns-name value
@@ -1819,7 +1821,7 @@ Flags:
   -chart-repository string
         fetch the chart from this HTTPS origin instead of https://charts.oberth.ci
   -context string
-        kubeconfig context to target (default: current-context)
+        kubeconfig context to upgrade (required when the kubeconfig has more than one context)
   -dry-run
         show what would change without doing it
   -f value

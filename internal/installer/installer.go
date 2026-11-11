@@ -291,6 +291,11 @@ type Config struct {
 	// certificate always covers it. Empty keeps the default: the Kubernetes
 	// API host, or localhost when that is a loopback address (#061).
 	ClientHost string
+	// ReplaceClientFiles lets an install without a terminal replace client
+	// files (~/.config/oberth/{ca.crt,env,mcp.json}) that exist with other
+	// content (--replace-client-files). On a terminal the offer is the
+	// consent; the setup wizard sets it, because its client-access step is.
+	ReplaceClientFiles bool
 	// AlsoUpstreams are further organizations onboarding connects with the
 	// same upstream key (--also-upstream, host/organization or an ssh:// URL),
 	// after the first one (#060).

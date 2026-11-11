@@ -18,10 +18,14 @@ type NextStepsInput struct {
 	SSHPort, HTTPSPort, ServiceType string
 	// Host is the address clients use (Config.ClientHost or the default);
 	// empty means localhost.
-	Host      string
-	Context   string
-	Namespace string
-	Upstreams []NextStepsUpstream
+	Host string
+	// Kubeconfig and Context name the cluster in the printed kubectl
+	// commands: the file the install was given (empty: the default one) and
+	// its context.
+	Kubeconfig string
+	Context    string
+	Namespace  string
+	Upstreams  []NextStepsUpstream
 	// SSHAlias is set when ~/.ssh/config on this machine has the "oberth"
 	// Host block, so the short clone form works here.
 	SSHAlias bool
@@ -49,6 +53,9 @@ func NextSteps(in NextStepsInput) []string {
 	}
 	exec := func(stdin bool, command ...string) string {
 		parts := []string{"kubectl"}
+		if in.Kubeconfig != "" {
+			parts = append(parts, "--kubeconfig", shellQuoteWord(in.Kubeconfig))
+		}
 		if in.Context != "" {
 			parts = append(parts, "--context", in.Context)
 		}
@@ -142,10 +149,11 @@ func printReadyWithNextSteps(w io.Writer, cfg Config, deps Deps, upstreams []Nex
 	for _, line := range NextSteps(NextStepsInput{
 		Host:    clientReachableHost(deps),
 		SSHPort: deps.ClientSSHPort, HTTPSPort: deps.ClientHTTPSPort, ServiceType: deps.ClientServiceType,
-		Context:   deps.ContextName,
-		Namespace: cfg.Namespace,
-		Upstreams: upstreams,
-		SSHAlias:  sshConfigured,
+		Kubeconfig: cfg.KubeconfigPath,
+		Context:    deps.ContextName,
+		Namespace:  cfg.Namespace,
+		Upstreams:  upstreams,
+		SSHAlias:   sshConfigured,
 	}) {
 		_, _ = fmt.Fprintln(w, "  "+line)
 	}

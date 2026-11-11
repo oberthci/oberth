@@ -26,10 +26,13 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			"so a non-interactive install trusts a forge whose key Oberth does not ship")
 	flags.StringVar(&cfg.UplinkIdentity, "uplink-identity", "", "workstation identity (default: user@host)")
 	flags.StringVar(&cfg.SSHPublicKeyPath, "ssh-public-key", "",
-		"workstation SSH public key path (default without a terminal: ~/.ssh/id_ed25519.pub, else the first key pair in ~/.ssh, else a new ~/.ssh/oberth_ed25519)")
+		"workstation SSH public key path (default without a terminal: ~/.ssh/id_ed25519.pub, else ~/.ssh/oberth_ed25519.pub, generated on the first run)")
 	flags.StringVar(&cfg.UpstreamPrivateKeyPath, "upstream-key-file", "", "existing work SSH private key to import into OpenBao")
 	flags.StringVar(&cfg.ClientAccess, "client-access", "",
 		"write this machine's client files without asking: both, cli, mcp, or none")
+	flags.BoolVar(&cfg.ReplaceClientFiles, "replace-client-files", false,
+		"without a terminal: replace this machine's client files (~/.config/oberth) when they exist with other content, "+
+			"such as another server's; by default they are kept and nothing is written")
 	flags.StringVar(&cfg.ClientHost, "client-host", "",
 		"address clients use to reach this server, a DNS name or IP (default: the Kubernetes API host, or localhost); "+
 			"client files, SSH config and printed URLs use it and the certificate covers it")

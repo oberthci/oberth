@@ -154,6 +154,51 @@ func TestClientAccessDefaultsToBothWithoutATerminal(t *testing.T) {
 		t.Fatal("the token reached the output")
 	}
 
+	// A rerun that plans the same files finds nothing to refuse.
+	if err := offerClientAccess(context.Background(), Config{}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "--replace-client-files") {
+		t.Fatalf("an identical rerun was refused:\n%s", out.String())
+	}
+
+	// Files that say something else are the operator's: without a terminal
+	// nothing is written, all three stay, and the output names the flag.
+	env := filepath.Join(root, "env")
+	const other = "export OBERTH_BASE_URL=\"https://other.example.test:30443\"\n"
+	if err := os.WriteFile(env, []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mcpBefore, err := os.ReadFile(filepath.Join(root, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mcp.json"), append(mcpBefore, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := offerClientAccess(context.Background(), Config{}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(env); string(got) != other {
+		t.Fatalf("another server's env was replaced:\n%s", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "mcp.json")); !bytes.Equal(got, append(mcpBefore, '\n')) {
+		t.Fatal("mcp.json was replaced although env was refused")
+	}
+	for _, want := range []string{"--replace-client-files", "--client-access none", "env", "mcp.json", "kept"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the refusal lacks %q:\n%s", want, out.String())
+		}
+	}
+	// --replace-client-files replaces them.
+	if err := offerClientAccess(context.Background(), Config{ReplaceClientFiles: true}, deps, newTableWriter(deps.Output, false), testToken); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(env); string(got) == other || !strings.Contains(string(got), "OBERTH_TOKEN_COMMAND") {
+		t.Fatalf("--replace-client-files did not replace env:\n%s", got)
+	}
+
 	// --client-access none still declines in advance.
 	deps, _, home = clientAccessDeps(t, "")
 	deps.IsTerminal = func() bool { return false }
@@ -172,8 +217,11 @@ func TestClientAccessNotesReadTheTokenFromTheSecretsFile(t *testing.T) {
 	if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "token above") {
 		t.Fatalf("notes:\n%s", out.String())
 	}
-	if got := storeFromSecretsFile("security add-generic-password -s oberth-token -a \"$USER\" -w", "/s"); !strings.HasSuffix(got, `-w "$(sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s)"`) {
-		t.Fatalf("macOS store command: %s", got)
+	// macOS: security -i reads the command from stdin, so the token is in no
+	// argument list (security's -w takes a value only as an argument).
+	if got, want := storeFromSecretsFile("security add-generic-password -s oberth-token -a \"$USER\" -w", "/s"),
+		`sed -n "s|^OBERTH_UPLINK_TOKEN=\(.*\)|add-generic-password -U -s oberth-token -a $USER -w \1|p" /s | security -i`; got != want {
+		t.Fatalf("macOS store command:\n got %s\nwant %s", got, want)
 	}
 	// pass insert asks twice on a pipe; -e reads the one line.
 	if got := storeFromSecretsFile("pass insert oberth/token", "/s"); got != "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s | pass insert -e -f oberth/token" {

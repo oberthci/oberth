@@ -78,6 +78,9 @@ Arguments given to the command: `$ARGUMENTS`
      write access to the organization's repositories. Then run the `upstream
      add` command the output printed, exactly as printed: it names the
      cluster that was installed on.
+   - When the output says the client files were kept because they differ,
+     this machine is set up for another Oberth server. Ask the user before
+     rerunning with `--replace-client-files`; never add it yourself.
    - The install configured this machine's client files (`~/.config/oberth`)
      and, when Claude Code is on PATH, its CA trust and this plugin. The user
      then enters the server in `/plugin configure oberth@oberthci`: the URL is

@@ -208,6 +208,12 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		}
 	} else if cfg.SecretsFile != "" && !cfg.DryRun {
 		return errors.New("--secrets-file cannot be combined with a caller that receives the credentials itself")
+	} else if cfg.SecretsFile != "" {
+		// A dry run creates nothing, but a path the install would refuse is
+		// part of the plan it reviews.
+		if _, err := CheckSecretsFilePath(cfg.SecretsFile); err != nil {
+			return err
+		}
 	}
 
 	contextName := cfg.ContextName
@@ -242,11 +248,9 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		}
 	}
 
-	if contextName == "" && deps.KubeContexts != nil {
-		names, err := deps.KubeContexts(cfg.KubeconfigPath)
-		if err == nil && len(names) > 1 {
-			return fmt.Errorf("the kubeconfig has %d contexts; choose the cluster to install on with --context <name>:\n  %s",
-				len(names), strings.Join(names, "\n  "))
+	if deps.KubeContexts != nil {
+		if err := RequireContextChoice("install on", contextName, cfg.KubeconfigPath, deps.KubeContexts); err != nil {
+			return err
 		}
 	}
 
@@ -354,6 +358,22 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 		ReleaseGetter:     deps.ReleaseGetter,
 		releaseKey:        deps.releaseKey,
 	})
+}
+
+// RequireContextChoice refuses to act on a kubeconfig with several contexts
+// when none was named: the operator picks the cluster, a command never does.
+// action completes "choose the cluster to ..." (install on, upgrade). A
+// kubeconfig that cannot be listed is left to the load that follows.
+func RequireContextChoice(action, contextName, kubeconfigPath string, list func(string) ([]string, error)) error {
+	if contextName != "" {
+		return nil
+	}
+	names, err := list(kubeconfigPath)
+	if err != nil || len(names) < 2 {
+		return nil
+	}
+	return fmt.Errorf("the kubeconfig has %d contexts; choose the cluster to %s with --context <name>:\n  %s",
+		len(names), action, strings.Join(names, "\n  "))
 }
 
 // KubeconfigContexts lists the context names of a kubeconfig, sorted: the
