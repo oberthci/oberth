@@ -18,6 +18,19 @@ import (
 // RegisterCertificateUplink creates a lifecycle record without minting a bearer
 // secret. Its public digest is never accepted by bearer authentication.
 func (s *Store) RegisterCertificateUplink(ctx context.Context, actor string, spec model.UplinkSpec) (model.Uplink, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.Uplink{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	u, err := s.registerCertificateUplink(ctx, tx, actor, spec)
+	if err != nil {
+		return u, err
+	}
+	return u, tx.Commit()
+}
+
+func (s *Store) registerCertificateUplink(ctx context.Context, tx *sql.Tx, actor string, spec model.UplinkSpec) (model.Uplink, error) {
 	if strings.TrimSpace(actor) == "" || strings.TrimSpace(spec.Identity) == "" || strings.TrimSpace(spec.Fingerprint) == "" {
 		return model.Uplink{}, ErrInvalid
 	}
@@ -28,11 +41,6 @@ func (s *Store) RegisterCertificateUplink(ctx context.Context, actor string, spe
 	if spec.Admin && model.MetricsOnly(scopes) {
 		return model.Uplink{}, ErrInvalid
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Uplink{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
 	// Never replace a registration or widen its authority during installation.
 	matches, err := matchUplinksByIdentity(ctx, tx, spec.Identity, spec.Fingerprint)
 	if err != nil {
@@ -73,9 +81,6 @@ func (s *Store) RegisterCertificateUplink(ctx context.Context, actor string, spe
 	if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "uplink.register", ResourceType: "uplink", ResourceID: fmt.Sprint(u.ID), Details: string(details)}, now); err != nil {
 		return u, err
 	}
-	if err = tx.Commit(); err != nil {
-		return u, err
-	}
 	u.Identity = spec.Identity
 	u.Fingerprint = spec.Fingerprint
 	u.TokenCredentialID = id
@@ -90,19 +95,25 @@ func (s *Store) RegisterCertificateUplink(ctx context.Context, actor string, spe
 // BindClientPin is atomic with its issuance receipt, and refuses a removed or
 // revoked or replaced registration. A pin cannot migrate to a different uplink.
 func (s *Store) BindClientPin(ctx context.Context, actor string, id int64, credentialID, pin string, expiry time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.bindClientPin(ctx, tx, actor, id, credentialID, pin, expiry); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Store) bindClientPin(ctx context.Context, tx *sql.Tx, actor string, id int64, credentialID, pin string, expiry time.Time) error {
 	if actor == "" || credentialID == "" || len(pin) != 64 || !expiry.After(s.now()) {
 		return ErrInvalid
 	}
 	if _, err := hex.DecodeString(pin); err != nil {
 		return ErrInvalid
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	var active bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id WHERE u.id=? AND t.id=? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL)`, id, credentialID).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id WHERE u.id=? AND t.id=? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL)`, id, credentialID).Scan(&active); err != nil {
 		return err
 	}
 	if !active {
@@ -123,7 +134,7 @@ func (s *Store) BindClientPin(ctx context.Context, actor string, id int64, crede
 	if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "uplink.cert.issue", ResourceType: "uplink", ResourceID: fmt.Sprint(id), Details: string(details)}, unixNano(s.now())); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) UplinkByClientPin(ctx context.Context, pin string) (model.Uplink, error) {

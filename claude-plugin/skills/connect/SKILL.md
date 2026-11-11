@@ -1,7 +1,7 @@
 ---
 name: connect
 description: Make Claude Code trust the CA of the configured Oberth server, checked against an explicit SHA-256 pin. Use when the user runs /oberth:connect, when the session-start note says the Oberth CA is not trusted yet, or when the oberth MCP server fails with a certificate error.
-argument-hint: "[CA SHA-256 pin]"
+argument-hint: "[private invite file or CA SHA-256 pin]"
 allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" *)
 ---
 
@@ -16,6 +16,33 @@ Configured values of this plugin:
 - CA pin: `${user_config.ca_pin}`
 
 Arguments given to the command: `$ARGUMENTS`
+
+## Connect with a single-use invite
+
+When the user has an invitation file, run only this command with its local
+path, never its contents:
+
+```sh
+sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" redeem '<private invite file>'
+```
+
+The file must be owner-only (0600). Never read, display, grep, upload or paste
+it into this session; never pass its credential as an argument or environment
+variable. The script generates a local TLS key/CSR and an Ed25519 SSH push
+key, verifies the server chain and hostname against the invite's exact CA
+pin before sending the credential, and redeems over the enrollment MCP
+endpoint. It receives only a client certificate. It then trusts the verified
+CA, preserves existing settings while setting the client certificate/key
+paths, and configures the MCP endpoint without an Authorization header.
+Tell the user to restart Claude Code once. No bearer token is issued.
+
+An invite is single use and expires. Do not retry a redemption automatically:
+a lost response can mean the invite was consumed. Keep the local keys and
+ask the admin to issue their certificate with `uplink_cert` if necessary.
+The registered SSH key is `~/.claude/oberth/push_ed25519.pub`; its private
+counterpart stays here and is the push key to use when adding repositories.
+
+## Connect with an admin-issued certificate
 
 ## Steps
 
@@ -52,8 +79,7 @@ Arguments given to the command: `$ARGUMENTS`
    the admin, who issues `oberth uplink cert <identity> --csr <file>` (or the
    `uplink_cert` MCP tool). The SSH public key must already be registered on
    that uplink. Save the returned public certificate as `current/client.csr.crt`.
-   Invite redemption will use the same CSR issuance path when available;
-   do not invent an invite command before that feature is installed.
+   Invitation enrollment uses this same CSR issuance path.
 5. Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" credentials` to validate
    the key pair and merge `CLAUDE_CODE_CLIENT_CERT` and
    `CLAUDE_CODE_CLIENT_KEY` into settings.json env beside NODE_EXTRA_CA_CERTS.

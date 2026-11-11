@@ -1133,7 +1133,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
 		ResourceDeclarations: argoJobs,
 		ReleasePreflight:     argoJobs,
-		ClientCertificates:   &service.ClientCertIssuer{Authority: clientAuthority, Store: database},
+		ClientCertificates:   &service.ClientCertIssuer{Authority: clientAuthority, Store: database, ServerCAPin: servedCAPin(served)},
 		UplinkLifecycle:      database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		SchedulingObserver: argoJobs, Admission: scheduler,

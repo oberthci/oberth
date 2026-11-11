@@ -57,6 +57,7 @@ mcp tools
 client
 client setup
 client pin
+client redeem
 client renew
 outbox
 preflight
@@ -123,6 +124,7 @@ upgrade
 uplink
 uplink add
 uplink cert
+uplink invite
 uplink list
 uplink remove
 uplink rotate

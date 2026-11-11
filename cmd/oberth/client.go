@@ -19,6 +19,7 @@ Configure this machine's MCP client (Claude Code) for an Oberth server.
 
 Commands:
   setup   trust the server's CA in Claude Code and install the Oberth plugin
+  redeem  redeem a private invitation with a local CSR and SSH public key
   renew   renew with the current certificate and rotate the local key
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
@@ -53,7 +54,7 @@ var clientSetupDeps = func(output io.Writer) installer.Deps { return installer.D
 
 func runClient(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: client setup|pin", errUsage)
+		return fmt.Errorf("%w: client setup|redeem|renew|pin", errUsage)
 	}
 	switch arguments[0] {
 	case "--help", "-h":
@@ -61,6 +62,8 @@ func runClient(ctx context.Context, arguments []string, output io.Writer) error 
 		return err
 	case "setup":
 		return runClientSetup(ctx, arguments[1:], output)
+	case "redeem":
+		return runClientRedeem(ctx, arguments[1:], output)
 	case "renew":
 		return runClientRenew(ctx, arguments[1:], output)
 	case "pin":

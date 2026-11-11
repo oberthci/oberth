@@ -930,8 +930,15 @@ containing CI and real workload qualification remain separately required.
   Stale transitions and the first retained deadline after each success are
   logged; sample age and the retained-deadline count are administrator metrics.
   The chart requires six consecutive five-second HTTPS readiness failures.
-- `/mcp` and `/api/*` require a bearer token. Static connection guidance may be
+- `/mcp` and `/api/*` require an active uplink authenticated by its bound
+  client certificate or bearer credential. Static connection guidance may be
   served unauthenticated without exposing repository or run data.
+- `POST /mcp/enroll` is a separate MCP boundary with only `uplink_redeem`.
+  A random single-use credential, expiry, current server CA pin and URL bind
+  enrollment to an invitation created by an unscoped admin. Consumption,
+  certificate-only uplink registration, local SSH fingerprint, client SPKI
+  and audit receipts commit together; no bearer token is minted. See
+  [uplink invitations](docs/uplink-invites.md).
 - The dashboard pages `/runs`, `/repos`, `/issues`, `/status`, and
   `/runs/{run}` serve a static shell (plus `/assets/*` stylesheet, script, and
   fonts) with zero repository or run data; the browser holds the bearer token
@@ -991,7 +998,7 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 95 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 96 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
   assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (any uplink whose scope covers the run's repository, or an admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since`, `events_wait` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
@@ -999,7 +1006,7 @@ containing CI and real workload qualification remain separately required.
   `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
   `issue_unlock`, `issue_close_many`,
   secret-access `access_list`/`access_allow`/`access_revoke`, unscoped-admin-only
-  `uplink_cert`, `uplink_list`/`uplink_revoke`/`uplink_rotate`,
+  `uplink_invite`, `uplink_cert`, `uplink_list`/`uplink_revoke`/`uplink_rotate`,
   certificate-authenticated `client_renew`,
   `access_dismiss`,
   admin-only `workflow_capability_grant` and

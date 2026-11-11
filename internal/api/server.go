@@ -292,6 +292,7 @@ func (server *Server) routes() {
 	})
 	server.mux.Handle("POST /api/admission/hold", server.requireAuth(http.HandlerFunc(server.handleAdmissionHold)))
 	server.mux.Handle("POST /api/promotions", server.requireAuth(http.HandlerFunc(server.handlePromote)))
+	server.mux.HandleFunc("POST /mcp/enroll", server.handleInviteMCP)
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
 	server.mux.Handle("GET /mcp", server.requireAuth(http.HandlerFunc(server.handleMCPEventStream)))
 	server.mux.Handle("DELETE /mcp", server.requireAuth(http.HandlerFunc(server.handleMCPSessionDelete)))
