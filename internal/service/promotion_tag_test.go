@@ -19,11 +19,16 @@ import (
 // taggingGit records annotated tag pushes over the fixed upstream head.
 type taggingGit struct {
 	*upstreamGit
-	pushes []string
-	err    error
+	pushes     []string
+	err        error
+	contains   bool
+	beforePush func()
 }
 
 func (g *taggingGit) PublishAnnotatedTag(_ context.Context, _, tag, commit, _ string) (string, error) {
+	if g.beforePush != nil {
+		g.beforePush()
+	}
 	g.pushes = append(g.pushes, tag+"@"+commit)
 	if g.err != nil {
 		return "", g.err
@@ -207,5 +212,41 @@ func TestPromoteTagAfterRefusesReleaseVersionNames(t *testing.T) {
 	}
 	if len(git.pushes) != 0 {
 		t.Fatal("refused names were pushed")
+	}
+}
+
+func (g *taggingGit) UpstreamContainsCommit(context.Context, string, string, string) (bool, error) {
+	return g.contains, nil
+}
+
+func TestPromotionTagRetryRechecksMovedTargetAndAuditsIntent(t *testing.T) {
+	f, g := newTagPromotionFixture(t)
+	g.head = f.initial
+	g.err = fmt.Errorf("push: %w", gitssh.ErrTransportUnavailable)
+	promotion, request := f.taggedPromotion(t, model.PromotionPassed, f.initial)
+	request = f.service.settlePromotionTag(t.Context(), f.store, promotion, request, time.Now())
+	if request.NextRetryAt == nil {
+		t.Fatal("no retry scheduled")
+	}
+	g.head = f.unmerged
+	g.contains = true
+	g.err = nil
+	g.beforePush = func() {
+		actions, _, err := f.store.ListAuditActions(t.Context(), model.AuditListFilter{ActionPrefix: "promotion.tag_after.push.intent", Limit: 20})
+		if err != nil || len(actions) != 2 {
+			t.Fatalf("intent missing before retry push: %d %v", len(actions), err)
+		}
+	}
+	got := f.service.settlePromotionTag(t.Context(), f.store, promotion, request, request.NextRetryAt.Add(time.Second))
+	if got.Status != model.PromotionTagPushed || !strings.Contains(got.Reason, "contains") {
+		t.Fatalf("advanced target retry: %+v", got)
+	}
+	g.beforePush = nil
+	g.pushes = nil
+	f.service.auditor = nil
+	promotion, request = f.taggedPromotion(t, model.PromotionPassed, f.initial)
+	got = f.service.settlePromotionTag(t.Context(), f.store, promotion, request, time.Now())
+	if got.Status == model.PromotionTagPushed || len(g.pushes) != 0 {
+		t.Fatal("push ran without durable intent")
 	}
 }

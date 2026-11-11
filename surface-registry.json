@@ -451,6 +451,14 @@
     "env:OBERTH_CLIENT_KEY": {
       "doc_anchor": "docs/client-certificates.md#cli-and-renewal",
       "test_ref": "internal/client/connection_test.go TestCertificateConnectionSelection"
+    },
+    "flag:resume-secrets-file": {
+      "doc_anchor": "docs/installer-resume.md#resume-a-partial-install",
+      "test_ref": "internal/installer/resume_secrets_test.go TestResumeInstallReadsPrivateRootWithoutOutput"
+    },
+    "flag:resume-age-identity": {
+      "doc_anchor": "docs/installer-resume.md#resume-a-partial-install",
+      "test_ref": "internal/installer/resume_secrets_test.go TestResumeInstallReadsPrivateRootWithoutOutput"
     }
   }
 }

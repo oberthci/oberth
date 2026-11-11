@@ -300,6 +300,14 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if err := openDatabase(); err != nil {
 		return err
 	}
+	same, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
+	if err != nil {
+		return err
+	}
+	if same {
+		_, err = fmt.Fprintf(output, "Upstream %s: identity verified; identical registration kept.\n", name)
+		return err
+	}
 	if err := dependencies.mutationGate(ctx, "upstream.register", *databasePath); err != nil {
 		return err
 	}

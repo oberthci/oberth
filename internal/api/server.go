@@ -165,7 +165,7 @@ type Server struct {
 	mcpStreamWriteTimeout time.Duration
 	sessions              *mcpSessions
 	longPolls             longPollLimiter
-	mux                   *http.ServeMux
+	mux                   *routeMux
 }
 
 type contextKey struct{}
@@ -184,7 +184,7 @@ func New(auth Authenticator, tools ToolService, views ViewService, version strin
 		version = "dev"
 	}
 	drainContext, stopObservers := context.WithCancel(context.Background())
-	server := &Server{drainContext: drainContext, stopObservers: stopObservers, auth: auth, tools: tools, views: views, downloads: downloads, version: version, sessions: newMCPSessions(), mux: http.NewServeMux()}
+	server := &Server{drainContext: drainContext, stopObservers: stopObservers, auth: auth, tools: tools, views: views, downloads: downloads, version: version, sessions: newMCPSessions(), mux: newRouteMux()}
 	for _, option := range options {
 		option(server)
 	}

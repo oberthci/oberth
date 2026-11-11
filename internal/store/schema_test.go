@@ -1064,6 +1064,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"runs_latest_ref_idx",
 		"runs_passed_tested_sha_idx",
 		"runs_ref_idx",
+		"runs_ref_prefix_idx",
 		"runs_sha_idx",
 		"schema_migrations_id_unique",
 		"secret_access_active",

@@ -5,24 +5,29 @@ import (
 	"time"
 )
 
-func TestFourPriorityClassesAndLegacyReadNames(t *testing.T) {
+func TestFourPriorityClasses(t *testing.T) {
 	now := time.Now()
 	for i, name := range []RunPriority{"low", "standard", "promotion", "high"} {
 		if got := name.Rank(); got != i-1 {
 			t.Errorf("%s rank=%d want %d", name, got, i-1)
 		}
 	}
-	for old, want := range map[RunPriority]RunPriority{"normal": "standard", "highest": "high", "high": "high", "low": "low"} {
-		got, _ := (Run{Priority: old, QueuedAt: now}).EffectivePriority(now)
-		if got != want {
-			t.Errorf("legacy %s displayed as %s, want %s", old, got, want)
+	for _, name := range []RunPriority{"low", "standard", "promotion", "high"} {
+		got, _ := (Run{Priority: name, QueuedAt: now}).EffectivePriority(now)
+		if !name.Valid() || got != name {
+			t.Errorf("priority %s did not remain canonical", name)
+		}
+	}
+	for _, name := range []RunPriority{"normal", "highest"} {
+		if name.Valid() {
+			t.Errorf("removed priority %s accepted", name)
 		}
 	}
 }
 
 func TestFourPriorityAgingNeverManufacturesUrgency(t *testing.T) {
 	now := time.Now()
-	for _, base := range []RunPriority{"standard", "normal"} {
+	for _, base := range []RunPriority{"standard"} {
 		run := Run{Priority: base, QueuedAt: now}
 		got, _ := run.EffectivePriority(now.Add(24 * time.Hour))
 		if got != "promotion" {

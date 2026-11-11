@@ -18,7 +18,7 @@ func TestRunListMessageContract(t *testing.T) {
 		want string
 	}{
 		{"queued", model.Run{Status: model.RunQueued}, "in line"},
-		{"tag boost", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHighest, PriorityReason: model.TagReleasePriorityReason}, ""},
+		{"tag boost", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHigh, PriorityReason: model.TagReleasePriorityReason}, ""},
 		{"aged", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityPromotion, PriorityReason: model.PriorityAgedReason}, "priority promotion (aged)"},
 		{"running", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: "normal", PriorityReason: "ordinary run"}, ""},
 		{"promotion", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: "highest", PriorityReason: "promotion run"}, ""},
@@ -127,7 +127,7 @@ func TestRunListWaitQualifierPrivacyAndClipping(t *testing.T) {
 	if len([]rune(message)) != 60 || !strings.HasSuffix(message, "…") {
 		t.Fatal(message)
 	}
-	run := model.Run{Status: model.RunQueued, DisplayStatus: model.DisplayQueued, Priority: model.PriorityHighest, PriorityReason: "admin bump: release"}
+	run := model.Run{Status: model.RunQueued, DisplayStatus: model.DisplayQueued, Priority: model.PriorityHigh, PriorityReason: "admin bump: release"}
 	applyQueuedDisplay(&run, &model.RunScheduling{State: "queued", QueuePosition: 2}, "")
 	if run.DisplayReason != "position 2" {
 		t.Fatal(run.DisplayReason)

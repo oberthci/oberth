@@ -265,9 +265,10 @@ func (t restoreTarget) previousFiles() string {
 }
 
 type restoreTarget struct {
-	Server       serverDeployment
-	Pod          string
-	ChartVersion string
+	DeployPublicKey string
+	Server          serverDeployment
+	Pod             string
+	ChartVersion    string
 	// Schema is the target server's schema version, 0 when no server pod
 	// is running to ask (it is then checked in the helper pod).
 	Schema    int
@@ -631,6 +632,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	} else {
 		_, _ = fmt.Fprintln(w, "  ✓ server ready")
 		if pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, target.Server.Selector); err == nil && pod != "" {
+			target.DeployPublicKey = readRestoreDeployPublicKey(ctx, deps.Deps, cfg.Namespace, pod, restoreDeployPublicPath(target.Server))
 			recordServerAudit(ctx, deps.Deps, cfg.Namespace, pod, "restore.completed", map[string]any{
 				"archive_sha256": archive.CipherSHA, "history": parts.History, "secrets": parts.Secrets,
 				"from_audit_head_id": archive.restoredHeadID(), "from_audit_head_sha256": archive.restoredHeadSHA256(),
@@ -1083,6 +1085,7 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 	if parts.History {
 		next("Uplinks and their tokens are the backup's again: a token this install printed no longer works; the previous ones do.")
 	}
+	printRestoreDeployKey(w, cfg, target)
 	next("This install keeps its own server CA and SSH host key: other machines re-pin ~/.config/oberth/ca.crt and\n" +
 		"     drop a stale known_hosts entry (ssh-keygen -R '[<host>]:30022').")
 	if parts.Secrets && len(target.Pins.OldCA) > 0 {

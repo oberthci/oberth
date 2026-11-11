@@ -40,7 +40,7 @@ func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
 	// A repository can name its branch release/* but has no priority until
 	// the installation administrator configures it.
 	before, err := s.Run(ctx, rc.ID)
-	if err != nil || before.Priority != model.PriorityNormal {
+	if err != nil || before.Priority != model.PriorityStandard {
 		t.Fatalf("repo self-classified: %+v, %v", before, err)
 	}
 	if _, err = s.SetQueuePriorityPatterns(ctx, "admin", []string{"rc/*", "release/*"}); err != nil {
@@ -137,8 +137,8 @@ func TestQueuePriorityBumpAuditedAndSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.BumpRunPriority(ctx, "admin", second.ID, model.PriorityHighest, "release blocker")
-	if err != nil || got.Priority != model.PriorityHighest || got.PriorityReason != "admin bump: release blocker" {
+	got, err := s.BumpRunPriority(ctx, "admin", second.ID, model.PriorityHigh, "release blocker")
+	if err != nil || got.Priority != model.PriorityHigh || got.PriorityReason != "admin bump: release blocker" {
 		t.Fatalf("bump=%+v %v", got, err)
 	}
 	// Pattern changes cannot undo an explicit administrator bump.
@@ -163,7 +163,7 @@ func TestQueuePriorityBumpAuditedAndSurvivesReopen(t *testing.T) {
 	if _, err = reopened.MarkRunAdmitted(ctx, next.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = reopened.BumpRunPriority(ctx, "admin", second.ID, model.PriorityHighest, "already started"); !errors.Is(err, ErrInvalidState) {
+	if _, err = reopened.BumpRunPriority(ctx, "admin", second.ID, model.PriorityHigh, "already started"); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("bumped admitted work=%v", err)
 	}
 	var details, actor string
@@ -220,7 +220,7 @@ func TestQueuePriorityRestartRefireRetainsWaitAndBump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.BumpRunPriority(ctx, "admin", bumped.ID, model.PriorityHighest, "release blocker"); err != nil {
+	if _, err = s.BumpRunPriority(ctx, "admin", bumped.ID, model.PriorityHigh, "release blocker"); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err := s.ClaimNextRun(ctx)
@@ -235,7 +235,7 @@ func TestQueuePriorityRestartRefireRetainsWaitAndBump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.Priority != model.PriorityHighest || retry.PriorityReason != "admin bump: release blocker" {
+	if retry.Priority != model.PriorityHigh || retry.PriorityReason != "admin bump: release blocker" {
 		t.Fatalf("restart discarded admin bump: %+v", retry)
 	}
 }
@@ -356,7 +356,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 		enqueue(repo.ID, "release-flag", model.RefBranch, "push", true),
 	}
 	for _, r := range ungranted {
-		want := model.PriorityNormal
+		want := model.PriorityStandard
 		if r.ID == tag.ID || r.ID == otherTag.ID {
 			want = model.PriorityPromotion
 		}
@@ -370,7 +370,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	for _, tc := range []struct {
 		id   string
 		want model.RunPriority
-	}{{tag.ID, model.PriorityPromotion}, {otherTag.ID, model.PriorityPromotion}, {ordinary.ID, model.PriorityNormal}} {
+	}{{tag.ID, model.PriorityPromotion}, {otherTag.ID, model.PriorityPromotion}, {ordinary.ID, model.PriorityStandard}} {
 		r, err := s.Run(ctx, tc.id)
 		if err != nil || r.Priority != tc.want {
 			t.Fatalf("scoped grant: %+v %v", r, err)
@@ -381,7 +381,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 			continue
 		}
 		got, err := s.Run(ctx, candidate.ID)
-		if err != nil || got.Priority != model.PriorityNormal {
+		if err != nil || got.Priority != model.PriorityStandard {
 			t.Fatalf("branch signals acquired release priority with a size grant: %+v %v", got, err)
 		}
 	}
@@ -422,7 +422,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 			return "explicit release replay authorization", nil
 		},
 	})
-	if err != nil || !authorized || retry.Enqueued.Priority != model.PriorityNormal {
+	if err != nil || !authorized || retry.Enqueued.Priority != model.PriorityStandard {
 		t.Fatalf("rerun ignored automatic priority revocation: %+v %v", retry, err)
 	}
 	next, err := s.NextQueuedRun(ctx)
@@ -448,7 +448,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	// Trusted plan/apply have cancellation guards, but no automatic urgency.
 	for _, trigger := range []string{"plan", "apply"} {
 		r := enqueue(repo.ID, trigger, model.RefBranch, trigger, false)
-		if r.Priority != model.PriorityNormal {
+		if r.Priority != model.PriorityStandard {
 			t.Fatalf("trusted %s acquired automatic priority: %+v", trigger, r)
 		}
 	}
@@ -470,7 +470,7 @@ func TestQueuePriorityAgedStandardJoinsPromotionStreamFIFO(t *testing.T) {
 		spec := testRunSpec(repo.ID, fmt.Sprintf("v1.%d", i), strings.Repeat("b", 40))
 		spec.RefKind, spec.Trigger, spec.Release = model.RefTag, "tag", true
 		tag, err := s.EnqueueRun(ctx, spec)
-		want := model.PriorityNormal
+		want := model.PriorityStandard
 		if i == 0 {
 			want = model.PriorityPromotion
 		}
@@ -541,20 +541,20 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 		}
 	}
 	check(first.ID, model.PriorityPromotion, "oldest waiting")
-	check(second.ID, model.PriorityNormal, "earlier tag")
-	check(third.ID, model.PriorityNormal, "earlier tag")
+	check(second.ID, model.PriorityStandard, "earlier tag")
+	check(third.ID, model.PriorityStandard, "earlier tag")
 	check(otherTag.ID, model.PriorityPromotion, "oldest waiting")
 	claimed, err := s.ClaimNextRun(ctx)
 	if err != nil || claimed.ID != first.ID || claimed.StartedAt != nil {
 		t.Fatalf("claim=%+v %v", claimed, err)
 	}
 	// Claiming is not resource admission: don't grant a second automatic boost.
-	check(second.ID, model.PriorityNormal, "earlier tag")
+	check(second.ID, model.PriorityStandard, "earlier tag")
 	if _, err := s.MarkRunAdmitted(ctx, first.ID); err != nil {
 		t.Fatal(err)
 	}
 	check(second.ID, model.PriorityPromotion, "oldest waiting")
-	check(third.ID, model.PriorityNormal, "earlier tag")
+	check(third.ID, model.PriorityStandard, "earlier tag")
 	if _, err := s.FinishRun(ctx, second.ID, model.RunResult{Status: model.RunFailed}); err != nil {
 		t.Fatal(err)
 	}
@@ -565,9 +565,9 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 	if err != nil || grant.RevokedAt == nil {
 		t.Fatalf("revoke never granted=%+v %v", grant, err)
 	}
-	check(third.ID, model.PriorityNormal, "disabled by size_revoke")
+	check(third.ID, model.PriorityStandard, "disabled by size_revoke")
 	newTag := enqueue(repo.ID, "junk-4")
-	check(newTag.ID, model.PriorityNormal, "disabled by size_revoke")
+	check(newTag.ID, model.PriorityStandard, "disabled by size_revoke")
 	check(otherTag.ID, model.PriorityPromotion, "oldest waiting")
 	if _, err := s.BumpRunPriority(ctx, "admin", third.ID, model.PriorityHigh, "intentional expedite"); err != nil {
 		t.Fatal(err)
@@ -587,7 +587,7 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 	if bumped, err := s.Run(ctx, third.ID); err != nil || bumped.PriorityOverride != model.PriorityHigh || bumped.PriorityOverrideReason != "intentional expedite" {
 		t.Fatalf("automatic boost discarded explicit fallback: %+v %v", bumped, err)
 	}
-	check(newTag.ID, model.PriorityNormal, "earlier tag")
+	check(newTag.ID, model.PriorityStandard, "earlier tag")
 	// Exercise both run-list CTE and per-repo subquery correlations.
 	for _, list := range []func() ([]model.Run, error){
 		func() ([]model.Run, error) { return s.ListRecentRuns(ctx, model.RunListFilter{}) },
@@ -598,7 +598,7 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, r := range runs {
-			if r.ID == newTag.ID && r.Priority != model.PriorityNormal {
+			if r.ID == newTag.ID && r.Priority != model.PriorityStandard {
 				t.Fatalf("list bypassed per-repo cap: %+v", r)
 			}
 		}

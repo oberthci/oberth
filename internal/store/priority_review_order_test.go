@@ -29,7 +29,7 @@ func TestPriorityReviewExplicitHighestBeforeAgedWork(t *testing.T) {
 	now = now.Add(time.Hour)
 	admin := true
 	spec := testRunSpec(repo.ID, "urgent", strings.Repeat("c", 40))
-	spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHighest, UnscopedAdmin: &admin}
+	spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHigh, UnscopedAdmin: &admin}
 	highest, err := s.EnqueueRun(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)

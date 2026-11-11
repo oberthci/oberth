@@ -502,6 +502,10 @@ Flags:
         fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
   -replace-client-files
         without a terminal: replace this machine's client files (~/.config/oberth) when they exist with other content, such as another server's; by default they are kept and nothing is written
+  -resume-age-identity string
+        age identity file for an encrypted install recovery file
+  -resume-secrets-file string
+        read the existing OpenBao root token from this private recovery file
   -secrets-age-recipient string
         age recipient for encrypting --secrets-file; requires age on PATH
   -secrets-file string

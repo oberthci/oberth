@@ -105,7 +105,7 @@ func (clock *fakeClock) Now() time.Time { return clock.now }
 // pending starts an acquire that may wait and returns its reservation.
 func pending(t *testing.T, gate *admissionGate, sequence int64, request admissionRequest) *admissionReservation {
 	t.Helper()
-	return pendingPriority(t, gate, sequence, model.PriorityNormal, request)
+	return pendingPriority(t, gate, sequence, model.PriorityStandard, request)
 }
 
 func pendingPriority(t *testing.T, gate *admissionGate, sequence int64, priority model.RunPriority, request admissionRequest) *admissionReservation {

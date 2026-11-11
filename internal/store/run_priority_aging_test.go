@@ -37,7 +37,7 @@ func TestQueuePriorityAgingMovesOneClassAndKeepsFIFO(t *testing.T) {
 	highAfter := enqueue("rc/after", "c")
 	fresh := enqueue("feature/fresh", "d")
 	bumped := enqueue("feature/blocker", "e")
-	if _, err := s.BumpRunPriority(ctx, "admin", bumped.ID, model.PriorityHighest, "release blocker"); err != nil {
+	if _, err := s.BumpRunPriority(ctx, "admin", bumped.ID, model.PriorityHigh, "release blocker"); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Minute)
@@ -127,7 +127,7 @@ func TestQueuePriorityAgingBoundsStarvationBehindHighStream(t *testing.T) {
 	// Highest work still leads, so the bound is 60 minutes plus whatever
 	// highest work an administrator or release puts ahead.
 	bumped := stream("blocker")
-	if _, err := s.BumpRunPriority(ctx, "admin", bumped.ID, model.PriorityHighest, "release blocker"); err != nil {
+	if _, err := s.BumpRunPriority(ctx, "admin", bumped.ID, model.PriorityHigh, "release blocker"); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{bumped.ID, starved.ID} {

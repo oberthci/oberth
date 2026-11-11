@@ -208,7 +208,7 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 			if got := runIDs(queue); strings.Join(got, ",") != strings.Join(wantAdmission, ",") {
 				t.Fatalf("%s: %s queue in admission order = %v, want %v", label, name, got, wantAdmission)
 			}
-			previousRank := rank[model.PriorityHighest] + 1
+			previousRank := rank[model.PriorityHigh] + 1
 			for i, run := range queue {
 				if run.QueuePosition != int64(i+1) {
 					t.Fatalf("%s: %s queue position of %s = %d, want %d", label, name, run.Ref, run.QueuePosition, i+1)

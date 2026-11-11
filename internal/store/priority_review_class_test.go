@@ -22,9 +22,9 @@ func TestPriorityReviewRequestsOnlyRaiseAutomaticClass(t *testing.T) {
 		{"admin high promotion", "promotion/main", "promotion", model.RefBranch, model.PriorityHigh, true, model.PriorityHigh, "submission priority: urgent", false},
 		{"typo RC", "rc/v1", "rc", model.RefBranch, "hgh", false, model.PriorityPromotion, "release-candidate pattern: rc/*", true},
 		{"typo tag", "v1", "tag", model.RefTag, "hgh", false, model.PriorityPromotion, model.TagReleasePriorityReason, true},
-		{"normal RC", "rc/v1", "branch", model.RefBranch, model.PriorityNormal, false, model.PriorityPromotion, "release-candidate pattern: rc/*", false},
-		{"normal tag", "v1", "tag", model.RefTag, model.PriorityNormal, false, model.PriorityPromotion, model.TagReleasePriorityReason, false},
-		{"invalid reason RC", "rc/v1", "branch", model.RefBranch, model.PriorityHighest, true, model.PriorityPromotion, "release-candidate pattern: rc/*", true},
+		{"normal RC", "rc/v1", "branch", model.RefBranch, model.PriorityStandard, false, model.PriorityPromotion, "release-candidate pattern: rc/*", false},
+		{"normal tag", "v1", "tag", model.RefTag, model.PriorityStandard, false, model.PriorityPromotion, model.TagReleasePriorityReason, false},
+		{"invalid reason RC", "rc/v1", "branch", model.RefBranch, model.PriorityHigh, true, model.PriorityPromotion, "release-candidate pattern: rc/*", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Now()

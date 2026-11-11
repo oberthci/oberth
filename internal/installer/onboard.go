@@ -11,6 +11,7 @@ package installer
 // over kubectl exec, and only then waits for readiness.
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -1352,23 +1353,16 @@ func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *table
 	// Check if the block already exists.
 	if existingData, readErr := os.ReadFile(configPath); readErr == nil { //nolint:gosec // G304: path is derived from os.UserHomeDir
 		if hasSSHHostBlock(existingData, "oberth") {
-			// Verify the IdentityFile matches the uplink key — a previous
-			// install may point at a different key than the one just registered.
-			existingIdentity := extractSSHBlockIdentityFile(existingData, "oberth")
-			if existingIdentity != "" {
-				expandedExisting, expandErr := expandHomePath(existingIdentity)
-				if expandErr != nil {
-					expandedExisting = existingIdentity
-				}
-				if expandedExisting != keyPath {
-					updated := updateSSHBlockIdentityFile(existingData, "oberth", keyPath)
-					if writeErr := atomicWriteFile(configPath, updated, 0600); writeErr != nil {
-						tw.AppendRow("SSH config", "~/.ssh/config", "✗ error", false)
-						return nil
-					}
-					tw.AppendRow("SSH config", "~/.ssh/config", "✓ updated", false)
+			updated := updateSSHBlockIdentityFile(existingData, "oberth", keyPath)
+			sshPort, _ := clientPorts(deps)
+			updated = updateSSHBlockPort(updated, "oberth", sshPort)
+			if !bytes.Equal(updated, existingData) {
+				if err := atomicWriteFile(configPath, updated, 0600); err != nil {
+					tw.AppendRow("SSH config", "~/.ssh/config", "✗ error", false)
 					return nil
 				}
+				tw.AppendRow("SSH config", "~/.ssh/config", "✓ updated", false)
+				return nil
 			}
 			tw.AppendRow("SSH config", "~/.ssh/config", "✓ exists", false)
 			return nil
@@ -2189,4 +2183,28 @@ func readDeployKey(path string) ([]byte, error) {
 		return nil, errors.New("deploy key read failed or exceeded 1 MiB")
 	}
 	return body, nil
+}
+
+// updateSSHBlockPort places the selected port first in the exact host block;
+// OpenSSH uses the first obtained value. Other hosts and Match blocks survive.
+func updateSSHBlockPort(data []byte, hostName, port string) []byte {
+	lines := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(lines)+1)
+	inBlock := false
+	for _, line := range lines {
+		fields := strings.Fields(strings.ReplaceAll(line, "=", " "))
+		if len(fields) > 0 && (strings.EqualFold(fields[0], "Host") || strings.EqualFold(fields[0], "Match")) {
+			inBlock = len(fields) == 2 && strings.EqualFold(fields[0], "Host") && fields[1] == hostName
+			out = append(out, line)
+			if inBlock {
+				out = append(out, "    Port "+port)
+			}
+			continue
+		}
+		if inBlock && len(fields) > 0 && strings.EqualFold(fields[0], "Port") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return []byte(strings.Join(out, "\n"))
 }

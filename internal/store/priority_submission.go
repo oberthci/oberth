@@ -35,7 +35,7 @@ const requestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE 
 
 // Explicit priority, including an admin bump, survives later pushes. RC runs
 // retain the administrator's existing live classification.
-const supersessionEligibleSQL = `NOT EXISTS (SELECT 1 FROM run_priority_overrides WHERE run_id=runs.id) AND NOT EXISTS (SELECT 1 FROM run_priority_requests WHERE run_id=runs.id AND accepted IN ('low','promotion','high','highest')) AND (` + basePrioritySQL + `) IN ('standard','low')`
+const supersessionEligibleSQL = `NOT EXISTS (SELECT 1 FROM run_priority_overrides WHERE run_id=runs.id) AND NOT EXISTS (SELECT 1 FROM run_priority_requests WHERE run_id=runs.id AND accepted IN ('low','promotion','high')) AND (` + basePrioritySQL + `) IN ('standard','low')`
 
 func (s *Store) SetPriorityGrant(ctx context.Context, actor string, grant model.PriorityGrant) (model.PriorityGrant, error) {
 	if strings.TrimSpace(grant.Identity) == "" || len(grant.Identity) > 256 || strings.IndexFunc(grant.Identity, unicode.IsControl) >= 0 || (grant.MaxClass != model.PriorityPromotion && grant.MaxClass != model.PriorityHigh) || (!grant.Expires.After(s.now()) || grant.Expires.UnixNano() <= s.now().UnixNano()) {
@@ -95,7 +95,6 @@ func (s *Store) ListPriorityGrants(ctx context.Context) ([]model.PriorityGrant, 
 			return nil, err
 		}
 		g.Expires = fromUnixNano(expires)
-		g.MaxClass = g.MaxClass.Canonical()
 		grants = append(grants, g)
 	}
 	return grants, rows.Err()
@@ -140,7 +139,7 @@ func (s *Store) submissionPriorityTx(ctx context.Context, tx *sql.Tx, spec model
 		}
 	}
 	if refusal != "" {
-		accepted = model.PriorityNormal
+		accepted = model.PriorityStandard
 	}
 	return accepted, reason, refusal, nil
 }

@@ -80,7 +80,7 @@ func TestSizeGrantToolRevokesNeverGrantedTagPriorityAndRefreshesWaiter(t *testin
 		raw  string
 		want model.RunPriority
 	}{
-		{"size_revoke", `{"repo":"oberth"}`, model.PriorityNormal},
+		{"size_revoke", `{"repo":"oberth"}`, model.PriorityStandard},
 		{"size_grant", `{"repo":"oberth","max":"L"}`, model.PriorityPromotion},
 	} {
 		if _, err := control.CallTool(ctx, admin, tc.tool, json.RawMessage(tc.raw)); err != nil {

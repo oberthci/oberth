@@ -23,10 +23,10 @@ func TestSubmissionPriorityExpiryAndSupersessionExceptions(t *testing.T) {
 		}
 		return r
 	}
-	if _, err := s.SetPriorityGrant(t.Context(), "admin", model.PriorityGrant{Identity: "owner", MaxClass: model.PriorityHighest, Expires: now.Add(time.Minute)}); err != nil {
+	if _, err := s.SetPriorityGrant(t.Context(), "admin", model.PriorityGrant{Identity: "owner", MaxClass: model.PriorityHigh, Expires: now.Add(time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	priority := enqueue("owner", "urgent", model.PriorityHighest, false)
+	priority := enqueue("owner", "urgent", model.PriorityHigh, false)
 	// A new priority build on the same branch never cancels the first one.
 	second := enqueue("owner", "urgent", model.PriorityHigh, false)
 	// Even an explicit supersede from somebody else cannot cancel priority work.
@@ -46,8 +46,8 @@ func TestSubmissionPriorityExpiryAndSupersessionExceptions(t *testing.T) {
 		}
 	}
 	now = now.Add(time.Minute)
-	expired := enqueue("owner", "expired", model.PriorityHighest, false)
-	if expired.Priority != model.PriorityNormal || !strings.Contains(expired.PriorityRefusal, "expired") {
+	expired := enqueue("owner", "expired", model.PriorityHigh, false)
+	if expired.Priority != model.PriorityStandard || !strings.Contains(expired.PriorityRefusal, "expired") {
 		t.Fatalf("expired grant accepted: %+v", expired)
 	}
 }
@@ -95,7 +95,7 @@ func TestPrioritySubmissionKeepsRunningSameBranch(t *testing.T) {
 	}
 	admin := true
 	spec := testRunSpec(repo.ID, "urgent", strings.Repeat("b", 40))
-	spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHighest, UnscopedAdmin: &admin}
+	spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHigh, UnscopedAdmin: &admin}
 	urgent, err := s.EnqueueRun(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestPriorityRestartKeepsNewerNormalSiblingAndRequest(t *testing.T) {
 	admin := true
 	spec := testRunSpec(repo.ID, "urgent", strings.Repeat("a", 40))
 	spec.Actor = "requester"
-	spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHighest, PriorityReason: "urgent recovery", UnscopedAdmin: &admin}
+	spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHigh, PriorityReason: "urgent recovery", UnscopedAdmin: &admin}
 	original, err := s.EnqueueRun(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestPriorityRestartKeepsNewerNormalSiblingAndRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered, err := s.RequeueStrandedRun(t.Context(), original.ID)
-	if err != nil || recovered.ID != original.ID || recovered.QueueSequence != original.QueueSequence || !recovered.PriorityProtected || recovered.Priority != model.PriorityHighest || recovered.PriorityRequestedBy != "requester" || recovered.PriorityReason != "submission priority: urgent recovery" || recovered.AdmissionSequence != original.AdmissionSequence {
+	if err != nil || recovered.ID != original.ID || recovered.QueueSequence != original.QueueSequence || !recovered.PriorityProtected || recovered.Priority != model.PriorityHigh || recovered.PriorityRequestedBy != "requester" || recovered.PriorityReason != "submission priority: urgent recovery" || recovered.AdmissionSequence != original.AdmissionSequence {
 		t.Fatalf("priority recovery lost request/place: %+v %v", recovered, err)
 	}
 	newer, err := s.Run(t.Context(), sibling.ID)
@@ -156,11 +156,11 @@ func TestSyncPriorityRequestPreservesAcceptedPriorityAndAuditsRefusals(t *testin
 		t.Fatalf("sync priority ignored: %+v %v", accepted, err)
 	}
 	ordinary := false
-	refused, err := s.RequestRunPriority(t.Context(), "other", run.ID, model.PriorityRequest{Priority: model.PriorityHighest, UnscopedAdmin: &ordinary}, false)
+	refused, err := s.RequestRunPriority(t.Context(), "other", run.ID, model.PriorityRequest{Priority: model.PriorityHigh, UnscopedAdmin: &ordinary}, false)
 	if err != nil || refused.Priority != model.PriorityHigh || refused.PriorityRefusal == "" || refused.PriorityRequestedBy != "operator" {
 		t.Fatalf("refused sync request demoted priority: %+v %v", refused, err)
 	}
-	admitted, err := s.RequestRunPriority(t.Context(), "operator", run.ID, model.PriorityRequest{Priority: model.PriorityHighest, UnscopedAdmin: &admin}, true)
+	admitted, err := s.RequestRunPriority(t.Context(), "operator", run.ID, model.PriorityRequest{Priority: model.PriorityHigh, UnscopedAdmin: &admin}, true)
 	if err != nil || admitted.Priority != model.PriorityHigh || !strings.Contains(admitted.PriorityRefusal, "admitted") {
 		t.Fatalf("sync bypassed admission grant: %+v %v", admitted, err)
 	}
@@ -195,16 +195,16 @@ func TestPriorityPushUsesAuthenticatedKeyInsteadOfIdentityAlias(t *testing.T) {
 		name, identity, fingerprint string
 		want                        model.RunPriority
 	}{
-		{"unscoped key", admin.Identity, admin.Fingerprint, model.PriorityHighest},
-		{"scoped alias", scoped.Identity, scoped.Fingerprint, model.PriorityNormal},
-		{"ordinary alias", ordinary.Identity, ordinary.Fingerprint, model.PriorityNormal},
-		{"missing key", admin.Identity, "", model.PriorityNormal},
-		{"SSH pending admin", pending.Identity, pending.Fingerprint, model.PriorityHighest},
+		{"unscoped key", admin.Identity, admin.Fingerprint, model.PriorityHigh},
+		{"scoped alias", scoped.Identity, scoped.Fingerprint, model.PriorityStandard},
+		{"ordinary alias", ordinary.Identity, ordinary.Fingerprint, model.PriorityStandard},
+		{"missing key", admin.Identity, "", model.PriorityStandard},
+		{"SSH pending admin", pending.Identity, pending.Fingerprint, model.PriorityHigh},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := testRunSpec(repo.ID, strings.ReplaceAll(tc.name, " ", "-"), strings.Repeat("a", 40))
 			spec.Actor = tc.identity
-			spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHighest, RequesterFingerprint: tc.fingerprint}
+			spec.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHigh, RequesterFingerprint: tc.fingerprint}
 			run, err := s.EnqueueRun(t.Context(), spec)
 			if err != nil || run.Priority != tc.want {
 				t.Fatalf("key priority=%s, want %s: %v", run.Priority, tc.want, err)

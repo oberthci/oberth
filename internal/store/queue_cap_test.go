@@ -324,7 +324,7 @@ func TestQueueCapRechecksPriorityAuthorityAndRetainsSupersessionAfterRestart(t *
 		if id != "occupant" {
 			e.Actor = admin.Identity
 			r.Actor = admin.Identity
-			r.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHighest, PriorityReason: "urgent", RequesterFingerprint: admin.Fingerprint}
+			r.PriorityRequest = model.PriorityRequest{Priority: model.PriorityHigh, PriorityReason: "urgent", RequesterFingerprint: admin.Fingerprint}
 		}
 		if id == "supersede" {
 			e.Ref = "feature/priority"
@@ -345,14 +345,14 @@ func TestQueueCapRechecksPriorityAuthorityAndRetainsSupersessionAfterRestart(t *
 		t.Fatal(err)
 	}
 	first, err := s.DrainDeferredBranch(ctx)
-	if err != nil || first.Priority != model.PriorityHighest || first.PriorityReason != "submission priority: urgent" || first.PriorityAcceptedReason != "urgent" {
+	if err != nil || first.Priority != model.PriorityHigh || first.PriorityReason != "submission priority: urgent" || first.PriorityAcceptedReason != "urgent" {
 		t.Fatalf("lost admin key or priority after restart: %+v %v", first, err)
 	}
 	if _, err := s.SetUplinkScope(ctx, "operator", admin.Identity, admin.Fingerprint, []string{"codeberg"}); err != nil {
 		t.Fatal(err)
 	}
 	second, err := s.DrainDeferredBranch(ctx)
-	if err != nil || second.Priority != model.PriorityNormal || second.PriorityRefusal == "" {
+	if err != nil || second.Priority != model.PriorityStandard || second.PriorityRefusal == "" {
 		t.Fatalf("reused stale admin authority: %+v %v", second, err)
 	}
 	third, err := s.DrainDeferredBranch(ctx)

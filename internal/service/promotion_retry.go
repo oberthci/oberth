@@ -83,6 +83,15 @@ func (service *API) retryPromotion(ctx context.Context, actor api.Actor, failed 
 // admitPromotionRetry durably admits the retry of failed as actor, with its
 // promotion.retry lineage, without preparing the merge.
 func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, failed model.Promotion, mode string) (model.Repository, model.Run, model.Promotion, error) {
+	if service.agentEvents != nil {
+		_, err := service.agentEvents.store.PromotionTag(ctx, failed.ID)
+		if err == nil && !actor.Admin {
+			return model.Repository{}, model.Run{}, model.Promotion{}, refuse(ErrForbidden, "retrying tag_after requires an admin uplink")
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return model.Repository{}, model.Run{}, model.Promotion{}, err
+		}
+	}
 	repository, err := service.repositoryByID(ctx, failed.RepoID)
 	if err != nil {
 		return model.Repository{}, model.Run{}, model.Promotion{}, err

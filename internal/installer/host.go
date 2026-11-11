@@ -174,6 +174,7 @@ func CheckHostTools(goos string, lookPath func(string) (string, error)) error {
 // kubeconfig, and runs the cluster install flow.
 func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	deps = deps.withDefaults()
+	defer func() { clear(cfg.resumeRootToken) }()
 	if err := prepareInstallInputs(ctx, &cfg, deps); err != nil {
 		return err
 	}
@@ -404,6 +405,20 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 }
 
 func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) error {
+	if cfg.ResumeAgeIdentity != "" && cfg.ResumeSecretsFile == "" {
+		return errors.New("--resume-age-identity requires --resume-secrets-file")
+	}
+	if cfg.ResumeSecretsFile != "" {
+		if !cfg.InstallSecretStore {
+			return errors.New("--resume-secrets-file requires --install-secretstore")
+		}
+		token, err := readResumeRootToken(ctx, cfg.ResumeSecretsFile, cfg.ResumeAgeIdentity)
+		if err != nil {
+			return err
+		}
+		cfg.resumeRootToken = token
+	}
+
 	if cfg.AdminCSRPath != "" {
 		if cfg.AdminSSHPublicKeyPath == "" {
 			return errors.New("--admin-csr requires --admin-ssh-public-key")

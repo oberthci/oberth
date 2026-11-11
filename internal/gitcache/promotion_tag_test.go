@@ -75,3 +75,20 @@ func TestPublishAnnotatedTag(t *testing.T) {
 		t.Fatal("empty message accepted")
 	}
 }
+
+func TestUpstreamContainsPromotedResultAfterTargetMoves(t *testing.T) {
+	repository := newTestRepository(t)
+	cache := newTestCache(t, repository.upstream)
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	next := repository.featureCommit(t, "feature/later", "later\n")
+	runGit(t, repository.work, "push", repository.upstream, next+":refs/heads/main")
+	if ok, err := cache.UpstreamContainsCommit(t.Context(), "example", "main", repository.initialSHA); err != nil || !ok {
+		t.Fatalf("advanced target: %v %v", ok, err)
+	}
+	runGit(t, repository.work, "push", "--force", repository.upstream, repository.initialSHA+":refs/heads/main")
+	if ok, err := cache.UpstreamContainsCommit(t.Context(), "example", "main", next); err != nil || ok {
+		t.Fatalf("rewound target: %v %v", ok, err)
+	}
+}

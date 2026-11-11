@@ -2834,6 +2834,8 @@ and v2 backup-and-replace semantics are unchanged. See
 | `20261104022000-migration-ids` | Migration IDs | Add/backfill unique IDs in the existing ledger, preserving integer receipts and timestamps; future definitions load from separate SQL files | Database restore |
 | `20261104130000-queue-cap` | Optional queue cap | Persist queueCap.maxNotStarted (default 0/off) and FIFO deferred branch receives; preserve the frozen integer catalog | Database restore |
 | `20261111190000-client-certificates` | Client certificate bindings | Public SPKI pins and certificate-only uplink lifecycle records | Database restore |
+| `20261111201000-run-ref-prefix-index` | Ref prefix index | Bounded literal-prefix run lookup | Drop index |
+| `20261111200000-canonical-priorities` | Canonical priorities | Rewrite stored priority classes and constrain new values | Database restore |
 | `YYYYMMDDHHMMSS-<slug>-<random>` | Future migrations | Per-file `Purpose` and `Rollback` contract in `internal/store/migrations/`; no shared number allocation | Per-file contract (database restore by default) |
 
 Timestamp migration `20261104190000-priority-four-classes`: extend execution-priority vocabulary while preserving legacy receipts; rollback restores the pre-upgrade backup.

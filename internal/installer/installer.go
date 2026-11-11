@@ -316,7 +316,10 @@ type Config struct {
 	// SecretsFile receives the credentials the install creates once (OpenBao
 	// root token and unseal key, the first uplink's bearer token) instead of
 	// the output. It must be a new file outside any git worktree.
-	SecretsFile string
+	SecretsFile       string
+	ResumeSecretsFile string
+	ResumeAgeIdentity string
+	resumeRootToken   []byte
 	// AdminSSHPublicKeyPath explicitly provisions the first admin from a public
 	// key generated on the client machine. '-' reads the key from stdin.
 	AdminSSHPublicKeyPath string

@@ -481,7 +481,10 @@ func setupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			openbao.Namespace, openbao.Namespace, client.pod)
 	default:
 		_, _ = fmt.Fprintln(interactiveDeps.Output, "OpenBao is already initialized and unsealed; skipping operator init (credentials were printed once at first initialization).")
-		rootToken = installerBaoToken(interactiveDeps)
+		rootToken = string(cfg.resumeRootToken)
+		if rootToken == "" {
+			rootToken = installerBaoToken(interactiveDeps)
+		}
 		if rootToken == "" && isInteractive(interactiveDeps) && interactiveDeps.ReadPassword != nil {
 			_, _ = fmt.Fprint(interactiveDeps.Output, "Root token (echo disabled): ")
 			tokenBytes, err := interactiveDeps.ReadPassword()
@@ -496,8 +499,7 @@ func setupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Cannot enable trusted Plan Transit: a re-run has no root token available to positively verify the managed mount, key, policy, and role.")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "To verify or repair the configuration, supply the root token without exposing it in shell history:")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "")
-			_, _ = fmt.Fprintln(interactiveDeps.Output, "    read -rs BAO_TOKEN && export BAO_TOKEN")
-			_, _ = fmt.Fprintln(interactiveDeps.Output, "    oberth install --install-secretstore")
+			_, _ = fmt.Fprintln(interactiveDeps.Output, "    oberth install --install-secretstore --resume-secrets-file PATH --secrets-file NEW_PATH [same install flags]")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Keep every install flag unchanged, especially --namespace, --openbao-namespace, --chart-version and --openbao-chart-version.")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Or run scripts/setup-secretstore.sh from an already-authenticated bao CLI session.")
