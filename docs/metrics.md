@@ -11,8 +11,8 @@ other token gets 403.
 `oberth uplink add --scope metrics` mints a token that reads `GET /metrics`
 and nothing else: every other REST route and every MCP tool answer 403, and
 its SSH key never authenticates for git. The `metrics` scope is reserved: it
-cannot be combined with another scope or with `--admin`, and it never covers
-an upstream's repositories. Expiry, rotation (`oberth uplink rotate`) and
+cannot be combined with another scope or with `--admin`, it never covers an
+upstream's repositories, and no upstream can be named `metrics`. Expiry, rotation (`oberth uplink rotate`) and
 revocation follow the ordinary uplink rules (`uplinkTokens.defaultTTL`,
 `uplinkTokens.maxTTL`); `oberth uplink scope --set metrics` narrows an existing
 non-admin uplink to it.

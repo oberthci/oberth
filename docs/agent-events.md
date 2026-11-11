@@ -226,7 +226,10 @@ prune.
 
 `promote` with `tag_after: {name, message}` (single source or train) records
 the request with the promotion; a malformed name, an empty message or a tag
-that already exists is refused before admission. When the promotion is
+that already exists is refused before admission. It needs an admin uplink: a
+promotion grant or a repository's promotion policy covers the promotion, not
+a new upstream tag. The tag is pushed straight to the upstream; it is not a
+release and starts no tag run in Oberth. When the promotion is
 terminal Oberth:
 
 1. pushes nothing unless the promotion **passed**;
@@ -236,8 +239,9 @@ terminal Oberth:
    commit and pushes `refs/tags/<name>` without force, verifying the remote ref.
 
 A transient upstream failure retries on the publication schedule
-(`pushretry`: at most 5 attempts, backing off from 2 minutes); a tag that
-already exists at another commit is never moved. The outcome (`pushed` with
+(`pushretry`: at most 5 attempts, backing off from 2 minutes); a tag of that
+name that already exists is never moved or reused, and a tag the upstream
+refused does not stay on the mirror. The outcome (`pushed` with
 the tag object, or `failed` with the reason) is audited as
 `promotion.tag_after.pushed|failed`, shown in `promote_status` as `tag_after`,
 and carried by the `promotion.finished` event, which waits for it. Use it for

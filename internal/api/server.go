@@ -820,8 +820,8 @@ func (server *Server) handleStatus(writer http.ResponseWriter, request *http.Req
 
 func (server *Server) handleUplinks(writer http.ResponseWriter, request *http.Request) {
 	actor := actorFrom(request.Context())
-	if !actor.MetricsOnly() && (!actor.Admin || actor.Scoped()) {
-		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "a metrics-scoped token (oberth uplink add --scope metrics) or an unscoped admin required"})
+	if !actor.Admin || actor.Scoped() {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "unscoped admin required"})
 		return
 	}
 	value, err := server.tools.CallTool(request.Context(), actor, "uplink_list", json.RawMessage(`{}`))

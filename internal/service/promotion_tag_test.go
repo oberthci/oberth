@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/model"
@@ -144,5 +145,54 @@ func TestPromoteTagAfterRefusals(t *testing.T) {
 		if _, err := f.service.CallTool(t.Context(), pruneAdmin, "promote", raw); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("tag_after %v = %v", tag, err)
 		}
+	}
+}
+
+// tag_after creates an upstream ref no promotion grant covers: admins only.
+func TestPromoteTagAfterRequiresAdmin(t *testing.T) {
+	f, git := newTagPromotionFixture(t)
+	raw, _ := json.Marshal(map[string]any{"repo": f.repo.Name, "branch": "main", "sha": f.initial, "tag_after": map[string]any{"name": "deploy/1", "message": "m"}})
+	if _, err := f.service.CallTool(t.Context(), api.Actor{Identity: "dev@host"}, "promote", raw); !errors.Is(err, ErrForbidden) || !strings.Contains(err.Error(), "tag_after requires an admin uplink") {
+		t.Fatalf("non-admin tag_after = %v", err)
+	}
+	if len(git.pushes) != 0 {
+		t.Fatalf("pushes = %v", git.pushes)
+	}
+}
+
+// A metrics-scoped uplink is served no tool, whatever the caller (#1534).
+func TestMetricsScopedActorIsServedNoTool(t *testing.T) {
+	f, _ := newTagPromotionFixture(t)
+	for _, tool := range []string{"run_list", "status", "repo_list", "uplink_list", "events_since", "promote"} {
+		for _, admin := range []bool{false, true} {
+			if _, err := f.service.CallTool(t.Context(), api.Actor{Identity: "metrics@prometheus", Admin: admin, Scope: []string{"metrics"}}, tool, json.RawMessage(`{}`)); !errors.Is(err, ErrForbidden) {
+				t.Fatalf("%s admin=%v = %v", tool, admin, err)
+			}
+		}
+	}
+}
+
+// A promotion that failed while it was admitted is announced before promote
+// records the request; the pending sweep still settles it.
+func TestPromotionTagAfterRequestedAfterTheEventIsSettled(t *testing.T) {
+	f, git := newTagPromotionFixture(t)
+	promotion, err := f.store.AppendPromotion(t.Context(), model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/tag", SourceSHA: f.initial, TargetRef: "main", Actor: "dev@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promotion.Status, promotion.Error = model.PromotionFailed, "prepare promotion: conflict"
+	recorder := f.service.agentEvents
+	recorder.started = time.Now()
+	recorder.observePromotion(t.Context(), promotion)
+	if !recorder.recorded(model.AgentEventPromotionFinished + ":" + promotion.ID) {
+		t.Fatal("promotion.finished not recorded")
+	}
+	if err := f.store.RequestPromotionTag(t.Context(), promotion.ID, "dev@host", "deploy/1", "apply it"); err != nil {
+		t.Fatal(err)
+	}
+	recorder.observePromotionRequests(t.Context(), promotion, true)
+	tag, err := f.store.PromotionTag(t.Context(), promotion.ID)
+	if err != nil || tag.Status != model.PromotionTagFailed || !strings.Contains(tag.Reason, "promotion failed") || len(git.pushes) != 0 {
+		t.Fatalf("late request = %+v %v", tag, err)
 	}
 }

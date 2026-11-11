@@ -41,6 +41,10 @@ func TestMetricsScopeIsReservedAloneAndNeverAdmin(t *testing.T) {
 	if _, err := s.RegisterUplink(ctx, "operator", model.UplinkSpec{Identity: "x@y", Fingerprint: "SHA256:x", TokenCredentialID: credential.ID, Admin: true, Scope: []string{"metrics"}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("admin metrics uplink registered: %v", err)
 	}
+	// No upstream can take the name, so a scope is never both (#1534).
+	if _, err := s.RegisterUpstream(ctx, "operator", model.UpstreamSpec{Name: "metrics", Kind: "github", BaseURL: "ssh://git@example.invalid", KeyName: "k"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("upstream named metrics registered: %v", err)
+	}
 	if model.ScopeCovers([]string{"metrics"}, "metrics") {
 		t.Fatal("metrics scope covers an upstream")
 	}

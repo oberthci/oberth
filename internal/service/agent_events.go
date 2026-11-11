@@ -313,14 +313,14 @@ func (recorder *agentEventRecorder) sweep(ctx context.Context) {
 		if prunes, err := recorder.store.PendingPromotionPrunes(sweepCtx, 20); err == nil {
 			for _, request := range prunes {
 				if promotion, err := base.promotions.Promotion(sweepCtx, request.PromotionID); err == nil {
-					recorder.observePromotion(sweepCtx, promotion)
+					recorder.observePromotionRequests(sweepCtx, promotion, true)
 				}
 			}
 		}
 		if tags, err := recorder.store.PendingPromotionTags(sweepCtx, 20); err == nil {
 			for _, request := range tags {
 				if promotion, err := base.promotions.Promotion(sweepCtx, request.PromotionID); err == nil {
-					recorder.observePromotion(sweepCtx, promotion)
+					recorder.observePromotionRequests(sweepCtx, promotion, true)
 				}
 			}
 		}
@@ -616,11 +616,20 @@ func (recorder *agentEventRecorder) observePublicationRetry(ctx context.Context,
 }
 
 func (recorder *agentEventRecorder) observePromotion(ctx context.Context, promotion model.Promotion) {
+	recorder.observePromotionRequests(ctx, promotion, false)
+}
+
+// observePromotionRequests is observePromotion; with pendingRequest it also
+// settles a prune_source or tag_after request of a promotion whose
+// promotion.finished event is already recorded. A promotion that fails while
+// it is admitted is terminal, and announced, before promote records the
+// request; without this the request would stay pending until a restart.
+func (recorder *agentEventRecorder) observePromotionRequests(ctx context.Context, promotion model.Promotion, pendingRequest bool) {
 	if promotion.Status == model.PromotionPending {
 		return
 	}
 	key := model.AgentEventPromotionFinished + ":" + promotion.ID
-	if recorder.recorded(key) {
+	if recorder.recorded(key) && !pendingRequest {
 		return
 	}
 	// A prune_source request is settled before the lookback applies: a

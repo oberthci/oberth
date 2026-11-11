@@ -39,6 +39,25 @@ func TestPublishAnnotatedTag(t *testing.T) {
 	if _, err := cache.PublishAnnotatedTag(context.Background(), "example", "deploy/1", feature, "elsewhere"); !errors.Is(err, ErrTagExists) {
 		t.Fatalf("tag at another commit = %v", err)
 	}
+	// A tag the upstream already has elsewhere is refused and leaves no tag
+	// on the mirror.
+	runGit(t, repository.work, "tag", "-a", "-m", "foreign", "deploy/3", feature)
+	runGit(t, repository.work, "push", repository.upstream, "refs/tags/deploy/3")
+	if _, err := cache.PublishAnnotatedTag(context.Background(), "example", "deploy/3", repository.initialSHA, "taken upstream"); !errors.Is(err, ErrTagExists) {
+		t.Fatalf("tag taken upstream = %v", err)
+	}
+	if out := runGit(t, ready.Path, "for-each-ref", "refs/tags/deploy/3"); out != "" {
+		t.Fatalf("refused tag stayed on the mirror: %s", out)
+	}
+	// Another writer's annotated tag on the same commit is never pushed.
+	runGit(t, repository.work, "tag", "-a", "-m", "release", "deploy/4", repository.initialSHA)
+	runGit(t, repository.work, "push", ready.Path, "refs/tags/deploy/4")
+	if _, err := cache.PublishAnnotatedTag(context.Background(), "example", "deploy/4", repository.initialSHA, "not ours"); !errors.Is(err, ErrTagExists) {
+		t.Fatalf("foreign mirror tag = %v", err)
+	}
+	if got := runGit(t, "", "ls-remote", repository.upstream, "refs/tags/deploy/4"); got != "" {
+		t.Fatalf("foreign mirror tag was pushed upstream: %s", got)
+	}
 	for _, bad := range []string{"", "bad..name", "-x"} {
 		if _, err := cache.PublishAnnotatedTag(context.Background(), "example", bad, repository.initialSHA, "m"); err == nil {
 			t.Fatalf("tag %q accepted", bad)

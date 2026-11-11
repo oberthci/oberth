@@ -400,6 +400,11 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if strings.TrimSpace(actor.Identity) == "" {
 		return nil, errors.New("service: acting uplink identity is required")
 	}
+	if actor.MetricsOnly() {
+		// The HTTP layer already refuses it; no tool is ever served to a
+		// metrics-scoped uplink, whatever the caller (#1534).
+		return nil, refuse(ErrForbidden, "a metrics-scoped token may read only GET /metrics")
+	}
 	// An admin may repair an issue's scope even when its own uplink has a
 	// narrower read scope. An ordinary title/body edit keeps that scope.
 	adminScopeMove := false

@@ -607,7 +607,7 @@ func (service *API) promoteTool(ctx context.Context, actor api.Actor, raw json.R
 		}
 	}
 	if arguments.TagAfter != nil {
-		if err := service.checkTagAfter(ctx, arguments); err != nil {
+		if err := service.checkTagAfter(ctx, actor, arguments); err != nil {
 			return nil, err
 		}
 	}

@@ -30,8 +30,13 @@ type mirrorTagReader interface {
 }
 
 // checkTagAfter refuses tag_after before admission when it can never apply.
-func (service *API) checkTagAfter(ctx context.Context, arguments promotionArguments) error {
+// It creates a new upstream ref, which no promotion grant or repository
+// promotion policy covers: only an admin uplink may ask for it.
+func (service *API) checkTagAfter(ctx context.Context, actor api.Actor, arguments promotionArguments) error {
 	tag := arguments.TagAfter
+	if !actor.Admin {
+		return refuse(ErrForbidden, "tag_after requires an admin uplink: a promotion grant covers the promotion, not a new upstream tag")
+	}
 	if err := gitcache.ValidateTag(tag.Name); err != nil || strings.HasPrefix(tag.Name, "refs/") {
 		return refuse(ErrInvalidInput, "tag_after name %q is not a valid tag name (no refs/tags/ prefix)", tag.Name)
 	}

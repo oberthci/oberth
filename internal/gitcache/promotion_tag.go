@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/pushretry"
 )
+
+// promotionTagger is the tagger of every tag_after tag object.
+const promotionTagger = "Oberth <oberth@localhost>"
 
 // ErrTagExists reports that refs/tags/<name> already names another commit,
 // on the mirror or upstream. It is never transient.
@@ -16,8 +21,9 @@ var ErrTagExists = errors.New("tag already exists at another commit")
 // without force, for promote tag_after (#1524), and returns the tag object.
 // The tag object is created once on the mirror (tagger Oberth, the same
 // identity as promotion merges) and reused by every retry; a mirror tag
-// that already peels to commit is reused as it is. A tag at another commit
-// is ErrTagExists. The remote ref is verified after the push.
+// that this function created on commit is reused. Any other tag of that name,
+// on the mirror or upstream, is ErrTagExists, and a tag the upstream refused
+// is removed from the mirror. The remote ref is verified after the push.
 func (c *Cache) PublishAnnotatedTag(ctx context.Context, input, tag, commit, message string) (string, error) {
 	if err := ValidateTag(tag); err != nil {
 		return "", err
@@ -49,7 +55,7 @@ func (c *Cache) PublishAnnotatedTag(ctx context.Context, input, tag, commit, mes
 		return "", err
 	}
 	if object == "" {
-		content := fmt.Sprintf("object %s\ntype commit\ntag %s\ntagger Oberth <oberth@localhost> %d +0000\n\n%s\n", commit, tag, time.Now().Unix(), strings.TrimRight(message, "\n"))
+		content := fmt.Sprintf("object %s\ntype commit\ntag %s\ntagger %s %d +0000\n\n%s\n", commit, tag, promotionTagger, time.Now().Unix(), strings.TrimRight(message, "\n"))
 		created, err := c.execute(ctx, commandSpec{dir: path, args: []string{"mktag"}, stdin: strings.NewReader(content)}, true)
 		if err != nil {
 			return "", fmt.Errorf("create annotated tag %s: %w", tag, err)
@@ -64,7 +70,17 @@ func (c *Cache) PublishAnnotatedTag(ctx context.Context, input, tag, commit, mes
 		}
 	}
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"push", "upstream", object + ":" + ref}}); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "already exists") {
+		exists := strings.Contains(strings.ToLower(err.Error()), "already exists")
+		if exists || !pushretry.Transient(err) {
+			// A refused tag never stays on the mirror: it would be served to
+			// clients as a tag the upstream does not have, and would hold the
+			// name against a later push. A transient failure keeps the object
+			// for the retry.
+			if dropErr := c.deleteRef(ctx, path, ref, object); dropErr != nil {
+				err = errors.Join(err, fmt.Errorf("drop refused mirror tag %s: %w", tag, dropErr))
+			}
+		}
+		if exists {
 			return "", fmt.Errorf("%w: upstream %s: %w", ErrTagExists, ref, err)
 		}
 		return "", fmt.Errorf("push tag %s without force: %w", tag, err)
@@ -75,8 +91,8 @@ func (c *Cache) PublishAnnotatedTag(ctx context.Context, input, tag, commit, mes
 	return object, nil
 }
 
-// mirrorTag returns the mirror's annotated tag object at ref when it peels
-// to commit, "" when ref is absent, and ErrTagExists otherwise.
+// mirrorTag returns the mirror's annotated tag object at ref when tag_after
+// created it on commit, "" when ref is absent, and ErrTagExists otherwise.
 func (c *Cache) mirrorTag(ctx context.Context, path, ref, commit string) (string, error) {
 	object, err := c.capture(ctx, path, "rev-parse", "--verify", "--quiet", ref)
 	if err != nil || strings.TrimSpace(object) == "" {
@@ -93,6 +109,17 @@ func (c *Cache) mirrorTag(ctx context.Context, path, ref, commit string) (string
 	}
 	if strings.TrimSpace(kind) != "tag" || strings.TrimSpace(peeled) != commit {
 		return "", fmt.Errorf("%w: %s is %s %s", ErrTagExists, ref, strings.TrimSpace(kind), shortObject(strings.TrimSpace(peeled)))
+	}
+	// Only a tag object this function created is reused. Another writer's tag
+	// on the same commit (a release tag still waiting for its release run) is
+	// never pushed from here.
+	body, err := c.capture(ctx, path, "cat-file", "tag", object)
+	if err != nil {
+		return "", err
+	}
+	header, _, _ := strings.Cut(body, "\n\n")
+	if !strings.Contains(header+"\n", "\ntagger "+promotionTagger+" ") {
+		return "", fmt.Errorf("%w: %s was not created by tag_after", ErrTagExists, ref)
 	}
 	return object, nil
 }
