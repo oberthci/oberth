@@ -107,3 +107,38 @@ closed even for unrelated source changes. Follow the [static Git re-pin and
 re-qualification procedure](../internal/staticgit/README.md); preserve the
 required `test-static-git-runtime` gate and review both architecture byte pins
 before accepting a replacement substrate.
+
+## Upstream host keys and repository paths
+
+`oberth upstream add` pins the forge's SSH host keys once: every key a
+well-known forge publishes, only the key matching `--expected-host-fingerprint`,
+or the keys an operator confirms with `yes`. Registration, `upstream list
+--check` and the Git transport then offer the forge only the pinned key
+types, so a forge with RSA, ECDSA and Ed25519 keys authenticates with an
+Ed25519-only pin.
+
+When a forge rotates its keys, or an earlier pin is incomplete, verify the new
+fingerprints through a trusted channel and rerun the same command with
+`--repin`. It rescans, accepts keys under the same rules, replaces only this
+endpoint's lines in the `oberth-known-hosts` bundle through the audited
+identity write, and keeps an identical registration. An entry Oberth did not
+write (hashed, wildcard or multi-host) is refused rather than edited.
+
+Repositories resolve to `<base URL>/<repo>.git`. A plain `git-shell` forge
+keeps them relative to the git user's home, so its base URL needs `/~/`:
+`ssh://git@forge.example/~/acme`, not `ssh://git@forge.example/acme`.
+`upstream add --check-repo <repo>` reads that existing repository's ref
+advertisement (no objects) before registering, and `upstream list --check`
+reads one registered repository per SSH upstream; both name the path the
+forge refused and suggest the `/~/` form. The first clone's error carries
+the same hint.
+
+A forge repository may start empty. While its default branch does not exist
+(an unborn HEAD, which protocol v0 forges never advertise), the cache keeps
+its recorded default branch, `main` for a new repository, even after other
+branches are synced there; the first promotion or default-branch publication
+creates it upstream.
+
+Clients pin Oberth's own SSH endpoint from `oberth status` (the
+`ssh host key` fingerprint) or the `ssh_host_key` field of `system_status`,
+both served over the CA-verified HTTPS API.
