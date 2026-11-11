@@ -6,12 +6,12 @@ After=k3s.service network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 ExecStart=/usr/local/libexec/oberth-openbao-unseal
 Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-LoadCredential=unseal-key:/etc/oberth/openbao-unseal-key
-Restart=always
+LoadCredentialEncrypted=unseal-key:/etc/oberth/openbao-unseal-key.cred
+Restart=on-failure
 RestartSec=10
 NoNewPrivileges=yes
 PrivateTmp=yes

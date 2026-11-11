@@ -1104,8 +1104,9 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 			}
 		}
 	}
-	next("If this node keeps OpenBao unsealed with deploy/systemd/oberth-openbao-unseal, give it this install's unseal key:\n" +
-		"         sudo install -m 0400 -o root -g root <unseal-key-file> /etc/oberth/openbao-unseal-key\n" +
+	next("If this node keeps OpenBao unsealed with deploy/systemd/oberth-openbao-unseal, bind this install's recovery file to the host TPM2 as documented in deploy/systemd/README.md:\n" +
+		"         sudo oberth unseal --secrets-file <root-owned-recovery-file> --seal-to-host <new-credential-file> --yes\n" +
+		"         update LoadCredentialEncrypted to that new file, then run sudo systemctl daemon-reload\n" +
 		"         sudo systemctl restart oberth-openbao-unseal")
 }
 

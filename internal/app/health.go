@@ -113,6 +113,7 @@ type SecretStoreStatus struct {
 	Transport  string `json:"transport,omitempty"`
 	Probe      string `json:"probe,omitempty"`
 	Sealed     bool   `json:"sealed,omitempty"`
+	Remedy     string `json:"remedy,omitempty"`
 }
 
 // AuditChainStatus reports the local audit hash-chain head and the latest
@@ -334,6 +335,7 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		storeCopy.Probe = probe
 		if probe == "sealed" {
 			storeCopy.Sealed = true
+			storeCopy.Remedy = "sealed: run /oberth:unseal"
 		}
 		status.SecretStore = &storeCopy
 	}

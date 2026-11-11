@@ -117,6 +117,7 @@ size get
 size grant
 size revoke
 status
+unseal
 upgrade
 uplink
 uplink add

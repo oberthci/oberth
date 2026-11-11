@@ -114,7 +114,7 @@ func TestClaudePluginManifests(t *testing.T) {
 	if _, helper := server["headersHelper"]; helper {
 		t.Fatal(".mcp.json carries a headersHelper")
 	}
-	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 3 || entries[0].Name() != "fetch-oberth" || entries[1].Name() != "install" || entries[2].Name() != "trust" {
+	if entries, err := os.ReadDir(pluginPath(t, "scripts")); err != nil || len(entries) != 4 || entries[0].Name() != "fetch-oberth" || entries[1].Name() != "install" || entries[2].Name() != "trust" || entries[3].Name() != "unseal" {
 		t.Fatalf("scripts = %v %v", entries, err)
 	}
 

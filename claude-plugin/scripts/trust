@@ -302,6 +302,13 @@ trusted() {
 }
 
 hint() {
+	# No recovery file is opened by the hint. Query only the installed CLI status.
+	if [ -x "$HOME/.local/bin/oberth" ]; then
+		seal_status=$("$HOME/.local/bin/oberth" unseal --status --json 2>/dev/null) || seal_status=
+		if printf '%s' "$seal_status" | grep -q '"sealed":true'; then
+			echo "Oberth sealed: run /oberth:unseal. Use the recovery file path; never paste its key into chat."
+		fi
+	fi
 	claude=$(claude_directory) || exit 0
 	store="$claude/oberth"
 	url=$(shown "${CLAUDE_PLUGIN_OPTION_URL:-}")

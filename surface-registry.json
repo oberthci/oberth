@@ -407,6 +407,26 @@
     "flag:reissue-server-ca": {
       "doc_anchor": "docs/single-host-tls.md",
       "test_ref": "internal/installer/single_host_tls_test.go TestExistingCARequiresExplicitReissue"
+    },
+    "flag:age-identity": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
+    },
+    "flag:seal-to-host": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
+    },
+    "flag:status": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
+    },
+    "flag:kubeconfig": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
+    },
+    "flag:openbao-namespace": {
+      "doc_anchor": "docs/unseal.md",
+      "test_ref": "internal/installer/unseal_test.go TestUnsealKeepsRecoveryOutOfOutputAndArgv"
     }
   }
 }
