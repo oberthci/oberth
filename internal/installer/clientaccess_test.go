@@ -212,19 +212,19 @@ func TestClientAccessDefaultsToBothWithoutATerminal(t *testing.T) {
 // and a command that moves it into the secret store unseen.
 func TestClientAccessNotesReadTheTokenFromTheSecretsFile(t *testing.T) {
 	var out bytes.Buffer
-	printClientAccessNotes(&out, "/srv/u/.config/oberth", clientAccessBoth, "secret-tool store --label=x service oberth", true, "/srv/u/oberth secrets.txt")
+	printClientAccessNotes(&out, "/srv/u/.config/oberth", clientAccessBoth, "secret-tool store --label=x service oberth", true, "/srv/u/oberth secrets.txt", false)
 	want := "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' '/srv/u/oberth secrets.txt' | secret-tool store --label=x service oberth"
 	if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "token above") {
 		t.Fatalf("notes:\n%s", out.String())
 	}
 	// macOS: security -i reads the command from stdin, so the token is in no
 	// argument list (security's -w takes a value only as an argument).
-	if got, want := storeFromSecretsFile("security add-generic-password -s oberth-token -a \"$USER\" -w", "/s"),
+	if got, want := storeFromSecretsFile("security add-generic-password -s oberth-token -a \"$USER\" -w", "/s", false),
 		`sed -n "s|^OBERTH_UPLINK_TOKEN=\(.*\)|add-generic-password -U -s oberth-token -a $USER -w \1|p" /s | security -i`; got != want {
 		t.Fatalf("macOS store command:\n got %s\nwant %s", got, want)
 	}
 	// pass insert asks twice on a pipe; -e reads the one line.
-	if got := storeFromSecretsFile("pass insert oberth/token", "/s"); got != "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s | pass insert -e -f oberth/token" {
+	if got := storeFromSecretsFile("pass insert oberth/token", "/s", false); got != "sed -n 's/^OBERTH_UPLINK_TOKEN=//p' /s | pass insert -e -f oberth/token" {
 		t.Fatalf("pass store command: %s", got)
 	}
 }
