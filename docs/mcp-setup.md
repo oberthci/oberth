@@ -980,7 +980,8 @@ Every tool advertises an object `outputSchema` in `tools/list`. When present,
 `run_list` uses `runs` and `repo_list` uses `repositories`. Successful
 `issue_delete` returns `{"id":123,"deleted":true}`. Clients consuming the old
 bare promotion-grant array or null deletion result must decode these objects.
-The read-only HTTP `/api/grants` endpoint retains its existing array response.
+The read-only HTTP `/api/grants` endpoint returns the same `{"grants": [...]}`
+object.
 
 Ordinary JSON tool results carry the same object in their text content. Log
 and diagnostic tools retain their readable text view. `oberth mcp call` prints

@@ -93,6 +93,7 @@ func checkRemovedUpgradeValues(cfg UpgradeConfig, stored map[string]any) error {
 			}
 		}
 	}
+	var unstored []string
 	for _, assignment := range cfg.UserSet {
 		key, _, _ := strings.Cut(assignment, "=")
 		removed, ok := removedChartValue(key)
@@ -100,15 +101,26 @@ func checkRemovedUpgradeValues(cfg UpgradeConfig, stored map[string]any) error {
 			continue
 		}
 		if clearsRemovedValue(assignment) {
+			// Helm drops a null only where the stored values hold the key;
+			// elsewhere the null stays and the chart schema refuses it.
+			if value, ok := chartValueAt(stored, removed); !ok || value == nil {
+				unstored = append(unstored, "--set "+assignment)
+			}
 			delete(sources, removed)
 		} else {
 			sources[removed] = "--set " + key
 		}
 	}
-	if len(sources) == 0 {
-		return nil
+	if len(sources) > 0 {
+		return removedValuesError(sources)
 	}
-	return removedValuesError(sources)
+	if len(unstored) > 0 {
+		slices.Sort(unstored)
+		return &ErrSchemaValidation{Detail: fmt.Sprintf("%s clears a removed chart value the stored release values do not set; no upgrade applied. "+
+			"Drop the flag and delete the key from any --values file (Helm keeps a null it has nothing to remove, and the chart schema refuses it)",
+			strings.Join(unstored, ", "))}
+	}
+	return nil
 }
 
 // refuseRemovedReleaseValues refuses an install re-run or a restore, which

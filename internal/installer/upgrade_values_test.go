@@ -196,6 +196,14 @@ func TestUpgradeRefusesRemovedChartValues(t *testing.T) {
 	if err := checkRemovedUpgradeValues(cfg, stored); err != nil {
 		t.Fatalf("cleared values still refused: %v", err)
 	}
+	// A clear of a value that is not stored is refused: Helm would keep the
+	// null and the chart schema would refuse it after the preflight.
+	for _, set := range []string{"gitBackend=null", "vm=null", "admission.maxHeadWait=null"} {
+		err := checkRemovedUpgradeValues(UpgradeConfig{UserSet: append([]string{set}, cfg.UserSet...)}, stored)
+		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "--set "+set+" clears a removed chart value the stored release values do not set; no upgrade applied") {
+			t.Fatalf("%s for an unstored value accepted: %v", set, err)
+		}
+	}
 	// Only the exact removed key set to null clears it.
 	for _, set := range []string{"trustedTests.runtime=null", "trustedTests=", "trustedTests=false"} {
 		if err := checkRemovedUpgradeValues(UpgradeConfig{UserSet: []string{set, "admission.sizeWeights=null"}}, stored); !errors.As(err, &schemaErr) {

@@ -72,6 +72,12 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 			c, r := wifControllerInput(t, shape)
 			var input wfv1.Workflow
 			decode(t, shape+"-workflow.json", &input)
+			// The captured bytes carry their own identity; only then may the
+			// removed annotation be renamed and the identity follow it.
+			capturedIdentity, err := specIdentity(&input)
+			if err != nil || input.Annotations[identityAnnotation] != capturedIdentity {
+				t.Fatal("captured workflow lost its spec identity")
+			}
 			// These authenticated historical Pods predate v2 and v3. Recovery of
 			// their policy must reproduce the captured Workflow exactly.
 			if input.Annotations[helperStorageAnnotation] != legacyHelperStoragePolicy {
