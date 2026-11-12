@@ -13,6 +13,10 @@ import (
 // that candidate before retrying: a lost acknowledgement cannot orphan a claim,
 // enqueue a second successor, or append a second publication intent.
 func (database schedulerDatabase) ClaimNextRun(ctx context.Context) (model.Run, error) {
+	return database.claimRun(ctx, database.SchedulerStore.ClaimNextRun)
+}
+
+func (database schedulerDatabase) claimRun(ctx context.Context, claim func(context.Context) (model.Run, error)) (model.Run, error) {
 	var candidate model.Run
 	return retryDatabase(ctx, "ClaimNextRun", func(ctx context.Context) (model.Run, error) {
 		if candidate.ID != "" {
@@ -26,7 +30,7 @@ func (database schedulerDatabase) ClaimNextRun(ctx context.Context) (model.Run, 
 			candidate = model.Run{}
 		}
 		var err error
-		candidate, err = database.SchedulerStore.ClaimNextRun(ctx)
+		candidate, err = claim(ctx)
 		return candidate, err
 	})
 }

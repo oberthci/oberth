@@ -69,15 +69,13 @@ func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service
 }
 
 // Restore the server-owned submission binding, never a fresh source analysis.
-func (jobs *ArgoJobs) AdoptedPodDemand(run model.Run) (*argoworkflow.PodDemand, error) {
+func (jobs *ArgoJobs) AdoptedPodDemand(ctx context.Context, run model.Run) (*argoworkflow.PodDemand, error) {
 	if jobs.routes != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
 		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
 		if err != nil {
 			return nil, err
 		}
-		return child.AdoptedPodDemand(run)
+		return child.AdoptedPodDemand(ctx, run)
 	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()

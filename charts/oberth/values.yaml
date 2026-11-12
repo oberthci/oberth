@@ -175,7 +175,7 @@ admission:
   stepCPURequestPercent: 25
   pressure:
     enabled: true
-    hardCpu: 25
+    hardCpu: 50
     deferSeconds: 300
     hardIo: 40
   # Hold new workflow admission below this free-space floor on the data

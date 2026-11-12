@@ -291,7 +291,7 @@ spec:
             {{- $pressure := $admission.pressure | default dict }}
             {{- $pressureEnabled := true }}
             {{- if hasKey $pressure "enabled" }}{{- $pressureEnabled = $pressure.enabled }}{{- end }}
-            {{- $hostPressure := merge (deepCopy $pressure) (dict "hardCpu" 25 "hardIo" 40 "deferSeconds" 300) }}
+            {{- $hostPressure := merge (deepCopy $pressure) (dict "hardCpu" 50 "hardIo" 40 "deferSeconds" 300) }}
             {{- $cpuEnabled := true }}
             {{- if hasKey $admission "cpuEnabled" }}{{- $cpuEnabled = $admission.cpuEnabled }}{{- end }}
             - {{ printf "--admission-cpu-enabled=%v" $cpuEnabled | quote }}

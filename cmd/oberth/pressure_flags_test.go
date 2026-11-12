@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func TestServePressureHardValveDefaultsAndValidation(t *testing.T) {
+func TestServePressureHardValveDefault50AndValidation(t *testing.T) {
 	defaults, err := parseServeOptions([]string{"--argo-namespace=argo"}, io.Discard)
-	if err != nil || !defaults.admissionPressure.Enabled || !defaults.admissionPressure.HardOnly || defaults.admissionPressure.HardCPU != 25 || defaults.admissionPressure.HardIO != 40 {
+	if err != nil || !defaults.admissionPressure.Enabled || !defaults.admissionPressure.HardOnly || defaults.admissionPressure.HardCPU != 50 || defaults.admissionPressure.HardIO != 40 {
 		t.Fatal("bad hard-pressure defaults", defaults.admissionPressure, err)
 	}
 	for _, value := range []string{"--admission-pressure-hard-cpu=NaN", "--admission-pressure-hard-io=Inf", "--admission-pressure-hard-io=101", "--admission-pressure-hard-cpu=10"} {

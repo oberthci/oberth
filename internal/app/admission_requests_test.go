@@ -158,6 +158,17 @@ spec:
 	if policy.Parallelism != 9 {
 		t.Fatal("fanout not bounded before admission", policy)
 	}
+	fitting := config
+	fitting.CPUAdmission.Milli = 12000
+	if p := jobs.cpuPolicy(t.Context(), model.Run{}, fitting, wf); p.Parallelism != 0 {
+		t.Fatal("fitting fanout was forced to serialize", p)
+	}
+	authored := wf.DeepCopy()
+	ten := int64(10)
+	authored.Spec.Parallelism = &ten
+	if p := jobs.cpuPolicy(t.Context(), model.Run{}, config, authored); p.Parallelism != 0 {
+		t.Fatal("authored parallelism was overridden", p)
+	}
 	demand, err := argojob.SchedulingDemand(wf, policy)
 	if err != nil || demand.CPUMilli != 9450 {
 		t.Fatalf("effective demand: %+v %v", demand, err)

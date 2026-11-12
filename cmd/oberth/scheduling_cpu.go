@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,7 +17,7 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-func schedulingCPU(ctx context.Context, kube kubernetes.Interface, nodeName string, headroom, stepPercent int64, tolerations ...corev1.Toleration) (argoworkflow.CPUAdmission, error) {
+func schedulingCPU(ctx context.Context, kube kubernetes.Interface, nodeName string, excluded []string, headroom, stepPercent int64, tolerations ...corev1.Toleration) (argoworkflow.CPUAdmission, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var nodes []corev1.Node
@@ -32,6 +36,9 @@ func schedulingCPU(ctx context.Context, kube kubernetes.Interface, nodeName stri
 	}
 	var total, largest int64
 	for _, node := range nodes {
+		if slices.Contains(excluded, node.Name) {
+			continue
+		}
 		ready := false
 		for _, c := range node.Status.Conditions {
 			if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
@@ -54,7 +61,7 @@ func schedulingCPU(ctx context.Context, kube kubernetes.Interface, nodeName stri
 	return p, nil
 }
 
-func schedulingKubernetesClient(ctx context.Context, config *rest.Config, options *serveOptions) (kubernetes.Interface, error) {
+func schedulingKubernetesClient(ctx context.Context, config *rest.Config, options *serveOptions, excluded []string) (kubernetes.Interface, error) {
 	kube, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -62,7 +69,7 @@ func schedulingKubernetesClient(ctx context.Context, config *rest.Config, option
 	if !options.admissionCPUEnabled {
 		return kube, nil
 	}
-	monitor := newCPUCapacity(ctx, kube, config.Host, "", options.admissionCPUHeadroomPercent, options.stepCPURequestPercent)
+	monitor := newCPUCapacity(ctx, kube, config.Host, "", excluded, options.admissionCPUHeadroomPercent, options.stepCPURequestPercent)
 	options.cpuCapacity = monitor.snapshot
 	p := monitor.snapshot(ctx)
 	options.admissionCPUPool, options.admissionCPUMilli, options.stepCPURequestMaxMilli = p.Pool, p.Milli, p.StepMaxMilli
@@ -98,10 +105,54 @@ func buildSchedulingArgoTargets(ctx context.Context, policy *argoTargetPolicy, o
 		if !options.admissionCPUEnabled {
 			continue
 		}
-		monitor := newCPUCapacity(ctx, target.Kubernetes, target.Transport.Host, target.Config.ExecutionPlacement.CPUNodeName(), options.admissionCPUHeadroomPercent, options.stepCPURequestPercent, target.Config.ExecutionPlacement.CPUTolerations()...)
+		monitor := newCPUCapacity(ctx, target.Kubernetes, target.Transport.Host, target.Config.ExecutionPlacement.CPUNodeName(), nil, options.admissionCPUHeadroomPercent, options.stepCPURequestPercent, target.Config.ExecutionPlacement.CPUTolerations()...)
 		target.Config.CPUCapacity = monitor.snapshot
 		target.Config.CPUAdmission = monitor.snapshot(ctx)
 		target.Config.StepCPURequestMaxMilli = target.Config.CPUAdmission.StepMaxMilli
 	}
 	return targets, nil
+}
+
+// The endpoint alone is not a capacity domain: pinned and eligible-node pools
+// on one API must not overwrite each other or count a node twice.
+func schedulingPool(endpoint, node string, excluded []string) string {
+	endpoint = strings.TrimRight(endpoint, "/")
+	if node != "" {
+		return endpoint + "#node=" + url.QueryEscape(node)
+	}
+	nodes := slices.Clone(excluded)
+	slices.Sort(nodes)
+	return endpoint + "#eligible;exclude=" + url.QueryEscape(strings.Join(slices.Compact(nodes), ","))
+}
+
+func schedulingClients(ctx context.Context, config *rest.Config, options *serveOptions) (kubernetes.Interface, []app.ExecutionTarget, error) {
+	policy, err := readArgoTargetPolicy(options.argoExecutionTargetConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	targets, err := buildSchedulingArgoTargets(ctx, policy, *options)
+	if err != nil {
+		return nil, nil, err
+	}
+	excluded, err := pinnedSchedulingNodes(config.Host, targets)
+	if err != nil {
+		return nil, nil, err
+	}
+	kube, err := schedulingKubernetesClient(ctx, config, options, excluded)
+	return kube, targets, err
+}
+
+func pinnedSchedulingNodes(endpoint string, targets []app.ExecutionTarget) ([]string, error) {
+	var excluded []string
+	for _, target := range targets {
+		if strings.TrimRight(target.Transport.Host, "/") != strings.TrimRight(endpoint, "/") {
+			continue
+		}
+		node := target.Config.ExecutionPlacement.CPUNodeName()
+		if node == "" {
+			return nil, fmt.Errorf("CPU admission: execution target %s on the local endpoint must pin a node to avoid overlapping capacity", target.ID)
+		}
+		excluded = append(excluded, node)
+	}
+	return excluded, nil
 }

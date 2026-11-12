@@ -84,3 +84,26 @@ func TestCapabilityReceiptSizesMixedResourceAndContainerSteps(t *testing.T) {
 		t.Fatalf("mixed operator workflow lost bounded demand: %+v %v", demand, err)
 	}
 }
+
+func TestCapabilityPeakIncludesExitAndConcurrentHookResources(t *testing.T) {
+	device := corev1.ResourceName("devices.example.test/worker")
+	main, handler := declaredLeaf("work", "1", "128Mi"), declaredLeaf("handler", "1", "128Mi")
+	main.Container.Resources.Requests[device] = resource.MustParse("1")
+	main.Container.Resources.Limits[device] = resource.MustParse("1")
+	handler.Container.Resources.Requests[device] = resource.MustParse("2")
+	handler.Container.Resources.Limits[device] = resource.MustParse("2")
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "work", OnExit: "handler", Templates: []wfv1.Template{main, handler}}}
+	grant := &Capability{ExtendedResources: map[string]int64{string(device): 2}}
+	if err := validateExtendedPeak(wf, grant); err != nil {
+		t.Fatal("sequential exit double-counted resources", err)
+	}
+	wf.Spec.OnExit = ""
+	wf.Spec.Hooks = wfv1.LifecycleHooks{"running": {Template: "handler", Expression: "workflow.status == 'Running'"}}
+	if err := validateExtendedPeak(wf, grant); err == nil {
+		t.Fatal("concurrent hook escaped extended-resource grant")
+	}
+	grant.ExtendedResources[string(device)] = 3
+	if err := validateExtendedPeak(wf, grant); err != nil {
+		t.Fatal("sufficient concurrent-hook grant rejected", err)
+	}
+}

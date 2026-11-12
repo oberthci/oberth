@@ -1,7 +1,12 @@
 package argojob
 
 import (
+	"errors"
 	"testing"
+
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -36,5 +41,27 @@ func TestLivePodRequestsRetainsPendingTerminatingAndSiblingPods(t *testing.T) {
 	}
 	if _, err = controller.LivePodRequests(t.Context(), wf.Name, "different-run"); err == nil {
 		t.Fatal("unowned workflow supplied CPU credit")
+	}
+}
+
+func TestLivePodRequestsSynchronizationWaitHasZeroResidentRequests(t *testing.T) {
+	config := testConfig()
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
+	wf, err := Build(config, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf.UID = "owned-workflow"
+	wf.Status.Phase = wfv1.WorkflowRunning
+	wf.Status.Synchronization = &wfv1.SynchronizationStatus{Mutex: &wfv1.MutexStatus{Waiting: []wfv1.MutexHolding{{Mutex: config.Namespace + "/Mutex/release", Holder: "other"}}}}
+	client := fake.NewClientset()
+	controller := &Controller{kube: client, workflows: &staticWorkflowClient{workflow: wf}, config: config}
+	live, err := controller.LivePodRequests(t.Context(), wf.Name, request.RunID)
+	if err != nil || live == nil || live.CPUMilli != 0 || live.Pods != 0 {
+		t.Fatalf("synchronization wait=%+v %v", live, err)
+	}
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("read denied") })
+	if _, err := controller.LivePodRequests(t.Context(), wf.Name, request.RunID); err == nil {
+		t.Fatal("failed Pod read became zero credit")
 	}
 }

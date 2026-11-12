@@ -448,7 +448,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if namespace, err := restarted.WorkflowNamespaceForRun(ctx, run); err != nil || namespace != f.definition.Config.Namespace {
 		t.Fatal(namespace, err)
 	}
-	if _, err := restarted.AdoptedPodDemand(run); err != nil {
+	if _, err := restarted.AdoptedPodDemand(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := restarted.AdoptedResourceFallback(run); err != nil {

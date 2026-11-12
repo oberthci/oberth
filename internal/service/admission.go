@@ -16,10 +16,10 @@ import (
 // must fit before any Pod is submitted. Native Argo locks still govern shared
 // step resources, and the disk floor, PSI valve and administrator hold apply.
 type admissionGate struct {
-	adminHold       model.AdmissionHold
-	holdUpdating    bool
-	lastHoldRefresh time.Time
-	mu              sync.Mutex
+	adminHold      model.AdmissionHold
+	holdUpdating   bool
+	lastCPURefresh int64
+	mu             sync.Mutex
 	// now is the gate's clock; nil is time.Now.
 	now             func() time.Time
 	priorityChanges map[string]bool
@@ -49,8 +49,10 @@ type admissionGate struct {
 }
 
 type admissionReservation struct {
-	trackLive    bool
-	cpuUncertain bool
+	sizingPending  bool
+	liveReadFailed bool
+	trackLive      bool
+	cpuUncertain   bool
 	// requests is the effective peak Pod request reservation.
 	requests        *argoworkflow.PodRequests
 	cpu             argoworkflow.CPUAdmission
@@ -324,8 +326,8 @@ func (reservation *admissionReservation) retain() {
 }
 
 // grantLocked chooses by priority and repository fair share, then reserves
-// whole-run CPU. Alternating drain and backfill windows bound queue obstruction
-// while allowing large reservations to accumulate capacity.
+// whole-run CPU. A bounded backfill window lets attainable large reservations
+// accumulate capacity while held and retained work keeps backfill open.
 func (gate *admissionGate) grantLocked() {
 	if gate.holdUpdating {
 		return
@@ -363,10 +365,12 @@ func (gate *admissionGate) grantLocked() {
 			index++
 			continue
 		}
-		// Stop at the first otherwise eligible candidate. A pressure timeout
-		// never bypasses priority or the disk floor.
+		// Pressure holds preserve priority within the execution pool. Other
+		// pools keep their own pressure timeout and may still grant.
 		if gate.deferPressureLocked(reservation, now) {
-			return
+			blockedPools[gate.pool(reservation).Pool] = true
+			index++
+			continue
 		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
@@ -397,26 +401,48 @@ func (gate *admissionGate) grantLocked() {
 	}
 }
 
-// spareSlotForClaim bounds preparation to one checkout at a time and, with
-// CPU packing, up to 8 prepared waiters. This lookahead makes room for newly
-// queued priority work while a standard candidate waits for CPU.
+// spareSlotForClaim reports whether any known pool has room for preparation.
 func (gate *admissionGate) spareSlotForClaim() bool {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
-	if gate.cpuEnabledLocked() {
-		if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
-			return len(gate.waiters)-gate.parkedLocked() == 0
-		}
-		// Bound checkout work while still looking past capacity-held work for
-		// newly queued promotions. Only one checkout prepares at a time.
-		for _, r := range gate.waiters {
-			if !r.prepared && !gate.adminHeldLocked(r) {
-				return false
-			}
-		}
-		return len(gate.waiters)-gate.parkedLocked() < 8
+	pools := map[string]bool{gate.defaultPool().Pool: true}
+	for pool := range gate.pools {
+		pools[pool] = true
 	}
-	return len(gate.waiters)-gate.parkedLocked() == 0
+	for _, r := range gate.waiters {
+		pools[gate.pool(r).Pool] = true
+	}
+	for pool := range pools {
+		if gate.claimSlotLocked(pool, nil) {
+			return true
+		}
+	}
+	return false
+}
+
+// Each pool permits one checkout and eight prepared waiters. Full lookahead
+// still admits strictly higher priority work, once per higher class.
+func (gate *admissionGate) claimSlotLocked(pool string, candidate *model.Run) bool {
+	count := 0
+	higher := candidate != nil
+	for _, r := range gate.waiters {
+		if gate.pool(r).Pool != pool || gate.adminHeldLocked(r) {
+			continue
+		}
+		if !r.prepared {
+			return false
+		}
+		count++
+		if candidate != nil {
+			priority, _ := candidate.EffectivePriority(gate.clock())
+			higher = higher && priority.Rank() > r.effectivePriority(gate.clock()).Rank()
+		}
+	}
+	limit := 1
+	if gate.cpuEnabledLocked() && (gate.diskFloor == nil || gate.diskFloor.freeAboveFloor()) {
+		limit = 8
+	}
+	return count < limit || (limit == 8 && higher)
 }
 
 // canGrantLocked checks non-pressure admission constraints.

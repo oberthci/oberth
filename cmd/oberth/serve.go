@@ -646,7 +646,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 	}
 	restConfig = serverKubernetesConfig(restConfig, options)
-	kube, err := schedulingKubernetesClient(ctx, restConfig, &options)
+	kube, targets, err := schedulingClients(ctx, restConfig, &options)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
@@ -875,14 +875,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, fragmentLoader,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
 		options.artifactsLimitBytes, perRepoIdentities, identityStore)
-	if err != nil {
-		return err
-	}
-	targetPolicy, err := readArgoTargetPolicy(options.argoExecutionTargetConfig)
-	if err != nil {
-		return err
-	}
-	targets, err := buildSchedulingArgoTargets(ctx, targetPolicy, options)
 	if err != nil {
 		return err
 	}

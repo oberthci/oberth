@@ -36,5 +36,22 @@ func (gate *admissionGate) blockedCPUHeadLocked(r *admissionReservation, now tim
 }
 func (gate *admissionGate) drainingBehindLocked(r *admissionReservation, now time.Time) bool {
 	drain, found := gate.drains[gate.pool(r).Pool]
-	return found && r != drain.head && now.Sub(drain.since) >= cpuBackfillWindow && !admissionBeforeAt(r, drain.head, now)
+	return found && r != drain.head && now.Sub(drain.since) >= cpuBackfillWindow && !admissionBeforeAt(r, drain.head, now) && gate.headCanDrainLocked(drain.head)
+}
+
+// A drain can recover finite work's credits, but cannot make an assisted hold,
+// uncertain cleanup or an unreadable adopted workload finish. Keep backfilling
+// until those credits change enough for this head to become attainable.
+func (gate *admissionGate) headCanDrainLocked(head *admissionReservation) bool {
+	pool := gate.pool(head)
+	available := pool.Milli
+	for _, r := range gate.reservations {
+		if !r.granted || r.released || (!r.cpuUncertain && !gate.samePool(r, head)) {
+			continue
+		}
+		if r.retained || !r.heldSince.IsZero() || ((r.unknownAdopted || r.trackLive) && (r.liveRequests == nil || r.liveReadFailed)) {
+			available -= gate.credit(r, pool)
+		}
+	}
+	return available >= gate.credit(head, pool)
 }

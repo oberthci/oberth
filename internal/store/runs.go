@@ -383,6 +383,10 @@ ON CONFLICT(run_id) DO UPDATE SET
 }
 
 func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {
+	return s.claimNextRun(ctx, "")
+}
+
+func (s *Store) claimNextRun(ctx context.Context, id string) (model.Run, error) {
 	// An explicit transaction ensures the candidate is known before commit.
 	// On a lost commit acknowledgement the scheduler can resolve that exact
 	// run instead of claiming a second run and abandoning the first.
@@ -396,10 +400,10 @@ func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {
 UPDATE runs
 SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
-    SELECT queue_sequence FROM runs WHERE `+claimableRunSQL+` AND `+automaticRetryReadySQL(fromUnixNano(now))+` AND `+admissionHoldAllowedSQL+`
+    SELECT queue_sequence FROM runs WHERE (?='' OR id=?) AND `+claimableRunSQL+` AND `+automaticRetryReadySQL(fromUnixNano(now))+` AND `+admissionHoldAllowedSQL+`
     ORDER BY `+fairPriorityOrderSQL(fromUnixNano(now))+` LIMIT 1
 )
-RETURNING `+runColumns, now, now))
+RETURNING `+runColumns, now, id, id, now))
 	if err != nil {
 		return model.Run{}, translateNotFound("queued run", err)
 	}

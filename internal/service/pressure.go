@@ -46,7 +46,7 @@ type AdmissionPressureConfig struct {
 }
 
 func DefaultAdmissionPressureConfig() AdmissionPressureConfig {
-	return AdmissionPressureConfig{Enabled: true, Mode: PressureEnforce, CPUSomeAvg10: 20, IOSomeAvg10: 20, HardCPU: 25, HardIO: 40, MaxWaitSeconds: 300, Hysteresis: 10}
+	return AdmissionPressureConfig{Enabled: true, Mode: PressureEnforce, CPUSomeAvg10: 20, IOSomeAvg10: 20, HardCPU: 50, HardIO: 40, MaxWaitSeconds: 300, Hysteresis: 10}
 }
 
 func (c AdmissionPressureConfig) Validate() error {
@@ -101,7 +101,7 @@ type pressureCheck struct {
 	state               model.AdmissionPressure
 	sampledAt           time.Time
 	lastGrant           time.Time
-	lastHardGrant       time.Time
+	lastHardGrants      map[string]time.Time
 	starvationGranted   bool
 	ioHeld, cpuHeld     bool
 	warned              bool
@@ -276,9 +276,13 @@ func (gate *admissionGate) deferPressureLocked(r *admissionReservation, now time
 			p.deferrals++
 		}
 		window := time.Duration(p.config.MaxWaitSeconds) * time.Second
-		if now.Sub(r.pressureSince) >= window && !p.starvationGranted && (p.lastHardGrant.IsZero() || now.Sub(p.lastHardGrant) >= window) {
-			p.lastHardGrant = now
-			p.starvationGranted = true
+		pool := gate.pool(r).Pool
+		last := p.lastHardGrants[pool]
+		if now.Sub(r.pressureSince) >= window && (last.IsZero() || now.Sub(last) >= window) {
+			if p.lastHardGrants == nil {
+				p.lastHardGrants = map[string]time.Time{}
+			}
+			p.lastHardGrants[pool] = now
 			p.bypasses++
 			return false
 		}

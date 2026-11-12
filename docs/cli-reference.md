@@ -1684,7 +1684,7 @@ Flags:
   -admission-pressure-enabled
         hold new workflow grants at the hard host CPU/IO PSI limits (default true)
   -admission-pressure-hard-cpu float
-        hard host CPU some PSI avg10 percentage for new workflow grants (default 25)
+        hard host CPU some PSI avg10 percentage for new workflow grants (default 50)
   -admission-pressure-hard-io float
         hard host IO some PSI avg10 percentage for new workflow grants (default 40)
   -admission-stall-timeout duration

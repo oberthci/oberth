@@ -21,7 +21,7 @@ type liveCPUFixture struct {
 	holds            []model.AssistHold
 }
 
-func (j *liveCPUFixture) AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error) {
+func (j *liveCPUFixture) AdoptedPodDemand(context.Context, model.Run) (*argoworkflow.PodDemand, error) {
 	return j.demand, nil
 }
 func (j *liveCPUFixture) AdoptedAdmissionCPU(context.Context, model.Run) (argoworkflow.CPUAdmission, error) {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -242,7 +243,7 @@ func TestAdmissionCPUUnknownAdoptionAndAssistedHoldRetainLiveCredits(t *testing.
 
 type failedAdoptedSizer struct{ JobController }
 
-func (failedAdoptedSizer) AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error) {
+func (failedAdoptedSizer) AdoptedPodDemand(context.Context, model.Run) (*argoworkflow.PodDemand, error) {
 	return nil, errors.New("unavailable demand binding")
 }
 func TestAdoptedDemandErrorDegradesToUnknownReservation(t *testing.T) {

@@ -40,8 +40,5 @@ func (controller *Controller) LivePodRequests(ctx context.Context, name, runID s
 		total.MemoryBytes += argoworkflow.PodMemoryRequests(&pod)
 		total.Pods++
 	}
-	if total.Pods == 0 && !wf.Status.Phase.Completed() {
-		return nil, errors.New("workflow has no resident Pods to bound yet")
-	}
 	return total, nil
 }

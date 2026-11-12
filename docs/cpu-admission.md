@@ -14,9 +14,13 @@ container sets, init containers and sidecars. Limits stay unchanged.
 
 Each remote target uses its own cluster and pool. A target pinned to one node
 reads and sizes only that node; its explicit dedicated-node toleration applies.
-Local and remote observations refresh every minute. A cordoned/tainted pool,
-missing eligible node or denied node read holds admission for that pool with a
-reason line while the server keeps serving. Recovery or capacity changes take
+Local and remote observations refresh every minute. Pool keys include placement
+scope. When a target pins a node on the local API endpoint, that node is excluded
+from the local capacity sum, including while the target is unavailable; it is
+counted only in the pinned pool. A cordoned/tainted pool,
+missing eligible node holds admission for that pool with a reason line. Failed
+node reads retain the last good capacity for three minutes, then hold the pool;
+startup without a good observation starts held while the server keeps serving. Recovery or capacity changes take
 effect without restarting Oberth. Local sizing needs `get,list` on nodes;
 pinned targets need `get` on their selected node. No watch, proxy or node write
 permission is needed. Affinity and unrelated workloads still affect placement.
@@ -27,9 +31,10 @@ workflows. With workflow parallelism, exit/hook graphs reserve at most that many
 largest template requests, scanning handler templates too. Without it, exit
 handlers run after the main graph (a maximum rather than a sum); hooks add
 concurrent work for each hooked invocation. Truly unbounded graphs reserve the
-whole pool. Oversized fan-out is clamped for admission. For static fan-out with
-no authored workflow parallelism, Oberth freezes a parallelism cap based on how
-many largest Pods the pool fits, so Argo queues the remainder.
+whole pool. Oversized fan-out is clamped for admission. For static fan-out that cannot fit the pool and has no authored workflow
+parallelism, Oberth freezes a cap based on how many largest Pods fit, so Argo
+queues the remainder. Steps that must start concurrently or coordinate with each
+other need explicit workflow parallelism. Authored parallelism is preserved.
 
 After five distinct successful fully covered runs for a template, main-container
 sizing uses P95 of CPU time divided by container lifetime, adds 25%, and rounds
@@ -52,9 +57,9 @@ expiry. Other admission gates still apply. `admission.cpuHeadroomPercent` and
 `admission.stepCPURequestPercent` correspond to `--admission-cpu-headroom-percent`
 and `--step-cpu-request-percent`.
 
-Pressure retains a 25% CPU and 40% IO hard threshold, with a 300-second maximum
+Pressure retains a 50% CPU and 40% IO hard threshold, with a 300-second maximum
 deferral. A hard-pressure timeout admits at most one otherwise-fitting run per
-300-second window; claims and releases do not renew that allowance. The CPU
+300-second window per execution pool; claims and releases do not renew that allowance. The CPU
 budget, disk floor and administrator hold still apply. Unavailable PSI does not
 disable CPU packing. Chart values are `admission.pressure.hardCpu`, `hardIo` and
 `deferSeconds`, with the corresponding `--admission-pressure-*` flags.
@@ -63,13 +68,18 @@ disable CPU packing. Chart values are `admission.pressure.hardCpu`, `hardIo` and
 
 Priority remains `low < standard < promotion < high`. Within one class,
 repositories with fewer active runs go first, then least recent service and
-FIFO. Ordinary preparation is bounded to eight prepared waiters and one
-checkout preparing at a time. Higher-priority work can still be claimed after
+FIFO. Ordinary preparation is bounded per execution pool to eight prepared waiters and one
+checkout preparing at a time. A full or held pool does not consume another
+pool's preparation slots. Higher-priority work can still be claimed after
 that window fills. An unprepared claim holds only its own pool.
 
 Each pool has one drain clock protecting its oldest capacity-blocked head.
 Backfill is allowed for two minutes; afterwards, work behind that head cannot
-refill its pool until the head starts or is withdrawn. Additional blocked
+refill its pool until the head starts or is withdrawn, provided the head can
+fit after finite work drains. Held resident requests, failed-read whole-pool
+fallbacks and retained cleanup credits are subtracted first. If those credits
+make the head unattainable, backfill remains open; its queue place and clock
+are preserved and re-evaluated after each observation. Additional blocked
 waiters do not reset the clock. Other pools keep advancing. This prevents
 finite but overlapping small jobs from starving a whole-pool head indefinitely.
 
@@ -92,16 +102,35 @@ extend how long resources remain owned.
 Unknown adopted demand is read from owned non-terminal Pods before dispatch.
 A failed read reserves the whole pool and retries on the 15-second refresh;
 credits never expire by age, including long-running workflows from an upgrade.
+Startup restores whole-pool credits without serial live reads. A background
+observer uses two workers, a five-second total cycle budget and two-second
+per-run bounds, rotating unfinished work across 15-second cycles. External
+observations do not block dispatch or cancellation or renew its heartbeat.
 Pending and terminating Pods keep their charges; completed or foreign Pods do
-not contribute. No resident Pods in an unfinished unknown Workflow is treated
-as unknown, since the controller may not have created its work yet.
+not contribute. A successful owned Workflow read and Pod list with no resident Pods counts
+zero, including synchronization, parallelism and retry-backoff waits.
 
 Held assistance uses the summed requests of all live Pods, including active
 sibling branches, refreshed every 15 seconds. That live accounting continues
 after an attempt resumes: resident Pods retain their charge throughout the
 hold and continuation, with no timed credit giveaway or reacquisition. Failed
 observations return to conservative reservation. Kubernetes enforces placement
-between observations. Running Workflows are never preempted by this accounting.
+between observations. A resumed or adopted Workflow can grow its resident
+requests at a later step; the next observation records the excess but cannot
+revoke existing grants. Kubernetes placement bounds that growth, so Pods may
+remain Pending even when they have an admission grant. Running Workflows are never preempted by this accounting.
+
+For a waiting head, inspect `run_get` and its admission reason, then use
+`run_list` for running owners and `run_get` for their assist holds or cleanup
+obligations. The owned Workflow's synchronization status identifies external
+lock holders and waiters.
+Ordinary finite work drains under its workflow deadline. Idle assisted holds
+expire after the configured hold TTL (20 minutes by default), active holds at
+twice that TTL; failed cleanup keeps ownership until deletion is confirmed.
+Pre-start synchronization locks can require operator release or cancellation.
+Fitting CPU-capacity waits have no ten-minute stall expiry; only individually
+impossible Pods have that bound. A successful zero-Pod lock wait consumes zero
+live CPU. Repair failed reads or cleanup rather than discarding resident credits.
 
 Persisted demand bindings are validated before writing. Unreadable optional
 demand metadata degrades to unknown/live accounting while the immutable Workflow

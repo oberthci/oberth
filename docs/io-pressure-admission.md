@@ -9,7 +9,7 @@ single-host policy. See [CPU admission](cpu-admission.md).
 admission:
   pressure:
     enabled: true
-    hardCpu: 25
+    hardCpu: 50
     deferSeconds: 300
     hardIo: 40
 ```
@@ -20,11 +20,12 @@ The active flags are `--admission-pressure-enabled`,
 the disk floor and administrator holds active.
 
 Admission reads bounded `/proc/pressure/cpu` and `/proc/pressure/io` samples.
-Hard CPU and IO thresholds use **some avg10**, defaulting to 25% and 40%.
+Hard CPU and IO thresholds use **some avg10**, defaulting to 50% and 40%.
 Each resource has an independent latch and recovers strictly below its hard
 threshold minus ten percentage points. One recovering resource cannot clear
 the other's latch. A fitting run waits at most 300 seconds (configurable), then one run may
-start despite PSI. CPU packing, disk floor and administrator holds still
+start despite PSI per execution pool and deferral window. One pool cannot
+consume another pool's timeout allowance. CPU packing, disk floor and administrator holds still
 apply. There is no settle window or resource drain forecast.
 
 PSI measures stall time, not CPU utilization or load average. These thresholds

@@ -493,7 +493,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		scheduler.sizeAdoptedReservation(workerCtx, run, reservation)
+		scheduler.initializeAdoptedCPU(workerCtx, run, reservation)
 		adopted = append(adopted, adoptedRun{run: run, reservation: reservation})
 		return nil
 	}); err != nil {
@@ -517,6 +517,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	dispatchCtx := withDispatchProgress(workerCtx, &scheduler.dispatchProgress)
 	workers.Add(1)
 	go func() { defer workers.Done(); scheduler.sweepWorkspaces(workerCtx) }()
+	workers.Add(1)
+	go func() { defer workers.Done(); scheduler.runAdmissionRefresh(workerCtx) }()
 	scheduler.startupRecovered.Store(true)
 	defer scheduler.startupRecovered.Store(false)
 	if scheduler.onStartupRecovered != nil {
@@ -586,37 +588,10 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 		for priorityErr == nil {
 			scheduler.dispatchProgress.Beat()
-			if !scheduler.dispatchSlotAvailable(active) {
-				available, err := scheduler.priorityDispatchAvailable(dispatchCtx, active)
-				if store.IsTransientLockError(err) {
-					break // Keep background tasks alive; retry on the next notification or poll.
-				}
-				if err != nil {
-					join()
-					if ctx.Err() != nil {
-						return nil
-					}
-					return err
-				}
-				if !available {
-					break
-				}
+			run, err := scheduler.claimDispatchRun(dispatchCtx, active)
+			if store.IsTransientLockError(err) {
+				break
 			}
-			if err := scheduler.awaitDispatchMutation(dispatchCtx); err != nil {
-				join()
-				if ctx.Err() != nil {
-					return nil
-				}
-				return err
-			}
-			if err := scheduler.awaitDispatchAdmission(dispatchCtx); err != nil {
-				join()
-				if ctx.Err() != nil {
-					return nil
-				}
-				return err
-			}
-			run, err := scheduler.database().ClaimNextRun(dispatchCtx)
 			if queueEmpty(err) {
 				break
 			}
