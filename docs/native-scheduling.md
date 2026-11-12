@@ -53,6 +53,27 @@ Server-owned executor/identity helpers have their own requests; these do not
 rewrite the author's container resources. Opted-in assisted holds retain their
 private scratch resources, retry/hold behavior and hold-lifetime deadlines.
 
+## Security waits before submission
+
+Two security checks can delay Workflow submission without doing resource
+scheduling. `awaitWorkflowPolicy` (`internal/service/workflow_policy.go`) keeps a
+claimed run while refreshing the trusted upstream policy, for at most 30
+minutes. The run reports `waiting for upstream policy`; its scheduling message
+names the unavailable trusted policy, and publication is forbidden. Operators
+restore upstream connectivity/credentials and the trusted policy source; an
+expired wait fails with a policy-refresh deadline error and can be retried.
+
+`awaitAdmission` (`internal/service/scheduler.go`) and the controller profile
+retry (`internal/argojob/profile_retry.go`) wait without a deadline while the
+required immutable controller/profile proof is unverified. This can pause
+dispatch or a claimed run before Create. Operators see `controller_profile`
+state/reason/remedy and retry timing in status and the dashboard's existing
+controller-profile pause banner. Restore the exact Ready controller, profile
+ConfigMap, images and required read permissions named by that diagnostic.
+Existing execution observation and cleanup retain their authority. These waits
+protect policy and identity; neither examines CPU, memory or node capacity.
+Cancellation remains a lifecycle action, not a placement decision.
+
 ## Operators
 
 Set the Argo controller limit with `oberth install --argo-parallelism N`.
