@@ -173,6 +173,21 @@ func TestNativeReceiveUpgradeArchivedReceiptsStayTerminalAfterUnarchive(t *testi
 			if err != nil || again.ID != replay.ID || again.Status != model.RunInterrupted {
 				t.Fatal("unarchive resurrected receipt", again, err)
 			}
+			rerun, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: replay.ID, Actor: "admin", Reason: "repository restored"})
+			if err != nil || rerun.Enqueued.Status != model.RunQueued || rerun.Enqueued.SHA != spec.SHA || rerun.Enqueued.ID == replay.ID {
+				t.Fatal("manual rerun after unarchive", rerun, err)
+			}
+			claimed, err := s.ClaimNextRun(ctx)
+			if err != nil || claimed.ID != rerun.Enqueued.ID {
+				t.Fatal("manual rerun was not claimable", claimed, err)
+			}
+			if _, err = s.FinishRun(ctx, claimed.ID, model.RunResult{Status: model.RunPassed, Phase: "complete"}); err != nil {
+				t.Fatal(err)
+			}
+			replayAgain, err := s.EnqueueReceiveEvent(ctx, event, spec)
+			if err != nil || replayAgain.ID != replay.ID || replayAgain.Status != model.RunInterrupted {
+				t.Fatal("manual rerun altered receipt binding", replayAgain, err)
+			}
 			event.ID = "new-push"
 			fresh, err := s.EnqueueReceiveEvent(ctx, event, spec)
 			if err != nil || fresh.Status != model.RunQueued || fresh.ID == replay.ID {
