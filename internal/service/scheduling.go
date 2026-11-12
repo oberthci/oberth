@@ -99,6 +99,10 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		run.DisplayStatus = model.DisplayQueued
 		run.DisplayReason = queuedDisplayReason(scheduling)
 	}
+	if scheduling.Execution.Reason == "Suspended" {
+		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(scheduling.Execution.Message))
+		return
+	}
 	for _, pod := range scheduling.Execution.Pods {
 		if pod.Phase == "Pending" && strings.HasPrefix(pod.Message, "pod pending: ") {
 			run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(pod.Message))

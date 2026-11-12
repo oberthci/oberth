@@ -46,6 +46,23 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 	if workflow.Status.Message == "" && workflow.Status.Phase == wfv1.WorkflowRunning {
 		result.Message = "Workflow execution is running."
 	}
+	// Suspension is observed from the exact live Workflow, never inferred from
+	// missing progress or copied from arbitrary controller messages.
+	defer func() {
+		if workflow.Status.Phase == wfv1.WorkflowSucceeded || workflow.Status.Phase == wfv1.WorkflowFailed || workflow.Status.Phase == wfv1.WorkflowError {
+			return
+		}
+		if workflow.Spec.Suspend != nil && *workflow.Spec.Suspend {
+			result.Reason, result.Message = "Suspended", model.WorkflowSuspendedMessage
+			return
+		}
+		for _, node := range workflow.Status.Nodes {
+			if node.Type == wfv1.NodeTypeSuspend && node.Phase == wfv1.NodeRunning {
+				result.Reason, result.Message = "Suspended", model.StepSuspendedMessage
+				return
+			}
+		}
+	}()
 	now := time.Now().UTC()
 	observeWorkflowDeadline(workflow, result, now)
 

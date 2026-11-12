@@ -51,7 +51,7 @@ func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
 	}
 }
 
-func TestRunListsObserveOnlyBeforeAnyStepStart(t *testing.T) {
+func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 	for _, view := range []string{""} {
 		t.Run(view, func(t *testing.T) {
 			f := newControlFixture(t)
@@ -122,8 +122,13 @@ func TestRunListsObserveOnlyBeforeAnyStepStart(t *testing.T) {
 					t.Fatalf("list has %d rows", len(rows))
 				}
 				callsMu.Lock()
-				if len(calls) != 1 || calls[runs[0].ID] != 1 {
-					t.Errorf("executing/unknown rows observed or cache missed: %v", calls)
+				if len(calls) != len(runs) {
+					t.Errorf("missing live observations: %v", calls)
+				}
+				for _, run := range runs {
+					if calls[run.ID] != poll {
+						t.Errorf("native state not refreshed on read: %v", calls)
+					}
 				}
 				callsMu.Unlock()
 			}
@@ -144,8 +149,8 @@ func TestRunListsObserveOnlyBeforeAnyStepStart(t *testing.T) {
 			drainListDiagnostics(t, service)
 			callsMu.Lock()
 			defer callsMu.Unlock()
-			if calls[runs[0].ID] != 1 {
-				t.Fatal("polling continued after first step start", calls)
+			if calls[runs[0].ID] != 3 {
+				t.Fatal("progress hid native suspension/queue observations", calls)
 			}
 		})
 	}

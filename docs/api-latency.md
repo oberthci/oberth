@@ -18,17 +18,25 @@ change invalidates its cached observation. Scope filtering still withholds other
 upstreams, global admission budgets, audit details and secret-store configuration.
 These diagnostics do not authorize mutations or change admission/readiness gates.
 
-Run-list startup observations and immutable queue-demand reads refresh in the
-background on demand. At most four refreshes run at once, each with a two-second
-budget, with 512 retained entries, a bounded FIFO of at most 512 pending keys
-and a ten-second refresh interval. Concurrent misses coalesce; queued refreshes
-continue across the page without another poll, so later rows cannot starve. Cached startup results retain `scheduling.observed_at` and update
-`age_seconds`. A cold observation is omitted; admission reasons and queue order
-still come from current process state and the database snapshot. Successful demand
-results retain the existing immutable run/SHA cache; missing demand stays unknown.
-Cache keys bind the attempt, workflow, update time and authorized repository view.
-API shutdown cancels and joins refresh work. Run detail reads keep their direct
-bounded observations.
+Run-list execution observations refresh in background workers on every read,
+as soon as successful Workflow submission is recorded. They do not wait for
+local step history and continue after steps start, so native suspension remains
+visible. At most four refreshes run at once, each with a two-second budget, with
+512 retained entries and a bounded FIFO of at most 512 pending keys. Concurrent
+misses coalesce; queued refreshes continue across the page without another poll.
+The response joins fast refreshes for at most **100 milliseconds for the whole
+page**, including the first read. It never waits for a separate deadline per
+row. This is a read budget, not a scheduling or startup timeout. There is no
+ten-second negative cache for these live observations.
+
+A slow/unavailable Argo leaves the last aged observation or the reason
+`awaiting Argo state`; absence of local step history never supplies an Argo
+queue verdict. Cached results retain `scheduling.observed_at` and update
+`age_seconds`. Native parallelism and suspend reasons come from the exact live
+Workflow; they never change durable status or authorize execution. Cache keys
+bind attempt, Workflow, update time and authorized repository view. API shutdown
+cancels and joins refresh work. Run detail reads keep their direct bounded
+observations.
 
 ## Query plans
 

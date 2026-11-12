@@ -20,6 +20,7 @@ type listDiagnosticKey struct {
 }
 type listDiagnosticValue struct {
 	scheduling *model.RunScheduling
+	ready      <-chan struct{}
 }
 type listDiagnosticEntry struct {
 	key       listDiagnosticKey
@@ -29,18 +30,19 @@ type listDiagnosticEntry struct {
 type listDiagnosticTask struct {
 	key  listDiagnosticKey
 	load func(context.Context) listDiagnosticValue
+	done chan struct{}
 }
 type listDiagnosticCache struct {
 	mu      sync.Mutex
 	entries map[listDiagnosticKey]*list.Element
-	pending map[listDiagnosticKey]bool
+	pending map[listDiagnosticKey]chan struct{}
 	recent  list.List
 	queue   []listDiagnosticTask
 	workers int
 }
-type listDiagnosticContextKey struct{}
 
-// Readers never wait for diagnostic I/O. Refreshes are bounded, coalesced and
+// Workers own diagnostic I/O; readers join only a short page-wide grace.
+// Refreshes are bounded, coalesced and
 // joined by API.Shutdown. Keys bind the durable attempt and the authorized view;
 // a scoped reader cannot reuse an administrator's scheduling projection.
 func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Context) listDiagnosticValue) listDiagnosticValue {
@@ -66,11 +68,18 @@ func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Conte
 			result.scheduling = &copy
 		}
 		cache.recent.MoveToFront(element)
-		if now.Sub(entry.checkedAt) < listDiagnosticTTL {
+		if load == nil || (kind != "execution" && now.Sub(entry.checkedAt) < listDiagnosticTTL) {
 			return result
 		}
 	}
-	if cache.pending[key] || len(cache.pending) >= listDiagnosticLimit || s.lifetime.Err() != nil {
+	if load == nil {
+		return result
+	}
+	if done := cache.pending[key]; done != nil {
+		result.ready = done
+		return result
+	}
+	if len(cache.pending) >= listDiagnosticLimit || s.lifetime.Err() != nil {
 		return result
 	}
 	if cache.workers < listDiagnosticWorkers {
@@ -81,10 +90,12 @@ func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Conte
 		go s.refreshListDiagnostics()
 	}
 	if cache.pending == nil {
-		cache.pending = make(map[listDiagnosticKey]bool)
+		cache.pending = make(map[listDiagnosticKey]chan struct{})
 	}
-	cache.pending[key] = true
-	cache.queue = append(cache.queue, listDiagnosticTask{key: key, load: load})
+	done := make(chan struct{})
+	cache.pending[key] = done
+	cache.queue = append(cache.queue, listDiagnosticTask{key: key, load: load, done: done})
+	result.ready = done
 	return result
 }
 
@@ -99,6 +110,7 @@ func (s *API) refreshListDiagnostics() {
 	for len(cache.queue) > 0 {
 		if s.lifetime.Err() != nil {
 			for _, task := range cache.queue {
+				close(task.done)
 				delete(cache.pending, task.key)
 			}
 			cache.queue = nil
@@ -113,6 +125,7 @@ func (s *API) refreshListDiagnostics() {
 		cancel()
 		cache.mu.Lock()
 		delete(cache.pending, task.key)
+		close(task.done)
 		if cache.entries == nil {
 			cache.entries = make(map[listDiagnosticKey]*list.Element)
 		}
@@ -128,8 +141,28 @@ func (s *API) refreshListDiagnostics() {
 	}
 }
 
-func (s *API) cachedRunListStartup(run model.Run) *model.RunScheduling {
-	return s.listDiagnostic(run, "startup", func(ctx context.Context) listDiagnosticValue {
-		return listDiagnosticValue{scheduling: s.observeRunListStartup(ctx, run)}
-	}).scheduling
+func (s *API) cachedRunListExecution(run model.Run) listDiagnosticValue {
+	return s.listDiagnostic(run, "execution", func(ctx context.Context) listDiagnosticValue {
+		return listDiagnosticValue{scheduling: s.observeRunListExecution(ctx, run)}
+	})
+}
+
+// One shared read budget per page, not per row. Background workers still own
+// all I/O and shutdown. Fast native reads appear on the first response; slow
+// or unavailable Argo never turns a list into N serial Kubernetes deadlines.
+func waitListExecution(ctx context.Context, pending []<-chan struct{}) {
+	if len(pending) == 0 {
+		return
+	}
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-timer.C:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
 }

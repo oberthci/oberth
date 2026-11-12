@@ -28,6 +28,12 @@ const ExecutionDeadlineMessage = "Execution deadline exceeded."
 // matches the lock-key grammar.
 const LockWaitMessagePrefix = "Waiting for lock "
 
+// WorkflowSuspendedMessage reports the exact live Workflow suspend flag.
+const WorkflowSuspendedMessage = "Workflow is suspended."
+
+// StepSuspendedMessage reports an active Argo suspend node.
+const StepSuspendedMessage = "Workflow has a suspended step."
+
 // ParallelismWaitMessage is the fixed-form message of a Workflow the Argo
 // controller postponed because its parallelism limit is reached
 // (controller.parallelism or controller.namespaceParallelism). The run is
