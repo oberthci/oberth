@@ -1,2 +1,4 @@
 # Unified patch context is data, including its leading space and blank lines.
 hack/static-git-no-shell.patch whitespace=-space-before-tab,-blank-at-eol
+# Verbatim upstream resource example retains its original trailing space.
+pkg/argoworkflow/testdata/native/resources-02.yaml whitespace=-blank-at-eol
