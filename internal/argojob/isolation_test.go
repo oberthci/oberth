@@ -232,8 +232,8 @@ func TestBuildRefusesContradictoryOrUnprovenIsolation(t *testing.T) {
 		{"unknown-env-mode", "must be none", func(w *wfv1.Workflow) {
 			w.Spec.Templates[0].Metadata.Annotations = map[string]string{"oberth.ci/workspace-env": "true"}
 		}},
-		{"reserved-annotation", "is reserved", func(w *wfv1.Workflow) {
-			w.Spec.Templates[0].Metadata.Annotations = map[string]string{"oberth.ci/spec-identity": "other"}
+		{"other-annotation", "annotations is assigned", func(w *wfv1.Workflow) {
+			w.Spec.Templates[0].Metadata.Annotations = map[string]string{"sidecar.istio.io/inject": "true"}
 		}},
 		{"defaults-mounts", "templateDefaults", func(w *wfv1.Workflow) {
 			w.Spec.TemplateDefaults = &wfv1.Template{Sidecars: []wfv1.UserContainer{{Container: corev1.Container{Name: "helper", Image: w.Spec.Templates[0].Container.Image}}}}

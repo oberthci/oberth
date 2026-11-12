@@ -116,7 +116,7 @@ func auditPodMetadataSelector(t *testing.T, fields map[string]any, keys map[stri
 				metadata = &wfv1.Metadata{Annotations: metadata.Labels}
 			}
 			wf.Spec.PodMetadata = metadata
-			if err := argoworkflow.Admit(wf, argoworkflow.Policy{}); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("[%q] is reserved", key)) {
+			if err := argoworkflow.Admit(wf, argoworkflow.Policy{}); err == nil || (!annotations && !strings.Contains(err.Error(), fmt.Sprintf("[%q] is reserved", key))) {
 				t.Fatalf("installed selector key %s is author-settable: %v", key, err)
 			}
 		}

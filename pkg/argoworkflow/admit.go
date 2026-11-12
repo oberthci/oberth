@@ -685,12 +685,16 @@ func admitHooks(location string, hooks wfv1.LifecycleHooks) []error {
 	return problems
 }
 
-// admitPodMetadata preserves author metadata outside ownership/selector keys.
+// admitPodMetadata permits labels outside ownership/selector keys. Pod
+// annotations can change runtime, CNI and webhook behavior, so are server-owned.
 func admitPodMetadata(location string, metadata *wfv1.Metadata) []error {
 	if metadata == nil {
 		return nil
 	}
-	problems := admitPodMetadataKeys(location+".annotations", metadata.Annotations)
+	var problems []error
+	if len(metadata.Annotations) != 0 {
+		problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
+	}
 	return append(problems, admitPodMetadataKeys(location+".labels", metadata.Labels)...)
 }
 
@@ -713,7 +717,7 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 		case "oberth.ci/exclusive":
 			problems = append(problems, removedAnnotation(location, name))
 		default:
-			problems = append(problems, admitPodMetadataKeys(location+".annotations", map[string]string{name: value})...)
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
 		}
 	}
 	problems = append(problems, admitPodMetadataKeys(location+".labels", metadata.Labels)...)

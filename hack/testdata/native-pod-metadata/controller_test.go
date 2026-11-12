@@ -49,11 +49,6 @@ func TestOberthPostedAuthorMetadataReachesPod(t *testing.T) {
 			t.Fatal("server label lost", key, pod.Labels)
 		}
 	}
-	for key, want := range map[string]string{"example.test/owner": "team", "example.test/note": "authored"} {
-		if pod.Annotations[key] != want {
-			t.Fatal("author annotation lost", key, pod.Annotations)
-		}
-	}
 	if !reflect.DeepEqual(pod.Spec.Affinity, wf.Spec.Affinity) {
 		t.Fatal("authored anti-affinity changed", pod.Spec.Affinity)
 	}

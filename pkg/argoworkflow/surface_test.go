@@ -175,10 +175,10 @@ func surfaceRoots() map[string]surfaceRoot {
 			withContainer("        securityContext:\n          privileged: true\n")},
 		"PodSecurityContext": {"the whole Pod security context is refused; the engine forces the baseline",
 			withSpec("  securityContext:\n    runAsUser: 0\n")},
-		"PodMetadata": {"reserved ownership and selector Pod metadata is refused",
-			withSpec("  podMetadata:\n    annotations:\n      workflows.argoproj.io/node-id: other\n")},
-		"Metadata": {"reserved ownership and selector Pod metadata is refused",
-			withTemplate("      metadata:\n        annotations:\n          workflows.argoproj.io/node-id: other\n")},
+		"PodMetadata": {"repository-authored Pod annotations are refused",
+			withSpec("  podMetadata:\n    annotations:\n      container.apparmor.security.beta.kubernetes.io/main: unconfined\n")},
+		"Metadata": {"repository-authored Pod annotations are refused",
+			withTemplate("      metadata:\n        annotations:\n          container.apparmor.security.beta.kubernetes.io/main: unconfined\n")},
 
 		// Closed by construction rather than by a check.
 		"Metrics":         {"Prometheus metric definitions carry no credential selector; the type-graph hit is the shared SecurityContext reachable through them", ""},

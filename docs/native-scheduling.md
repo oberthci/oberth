@@ -35,18 +35,23 @@ ports; token/ServiceAccount/automount overrides; unauthorized secrets/configs,
 volumes, images, registries, runtimes and devices; and arbitrary Pod patches
 remain unavailable. Workflow identity is assigned by the server; template and
 patch identity escape routes are refused. Repository Pod priority classes stay
-refused. Authors may set Pod labels and annotations in `spec.podMetadata` and
+refused. Authors may set Pod labels in `spec.podMetadata` and
 `templates[].metadata` (including defaults/inline templates). Use literal
 Kubernetes-qualified keys. `oberth.ci/` and `workflows.argoproj.io/` keys are
 reserved, as are the installed selector keys `app.kubernetes.io/name`,
 `app.kubernetes.io/instance`, `app.kubernetes.io/component`, `component`,
-`openbao-active`, `openbao-internal`, and `kubernetes.io/metadata.name`; Argo’s
-`kubectl.kubernetes.io/default-container` annotation is also reserved. This
+`openbao-active`, `openbao-internal`, and `kubernetes.io/metadata.name`; the exact Argo-owned
+`kubectl.kubernetes.io/default-container` key is also reserved. This
 protects the installed policies and Services without restricting native affinity
-selectors. Existing validated template controls for workspace mounts/env and
-release WIF remain author-facing configuration. Other author annotations pass
-through; an operator’s additional admission webhooks remain cluster policy.
+selectors. Author Pod annotations are not admitted: they can switch runtime, CNI and
+injection-webhook behavior, including weakening security, and cannot be secured
+with an enumerated deny-list. Existing validated template controls for workspace
+mounts/env and release WIF remain author-facing configuration, as before this
+change; there is no general author Pod-annotation allow-list.
 Oberth’s own run/trigger/tier labels remain server-assigned.
+An author label can match selectors in the operator’s own policies in other
+namespaces (for example a NetworkPolicy admitting `role=backend` from any
+namespace); Oberth reserves only the keys its own installed charts select on.
 Affinity namespace selectors are explicitly permitted despite other namespace
 reference restrictions.
 A repository semaphore may read only the `oberth-sync-limits` ConfigMap in the
@@ -181,7 +186,8 @@ win name/path collisions; validated workspace opt-outs remain available.
 - **Object identity and parameters.** Oberth assigns the Workflow name,
   namespace, run/repository/SHA/trigger/tier labels and immutable source,
   policy and custody annotations. Pod metadata adds run/trigger/tier labels;
-  other author Pod metadata survives outside reserved keys. Declared trigger
+  other author Pod labels survive outside reserved keys; author Pod annotations
+  are refused. Declared trigger
   and schedule arguments are bound to the actual run. These do not set node
   placement or resource requests. Labels can affect cluster policy and native
   affinity when selected; that is why installed selector keys are reserved.
@@ -384,8 +390,8 @@ spec:
           topologyKey: kubernetes.io/hostname
 ```
 
-A template can additionally set its own labels/annotations, for example
-`metadata.labels: {component.example.test/part: worker}`. Both scopes reach
+A template can additionally set its own labels, for example
+`metadata.labels: {component.example.test/part: worker}`. Both label scopes reach
 the Pod. Selectors may also read the server-owned `oberth.ci/run` label or
 `workflows.argoproj.io/workflow: WORKFLOW_NAME` for one Workflow. Use actual existing label values. A selector on `oberth.ci/repo` will
 not select every user Pod of that repository: Oberth does not inject that label
