@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"k8s.io/client-go/tools/clientcmd"
+	"github.com/oberthci/oberth/internal/kubeconfig"
 )
 
 type UnsealConfig struct {
@@ -52,7 +52,7 @@ func ExecuteUnseal(ctx context.Context, cfg UnsealConfig, host InstallDeps) (Sea
 	run := host.RunCommand
 	var deps Deps
 	if cfg.KubeconfigPath != "" {
-		rules := clientcmd.NewDefaultClientConfigLoadingRules()
+		rules := kubeconfig.Rules("")
 		rules.ExplicitPath = cfg.KubeconfigPath
 		kube, rest, name, err := loadKubeConfigWithRules(rules, cfg.ContextName, "", io.Discard)
 		if err != nil {
@@ -245,9 +245,18 @@ func PrintSealStatus(w io.Writer, status SealStatus, jsonOutput bool) error {
 }
 
 // Capture only stdout; child diagnostics never enter a transcript or error.
-func privateUnsealCommand(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+func privateUnsealCommand(ctx context.Context, input []byte, name string, args ...string) (result []byte, resultErr error) {
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
+
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: fixed operator executables, structured arguments.
-	cmd.Env = installerChildEnvironment()
+	cmd.Env = environment
+	if lease != nil {
+		cmd.ExtraFiles = []*os.File{lease}
+	}
 	cmd.Stdin = bytes.NewReader(input)
 	cmd.Stderr = io.Discard
 	var out bytes.Buffer

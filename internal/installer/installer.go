@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -2350,13 +2352,22 @@ func HelmWithKubeArgs(runHelm func(ctx context.Context, args []string) ([]byte, 
 // returned (clean data for JSON/YAML callers), on failure both are included
 // for diagnostics. This prevents helm stderr warnings (e.g. kubeconfig
 // permission notices on macOS) from corrupting parseable output.
-func DefaultRunHelm(ctx context.Context, args []string) ([]byte, error) {
+func DefaultRunHelm(ctx context.Context, args []string) (result []byte, resultErr error) {
+
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command("helm", args, installerChildEnvironment())
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
 
 	// #nosec G204 -- the command is the literal helm binary; every argument is
 	// constructed by this package from validated flags (no shell, no
 	// caller-controlled command word).
 	cmd := exec.CommandContext(ctx, "helm", args...)
-	cmd.Env = installerChildEnvironment()
+	cmd.Env = environment
+	if lease != nil {
+		cmd.ExtraFiles = []*os.File{lease}
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -2389,7 +2400,7 @@ func LoadKubeConfigForContext(contextName string, output io.Writer) (kubernetes.
 // variable initialized at program start from the original $HOME, which
 // t.Setenv cannot override).
 func loadKubeConfigForContext(contextName, k3sFallbackPath string, output io.Writer) (kubernetes.Interface, *rest.Config, string, error) {
-	return loadKubeConfigWithRules(clientcmd.NewDefaultClientConfigLoadingRules(), contextName, k3sFallbackPath, output)
+	return loadKubeConfigWithRules(kubeconfig.Rules(""), contextName, k3sFallbackPath, output)
 }
 
 func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextName, k3sFallbackPath string, output io.Writer) (kubernetes.Interface, *rest.Config, string, error) {
@@ -2404,18 +2415,9 @@ func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextN
 }
 
 func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string) (kubernetes.Interface, *rest.Config, string, error) {
-	overrides := &clientcmd.ConfigOverrides{}
-	if contextName != "" {
-		overrides.CurrentContext = contextName
-	}
-	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
-	rawConfig, err := config.RawConfig()
+	rawConfig, restConfig, err := kubeconfig.Client(rules, contextName)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("load kubeconfig: %w", err)
-	}
-	restConfig, err := config.ClientConfig()
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("build REST config: %w", err)
 	}
 	client, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
@@ -2435,7 +2437,7 @@ func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string
 // The selected context is pinned in Helm's arguments. KUBECONFIG keeps its
 // full file list; a root-owned k3s file is never selected implicitly.
 func ResolveHelmKubeArgs(contextName string) (helmArgs []string, target string, err error) {
-	return resolveHelmKubeArgs(clientcmd.NewDefaultClientConfigLoadingRules(), contextName, k3sKubeconfigPath)
+	return resolveHelmKubeArgs(kubeconfig.Rules(""), contextName, k3sKubeconfigPath)
 }
 
 // resolveHelmKubeArgs is the testable core of ResolveHelmKubeArgs.

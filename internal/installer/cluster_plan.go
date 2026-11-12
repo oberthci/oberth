@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -70,7 +72,7 @@ type InstallPlan struct {
 }
 
 func selectedRules(cfg Config) *clientcmd.ClientConfigLoadingRules {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules := kubeconfig.Rules("")
 	rules.ExplicitPath = cfg.KubeconfigPath
 	return rules
 }

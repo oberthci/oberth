@@ -15,12 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	"github.com/oberthci/oberth/internal/model"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // CheckResult is a stable public check. Diagnostics never include subprocess output.
@@ -112,7 +113,7 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 	}
 	if cfg.KubeconfigPath != "" {
 		host.LoadKubeConfig = func(name string) (kubernetes.Interface, *rest.Config, string, error) {
-			rules := clientcmd.NewDefaultClientConfigLoadingRules()
+			rules := kubeconfig.Rules("")
 			rules.ExplicitPath = cfg.KubeconfigPath
 			return loadKubeConfigWithRules(rules, name, "", io.Discard)
 		}

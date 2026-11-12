@@ -822,6 +822,7 @@ Commands:
   renew   renew with the current certificate and rotate the local key
   repository  bind one repository to the selected server and pinned SSH identity
   ports   probe planned client endpoints and propose published host ports
+  kubectl run kubectl with a private kubeconfig copy
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
 Use oberth client <command> --help for its flags.
@@ -861,6 +862,15 @@ would change. Restart Claude Code once afterwards.
         owner-only (0600) file holding the bearer token; it replaces the private bearer file used by Claude Code
   -url string
         server MCP endpoint or base address, e.g. https://localhost:30443/mcp
+```
+
+## oberth client kubectl
+
+```text
+Usage: oberth client kubectl [kubectl arguments]
+Run kubectl using a private copy of the selected kubeconfig for this command.
+The source kubeconfig files stay read-only. Context flags and arguments after
+-- are preserved. Exec credential plugins may maintain their own caches.
 ```
 
 ## oberth client pin

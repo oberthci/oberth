@@ -57,6 +57,7 @@ mcp call
 mcp tools
 client
 client setup
+client kubectl
 client pin
 client ports
 client repository

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,8 +26,10 @@ import (
 // ---------- verification against the installed server (#002) ----------
 
 // runKubectl runs one kubectl command; tests replace it.
-var runKubectl = func(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, "kubectl", args...).CombinedOutput() //nolint:gosec // G204: fixed binary; arguments are built by the wizard
+var runKubectl = defaultRunKubectl
+
+func defaultRunKubectl(ctx context.Context, args ...string) ([]byte, error) {
+	return installer.DefaultRunCommand(ctx, nil, "kubectl", args...)
 }
 
 // kubectlTarget is the --kubeconfig/--context pair the install targeted.

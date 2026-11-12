@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -24,13 +26,10 @@ func WaitClientLoadBalancer(ctx context.Context, plan InstallPlan, namespace str
 		return "", errors.New("LoadBalancer wait requires the selected plan's kubeconfig files and context")
 	}
 	rules := &clientcmd.ClientConfigLoadingRules{Precedence: plan.Identity.Files}
-	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{CurrentContext: plan.Identity.Context})
-	restConfig, err := config.ClientConfig()
+	_, restConfig, err := kubeconfig.Client(rules, plan.Identity.Context)
 	if err != nil {
 		return "", errors.New("cannot load selected plan's kubeconfig")
 	}
-	// Credential refresh must never persist into the selected kubeconfig.
-	restConfig.AuthConfigPersister = nil
 	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return "", errors.New("cannot create selected cluster client")

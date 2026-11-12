@@ -12,8 +12,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	"golang.org/x/crypto/ssh"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/mdnsdial"
@@ -97,9 +98,9 @@ type kubeContext struct {
 // loadKubeContexts lists a kubeconfig's contexts, the current one first. An
 // empty path reads the default kubeconfig (KUBECONFIG or ~/.kube/config).
 func loadKubeContexts(path string) ([]kubeContext, string, error) {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules := kubeconfig.Rules("")
 	rules.ExplicitPath = path
-	raw, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).RawConfig()
+	raw, err := kubeconfig.Read(rules)
 	if err != nil {
 		return nil, "", err
 	}
@@ -519,7 +520,7 @@ func buildQuestions() []*question {
 				if err != nil {
 					return err
 				}
-				raw, err := clientcmd.LoadFromFile(path)
+				raw, err := kubeconfig.Read(kubeconfig.Rules(path))
 				if err != nil {
 					return fmt.Errorf("read kubeconfig: %w", err)
 				}

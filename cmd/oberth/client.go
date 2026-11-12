@@ -23,9 +23,15 @@ Commands:
   renew   renew with the current certificate and rotate the local key
   repository  bind one repository to the selected server and pinned SSH identity
   ports   probe planned client endpoints and propose published host ports
+  kubectl run kubectl with a private kubeconfig copy
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
 Use oberth client <command> --help for its flags.`
+
+const clientKubectlUsage = `Usage: oberth client kubectl [kubectl arguments]
+Run kubectl using a private copy of the selected kubeconfig for this command.
+The source kubeconfig files stay read-only. Context flags and arguments after
+-- are preserved. Exec credential plugins may maintain their own caches.`
 
 const clientSetupUsage = `Usage: oberth client setup [flags]
 Make Claude Code trust the Oberth server's CA and install the Oberth plugin.
@@ -56,7 +62,7 @@ var clientSetupDeps = func(output io.Writer) installer.Deps { return installer.D
 
 func runClient(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: client setup|redeem|renew|repository|ports|pin", errUsage)
+		return fmt.Errorf("%w: client setup|redeem|renew|repository|ports|kubectl|pin", errUsage)
 	}
 	switch arguments[0] {
 	case "--help", "-h":
@@ -70,6 +76,12 @@ func runClient(ctx context.Context, arguments []string, output io.Writer) error 
 		return runClientRenew(ctx, arguments[1:], output)
 	case "repository":
 		return runClientRepository(ctx, arguments[1:], output)
+	case "kubectl":
+		if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
+			_, err := fmt.Fprintln(output, clientKubectlUsage)
+			return err
+		}
+		return installer.DefaultRunInteractive(ctx, "kubectl", arguments[1:]...)
 	case "ports":
 		return runClientPorts(ctx, arguments[1:], output)
 	case "pin":

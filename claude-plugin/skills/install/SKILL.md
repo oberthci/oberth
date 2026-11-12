@@ -228,9 +228,6 @@ The printed command targets a new `oberth-kind.kubeconfig` and refuses an
 existing file or symlink. Use that file and `kind-oberth-onboarding` explicitly
 for the next plan/install; choose unused names if either already exists.
 
-The CLI and setup wizard only target an existing operator-provided cluster and
-kubeconfig. Oberth never creates or recreates a Kubernetes cluster.
-
 ### Live NetworkPolicy enforcement check
 
 Plan, install preflight and verification use a bounded live egress probe, not
@@ -282,3 +279,46 @@ The dedicated upgrade path preserves stored values, prints the stored choice and
 warning, and reports capability as unverified/not probed. A successful upgrade
 is not NetworkPolicy evidence. Use `install --verify --json` for the explicit
 bounded security check; rollback does not run this probe.
+
+### Preserve the operator's kubeconfig
+
+Selected kubeconfig files are read-only inputs. Native loaders disable
+client-go migration and auth-provider persistence. Every kubectl/Helm child
+(including backup, restore, unseal, upgrade and rollback) receives an owner-only
+merged file for the child command, supplied through both its argument and
+`KUBECONFIG` environment.
+The copy preserves file precedence, the selected context and source-relative
+CA, key, token-file and exec-command paths. A private child home prevents
+client-go migration from creating an ambient default configuration; normal
+Helm repository/cache/plugin directories remain available. Transient copies live in the owner-only
+`oberth/kubeconfig-sessions` directory under the platform user cache. Each has
+an owner-only marker with its creation time and a kernel lease inherited by the
+child. Copies are removed after completion/cancellation; cleanup errors are reported.
+SIGINT, SIGTERM, SIGHUP and SIGQUIT cancel the child and unwind cleanup.
+After SIGKILL or a fatal runtime crash, a surviving child keeps its lease and
+copy. After the last lease holder exits, the next ordinary CLI startup reclaims
+recognized copies whose creation time is not in the future. Active copies,
+unmarked/foreign objects and unverified lifetimes are never deleted by age alone.
+Malformed markers or cleanup failures are reported for ownership inspection.
+There is no wall-clock deletion guarantee if the child survives or the CLI never
+starts again, and this is not a secure-erase guarantee. Source bytes, modes and sibling files
+remain unchanged. Operator exec credential plugins retain their own environment
+and may maintain their own caches; they are not sandboxed by this protection.
+
+The add-repo script uses `oberth client kubectl` for the same boundary; keep the
+verified local CLI in step with the plugin. Fetch, trust and connect do not
+load or write a kubeconfig. Setup enumeration and probing use the same
+migration-free native loader.
+
+The CLI and setup wizard only target an existing operator-provided cluster and
+kubeconfig. Oberth never creates or recreates a Kubernetes cluster.
+
+Printed kind remedies use a new `oberth-kind.kubeconfig`, refuse an existing
+file or symlink, and pass it explicitly to kind. After creation, use that file
+and the corresponding context in plan/install. An ordinary operator-run
+`kind create cluster` without a separate kubeconfig can switch current-context;
+`kubectl config get-contexts` lists the contexts still retained in the selected
+files. A changed current context does not establish that another context was
+deleted. The rehearsal's original context loss remains unestablished; inspect
+retained files and commands without attributing a cause or recreating guessed
+credentials. Oberth never updates the operator's kubeconfig files.

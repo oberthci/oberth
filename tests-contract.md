@@ -463,12 +463,6 @@ sh, bash and zsh when available: missing tools only print exact commands/links,
 including with affirmative stdin. Brew is never invoked. The installation
 option is rejected; existing prerequisites let validation succeed.
 
-Mac onboarding #1553: `TestInstallRejectsClusterCreationOption`,
-`TestWizardOnlyOffersExistingClusters` and
-`TestSavedAnswersRejectRemovedClusterCreationState` keep the CLI, setup choices
-and resumed answers on existing operator-provided clusters. Printed kind
-remedies remain guarded instructions with a separate kubeconfig destination.
-
 Mac onboarding #1548: `TestPluginNetworkPolicyLiveProbeAndCleanup` drives the
 real probe through fake Kubernetes resources and exec outcomes: enforced,
 absent, namespace/exec denial, unavailable image, cancellation, lost create
@@ -477,8 +471,42 @@ tokenless Pods, allowed/blocked/recovered sequence and UID-bound cleanup.
 `TestPolicyPreflightUsesLiveEvidenceForEveryDistribution` keeps enforcement
 independent of kind/managed/unknown controller and distribution names.
 
+Mac onboarding #1549: `TestPluginPlanAndInstallKeepKubeconfigBytes` retains two
+operator files, comments, current-context fields and both contexts without changing bytes
+after a successful plan and a non-dry-run install that reaches the Helm boundary.
+Operator-created kind clusters use the same selected-context read-only loading
+and private child-copy boundary as every other existing cluster.
+
+Mac onboarding review regressions cover ingress-only/egress-only data planes,
+unrelated HTTP failure, delayed programming, namespace-label and partial-node
+exclusions, exact evidence scope, and stale/active/foreign probe cleanup.
+The original no-enforcement fixture now correctly expects unverified rather
+than treating a timeout as proof of absence. Every child runner executes real
+pinned client-go credential persistence into its private copy and checks source
+bytes/modes/sibling sets and an absent migration destination. Merge tests retain
+precedence, context, relative assets and -- separation. An actual add-repo -> CLI
+-> child runner fixture proves the direct script path. Stored disabled policy
+survives preflight and upgrade arguments, preserves its warning, and verifies
+as disabled from installed values rather than the flag default.
+Setup verification and saved-release probes also execute real client-go refresh
+through their production wrappers; source bytes/modes/sibling sets and the absent
+default migration destination remain unchanged, and private copies are removed.
+
+Mac onboarding #1553: `TestInstallRejectsClusterCreationOption`,
+`TestWizardOnlyOffersExistingClusters` and
+`TestSavedAnswersRejectRemovedClusterCreationState` keep the CLI, setup choices
+and resumed answers on existing operator-provided clusters. Printed kind
+remedies remain guarded instructions with a separate kubeconfig destination.
+
 Mac onboarding R3 #1548: `TestExistingUpgradeDoesNotRequireFreshProbe` reaches
 the real Execute Review boundary with unverified capability for stored true,
 false and missing values; `TestRunUpgradePreservesPolicyWithoutProbePrivileges`
 exercises real upgrade application with no fresh-probe requirement. Replacement,
 renewed and unknown-lifetime namespaces never acquire stale deletion authority.
+
+Mac onboarding R3 #1549: `TestSweepReclaimsOnlyUnlockedOwnedCopies`,
+`TestSweepPreservesUnverifiedAgeAndReportsCleanupFailure`,
+`TestSweepPreservesMalformedOwnershipMarkers` and
+`TestCLIPrivateKubeconfigSignalsAndCrashRecovery` cover active leases, stale
+marked copies, unknown/future/trailing metadata, directory replacement, all
+handled signals and SIGKILL followed by startup reclamation after child exit.

@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/holdfs"
 	"github.com/oberthci/oberth/internal/installer"
+	"github.com/oberthci/oberth/internal/kubeconfig"
 	"github.com/oberthci/oberth/internal/stepusage"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -43,8 +44,12 @@ func main() {
 		// inside a held attempt (docs/assisted-continuation.md).
 		os.Exit(holdfs.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	defer stop()
+	if err := kubeconfig.Sweep(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "oberth: private kubeconfig recovery:", err)
+		os.Exit(1)
+	}
 	if code, handled := gitcache.ReceiveHookInvocation(ctx, os.Args, os.Stdin, os.Stderr); handled {
 		stop()
 		os.Exit(code)

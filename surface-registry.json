@@ -792,6 +792,10 @@
       "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
       "test_ref": "internal/installer/network_policy_review_test.go TestProbeReconcilesStaleNamespacesAndProtectsActiveAndForeign"
     },
+    "value:client kubectl": {
+      "doc_anchor": "docs/plugin-install.md#preserve-the-operators-kubeconfig",
+      "test_ref": "cmd/oberth/client_kubectl_test.go TestAddRepoKubectlUsesPrivateConfiguration"
+    },
     "value:evidence": {
       "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
       "test_ref": "internal/installer/network_policy_review_test.go TestProbeEvidenceRequiresEgressControlAndConvergence"

@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	tea "charm.land/bubbletea/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -39,15 +40,9 @@ type clusterInfoMsg struct {
 // the default when empty) for the given context and checks the cluster.
 func probeClusterWithPath(contextName, path string) tea.Cmd {
 	return func() tea.Msg {
-		rules := clientcmd.NewDefaultClientConfigLoadingRules()
+		rules := kubeconfig.Rules("")
 		rules.ExplicitPath = path
-		overrides := &clientcmd.ConfigOverrides{}
-		if contextName != "" {
-			overrides.CurrentContext = contextName
-		}
-		config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
-
-		rawConfig, err := config.RawConfig()
+		rawConfig, restConfig, err := kubeconfig.Client(rules, contextName)
 		if err != nil {
 			return clusterInfoMsg{err: fmt.Errorf("load kubeconfig: %w", err)}
 		}
@@ -59,13 +54,6 @@ func probeClusterWithPath(contextName, path string) tea.Cmd {
 			selectedContext = contextName
 		}
 
-		restConfig, err := config.ClientConfig()
-		if err != nil {
-			return clusterInfoMsg{
-				context: selectedContext,
-				err:     fmt.Errorf("build REST config: %w", err),
-			}
-		}
 		restConfig.Timeout = 10 * time.Second
 
 		client, err := kubernetes.NewForConfig(restConfig)

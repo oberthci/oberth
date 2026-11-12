@@ -1452,6 +1452,8 @@ spec:
         value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
       - name: OBERTH_TOOLS_DIR
         value: "/tmp/oberth-tools"
+      - name: KUBECONFIG
+        value: ""
       - name: HOME
         value: "/tmp"
       - name: GOPATH

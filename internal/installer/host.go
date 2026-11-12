@@ -17,10 +17,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/oberthci/oberth/internal/clientcert"
 	"github.com/oberthci/oberth/internal/mdnsdial"
@@ -227,7 +228,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 
 	if cfg.KubeconfigPath != "" {
 		deps.LoadKubeConfig = func(name string) (kubernetes.Interface, *rest.Config, string, error) {
-			rules := clientcmd.NewDefaultClientConfigLoadingRules()
+			rules := kubeconfig.Rules("")
 			rules.ExplicitPath = cfg.KubeconfigPath
 			return loadKubeConfigWithRules(rules, name, "", deps.Output)
 		}
@@ -462,9 +463,9 @@ func RequireContextChoice(action, contextName, kubeconfigPath string, list func(
 // file at path, else what KUBECONFIG names, else ~/.kube/config. A kubeconfig
 // that cannot be read lists none, and the load that follows reports why.
 func KubeconfigContexts(path string) ([]string, error) {
-	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	rules := kubeconfig.Rules("")
 	rules.ExplicitPath = path
-	raw, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).RawConfig()
+	raw, err := kubeconfig.Read(rules)
 	if err != nil {
 		return nil, err
 	}
@@ -605,11 +606,20 @@ func commandOutputSuffix(output []byte) string {
 // DefaultRunCommand runs a host command without a shell and returns its
 // combined output for prerequisite and registry diagnostics. Failed child
 // commands retain stderr separately in exec.ExitError.
-func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...string) (result []byte, resultErr error) {
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
+
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
-	command.Env = installerChildEnvironment()
+	command.Env = environment
+	if lease != nil {
+		command.ExtraFiles = []*os.File{lease}
+	}
 	if len(input) > 0 {
 		command.Stdin = bytes.NewReader(input)
 	}
@@ -652,15 +662,24 @@ func (w commandCaptureWriter) Write(p []byte) (int, error) {
 // DefaultRunInteractive runs a host command wired to the operator's own
 // terminal, so pod-side interactive flows (kubectl exec -i ... oberth
 // upstream add) can prompt, stream progress, and read answers directly.
-func DefaultRunInteractive(ctx context.Context, name string, args ...string) error {
+func DefaultRunInteractive(ctx context.Context, name string, args ...string) (resultErr error) {
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	if prepareErr != nil {
+		return prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
+
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
-	command.Env = installerChildEnvironment()
+	command.Env = environment
+	if lease != nil {
+		command.ExtraFiles = []*os.File{lease}
+	}
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	return command.Run()
+	return errors.Join(command.Run(), ctx.Err())
 }
 
 // StdinIsTerminal reports whether stdin is an interactive terminal. The
@@ -673,10 +692,19 @@ func StdinIsTerminal() bool {
 // DefaultRunCommandStream streams wait progress without a shell or buffered
 // output. The explicit caller context owns termination; WaitDelay bounds joins
 // if an inherited pipe remains open after the local child exits.
-func DefaultRunCommandStream(ctx context.Context, output io.Writer, name string, args ...string) error {
+func DefaultRunCommandStream(ctx context.Context, output io.Writer, name string, args ...string) (resultErr error) {
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	if prepareErr != nil {
+		return prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
+
 	// #nosec G204 -- fixed executable and structured arguments, as in DefaultRunCommand.
 	command := exec.CommandContext(ctx, name, args...)
-	command.Env = installerChildEnvironment()
+	command.Env = environment
+	if lease != nil {
+		command.ExtraFiles = []*os.File{lease}
+	}
 	command.Stdout, command.Stderr = output, output
 	command.WaitDelay = 5 * time.Second
 	return errors.Join(command.Run(), ctx.Err())

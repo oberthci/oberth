@@ -63,11 +63,15 @@ detect_language() {
  elif [ -f "$root/pyproject.toml" ] || [ -f "$root/setup.py" ]; then language=python; fi
 }
 manual() { if [ -n "$settings" ]; then printf 'manual_key_settings=%s\n' "$settings"; else echo 'manual_key_registration=Ask the forge administrator for the exact public-key registration page or authorized_keys location.'; fi; echo 'Add the public deploy key with write access, then verify through Oberth. Do not paste a private key or token.'; }
+run_kubectl() {
+ find_cli
+ "$oberth_cli" client kubectl "$@"
+}
 server() {
  context=$1; namespace=$2; pod=$3; shift 3
  [ -n "$context" ] && [ -n "$namespace" ] && [ -n "$pod" ] || fail 'explicit context, namespace and pod are required'
  command -v kubectl >/dev/null 2>&1 || fail 'install kubectl yourself: https://kubernetes.io/docs/tasks/tools/'
- kubectl --context="$context" exec -n "$namespace" "$pod" -c oberth -- /usr/local/bin/oberth "$@"
+ run_kubectl --context="$context" exec -n "$namespace" "$pod" -c oberth -- /usr/local/bin/oberth "$@"
 }
 workflow() {
  case "$language" in
@@ -141,10 +145,10 @@ inspect)
  detect "$1" "${2:-}"
  printf 'root=%s\nforge=%s\nhost=%s\norganization=%s\nrepository=%s\nroute_org=%s\nupstream_url=ssh://%s@%s/%s\nkey_settings=%s\nlanguage=%s\n' "$root" "$forge" "$host" "$organization" "$repository" "${organization##*/}" "$ssh_user" "$host${ssh_port:+:$ssh_port}" "$home_prefix$organization" "$settings" "$language"
  if [ -e "$root/.oberth" ] || [ -L "$root/.oberth" ]; then echo 'workflow=existing'; else echo 'workflow=missing'; fi;;
-contexts) kubectl config get-contexts;;
+contexts) run_kubectl config get-contexts;;
 pods)
  [ "$#" -eq 2 ] || fail 'pods <chosen-context> <namespace>'
- kubectl --context="$1" get pods -n "$2" -l app.kubernetes.io/name=oberth -o name;;
+ run_kubectl --context="$1" get pods -n "$2" -l app.kubernetes.io/name=oberth -o name;;
 upstreams)
  [ "$#" -eq 3 ] || fail 'upstreams <context> <namespace> <pod>'
  server "$1" "$2" "$3" upstream list --check;;
