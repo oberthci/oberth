@@ -196,3 +196,66 @@ func TestNativeReceiveUpgradeArchivedReceiptsStayTerminalAfterUnarchive(t *testi
 		})
 	}
 }
+
+func TestNativeReceiveUpgradePreservesExecutionAndPublicationCustody(t *testing.T) {
+	for _, kind := range []string{"queued", "promotion", "running", "publication"} {
+		t.Run(kind, func(t *testing.T) {
+			s := nativeReceiveUpgradeStore(t)
+			repo := createRepo(t, s)
+			ctx := t.Context()
+			spec := testRunSpec(repo.ID, "main", strings.Repeat("a", 40))
+			if kind == "promotion" {
+				spec.Trigger = "promotion"
+			}
+			older, err := s.EnqueueRun(ctx, spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var publication model.Publication
+			if kind == "running" || kind == "publication" {
+				older.Run, err = s.ClaimNextRun(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind == "publication" {
+					publication, err = s.BeginPublication(ctx, model.PublicationSpec{RepoID: repo.ID, RunID: older.ID, RefKind: older.RefKind, Ref: older.Ref, ResultSHA: older.SHA, Actor: older.Actor})
+					if err != nil {
+						t.Fatal(err)
+					}
+					// Recreate a restored queued row that still owns a pending publication.
+					if _, err = s.db.ExecContext(ctx, `UPDATE runs SET status='queued' WHERE id=?`, older.ID); err != nil {
+						t.Fatal(err)
+					}
+					older.Status = model.RunQueued
+				}
+			}
+			newerSpec := testRunSpec(repo.ID, "main", strings.Repeat("b", 40))
+			event := seedDeferredReceive(t, s, "new-main", newerSpec)
+			applyNativeReceiveUpgrade(t, s)
+			newer, err := s.EnqueueReceiveEvent(ctx, event, newerSpec)
+			if err != nil || newer.Status != model.RunQueued {
+				t.Fatal(newer, err)
+			}
+			after, err := s.Run(ctx, older.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "queued" {
+				if after.Status != model.RunInterrupted || after.SupersededBy != newer.ID || after.Reason != "superseded by newer run" {
+					t.Fatal("queued A not superseded by B", after, newer)
+				}
+			} else if after.Status != older.Status || after.SupersededBy != "" || after.FinishedAt != nil {
+				t.Fatal("migration changed existing custody", after)
+			}
+			if kind == "publication" {
+				var status, runID string
+				if err = s.db.QueryRowContext(ctx, `SELECT status,run_id FROM publications WHERE id=?`, publication.ID).Scan(&status, &runID); err != nil || status != "pending" || runID != older.ID {
+					t.Fatal("publication custody changed", status, runID, err)
+				}
+				if _, err = s.ClaimNextRun(ctx); !errors.Is(err, ErrNotFound) {
+					t.Fatal("pending publication lane became claimable", err)
+				}
+			}
+		})
+	}
+}
