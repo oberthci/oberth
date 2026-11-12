@@ -188,10 +188,7 @@ spec:
             {{- $autoRetryBudget = int .Values.autoRetryInfrastructureBudget }}
             {{- end }}
             - --auto-retry-infrastructure-budget={{ $autoRetryBudget }}
-            {{- $releases := .Values.releases | default dict }}
-            {{- if $releases.serialize }}
-            - --serialize-releases=true
-            {{- end }}
+
             {{- $kubernetesClient := .Values.kubernetesClient | default dict }}
             - --kubernetes-client-qps={{ $kubernetesClient.qps | default 50 }}
             - --kubernetes-client-burst={{ int64 ($kubernetesClient.burst | default 100) }}

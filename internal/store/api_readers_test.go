@@ -29,9 +29,6 @@ func TestAPIReadsWhileWriterTransactionHeld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
-		t.Fatal(err)
-	}
 	var mode string
 	if err := s.reader().QueryRowContext(t.Context(), `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
 		t.Fatalf("journal mode=%q: %v", mode, err)
@@ -72,13 +69,6 @@ func TestAPIReadsWhileWriterTransactionHeld(t *testing.T) {
 		"counts":          func(ctx context.Context) error { _, err := s.CountRuns(ctx); return err },
 		"latest":          func(ctx context.Context) error { _, err := s.ListLatestRunsPerRepo(ctx, 1); return err },
 		"steps":           func(ctx context.Context) error { _, err := s.StepResults(ctx, run.ID); return err },
-		"priority-patterns": func(ctx context.Context) error {
-			got, err := s.QueuePriorityPatterns(ctx)
-			if err == nil && (len(got) != 1 || got[0] != "rc/*") {
-				return fmt.Errorf("unexpected priority patterns: %v", got)
-			}
-			return err
-		},
 		"run-workspace-owner": func(ctx context.Context) error {
 			eligible, err := s.RunWorkspaceCleanupEligible(ctx, run.ID)
 			if err == nil && eligible {

@@ -17,7 +17,6 @@ type promotionSourceArgument struct {
 	Ref string `json:"ref,omitempty"`
 }
 type promotionArguments struct {
-	model.PriorityRequest
 	Repo            string                    `json:"repo"`
 	SHA             string                    `json:"sha"`
 	Branch          string                    `json:"branch"`
@@ -109,7 +108,7 @@ func (service *API) promoteTrain(ctx context.Context, actor api.Actor, args prom
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	return service.planOrQueuePromotion(ctx, actor, repository, candidate, args.Branch, promotion, requestedPriority(actor, args.PriorityRequest))
+	return service.planOrQueuePromotion(ctx, actor, repository, candidate, args.Branch, promotion)
 }
 
 func (service *API) resolvePromotionTrainSources(ctx context.Context, repository model.Repository, train *model.PromotionTrain, target string) ([]model.Run, error) {

@@ -36,7 +36,7 @@ func TestInfrastructureRetryTrustedPolicyDeadlineKeepsQueuePosition(t *testing.T
 	}
 	retry, err := f.store.Run(t.Context(), failed.AutoRetriedBy)
 	reason := "automatic retry of " + source.ID + " after infrastructure failure: " + failed.Error
-	if err != nil || retry.AdmissionSequence != source.AdmissionSequence || retry.Priority != source.Priority || retry.Reason != reason || retry.AutoRetryOf != source.ID {
+	if err != nil || retry.AdmissionSequence != source.AdmissionSequence || retry.Reason != reason || retry.AutoRetryOf != source.ID {
 		t.Fatalf("retry identity/order/reason: %+v %v", retry, err)
 	}
 	action, err := f.store.LatestAuditActionByType(t.Context(), "run.retry.auto", "run")

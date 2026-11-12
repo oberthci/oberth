@@ -34,7 +34,7 @@ func TestAPILatencyQueries(t *testing.T) {
 			t.Fatalf("%s exceeded 500ms", name)
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+latestRefQuery("", priorityOrderSQL(s.now())), "", MaxActiveRuns, "", 0, 0, "", 100)
+	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+latestRefQuery("", submissionOrderSQL()), "", MaxActiveRuns, "", 0, 0, "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestAPIQueryPlansUseHistoryIndexes(t *testing.T) {
 		{"terminal", `SELECT id FROM runs WHERE status NOT IN ('queued','running') ORDER BY ` + runEndTimeSQL + ` DESC,id DESC LIMIT 100`, "INDEX runs_terminal_end_idx", nil},
 		{"successor", `SELECT 1 FROM runs AS newer WHERE newer.trigger!='promotion' AND newer.repo_id=? AND newer.ref_kind=? AND newer.ref=? AND newer.schedule_entry=? AND newer.queue_sequence>? AND newer.status IN ('queued','running')`, "INDEX runs_active_ref_idx", []any{1, "branch", "ref-0001", "", 1}},
 		{"audit", `SELECT id FROM audit_actions WHERE action=? AND resource_type=? ORDER BY id DESC LIMIT 1`, "COVERING INDEX audit_actions_type_idx", []any{"backup.completed", "system"}},
-		{"scoped_heads", latestRefQuery(" AND repo_id=?", priorityOrderSQL(s.now())), "SEARCH runs USING COVERING INDEX runs_latest_ref_idx (repo_id=?)", []any{1, "", MaxActiveRuns, "", 0, 0, "", 100}},
+		{"scoped_heads", latestRefQuery(" AND repo_id=?", submissionOrderSQL()), "SEARCH runs USING COVERING INDEX runs_latest_ref_idx (repo_id=?)", []any{1, "", MaxActiveRuns, "", 0, 0, "", 100}},
 	}
 	for _, check := range checks {
 		t.Run(check.name, func(t *testing.T) {

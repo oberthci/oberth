@@ -132,7 +132,7 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
   AND NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?
     AND ((status='failed' AND NOT ?) OR (? AND (started_at IS NOT NULL OR status='passed' OR log_end>log_start))))
   AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
-  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, source.PriorityProtected, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, eviction, deadline, source.ID, source.ID).Scan(&eligible)
+  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, false, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, eviction, deadline, source.ID, source.ID).Scan(&eligible)
 	if err != nil {
 		return source, fmt.Errorf("check automatic infrastructure retry: %w", err)
 	}
@@ -150,10 +150,7 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 	if err != nil {
 		return source, fmt.Errorf("enqueue automatic infrastructure retry: %w", err)
 	}
-	next.Run, err = s.inheritQueuePriorityTx(ctx, tx, source, next.Run)
-	if err != nil {
-		return source, err
-	}
+
 	// The original's reason line links to the rerun; the rerun's names the
 	// lineage origin and this attempt's cause.
 	source.AutoRetriedBy, source.Reason = next.ID, autoRetriedByPrefix+next.ID
@@ -164,7 +161,7 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 	if err = s.recordAutoRetryLineageTx(ctx, tx, origin, source.Error, attempt, &next.Run); err != nil {
 		return source, err
 	}
-	details, err := json.Marshal(map[string]any{"source_run_id": source.ID, "origin_run_id": origin, "run_id": next.ID, "reason": next.Reason, "failure_reason": source.Error, "admission_sequence": source.AdmissionSequence, "priority": next.Priority, "automatic": true, "attempt": attempt, "budget": budget, "sha": source.SHA, "ref": source.Ref})
+	details, err := json.Marshal(map[string]any{"source_run_id": source.ID, "origin_run_id": origin, "run_id": next.ID, "reason": next.Reason, "failure_reason": source.Error, "admission_sequence": source.AdmissionSequence, "automatic": true, "attempt": attempt, "budget": budget, "sha": source.SHA, "ref": source.Ref})
 	if err != nil {
 		return source, err
 	}

@@ -42,10 +42,6 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 					enqueued, err = s.EnqueueRun(ctx, spec)
 				}
 				requireRestartNoError(t, err)
-				if kind == "branch" {
-					_, err = s.BumpRunPriority(ctx, "operator", enqueued.ID, model.PriorityHigh, "urgent branch")
-					requireRestartNoError(t, err)
-				}
 				claimed, err := s.ClaimNextRun(ctx)
 				requireRestartNoError(t, err)
 				if claimed.ID != enqueued.ID || claimed.StartedAt != nil {
@@ -71,8 +67,8 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 				requireRestartNoError(t, err)
 				if current.Status != model.RunQueued || current.ID != original.ID ||
 					current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence ||
-					!current.QueuedAt.Equal(original.QueuedAt) || current.Priority != original.Priority ||
-					current.PriorityReason != original.PriorityReason || current.PriorityOverride != original.PriorityOverride ||
+					!current.QueuedAt.Equal(original.QueuedAt) ||
+
 					current.SupersededBy != "" || current.StartedAt != nil || current.FinishedAt != nil || current.Error != "" {
 					t.Errorf("restart changed waiting identity/order/priority: before=%+v after=%+v", original, current)
 				}

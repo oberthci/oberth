@@ -35,7 +35,7 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	restriction += statusSQL
 	restrictionArgs = append(restrictionArgs, statusArgs...)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
-	priorityOrder := priorityOrderSQL(s.now())
+	priorityOrder := submissionOrderSQL()
 	rows, err := s.reader().QueryContext(ctx, `
 WITH queue AS (
  SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs

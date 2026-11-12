@@ -55,7 +55,7 @@ func newPapercutFixture(t *testing.T) papercutFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control, err := service.NewAPI(service.APIConfig{Runs: db, History: db, Repositories: db, Promotions: db, PromotionRuns: db, QueuePriorities: db, Logs: logs, MaximumWait: 20 * time.Millisecond})
+	control, err := service.NewAPI(service.APIConfig{Runs: db, History: db, Repositories: db, Promotions: db, PromotionRuns: db, Logs: logs, MaximumWait: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,30 +95,6 @@ func papercutCall(t *testing.T, tool string, args any) (string, error) {
 	var output bytes.Buffer
 	err = runMCPCall(t.Context(), []string{tool, string(encoded)}, &output)
 	return output.String(), err
-}
-
-func TestAdminPapercutPriorityCLIAndReadback(t *testing.T) {
-	f := newPapercutFixture(t)
-	run := f.run(t, "feature/priority")
-	for _, priority := range []string{"low", "standard", "promotion", "high"} {
-		args := map[string]any{"id": run.ID[:8], "priority": priority, "reason": "let the queue move"}
-		output, err := papercutCall(t, "run_priority", args)
-		if err != nil || !strings.Contains(output, "let the queue move") {
-			t.Fatalf("priority CLI=%s %v", output, err)
-		}
-		reply := f.rest("/api/runs/" + run.ID)
-		var detail service.RunDetailResponse
-		if err = json.Unmarshal(reply.Body.Bytes(), &detail); err != nil {
-			t.Fatal(err)
-		}
-		if reply.Code != http.StatusOK || detail.Run.Priority != model.RunPriority(priority) || !strings.Contains(detail.Run.PriorityReason, "let the queue move") {
-			t.Fatalf("priority REST readback=%d %s", reply.Code, reply.Body)
-		}
-	}
-	t.Setenv("OBERTH_TOKEN", "reader")
-	if _, err := papercutCall(t, "run_priority", map[string]any{"id": run.ID, "priority": "low", "reason": "not authorized"}); err == nil {
-		t.Fatal("non-admin lowered priority")
-	}
 }
 
 func TestAdminPapercutRunListCLIAndREST(t *testing.T) {

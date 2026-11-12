@@ -29,7 +29,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -236,13 +235,6 @@ type Config struct {
 	// Assist is the agent-assisted continuation policy (Helm assist.*).
 	// Disabled by default; see assist_hold.go.
 	Assist AssistConfig
-
-	// SerializeReleases (Helm releases.serialize) adds the native Argo
-	// workflow-level mutex ReleaseMutexName to every release run, so no two
-	// releases of any repository run at the same time. The decision is the
-	// run's trigger, never its document; a document's own synchronization is
-	// kept beside the server's mutex. Off by default.
-	SerializeReleases bool
 
 	// StalledRunTimeout bounds an admitted workflow without a scheduled pod or progress.
 	// Zero selects ten minutes.
@@ -619,7 +611,6 @@ type Request struct {
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
 
-	Priority     model.RunPriority
 	RunID        string
 	RepositoryID int64
 	// Name is the durable, deterministic object name the scheduler already
@@ -894,8 +885,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 
-	serializeReleases(workflow, config, request)
-	prioritizeReleases(workflow, request)
 	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
@@ -1256,60 +1245,6 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	workflow.Spec.PodMetadata.Labels[runLabel] = labelValue(request.RunID)
 	workflow.Spec.PodMetadata.Labels[triggerLabel] = string(request.Trigger)
 	workflow.Spec.PodMetadata.Labels[tierLabel] = tierFor(request.Trigger)
-}
-
-// ReleaseMutexName is the fixed native Argo mutex every release run takes at
-// workflow level while Config.SerializeReleases is on. One name across all
-// repositories is the point: releases wait for each other in Argo's queue,
-// priority then creation time, and show "Waiting for lock .../Mutex/oberth-release".
-// Admission refuses the name in authored documents, so the server is its only
-// holder.
-const ReleaseMutexName = argoworkflow.ReleaseMutexName
-
-// serializeReleases adds the release mutex to a release run's workflow-level
-// synchronization, merging with whatever the document declares there. A
-// held retry keeps it: Argo acquires workflow-level locks before the run
-// starts and releases them when the Workflow is fulfilled. A release waiting
-// for it is Pending with the controller's lock message, which the startup
-// stall clock and the pre-start watchdog leave alone.
-func serializeReleases(workflow *wfv1.Workflow, config Config, request Request) {
-	if !config.SerializeReleases || request.Trigger != pipeline.TriggerRelease {
-		return
-	}
-	if workflow.Spec.Synchronization == nil {
-		workflow.Spec.Synchronization = &wfv1.Synchronization{}
-	}
-	for _, mutex := range workflow.Spec.Synchronization.Mutexes {
-		if mutex != nil && mutex.Name == ReleaseMutexName && mutex.Namespace == "" {
-			return
-		}
-	}
-	workflow.Spec.Synchronization.Mutexes = append(workflow.Spec.Synchronization.Mutexes, &wfv1.Mutex{Name: ReleaseMutexName})
-}
-
-// ReleasePriority is the minimum Argo queue priority for a release.
-// It orders controller admission and native lock acquisition, never Pods.
-const ReleasePriority int32 = 1
-
-// prioritizeReleases propagates the server-accepted class. Repository YAML
-// cannot choose Argo priority; releases retain at least ReleasePriority.
-func prioritizeReleases(workflow *wfv1.Workflow, request Request) {
-	if request.Trigger != pipeline.TriggerRelease && request.Priority.Rank() == 0 {
-		return
-	}
-	priority := int32(0)
-	switch request.Priority {
-	case model.PriorityLow:
-		priority = -1
-	case model.PriorityPromotion:
-		priority = 1
-	case model.PriorityHigh:
-		priority = 2
-	}
-	if request.Trigger == pipeline.TriggerRelease {
-		priority = max(priority, ReleasePriority)
-	}
-	workflow.Spec.Priority = &priority
 }
 
 // applyServerBounds caps the document's own deadline and pins retention. A

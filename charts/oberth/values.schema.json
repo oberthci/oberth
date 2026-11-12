@@ -24,9 +24,18 @@
       "additionalProperties": false,
       "description": "Advertised client endpoints persisted on the Service for install verification; empty fields use Service discovery.",
       "properties": {
-        "host": {"type": "string", "maxLength": 253},
-        "sshPort": {"type": "string", "pattern": "^$|^[1-9][0-9]{0,4}$"},
-        "httpsPort": {"type": "string", "pattern": "^$|^[1-9][0-9]{0,4}$"}
+        "host": {
+          "type": "string",
+          "maxLength": 253
+        },
+        "sshPort": {
+          "type": "string",
+          "pattern": "^$|^[1-9][0-9]{0,4}$"
+        },
+        "httpsPort": {
+          "type": "string",
+          "pattern": "^$|^[1-9][0-9]{0,4}$"
+        }
       }
     },
     "uplinkTokens": {
@@ -54,14 +63,43 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": {"type": "boolean", "default": false},
-            "interval": {"type": "string", "pattern": "^[0-9]+(ms|s|m|h)$", "default": "60s"},
-            "additionalLabels": {"type": "object", "additionalProperties": {"type": "string"}},
-            "bearerTokenSecretName": {"type": "string", "description": "Secret in the release namespace holding a metrics-scoped uplink token (oberth uplink add --scope metrics)."},
-            "bearerTokenSecretKey": {"type": "string", "minLength": 1, "default": "token"},
-            "caConfigMapName": {"type": "string", "description": "ConfigMap in the release namespace holding the CA the server certificate chains to."},
-            "caConfigMapKey": {"type": "string", "minLength": 1, "default": "ca.crt"},
-            "serverName": {"type": "string", "description": "TLS server name; empty is <fullname>.<namespace>.svc."}
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "interval": {
+              "type": "string",
+              "pattern": "^[0-9]+(ms|s|m|h)$",
+              "default": "60s"
+            },
+            "additionalLabels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "bearerTokenSecretName": {
+              "type": "string",
+              "description": "Secret in the release namespace holding a metrics-scoped uplink token (oberth uplink add --scope metrics)."
+            },
+            "bearerTokenSecretKey": {
+              "type": "string",
+              "minLength": 1,
+              "default": "token"
+            },
+            "caConfigMapName": {
+              "type": "string",
+              "description": "ConfigMap in the release namespace holding the CA the server certificate chains to."
+            },
+            "caConfigMapKey": {
+              "type": "string",
+              "minLength": 1,
+              "default": "ca.crt"
+            },
+            "serverName": {
+              "type": "string",
+              "description": "TLS server name; empty is <fullname>.<namespace>.svc."
+            }
           }
         }
       }
@@ -111,31 +149,51 @@
       "default": 2,
       "description": "Automatic retries per lineage of an eligible branch infrastructure failure (retry_hint class infrastructure), retaining queue position and priority. 0 disables."
     },
-    "releases": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Release run policy.",
-      "properties": {
-        "serialize": {
-          "type": "boolean",
-          "default": false,
-          "description": "Give every release run the native Argo workflow-level mutex oberth-release, so no two releases of any repository run at once."
-        }
-      }
-    },
     "assist": {
       "type": "object",
       "additionalProperties": false,
       "description": "Agent-assisted CI continuation: opted-in credential-free branch CI steps park a failed retry for run_hold_* tools. Off by default; assisted runs are never green evidence.",
       "properties": {
-        "enabled": {"type": "boolean", "default": false},
-        "holdTTL": {"type": "string", "pattern": "^(([0-9]+h)([0-9]+m)?([0-9]+s)?|([0-9]+m)([0-9]+s)?|[0-9]+s)$", "description": "How long an idle unreleased hold waits for the agent before the server abandons it; a hold with an agent action ages from its last action, at most 2x this TTL; the held Pod deadline is the step budget plus 2x this TTL. A Go duration in whole seconds such as 20m or 1h30m, at most 4h."},
-        "maxConcurrentHolds": {"type": "integer", "minimum": 1, "maximum": 64},
-        "execTimeout": {"type": "string", "pattern": "^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$", "description": "Deadline of one run_hold_exec command, a Go duration such as 90s or 1m30s; at most 15m."},
-        "execOutputBytes": {"type": "integer", "minimum": 1024, "maximum": 4194304},
-        "patchMaxBytes": {"type": "integer", "minimum": 1024, "maximum": 16777216},
-        "patchMaxFiles": {"type": "integer", "minimum": 1, "maximum": 1024},
-        "scratchBytes": {"type": "integer", "minimum": -1, "maximum": 68719476736, "description": "Ephemeral storage in bytes added to a held attempt's main container request and limit: its Go caches move to private scratch, so the continued command rebuilds cold on the node's disk. Default 8Gi (8589934592); -1 adds none; at most 64Gi."}
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "holdTTL": {
+          "type": "string",
+          "pattern": "^(([0-9]+h)([0-9]+m)?([0-9]+s)?|([0-9]+m)([0-9]+s)?|[0-9]+s)$",
+          "description": "How long an idle unreleased hold waits for the agent before the server abandons it; a hold with an agent action ages from its last action, at most 2x this TTL; the held Pod deadline is the step budget plus 2x this TTL. A Go duration in whole seconds such as 20m or 1h30m, at most 4h."
+        },
+        "maxConcurrentHolds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "execTimeout": {
+          "type": "string",
+          "pattern": "^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$",
+          "description": "Deadline of one run_hold_exec command, a Go duration such as 90s or 1m30s; at most 15m."
+        },
+        "execOutputBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 4194304
+        },
+        "patchMaxBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 16777216
+        },
+        "patchMaxFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "scratchBytes": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 68719476736,
+          "description": "Ephemeral storage in bytes added to a held attempt's main container request and limit: its Go caches move to private scratch, so the continued command rebuilds cold on the node's disk. Default 8Gi (8589934592); -1 adds none; at most 64Gi."
+        }
       }
     },
     "agentEvents": {
@@ -143,13 +201,40 @@
       "additionalProperties": false,
       "description": "MCP agent loop: durable agent events, native Argo lock history and MCP push stream bounds (docs/agent-events.md).",
       "properties": {
-        "retention": {"type": "integer", "minimum": 1, "maximum": 1000000},
-        "syncRetention": {"type": "integer", "minimum": 1, "maximum": 1000000},
-        "interval": {"type": "string", "pattern": "^[0-9]+(s|m)$", "description": "Sweep period, 2s..5m."},
-        "lockWaitThreshold": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"},
-        "maxStreamsPerToken": {"type": "integer", "minimum": 1, "maximum": 64},
-        "maxBacklog": {"type": "integer", "minimum": 1, "maximum": 10000},
-        "heartbeat": {"type": "string", "pattern": "^[0-9]+(s|m)$", "description": "Keepalive interval, 1s..5m."}
+        "retention": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "syncRetention": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "interval": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m)$",
+          "description": "Sweep period, 2s..5m."
+        },
+        "lockWaitThreshold": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m|h)$"
+        },
+        "maxStreamsPerToken": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "maxBacklog": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "heartbeat": {
+          "type": "string",
+          "pattern": "^[0-9]+(s|m)$",
+          "description": "Keepalive interval, 1s..5m."
+        }
       }
     },
     "terminationGracePeriodSeconds": {
@@ -166,7 +251,11 @@
           "type": "string",
           "pattern": "^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
         },
-        "maxEntries": {"type": "integer", "minimum": 1, "maximum": 256}
+        "maxEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        }
       }
     },
     "pushBannerURL": {
@@ -559,9 +648,14 @@
         "podPolicy": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "properties": {
-            "enabled": {"type": "boolean", "default": true}
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            }
           }
         },
         "releaseTagRoutes": {
@@ -882,7 +976,9 @@
         "repoWorkflowTimeouts": {
           "type": "object",
           "description": "Per-repository workflow deadline caps keyed by upstream/org/repo.",
-          "propertyNames": {"pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$"},
+          "propertyNames": {
+            "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$"
+          },
           "additionalProperties": {
             "type": "string",
             "pattern": "^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
@@ -1007,9 +1103,17 @@
       "description": "Branch deletion guards (#1490).",
       "properties": {
         "reserved": {
-          "type": ["array", "null"],
+          "type": [
+            "array",
+            "null"
+          ],
           "maxItems": 64,
-          "items": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^,]+$"},
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^,]+$"
+          },
           "description": "Branch globs (Go path.Match; * does not cross /) that no push or prune selector may delete; the default branch is always reserved. [] reserves only the default branch; null or absent keeps the server default main,master."
         }
       }

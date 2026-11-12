@@ -16,11 +16,9 @@ func TestRunListMessageContract(t *testing.T) {
 		want string
 	}{
 		{"queued", model.Run{Status: model.RunQueued}, "in line"},
-		{"tag boost", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHigh, PriorityReason: model.TagReleasePriorityReason}, ""},
-		{"aged", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityPromotion, PriorityReason: model.PriorityAgedReason}, "priority promotion (aged)"},
-		{"running", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityStandard, PriorityReason: "ordinary run"}, ""},
-		{"promotion", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityPromotion, PriorityReason: "promotion run"}, ""},
-		{"admin priority", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHigh, PriorityReason: "admin bump: release candidate"}, "priority high · release candidate"},
+		{"tag boost", model.Run{Status: model.RunRunning, StartedAt: &now}, ""},
+		{"running", model.Run{Status: model.RunRunning, StartedAt: &now}, ""},
+		{"promotion", model.Run{Status: model.RunRunning, StartedAt: &now}, ""},
 		{"publishing", model.Run{Status: model.RunRunning, StartedAt: &now, Phase: "publishing"}, "publishing to upstream"},
 		{"passed", model.Run{Status: model.RunPassed}, ""},
 		{"schedule", model.Run{Status: model.RunPassed, Trigger: "schedule", ScheduleEntry: "nightly"}, "schedule nightly"},

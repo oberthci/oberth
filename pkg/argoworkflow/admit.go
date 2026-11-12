@@ -160,8 +160,8 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	problems = append(problems, admitPodMetadata("spec.podMetadata", spec.PodMetadata)...)
 	problems = append(problems, admitWorkflowMetadata("spec.workflowMetadata", spec.WorkflowMetadata)...)
 	problems = append(problems, admitSynchronization("spec.synchronization", spec.Synchronization)...)
-	if spec.PodPriorityClassName != "" || spec.Priority != nil {
-		problems = append(problems, errors.New("argoworkflow: spec.priority and spec.podPriorityClassName are not admitted"))
+	if spec.PodPriorityClassName != "" {
+		problems = append(problems, errors.New("argoworkflow: spec.podPriorityClassName is not admitted"))
 	}
 	if spec.PodDisruptionBudget != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.podDisruptionBudget is not admitted"))

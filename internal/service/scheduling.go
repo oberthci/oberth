@@ -25,6 +25,7 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 			}
 		}
 	}
+	run = s.runAdmissionContext(ctx, run, true)
 	c := s.schedulingClock()
 	observed := c.Now().UTC()
 	result = &model.RunScheduling{ObservedAt: observed, State: "preparing", Message: "Preparing Workflow submission.", QueuePosition: run.QueuePosition}
@@ -36,7 +37,7 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 	}()
 	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
 		result.State = "waiting"
-		result.Message = store.PolicyRefreshWaitingReason
+		result.Message = store.PolicyRefreshWaitingReason + ": waiting for upstream trusted test policy; no publication is allowed."
 		return result, "waiting for upstream policy"
 	}
 	if isPendingCreate(run) {
@@ -84,14 +85,18 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	if run.Phase == "publishing" || scheduling == nil || scheduling.Execution == nil {
 		return
 	}
+	if scheduling.Execution.Phase == "Pending" || scheduling.Execution.Message == model.ParallelismWaitMessage {
+		run.DisplayStatus = model.DisplayQueued
+		run.DisplayReason = queuedDisplayReason(scheduling)
+	}
 	for _, pod := range scheduling.Execution.Pods {
 		if pod.Phase == "Pending" && strings.HasPrefix(pod.Message, "pod pending: ") {
-			run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), pod.Message)))
+			run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(pod.Message))
 			return
 		}
 	}
 	if wait := lockWaitReason(scheduling.Execution); wait != "" {
-		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), wait)))
+		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(wait))
 		return
 	}
 	switch scheduling.Execution.State {
@@ -102,7 +107,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		if message == "" {
 			message = "awaiting finalization"
 		}
-		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), message)))
+		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(message))
 	}
 }
 

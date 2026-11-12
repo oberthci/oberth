@@ -147,20 +147,13 @@ type Run struct {
 	Assisted        bool             `json:"assisted,omitempty"`
 	Assist          *RunAssistRecord `json:"assist,omitempty"`
 
-	EarlierAttempts     int         `json:"earlier_attempts,omitempty"`
-	AutoRetryOf         string      `json:"auto_retry_of,omitempty"`
-	AutoRetriedBy       string      `json:"auto_retried_by,omitempty"`
-	Priority            RunPriority `json:"priority_class"`
-	PriorityReason      string      `json:"priority_reason"`
-	PriorityRequestedBy string      `json:"priority_requested_by,omitempty"`
-	PriorityRefusal     string      `json:"priority_refusal,omitempty"`
-	PriorityProtected   bool        `json:"-"`
+	EarlierAttempts int    `json:"earlier_attempts,omitempty"`
+	AutoRetryOf     string `json:"auto_retry_of,omitempty"`
+	AutoRetriedBy   string `json:"auto_retried_by,omitempty"`
+
 	// The explicit admin fallback survives a withheld automatic tag boost.
-	PriorityOverride       RunPriority `json:"-"`
-	PriorityOverrideReason string      `json:"-"`
+
 	// Only accepted explicit nonstandard requests provide a tag fallback.
-	PriorityAccepted       RunPriority `json:"-"`
-	PriorityAcceptedReason string      `json:"-"`
 
 	ID            string
 	QueueSequence int64
@@ -198,7 +191,7 @@ type Run struct {
 }
 
 type RunSpec struct {
-	PriorityRequest
+
 	// Assist asks for retry holds (push option oberth.assist=1, rerun assist).
 	Assist        bool
 	Reason        string

@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestClaimFIFOAcrossRepositoriesWithinPriority(t *testing.T) {
+func TestClaimFIFOAcrossRepositoriesAndRunKinds(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -38,7 +38,7 @@ func TestClaimFIFOAcrossRepositoriesWithinPriority(t *testing.T) {
 		t.Fatalf("FIFO acceptance order changed: %+v %v", peek, err)
 	}
 	promotion := enqueue(repo.ID, "promotion/main/one", "promotion")
-	for _, want := range []model.Run{promotion, pending, b} {
+	for _, want := range []model.Run{pending, b, promotion} {
 		got, err := s.ClaimNextRun(t.Context())
 		if err != nil || got.ID != want.ID {
 			t.Fatalf("claim=%+v want=%s err=%v", got, want.ID, err)

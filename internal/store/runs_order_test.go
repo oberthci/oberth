@@ -30,9 +30,6 @@ func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
-	if _, err := s.SetQueuePriorityPatterns(ctx, "admin", []string{"rc/*"}); err != nil {
-		t.Fatal(err)
-	}
 	enqueue := func(ref, sha string) model.Run {
 		t.Helper()
 		run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, ref, strings.Repeat(sha, 40)))

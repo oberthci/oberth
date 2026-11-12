@@ -216,7 +216,7 @@ func (schedules *Schedules) fire(
 	var result model.ScheduleEnqueueResult
 	if err == nil {
 		result, err = schedules.config.Enqueuer.EnqueueScheduledCI(ctx, service.CIRequest{
-			PriorityRequest: model.PriorityRequest{Priority: entry.Priority, PriorityReason: "schedule default: " + entry.Name}, EventID: scheduleEventID(), Repository: repository, Branch: branch,
+			EventID: scheduleEventID(), Repository: repository, Branch: branch,
 			SHA: target, Actor: ScheduleActor, Trigger: "schedule", ScheduleEntry: entry.Name,
 		}, fire)
 	}
@@ -247,13 +247,9 @@ func (schedules *Schedules) entryTarget(ctx context.Context, qualifiedName strin
 
 // enqueue is the manual schedule admission path: EnqueueCI with trigger
 // "schedule". Cron uses EnqueueScheduledCI for atomic cursor consumption.
-func (schedules *Schedules) enqueue(ctx context.Context, repository model.Repository, branch, sha, entry, actor string, priority ...model.PriorityRequest) (model.EnqueueRunResult, error) {
-	var request model.PriorityRequest
-	if len(priority) > 0 {
-		request = priority[0]
-	}
+func (schedules *Schedules) enqueue(ctx context.Context, repository model.Repository, branch, sha, entry, actor string) (model.EnqueueRunResult, error) {
 	return schedules.config.Enqueuer.EnqueueCI(ctx, service.CIRequest{
-		PriorityRequest: request, EventID: scheduleEventID(),
+		EventID:       scheduleEventID(),
 		Repository:    repository,
 		Branch:        branch,
 		SHA:           sha,

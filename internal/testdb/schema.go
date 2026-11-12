@@ -339,7 +339,7 @@ DELETE FROM schema_migrations WHERE id='20261112182825-remove-admission-controls
 `
 
 // PostNativeHoldDowngrade restores the empty hold table in disposable historical fixtures.
-const PostNativeHoldDowngrade = `
+const PostNativeHoldDowngrade = PostNativePriorityDowngrade + `
 CREATE TABLE IF NOT EXISTS admission_holds (
  singleton INTEGER PRIMARY KEY,on_hold INTEGER NOT NULL DEFAULT 0,reason TEXT NOT NULL DEFAULT '',actor TEXT NOT NULL DEFAULT '',
  allow_tag INTEGER NOT NULL DEFAULT 1,allow_release INTEGER NOT NULL DEFAULT 1,allow_promotion INTEGER NOT NULL DEFAULT 0,
@@ -347,4 +347,13 @@ CREATE TABLE IF NOT EXISTS admission_holds (
 );
 INSERT OR IGNORE INTO admission_holds(singleton) VALUES(1);
 DELETE FROM schema_migrations WHERE id='20261112191324-remove-admin-hold-81c738135e3f7c3e6e8eadcd1eb51ea4';
+`
+
+// PostNativePriorityDowngrade recreates empty priority tables only for old-schema fixtures.
+const PostNativePriorityDowngrade = `
+CREATE TABLE IF NOT EXISTS queue_priority_patterns (pattern TEXT PRIMARY KEY) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS run_priority_overrides (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,priority TEXT NOT NULL,reason TEXT NOT NULL,actor TEXT NOT NULL,updated_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS run_priority_requests (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,requested TEXT NOT NULL,accepted TEXT NOT NULL,reason TEXT NOT NULL,actor TEXT NOT NULL,refusal TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS priority_grants (identity TEXT PRIMARY KEY,max_class TEXT NOT NULL,expires INTEGER NOT NULL,granted_by TEXT NOT NULL) WITHOUT ROWID;
+DELETE FROM schema_migrations WHERE id='20261112192937-remove-queue-priority-104b8d495586e655eeee52d3b76aaa30';
 `

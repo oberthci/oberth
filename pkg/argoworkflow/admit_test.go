@@ -1103,7 +1103,7 @@ func TestPipelinePriorityAnnotationDoesNotSetArgoPriority(t *testing.T) {
 	if workflow.Spec.Priority != nil {
 		t.Fatal("annotation changed controller priority")
 	}
-	refuse(t, strings.Replace(admissibleDocument, "spec:\n", "spec:\n  priority: 1000\n", 1), Policy{}, "spec.priority")
+	mustAdmit(t, strings.Replace(admissibleDocument, "spec:\n", "spec:\n  priority: 1000\n", 1), Policy{})
 }
 
 // Repositories may not set the Argo executor's own control environment:

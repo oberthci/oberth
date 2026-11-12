@@ -10,7 +10,7 @@ import (
 func (s *Store) QueuedRunPosition(ctx context.Context, id string) (int64, error) {
 	var position int64
 	err := s.reader().QueryRowContext(ctx, `WITH queue AS (
- SELECT id, ROW_NUMBER() OVER (ORDER BY `+priorityOrderSQL(s.now())+`) AS position
+ SELECT id, ROW_NUMBER() OVER (ORDER BY `+submissionOrderSQL()+`) AS position
  FROM runs WHERE status='queued' OR (status='running' AND started_at IS NULL)
 ) SELECT position FROM queue WHERE id=?`, id).Scan(&position)
 	if err != nil {

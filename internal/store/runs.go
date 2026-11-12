@@ -20,10 +20,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
-COALESCE(` + currentOverridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
-COALESCE(` + currentRequestedPrioritySQL + `,''), COALESCE(` + currentRequestedPriorityReasonSQL + `,''),
-COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
+schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
 var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
@@ -137,7 +134,7 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
  AND status IN ('queued','running')`, run.RepoID, run.RefKind, run.Ref, run.ScheduleEntry, run.ID).Scan(&activeSiblings); err != nil {
 		return model.Run{}, fmt.Errorf("check active restart siblings: %w", err)
 	}
-	if activeSiblings > 0 && !run.PriorityProtected {
+	if activeSiblings > 0 {
 		return model.Run{}, ErrRequeueIneligible
 	}
 	if run.RefKind == model.RefTag {
@@ -221,10 +218,6 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 	if err := requireRepositoryActive(ctx, tx, spec.RepoID); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	accepted, priorityReason, refusal, err := s.submissionPriorityTx(ctx, tx, spec, now)
-	if err != nil {
-		return model.EnqueueRunResult{}, err
-	}
 
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO runs(
@@ -239,48 +232,10 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
 	}
-	if err := s.recordSubmissionPriorityTx(ctx, tx, spec, id, accepted, priorityReason, refusal, now); err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	value, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id=?`, id))
-	if err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	// Preserve priority protection for running work unless supersession is explicit.
-	if value.Priority.Rank() > 0 && spec.Priority == "" {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO run_priority_requests(run_id,requested,accepted,reason,actor,refusal) VALUES(?,'',?,?,?,'')`, id, value.Priority, value.PriorityReason, spec.Actor); err != nil {
-			return model.EnqueueRunResult{}, err
-		}
-		value.PriorityRequestedBy = spec.Actor
-	}
-	supersede := spec.Supersede || value.Priority.Rank() == 0 || inheritedAdmissionSequence > 0
-	explicit := spec.Supersede || inheritedAdmissionSequence > 0
-	admin := inheritedAdmissionSequence > 0
-	if spec.Supersede {
-		allowed, err := priorityAdminTx(ctx, tx, spec)
-		if err != nil {
-			return model.EnqueueRunResult{}, err
-		}
-		admin = admin || allowed
-	}
-	// A new branch head replaces stale, unclaimed work in every priority class.
-	// Keep the existing priority/authority rules for running work and retries.
-	newHead := spec.RefKind == model.RefBranch && !spec.Release && (spec.Trigger == "branch" || spec.Trigger == "push") && inheritedAdmissionSequence == 0
-	guard := ` AND ((? AND status='queued' AND started_at IS NULL AND sha!=?) OR (? AND (` + supersessionEligibleSQL + ` OR (? AND (COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=runs.id),(SELECT actor FROM run_priority_requests WHERE run_id=runs.id),actor)=? OR ?)))))`
+	guard := ""
 	if inheritedAdmissionSequence > 0 {
 		// Recovery replaces only its stranded source, preserving every newer push.
-		guard += ` AND COALESCE(admission_sequence,queue_sequence)=` + fmt.Sprint(inheritedAdmissionSequence)
-	}
-	// Compute running supersession above from the incoming request, before the
-	// queued predecessor lends its override to the replacement.
-	if newHead {
-		if err := s.inheritBranchHeadPriorityTx(ctx, tx, value, now); err != nil {
-			return model.EnqueueRunResult{}, err
-		}
-		value, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id=?`, id))
-		if err != nil {
-			return model.EnqueueRunResult{}, err
-		}
+		guard = " AND COALESCE(admission_sequence,queue_sequence)=" + fmt.Sprint(inheritedAdmissionSequence)
 	}
 	var cancellations []model.RunCancellation
 	var supersededCount int64
@@ -291,7 +246,7 @@ RETURNING `+runColumns,
 	// and must neither supersede nor be superseded by a client push. A pending
 	// publication also owns its run until the external mutation terminalizes;
 	// newer work stays queued behind that durable obligation.
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && (supersede || newHead) {
+	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
 		rows, err := tx.QueryContext(ctx, `
 SELECT id, job_name, phase FROM runs
 WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
@@ -301,7 +256,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running') AND (status = 'running' OR job_name != '')
- `+guard+` ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, newHead, spec.SHA, supersede, explicit, spec.Actor, admin)
+ `+guard+` ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry)
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("find running superseded runs: %w", err)
 		}
@@ -340,7 +295,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
 	if err := registerRunIssueWork(ctx, tx, value, now); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && (supersede || newHead) {
+	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
 		updated, err := tx.ExecContext(ctx, `
 UPDATE runs
 SET status = 'interrupted', phase = 'interrupted', reason = ?, superseded_by = ?,
@@ -352,7 +307,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running')`+guard,
-			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, newHead, spec.SHA, supersede, explicit, spec.Actor, admin)
+			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry)
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("supersede earlier runs: %w", err)
 		}
@@ -401,7 +356,7 @@ UPDATE runs
 SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
     SELECT queue_sequence FROM runs WHERE (?='' OR id=?) AND `+claimableRunSQL+` AND `+automaticRetryReadySQL(fromUnixNano(now))+`
-    ORDER BY `+priorityOrderSQL(fromUnixNano(now))+` LIMIT 1
+    ORDER BY `+submissionOrderSQL()+` LIMIT 1
 )
 RETURNING `+runColumns, now, id, id))
 	if err != nil {
@@ -1112,7 +1067,7 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 	}
 	runs := make([]model.Run, 0)
 	if filter.Before == 0 && filter.BeforeRun == "" {
-		priorityOrder := priorityOrderSQL(s.now())
+		priorityOrder := submissionOrderSQL()
 		// Keep the queue in the same effective-priority and FIFO order as ClaimNextRun.
 		rows, err := tx.QueryContext(ctx, `
 WITH queue AS (
@@ -1383,7 +1338,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
+		&created, &updated, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err

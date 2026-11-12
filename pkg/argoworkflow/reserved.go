@@ -20,11 +20,6 @@ const ReservedMetadataPrefix = "oberth.ci/"
 // the run from the controller Oberth submitted it to.
 const ArgoMetadataPrefix = "workflows.argoproj.io/"
 
-// ReleaseMutexName is the fixed native Argo mutex the server adds to every
-// release run while release serialization is on. A document that took it
-// itself would hold every release in the installation behind its own run.
-const ReleaseMutexName = "oberth-release"
-
 // templateTagOpen starts every Argo template tag, simple or expression.
 const templateTagOpen = "{{"
 
@@ -105,25 +100,6 @@ func admitSynchronization(location string, synchronization *wfv1.Synchronization
 			problems = append(problems, fmt.Errorf(
 				"argoworkflow: %s.semaphores[%d] is refused: a semaphore reads its limit from configMapKeyRef name %s, key of your choice, in the Workflow's own namespace",
 				location, index, SyncLimitsConfigMap))
-		}
-	}
-	for index, mutex := range synchronization.Mutexes {
-		if mutex == nil {
-			continue
-		}
-		if strings.TrimSpace(mutex.Name) == ReleaseMutexName {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.mutexes[%d].name %q is reserved: Oberth adds it to every release run to serialize releases across the installation; use a mutex name of your own",
-				location, index, mutex.Name))
-			continue
-		}
-		// The controller substitutes {{...}} in the name before it takes
-		// the lock. A templated name is admitted only when the literal text
-		// before the first tag already rules the reserved name out.
-		if literal, _, templated := strings.Cut(mutex.Name, templateTagOpen); templated && strings.HasPrefix(ReleaseMutexName, literal) {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.mutexes[%d].name %q is refused: the templated name could resolve to the reserved %s; start it with literal text of your own, such as \"deploy-{{...}}\"",
-				location, index, mutex.Name, ReleaseMutexName))
 		}
 	}
 	return problems

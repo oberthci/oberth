@@ -122,10 +122,6 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 	result, err := service.runCancels.CancelRun(ctx, model.RunCancelRequest{
 		RunID: run.ID, Actor: actor.Identity, Reason: reason, Force: force,
 		Authorize: func(current model.Run) (string, error) {
-			if current.PriorityProtected && current.PriorityRequestedBy != "" && current.PriorityRequestedBy != actor.Identity && (!actor.Admin || actor.Scoped()) {
-				return "", refuse(ErrForbidden, "priority run can be cancelled only by its requester or an unscoped admin")
-			}
-			// Requester ownership is an extra restriction, never an admin grant.
 			decided, err := RunCancelPolicy(current, actor.Admin, force)
 			warning = decided
 			return decided, err

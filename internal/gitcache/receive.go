@@ -23,10 +23,8 @@ const (
 )
 
 type receiveReservation struct {
-	ActorFingerprint string            `json:"actor_fingerprint,omitempty"`
-	Priority         string            `json:"priority,omitempty"`
-	PriorityReason   string            `json:"priority_reason,omitempty"`
-	Supersede        bool              `json:"supersede,omitempty"`
+	ActorFingerprint string `json:"actor_fingerprint,omitempty"`
+
 	Assist           bool              `json:"assist,omitempty"`
 	Version          int               `json:"version"`
 	ID               string            `json:"id"`
@@ -176,7 +174,8 @@ func (c *Cache) receiveTransactionSerialized(
 		lock.Unlock()
 		return errors.Join(receiveErr, readErr)
 	}
-	reservation.Priority, reservation.PriorityReason, reservation.Supersede, reservation.Assist = recorded.Priority, recorded.PriorityReason, recorded.Supersede, recorded.Assist
+
+	reservation.Assist = recorded.Assist
 	// The server-owned pre-finalize gate runs after receive-pack has applied
 	// ref updates and before finalization records the delta in the durable
 	// outbox. A gate failure (e.g. audit chain tampered during the pack
@@ -418,7 +417,7 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, identity, path string,
 	for reservation.Next < len(reservation.Updates) {
 		index := reservation.Next
 		event := ReceiveEvent{
-			Priority: reservation.Priority, PriorityReason: reservation.PriorityReason, Supersede: reservation.Supersede, Assist: reservation.Assist,
+			Assist:           reservation.Assist,
 			ID:               fmt.Sprintf("%s:%d", reservation.ID, index),
 			ActorFingerprint: reservation.ActorFingerprint,
 			Actor:            reservation.Actor,

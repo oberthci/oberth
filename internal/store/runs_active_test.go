@@ -164,9 +164,6 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
-	if _, err := s.SetQueuePriorityPatterns(ctx, "admin", []string{"rc/*"}); err != nil {
-		t.Fatal(err)
-	}
 	enqueue := func(ref, sha string) model.Run {
 		t.Helper()
 		result, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, ref, strings.Repeat(sha, 40)))
@@ -175,7 +172,7 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 		}
 		return result.Run
 	}
-	rank := map[model.RunPriority]int{model.PriorityLow: -1, model.PriorityStandard: 0, model.PriorityPromotion: 1, model.PriorityHigh: 2}
+
 	check := func(label string, wantAdmission []string) {
 		t.Helper()
 		active, err := s.ListActiveRuns(ctx, model.RunListFilter{})
@@ -208,16 +205,12 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 			if got := runIDs(queue); strings.Join(got, ",") != strings.Join(wantAdmission, ",") {
 				t.Fatalf("%s: %s queue in admission order = %v, want %v", label, name, got, wantAdmission)
 			}
-			previousRank := rank[model.PriorityHigh] + 1
+
 			for i, run := range queue {
 				if run.QueuePosition != int64(i+1) {
 					t.Fatalf("%s: %s queue position of %s = %d, want %d", label, name, run.Ref, run.QueuePosition, i+1)
 				}
-				class, _ := run.EffectivePriority(now)
-				if rank[class] > previousRank {
-					t.Fatalf("%s: %s queue interleaves classes at %s (%s after a lower class)", label, name, run.Ref, class)
-				}
-				previousRank = rank[class]
+
 			}
 		}
 	}
@@ -230,7 +223,7 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 	high := enqueue("rc/one", "b") // high: admitted before the claimed normal run
 	now = now.Add(time.Minute)
 	fresh := enqueue("feature/fresh", "c")
-	check("high arrives after a normal claim", []string{high.ID, claimed.ID, fresh.ID})
+	check("high arrives after a normal claim", []string{claimed.ID, high.ID, fresh.ID})
 
 	// An hour later the claimed run and the fresh one have aged into high;
 	// the queue is FIFO within the high class, still one order everywhere.

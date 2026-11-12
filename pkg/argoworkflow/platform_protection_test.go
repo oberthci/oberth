@@ -9,7 +9,7 @@ import (
 // workflows. Resource capability tests cover embedded resource Pod templates.
 func TestPlatformPriorityClassesCannotBeSelectedByCI(t *testing.T) {
 	mustAdmit(t, admissibleDocument, Policy{})
-	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  priority: 1000000\n", 1), Policy{}, "spec.priority")
+	mustAdmit(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  priority: 1000000\n", 1), Policy{})
 	for _, component := range []string{"control-plane", "pipeline"} {
 		class := "oberth-oberth-" + component
 		t.Run(component, func(t *testing.T) {

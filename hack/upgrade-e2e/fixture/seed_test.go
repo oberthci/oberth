@@ -45,18 +45,18 @@ func TestSeedPriorityRunsHaveRunnablePipelines(t *testing.T) {
 		// This fixture is also compiled against earlier published releases.
 		source, err := os.ReadFile(filepath.Join(root, "fixtures", "sample", ".oberth", file))
 		if err != nil {
-			t.Fatalf("%s pipeline source: %v", r.Priority, err)
+			t.Fatalf("%s pipeline source: %v", r.Ref, err)
 		}
 		workflow, err := argoworkflow.Decode(source)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(workflow.Spec.Templates) != 1 {
-			t.Fatalf("%s templates=%d, want one runnable entrypoint", r.Priority, len(workflow.Spec.Templates))
+			t.Fatalf("%s templates=%d, want one runnable entrypoint", r.Ref, len(workflow.Spec.Templates))
 		}
 		entry := workflow.Spec.Templates[0]
 		if entry.Name != workflow.Spec.Entrypoint || entry.Container == nil || entry.Container.Image != os.Args[3] || strings.Join(entry.Container.Command, " ") != "/usr/local/bin/oberth version" {
-			t.Fatalf("%s entrypoint must run the signed release binary: %+v", r.Priority, entry)
+			t.Fatalf("%s entrypoint must run the signed release binary: %+v", r.Ref, entry)
 		}
 	}
 	upstream := filepath.Join(root, "fixtures", "sample.git")

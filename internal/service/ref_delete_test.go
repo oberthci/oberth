@@ -86,12 +86,12 @@ func TestRefDeletionCancelsQueuedAndAdmissionHeldRuns(t *testing.T) {
 			if !claimed {
 				f.start(t)
 			}
-			f.awaitNoPendingCancellations(t)
 			stopped := f.awaitTerminal(t, old.ID)
 			if !stopped.Cancelled() || stopped.Reason != "ref deleted" {
 				t.Fatal("pending run survived deletion", stopped)
 			}
 			lift()
+			f.awaitNoPendingCancellations(t)
 			if made := f.awaitCreated(t, 1); !made[other.ID] || f.engine.wasCreated(old.ID) {
 				t.Fatal("deleted run held queue or created workflow", made)
 			}

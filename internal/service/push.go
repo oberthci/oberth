@@ -179,7 +179,7 @@ func (ingestor *PushIngestor) enqueueBranch(ctx context.Context, push BranchPush
 	if ingestor.branches == nil {
 		return PushResult{}, refuse(ErrUnavailable, "CI queue")
 	}
-	enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{PriorityRequest: push.PriorityRequest,
+	enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{
 		Assist:     push.Assist,
 		Reason:     reason,
 		EventID:    push.EventID,
@@ -301,7 +301,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		}
 	}
 	if !release {
-		enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{PriorityRequest: push.PriorityRequest,
+		enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{
 			RefKind: model.RefTag, EventID: push.EventID, Repository: repository, Branch: push.Tag,
 			OldSHA: push.OldOID, SHA: strings.ToLower(peeled.ObjectSHA), TestedSHA: strings.ToLower(peeled.CommitSHA), Actor: push.Actor, Trigger: "tag"})
 		if err != nil {
@@ -309,7 +309,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 		}
 		return pushRunResult(repository, enqueued), nil
 	}
-	enqueued, err := ingestor.releases.AdmitRelease(ctx, ReleaseRequest{PriorityRequest: push.PriorityRequest,
+	enqueued, err := ingestor.releases.AdmitRelease(ctx, ReleaseRequest{
 		EventID:    push.EventID,
 		Repository: repository,
 		Tag:        push.Tag,

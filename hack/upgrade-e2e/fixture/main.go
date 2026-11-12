@@ -23,18 +23,17 @@ import (
 )
 
 type run struct {
-	ID             string
-	Sequence       int64
-	Admission      int64
-	Repo           int64
-	Ref            string
-	SHA            string
-	Status         model.RunStatus
-	Phase          string
-	Job            string
-	Priority       model.RunPriority
-	PriorityReason string
-	Started        *time.Time
+	ID        string
+	Sequence  int64
+	Admission int64
+	Repo      int64
+	Ref       string
+	SHA       string
+	Status    model.RunStatus
+	Phase     string
+	Job       string
+
+	Started *time.Time
 }
 
 type migration struct {
@@ -88,7 +87,7 @@ func main() {
 	must(err)
 	values := make([]run, 0, len(runs))
 	for _, r := range runs {
-		values = append(values, run{r.ID, r.QueueSequence, r.AdmissionSequence, r.RepoID, r.Ref, r.SHA, r.Status, r.Phase, workflowName(r), r.Priority, r.PriorityReason, r.StartedAt})
+		values = append(values, run{r.ID, r.QueueSequence, r.AdmissionSequence, r.RepoID, r.Ref, r.SHA, r.Status, r.Phase, workflowName(r), r.StartedAt})
 	}
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	must(err)
@@ -185,8 +184,6 @@ spec:
 	_, err = setWorkflowName(ctx, s, running.ID, "oberth-e2e-running")
 	must(err)
 	_, err = s.MarkRunSubmitted(ctx, running.ID)
-	must(err)
-	_, err = s.SetQueuePriorityPatterns(ctx, "upgrade-fixture", []string{"rc/*"})
 	must(err)
 	enqueue("feature/normal", model.RefBranch, "push")
 	enqueue("rc/upgrade", model.RefBranch, "push")

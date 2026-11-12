@@ -67,7 +67,7 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 	// Group using a narrow covering index: only sequences/counts are scanned,
 	// never historical errors/logs. Fetch the wide rows after selecting heads.
 	// Queue positions use the same global priority order as the flat list.
-	rows, err := tx.QueryContext(ctx, latestRefQuery(restriction, priorityOrderSQL(s.now()), statusSQL), params...) //nolint:gosec // Fixed query with placeholder-only scope restrictions.
+	rows, err := tx.QueryContext(ctx, latestRefQuery(restriction, submissionOrderSQL(), statusSQL), params...) //nolint:gosec // Fixed query with placeholder-only scope restrictions.
 	if err != nil {
 		return nil, fmt.Errorf("list latest refs: %w", err)
 	}

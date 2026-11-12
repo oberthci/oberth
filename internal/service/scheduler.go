@@ -78,7 +78,7 @@ type Scheduler struct {
 	workspaces         *workspaceLifecycle
 	workspaceRoot      string
 	submissions        *submissionRegistry
-	priorityMu         sync.Mutex // serialize durable priority refresh snapshots
+
 	maxRunLogBytes     int64
 	stalledRunTimeout  time.Duration
 	mutationGate       func(context.Context) error
@@ -227,10 +227,10 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, kind, request.Branch,
 		request.OldSHA, request.SHA, testedSHA, "queued")
 	spec := model.RunSpec{
-		PriorityRequest: request.PriorityRequest,
-		Assist:          request.Assist,
-		Reason:          request.Reason,
-		RepoID:          request.Repository.ID, RefKind: kind, Ref: request.Branch,
+
+		Assist: request.Assist,
+		Reason: request.Reason,
+		RepoID: request.Repository.ID, RefKind: kind, Ref: request.Branch,
 		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, ScheduleEntry: request.ScheduleEntry, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
 	}
 	var result model.ScheduleEnqueueResult
@@ -261,8 +261,8 @@ func (scheduler *Scheduler) AdmitRelease(ctx context.Context, request ReleaseReq
 	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, model.RefTag, request.Tag,
 		request.OldSHA, request.ObjectSHA, request.CommitSHA, "queued")
 	enqueued, err := scheduler.database().EnqueueReceiveEvent(ctx, event, model.RunSpec{
-		PriorityRequest: request.PriorityRequest,
-		RepoID:          request.Repository.ID, RefKind: model.RefTag, Ref: request.Tag,
+
+		RepoID: request.Repository.ID, RefKind: model.RefTag, Ref: request.Tag,
 		SHA: request.ObjectSHA, Actor: request.Actor, Release: true, Credentialed: true, Trigger: "tag", TestedSHA: request.CommitSHA,
 	})
 	if err != nil {
@@ -525,9 +525,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		cancellationDelay = min(2*cancellationDelay, cancellationRetryMaximum)
 		return nil
 	}
-	priorityPoll := time.NewTicker(submissionPollInterval)
-	defer priorityPoll.Stop()
-	ticks := priorityPoll.C
+	submissionPoll := time.NewTicker(submissionPollInterval)
+	defer submissionPoll.Stop()
+	ticks := submissionPoll.C
 	if scheduler.dispatchTicks != nil {
 		ticks = scheduler.dispatchTicks
 	}
@@ -547,7 +547,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 					return nil
 				}
-				return fmt.Errorf("claim priority run: %w", err)
+				return fmt.Errorf("claim accepted run: %w", err)
 			}
 			reservation := scheduler.submissions.trackRun(run)
 			active++
@@ -779,8 +779,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return nil
 	}
 	jobRequest := WorkflowRequest{WorkflowName: workflowName, Run: run, Repository: repository, SourceDir: sourceDir, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org()}
-	// Priority is advisory: an unavailable policy read withholds the boost,
-	// never the release's execution or publication.
 	receipt, err := scheduler.pipelineDemandReceipt(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()

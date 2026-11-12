@@ -6,8 +6,6 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
-
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Pipeline Pods use the non-preempting lower tier. The only
@@ -15,9 +13,8 @@ import (
 // runs (Argo's postponed queue and lock grants, never Pod scheduling).
 func assertOrdinaryWorkflowPriority(t *testing.T, workflow *wfv1.Workflow) {
 	t.Helper()
-	release := workflow.Spec.PodMetadata != nil && workflow.Spec.PodMetadata.Labels[triggerLabel] == string(pipeline.TriggerRelease)
-	if workflow.Spec.PodPriorityClassName != "" || (workflow.Spec.Priority != nil && (!release || *workflow.Spec.Priority != ReleasePriority)) {
-		t.Fatal("CI workflow received a priority override")
+	if workflow.Spec.PodPriorityClassName != "" {
+		t.Fatal("user Workflow has an injected Pod priority class")
 	}
 	assertPatch := func(patch string) {
 		t.Helper()

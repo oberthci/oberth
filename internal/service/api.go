@@ -54,40 +54,40 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
-	Tags                      *PushIngestor
-	IssueStaleAfter           time.Duration
-	IssueActiveStaleAfter     time.Duration
-	WorkflowCapabilities      WorkflowCapabilityStore
-	RunResources              RunResourceReader
-	ResourceDeclarations      ResourceDeclarationReader
-	Resources                 ResourceUsageReader
-	ReleasePreflight          ReleasePreflighter
-	ClientCertificates        *ClientCertIssuer
-	UplinkLifecycle           UplinkLifecycle
-	DeclarationDismissal      DeclarationDismissal
-	IssueLifecycle            IssueLifecycle
-	SchedulingObserver        SchedulingObserver
-	Runs                      RunResolver
-	History                   RunHistory
-	RunRetries                RunRetryStore
-	Repositories              RepositoryReader
-	Issues                    IssueRepository
-	Promotions                PromotionRepository
-	PromotionRuns             PromotionRunStore
-	Enqueues                  EnqueueObserver
-	Git                       DeliveryGit
-	Refs                      RefResolver
-	Logs                      LogStore
-	Artifacts                 ArtifactStore
-	Auditor                   Auditor
-	Health                    Health
-	Signals                   *Signals
-	MaximumWait               time.Duration
-	MutationGate              func(context.Context) error
-	PromotionWorkspaceRoot    string
-	RemoveWorkspace           func(string) error
-	SecretAccess              SecretAccessStore
-	QueuePriorities           QueuePriorityStore
+	Tags                   *PushIngestor
+	IssueStaleAfter        time.Duration
+	IssueActiveStaleAfter  time.Duration
+	WorkflowCapabilities   WorkflowCapabilityStore
+	RunResources           RunResourceReader
+	ResourceDeclarations   ResourceDeclarationReader
+	Resources              ResourceUsageReader
+	ReleasePreflight       ReleasePreflighter
+	ClientCertificates     *ClientCertIssuer
+	UplinkLifecycle        UplinkLifecycle
+	DeclarationDismissal   DeclarationDismissal
+	IssueLifecycle         IssueLifecycle
+	SchedulingObserver     SchedulingObserver
+	Runs                   RunResolver
+	History                RunHistory
+	RunRetries             RunRetryStore
+	Repositories           RepositoryReader
+	Issues                 IssueRepository
+	Promotions             PromotionRepository
+	PromotionRuns          PromotionRunStore
+	Enqueues               EnqueueObserver
+	Git                    DeliveryGit
+	Refs                   RefResolver
+	Logs                   LogStore
+	Artifacts              ArtifactStore
+	Auditor                Auditor
+	Health                 Health
+	Signals                *Signals
+	MaximumWait            time.Duration
+	MutationGate           func(context.Context) error
+	PromotionWorkspaceRoot string
+	RemoveWorkspace        func(string) error
+	SecretAccess           SecretAccessStore
+
 	ReleaseWIFOverrides       ReleaseWIFOverrideStore
 	ReleaseWIF                ReleaseWIFPolicy
 	SecretStoreVerifier       SecretStoreVerifier
@@ -127,50 +127,50 @@ type APIConfig struct {
 }
 
 type API struct {
-	tags                      *PushIngestor
-	branchPrune               BranchPruneGit
-	branchDeletions           BranchDeletionRecords
-	deletionQueued            func()
-	receiveOutbox             ReceiveOutbox
-	receiveHandler            gitcache.ReceiveHandler
-	listDiagnostics           *listDiagnosticCache
-	branchCounts              *branchCountCache
-	issueStaleAfter           time.Duration
-	issueActiveStaleAfter     time.Duration
-	issueObservedAt           time.Time
-	workflowCapabilities      WorkflowCapabilityStore
-	runResources              RunResourceReader
-	resourceDeclarations      ResourceDeclarationReader
-	resources                 ResourceUsageReader
-	promotionProgress         *sync.Map
-	releasePreflight          ReleasePreflighter
-	clientCertificates        *ClientCertIssuer
-	uplinkLifecycle           UplinkLifecycle
-	declarationDismissal      DeclarationDismissal
-	issueLifecycle            IssueLifecycle
-	schedulingObserver        SchedulingObserver
-	runs                      RunResolver
-	history                   RunHistory
-	runRetries                RunRetryStore
-	repositories              RepositoryReader
-	issues                    IssueRepository
-	promotions                PromotionRepository
-	promotionRuns             PromotionRunStore
-	enqueues                  EnqueueObserver
-	git                       DeliveryGit
-	logs                      LogStore
-	artifacts                 ArtifactStore
-	refs                      RefResolver
-	auditor                   Auditor
-	health                    Health
-	signals                   *Signals
-	maximumWait               time.Duration
-	waitClock                 clock.Clock // nil uses real time; shared observation/long-poll clock
-	mutationGate              func(context.Context) error
-	promotionWorkspaceRoot    string
-	workspaces                *workspaceLifecycle
-	secretAccess              SecretAccessStore
-	queuePriorities           QueuePriorityStore
+	tags                   *PushIngestor
+	branchPrune            BranchPruneGit
+	branchDeletions        BranchDeletionRecords
+	deletionQueued         func()
+	receiveOutbox          ReceiveOutbox
+	receiveHandler         gitcache.ReceiveHandler
+	listDiagnostics        *listDiagnosticCache
+	branchCounts           *branchCountCache
+	issueStaleAfter        time.Duration
+	issueActiveStaleAfter  time.Duration
+	issueObservedAt        time.Time
+	workflowCapabilities   WorkflowCapabilityStore
+	runResources           RunResourceReader
+	resourceDeclarations   ResourceDeclarationReader
+	resources              ResourceUsageReader
+	promotionProgress      *sync.Map
+	releasePreflight       ReleasePreflighter
+	clientCertificates     *ClientCertIssuer
+	uplinkLifecycle        UplinkLifecycle
+	declarationDismissal   DeclarationDismissal
+	issueLifecycle         IssueLifecycle
+	schedulingObserver     SchedulingObserver
+	runs                   RunResolver
+	history                RunHistory
+	runRetries             RunRetryStore
+	repositories           RepositoryReader
+	issues                 IssueRepository
+	promotions             PromotionRepository
+	promotionRuns          PromotionRunStore
+	enqueues               EnqueueObserver
+	git                    DeliveryGit
+	logs                   LogStore
+	artifacts              ArtifactStore
+	refs                   RefResolver
+	auditor                Auditor
+	health                 Health
+	signals                *Signals
+	maximumWait            time.Duration
+	waitClock              clock.Clock // nil uses real time; shared observation/long-poll clock
+	mutationGate           func(context.Context) error
+	promotionWorkspaceRoot string
+	workspaces             *workspaceLifecycle
+	secretAccess           SecretAccessStore
+
 	releaseWIFOverrides       ReleaseWIFOverrideStore
 	releaseWIF                ReleaseWIFPolicy
 	releaseWIFMu              *sync.Mutex
@@ -279,9 +279,9 @@ func NewAPI(config APIConfig) (*API, error) {
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
 		workflowCapabilities: config.WorkflowCapabilities,
-		queuePriorities:      config.QueuePriorities,
-		secretStoreVerifier:  config.SecretStoreVerifier,
-		repositoryArchiver:   config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
+
+		secretStoreVerifier: config.SecretStoreVerifier,
+		repositoryArchiver:  config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
@@ -439,12 +439,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		default:
 			return service.secretStoreSyncReceipt(ctx, actor, raw)
 		}
-	case "priority_grant", "priority_grant_list", "priority_grant_revoke":
-		return service.priorityGrantTool(ctx, actor, name, raw)
 	case "release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset":
 		return service.releaseWIFTool(ctx, actor, name, raw)
-	case "queue_priority_config", "queue_priority_get", "run_priority":
-		return service.queuePriorityTool(ctx, actor, name, raw)
 	case "audit_list":
 		return service.auditList(ctx, actor, raw)
 	case "schedule_list":
@@ -508,13 +504,12 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.readRunResources(ctx, raw)
 	case "run_retry":
 		var arguments struct {
-			model.PriorityRequest
 			ID string `json:"id"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.retryRun(ctx, actor, arguments.ID, requestedPriority(actor, arguments.PriorityRequest))
+		return service.retryRun(ctx, actor, arguments.ID)
 	case "publication_abandon":
 		return service.abandonPublication(ctx, actor, raw)
 	case "run_cancel":
@@ -529,7 +524,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.cancelRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
 	case "run_rerun":
 		var arguments struct {
-			model.PriorityRequest
 			ID     string `json:"id"`
 			Reason string `json:"reason"`
 			Force  bool   `json:"force"`
@@ -538,7 +532,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force, arguments.Assist, requestedPriority(actor, arguments.PriorityRequest))
+		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force, arguments.Assist)
 	case "run_hold_list":
 		var arguments struct {
 			ID string `json:"id"`
@@ -692,7 +686,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return prepared(ctx)
 	case "sync":
 		var arguments struct {
-			model.PriorityRequest
 			Repo   string `json:"repo"`
 			SHA    string `json:"sha"`
 			Branch string `json:"branch"`
@@ -700,7 +693,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.sync(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
+		return service.sync(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch)
 	case "promote":
 		return service.promoteTool(ctx, actor, raw)
 	case "promote_retry":
@@ -1587,7 +1580,7 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 func (service *API) statusForRun(ctx context.Context, repository model.Repository, run model.Run) (StatusResponse, error) {
 	presented := service.presentationRun(ctx, run)
 	response := StatusResponse{
-		Priority: presented.Priority, PriorityReason: presented.PriorityReason, PriorityRequestedBy: presented.PriorityRequestedBy, PriorityRefusal: presented.PriorityRefusal,
+
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Stages: map[string]string{},
 		DisplayStatus:   presented.DisplayStatus,
@@ -1743,9 +1736,6 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 			visible.DisplayReason = joinRunMessage(cause, visible.DisplayReason)
 		}
 	}
-	if run.Priority != "" {
-		visible.Priority, visible.PriorityReason = run.EffectivePriority(now)
-	}
 	if run.Status == model.RunRunning && isPendingCreate(run) {
 		visible.DisplayReason = "workflow create uncertain, cleanup pending"
 	}
@@ -1753,9 +1743,6 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 		visible.DisplayReason = "publishing to upstream"
 	}
 
-	if run.Status.Active() && visible.DisplayStatus != model.DisplayQueued {
-		visible.DisplayReason = joinRunMessage(priorityPrefix(visible), visible.DisplayReason)
-	}
 	if visible.DisplayStatus != model.DisplayQueued {
 		// Keep bounded eviction/reboot evidence and the retry link intact.
 		if evictionDisplayReason(run) == "" && nodeRebootDisplayReason(run) == "" {
@@ -1769,23 +1756,6 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 		}
 	}
 	return visible
-}
-
-// priorityPrefix uses server-owned provenance, with structural boosts implied by ref.
-func priorityPrefix(run model.Run) string {
-	priority := run.Priority
-	if priority == "" || priority == model.PriorityStandard || run.PriorityReason == "promotion run" || run.PriorityReason == model.TagReleasePriorityReason {
-		return ""
-	}
-	prefix := "priority " + string(priority)
-	if run.PriorityReason == model.PriorityAgedReason {
-		return prefix + " (aged)"
-	}
-	reason := strings.TrimPrefix(strings.TrimPrefix(run.PriorityReason, "admin bump: "), "submission priority: ")
-	if model.DisplayRunStatus(run) == model.DisplayQueued {
-		return prefix
-	}
-	return joinRunMessage(prefix, reason)
 }
 
 func joinRunMessage(first, second string) string {
@@ -2395,7 +2365,7 @@ func validSHASelector(value string) bool {
 	return true
 }
 
-func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, selector, branch string, priority ...model.PriorityRequest) (model.Run, error) {
+func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, selector, branch string) (model.Run, error) {
 	if service.git == nil || service.auditor == nil {
 		return model.Run{}, refuse(ErrUnavailable, "sync")
 	}
@@ -2462,21 +2432,7 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 		return model.Run{}, fmt.Errorf("%w: sync refuses the default branch %q — use promote to integrate",
 			ErrInvalidInput, repository.DefaultBranch)
 	}
-	if request := firstPriority(priority); request.Priority != "" {
-		requester, ok := service.enqueues.(interface {
-			RequestRunPriority(context.Context, string, string, model.PriorityRequest) (model.Run, error)
-		})
-		if !ok {
-			return model.Run{}, refuse(ErrUnavailable, "sync priority")
-		}
-		run, err = requester.RequestRunPriority(ctx, actor.Identity, run.ID, requestedPriority(actor, request))
-		if err != nil {
-			return model.Run{}, err
-		}
-		if err = service.notifyPriorityChange(ctx); err != nil {
-			return model.Run{}, err
-		}
-	}
+
 	if err := auditedGitMutation(ctx, service.auditor, actor.Identity, "sync.branch", "run", run.ID,
 		map[string]any{"repo": repository.Name, "branch": run.Ref, "sha": run.SHA},
 		func() error {
@@ -2487,7 +2443,7 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 	return run, nil
 }
 
-func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName, selector, target string, priority ...model.PriorityRequest) (result model.Promotion, resultErr error) {
+func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName, selector, target string) (result model.Promotion, resultErr error) {
 	// Without either grant or repository-policy capability, only admins
 	// can request promotion.
 	if !actor.Admin && service.promotionGrants == nil {
@@ -2517,7 +2473,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion, priority...)
+	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion)
 }
 
 // validatePromotionTarget accepts a branch name only. A full ref was admitted
@@ -2565,7 +2521,7 @@ func (service *API) admitPromotion(ctx context.Context, actor api.Actor, reposit
 // planAdmittedPromotion prepares an admitted promotion against the target's
 // current head, then publishes a fast-forward or enqueues the merged run.
 func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
-	target string, promotion model.Promotion, priority ...model.PriorityRequest) (result model.Promotion, resultErr error) {
+	target string, promotion model.Promotion) (result model.Promotion, resultErr error) {
 	if promotion.BranchCISkipped {
 		policy, err := readPromotionPolicy(ctx, service.git, service.cacheInputFor(ctx, repository))
 		if err != nil {
@@ -2695,8 +2651,8 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 	}
 
 	enqueued, attached, err := service.promotionRuns.EnqueueAdmittedPromotionRun(ctx, model.RunSpec{
-		PriorityRequest: requestedPriority(actor, firstPriority(priority)),
-		RepoID:          repository.ID, RefKind: model.RefBranch,
+
+		RepoID: repository.ID, RefKind: model.RefBranch,
 		Ref: promotionRunRef(target, plan.MergedSHA), SHA: plan.MergedSHA,
 		Actor: actor.Identity, Trigger: "promotion", TestedSHA: plan.MergedSHA, BaseSHA: plan.BaseSHA,
 	}, promotion.ID)
@@ -3128,7 +3084,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke",
 
-		"release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
+		"release_wif_grant", "release_wif_revoke", "release_wif_reset",
 		"repo_remove", "repo_archive", "repo_unarchive", "branch_delete_many", "branch_deletion_resolve", "ref_delete_many", "receive_outbox",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",

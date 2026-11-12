@@ -136,10 +136,8 @@ type Logger interface {
 // stable across callback retries and process restarts so handlers can make
 // their own durable side effects idempotent.
 type ReceiveEvent struct {
-	ActorFingerprint string           `json:"actor_fingerprint,omitempty"`
-	Priority         string           `json:"priority,omitempty"`
-	PriorityReason   string           `json:"priority_reason,omitempty"`
-	Supersede        bool             `json:"supersede,omitempty"`
+	ActorFingerprint string `json:"actor_fingerprint,omitempty"`
+
 	Assist           bool             `json:"assist,omitempty"`
 	ID               string           `json:"id"`
 	Actor            string           `json:"actor"`

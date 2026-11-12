@@ -25,11 +25,7 @@ func TestInfrastructureRetryPreservesOrdinaryAndAgedQueueOrder(t *testing.T) {
 			if err != nil || retry.AdmissionSequence != source.AdmissionSequence || !retry.QueuedAt.Equal(source.QueuedAt) || retry.QueueSequence <= other.QueueSequence {
 				t.Fatalf("retry lost order or unique history identity: %+v %v", retry, err)
 			}
-			sourcePriority, _ := source.EffectivePriority(now)
-			retryPriority, _ := retry.EffectivePriority(now)
-			if sourcePriority != retryPriority {
-				t.Fatalf("priority changed %s -> %s", sourcePriority, retryPriority)
-			}
+
 			now = now.Add(automaticRetryDelay)
 			claimed, err := s.ClaimNextRun(t.Context())
 			if err != nil || claimed.ID != retry.ID {

@@ -117,7 +117,7 @@ func benchmarkMeasuredWriter(b *testing.B, s *Store) *writerHoldSamples {
 }
 
 func BenchmarkWriterHoldUnderAPIReads(b *testing.B) {
-	for _, name := range []string{"timings64", "timings256", "timings2048", "priority-config", "audit-append"} {
+	for _, name := range []string{"timings64", "timings256", "timings2048", "audit-append"} {
 		b.Run(name, func(b *testing.B) {
 			tasks := 64
 			if name == "timings256" {
@@ -141,9 +141,7 @@ func BenchmarkWriterHoldUnderAPIReads(b *testing.B) {
 						if err == nil {
 							_, err = s.ListRecentRuns(ctx, model.RunListFilter{})
 						}
-						if err == nil {
-							_, err = s.QueuePriorityPatterns(ctx)
-						}
+
 						if err == nil {
 							_, err = s.NextQueuedRun(ctx)
 						}
@@ -176,8 +174,6 @@ func BenchmarkWriterHoldUnderAPIReads(b *testing.B) {
 			for range b.N {
 				var err error
 				switch name {
-				case "priority-config":
-					_, err = s.SetQueuePriorityPatterns(writeCtx, "benchmark", []string{"rc/*"})
 				case "audit-append":
 					_, err = s.AppendAuditAction(writeCtx, model.AuditActionSpec{Actor: "benchmark", Action: "benchmark", ResourceType: "benchmark", ResourceID: "benchmark", Details: "{}"})
 				default:

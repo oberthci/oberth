@@ -21,7 +21,6 @@ type SchedulePauseView struct {
 // ScheduleEntryView is one entry of a repository's .oberth/schedule.yaml with
 // its durable state.
 type ScheduleEntryView struct {
-	Priority    model.RunPriority  `json:"priority,omitempty"`
 	Name        string             `json:"name"`
 	Cron        string             `json:"cron"`
 	Branch      string             `json:"branch,omitempty"`
@@ -55,7 +54,6 @@ type ScheduleListResponse struct {
 // SchedulePlan is a resolved manual trigger: the entry, the branch and the
 // commit the run would test.
 type SchedulePlan struct {
-	model.PriorityRequest
 	Repository model.Repository
 	Qualified  string
 	Entry      string
@@ -229,7 +227,6 @@ func (service *API) schedulePauseResume(ctx context.Context, actor api.Actor, pa
 // queued run's ID.
 func (service *API) scheduleTrigger(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	var arguments struct {
-		model.PriorityRequest
 		Repo  string `json:"repo"`
 		Entry string `json:"entry"`
 		Force bool   `json:"force"`
@@ -251,10 +248,6 @@ func (service *API) scheduleTrigger(ctx context.Context, actor api.Actor, raw js
 	if service.auditor == nil {
 		return nil, refuse(ErrUnavailable, "audit")
 	}
-	if arguments.Priority != "" {
-		plan.PriorityRequest = arguments.PriorityRequest
-	}
-	plan.PriorityRequest = requestedPriority(actor, plan.PriorityRequest)
 	enqueued, err := service.schedules.EnqueueSchedule(ctx, plan, actor.Identity)
 	if err != nil {
 		return nil, err

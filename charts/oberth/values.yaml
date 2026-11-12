@@ -45,14 +45,6 @@ replicaCount: 1
 # queue position and is audited. 0 disables, at most 5.
 autoRetryInfrastructureBudget: 2
 
-# Release runs of every repository, one at a time. When true, every release
-# run carries the native Argo workflow-level mutex `oberth-release`; a second
-# release waits in the Argo controller's queue (priority, then creation time)
-# and shows "waiting for lock .../Mutex/oberth-release" until the first
-# finishes. A document's own synchronization is kept beside it.
-releases:
-  serialize: false
-
 # Agent-assisted CI continuation (retry hold). Off by default. When enabled,
 # a branch run pushed with `git push -o oberth.assist=1` (or rerun with
 # assist) parks the retry of a failed credential-free step before its command,

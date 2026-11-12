@@ -2,7 +2,7 @@
 # internal/installer/upgrade_removed_values.go). The historical fixtures keep
 # them; the target schema refuses them, and an upgrade refuses stored ones.
 BEGIN {
-  split("admission argo.ciSecretsServiceAccount argo.ciServiceAccount argo.containerDiskPrefixes argo.enabled argo.kubevirtCeiling argo.vault.ciSecretsRole argo.vmLauncherServiceAccount argoSync auditAnchor.rootsKey gitBackend gitcache maxConcurrentJobs platformProtection secretCreatePolicy trustedTests upstream.createSecrets upstream.keySecret upstream.knownHostsSecret vm watchTunnel", list, " ")
+  split("admission argo.ciSecretsServiceAccount argo.ciServiceAccount argo.containerDiskPrefixes argo.enabled argo.kubevirtCeiling argo.vault.ciSecretsRole argo.vmLauncherServiceAccount argoSync auditAnchor.rootsKey gitBackend gitcache maxConcurrentJobs platformProtection releases secretCreatePolicy trustedTests upstream.createSecrets upstream.keySecret upstream.knownHostsSecret vm watchTunnel", list, " ")
   for (i in list) removed[list[i]] = 1
 }
 function indentation(line) { match(line, /^ */); return RLENGTH }

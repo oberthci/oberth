@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/pushretry"
 )
 
-func (service *API) retryRun(ctx context.Context, actor api.Actor, id string, priority ...model.PriorityRequest) (model.Run, error) {
+func (service *API) retryRun(ctx context.Context, actor api.Actor, id string) (model.Run, error) {
 	if strings.TrimSpace(id) == "" {
 		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
@@ -42,7 +42,7 @@ func (service *API) retryRun(ctx context.Context, actor api.Actor, id string, pr
 			return model.Run{}, err
 		}
 	}
-	enqueued, err := service.runRetries.RetryRun(ctx, model.RunRetryRequest{PriorityRequest: requestedPriority(actor, firstPriority(priority)),
+	enqueued, err := service.runRetries.RetryRun(ctx, model.RunRetryRequest{
 		RunID: previous.ID, Actor: actor.Identity, ReplayAudit: audit,
 		Authorize: func(current model.Run, evidence model.RunReplayEvidence) error {
 			moved := tagCheck(current)

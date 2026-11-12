@@ -70,7 +70,6 @@ type RunReplayEvidence struct {
 
 // RunRetryRequest queues an eligible newest infrastructure/interrupted attempt.
 type RunRetryRequest struct {
-	PriorityRequest
 	RunID, Actor string
 	ReplayAudit  *RunReplayAudit
 	// Authorize is required for tag/release retries and runs inside the transaction.
@@ -81,7 +80,6 @@ type RunRetryRequest struct {
 // as a terminal, undelivered run (#1098). Authorization is the caller's; the
 // store re-applies Authorize to the run as it is inside the rerun transaction.
 type RunRerunRequest struct {
-	PriorityRequest
 	RunID  string
 	Actor  string
 	Reason string

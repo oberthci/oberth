@@ -616,7 +616,7 @@ func (service *API) promoteTool(ctx context.Context, actor api.Actor, raw json.R
 	if arguments.Sources != nil {
 		promotion, err = service.promoteTrain(ctx, actor, arguments)
 	} else {
-		promotion, err = service.promote(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
+		promotion, err = service.promote(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch)
 	}
 	if err != nil {
 		return nil, err

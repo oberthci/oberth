@@ -11,30 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 )
-
-func TestBatchRunPriorityUniquePrefixes(t *testing.T) {
-	f := newControlFixture(t)
-	control, err := NewAPI(APIConfig{Runs: f.store, History: f.store, QueuePriorities: f.store, Enqueues: f.scheduler})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, n := range []int{8, 12, 32} {
-		run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: fmt.Sprintf("feature/prefix-%d", n), SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		value, err := control.CallTool(t.Context(), api.Actor{Identity: "admin", Admin: true}, "run_priority", json.RawMessage(fmt.Sprintf(`{"id":%q,"priority":"high","reason":"prioritize queued run"}`, run.ID[:n])))
-		if err != nil {
-			t.Errorf("%d characters: %v", n, err)
-			continue
-		}
-		if got := value.(model.Run); got.ID != run.ID || got.Priority != model.PriorityHigh {
-			t.Fatalf("wrong run: %+v", got)
-		}
-	}
-}
 
 func TestBatchPromotionToolsUniquePrefixes(t *testing.T) {
 	f := newControlFixture(t)
@@ -116,17 +93,14 @@ func TestBatchToolAmbiguousPrefixes(t *testing.T) {
 	control.history = batchAmbiguousHistory{f.store}
 	control.promotions = batchAmbiguousPromotions{f.store}
 	control.runCancels, control.runReruns, control.runRetries = f.store, f.store, f.store
-	control.queuePriorities = f.store
+
 	control.artifacts = kept.retention.Artifacts
-	for _, tool := range []string{"run_get", "run_logs", "run_cancel", "run_rerun", "run_retry", "run_resources", "run_priority", "artifacts", "artifact_get", "wait", "publish_retry", "run_list", "promote_status", "promote_retry", "promotion_list"} {
+	for _, tool := range []string{"run_get", "run_logs", "run_cancel", "run_rerun", "run_retry", "run_resources", "artifacts", "artifact_get", "wait", "publish_retry", "run_list", "promote_status", "promote_retry", "promotion_list"} {
 		for _, n := range []int{8, 12} {
 			t.Run(fmt.Sprintf("%s/%d", tool, n), func(t *testing.T) {
 				key := "id"
 				args := map[string]any{}
 				switch tool {
-				case "run_priority":
-					args["priority"] = "high"
-					args["reason"] = "release blocker"
 				case "run_list":
 					key = "before"
 				case "promotion_list":

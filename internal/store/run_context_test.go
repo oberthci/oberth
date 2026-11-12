@@ -127,9 +127,6 @@ func TestRunRepositoryContextSupersededRule(t *testing.T) {
 			s := testStore(t, &now)
 			repo := createRepo(t, s)
 			spec := testRunSpec(repo.ID, "feature/context", strings.Repeat("a", 40))
-			if _, err := s.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
-				t.Fatal(err)
-			}
 			first, err := s.EnqueueRun(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)

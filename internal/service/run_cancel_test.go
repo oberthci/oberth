@@ -144,8 +144,8 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	if shown.StartedAt != nil || shown.DisplayStatus != "cancelled" || shown.DisplayReason != "by "+cancelAdmin.Identity+": wrong size" {
 		t.Fatalf("cancel during admission: %+v", shown)
 	}
-	fixture.awaitNoPendingCancellations(t)
 	lift()
+	fixture.awaitNoPendingCancellations(t)
 	if created := fixture.awaitCreated(t, 1); !created[member.ID] {
 		t.Fatalf("cancelled waiter held the next run: %v", created)
 	}
