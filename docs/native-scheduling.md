@@ -169,6 +169,146 @@ Custody-bound execution targets retain their uncertainty/cleanup proof before
 retrying. Cancellation, supersession and publication can affect retention.
 This is unbounded source retention. Its native replacement is tracked separately.
 
+## What Oberth writes into the user's Workflow and Pods
+
+This inventory describes current submission (`internal/argojob/spec.go`,
+`executor_tokens.go`, `nonroot.go`, `release_wif.go`, `step_usage.go`,
+`sourcevolume.go` and `artifactcollect.go`). The metadata tables below list
+individual server labels and annotations. Conditional features apply only when
+configured/authorized. Oberth's injected environment and reserved mount paths
+win name/path collisions; validated workspace opt-outs remain available.
+
+- **Object identity and parameters.** Oberth assigns the Workflow name,
+  namespace, run/repository/SHA/trigger/tier labels and immutable source,
+  policy and custody annotations. Pod metadata adds run/trigger/tier labels;
+  other author Pod metadata survives outside reserved keys. Declared trigger
+  and schedule arguments are bound to the actual run. These do not set node
+  placement or resource requests. Labels can affect cluster policy and native
+  affinity when selected; that is why installed selector keys are reserved.
+- **Environment.** Run containers receive `OBERTH_REPO`, `OBERTH_REF`,
+  `OBERTH_SHA`, `OBERTH_TRIGGER`, `OBERTH_RUN_ID` and per-template `OBERTH_STEP`.
+  Artifact delivery adds `OBERTH_ARTIFACTS`. Release runs add
+  `OBERTH_RELEASE_TAG` and `OBERTH_RELEASE_SHA`. Standard work-volume setup
+  supplies `PATH`, `OBERTH_TOOLS_DIR`, `HOME`, `GOPATH`, `GOTOOLCHAIN`, `GOWORK`,
+  `GOENV`, `GOMODCACHE`, `GOCACHE`, `GIT_TERMINAL_PROMPT`, `KUBEBUILDER_ASSETS`,
+  `TRIVY_CACHE_DIR` and `GOLANGCI_LINT_CACHE`; workspace annotations can omit
+  these defaults. A configured persistent cache overrides `GOMODCACHE` and
+  `GOCACHE` and adds `OBERTH_CACHE_DIR`, pointing to that cache instead of the
+  work-volume fallbacks. A configured private module proxy sets `GOPROXY`,
+  `GONOPROXY` and `GONOSUMDB`, including the authored mirror-only option.
+  Credentialed leaves receive `VAULT_ADDR`, `OBERTH_VAULT_ROLE` and, when
+  delivered, `VAULT_CACERT`; approved per-repository/per-step identities
+  specialize the role. Approved release WIF adds
+  `GOOGLE_APPLICATION_CREDENTIALS` and `OBERTH_RELEASE_WIF`. The nonroot profile
+  additionally sets `TMPDIR`, `GOTMPDIR`, `XDG_CACHE_HOME`, `HOME` and private
+  scratch Go/cache paths. Environment affects program behavior and I/O,
+  **not scheduler placement or declared resource quantities**.
+- **Security context and identity.** The ordinary Pod baseline uses UID/GID 0,
+  `runAsNonRoot: false` and RuntimeDefault seccomp. Main/script/container-set,
+  authored init containers and sidecars get no privilege escalation, all
+  capabilities dropped and a read-only root filesystem; conflicting template
+  security contexts are cleared. The verified nonroot profile instead uses
+  UID/GID 65534 and private scratch for selected leaves, including patched
+  Argo init/wait containers and a fixed root initializer for fresh EmptyDirs.
+  Oberth forces the pipeline, CI-secrets, release or approved per-step
+  ServiceAccount and the separate executor ServiceAccount. Ordinary leaves
+  have no automounted API token; authorized credential leaves receive only
+  their scoped token mounts. These are security/startup compatibility rules,
+  **not placement policy**; missing identities or incompatible security can
+  cause native admission/startup failure. The separate authenticated execution
+  target's already documented placement remains an explicit exception.
+- **Scratch and work volumes.** Oberth adds a bounded disk EmptyDir at `/tmp`
+  (8 GiB size limit) to ordinary containers; the nonroot profile uses its own
+  private `/tmp` EmptyDir and preparation mounts. If the author declares a
+  `work` volumeClaimTemplate, Oberth adds its tools, fallback Go caches, Trivy
+  cache and release-artifact subpath mounts at `/tmp/oberth-tools`,
+  `/cache/gomod`, `/cache/gobuild`, `/tmp/oberth-trivy` and, for release,
+  `/tmp/oberth-release`. Workspace annotations can omit these or make shared
+  mounts read-only. EmptyDir size limits constrain storage usage, not node
+  selection; they are not ephemeral-storage requests. PVC binding and access
+  modes **can constrain placement**. No new work PVC is invented when the
+  document lacks that volumeClaimTemplate.
+- **Persistent cache.** When configured, a writable, repository-scoped,
+  tier-separated `DirectoryOrCreate` hostPath is mounted at `/work/cache`.
+  This is server-owned; repository hostPath declarations remain refused.
+  It changes node-local storage locality/compatibility and runtime I/O but
+  **adds no cache node selector or compute request**.
+- **Source, artifacts and public inputs.** The run's source PVC is mounted
+  read-only at `/work/src`; an omitted working directory defaults there.
+  Approved pinned sources get additional read-only subpaths at their declared
+  paths. `/work/artifacts` is a writable subpath of the same claim when
+  collected artifacts are enabled. Public Vault/proxy trust anchors and the
+  authenticated server binary are additional read-only source-claim subpaths
+  where required (`/run/oberth/vault-ca`, `/etc/ssl/certs/oberth-goproxy-ca.pem`,
+  `/run/oberth/bin`). The claim is already bound by source seeding:
+  **its RWO/node/storage topology constrains subsequent Pods**, including
+  collection. The source deviation above describes the extra pre-Workflow
+  server copies, PVC and seed Pod; these remain unchanged and unbounded.
+- **Executor-token init container and helper resources.** A server patch
+  replaces Argo's executor Secret volume with a bounded 1 MiB memory EmptyDir
+  and inserts `oberth-wait-executor-token` before Argo's init. Oberth delivers
+  a Pod-bound executor token over exec after verifying the exact Pod identity;
+  the waiter exposes no token in a Kubernetes object. The init/wait/waiter
+  helpers normally request 50m CPU and 64 MiB memory, with 500m/512 MiB limits.
+  With helper-storage accounting they also request 256 MiB ephemeral storage;
+  the 512 MiB helper storage limit is applied only when the step itself
+  declares a storage limit. The nonroot preparation helper requests 10m CPU/16 MiB memory and has
+  100m/64 MiB limits. **Helper requests affect Kubernetes Pod packing**
+  (init/steady-state aggregation), and token delivery is a security startup
+  dependency. They do not fill or resize the author's container requests.
+  The separate token-identity holder Pod deliberately carries a scheduling
+  gate and never executes; it has its own ServiceAccount, 1m/1 MiB requests
+  and 10m/8 MiB limits, and is retired with its owned Workflow identity.
+- **Post-run collect Pod.** When collecting artifacts, Oberth creates a
+  helper outside the Workflow using the source-seed Pod shape,
+  mounting the same source PVC at `/seed`, and streams the artifact archive
+  back before deleting that Pod. The seed and collect helper request 100m
+  CPU, 64 MiB memory and 16 MiB ephemeral storage, with 500m/512 MiB/64 MiB
+  limits. They keep the helper PriorityClass and `preemptionPolicy: Never`.
+  **Their resources and source-volume node binding affect scheduling**.
+  They do not inherit the ordinary Workflow's authored affinity/selectors;
+  collection is tied to the node/topology of that source volume. The running
+  helper's `sleep 900` is a leak backstop, not a Pending-Pod expiry. These
+  separate helpers run outside Argo's Workflow parallelism.
+- **Usage instrumentation.** Eligible explicit container/script commands
+  become `/run/oberth/usage/oberth internal-step-exec -- <authored command>`;
+  authored args and Argo's script-path behavior remain. The executable is
+  mounted read-only at `/run/oberth/usage` from the authenticated source-claim
+  binary. Argo adds its own emissary entrypoint around this command later.
+  Instrumentation uses the existing explicit-memory-limit safety check;
+  opaque entrypoints/container sets or incompatible architecture placement
+  remain uninstrumented, with usage unknown. The wrapper/mount add runtime
+  work but **no resource request rewrite**. Instrumented Pod patches add
+  `kubernetes.io/arch` for the delivered binary, **an extra placement
+  constraint and the named architecture deviation**. An authored different
+  architecture is never overwritten or narrowed. Instrumentation itself is
+  unchanged in this round.
+- **Retention and native fields.** Oberth writes `ttlStrategy` with
+  `secondsAfterCompletion` from configured retention (at least 180 seconds)
+  and removes authored PodGC so step logs remain for the Workflow's retention
+  window. **These clean up completed work, not the live scheduling queue**.
+  Authorized assisted continuation separately retains its documented retry,
+  hold-lifetime and scratch behavior. Ordinary authored resource requests,
+  affinity, node selectors, tolerations, parallelism, priority,
+  synchronization, suspend, retryStrategy and optional deadlines pass through;
+  no additional Oberth capacity queue, default deadline or release mutex is
+  introduced.
+
+A branch receive records the accepted ref and queued run before this full
+Workflow validation. Validation happens against the checked-out, resolved
+source receipt before Create. A deterministic decode/admission refusal fails
+that run in the existing `job` phase; `error` retains the complete rule and the
+bounded display reason says `validation refused: …`. Its retry hint asks for a
+YAML fix and new commit. Genuine source/API I/O failures remain infrastructure
+failures. Accepted event-ID replay stays bound to the same run.
+
+Suspension reasons come from the live Workflow's `spec.suspend` or an active
+Argo suspend node. Controller-parallelism waits likewise come from native Argo
+state. Run lists observe these even before local step records exist and after
+steps start; fast reads appear in the first response, with a single 100 ms
+page-wide read grace. A slow API retains an aged observation or says
+`awaiting Argo state`. This read budget neither starts nor fails a workload.
+
 ## Labels and annotations
 
 Label keys/meanings below are public selectors. Values are per-run identities
