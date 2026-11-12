@@ -446,3 +446,8 @@ Plugin macOS onboarding: `TestPluginDNSRemedyWaitsForNameAndReprobes` covers
 IPv4, IPv6, hostname targets and the before/after resolution boundary.
 `TestPluginDNSRejectsStaleOrInvalidAddresses` rejects invalid endpoints and
 stale extra DNS addresses.
+
+`TestPluginOffersLoadBalancerFromGenericReachability` checks proposals without
+provider/distribution matching. `TestPluginWaitLoadBalancerIsBoundedAndSelected`
+checks selected namespace/Service, delayed ingress and bounded missing-Service
+waits. The address wait is read-only and follows the approved install start.

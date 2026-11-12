@@ -771,6 +771,18 @@
     "flag:endpoint-address": {
       "doc_anchor": "docs/plugin-install.md#naming-an-ip-or-load-balancer-endpoint",
       "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginDNSRemedyWaitsForNameAndReprobes"
+    },
+    "flag:wait-load-balancer": {
+      "doc_anchor": "docs/plugin-install.md#no-reachable-node-loadbalancer-proposal",
+      "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginWaitLoadBalancerIsBoundedAndSelected"
+    },
+    "flag:wait-timeout": {
+      "doc_anchor": "docs/plugin-install.md#no-reachable-node-loadbalancer-proposal",
+      "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginWaitLoadBalancerIsBoundedAndSelected"
+    },
+    "flag:namespace": {
+      "doc_anchor": "docs/plugin-install.md#no-reachable-node-loadbalancer-proposal",
+      "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginWaitLoadBalancerIsBoundedAndSelected"
     }
   }
 }

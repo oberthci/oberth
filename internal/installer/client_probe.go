@@ -16,14 +16,15 @@ import (
 
 // ClientPortProbe is advisory: a TCP listener is not Oberth readiness or TLS trust.
 type ClientPortProbe struct {
-	Context      string                `json:"context"`
-	Host         string                `json:"client_host"`
-	HTTPS        ClientPortObservation `json:"https"`
-	SSH          ClientPortObservation `json:"ssh"`
-	InstallFlags []string              `json:"install_flags"`
-	NeedsAction  bool                  `json:"needs_action"`
-	DNS          *ClientDNSProposal    `json:"dns,omitempty"`
-	Advice       string                `json:"advice"`
+	Context      string                      `json:"context"`
+	Host         string                      `json:"client_host"`
+	HTTPS        ClientPortObservation       `json:"https"`
+	SSH          ClientPortObservation       `json:"ssh"`
+	InstallFlags []string                    `json:"install_flags"`
+	NeedsAction  bool                        `json:"needs_action"`
+	LoadBalancer *ClientLoadBalancerProposal `json:"load_balancer,omitempty"`
+	DNS          *ClientDNSProposal          `json:"dns,omitempty"`
+	Advice       string                      `json:"advice"`
 }
 
 type ClientPortObservation struct {
@@ -124,9 +125,21 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 		return result, err
 	}
 	result.InstallFlags = []string{"--client-host", result.Host, "--client-https-port", result.HTTPS.Port, "--client-ssh-port", result.SSH.Port}
+	if cfg.ServiceType != "" && cfg.ServiceType != "NodePort" {
+		result.InstallFlags = append(result.InstallFlags, "--service-type", cfg.ServiceType)
+	}
 	result.Advice = "TCP reachability and published mappings do not prove Oberth readiness or TLS identity. Review these client ports before install; verify the server afterwards."
 	if result.NeedsAction {
 		result.Advice = "Planned client ports did not answer from this host and no unique local mapping was found. NodePorts are not reachable from this host; map them or use port-forward, then repeat this probe. A fresh server may not be listening yet: review the network path, not the cluster type."
+	}
+	if result.NeedsAction && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") {
+		nodeReachable := reachableProbeNode(ctx, plan, deps)
+		if !nodeReachable {
+			result.LoadBalancer = &ClientLoadBalancerProposal{InstallFlags: []string{"--service-type", "LoadBalancer", "--client-https-port", "443", "--client-ssh-port", "2222"}, Advice: "No node address answered the planned NodePorts from this client. Offer LoadBalancer in the same install Review, or map ports/use port-forward. After the approved install starts, wait for its Service address with --wait-load-balancer, then show the DNS remedy and re-probe the chosen name."}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 	if result.DNS != nil && !result.DNS.Resolves {
 		result.Advice += " Show the DNS remedy, wait for the user to configure it, then repeat this probe with the proposed DNS name and the same --endpoint-address before continuing."
@@ -227,4 +240,28 @@ func probeBindingMatches(host, bind string) bool {
 		return ip != nil && (ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback))
 	}
 	return ip != nil && ip.Equal(net.ParseIP(host))
+}
+
+// Bound advisory node checks independently so an unreachable large cluster
+// still receives a network proposal within the overall probe budget.
+func reachableProbeNode(ctx context.Context, plan InstallPlan, deps ClientPortProbeDeps) bool {
+	if deps.Dial == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	for _, node := range plan.Identity.Nodes {
+		for _, address := range node.Addresses {
+			if ctx.Err() != nil {
+				return false
+			}
+			if net.ParseIP(address) == nil {
+				continue
+			}
+			if deps.Dial(ctx, net.JoinHostPort(address, httpsNodePort)) == nil || deps.Dial(ctx, net.JoinHostPort(address, sshNodePort)) == nil {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -46,10 +46,11 @@ func freshK3sHint(rules *clientcmd.ClientConfigLoadingRules, path string) error 
 }
 
 type NodeIdentity struct {
-	Name              string  `json:"name"`
-	Architecture      string  `json:"architecture"`
-	KubernetesVersion string  `json:"kubernetes_version"`
-	AvailableBytes    *uint64 `json:"available_bytes,omitempty"`
+	Addresses         []string `json:"addresses,omitempty"`
+	Name              string   `json:"name"`
+	Architecture      string   `json:"architecture"`
+	KubernetesVersion string   `json:"kubernetes_version"`
+	AvailableBytes    *uint64  `json:"available_bytes,omitempty"`
 }
 
 type ClusterIdentity struct {
@@ -180,6 +181,11 @@ func inspectClusterPreflight(ctx context.Context, cfg *Config, deps Deps, identi
 	sort.Slice(nodes.Items, func(i, j int) bool { return nodes.Items[i].Name < nodes.Items[j].Name })
 	for _, node := range nodes.Items {
 		item := NodeIdentity{Name: node.Name, Architecture: node.Status.NodeInfo.Architecture, KubernetesVersion: node.Status.NodeInfo.KubeletVersion}
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeExternalIP || address.Type == corev1.NodeInternalIP {
+				item.Addresses = append(item.Addresses, address.Address)
+			}
+		}
 		r.check("architecture/"+node.Name, item.Architecture == "amd64" || item.Architecture == "arm64", "Use an amd64 or arm64 node supported by the published Oberth images.")
 		ready, diskPressure := false, false
 		for _, condition := range node.Status.Conditions {

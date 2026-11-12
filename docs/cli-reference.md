@@ -895,10 +895,16 @@ TCP success does not establish server readiness or TLS trust. Nothing is install
         explicit host SSH port; overrides discovery
   -endpoint-address string
         detected node IP or load-balancer address to name and re-probe
+  -namespace string
+        namespace (default: plan review namespace, then oberth)
   -plan-file string
         public JSON from install --plan --json
   -service-type string
         planned Service type: NodePort, ClusterIP or LoadBalancer (default "NodePort")
+  -wait-load-balancer
+        after approved install starts, wait for its Service address (read-only)
+  -wait-timeout duration
+        LoadBalancer wait bound (greater than zero, at most 10m) (default 2m0s)
 ```
 
 ## oberth client repository

@@ -69,7 +69,11 @@ Arguments given to the command: `$ARGUMENTS`
    review, including forwarded ports automatically; never guess a global
    `oberth` SSH alias. Explicit ports win. A remote Docker daemon's ports
    and another cluster's bindings are not this host's mappings.
-   If `needs_action` is true, explain: "NodePorts are not reachable from this
+   Show `kind_remedy` in full before install when present (see below).
+   When `load_balancer` is returned, offer its flags in the same Review and
+   follow the bounded address wait below after the approved install starts.
+   For an IP or load-balancer address, follow the DNS naming remedy below.
+   Otherwise, if `needs_action` is true, explain: "NodePorts are not reachable from this
    host; map them or use port-forward." Offer that network choice, then repeat
    the probe with the resulting client ports. The probe is advisory: a fresh
    server may not listen yet, and TCP or a mapping proves neither readiness
@@ -171,3 +175,31 @@ rerun with the chosen `--client-host` and the same `--endpoint-address`.
 Continue when `dns.resolves_to_endpoint` is true. This checks name resolution
 separately from TCP: a fresh service need not listen yet. Keep DNS-only CA
 constraints and include the chosen name in the install Review.
+
+### No reachable node: LoadBalancer proposal
+
+The port probe offers `load_balancer.install_flags` when no planned node
+address answers its NodePorts. Missing node addresses and failed probes are
+advisory generic signals, including on managed clusters; no provider detection
+or new admission gate is used. Offer `--service-type LoadBalancer` with
+`--client-https-port 443 --client-ssh-port 2222`, or port mapping/forwarding.
+Use the operator's chosen DNS name (propose `oberth.test`) in the same Review.
+Include all flags in that Review and wait for "install" before any mutation.
+
+For LoadBalancer, start the approved install in the background, retaining its
+public output and process status. Then run the read-only address wait against
+the saved plan and the reviewed namespace:
+
+```sh
+sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<hostname approved in Review>' --client-https-port '<approved HTTPS port>' --client-ssh-port '<approved SSH port>' --service-type LoadBalancer --wait-load-balancer --wait-timeout 2m --namespace '<approved namespace>'
+```
+
+The helper waits for Service `oberth` to exist and receive an ingress address,
+with a bounded timeout (maximum 10m). It never creates a Service. Show the
+returned DNS remedy, wait for the user's DNS/hosts change, and re-probe with
+`--endpoint-address` set to that ingress address. Do not rerun the installer
+while the original process is still running. On timeout inspect that Service
+and its events, keep the install status and secrets file, then retry the wait
+or review a forwarding remedy. Do not claim success until the original install
+and subsequent verification pass. Standard LoadBalancer Service ports are 443
+and 2222; NodePorts remain 30443 and 30022.
