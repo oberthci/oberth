@@ -371,7 +371,7 @@ type StepResult struct {
 	ExitCode               int
 	LogStart               int64
 	LogEnd                 int64
-	DeclaredSize           pipeline.Size
+	DeclaredSize           pipeline.Size `json:"-"`
 	// Usage counters are self-reported by untrusted build code, never evidence
 	// for admission or size grants. Any aggregation must saturate on overflow.
 	// Pointers distinguish unavailable telemetry from measured zero.

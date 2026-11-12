@@ -11,7 +11,7 @@ vm.runInContext(`
  replaceApp = html => { statusHTML = html; };
  api = async path => path === '/api/status' ? {cluster: 'ready', cluster_detail: policyDetail} : [];
 `, sandbox);
-for (const detail of ['WARNING: pipeline NetworkPolicy is configured disabled; <configuration>', 'pipeline NetworkPolicy is configured enabled; CNI enforcement has not been measured', 'pipeline NetworkPolicy configuration is unavailable; CNI enforcement has not been measured']) {
+for (const detail of ['WARNING: pipeline NetworkPolicy is configured disabled; <configuration>', 'pipeline NetworkPolicy is configured enabled', 'pipeline NetworkPolicy configuration is unavailable']) {
   vm.runInContext(`policyDetail = ${JSON.stringify(detail)};`, sandbox);
   await vm.runInContext('renderStatus(0)', sandbox);
   const html = vm.runInContext('statusHTML', sandbox);

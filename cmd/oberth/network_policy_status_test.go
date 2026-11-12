@@ -78,7 +78,7 @@ func TestChartEnabledPipelinePolicyStatus(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "pipeline NetworkPolicy is configured enabled; CNI enforcement has not been measured"
+			want := "pipeline NetworkPolicy is configured enabled"
 			if !strings.Contains(string(payload), want) || strings.Contains(string(payload), "WARNING") {
 				t.Fatalf("enabled config misreported: %s", payload)
 			}
@@ -108,7 +108,7 @@ func TestPipelinePolicyConfigurationUnavailableWithoutFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(payload), "pipeline NetworkPolicy configuration is unavailable; CNI enforcement has not been measured") {
+	if !strings.Contains(string(payload), "pipeline NetworkPolicy configuration is unavailable") {
 		t.Fatalf("missing configuration guessed: %s", payload)
 	}
 	configure(t, remoteServer(t, string(payload)))

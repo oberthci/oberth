@@ -249,12 +249,12 @@ func requiresSSHIdentity(upstreams []model.Upstream) bool {
 // pipelineNetworkPolicyDetail is informational and never gates readiness or admission.
 func (health Health) pipelineNetworkPolicyDetail() string {
 	if health.PipelineNetworkPolicyEnabled == nil {
-		return "pipeline NetworkPolicy configuration is unavailable; CNI enforcement has not been measured"
+		return "pipeline NetworkPolicy configuration is unavailable"
 	}
 	if !*health.PipelineNetworkPolicyEnabled {
 		return "WARNING: pipeline NetworkPolicy is configured disabled; Oberth does not configure pipeline egress isolation"
 	}
-	return "pipeline NetworkPolicy is configured enabled; CNI enforcement has not been measured"
+	return "pipeline NetworkPolicy is configured enabled"
 }
 
 func (health Health) Status(ctx context.Context) (any, error) {

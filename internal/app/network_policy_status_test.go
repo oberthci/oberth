@@ -18,9 +18,9 @@ func TestPipelineNetworkPolicyStatus(t *testing.T) {
 		configured *bool
 		detail     string
 	}{
-		{"enabled", &enabled, "pipeline NetworkPolicy is configured enabled; CNI enforcement has not been measured"},
+		{"enabled", &enabled, "pipeline NetworkPolicy is configured enabled"},
 		{"disabled", &disabled, "WARNING: pipeline NetworkPolicy is configured disabled; Oberth does not configure pipeline egress isolation"},
-		{"unavailable", nil, "pipeline NetworkPolicy configuration is unavailable; CNI enforcement has not been measured"},
+		{"unavailable", nil, "pipeline NetworkPolicy configuration is unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			health := Health{
