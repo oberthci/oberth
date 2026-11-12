@@ -58,6 +58,8 @@ mcp tools
 client
 client setup
 client pin
+client ports
+client repository
 client redeem
 client renew
 outbox

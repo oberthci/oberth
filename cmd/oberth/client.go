@@ -21,6 +21,8 @@ Commands:
   setup   trust the server's CA in Claude Code and install the Oberth plugin
   redeem  redeem a private invitation with a local CSR and SSH public key
   renew   renew with the current certificate and rotate the local key
+  repository  bind one repository to the selected server and pinned SSH identity
+  ports   probe planned client endpoints and propose published host ports
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
 Use oberth client <command> --help for its flags.`
@@ -54,7 +56,7 @@ var clientSetupDeps = func(output io.Writer) installer.Deps { return installer.D
 
 func runClient(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: client setup|redeem|renew|pin", errUsage)
+		return fmt.Errorf("%w: client setup|redeem|renew|repository|ports|pin", errUsage)
 	}
 	switch arguments[0] {
 	case "--help", "-h":
@@ -66,6 +68,10 @@ func runClient(ctx context.Context, arguments []string, output io.Writer) error 
 		return runClientRedeem(ctx, arguments[1:], output)
 	case "renew":
 		return runClientRenew(ctx, arguments[1:], output)
+	case "repository":
+		return runClientRepository(ctx, arguments[1:], output)
+	case "ports":
+		return runClientPorts(ctx, arguments[1:], output)
 	case "pin":
 		return runClientPin(arguments[1:], output)
 	default:

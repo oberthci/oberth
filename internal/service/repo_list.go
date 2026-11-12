@@ -12,6 +12,7 @@ import (
 type repoSummary struct {
 	ID            int64      `json:"id"`
 	Name          string     `json:"name"`
+	GitPath       string     `json:"git_path"`
 	Upstream      string     `json:"upstream"`
 	DefaultBranch string     `json:"default_branch"`
 	ArchivedAt    *time.Time `json:"archived_at"`
@@ -88,6 +89,7 @@ func (service *API) repoList(ctx context.Context, archived string) (api.RepoList
 				return api.RepoListResponse{}, err
 			}
 			summary.Upstream = upstream.Name
+			summary.GitPath = upstream.QualifiedRepo(repo.Name)
 		}
 		if run, ok := latest[repo.ID]; ok {
 			shown := service.presentationRun(ctx, run)

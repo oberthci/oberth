@@ -22,15 +22,16 @@ root_at() {
 }
 detect() {
  root_at "$1"
- ssh_port=; web_port=
+ ssh_port=; web_port=; home_prefix=; ssh_user=git
  origin=$(git -C "$root" config --get remote.origin.url 2>/dev/null) || fail 'origin is missing; configure the forge origin first'
  case "$origin" in
  https://*|ssh://*) address=${origin#*://}; authority=${address%%/*}; [ "$address" != "$authority" ] || fail 'origin has no repository path'; host=${authority##*@}
-  case "$origin" in ssh://*) case "$host" in *:*) ssh_port=${host#*:};; esac;; https://*) case "$host" in *:*) web_port=${host#*:};; esac;; esac
+  case "$origin" in ssh://*) case "$authority" in *@*) ssh_user=${authority%@*}; ssh_user=${ssh_user%%:*};; esac; case "$host" in *:*) ssh_port=${host#*:};; esac;; https://*) case "$host" in *:*) web_port=${host#*:};; esac;; esac
   host=${host%%:*}; slug=${address#*/};;
- git@*:*) address=${origin#git@}; host=${address%%:*}; slug=${address#*:};;
+ *@*:*) ssh_user=${origin%%@*}; address=${origin#*@}; host=${address%%:*}; slug=${address#*:};;
  *) fail 'origin must be an HTTPS or SSH forge URL';;
  esac
+ case "$ssh_user" in ''|-*|*[!A-Za-z0-9_.-]*) fail 'unsupported SSH user';; esac
  host=$(printf '%s' "$host" | tr 'A-Z' 'a-z')
  case "$host" in ''|*[!a-z0-9.-]*|.*|-*) fail 'unsupported forge host';; esac
  for port in "$ssh_port" "$web_port"; do
@@ -40,16 +41,18 @@ detect() {
  done
  web_host=$host${web_port:+:$web_port}
  slug=${slug%/}; slug=${slug%.git}
+ case "$slug" in \~/*) home_prefix="~/"; slug=${slug#\~/};; esac
  safe_path "$slug" || fail 'unsupported repository path in origin'
  case "$slug" in */*) organization=${slug%/*}; repository=${slug##*/};; *) fail 'origin needs an organization and repository';; esac
  forge=${2:-}
  if [ -z "$forge" ]; then
-  case "$host" in github.com) forge=github;; gitlab.com) forge=gitlab;; codeberg.org) forge=codeberg;; *) fail 'unknown forge: ask the user, then pass github, gitlab or codeberg explicitly';; esac
+  case "$host" in github.com) forge=github;; gitlab.com) forge=gitlab;; codeberg.org) forge=codeberg;; *) forge=other;; esac
  fi
  case "$forge" in
  github|codeberg) case "$organization" in */*) fail 'this forge requires a single organization segment';; esac; settings="https://$web_host/$slug/settings/keys";;
  gitlab) settings="https://$web_host/$slug/-/settings/repository#js-deploy-keys-settings";;
- *) fail 'forge must be github, gitlab or codeberg';;
+ other) settings=;;
+ *) fail 'forge must be github, gitlab, codeberg or other';;
  esac
  detect_language
 }
@@ -59,7 +62,7 @@ detect_language() {
  elif [ -f "$root/package.json" ]; then language=node
  elif [ -f "$root/pyproject.toml" ] || [ -f "$root/setup.py" ]; then language=python; fi
 }
-manual() { printf 'manual_key_settings=%s\n' "$settings"; echo 'Add the public deploy key with write access, then verify through Oberth. Do not paste a private key or token.'; }
+manual() { if [ -n "$settings" ]; then printf 'manual_key_settings=%s\n' "$settings"; else echo 'manual_key_registration=Ask the forge administrator for the exact public-key registration page or authorized_keys location.'; fi; echo 'Add the public deploy key with write access, then verify through Oberth. Do not paste a private key or token.'; }
 server() {
  context=$1; namespace=$2; pod=$3; shift 3
  [ -n "$context" ] && [ -n "$namespace" ] && [ -n "$pod" ] || fail 'explicit context, namespace and pod are required'
@@ -136,7 +139,7 @@ prerequisites)
 inspect)
  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'inspect <path> [forge]'
  detect "$1" "${2:-}"
- printf 'root=%s\nforge=%s\nhost=%s\norganization=%s\nrepository=%s\nroute_org=%s\nupstream_url=ssh://git@%s/%s\nkey_settings=%s\nlanguage=%s\n' "$root" "$forge" "$host" "$organization" "$repository" "${organization##*/}" "$host${ssh_port:+:$ssh_port}" "$organization" "$settings" "$language"
+ printf 'root=%s\nforge=%s\nhost=%s\norganization=%s\nrepository=%s\nroute_org=%s\nupstream_url=ssh://%s@%s/%s\nkey_settings=%s\nlanguage=%s\n' "$root" "$forge" "$host" "$organization" "$repository" "${organization##*/}" "$ssh_user" "$host${ssh_port:+:$ssh_port}" "$home_prefix$organization" "$settings" "$language"
  if [ -e "$root/.oberth" ] || [ -L "$root/.oberth" ]; then echo 'workflow=existing'; else echo 'workflow=missing'; fi;;
 contexts) kubectl config get-contexts;;
 pods)
@@ -149,11 +152,15 @@ public-key)
  [ "$#" -eq 3 ] || fail 'public-key <context> <namespace> <pod>'
  server "$1" "$2" "$3" admin read-file /run/oberth-identities/upstream/id_ed25519.pub;;
 prepare-upstream)
- [ "$#" -eq 8 ] || fail 'prepare-upstream <context> <namespace> <pod> <name> <base-url> <repo> shared|dedicated --consent'
+ [ "$#" -ge 8 ] && [ "$#" -le 9 ] || fail 'prepare-upstream <context> <namespace> <pod> <name> <base-url> <repo> shared|dedicated --consent [authoritative-host-fingerprint]'
  consent "$8"
+ expected=${9:-}
+ if [ -n "$expected" ]; then
+  case "$expected" in SHA256:*[!A-Za-z0-9+/=:]*|*[!A-Za-z0-9+/=:]*) fail 'invalid authoritative host fingerprint';; SHA256:?*) :;; *) fail 'expected an authoritative SHA256 host fingerprint';; esac
+ fi
  case "$7" in
- shared) server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --check-repo "$6" "$4" "$5";;
- dedicated) server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --dedicated-key --check-repo "$6" "$4" "$5";;
+ shared) if [ -n "$expected" ]; then server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --check-repo "$6" --expected-host-fingerprint "$expected" "$4" "$5"; else server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --check-repo "$6" "$4" "$5"; fi;;
+ dedicated) if [ -n "$expected" ]; then server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --dedicated-key --check-repo "$6" --expected-host-fingerprint "$expected" "$4" "$5"; else server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --dedicated-key --check-repo "$6" "$4" "$5"; fi;;
  *) fail 'key mode must be shared or dedicated';;
  esac;;
 register)
@@ -180,6 +187,7 @@ deploy-key)
  public_file=$canonical_key
  cd "$root"
  case "$forge" in
+ other) manual; exit 2;;
  github)
   if ! command -v gh >/dev/null 2>&1 || ! gh auth status --hostname "$web_host" >/dev/null 2>&1; then manual; exit 2; fi
   gh api --hostname "$web_host" --method POST "repos/$slug/keys" -f title=Oberth -F "key=@$public_file" -F read_only=false >/dev/null 2>&1 || { manual; exit 2; };;
@@ -197,36 +205,11 @@ deploy-key)
   case "$status" in 2[0-9][0-9]) :;; *) manual; exit 2;; esac;;
  esac
  echo 'Deploy-key request accepted; verify repository access through Oberth before pushing.';;
-ssh-info)
- [ "$#" -eq 1 ] || fail 'ssh-info <approved-host-or-alias>'
- case "$1" in ''|-*|*[!A-Za-z0-9._:-]*) fail 'invalid SSH host or alias';; esac
- ssh -G "$1" 2>/dev/null | awk '$1 ~ /^(hostname|port|user|identityfile|identitiesonly|stricthostkeychecking|userknownhostsfile)$/ {print}';;
 configure)
- [ "$#" -eq 4 ] || fail 'configure <path> remote|replace-remote|push-url <oberth-ssh-url> --consent'
- consent "$4"; root_at "$1"; mode=$2; target=$3
- case "$target" in git@*:*|ssh://git@*/*) :;; *) fail 'Oberth remote must use SSH as git';; esac
- case "$target" in *[!A-Za-z0-9_./:@\[\]-]*|*..*) fail 'unsupported SSH URL';; esac
- authority=${target#git@}; authority=${authority#ssh://git@}
- case "$authority" in *@*) fail 'credential-bearing SSH URLs are refused';; esac
- case "$mode" in
- remote)
-  existing=$(git -C "$root" config --local --get remote.oberth.url || true)
-  pushurl=$(git -C "$root" config --local --get-all remote.oberth.pushurl || true)
-  [ -z "$pushurl" ] || [ "$pushurl" = "$target" ] || fail 'oberth push URL differs; explicitly review replace-remote'
-  [ -z "$existing" ] || [ "$existing" = "$target" ] || fail 'oberth remote differs; review it and explicitly choose replace-remote'
-  if [ -z "$existing" ]; then git -C "$root" remote add oberth "$target"; fi;;
- replace-remote)
-  git -C "$root" remote set-url oberth "$target"
-  if git -C "$root" config --local --get-all remote.oberth.pushurl >/dev/null; then git -C "$root" config --local --unset-all remote.oberth.pushurl; fi;;
- push-url)
-  git -C "$root" config --get remote.origin.url >/dev/null || fail 'origin is missing'
-  git -C "$root" config --local --replace-all remote.origin.pushurl "$target";;
- *) fail 'choose remote, replace-remote or push-url';;
- esac
- if ! git -C "$root" config --local --get-all push.pushOption | grep -Fxq oberth.assist=1; then
-  git -C "$root" config --local --add push.pushOption oberth.assist=1
- fi
- echo 'Configured this repository only; no commit was created.';;
+ [ "$#" -ge 2 ] || fail 'configure <path> remote|replace-remote|push-url --installation <public install JSON> --registered-repo <path> --ssh-key <local key> --ca-file <CA> --client-cert <cert> --client-key <key> [--assist] [--consent]'
+ root_at "$1"; mode=$2; shift 2
+ find_cli
+ exec "$oberth_cli" client repository --path "$root" --mode "$mode" "$@";;
 workflow-preview|workflow-write)
  if [ "$action" = workflow-write ]; then [ "$#" -eq 2 ] || fail 'workflow-write <path> --consent'; consent "$2"
  else [ "$#" -eq 1 ] || fail 'workflow-preview <path>'; fi
@@ -243,7 +226,9 @@ validate)
  find_cli
  if [ "$#" -eq 2 ]; then "$oberth_cli" validate --runner-image-prefixes "$2" "$1"; else "$oberth_cli" validate "$1"; fi;;
 smoke)
- [ "$#" -eq 6 ] || fail 'smoke <path> oberth|origin <new-branch> <approved-oberth-url> <approved-commit> --consent'
+ [ "$#" -ge 6 ] && [ "$#" -le 7 ] || fail 'smoke <path> oberth|origin <new-branch> <approved-oberth-url> <approved-commit> --consent [--unassisted]'
+ [ "$#" -eq 6 ] || [ "$7" = --unassisted ] || fail 'expected --unassisted'
+ unassisted=false; [ "$#" -eq 6 ] || unassisted=true
  consent "$6"; root_at "$1"; remote=$2; branch=$3; approved=$4; approved_commit=$5
  case "$remote" in oberth|origin) :;; *) fail 'choose the configured Oberth push remote';; esac
  git check-ref-format "refs/heads/$branch" >/dev/null 2>&1 || fail 'invalid smoke branch'
@@ -251,14 +236,43 @@ smoke)
  current_commit=$(git -C "$root" rev-parse --verify HEAD) || fail 'repository has no committed HEAD'
  [ "$current_commit" = "$approved_commit" ] || fail 'HEAD differs from the approved commit; review the new SHA before pushing'
  git -C "$root" cat-file -e "$approved_commit:.oberth/build.yaml" 2>/dev/null || fail 'the workflow must be committed with approval before pushing'
+ unset GIT_SSH_COMMAND GIT_SSH
+ config=$(git -C "$root" config --local --get oberth.sshConfig) || fail 'configure this repository with a pinned per-install SSH binding first'
+ bound=$(git -C "$root" config --local --get oberth.pushURL) || fail 'missing bound push URL'
+ command=$(git -C "$root" config --local --get core.sshCommand) || fail 'missing per-install SSH command'
+ escaped_config=$(printf '%s' "$config" | sed "s/'/'\"'\"'/g")
+ expected_command="ssh -F '$escaped_config'"
+ [ "$command" = "$expected_command" ] && [ -f "$config" ] && [ "$approved" = "$bound" ] || fail 'repository SSH binding differs from the reviewed server'
+ server_id=$(git -C "$root" config --local --get oberth.serverID) || fail 'missing server identity binding'
+ case "$server_id" in ''|*[!0-9a-f]*) fail 'invalid server identity binding';; esac
+ [ "${#server_id}" -eq 64 ] || fail 'invalid server identity binding'
+ claude=${CLAUDE_CONFIG_DIR:-${HOME:?}/.claude}
+ case "$claude" in /*) :;; *) claude="$(pwd)/$claude";; esac
+ [ "$config" = "$claude/oberth/$server_id/ssh_config" ] && [ ! -L "$config" ] || fail 'SSH config is not the managed per-install binding'
  target=$(git -C "$root" remote get-url --push --all "$remote")
  [ "$target" = "$approved" ] || fail 'push URL differs from the reviewed Oberth URL'
  case "$target" in *[!A-Za-z0-9_./:@\[\]-]*|*..*) fail 'smoke requires one safe SSH URL';; esac
  case "$target" in git@*:*|ssh://git@*/*) :;; *) fail 'the smoke push target must be the approved Oberth SSH URL';; esac
  authority=${target#git@}; authority=${authority#ssh://git@}
  case "$authority" in *@*) fail 'credential-bearing SSH URLs are refused';; esac
+ case "$target" in ssh://git@*:*/*) :;; *) fail 'use the exact explicit server URL returned by configure';; esac
+ endpoint=${target#ssh://git@}; endpoint=${endpoint%%/*}
+ expected_host=${endpoint%:*}; expected_port=${endpoint##*:}
+ case "$expected_host" in ''|-*|*[!A-Za-z0-9.-]*) fail 'invalid bound server host';; esac
+ case "$expected_port" in ''|*[!0-9]*) fail 'invalid bound server port';; esac
+ resolved=$(ssh -G -F "$config" "$expected_host" 2>/dev/null) || fail 'cannot inspect the per-install SSH config'
+ resolved_host=$(printf '%s\n' "$resolved" | awk '$1=="hostname" {print $2}')
+ resolved_port=$(printf '%s\n' "$resolved" | awk '$1=="port" {print $2}')
+ resolved_alias=$(printf '%s\n' "$resolved" | awk '$1=="hostkeyalias" {print $2}')
+ resolved_strict=$(printf '%s\n' "$resolved" | awk '$1=="stricthostkeychecking" {print $2}')
+ [ "$resolved_host" = "$expected_host" ] && [ "$resolved_port" = "$expected_port" ] && [ "$resolved_alias" = "oberth-$server_id" ] || fail 'SSH binding does not match the selected server URL'
+ case "$resolved_strict" in true|yes) :;; *) fail 'pinned host-key checking is required';; esac
  existing=$(git -C "$root" ls-remote --heads "$target" "refs/heads/$branch") || fail 'cannot inspect smoke branch on Oberth'
  [ -z "$existing" ] || fail 'smoke branch already exists; choose a new branch'
- git -C "$root" push "--force-with-lease=refs/heads/$branch:" -- "$target" "$approved_commit:refs/heads/$branch";;
+ if [ "$unassisted" = true ]; then
+  git -C "$root" -c push.pushOption= push "--force-with-lease=refs/heads/$branch:" -- "$target" "$approved_commit:refs/heads/$branch"
+ else
+  git -C "$root" push "--force-with-lease=refs/heads/$branch:" -- "$target" "$approved_commit:refs/heads/$branch"
+ fi;;
 *) fail 'unknown add-repo action';;
 esac

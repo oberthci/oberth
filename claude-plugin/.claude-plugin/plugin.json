@@ -14,12 +14,16 @@
     "url": {
       "type": "string",
       "title": "Oberth MCP URL",
-      "description": "MCP endpoint of your Oberth server, for example https://oberth.example.test:30443/mcp. Leave empty until a server exists: the plugin then guides you to install one (/oberth:install) or to connect to one."
+      "description": "MCP endpoint of your Oberth server, for example https://oberth.example.test:30443/mcp. Leave empty until a server exists: the plugin then guides you to install one (/oberth:install) or to connect to one.",
+      "required": false,
+      "default": ""
     },
     "ca_pin": {
       "type": "string",
       "title": "CA SHA-256 pin",
-      "description": "SHA-256 fingerprint of the server's CA certificate, from your Oberth admin (oberth client pin). /oberth:connect trusts the CA only when it matches. Leave empty when the server has a publicly trusted certificate."
+      "description": "SHA-256 fingerprint of the server's CA certificate. Leave empty before a server exists; /oberth:install records the installed connection and /oberth:connect checks its pin.",
+      "required": false,
+      "default": ""
     }
   }
 }

@@ -90,8 +90,8 @@ func TestAddRepoDetectsForgesWithoutDisclosingOriginCredentials(t *testing.T) {
 		t.Fatal("origin credentials disclosed or detection failed")
 	}
 	f.git(t, "remote", "set-url", "origin", "git@forge.example.test:acme/project.git")
-	if _, err := f.call(t, "inspect", f.root); err == nil {
-		t.Fatal("guessed an unknown forge")
+	if out, err := f.call(t, "inspect", f.root); err != nil || !strings.Contains(out, "forge=other") || !strings.Contains(out, "key_settings=\n") {
+		t.Fatal("unknown SSH forge needs the manual registration path")
 	}
 	if out, err := f.call(t, "inspect", f.root, "gitlab"); err != nil || !strings.Contains(out, "https://forge.example.test/acme/project/-/settings/repository") {
 		t.Fatal("explicit custom forge failed")
@@ -112,46 +112,30 @@ func TestAddRepoConfiguresOnlyTheRepositoryWithConsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := "git@oberth:github/acme/project.git"
 	original := f.git(t, "rev-parse", "HEAD")
-	f.git(t, "config", "--local", "--add", "push.pushOption", "other=value")
-	if _, err := f.call(t, "configure", f.root, "remote", target, "no"); err == nil {
-		t.Fatal("configured without consent")
+	f.fake(t, "oberth", `printf '%s\n' "$@" > "$CALL_TRACE"
+case " $* " in *" --consent "*) echo '{"configured":true}' ;; *) echo '{"configured":false}' ;; esac
+`)
+	args := []string{"configure", f.root, "remote", "--installation", "/public/install.json", "--registered-repo", "github/acme/project", "--ssh-key", "/local/push-key", "--client-cert", "/local/client.crt", "--client-key", "/local/client.key", "--ca-file", "/public/ca.crt"}
+	if out, err := f.call(t, args...); err != nil || !strings.Contains(out, `"configured":false`) {
+		t.Fatalf("preview: %v %s", err, out)
 	}
-	for range 2 {
-		if out, err := f.call(t, "configure", f.root, "remote", target, "--consent"); err != nil {
-			t.Fatalf("configuration failed: %v %s", err, out)
+	args = append(args, "--assist", "--consent")
+	if _, err := f.call(t, args...); err != nil {
+		t.Fatal(err)
+	}
+	trace, err := os.ReadFile(f.trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"client\nrepository\n--path\n" + f.git(t, "rev-parse", "--show-toplevel"), "--installation\n/public/install.json", "--registered-repo\ngithub/acme/project", "--assist\n--consent"} {
+		if !strings.Contains(string(trace), want) {
+			t.Fatal("lost the selected server binding argument")
 		}
 	}
-	if got := f.git(t, "config", "--local", "--get-all", "push.pushOption"); got != "other=value\noberth.assist=1" {
-		t.Fatal("did not preserve local options exactly once")
-	}
-	if f.git(t, "config", "--local", "--get", "remote.oberth.url") != target {
-		t.Fatal("wrong Oberth remote")
-	}
-	different := "git@oberth:other/acme/project.git"
-	if _, err := f.call(t, "configure", f.root, "remote", different, "--consent"); err == nil {
-		t.Fatal("replaced an existing remote implicitly")
-	}
-	f.git(t, "config", "--local", "remote.oberth.pushurl", different)
-	if _, err := f.call(t, "configure", f.root, "remote", target, "--consent"); err == nil {
-		t.Fatal("ignored conflicting push URL")
-	}
-	if _, err := f.call(t, "configure", f.root, "replace-remote", target, "--consent"); err != nil {
-		t.Fatal("explicit replacement failed")
-	}
-	if _, err := f.call(t, "configure", f.root, "push-url", target, "--consent"); err != nil {
-		t.Fatal("push URL choice failed")
-	}
-	if f.git(t, "config", "--local", "--get", "remote.origin.url") != "git@github.com:acme/project.git" || f.git(t, "config", "--local", "--get", "remote.origin.pushurl") != target {
-		t.Fatal("origin fetch/push choice incorrect")
-	}
 	after, err := os.ReadFile(f.global)
-	if err != nil || !bytes.Equal(before, after) {
-		t.Fatal("global git configuration changed")
-	}
-	if original != f.git(t, "rev-parse", "HEAD") {
-		t.Fatal("created a commit")
+	if err != nil || !bytes.Equal(before, after) || f.git(t, "rev-parse", "HEAD") != original {
+		t.Fatal("modified global settings or committed files")
 	}
 }
 
@@ -326,10 +310,24 @@ func TestAddRepoSmokeRequiresApprovedTargetCommittedWorkflowAndNewBranch(t *test
 esac
 exec "$REAL_GIT" "$@"
 `)
-	target := "git@oberth:github/acme/project.git"
-	if _, err := f.call(t, "configure", f.root, "remote", target, "--consent"); err != nil {
+	target := "ssh://git@localhost:32022/github/acme/project.git"
+	configRoot := filepath.Join(t.TempDir(), "config with 'quote")
+	serverID := strings.Repeat("a", 64)
+	directory := filepath.Join(configRoot, "oberth", serverID)
+	if err := os.MkdirAll(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
+	config := filepath.Join(directory, "ssh_config")
+	body := "Host localhost\n HostName localhost\n Port 32022\n HostKeyAlias oberth-" + serverID + "\n StrictHostKeyChecking yes\n"
+	if err := os.WriteFile(config, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.env = append(f.env, "CLAUDE_CONFIG_DIR="+configRoot)
+	f.git(t, "config", "--local", "oberth.serverID", serverID)
+	f.git(t, "config", "--local", "remote.oberth.url", target)
+	f.git(t, "config", "--local", "oberth.sshConfig", config)
+	f.git(t, "config", "--local", "oberth.pushURL", target)
+	f.git(t, "config", "--local", "core.sshCommand", "ssh -F '"+strings.ReplaceAll(config, "'", "'\"'\"'")+"'")
 	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, f.git(t, "rev-parse", "HEAD"), "--consent"); err == nil {
 		t.Fatal("pushed without committed workflow")
 	}
@@ -369,7 +367,13 @@ exec "$REAL_GIT" "$@"
 	if _, err := f.call(t, "smoke", f.root, "oberth", "smoke", target, approvedCommit, "--consent"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.call(t, "smoke", f.root, "oberth", "fresh-unassisted", target, approvedCommit, "--consent", "--unassisted"); err != nil {
+		t.Fatal(err)
+	}
 	calls, err := os.ReadFile(f.trace)
+	if !strings.Contains(string(calls), "-c\npush.pushOption=\npush") {
+		t.Fatal("unassisted push did not clear configured push options")
+	}
 	if err != nil || !strings.Contains(string(calls), approvedCommit+":refs/heads/smoke") || !strings.Contains(string(calls), "\n"+target+"\n") || !strings.Contains(string(calls), "--force-with-lease=refs/heads/smoke:") || strings.Contains(string(calls), "\n--force\n") {
 		t.Fatal("wrong smoke push")
 	}
@@ -441,5 +445,29 @@ printf 'HTTP/2.0 201 Created\n' >&2
 				t.Fatal("forge received data outside the canonical public key")
 			}
 		})
+	}
+}
+
+func TestAddRepoHomeRelativeOtherForgeAndHostPin(t *testing.T) {
+	f := newAddRepoFixture(t, "ssh://deploy@forge.example.test:2222/~/acme/project.git")
+	out, err := f.call(t, "inspect", f.root)
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	for _, want := range []string{"forge=other", "organization=acme", "route_org=acme", "upstream_url=ssh://deploy@forge.example.test:2222/~/acme", "key_settings=\n"} {
+		if !strings.Contains(out, want) {
+			t.Fatal(want)
+		}
+	}
+	if out, err = f.call(t, "deploy-key", f.root, addRepoPublicKey(t), "--consent", "other"); err == nil || !strings.Contains(out, "Ask the forge administrator for the exact public-key registration page or authorized_keys location") {
+		t.Fatalf("%v %s", err, out)
+	}
+	f.fake(t, "kubectl", `printf '%s\n' "$@" > "$CALL_TRACE"`)
+	if _, err = f.call(t, "prepare-upstream", "chosen", "namespace", "pod", "custom", "ssh://git@forge.example.test:2222/~/acme", "project", "shared", "--consent", "SHA256:approved"); err != nil {
+		t.Fatal(err)
+	}
+	trace, err := os.ReadFile(f.trace)
+	if err != nil || !strings.Contains(string(trace), "--expected-host-fingerprint\nSHA256:approved") {
+		t.Fatal("lost authoritative host pin")
 	}
 }

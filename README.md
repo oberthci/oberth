@@ -129,7 +129,9 @@ command use them. `--assist` turns on
 
 The Oberth plugin for Claude Code can come first: `/plugin install
 oberth@oberthci` works before any server exists, and `/oberth:install` then
-walks through these steps.
+walks through these steps. Leave its URL/CA options empty until then. The
+[plugin guide](docs/plugin-install.md) covers custom client ports and per-install
+SSH bindings for repositories.
 
 ### First push
 

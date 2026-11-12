@@ -19,7 +19,11 @@ func TestRepoListReturnsOnlySlimScopedRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := value.(api.RepoListResponse).Repositories.([]repoSummary)
-	if len(rows) != 1 || rows[0].ID != f.visible.ID || rows[0].Upstream != "github" || rows[0].LatestRun == nil {
+	canonical, err := f.store.QualifiedRepoName(t.Context(), f.visible.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ID != f.visible.ID || rows[0].Upstream != "github" || rows[0].GitPath != canonical || rows[0].LatestRun == nil {
 		t.Fatalf("%+v", rows)
 	}
 	raw, err := json.Marshal(value)
@@ -32,7 +36,7 @@ func TestRepoListReturnsOnlySlimScopedRecords(t *testing.T) {
 	if err = json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if len(decoded.Repositories[0]) != 7 {
+	if len(decoded.Repositories[0]) != 8 {
 		t.Fatalf("not slim: %s", raw)
 	}
 	var latest map[string]json.RawMessage

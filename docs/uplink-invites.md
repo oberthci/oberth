@@ -40,8 +40,8 @@ the one-time credential nor an authentication token enters the transcript.
 Give `/oberth:connect` the local path of the received 0600 invitation file.
 It invokes the plugin's `trust redeem` script. When the CLI is absent the
 script uses the plugin's verified fetcher. The script creates its local TLS
-identity under `~/.claude/oberth/current/` and an Ed25519 SSH key at
-`~/.claude/oberth/push_ed25519`; it registers only the public SSH key.
+identity under `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/current/` and an Ed25519 SSH key at
+`${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/push_ed25519`; it registers only the public SSH key.
 
 The client checks the server's certificate chain, hostname, validity and
 name constraints against the exact invitation CA pin before sending the
@@ -55,9 +55,9 @@ For an existing locally generated CSR and SSH key, the same operation is:
 
 ```sh
 oberth client redeem --invite-file "$HOME/oberth-invite.json" \
-  --csr "$HOME/.claude/oberth/current/client.csr" \
-  --ssh-public-key "$HOME/.claude/oberth/push_ed25519.pub" \
-  --certificate-out "$HOME/.claude/oberth/current/client.csr.crt"
+  --csr "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/oberth/current/client.csr" \
+  --ssh-public-key "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/oberth/push_ed25519.pub" \
+  --certificate-out "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/oberth/current/client.csr.crt"
 ```
 
 The certificate output and its `.ca.crt` and `.url` companions must all be new.
