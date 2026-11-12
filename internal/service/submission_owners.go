@@ -16,6 +16,7 @@ type submissionRegistry struct {
 }
 type submissionOwner struct {
 	gate                                                                  *submissionRegistry
+	withdrawn                                                             chan struct{}
 	sequence, order, repoID                                               int64
 	runID, repo, ref, sha                                                 string
 	refKind                                                               model.RefKind
@@ -26,7 +27,7 @@ func newSubmissionRegistry() *submissionRegistry {
 	return &submissionRegistry{owners: map[int64]*submissionOwner{}}
 }
 func (g *submissionRegistry) trackRun(run model.Run) *submissionOwner {
-	r := &submissionOwner{gate: g, sequence: run.QueueSequence, order: run.AdmissionSequence, repoID: run.RepoID, runID: run.ID, ref: run.Ref, sha: run.SHA, refKind: run.RefKind}
+	r := &submissionOwner{withdrawn: make(chan struct{}), gate: g, sequence: run.QueueSequence, order: run.AdmissionSequence, repoID: run.RepoID, runID: run.ID, ref: run.Ref, sha: run.SHA, refKind: run.RefKind}
 	if r.order <= 0 {
 		r.order = r.sequence
 	}
@@ -96,11 +97,32 @@ func (g *submissionRegistry) abandon(sequence int64) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	r := g.owners[sequence]
-	if r == nil || r.granted || r.retained {
+	if r == nil {
+		return false
+	}
+	if !r.canceled {
+		r.canceled = true
+		close(r.withdrawn)
+	}
+	if r.granted || r.retained {
 		return false
 	}
 	r.abandoned = true
 	r.canceled = true
 	g.releaseLocked(r)
 	return true
+}
+
+// Creation can wait on a source Pod indefinitely. A durable cancellation wakes
+// that operation without releasing its cleanup custody before Create returns.
+func (r *submissionOwner) creationContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	go func() {
+		select {
+		case <-r.withdrawn:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
 }

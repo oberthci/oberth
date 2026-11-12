@@ -862,16 +862,19 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		}
 	}
 
+	creationCtx, cancelCreation := reservation.creationContext(ctx)
+
 	switch {
 	case run.Release:
 		if scheduler.releaseJobs == nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("release Job capability is unavailable"))
 		}
-		err = scheduler.releaseJobs.CreateRelease(ctx, jobRequest)
+		err = scheduler.releaseJobs.CreateRelease(creationCtx, jobRequest)
 	default:
-		err = scheduler.jobs.CreateWorkflow(ctx, jobRequest)
+		err = scheduler.jobs.CreateWorkflow(creationCtx, jobRequest)
 	}
+	cancelCreation()
 	if err != nil {
 		var uncertain interface{ AmbiguousCreate() bool }
 		if errors.As(err, &uncertain) && uncertain.AmbiguousCreate() {

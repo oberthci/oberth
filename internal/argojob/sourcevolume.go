@@ -58,11 +58,6 @@ const (
 	// later see at SourceMountPath.
 	seedMountPath = "/seed"
 
-	// seedReadyTimeout bounds the wait for the seeding Pod to start. It is a
-	// single small container with no dependencies; a longer wait would only
-	// mean the node cannot schedule it at all.
-	seedReadyTimeout = 3 * time.Minute
-
 	// sourceClaimLabelSelector matches the claims this seeder creates, which is
 	// what makes an unowned one identifiable as ours rather than a coincidence.
 	sourceClaimLabelSelector = "oberth.ci/component=source"
@@ -568,7 +563,6 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 }
 
 func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, expected ...*corev1.Pod) error {
-	deadline := time.Now().Add(seedReadyTimeout)
 	interval := seeder.interval()
 	for {
 		pod, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Get(ctx, name, metav1.GetOptions{})
@@ -594,9 +588,6 @@ func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, exp
 			}
 		} else if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("argojob: read source seed pod %s: %w", name, err)
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("argojob: source seed pod %s did not start within %s", name, seedReadyTimeout)
 		}
 		select {
 		case <-ctx.Done():
