@@ -235,12 +235,6 @@ func executeWithCredentials(ctx context.Context, cfg Config, deps InstallDeps) (
 		}
 	} else if cfg.SecretsFile != "" && !cfg.DryRun {
 		return errors.New("--secrets-file cannot be combined with a caller that receives the credentials itself")
-	} else if cfg.SecretsFile != "" {
-		// A dry run creates nothing, but a path the install would refuse is
-		// part of the plan it reviews.
-		if _, err := CheckSecretsFilePath(cfg.SecretsFile); err != nil {
-			return err
-		}
 	}
 
 	return executeCluster(ctx, cfg, deps, secretsFileSink)
@@ -421,11 +415,13 @@ func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) er
 		if !cfg.InstallSecretStore {
 			return errors.New("--resume-secrets-file requires --install-secretstore")
 		}
-		token, err := readResumeRootToken(ctx, cfg.ResumeSecretsFile, cfg.ResumeAgeIdentity)
-		if err != nil {
-			return err
+		if !cfg.DryRun {
+			token, err := readResumeRootToken(ctx, cfg.ResumeSecretsFile, cfg.ResumeAgeIdentity)
+			if err != nil {
+				return err
+			}
+			cfg.resumeRootToken = token
 		}
-		cfg.resumeRootToken = token
 	}
 
 	if cfg.AdminCSRPath != "" {
@@ -445,10 +441,12 @@ func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) er
 			return err
 		}
 		cfg.adminCSR = raw
-		if _, err := os.Lstat(cfg.AdminCSRPath + ".crt"); err == nil {
-			return errors.New("admin certificate output already exists; choose a new CSR path")
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
+		if !cfg.DryRun {
+			if _, err := os.Lstat(cfg.AdminCSRPath + ".crt"); err == nil {
+				return errors.New("admin certificate output already exists; choose a new CSR path")
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
 	}
 	if cfg.AdminBearer && cfg.AdminCSRPath == "" {

@@ -284,11 +284,16 @@ func (server *Server) routes() {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "live"})
 	})
 	server.mux.HandleFunc("GET /readyz", func(writer http.ResponseWriter, request *http.Request) {
-		if err := server.views.Ready(request.Context()); err != nil || server.draining.Load() {
-			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"status": "not ready"})
+		err := server.views.Ready(request.Context())
+		if server.draining.Load() {
+			err = model.ReadinessFailure("draining", errors.New("server is draining"))
+		}
+		response := model.Readiness(err)
+		if err != nil {
+			writeJSON(writer, http.StatusServiceUnavailable, response)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
+		writeJSON(writer, http.StatusOK, response)
 	})
 	server.mux.Handle("POST /api/admission/hold", server.requireAuth(http.HandlerFunc(server.handleAdmissionHold)))
 	server.mux.Handle("POST /api/promotions", server.requireAuth(http.HandlerFunc(server.handlePromote)))

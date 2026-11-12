@@ -38,12 +38,21 @@ func TestHealthRequiresConfiguredUpstreamAndDatabase(t *testing.T) {
 	if err := health.Ready(context.Background()); err == nil || !strings.Contains(err.Error(), "no upstream is configured") {
 		t.Fatalf("fresh install readiness = %v, want not-ready until an upstream is registered", err)
 	}
+	if model.Readiness(health.Ready(t.Context())).Code != "no_upstream" {
+		t.Fatal("missing safe no-upstream readiness code")
+	}
 	health.Store = fakeHealthStore{err: errors.New("database locked")}
+	if model.Readiness(health.Ready(t.Context())).Code != "database_error" {
+		t.Fatal("missing safe database readiness code")
+	}
 	if err := health.Ready(context.Background()); err == nil {
 		t.Fatal("readiness passed with an unavailable database")
 	}
 	health.Store = fakeHealthStore{upstreams: []model.Upstream{{ID: 1}}}
 	health.Configured = func(context.Context, []model.Upstream) error { return errors.New("credentials missing") }
+	if model.Readiness(health.Ready(t.Context())).Code != "ssh_identity" {
+		t.Fatal("missing safe SSH-identity readiness code")
+	}
 	if err := health.Ready(context.Background()); err == nil {
 		t.Fatal("readiness passed without durable upstream credentials")
 	}

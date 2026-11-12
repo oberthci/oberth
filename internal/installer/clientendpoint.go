@@ -10,6 +10,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	clientHostAnnotation      = "oberth.ci/client-host"
+	clientSSHPortAnnotation   = "oberth.ci/client-ssh-port"
+	clientHTTPSPortAnnotation = "oberth.ci/client-https-port"
+)
+
 func defaultClientHTTPSPort(serviceType string) string {
 	if serviceType == "ClusterIP" {
 		return "443"
@@ -47,7 +53,48 @@ func configureClientEndpoint(ctx context.Context, namespace, serviceType string,
 			service = found
 		}
 	}
-	return WithServiceEndpoint(service, namespace, deps), nil
+	return withInstalledServiceEndpoint(service, namespace, deps)
+}
+
+func withInstalledServiceEndpoint(service *corev1.Service, namespace string, deps Deps) (Deps, error) {
+	stored, err := withStoredClientEndpoint(service, Deps{})
+	if err != nil {
+		return deps, err
+	}
+	// The stored host must participate in LoadBalancer port discovery too.
+	if deps.ClientHost == "" {
+		deps.ClientHost = stored.ClientHost
+	}
+	deps = WithServiceEndpoint(service, namespace, deps)
+	return withClientEndpoint(Config{ClientHost: stored.ClientHost, ClientSSHPort: stored.ClientSSHPort, ClientHTTPSPort: stored.ClientHTTPSPort}, deps), nil
+}
+
+// Service annotations are Helm-owned public advertised endpoints. They can
+// differ from Service ports when a host forwards traffic into the cluster.
+func withStoredClientEndpoint(service *corev1.Service, deps Deps) (Deps, error) {
+	if service == nil {
+		return deps, nil
+	}
+	if host := service.Annotations[clientHostAnnotation]; host != "" {
+		normalized, err := NormalizeClientHost(host)
+		if err != nil {
+			return deps, fmt.Errorf("invalid stored client host")
+		}
+		deps.ClientHost = normalized
+	}
+	for _, port := range []struct {
+		key         string
+		destination *string
+	}{{clientSSHPortAnnotation, &deps.ClientSSHPort}, {clientHTTPSPortAnnotation, &deps.ClientHTTPSPort}} {
+		if value := service.Annotations[port.key]; value != "" {
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != value {
+				return deps, fmt.Errorf("invalid stored client port")
+			}
+			*port.destination = value
+		}
+	}
+	return deps, nil
 }
 
 // WithServiceEndpoint describes the installed Service without performing I/O.
@@ -101,9 +148,11 @@ func WithServiceEndpoint(service *corev1.Service, namespace string, deps Deps) D
 	return deps
 }
 
-// withClientPorts applies the client-visible ports the operator named
-// (--client-ssh-port, --client-https-port) over the Service's own.
-func withClientPorts(cfg Config, deps Deps) Deps {
+// withClientEndpoint applies explicit client flags over discovered and stored endpoints.
+func withClientEndpoint(cfg Config, deps Deps) Deps {
+	if cfg.ClientHost != "" {
+		deps.ClientHost = cfg.ClientHost
+	}
 	if cfg.ClientSSHPort != "" {
 		deps.ClientSSHPort = cfg.ClientSSHPort
 	}

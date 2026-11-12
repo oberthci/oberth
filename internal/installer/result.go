@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/model"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -27,6 +29,7 @@ type CheckResult struct {
 	Code            string `json:"code"`
 	OK              bool   `json:"ok"`
 	Remedy          string `json:"remedy,omitempty"`
+	Reason          string `json:"reason,omitempty"`
 }
 
 type InstallReview struct {
@@ -140,17 +143,26 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	r.Cluster = &identity
 	service, serviceErr := kube.CoreV1().Services(cfg.Namespace).Get(ctx, "oberth", metav1.GetOptions{})
 	deps.ClientServiceType = cfg.ServiceType
-	deps = WithServiceEndpoint(service, cfg.Namespace, deps)
 	r.check("service", serviceErr == nil, "Restore the Oberth Service and Kubernetes read permissions.")
-	deps = withClientPorts(cfg, deps)
+	deps, endpointErr := withInstalledServiceEndpoint(service, cfg.Namespace, deps)
+	r.check("client_endpoint", endpointErr == nil, "Correct the advertised clientEndpoint values in the Oberth Helm release.")
+	if endpointErr != nil {
+		return r
+	}
+	deps = withClientEndpoint(cfg, deps)
 	ssh, https := clientPorts(deps)
 	address := clientReachableHost(deps)
 	r.ServerURL = "https://" + net.JoinHostPort(address, https)
 	r.MCPURL = r.ServerURL + "/mcp"
 	r.GitURL = "ssh://git@" + net.JoinHostPort(address, ssh)
 	deployment, err := kube.AppsV1().Deployments(cfg.Namespace).Get(ctx, "oberth", metav1.GetOptions{})
-	ready := err == nil && deployment.Status.ReadyReplicas > 0 && deployment.Spec.Replicas != nil && deployment.Status.ReadyReplicas >= *deployment.Spec.Replicas
-	r.check("deployment_ready", ready, "Check Oberth pod events, unseal OpenBao, and finish upstream registration.")
+	ready := err == nil && deployment.Status.ObservedGeneration >= deployment.Generation && deployment.Status.ReadyReplicas > 0 && deployment.Spec.Replicas != nil && deployment.Status.ReadyReplicas >= *deployment.Spec.Replicas
+	reason := ""
+	if !ready {
+		reason = deploymentReadinessReason(ctx, cfg, deps)
+	}
+	r.check("deployment_ready", ready, readinessRemedy(reason))
+	r.Checks[len(r.Checks)-1].Reason = reason
 	r.Upstream = host.upstream
 	if r.Upstream != nil && r.Upstream.State == "pending" {
 		r.checkUpstreamPending(*r.Upstream)
@@ -177,6 +189,16 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	if caOK {
 		sum := sha256.Sum256(ca.Raw)
 		r.CAPin = hex.EncodeToString(sum[:])
+	}
+	if !ready {
+		blocked := "blocked by: deployment not ready (" + reason + ")"
+		r.check("https_tls", false, blocked)
+		r.Checks[len(r.Checks)-1].Reason = reason
+		r.check("ssh_reachable", false, blocked)
+		r.Checks[len(r.Checks)-1].Reason = reason
+		return r
+	}
+	if caOK {
 		roots := x509.NewCertPool()
 		roots.AddCert(ca)
 		dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
@@ -193,6 +215,30 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 		_ = connection.Close()
 	}
 	return r
+}
+
+func deploymentReadinessReason(ctx context.Context, cfg Config, deps Deps) string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	raw, err := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "admin", "readiness")...)
+	var response model.ReadinessResponse
+	if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &response) != nil || !response.Valid() || response.Status == "ready" {
+		return "unavailable"
+	}
+	return response.Code
+}
+
+func readinessRemedy(reason string) string {
+	switch reason {
+	case "no_upstream":
+		return "Register an upstream, including pending forge registration, so the server can become ready."
+	case "database_error":
+		return "Restore database availability; inspect Oberth pod events and storage health."
+	case "ssh_identity":
+		return "Restore the upstream SSH identity and pinned known-host configuration."
+	default:
+		return "Inspect Oberth pod events and cached readiness; restore the deployment before checking client connectivity."
+	}
 }
 
 func PrintVerification(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) error {

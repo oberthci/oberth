@@ -1,5 +1,33 @@
 {
   "entries": {
+    "annotation:oberth.ci/client-host": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"
+    },
+    "annotation:oberth.ci/client-ssh-port": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"
+    },
+    "annotation:oberth.ci/client-https-port": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"
+    },
+    "value:clientEndpoint": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"
+    },
+    "value:host": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"
+    },
+    "value:sshPort": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"
+    },
+    "value:httpsPort": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"
+    },
     "value:priorityClassName": {
       "doc_anchor": "docs/platform-protection.md#platform-protection",
       "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"

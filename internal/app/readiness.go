@@ -182,6 +182,13 @@ func readinessReason(err error) string {
 	}
 }
 
+func publicReadinessReason(err error) string {
+	if errors.Is(err, errReadinessConfiguration) {
+		return "ssh_identity"
+	}
+	return readinessReason(err)
+}
+
 // WatchReadiness probes immediately, then on a five-second ticker. Probes run
 // serially and can take up to thirty seconds, so slow probes reduce the cadence.
 // All remote probes must honor the context to avoid stalling process shutdown.

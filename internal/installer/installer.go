@@ -1704,6 +1704,14 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	for _, file := range cfg.ValuesFiles {
 		args = append(args, "-f", file)
 	}
+	for _, endpoint := range []struct{ key, value string }{
+		{"host", cfg.ClientHost}, {"sshPort", cfg.ClientSSHPort}, {"httpsPort", cfg.ClientHTTPSPort},
+	} {
+		if endpoint.value != "" {
+			value, _ := json.Marshal(endpoint.value)
+			args = append(args, "--set-json", "clientEndpoint."+endpoint.key+"="+string(value))
+		}
+	}
 	if image := strings.TrimSpace(cfg.ImageRef); image != "" {
 		args = append(args, "--set-string", "image.ref="+image)
 	}
@@ -2137,7 +2145,7 @@ func PrintNextSteps(cfg Config, w io.Writer) error {
 	if ns == "" {
 		ns = DefaultNamespace
 	}
-	endpoint := withClientPorts(cfg, WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType}))
+	endpoint := withClientEndpoint(cfg, WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType}))
 	// The commands name the cluster the install named, never whatever the
 	// current context is when they are run.
 	target := ""

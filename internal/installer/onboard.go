@@ -61,7 +61,7 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	if endpointErr != nil {
 		return endpointErr
 	}
-	deps = withClientPorts(cfg, deps)
+	deps = withClientEndpoint(cfg, deps)
 	ns := cfg.Namespace
 	if ns == "" {
 		ns = DefaultNamespace

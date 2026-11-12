@@ -71,6 +71,9 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				if strings.Contains(command, "admin read-file") {
 					return ca, nil
 				}
+				if strings.Contains(command, "admin readiness") {
+					return []byte(`{"status":"not ready","code":"no_upstream"}`), nil
+				}
 				if tc.existing && strings.Contains(command, "upstream list --check") {
 					status := "ok"
 					if !tc.authorized {

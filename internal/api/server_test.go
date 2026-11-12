@@ -577,12 +577,22 @@ func TestLiveLogViewRequiresAuthAndBoundsOffset(t *testing.T) {
 }
 
 func TestReadinessFailsClosed(t *testing.T) {
-	server, backend := testServer(t)
-	backend.readyErr = errors.New("database unavailable")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d", response.Code)
+	for _, code := range []string{"no_upstream", "database_error", "ssh_identity", "not-a-public-code"} {
+		server, backend := testServer(t)
+		backend.readyErr = model.ReadinessFailure(code, errors.New("private dependency details"))
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+		var state model.ReadinessResponse
+		if response.Code != http.StatusServiceUnavailable || json.Unmarshal(response.Body.Bytes(), &state) != nil || !state.Valid() || strings.Contains(response.Body.String(), "private dependency details") {
+			t.Fatalf("unsafe readiness response: %d %s", response.Code, response.Body)
+		}
+		want := code
+		if code == "not-a-public-code" {
+			want = "unavailable"
+		}
+		if state.Code != want {
+			t.Fatalf("readiness code = %q, want %q", state.Code, want)
+		}
 	}
 }
 
