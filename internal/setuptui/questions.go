@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -77,26 +76,9 @@ func (q *question) answerOf(st *WizardState) []string {
 
 // ---------- host probes, replaceable in tests ----------
 
-// kindLookPath resolves the binaries kind creation needs; tests replace it.
-var kindLookPath = exec.LookPath
-
-// kindAvailable reports whether this host can create a kind cluster: the
-// installer drives both the kind and docker CLIs. Without them the choice
-// can only fail, so it is not offered (a k3s host on Linux, for example).
-func kindAvailable() bool {
-	for _, tool := range []string{"kind", "docker"} {
-		if _, err := kindLookPath(tool); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
 // noClusterAdvice is shown when no Kubernetes cluster is configured.
 func noClusterAdvice() string {
-	if kindAvailable() {
-		return "Provide a kubeconfig path for an existing cluster, or create a new one with kind."
-	}
+
 	return "Provide a kubeconfig path for an existing cluster (install kind and Docker to create a local one)."
 }
 
@@ -341,10 +323,7 @@ func displayUpstream(baseURL string) string {
 // A kind cluster publishes on 127.0.0.1 only, so it offers localhost alone.
 func clientHostOptions(st *WizardState) []option {
 	local := option{value: "localhost", label: "localhost", detail: "this machine only"}
-	if st.Config.CreateKind {
-		local.detail = "kind publishes Oberth on 127.0.0.1 only"
-		return []option{local}
-	}
+
 	var opts []option
 	seen := map[string]bool{"localhost": true, "127.0.0.1": true}
 	addOpt := func(value, detail string) {
@@ -490,9 +469,7 @@ func buildQuestions() []*question {
 				contexts, current, _ := loadKubeContexts("")
 				opts := contextOptions(contexts, current)
 				opts = append(opts, option{value: clusterChoiceFile, label: "Use a kubeconfig file…", detail: "point at another kubeconfig and choose one of its contexts"})
-				if kindAvailable() {
-					opts = append(opts, option{value: clusterChoiceKind, label: "Create a local kind cluster", detail: "kind and Docker are installed · cluster \"oberth\", context " + installer.KindContextName})
-				}
+
 				return opts
 			},
 			selected: func(st *WizardState) string {
@@ -507,16 +484,7 @@ func buildQuestions() []*question {
 				switch choice {
 				case "":
 					return errors.New("choose a cluster")
-				case clusterChoiceKind:
-					if !kindAvailable() {
-						return errors.New("kind and docker must both be installed to create a kind cluster")
-					}
-					st.Config.CreateKind = true
-					st.Config.KubeconfigPath = ""
-					st.Config.ContextName = ""
-					st.ClusterInfo = clusterInfoMsg{context: installer.KindContextName, engine: "kind"}
 				case clusterChoiceFile:
-					st.Config.CreateKind = false
 				default:
 					contexts, _, err := loadKubeContexts("")
 					if err != nil {
@@ -525,7 +493,6 @@ func buildQuestions() []*question {
 					if !slices.ContainsFunc(contexts, func(c kubeContext) bool { return c.name == choice }) {
 						return fmt.Errorf("context %q is not in your kubeconfig", choice)
 					}
-					st.Config.CreateKind = false
 					st.Config.KubeconfigPath = ""
 					st.Config.ContextName = choice
 				}
@@ -533,7 +500,7 @@ func buildQuestions() []*question {
 				return nil
 			},
 			probe: func(st *WizardState) func() probeResult {
-				if st.ClusterChoice == clusterChoiceKind || st.ClusterChoice == clusterChoiceFile {
+				if st.ClusterChoice == clusterChoiceFile {
 					return nil
 				}
 				return probeContext(st.Config.ContextName, "")
@@ -729,9 +696,7 @@ func buildQuestions() []*question {
 				text := "Oberth serves a " + tlsCertificateDescription(st) + ". It is always valid for " +
 					strings.Join(append(dnsNames, ips...), ", ") + ". Add every name or IP address clients reach this server by — " +
 					"a name missing here appears later as a hostname mismatch no client can fix."
-				if st.Config.CreateKind {
-					text += " localhost is added for a kind cluster."
-				}
+
 				return text
 			},
 			fields: []string{"Extra names"}, placeholders: []string{"node.example.com, 192.0.2.10"},
@@ -771,9 +736,7 @@ func buildQuestions() []*question {
 		{
 			id: "tls.client", step: stepTLS, heading: "Which address do clients use?",
 			explain: func(st *WizardState) string {
-				if st.Config.CreateKind {
-					return "kind publishes ports 30022 and 30443 on 127.0.0.1 only, so clients on this machine use localhost."
-				}
+
 				text := "Clone URLs, the CLI and MCP settings and the dashboard link name this address, and the certificate covers it. On k3s and most clusters, ports 30022 and 30443 already listen on every address of the node, so pick the one your other machines (a laptop, the VM's host) reach this server by. localhost works on this machine only."
 				if warning := installer.LocalNameWarning(defaultClientHost(st)); warning != "" {
 					text += " " + warning

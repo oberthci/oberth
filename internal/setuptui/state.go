@@ -1,9 +1,11 @@
 package setuptui
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +58,6 @@ const (
 	installPartial        = "partial"
 	installFailed         = "failed"
 	clusterChoiceFile     = "@file"
-	clusterChoiceKind     = "@kind"
 	uplinkKeyOther        = "@other"
 	upstreamKeyOther      = "@other"
 	upstreamKeyRescan     = "@rescan"
@@ -84,7 +85,7 @@ type installRecord struct {
 type WizardState struct {
 	Config installer.Config
 
-	ClusterChoice  string // a context name, clusterChoiceFile or clusterChoiceKind
+	ClusterChoice  string // a context name or clusterChoiceFile
 	ClusterInfo    clusterInfoMsg
 	SSHKeyPath     string
 	UplinkKey      string // a scanned key path or uplinkKeyOther
@@ -123,9 +124,7 @@ func newWizardState(opts Options) *WizardState {
 // contextForCommands is the kubeconfig context every kubectl the wizard runs
 // or prints targets.
 func (st *WizardState) contextForCommands() string {
-	if st.Config.CreateKind {
-		return installer.KindContextName
-	}
+
 	return st.Config.ContextName
 }
 
@@ -145,7 +144,6 @@ type savedSetup struct {
 	ClusterChoice  string `json:"clusterChoice,omitempty"`
 	KubeconfigPath string `json:"kubeconfig,omitempty"`
 	ContextName    string `json:"context,omitempty"`
-	CreateKind     bool   `json:"createKind,omitempty"`
 	// What the cluster probe found, so a resumed finish screen, Verify and
 	// the equivalent command do not fall back to localhost (non-secret).
 	ClusterServer string `json:"clusterServer,omitempty"`
@@ -199,7 +197,6 @@ func (st *WizardState) toSaved() savedSetup {
 		ClusterChoice:      st.ClusterChoice,
 		KubeconfigPath:     c.KubeconfigPath,
 		ContextName:        c.ContextName,
-		CreateKind:         c.CreateKind,
 		ClusterServer:      st.ClusterInfo.server,
 		NodeName:           st.ClusterInfo.nodeName,
 		NodeIP:             st.ClusterInfo.nodeIP,
@@ -238,7 +235,6 @@ func (st *WizardState) fromSaved(s savedSetup) {
 	st.ClusterChoice = s.ClusterChoice
 	c.KubeconfigPath = s.KubeconfigPath
 	c.ContextName = s.ContextName
-	c.CreateKind = s.CreateKind
 	if st.ClusterInfo.server == "" && s.ClusterServer != "" {
 		st.ClusterInfo.context = s.ContextName
 		st.ClusterInfo.server = s.ClusterServer
@@ -322,8 +318,13 @@ func loadSetupState(st *WizardState) (bool, error) {
 		return false, err
 	}
 	var saved savedSetup
-	if err := json.Unmarshal(data, &saved); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&saved); err != nil {
 		return false, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("%s: unexpected data after saved answers", path)
 	}
 	if saved.Version != setupStateFileVersion {
 		return false, fmt.Errorf("%s: unsupported version %d", path, saved.Version)

@@ -87,10 +87,10 @@ func TestOberthHelmArgsSendsNoCertificateNamesWhenNoneWereGiven(t *testing.T) {
 // interface, so localhost and 127.0.0.1 are always true of it. Adding them
 // automatically is what removes the /etc/hosts step a host-side client would
 // otherwise need.
-func TestKindInstallNamesLoopbackOnTheCertificate(t *testing.T) {
+func TestLoopbackClientNamesOnTheCertificate(t *testing.T) {
 	t.Parallel()
 
-	dnsNames, ips := certificateNamesForKind(nil, nil)
+	dnsNames, ips := certificateNamesForLoopback(nil, nil)
 	if !contains(dnsNames, "localhost") {
 		t.Errorf("a kind install does not name localhost: %v", dnsNames)
 	}
@@ -101,10 +101,10 @@ func TestKindInstallNamesLoopbackOnTheCertificate(t *testing.T) {
 
 // An operator who names their own addresses keeps them, and does not lose the
 // loopback names that are true regardless.
-func TestKindInstallKeepsOperatorNamesAndDoesNotDuplicateLoopback(t *testing.T) {
+func TestLoopbackClientKeepsOperatorNamesWithoutDuplicates(t *testing.T) {
 	t.Parallel()
 
-	dnsNames, ips := certificateNamesForKind([]string{"oberth.example.internal", "localhost"}, []string{"127.0.0.1"})
+	dnsNames, ips := certificateNamesForLoopback([]string{"oberth.example.internal", "localhost"}, []string{"127.0.0.1"})
 
 	if !contains(dnsNames, "oberth.example.internal") {
 		t.Errorf("operator-named address was dropped: %v", dnsNames)

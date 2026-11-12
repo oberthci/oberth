@@ -3720,3 +3720,9 @@ A/AAAA record. Load-balancer hostnames can be named by CNAME. The plugin waits
 for the user's naming change and re-probes the chosen name against the detected
 endpoint; no hosts file or DNS is edited automatically. TCP checks remain
 advisory and DNS-only CA constraints remain unchanged.
+
+Mac onboarding #1553: Kubernetes clusters and host prerequisites are supplied by
+the operator. The CLI and setup wizard do not create clusters, load kind images
+or run package managers. Missing prerequisites print commands/links and stop;
+printed kind remedies are instructions for the operator, with a separate new
+kubeconfig target. Validation and address waiting do not change settings.

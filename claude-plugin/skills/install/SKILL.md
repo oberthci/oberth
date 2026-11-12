@@ -226,3 +226,6 @@ as an install target. These loopback mappings support clients on this Mac.
 The printed command targets a new `oberth-kind.kubeconfig` and refuses an
 existing file or symlink. Use that file and `kind-oberth-onboarding` explicitly
 for the next plan/install; choose unused names if either already exists.
+
+The CLI and setup wizard only target an existing operator-provided cluster and
+kubeconfig. Oberth never creates or recreates a Kubernetes cluster.

@@ -461,8 +461,6 @@ Flags:
         git SSH port clients reach the server on, when it is not the Service's (default: the NodePort 30022, or the Service port); client files, SSH config and printed commands use it
   -context string
         kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)
-  -create-kind
-        create or use the local oberth kind cluster
   -credentialed-secret-path oberth access allow
         full KV data path approved in the secret-access table (repeatable, exactly the string oberth access allow records, e.g. oberth/data/release/cosign-secret); synced into the RELEASE-tier credentialed Vault policy as an exact read grant when --install-secretstore reconciles the store — the branch-tier ci-secrets policy never receives grants
   -dry-run

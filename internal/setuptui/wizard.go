@@ -448,13 +448,11 @@ func BuildCommandLine(state *WizardState) string {
 	c := state.Config
 	c.TLSExtraDNSNames, c.TLSExtraIPs = wizardTLSNames(state)
 	args := []string{"oberth install"}
-	if c.CreateKind {
-		args = append(args, "--create-kind")
-	}
+
 	if c.KubeconfigPath != "" {
 		args = append(args, "--kubeconfig="+shellQuote(c.KubeconfigPath))
 	}
-	if c.ContextName != "" && !c.CreateKind {
+	if c.ContextName != "" {
 		args = append(args, "--context="+shellQuote(c.ContextName))
 	}
 	if c.UpstreamPrivateKeyPath != "" {

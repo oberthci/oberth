@@ -128,3 +128,6 @@ command on macOS, alongside the installation links. It then stops. The operator
 runs dependency installation outside Oberth. Validation never invokes brew,
 reads consent to install tools, or changes settings. Existing tools are not
 reinstalled. Linux retains the installation links.
+
+The CLI and setup wizard only target an existing operator-provided cluster and
+kubeconfig. Oberth never creates or recreates a Kubernetes cluster.

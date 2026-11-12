@@ -462,3 +462,9 @@ mappings are already present.
 sh, bash and zsh when available: missing tools only print exact commands/links,
 including with affirmative stdin. Brew is never invoked. The installation
 option is rejected; existing prerequisites let validation succeed.
+
+Mac onboarding #1553: `TestInstallRejectsClusterCreationOption`,
+`TestWizardOnlyOffersExistingClusters` and
+`TestSavedAnswersRejectRemovedClusterCreationState` keep the CLI, setup choices
+and resumed answers on existing operator-provided clusters. Printed kind
+remedies remain guarded instructions with a separate kubeconfig destination.

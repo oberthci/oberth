@@ -122,7 +122,7 @@ mkdir -p "$HOME/.kube" && chmod 700 "$HOME/.kube" && sudo install -m 600 -o "$(i
 
 The original server address stays at `127.0.0.1`. Rerun the plan after copying.
 No file is made world-readable. macOS also uses the selected kubeconfig;
-creating kind requires an explicit `--create-kind`.
+clusters must be provisioned by the operator before selecting their kubeconfig.
 
 Preflight fails with a remedy for unavailable prerequisites, unknown cluster
 CA, unreadable or unready nodes, unsupported architecture, less than 1 GiB

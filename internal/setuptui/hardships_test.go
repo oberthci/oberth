@@ -141,11 +141,6 @@ func TestClientHostChoice(t *testing.T) {
 		t.Error("an address that is not offered must be refused")
 	}
 
-	kind := newWizardState(Options{})
-	kind.Config.CreateKind = true
-	if opts := q.options(kind); len(opts) != 1 || opts[0].value != "localhost" {
-		t.Errorf("kind must offer localhost only: %+v", opts)
-	}
 }
 
 // #060: more organizations go to the installer as ssh:// URLs.

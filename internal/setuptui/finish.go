@@ -413,7 +413,7 @@ func clientHost(st *WizardState) string {
 	if st.Config.ClientHost != "" {
 		return st.Config.ClientHost
 	}
-	if st.Config.CreateKind || st.ClusterInfo.server == "" {
+	if st.ClusterInfo.server == "" {
 		return "localhost"
 	}
 	u, err := url.Parse(st.ClusterInfo.server)
@@ -868,8 +868,6 @@ func valueOr(v, fallback string) string {
 
 func wizardClientEndpoint(st *WizardState, service *corev1.Service) installer.Deps {
 	deps := installer.Deps{ClientHost: st.Config.ClientHost, ClientServiceType: st.Config.ServiceType, RestConfig: &rest.Config{Host: st.ClusterInfo.server}}
-	if st.Config.CreateKind {
-		deps.KindClusterName = "wizard"
-	}
+
 	return installer.WithServiceEndpoint(service, st.namespace(), deps)
 }

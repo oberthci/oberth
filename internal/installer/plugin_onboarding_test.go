@@ -123,7 +123,16 @@ func TestPluginKindPrintsCompleteRemedyBeforeInstall(t *testing.T) {
 	if err != nil || result.KindRemedy == nil {
 		t.Fatalf("%+v %v", result, err)
 	}
-	var config kindConfig
+	var config struct {
+		Kind       string
+		APIVersion string
+		Nodes      []struct {
+			ExtraPortMappings []struct {
+				ContainerPort, HostPort int
+				ListenAddress, Protocol string
+			}
+		}
+	}
 	if err := yaml.Unmarshal([]byte(result.KindRemedy.Config), &config); err != nil {
 		t.Fatal(err)
 	}
@@ -219,6 +228,16 @@ func TestPluginPrerequisitesOnlyPrintMissingToolCommands(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestPluginPrerequisitesRejectInstallationOption(t *testing.T) {
+	command := exec.CommandContext(t.Context(), "/bin/sh", pluginPath(t, "scripts", "install"), "prerequisites", "--install-missing")
+	command.Env = []string{"HOME=" + t.TempDir(), "PATH=" + t.TempDir()}
+	command.Stdin = strings.NewReader("yes\nyes\n")
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "Usage: scripts/install prerequisites") {
+		t.Fatalf("%v %s", err, output)
 	}
 }
 

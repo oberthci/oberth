@@ -111,7 +111,7 @@ func WithServiceEndpoint(service *corev1.Service, namespace string, deps Deps) D
 	}
 	if service != nil {
 		useServicePorts := service.Spec.Type == corev1.ServiceTypeClusterIP
-		if service.Spec.Type == corev1.ServiceTypeLoadBalancer && deps.KindClusterName == "" {
+		if service.Spec.Type == corev1.ServiceTypeLoadBalancer {
 			// Keep the configured/certificate-bound host. An automatically allocated
 			// ingress address may not be on the installed TLS certificate.
 			host := clientReachableHost(deps)

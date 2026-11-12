@@ -291,6 +291,7 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 		review := Review(cfg)
 		result.Review = &review
 	}
+	result.Context = cfg.ContextName
 	result.Upstream = deps.upstream
 	result.FirstUplink = identity
 	result.SecretsValues = values
