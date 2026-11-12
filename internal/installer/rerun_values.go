@@ -177,5 +177,8 @@ func changedValuePaths(before, after map[string]any, prefix string, changed *[]s
 }
 
 func explicitInstallValues(cfg Config) bool {
+	if cfg.ClientHost != "" || cfg.ClientSSHPort != "" || cfg.ClientHTTPSPort != "" {
+		return true
+	}
 	return cfg.PushBannerURLSet || cfg.PushBannerURL != "" || cfg.AcceptWitnessGenesisSet || cfg.AcceptWitnessGenesis != "" || cfg.ServiceType != "" || cfg.NetworkPolicy == "true" || cfg.NetworkPolicy == "false" || cfg.ArgoVaultCredentialedRole != "" || cfg.ArgoVaultAddress != "" || len(cfg.ValuesFiles) > 0 || cfg.AssistEnabled
 }
