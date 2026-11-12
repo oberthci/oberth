@@ -500,3 +500,8 @@ Native cancellation isolation: the running-run cancellation test waits for both
 independent Workflows to be submitted, without assuming creation order or an
 Oberth workflow ceiling. It requires deletion of only the selected Workflow,
 a live peer and preservation of cancellation against the owner's late result.
+
+Private-copy refresh stress repeats the concurrent lifecycle/sweep cases 50
+times. After lease acquisition, disappearance is checked before marker age is
+judged; existing future, malformed and replaced objects remain preserved, and
+the separate pre-delete identity check remains required.

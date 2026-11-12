@@ -141,6 +141,19 @@ func sweepCopy(root, dir *os.Root, name string, info os.FileInfo, now time.Time)
 		}
 		return err
 	}
+	// A normal owner removes its directory before releasing the lease. It can
+	// finish after ReadDir while this sweep is waiting to inspect its marker;
+	// its creation timestamp may also be later than the sweep snapshot.
+	current, err := root.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, current) {
+		return errors.New("directory replaced; preserved")
+	}
 	var owner copyOwner
 	decoder := json.NewDecoder(io.LimitReader(marker, 4096))
 	decoder.DisallowUnknownFields()
@@ -153,7 +166,7 @@ func sweepCopy(root, dir *os.Root, name string, info os.FileInfo, now time.Time)
 	if owner.Format != 1 || owner.Name != name || owner.CreatedAt.IsZero() || owner.CreatedAt.After(now) {
 		return errors.New("ownership or age is unverified; preserved")
 	}
-	current, err := root.Lstat(name)
+	current, err = root.Lstat(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
