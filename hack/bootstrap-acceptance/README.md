@@ -23,7 +23,9 @@ required. The Helm and kubectl used by the plan fixture are deliberately narrow
 local executables, and all Kubernetes HTTP requests go to a loopback TLS fixture.
 
 The cell records the existing rest race run once and requires an explicit pass
-event for every named fixture. It does not compile/run the 18 fixtures a second
+event for every required (Go package, top-level test) pair. A same-named test in
+another package cannot satisfy that requirement, and a later skip cannot replace
+the required terminal pass. It does not compile/run the 18 fixtures a second
 time. The CLI build and one adverse fixture reuse the same race build flags/cache. Those tests cover:
 
 - The fixed-origin fetcher, real OpenSSL checksum signature verification,
@@ -40,6 +42,14 @@ answers context; an unknown or ambiguous selection fails. The fixture asserts
 that no API mutation occurs. Separate assertions cover mTLS acceptance, wrong
 CA/client refusal, redirects, unsafe Helm archive members, exact pushed SHA,
 assisted non-evidence classification, and secret scanning across chunk boundaries.
+Plan verification honors the installer's advisory `warning: true` checks:
+unknown remote host preparation may warn while aggregate `ok` remains true.
+Every non-warning check and aggregate result must still pass; malformed warning
+flags, empty checks and duplicate check identities refuse verification.
+Failed JSON plans are checked before their nonzero exit is reported, so the
+failure names the hard check. An adverse real CLI plan with zero available disk
+must exit 1 and identify `disk`; a nonzero command can never become a pass merely
+because its JSON result says `ok: true`.
 
 ## Captured output boundary
 
@@ -60,13 +70,19 @@ This boundary does not assert complete nondisclosure of every credential in
 every rest-suite fixture, or contents retained only in nested Go buffers. It
 covers the inventoried contract credentials in captured channels and Python-cell
 credentials/keys; a nonempty canary alone is not evidence of that coverage.
-Failures identify the stage and available top-level Go or Python test identity, never
-captured output, argv, credentials or exception text. There is no public upload
+Failures identify the originating stage, check name, and available Go package
+and top-level test (or Python assertion identity), never captured output, argv,
+credentials or exception text. Secret detections also identify the captured
+channel. Final scanning cannot replace the originating failure with its own
+stage; a secondary scan failure gets its own separate redacted line. There is no public upload
 of private logs or inventories.
 
 The existing race command has a 3120-second wall bound (including compilation),
 followed by a 120-second bound for the added cell stages and final scan. This
 leaves cleanup headroom inside the existing 3300-second rest Pod deadline.
+After a failure, final scanning gets an independent 10-second alarm even when
+the cell alarm has already expired. An interrupted scan always fails closed;
+it never releases captured artifacts or converts the original failure to a pass.
 Child environments retain GOMEMLIMIT, OBERTH_TEST_TIMEOUT_SCALE, GOPATH and
 GIT_TERMINAL_PROMPT as well as the existing Go/cache controls. The cell prints
 race_seconds and added_cell_seconds separately. A cold release still needs the

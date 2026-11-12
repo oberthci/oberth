@@ -15,27 +15,77 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fixtures import private_values, tls_server
-from probe import Probe, Refused, go_inventory, scan_go_events, scan_logs, secret_values, verify_result
+from probe import (Probe, Refused, diagnostic, go_inventory, safe_go_test, scan_go_events,
+                   scan_logs, secret_values, stage_failure, verify_result)
 
 # Exact test identities are checked in go test's event stream: an empty regex
 # match or a skipped required fixture cannot manufacture a green cell.
+INSTALLER_PACKAGE = 'github.com/oberthci/oberth/internal/installer'
+PIN_PACKAGE = 'github.com/oberthci/oberth/internal/releaseverify'
+CLI_PACKAGE = 'github.com/oberthci/oberth/cmd/oberth'
 TESTS = (
-    'TestPluginFetchVerifiedRelease', 'TestPluginFetchOverHTTPS',
-    'TestPinnedKeyIsTheReleasePipelinePin',
-    'TestPluginInstallRequiresRecoveryFile', 'TestPluginInstallUsesVerifiedCLIAndSharedModes',
-    'TestAnswersStrictRoundTrip', 'TestSecretsFilePathRefusals',
-    'TestSecretsFileHoldsCredentialsAndOutputOnlyItsDigest', 'TestInstallReservesTheSecretsFileFirst',
-    'TestMultifileKubeconfigKeepsExplicitContext', 'TestPlanReportsSelectedRemoteClusterWithoutAnotherGate',
-    'TestPluginConnectRefusesWithoutAMatchingPin', 'TestPluginConnectStoresTheCAAndMergesSettings',
-    'TestPluginConnectRefusesSettingsItCannotMerge', 'TestPluginConnectIgnoresTheDefaultTrustOfOpenSSL',
-    'TestFirstAdminCSRDoesNotMintBearer', 'TestPluginInviteConfiguresMutualTLSAfterRedemption',
-    'TestAddRepoClusterActionsKeepTheChosenContext',
+    (INSTALLER_PACKAGE, 'TestPluginFetchVerifiedRelease'),
+    (INSTALLER_PACKAGE, 'TestPluginFetchOverHTTPS'),
+    (PIN_PACKAGE, 'TestPinnedKeyIsTheReleasePipelinePin'),
+    (INSTALLER_PACKAGE, 'TestPluginInstallRequiresRecoveryFile'),
+    (INSTALLER_PACKAGE, 'TestPluginInstallUsesVerifiedCLIAndSharedModes'),
+    (INSTALLER_PACKAGE, 'TestAnswersStrictRoundTrip'),
+    (INSTALLER_PACKAGE, 'TestSecretsFilePathRefusals'),
+    (INSTALLER_PACKAGE, 'TestSecretsFileHoldsCredentialsAndOutputOnlyItsDigest'),
+    (INSTALLER_PACKAGE, 'TestInstallReservesTheSecretsFileFirst'),
+    (INSTALLER_PACKAGE, 'TestMultifileKubeconfigKeepsExplicitContext'),
+    (INSTALLER_PACKAGE, 'TestPlanReportsSelectedRemoteClusterWithoutAnotherGate'),
+    (INSTALLER_PACKAGE, 'TestPluginConnectRefusesWithoutAMatchingPin'),
+    (INSTALLER_PACKAGE, 'TestPluginConnectStoresTheCAAndMergesSettings'),
+    (INSTALLER_PACKAGE, 'TestPluginConnectRefusesSettingsItCannotMerge'),
+    (INSTALLER_PACKAGE, 'TestPluginConnectIgnoresTheDefaultTrustOfOpenSSL'),
+    (INSTALLER_PACKAGE, 'TestFirstAdminCSRDoesNotMintBearer'),
+    (INSTALLER_PACKAGE, 'TestPluginInviteConfiguresMutualTLSAfterRedemption'),
+    (INSTALLER_PACKAGE, 'TestAddRepoClusterActionsKeepTheChosenContext'),
 )
 
 
 def assert_no_mutations(requests):
     if any(method != 'GET' for method, _ in requests):
-        raise Refused('plan attempted to mutate the API fixture')
+        raise Refused('plan attempted to mutate the API fixture', check='api-mutation')
+
+
+def json_result(raw, check):
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise Refused('invalid JSON result', check=check) from None
+
+
+def verify_plan(probe, name, args, context):
+    # Failed JSON plans carry actionable checks despite their nonzero exit.
+    raw = probe.run(name, args, allowed_codes=(0, 1, 2), package=CLI_PACKAGE)
+    try:
+        result = json_result(raw, 'plan-json')
+        if not isinstance(result, dict) or not isinstance(result.get('identity'), dict):
+            raise Refused('invalid plan identity', check='plan-schema')
+        verify_result(result | {'context': result['identity'].get('context')}, context)
+    except Refused as error:
+        error.stage, error.package = name, CLI_PACKAGE
+        raise
+    if probe.last_returncode != 0:
+        raise Refused('plan command failed despite a green result', stage=name,
+                      check='plan-exit', package=CLI_PACKAGE)
+    return result
+
+
+def require_disk_refusal(probe, args):
+    try:
+        verify_plan(probe, 'plan-disk-refusal',
+                    args + ['--context', 'selected', '--plan', '--json'], 'selected')
+    except Refused as error:
+        if error.check != 'disk':
+            raise
+        if (error.stage != 'plan-disk-refusal' or error.package != CLI_PACKAGE
+                or probe.last_returncode != 1):
+            raise Refused('failed plan check was not identified', check='hard-plan-diagnostic') from None
+    else:
+        raise Refused('hard disk failure was accepted', check='hard-plan-refusal')
 
 
 def plan_fixture(probe, cli):
@@ -81,11 +131,14 @@ context=$2
 case "$context" in selected|other) :;; *) exit 98;; esac
 shift 2
 [ "$*" = "get --raw /api/v1/nodes/$context-node/proxy/stats/summary" ]
-echo '{"node":{"fs":{"availableBytes":4294967296}}}'
+cat "$(dirname "$0")/node-stats.json"
 ''')
         (tools / 'helm').write_text('#!/bin/sh\nexit 99\n')
         for tool in tools.iterdir():
             tool.chmod(0o700)
+        stats = tools / 'node-stats.json'
+        healthy_stats = '{"node":{"fs":{"availableBytes":4294967296}}}'
+        stats.write_text(healthy_stats)
         probe.env['PATH'] = str(tools) + os.pathsep + probe.env['PATH']
         answers = probe.work / 'answers.json'
         answers.write_text(json.dumps({'version': 1, 'config': {
@@ -93,44 +146,61 @@ echo '{"node":{"fs":{"availableBytes":4294967296}}}'
         args = [str(cli), 'install', '--answers', str(answers), '--kubeconfig', str(config)]
         for context in ('selected', 'other'):
             counts = {name: len(items) for name, items in requests.items()}
-            result = json.loads(probe.run('plan-' + context, args + ['--context', context, '--plan', '--json']))
-            verify_result(result | {'context': result['identity']['context']}, context)
+            result = verify_plan(probe, 'plan-' + context,
+                                 args + ['--context', context, '--plan', '--json'], context)
             if result['identity']['api_server'] != urls[context] or not result['identity']['ca_sha256']:
-                raise Refused('plan did not retain the selected API identity')
+                raise Refused('plan did not retain the selected API identity', check='api-identity')
             if len(requests[context]) <= counts[context] or any(len(items) != counts[name] for name, items in requests.items() if name != context):
-                raise Refused('plan contacted the wrong context endpoint')
+                raise Refused('plan contacted the wrong context endpoint', check='context-endpoint')
+            assert_no_mutations(requests[context])
+        # Exercise the production CLI's nonzero failed-plan path, not only a
+        # synthetic result dictionary. Its hard disk check must survive capture.
+        stats.write_text('{"node":{"fs":{"availableBytes":0}}}')
+        try:
+            require_disk_refusal(probe, args)
+        finally:
+            stats.write_text(healthy_stats)
         for name, extra in [('missing-context', ['--context', 'missing']), ('ambiguous-context', [])]:
             if name == 'ambiguous-context':
                 answers.write_text('{"version":1,"config":{"InstallSecretStore":true}}')
             counts = {name: len(items) for name, items in requests.items()}
             raw = probe.run(name, args + extra + ['--plan', '--json'], allowed_codes=(1, 2))
-            if json.loads(raw).get('ok') is not False or counts != {name: len(items) for name, items in requests.items()}:
-                raise Refused('invalid context was accepted or contacted an API')
+            if json_result(raw, 'context-refusal-json').get('ok') is not False or counts != {name: len(items) for name, items in requests.items()}:
+                raise Refused('invalid context was accepted or contacted an API', check='context-refusal')
         for items in requests.values():
             assert_no_mutations(items)
         if config.read_bytes() != original:
-            raise Refused('plan rewrote fixture kubeconfig')
+            raise Refused('plan rewrote fixture kubeconfig', check='kubeconfig-preserved')
 
 
 RACE_FLAGS = ['-race', '-gcflags=modernc.org/sqlite/...=-race=false',
               '-gcflags=modernc.org/libc/...=-race=false']
 RACE_BUDGET = 3120
 CELL_BUDGET = 120
+FAILURE_SCAN_BUDGET = 10
 
 
 def require_pass_events(raw):
-    events = [json.loads(line) for line in raw.splitlines()]
-    failed = [event['Test'].split('/')[0] for event in events
-              if event.get('Action') == 'fail' and event.get('Test', '').startswith('Test')]
-    if failed:
-        # Top-level test identities come from Go's compiled test list, never Output.
-        import re
-        name = next((name for name in failed if re.fullmatch(r'Test[A-Za-z0-9_]+', name)), 'unknown')
-        raise Refused('stage=rest-race test=' + name + ' failed; private artifacts withheld')
-    passed = {event.get('Test') for event in events if event.get('Action') == 'pass'}
-    for name in TESTS:
-        if name not in passed:
-            raise Refused('stage=fixture-events test=' + name + ' did not pass; private artifacts withheld')
+    try:
+        events = [json.loads(line) for line in raw.splitlines()]
+    except ValueError:
+        raise Refused('invalid race event JSON', stage='fixture-events', check='event-json') from None
+    terminal = {}
+    for event in events:
+        if not isinstance(event, dict):
+            raise Refused('invalid race event', stage='fixture-events', check='event-schema')
+        package, test, action = event.get('Package'), event.get('Test'), event.get('Action')
+        if any(value is not None and not isinstance(value, str) for value in (package, test, action)):
+            raise Refused('invalid race identity', stage='fixture-events', check='event-schema')
+        if action == 'fail':
+            raise Refused('race suite failed', stage='rest-race', check='go-test-pass' if test else 'go-package-pass',
+                          package=package, test=safe_go_test(test))
+        if action in ('pass', 'skip'):
+            terminal[(package, test)] = action
+    for package, test in TESTS:
+        if terminal.get((package, test)) != 'pass':
+            raise Refused('required fixture did not pass', stage='fixture-events', check='required-fixture-pass',
+                          package=package, test=test)
 
 
 def reject_generated_leak(probe):
@@ -144,17 +214,18 @@ def reject_generated_leak(probe):
         control.run('generated-key-leak', ['go', 'test', *RACE_FLAGS, '-json', '-count=1',
             '-timeout=30s', '-outputdir', str(inventory), './internal/installer',
             '-run', '^TestFirstAdminCSRDoesNotMintBearer$', '-args',
-            '-bootstrap-credential-leak-control'], cwd=probe.root, umask=0o022, go_events=True)
+            '-bootstrap-credential-leak-control'], cwd=probe.root, umask=0o022, go_events=True,
+            package=INSTALLER_PACKAGE, test='TestFirstAdminCSRDoesNotMintBearer')
         values, tests = go_inventory(inventory)
         if tests != {'TestFirstAdminCSRDoesNotMintBearer'} or not values:
-            raise Refused('stage=leak-control fixture inventory missing')
+            raise Refused('fixture inventory missing', stage='leak-control', check='credential-inventory', package=INSTALLER_PACKAGE, test='TestFirstAdminCSRDoesNotMintBearer')
         try:
             scan_go_events(control.go_events[0], values)
         except Refused as error:
-            if 'secret detected in decoded Go output; artifacts withheld' in str(error):
+            if error.check == 'credential-exposure' and error.channel == 'go-output':
                 return
             raise
-        raise Refused('stage=leak-control generated credential was not rejected')
+        raise Refused('generated credential was not rejected', stage='leak-control', check='generated-key-rejected', package=INSTALLER_PACKAGE, test='TestFirstAdminCSRDoesNotMintBearer')
     finally:
         # Deliberate adverse output is never part of normal scan/publication.
         shutil.rmtree(directory)
@@ -173,55 +244,74 @@ def run_cell(probe, race_command):
     signal.setitimer(signal.ITIMER_REAL, CELL_BUDGET)
     require_pass_events(raw)
     if probe.last_returncode:
-        raise Refused('stage=rest-race package failed; private artifacts withheld')
+        raise Refused('race command failed', stage='rest-race', check='command-exit')
     values, inventoried = go_inventory(inventory)
-    for name in TESTS:
-        if name != 'TestPinnedKeyIsTheReleasePipelinePin' and name not in inventoried:
-            raise Refused('stage=fixture-inventory test=' + name + ' missing; private artifacts withheld')
+    for package, name in TESTS:
+        if package == INSTALLER_PACKAGE and name not in inventoried:
+            raise Refused('fixture inventory missing', stage='fixture-inventory', check='credential-inventory', package=package, test=name)
     cli = probe.work / 'home/.local/bin/oberth'
     cli.parent.mkdir(parents=True)
-    probe.run('build-cli', ['go', 'build', *RACE_FLAGS, '-o', str(cli), './cmd/oberth'], cwd=probe.root)
+    probe.run('build-cli', ['go', 'build', *RACE_FLAGS, '-o', str(cli), './cmd/oberth'], cwd=probe.root,
+              package=CLI_PACKAGE)
     plan_fixture(probe, cli)
     raw = probe.run('assertions', [sys.executable, '-I', '-B',
                     str(probe.root / 'hack/bootstrap-acceptance/assertions.py')], allowed_codes=(0, 1))
-    events = [json.loads(line) for line in raw.splitlines()]
+    events = [json_result(line, 'assertion-json') for line in raw.splitlines()]
     for event in events:
+        if not isinstance(event, dict):
+            raise Refused('invalid assertion event', stage='assertions', check='assertion-schema')
         if event.get('action') in ('fail', 'skip'):
             import re
             name = event.get('test', '')
             if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.]{1,240}', name):
                 name = 'unavailable'
-            raise Refused('stage=assertions test=' + name + ' did not pass; private artifacts withheld')
+            raise Refused('assertion did not pass', stage='assertions', check='python-test-pass', package=name.split('.')[0], test=name)
     if probe.last_returncode or not any(event.get('action') == 'pass' for event in events):
-        raise Refused('stage=assertions test=unavailable assertions did not pass; private artifacts withheld')
+        raise Refused('assertions did not pass', stage='assertions', check='assertion-events')
     probe.stage = "leak-control"
     reject_generated_leak(probe)
     return race_seconds
 
 
+def final_scan(probe):
+    values, _ = go_inventory(probe.work / 'go-inventory')
+    values = list(set(values + secret_values(probe.secrets) + private_values(probe.work)))
+    for path in probe.go_events:
+        scan_go_events(path, values)
+    scan_logs(probe.logs, values)
+
+
 def checked_cell(probe, race_command):
+    failure = None
+    scanning_failure = False
     def expired(signum, frame):
-        raise Refused('stage=' + probe.stage + ' cell time budget exceeded; private artifacts withheld')
+        raise Refused('time budget exceeded', stage=probe.stage,
+                      check='failure-scan-timeout' if scanning_failure else 'cell-timeout')
     previous = signal.signal(signal.SIGALRM, expired)
     try:
         try:
             race_seconds = run_cell(probe, race_command)
-        finally:
-            if probe.deadline is None:
-                signal.setitimer(signal.ITIMER_REAL, CELL_BUDGET)
-            probe.stage = 'secret-scan'
-            values, _ = go_inventory(probe.work / 'go-inventory')
-            values = list(set(values + secret_values(probe.secrets) + private_values(probe.work)))
-            for path in probe.go_events:
-                scan_go_events(path, values)
-            scan_logs(probe.logs, values)
+        except Exception as error:
+            # Freeze the originating stage before entering final scanning.
+            failure = stage_failure(error, probe.stage)
+        probe.stage = 'secret-scan'
+        if failure is not None:
+            scanning_failure = True
+            # Independent one-shot alarm: the cell alarm may already have fired.
+            signal.setitimer(signal.ITIMER_REAL, FAILURE_SCAN_BUDGET)
+        elif probe.deadline is None:
+            signal.setitimer(signal.ITIMER_REAL, CELL_BUDGET)
+        try:
+            final_scan(probe)
+        except Exception as error:
+            scan_failure = stage_failure(error, probe.stage)
+            if failure is None:
+                failure = scan_failure
+            else:
+                failure.cleanup_failure = scan_failure
+        if failure is not None:
+            raise failure from None
         return race_seconds, time.monotonic() - probe.race_finished
-    except Refused as error:
-        if str(error).startswith('stage='):
-            raise
-        raise Refused('stage=' + probe.stage + ' ' + str(error)) from None
-    except Exception:
-        raise Refused('stage=' + probe.stage + ' internal assertion failed; private artifacts withheld') from None
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
@@ -243,8 +333,10 @@ if __name__ == '__main__':
     try:
         main()
     except Refused as error:
-        print('Bootstrap contract cell failed: ' + str(error), file=sys.stderr)
+        print('Bootstrap contract cell failed: ' + diagnostic(error), file=sys.stderr)
+        if error.cleanup_failure is not None:
+            print('Bootstrap contract cleanup failed: ' + diagnostic(error.cleanup_failure), file=sys.stderr)
         sys.exit(1)
     except Exception:
-        print('Bootstrap contract cell failed: stage=internal; private artifacts withheld.', file=sys.stderr)
+        print('Bootstrap contract cell failed: ' + diagnostic(Refused('internal error', stage='internal', check='internal-error')), file=sys.stderr)
         sys.exit(1)

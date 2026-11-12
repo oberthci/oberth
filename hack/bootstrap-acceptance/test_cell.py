@@ -197,14 +197,17 @@ class ReleaseRuntimeControls(unittest.TestCase):
             root = Path(directory)
             runner = Probe(root, root, 'selected', root / 'unused')
             runner.budget(0.05)
-            with self.assertRaisesRegex(Refused, 'stage=slow time budget exceeded'):
+            with self.assertRaises(Refused) as failure:
                 runner.run('slow', [sys.executable, '-c', 'import time; time.sleep(60)'])
+            self.assertEqual(failure.exception.stage, 'slow')
+            self.assertEqual(failure.exception.check, 'command-timeout')
 
     def test_missing_fixture_event_reports_exact_required_test(self):
         from ci import TESTS, require_pass_events
-        raw = '\n'.join(json.dumps({'Action': 'pass', 'Test': name}) for name in TESTS[1:]).encode()
-        with self.assertRaisesRegex(Refused, 'test=' + TESTS[0]):
+        raw = '\n'.join(json.dumps({'Action': 'pass', 'Package': package, 'Test': name}) for package, name in TESTS[1:]).encode()
+        with self.assertRaises(Refused) as failure:
             require_pass_events(raw)
+        self.assertEqual((failure.exception.package, failure.exception.test), TESTS[0])
 
     def test_decoded_go_output_is_scanned_across_event_boundaries(self):
         from probe import scan_go_events
@@ -218,7 +221,7 @@ class ReleaseRuntimeControls(unittest.TestCase):
 
 class SafeGoDiagnostics(unittest.TestCase):
     def test_timeout_identity_comes_from_events_not_captured_output(self):
-        from probe import active_go_test
+        from probe import active_go_identity
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'events'
             path.write_text('\n'.join(json.dumps(event) for event in [
@@ -227,7 +230,7 @@ class SafeGoDiagnostics(unittest.TestCase):
                 {'Action': 'run', 'Test': 'TestCompleted'},
                 {'Action': 'pass', 'Test': 'TestCompleted'},
             ]))
-            self.assertEqual(active_go_test(path), 'TestActionable')
+            self.assertEqual(active_go_identity(path), (None, 'TestActionable'))
 
 class CellFailurePrivacy(unittest.TestCase):
     def test_final_scan_failure_has_stage_and_no_captured_output(self):
@@ -241,8 +244,10 @@ class CellFailurePrivacy(unittest.TestCase):
             path.write_bytes(b'private-capture-marker')
             runner.logs.append(path)
             previous = signal.getsignal(signal.SIGALRM)
-            with patch.object(ci, 'run_cell', return_value=0), self.assertRaisesRegex(Refused, 'stage=secret-scan') as error:
+            with patch.object(ci, 'run_cell', return_value=0), self.assertRaises(Refused) as error:
                 ci.checked_cell(runner, [])
+            self.assertEqual(error.exception.stage, 'secret-scan')
+            self.assertEqual(error.exception.check, 'credential-exposure')
             self.assertNotIn('private-capture-marker', str(error.exception))
             self.assertEqual(signal.getsignal(signal.SIGALRM), previous)
 

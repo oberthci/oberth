@@ -95,7 +95,7 @@ def tls_server(probe, name, respond, client_ca=None, record=None, allowed_method
         thread.join(2)
         if shutdown.is_alive() or thread.is_alive():
             from probe import Refused
-            raise Refused('fixture HTTP server teardown exceeded its bound')
+            raise Refused('fixture HTTP server teardown exceeded its bound', stage='fixture-http', check='http-teardown')
 
 
 def private_values(work):

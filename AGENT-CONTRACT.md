@@ -3718,12 +3718,16 @@ See [plugin install and repository connections](docs/plugin-install.md).
 # Bootstrap contract cell runtime and capture boundary (#1533 review follow-ups)
 
 The branch/release rest wrapper records one existing race run and requires all
-18 named top-level fixture pass events. Its Go memory/timeout/cache/interactive
+18 required (Go package, top-level test) terminal pass events. Its Go memory/timeout/cache/interactive
 Git controls survive child-environment isolation. The race command has a wall
 budget including compilation, followed by a bounded added cell/scan budget
 inside the existing Pod deadline. CLI construction and the generated-key adverse
 control use the same race compilation flags/cache. Failed stages/test identities
 are public; captured output, argv and exception diagnostics remain private.
+The originating stage/check survives final scanning. Failure-path scanning has
+an independent bounded alarm after a cell timeout; a scan failure stays red.
+Installer advisory warnings do not invalidate an aggregate green plan; every
+non-warning check and the aggregate result must pass.
 
 Installer fixture helpers export credential inventories into the standard Go
 test output directory before fixture cleanup. Raw/base64 values and PEM body
