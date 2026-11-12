@@ -441,3 +441,18 @@ waits from the stall bound and the pre-start watchdog;
 `TestBuildSerializesReleasesWithOneNativeMutex` covers `releases.serialize`;
 `TestBuildIgnoresRetiredExclusiveAnnotationInFragments` keeps the retired
 annotation inert.
+
+Background status probes: `TestUpstreamFailureThresholdAndBackoff` checks exact
+retry boundaries, retained check times, three consecutive failures and recovery;
+`TestUpstreamSharingKeepsCredentialAndEndpointBoundaries` covers organization
+sharing and distinct host/port spellings, usernames, credentials, local paths and
+IPv6 zones. `TestUpstreamSharingPreservesHostPinDecisions` performs real SSH
+handshakes with different pins for host case and zero-prefixed ports in the same
+file, preserves acceptance/rejection in both orders, and shares identical
+spellings across organizations.
+Concurrent/cancellation tests keep one in-flight sample and retain evidence on
+shutdown. `TestStatusProbeFlagsAndChart` checks binary defaults, chart wiring and
+schema/flag validation. `TestStatusProbeIdentityUsesResolvedCredentialsAndPins`
+checks projected-key fallback and rotation. The receive-adapter integration test
+runs readiness, mirror refresh, promotion delivery and real tag pushes with an
+unavailable diagnostic; dashboard behavior preserves escaped errors/check times.

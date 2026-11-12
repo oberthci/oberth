@@ -275,9 +275,9 @@ function normalizeRepoSelector(value, everything) {
   const named = state.repos.filter(repo => repo.name === value);
   return named.length === 1 ? repoKey(named[0]) : everything;
 }
-/* ensureStatus refreshes /api/status at most once per five minutes in the background. It probes every
-   upstream, so pages render without waiting for it and re-render when it
-   arrives; a failure is not retried for 30 seconds, so a live view polling
+/* ensureStatus reads /api/status at most once per five minutes in the background.
+   It reads cached diagnostics, so pages render without waiting for it and
+   re-render when it arrives; a failure is not retried for 30 seconds, so a live view polling
    every two seconds does not hammer it. */
 function ensureStatus() {
   if (state.status && Date.now() - state.statusLoadedAt < 5 * 60 * 1000) return Promise.resolve();
@@ -1700,7 +1700,7 @@ async function renderStatus(seq) {
     ${uplinkExpiryWarnings(uplinks)}
     <div class="vcs-panel">
       <div class="vcs-head">Upstreams</div>
-      ${(s.upstream_info || []).map(upstream => `<div class="vcs-entry"><span class="vcs-led ${upstream.probe === "ready" ? "ok" : "err"}"></span><span class="vcs-host">${esc(upstream.name)}</span><span class="meta">${esc(upstream.kind)}</span><span class="mono-detail">${esc(upstream.base_url)}</span><span class="mono-detail">${esc(upstream.probe === "ready" ? "reachable" : upstream.probe || "unprobed")}</span></div>`).join("") || '<div class="vcs-entry"><span class="vcs-led na"></span><span class="meta">No upstream registered — run oberth admin upstream register in-pod.</span></div>'}
+      ${(s.upstream_info || []).map(upstream => `<div class="vcs-entry"><span class="vcs-led ${upstream.probe === "ready" ? "ok" : "err"}"></span><span class="vcs-host">${esc(upstream.name)}</span><span class="meta">${esc(upstream.kind)}</span><span class="mono-detail">${esc(upstream.base_url)}</span><span class="mono-detail">${esc([upstream.probe === "ready" ? "reachable" : upstream.probe || "unprobed", upstream.last_error || "", upstream.checked_at ? "checked " + fmtTime(upstream.checked_at) : ""].filter(Boolean).join(" · "))}</span></div>`).join("") || '<div class="vcs-entry"><span class="vcs-led na"></span><span class="meta">No upstream registered — run oberth admin upstream register in-pod.</span></div>'}
       ${s.ssh_identity ? `<div class="vcs-entry"><span class="vcs-led ok"></span><span class="vcs-host">SSH identity</span><span class="meta">upstream auth</span><span class="mono-detail">${esc(s.ssh_identity)}</span><span><button class="copy-btn" data-copy-text="${esc(s.ssh_identity)}">Copy</button></span></div>` : ""}
     </div>
     <div class="vcs-panel">

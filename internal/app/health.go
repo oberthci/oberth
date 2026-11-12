@@ -48,7 +48,10 @@ type Health struct {
 	VCS          VCSProbe
 	// VCSCache is refreshed by WatchStatusProbes. Requests only read it.
 	// A nil snapshot reports unavailable until configured and sampled.
-	VCSCache *VCSSnapshot
+	VCSCache     *VCSSnapshot
+	StatusProbes StatusProbeConfig
+	// PrepareVCS binds one probe closure to the exact credentials it will use.
+	PrepareVCS func(context.Context, model.Upstream) (string, func(context.Context) error, error)
 	// Version is the running server build, reported on the status view so the
 	// dashboard can confirm which binary answered.
 	Version string
@@ -95,12 +98,14 @@ type Health struct {
 
 // UpstreamStatus reports one configured upstream and its live probe result.
 type UpstreamStatus struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Kind      string    `json:"kind"`
-	BaseURL   string    `json:"base_url"`
-	Probe     string    `json:"probe"`
-	CheckedAt time.Time `json:"checked_at,omitzero"`
+	LastError           string    `json:"last_error,omitempty"`
+	ConsecutiveFailures int       `json:"consecutive_failures,omitempty"`
+	ID                  int64     `json:"id"`
+	Name                string    `json:"name"`
+	Kind                string    `json:"kind"`
+	BaseURL             string    `json:"base_url"`
+	Probe               string    `json:"probe"`
+	CheckedAt           time.Time `json:"checked_at,omitzero"`
 }
 
 // SecretStoreStatus summarizes the operator-supplied OpenBao configuration.
@@ -300,16 +305,7 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		status.Repositories = len(repositories)
 		if len(upstreams) > 0 && health.VCS != nil {
 			status.UpstreamInfo = health.probeVCSForRepositories(upstreams, repositories)
-			ready := true
-			for _, upstream := range status.UpstreamInfo {
-				if upstream.Probe != "ready" && upstream.Probe != "archived" {
-					ready = false
-					break
-				}
-			}
-			if ready {
-				status.VCS = "ready"
-			}
+			status.VCS = vcsState(status.UpstreamInfo)
 		}
 	}
 	status.Cluster, status.ClusterCheckedAt = health.clusterStatus()
@@ -414,19 +410,12 @@ func (health Health) ScopedStatus(ctx context.Context, actor api.Actor) (any, er
 		}
 		if len(visible) > 0 && health.VCS != nil {
 			// Read the full shared snapshot, then project only visible upstreams.
-			ready := true
 			for _, upstream := range health.probeVCSForRepositories(upstreams, repositories) {
-				if !visible[upstream.ID] {
-					continue
-				}
-				status.UpstreamInfo = append(status.UpstreamInfo, upstream)
-				if upstream.Probe != "ready" && upstream.Probe != "archived" {
-					ready = false
+				if visible[upstream.ID] {
+					status.UpstreamInfo = append(status.UpstreamInfo, upstream)
 				}
 			}
-			if ready {
-				status.VCS = "ready"
-			}
+			status.VCS = vcsState(status.UpstreamInfo)
 		}
 	}
 	status.Cluster, status.ClusterCheckedAt = health.clusterStatus()
@@ -474,105 +463,6 @@ func scopedAdmission(state *model.AdmissionState, upstreams []model.Upstream, re
 	return scoped
 }
 
-const (
-	// vcsProbeTTL is the minimum interval between full upstream probe cycles.
-	// Background sampling interval; readers never refresh the snapshot.
-	vcsProbeTTL = 10 * time.Second
-	// vcsProbeTimeout is the per-upstream probe deadline.
-	vcsProbeTimeout = 5 * time.Second
-	// vcsProbeAggregate is the aggregate deadline across all concurrent probes.
-	vcsProbeAggregate = 15 * time.Second
-)
-
-// VCSSnapshot retains the last completed background upstream sample.
-// Readers return it immediately while a refresh is in progress.
-type VCSSnapshot struct {
-	key      string
-	mu       sync.Mutex
-	results  []UpstreamStatus
-	inflight chan struct{} // non-nil while a refresh is in progress
-}
-
-// probeVCS refreshes the background snapshot, coalescing overlapping samples.
-// The watcher owns the sampling interval; request readers use vcsStatus.
-func (health Health) probeVCS(ctx context.Context, upstreams []model.Upstream) []UpstreamStatus {
-	key := upstreamProbeKey(upstreams)
-	cache := health.VCSCache
-	if cache == nil {
-		// No shared cache (test or single-caller path): probe directly.
-		return health.probeVCSConcurrent(ctx, upstreams)
-	}
-	cache.mu.Lock()
-	if cache.inflight != nil {
-		wait := cache.inflight
-		cache.mu.Unlock()
-		select {
-		case <-wait:
-			return health.probeVCS(ctx, upstreams)
-		case <-ctx.Done():
-			cache.mu.Lock()
-			results := cache.results
-			cache.mu.Unlock()
-			return results
-		}
-	}
-	done := make(chan struct{})
-	cache.inflight = done
-	cache.mu.Unlock()
-
-	results := health.probeVCSConcurrent(ctx, upstreams)
-
-	cache.mu.Lock()
-	cache.results = results
-	cache.key = key
-	cache.inflight = nil
-	cache.mu.Unlock()
-	close(done)
-	return results
-}
-
-// probeVCSConcurrent bounds background SSH concurrency and the aggregate deadline.
-func (health Health) probeVCSConcurrent(ctx context.Context, upstreams []model.Upstream) []UpstreamStatus {
-	aggCtx, aggCancel := context.WithTimeout(ctx, vcsProbeAggregate)
-	defer aggCancel()
-
-	type indexedResult struct {
-		index  int
-		status UpstreamStatus
-	}
-	results := make([]UpstreamStatus, len(upstreams))
-	ch := make(chan indexedResult, len(upstreams))
-	var wg sync.WaitGroup
-	jobs := make(chan int, len(upstreams))
-	for i := range upstreams {
-		jobs <- i
-	}
-	close(jobs)
-	for range min(4, len(upstreams)) {
-		wg.Go(func() {
-			for index := range jobs {
-				u := upstreams[index]
-				probeCtx, cancel := context.WithTimeout(aggCtx, vcsProbeTimeout)
-				err := probeCtx.Err()
-				if err == nil {
-					err = health.VCS(probeCtx, u)
-				}
-				cancel()
-				probe := "ready"
-				if err != nil {
-					probe = boundedDetail(fmt.Errorf("probe upstream %s: %w", u.Name, err).Error())
-				}
-				ch <- indexedResult{index: index, status: UpstreamStatus{ID: u.ID, Name: u.Name, Kind: u.Kind, BaseURL: u.BaseURL, Probe: probe, CheckedAt: time.Now().UTC()}}
-			}
-		})
-	}
-	go func() { wg.Wait(); close(ch) }()
-	for result := range ch {
-		results[result.index] = result.status
-	}
-	return results
-}
-
 // boundedDetail keeps diagnostic strings on the status view single-line and
 // short enough for a dashboard cell.
 func boundedDetail(detail string) string {
@@ -586,7 +476,7 @@ func boundedDetail(detail string) string {
 const (
 	// secretStoreProbeTTL is the minimum interval between login probes.
 	// Background sampling interval; readers never refresh the snapshot.
-	secretStoreProbeTTL = 30 * time.Second
+	secretStoreProbeTTL = time.Minute
 	// secretStoreProbeTimeout bounds a single probe's context.
 	secretStoreProbeTimeout = 10 * time.Second
 )

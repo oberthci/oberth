@@ -183,12 +183,12 @@ func TestHealthStatusReportsDashboardDetail(t *testing.T) {
 	if status.Version != "v0.10.52-test" || status.SSHIdentity != "SHA256:abcdef" {
 		t.Fatalf("status identity = %+v", status)
 	}
-	// One unreachable upstream keeps overall VCS unavailable while each
+	// An initial failure remains checking until the threshold while each
 	// upstream still reports its own probe result.
-	if status.VCS != "unavailable" || len(status.UpstreamInfo) != 2 {
+	if status.VCS != "checking" || len(status.UpstreamInfo) != 2 {
 		t.Fatalf("upstream detail = %+v", status)
 	}
-	if status.UpstreamInfo[0].Probe != "ready" || !strings.Contains(status.UpstreamInfo[1].Probe, "connection refused") {
+	if status.UpstreamInfo[0].Probe != "ready" || !strings.Contains(status.UpstreamInfo[1].LastError, "connection refused") {
 		t.Fatalf("per-upstream probes = %+v", status.UpstreamInfo)
 	}
 	if status.SecretStore == nil || !status.SecretStore.Configured || status.SecretStore.Address != "https://bao.internal:8200" {

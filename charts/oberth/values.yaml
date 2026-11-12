@@ -35,6 +35,13 @@ uplinkTokens:
   defaultTTL: 2160h # 90 days
   maxTTL: 8760h # 365-day hard ceiling; may be lowered
 
+# Background diagnostics only; these never authorize Git or release operations.
+statusProbes:
+  upstreamIntervalSeconds: 60 # 10-3600; shared SSH endpoints back off on failure
+  clusterIntervalSeconds: 60 # 10-3600
+  secretStoreIntervalSeconds: 60 # 10-3600
+  upstreamFailureThreshold: 3 # 1-10 consecutive failures before unavailable
+
 replicaCount: 1
 # Run limits live in Argo since v0.20.0 (docs/where-limits-live.md): how many
 # pipeline Workflows run at once is the argo-workflows release's

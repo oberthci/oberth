@@ -172,6 +172,11 @@ spec:
             - --ssh-host-key=/run/oberth-identities/server/ssh_host_key
             - --upstream-key=/run/oberth-identities/upstream/{{ .Values.upstream.keyFile }}
             - --known-hosts=/run/oberth-identities/hosts/{{ .Values.upstream.knownHostsKey }}
+            {{- $statusProbes := .Values.statusProbes | default dict }}
+            - --status-upstream-probe-interval={{ $statusProbes.upstreamIntervalSeconds | default 60 }}s
+            - --status-cluster-probe-interval={{ $statusProbes.clusterIntervalSeconds | default 60 }}s
+            - --status-secretstore-probe-interval={{ $statusProbes.secretStoreIntervalSeconds | default 60 }}s
+            - --status-upstream-failure-threshold={{ $statusProbes.upstreamFailureThreshold | default 3 }}
             - --namespace={{ .Release.Namespace }}
             {{- $uplinkTokens := .Values.uplinkTokens | default dict }}
             - "--uplink-token-default-ttl={{ $uplinkTokens.defaultTTL | default "2160h" }}"

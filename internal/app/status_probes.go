@@ -81,23 +81,25 @@ func (health Health) secretStoreStatus() (string, time.Time) {
 // Separate loops keep a slow forge from delaying Kubernetes or OpenBao samples.
 // The owner cancels and joins this watcher before closing its store.
 func (health Health) WatchStatusProbes(ctx context.Context) {
+	config := health.StatusProbes.withDefaults()
 	var workers sync.WaitGroup
 	watch := func(interval time.Duration, sample func(context.Context)) {
 		workers.Go(func() {
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
+
 			for ctx.Err() == nil {
 				sample(ctx)
+				timer := time.NewTimer(interval)
 				select {
 				case <-ctx.Done():
+					timer.Stop()
 					return
-				case <-ticker.C:
+				case <-timer.C:
 				}
 			}
 		})
 	}
 	if health.VCSCache != nil && health.VCS != nil && health.Store != nil {
-		watch(vcsProbeTTL, func(ctx context.Context) {
+		watch(config.UpstreamInterval, func(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(ctx, vcsProbeAggregate)
 			defer cancel()
 			upstreams, err := health.Store.ListUpstreams(ctx)
@@ -113,7 +115,7 @@ func (health Health) WatchStatusProbes(ctx context.Context) {
 		})
 	}
 	if health.ClusterCache != nil && health.Cluster != nil {
-		watch(vcsProbeTTL, func(ctx context.Context) {
+		watch(config.ClusterInterval, func(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(ctx, vcsProbeTimeout)
 			defer cancel()
 			state := "unavailable"
@@ -131,7 +133,7 @@ func (health Health) WatchStatusProbes(ctx context.Context) {
 		if health.SecretStore != nil {
 			observer.Address = health.SecretStore.Address
 		}
-		watch(secretStoreProbeTTL, func(ctx context.Context) {
+		watch(config.SecretStoreInterval, func(ctx context.Context) {
 			result := health.RefreshSecretStore(ctx)
 			if health.Log != nil {
 				observer.Observe(result)

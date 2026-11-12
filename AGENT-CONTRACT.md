@@ -967,7 +967,12 @@ containing CI and real workload qualification remain separately required.
   probe result — never a token or secret value), the audit mode
   (`audit_mode`: `"local"` or `"anchored"`), and the audit-chain head with
   `audit_chain.anchored` plus the latest external checkpoint when a timestamp
-  authority is configured.
+  authority is configured. Background diagnostics use configurable sixty-second
+  defaults. Upstream SSH samples share endpoint/credential bindings, back off on
+  failure and require three consecutive failures before `unavailable`; `last_error`
+  and `checked_at` remain visible while the last healthy state is retained.
+  These observations never authorize or refuse readiness, pushes, mirror refresh
+  or promotions. See [status probe policy](docs/api-latency.md).
 - A bearer credential maps to exactly one uplink public-key fingerprint and
   identity. Plaintext tokens are displayed once and are never persisted.
 - MCP `wait` and `promote_status` negotiate POST SSE only for explicit

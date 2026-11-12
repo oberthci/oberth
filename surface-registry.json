@@ -767,6 +767,50 @@
     "value:cpu_reason": {
       "doc_anchor": "docs/cpu-admission.md#defaults",
       "test_ref": "internal/service/admission_live_test.go TestCapacityHeldPoolRefreshUnblocksWithoutRestart"
+    },
+    "flag:status-upstream-probe-interval": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "flag:status-cluster-probe-interval": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "flag:status-secretstore-probe-interval": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "flag:status-upstream-failure-threshold": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "value:statusProbes": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "value:upstreamIntervalSeconds": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "value:clusterIntervalSeconds": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "value:secretStoreIntervalSeconds": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "value:upstreamFailureThreshold": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
+    },
+    "value:status.upstream_info[].last_error": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "internal/app/upstream_status_test.go TestUpstreamFailureThresholdAndBackoff"
+    },
+    "value:status.upstream_info[].consecutive_failures": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "internal/app/upstream_status_test.go TestUpstreamFailureThresholdAndBackoff"
     }
   }
 }

@@ -101,7 +101,7 @@ func TestStatusProbeDoesNotReuseChangedIdentity(t *testing.T) {
 	}
 }
 
-func TestStatusProbesRefreshEveryIntervalAfterSlowSamples(t *testing.T) {
+func TestStatusProbesWaitBetweenSlowSamples(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var vcs, cluster, secret atomic.Int32
 		probe := func(counter *atomic.Int32) error {
@@ -126,8 +126,8 @@ func TestStatusProbesRefreshEveryIntervalAfterSlowSamples(t *testing.T) {
 		cancel()
 		synctest.Wait()
 		<-done
-		if vcs.Load() != 4 || cluster.Load() != 4 || secret.Load() != 2 {
-			t.Fatalf("samples skipped scheduled ticks: vcs=%d cluster=%d secret=%d", vcs.Load(), cluster.Load(), secret.Load())
+		if vcs.Load() != 2 || cluster.Load() != 2 || secret.Load() != 2 {
+			t.Fatalf("unexpected diagnostic cadence: vcs=%d cluster=%d secret=%d", vcs.Load(), cluster.Load(), secret.Load())
 		}
 	})
 }
