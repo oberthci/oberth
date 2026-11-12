@@ -157,31 +157,26 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	fixture.engine.assertNoViolations(t)
 }
 
-// A running run's Workflow is deleted; its owner settles without recording a
-// result over the cancel, and the next Workflow starts only once the first is
-// gone.
+// Cancelling one submitted Workflow preserves the independently submitted peer
+// and the cancelled owner cannot record a late result over the cancellation.
 func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	fixture := newGroupFixture(t, 1)
 	running := fixture.branch(t, fixture.exampleService, "busy", "a")
-	fixture.start(t)
-	if created := fixture.awaitCreated(t, 1); !created[running.ID] {
-		t.Fatalf("created %v; want the running run", created)
-	}
-	// Establish the first Workflow before enqueueing its successor: source
-	// preparation can finish out of order for two prequeued runs. The fake
-	// native Workflow ceiling keeps the successor queued until cancellation.
 	next := fixture.branch(t, fixture.exampleService, "heavy", "b")
-	if queued, err := fixture.store.Run(t.Context(), next.ID); err != nil || queued.Status.Terminal() || queued.StartedAt != nil || fixture.engine.wasCreated(next.ID) {
-		t.Fatalf("workflow ceiling did not retain the queued run: %+v %v", queued, err)
+	fixture.start(t)
+	created := fixture.awaitCreated(t, 2)
+	if !created[running.ID] || !created[next.ID] {
+		t.Fatalf("created %v; want both independently submitted runs", created)
 	}
 	submitted := fixture.awaitRunStarted(t, running.ID)
+	peer := fixture.awaitRunStarted(t, next.ID)
 
 	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID, "reason": "stuck test"})
 	if response.PreviousState != "running" || response.Workflow != "deleted" {
 		t.Fatalf("running cancel response = %#v", response)
 	}
-	if created := fixture.awaitCreated(t, 1); !created[next.ID] {
-		t.Fatalf("after the deletion the gate admitted %v; want %s", created, next.ID)
+	if current := fixture.run(t, next.ID); current.Status.Terminal() {
+		t.Fatalf("cancelling a run finished its independent peer: %+v", current)
 	}
 	fixture.awaitNoPendingCancellations(t)
 	final := fixture.awaitTerminal(t, running.ID)
@@ -191,9 +186,10 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	}
 	fixture.engine.mu.Lock()
 	deleted := slices.Contains(fixture.engine.deleted, submitted.WorkflowName)
+	peerDeleted := slices.Contains(fixture.engine.deleted, peer.WorkflowName)
 	fixture.engine.mu.Unlock()
-	if !deleted {
-		t.Fatalf("Workflow %s was not deleted", submitted.WorkflowName)
+	if !deleted || peerDeleted {
+		t.Fatalf("cancellation deletion: selected=%t peer=%t", deleted, peerDeleted)
 	}
 	// The owner's late result never replaces the cancel.
 	time.Sleep(testTimeout(100 * time.Millisecond))

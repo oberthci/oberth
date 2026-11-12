@@ -495,3 +495,8 @@ and report unverified as a warning; a fresh plan must exit 1 on the hard
 network_policy check. Exactly the denied scratch-namespace POST is expected;
 all other mutation attempts refuse. No CNI enforcement is claimed by this fixture.
 The normal rest suite still covers enforced probe traffic and UID-bound cleanup.
+
+Native cancellation isolation: the running-run cancellation test waits for both
+independent Workflows to be submitted, without assuming creation order or an
+Oberth workflow ceiling. It requires deletion of only the selected Workflow,
+a live peer and preservation of cancellation against the owner's late result.
