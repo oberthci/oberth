@@ -1970,7 +1970,7 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	if _, err := fixture.store.SetRunWorkflowName(ctx, restart.ID, restartJob); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.MarkRunAdmitted(ctx, restart.ID); err != nil {
+	if _, err := fixture.store.MarkRunSubmissionStarted(ctx, restart.ID); err != nil {
 		t.Fatal(err)
 	}
 	// This models a crash after the durable Job intent and before idempotent

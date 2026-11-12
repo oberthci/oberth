@@ -94,7 +94,7 @@ type RunQueueStore interface {
 	ClaimNextRun(context.Context) (model.Run, error)
 	MarkRunCreatePending(context.Context, string, string, ...string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
-	MarkRunAdmitted(context.Context, string) (model.Run, error)
+	MarkRunSubmissionStarted(context.Context, string) (model.Run, error)
 	SetRunPolicyWaiting(context.Context, string, bool) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
 	SetRunWorkflowName(context.Context, string, string) (model.Run, error)

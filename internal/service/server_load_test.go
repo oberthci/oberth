@@ -179,7 +179,7 @@ func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 		if _, err := f.store.SetRunWorkflowName(t.Context(), run.ID, "oberth-"+run.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.store.MarkRunAdmitted(t.Context(), run.ID); err != nil {
+		if _, err := f.store.MarkRunSubmissionStarted(t.Context(), run.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {

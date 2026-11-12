@@ -349,7 +349,7 @@ func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
 	if _, err = f.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+	if _, err = f.store.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.store.Close(); err != nil {

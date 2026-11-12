@@ -358,7 +358,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-reconcile-job"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+	if _, err := database.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -459,7 +459,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-vanished-job"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+	if _, err := database.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -582,7 +582,7 @@ func TestStartupReconciliationResetsUnobservedTag(t *testing.T) {
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-tag-job"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+	if _, err := database.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {

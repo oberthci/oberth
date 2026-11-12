@@ -41,7 +41,7 @@ func TestFlatRunsListQueueThenRunningThenFinishedAndPageByEndTime(t *testing.T) 
 			t.Fatalf("claim %s = %+v, %v", ref, claimed, err)
 		}
 		now = now.Add(time.Minute)
-		if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
+		if _, err := s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.SetRunWorkflowName(ctx, run.ID, "wf-"+run.ID); err != nil {
@@ -76,7 +76,7 @@ func TestFlatRunsListQueueThenRunningThenFinishedAndPageByEndTime(t *testing.T) 
 		t.Fatalf("claim queued run = %+v, %v", claimed, err)
 	}
 	now = now.Add(time.Minute)
-	if _, err := s.MarkRunAdmitted(ctx, firstQueued.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, firstQueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	current, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
@@ -142,7 +142,7 @@ func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
 	if err != nil || counts.Queued != 4 || counts.Running != 0 || counts.QueuedByRepo[repo.ID] != 2 {
 		t.Fatalf("counts %+v, %v", counts, err)
 	}
-	if _, err := s.MarkRunAdmitted(t.Context(), queued[0].ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(t.Context(), queued[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	counts, err = s.CountRuns(t.Context())
@@ -226,12 +226,12 @@ func TestFlatRunsFinishedRowsSortByFinishNotAdmission(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	first := projectionRun(t, s, repo.ID, "first", projectionSourceSHA)
-	if _, err := s.MarkRunAdmitted(t.Context(), first.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(t.Context(), first.ID); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Minute)
 	second := projectionRun(t, s, repo.ID, "second", projectionSourceSHA)
-	if _, err := s.MarkRunAdmitted(t.Context(), second.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(t.Context(), second.ID); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{second.ID, first.ID} {

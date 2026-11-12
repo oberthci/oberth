@@ -27,7 +27,7 @@ func TestStartupRetriesInterruptedPromotionUnderOriginalGrant(t *testing.T) {
 			if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = f.store.MarkRunAdmitted(t.Context(), original.RunID); err != nil {
+			if _, err = f.store.MarkRunSubmissionStarted(t.Context(), original.RunID); err != nil {
 				t.Fatal(err)
 			}
 			if mode == "failed-step" {

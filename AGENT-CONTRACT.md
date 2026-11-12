@@ -3298,7 +3298,8 @@ a new numbered episode, preserving previous waits and grants. Queue time is
 Checkout completion, admission request and grant, source seed start and readiness,
 Workflow creation, and durable terminalization have separate timestamps. Source
 seeding is once per Workflow, not once per step. Admission grants are recorded
-atomically with MarkRunAdmitted; submission alone cannot infer a grant.
+at the start of Workflow submission with MarkRunSubmissionStarted; these
+retained historical timing fields do not represent a resource gate.
 
 Before TTL, the server retains the admitted expanded task/template identities,
 simple dependency names, Workflow UID and spec identity. No commands, arguments,

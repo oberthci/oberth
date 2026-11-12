@@ -95,7 +95,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A submitted Workflow follows durable admission in the scheduler.
-	if _, err = db.MarkRunAdmitted(ctx, run.ID); err != nil {
+	if _, err = db.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 

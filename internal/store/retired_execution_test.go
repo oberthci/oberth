@@ -20,7 +20,7 @@ func TestRetiredUnsubmittedExecutionFailsOnRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Old preflight owners admitted before recording the parent Workflow name.
-	if _, err := s.MarkRunAdmitted(t.Context(), run.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE runs SET phase='preflight' WHERE id=?`, run.ID); err != nil {

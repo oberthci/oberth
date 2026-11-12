@@ -67,7 +67,7 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 		}
 		return previous, nil
 	}
-	reservation := &submissionOwner{gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, ref: run.Ref, refKind: run.RefKind, sha: run.SHA, prepared: true, granted: true, submitted: true}
+	reservation := &submissionOwner{withdrawn: make(chan struct{}), gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, granted: true, submitted: true}
 	gate.owners[run.QueueSequence] = reservation
 	return reservation, nil
 }
@@ -83,9 +83,7 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		reservation.retain()
 		return err
 	}
-	scheduler.submissions.mu.Lock()
-	reservation.repo = repository.Name
-	scheduler.submissions.mu.Unlock()
+
 	current, err := scheduler.database().Run(ctx, run.ID)
 	if err != nil {
 		reservation.retain()

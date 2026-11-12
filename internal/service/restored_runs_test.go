@@ -46,7 +46,7 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	if _, err := database.SetRunWorkflowName(ctx, enqueued.ID, "oberth-restored-job"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+	if _, err := database.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	// A run still queued in the backup may already have run on the version a

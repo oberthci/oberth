@@ -49,9 +49,9 @@ func (s *lostDatabaseAck) FinalizePublication(ctx context.Context, id string, st
 	v, e := s.Store.FinalizePublication(ctx, id, status, failure)
 	return v, s.lost("FinalizePublication", e)
 }
-func (s *lostDatabaseAck) MarkRunAdmitted(ctx context.Context, id string) (model.Run, error) {
-	v, e := s.Store.MarkRunAdmitted(ctx, id)
-	return v, s.lost("MarkRunAdmitted", e)
+func (s *lostDatabaseAck) MarkRunSubmissionStarted(ctx context.Context, id string) (model.Run, error) {
+	v, e := s.Store.MarkRunSubmissionStarted(ctx, id)
+	return v, s.lost("MarkRunSubmissionStarted", e)
 }
 func (s *lostDatabaseAck) MarkRunSubmitted(ctx context.Context, id string) (model.Run, error) {
 	v, e := s.Store.MarkRunSubmitted(ctx, id)
@@ -90,7 +90,7 @@ func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 }
 
 func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
-	for _, operation := range []string{"RequeueStrandedRun", "BeginPublication", "FinalizePublication", "MarkRunAdmitted", "MarkRunSubmitted"} {
+	for _, operation := range []string{"RequeueStrandedRun", "BeginPublication", "FinalizePublication", "MarkRunSubmissionStarted", "MarkRunSubmitted"} {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			fixture := newRecoveryFixture(t)
@@ -102,8 +102,8 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 			ctx := deadlineScope(t.Context(), scheduler)
 			spec := model.PublicationSpec{RepoID: run.RepoID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor}
 			switch operation {
-			case "MarkRunAdmitted":
-				current, err := database.MarkRunAdmitted(ctx, run.ID)
+			case "MarkRunSubmissionStarted":
+				current, err := database.MarkRunSubmissionStarted(ctx, run.ID)
 				if err != nil || current.StartedAt == nil {
 					t.Fatal(current, err)
 				}

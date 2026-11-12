@@ -685,7 +685,7 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if _, err := s.SetRunWorkflowName(ctx, run.ID, "job-before-restart"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -822,7 +822,7 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	if _, err := s.SetRunWorkflowName(ctx, run.ID, "job-stranded"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	// A credentialed (ci-secrets tier) branch run is requeue-eligible; the
@@ -1964,7 +1964,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 	if _, err := s.SetRunWorkflowName(context.Background(), run.ID, "old-owner-workflow"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.MarkRunAdmitted(context.Background(), run.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {

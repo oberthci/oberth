@@ -63,12 +63,12 @@ func (s *deadlineFaultStore) MarkRunSubmitted(a0 context.Context, a1 string) (mo
 	return s.Store.MarkRunSubmitted(a0, a1)
 }
 
-func (s *deadlineFaultStore) MarkRunAdmitted(a0 context.Context, a1 string) (model.Run, error) {
-	if err := s.fault("MarkRunAdmitted"); err != nil {
+func (s *deadlineFaultStore) MarkRunSubmissionStarted(a0 context.Context, a1 string) (model.Run, error) {
+	if err := s.fault("MarkRunSubmissionStarted"); err != nil {
 		var zero model.Run
 		return zero, err
 	}
-	return s.Store.MarkRunAdmitted(a0, a1)
+	return s.Store.MarkRunSubmissionStarted(a0, a1)
 }
 
 func (s *deadlineFaultStore) Run(a0 context.Context, a1 string) (model.Run, error) {

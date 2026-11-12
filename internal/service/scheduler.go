@@ -81,7 +81,7 @@ type Scheduler struct {
 	publicationIDs     []string
 	publicationSet     map[string]struct{}
 	deliveryPermit     chan struct{}
-	capacityWait       func(context.Context) error
+	policyRetryWait    func(context.Context) error
 	policyWaitTimeout  time.Duration // tests may shorten the fixed production limit
 	// deferredJournals holds the pod-log journal of a run whose worker left
 	// its Workflow deletion to the dispatch pass; that pass prunes it.
@@ -164,7 +164,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
-		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
+		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, policyRetryWait: waitPolicyRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
 	return scheduler, nil
@@ -794,10 +794,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return err
 	}
-	current, err = scheduler.database().MarkRunAdmitted(ctx, run.ID)
+	current, err = scheduler.database().MarkRunSubmissionStarted(ctx, run.ID)
 	if err != nil {
 		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record admission: %w", err))
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record submission start: %w", err))
 	}
 	if current.Preempted() {
 		_ = logFile.Close()
@@ -832,15 +832,11 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return err
 	}
-	if err != nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
-	}
 	if current.Status != model.RunRunning {
 		_ = logFile.Close()
 		return nil
 	}
-	// A run granted without waiting was last read before admission. Re-read
+	// A run was last read before starting submission. Re-read
 	// it so a supersede or cancel that landed since stops here, before any
 	// Workflow exists, instead of after MarkRunSubmitted.
 	if fresh, err := scheduler.database().Run(ctx, run.ID); err != nil {
@@ -863,6 +859,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 
 	creationCtx, cancelCreation := reservation.creationContext(ctx)
+	defer cancelCreation()
 
 	switch {
 	case run.Release:

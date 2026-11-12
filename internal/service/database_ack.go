@@ -122,8 +122,8 @@ func (database schedulerDatabase) runTransition(ctx context.Context, operation, 
 		return transition(ctx, id)
 	})
 }
-func (database schedulerDatabase) MarkRunAdmitted(ctx context.Context, id string) (model.Run, error) {
-	return database.runTransition(ctx, "MarkRunAdmitted", id, func(run model.Run) bool { return run.Status == model.RunRunning && run.StartedAt != nil }, database.SchedulerStore.MarkRunAdmitted)
+func (database schedulerDatabase) MarkRunSubmissionStarted(ctx context.Context, id string) (model.Run, error) {
+	return database.runTransition(ctx, "MarkRunSubmissionStarted", id, func(run model.Run) bool { return run.Status == model.RunRunning && run.StartedAt != nil }, database.SchedulerStore.MarkRunSubmissionStarted)
 }
 func (database schedulerDatabase) MarkRunSubmitted(ctx context.Context, id string) (model.Run, error) {
 	return database.runTransition(ctx, "MarkRunSubmitted", id, func(run model.Run) bool {

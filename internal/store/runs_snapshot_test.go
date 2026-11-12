@@ -82,7 +82,7 @@ func TestFlatRunsUseOneSnapshotAcrossAdmission(t *testing.T) {
 	admitted := false
 	db := sql.OpenDB(flatRunConnector{driver: &sqlite.Driver{}, dsn: dsn, afterQueue: func() error {
 		now = now.Add(time.Minute)
-		_, err := writer.MarkRunAdmitted(ctx, run.ID)
+		_, err := writer.MarkRunSubmissionStarted(ctx, run.ID)
 		admitted = err == nil
 		return err
 	}})

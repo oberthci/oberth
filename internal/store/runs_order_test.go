@@ -44,7 +44,7 @@ func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 		if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != run.ID {
 			t.Fatalf("claim %s = %+v, %v", ref, claimed, err)
 		}
-		if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
+		if _, err := s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.SetRunWorkflowName(ctx, run.ID, "wf-"+run.ID); err != nil {
@@ -214,7 +214,7 @@ func TestRunListKeepsClaimedUnstartedRunsInTheQueue(t *testing.T) {
 	if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != running.ID {
 		t.Fatalf("claim running = %+v, %v", claimed, err)
 	}
-	if _, err := s.MarkRunAdmitted(ctx, running.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, running.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SetRunWorkflowName(ctx, running.ID, "wf-"+running.ID); err != nil {
@@ -228,7 +228,7 @@ func TestRunListKeepsClaimedUnstartedRunsInTheQueue(t *testing.T) {
 	if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != finished.ID {
 		t.Fatalf("claim finished = %+v, %v", claimed, err)
 	}
-	if _, err := s.MarkRunAdmitted(ctx, finished.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, finished.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.FinishRun(ctx, finished.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {

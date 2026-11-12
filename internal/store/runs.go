@@ -126,7 +126,6 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
 	if !safe {
 		return model.Run{}, ErrRequeueIneligible
 	}
-	// Protected priority work retains its place beside newer active siblings.
 	// Evidence/publication exclusions above apply to every run.
 	var activeSiblings int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs
@@ -155,7 +154,7 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
 	return s.resetRunAfterRestartTx(ctx, tx, run, now)
 }
 
-// A claim is persisted as running before weighted admission. Owner startup
+// A claim is persisted as running before Workflow submission. Owner startup
 // proves the claiming worker is gone. Restore that claim for every trigger,
 // including promotion, without creating a new run or interrupting its promotion.
 // The deterministic Workflow name is recorded before admission, so its presence
@@ -365,10 +364,10 @@ RETURNING `+runColumns, now, id, id))
 	return value, nil
 }
 
-// MarkRunAdmitted records when the weighted gate grants a run. The run is
-// visibly running from this point.
-// A cancellation that won before the grant cannot acquire a start time.
-func (s *Store) MarkRunAdmitted(ctx context.Context, id string) (model.Run, error) {
+// MarkRunSubmissionStarted records when Workflow submission begins. Native
+// execution observation determines whether it displays queued or running.
+// A cancellation that won before this transition cannot acquire a start time.
+func (s *Store) MarkRunSubmissionStarted(ctx context.Context, id string) (model.Run, error) {
 	if strings.TrimSpace(id) == "" {
 		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
 	}
@@ -385,10 +384,10 @@ RETURNING `+runColumns, now, now, id))
 		if current.Preempted() {
 			return current, nil
 		}
-		return model.Run{}, fmt.Errorf("%w: run is not awaiting admission", ErrInvalidState)
+		return model.Run{}, fmt.Errorf("%w: run is not awaiting submission", ErrInvalidState)
 	}
 	if err != nil {
-		return model.Run{}, fmt.Errorf("mark run admitted: %w", err)
+		return model.Run{}, fmt.Errorf("mark run submission started: %w", err)
 	}
 	return value, nil
 }

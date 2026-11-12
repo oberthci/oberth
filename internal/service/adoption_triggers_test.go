@@ -58,7 +58,7 @@ func slice2RecoveryRun(t *testing.T, kind string) (*recoveryFixture, model.Run, 
 	ctx := context.Background()
 	var err error
 
-	if _, err = fixture.store.MarkRunAdmitted(ctx, run.ID); err != nil {
+	if _, err = fixture.store.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	fixture.setWorkflowName(t, run.ID, "oberth-"+kind+"-adopt")

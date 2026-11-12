@@ -103,7 +103,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 // Exercise actual Run startup, dispatch, submitted background task and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
-	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
+	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunCredentialed", "MarkRunSubmissionStarted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
 	for _, operation := range operations {
 		for _, fault := range []struct {
 			name string
@@ -419,8 +419,8 @@ func (s *deadlineJoinStore) Run(ctx context.Context, id string) (model.Run, erro
 	return model.Run{}, context.DeadlineExceeded
 }
 
-func (s *deadlineJoinStore) MarkRunAdmitted(ctx context.Context, id string) (model.Run, error) {
-	run, err := s.Store.MarkRunAdmitted(ctx, id)
+func (s *deadlineJoinStore) MarkRunSubmissionStarted(ctx context.Context, id string) (model.Run, error) {
+	run, err := s.Store.MarkRunSubmissionStarted(ctx, id)
 	s.admitted.Store(true)
 	return run, err
 }

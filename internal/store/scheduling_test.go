@@ -32,7 +32,7 @@ func TestQueuedRunPositionIncludesClaimedUnadmitted(t *testing.T) {
 	if position, err := s.QueuedRunPosition(ctx, first.ID); err != nil || position != 1 {
 		t.Fatalf("claimed position=%d err=%v", position, err)
 	}
-	if _, err := s.MarkRunAdmitted(ctx, first.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, first.ID); err != nil {
 		t.Fatal(err)
 	}
 	if position, err := s.QueuedRunPosition(ctx, second.ID); err != nil || position != 1 {

@@ -2795,7 +2795,7 @@ func TestRestartRecoveryWithPromotionRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	// This fixture represents work that reached admission.
-	if _, err := s.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -3010,7 +3010,7 @@ func TestRestartRecoveryRunningPromotionWithWorkflowName(t *testing.T) {
 	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "prom-job-restart"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

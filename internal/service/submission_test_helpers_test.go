@@ -12,7 +12,7 @@ type submissionTestView struct {
 	Runs         int
 	Reservations []submissionTestOwner
 }
-type submissionTestOwner struct{ RunID, Repo, Ref, State string }
+type submissionTestOwner struct{ RunID, State string }
 
 func (s *Scheduler) submissionStateForTest() submissionTestView {
 	g := s.submissions
@@ -27,7 +27,7 @@ func (s *Scheduler) submissionStateForTest() submissionTestView {
 		if r.retained {
 			state = "retained"
 		}
-		v.Reservations = append(v.Reservations, submissionTestOwner{RunID: r.runID, Repo: r.repo, Ref: r.ref, State: state})
+		v.Reservations = append(v.Reservations, submissionTestOwner{RunID: r.runID, State: state})
 	}
 	return v
 }

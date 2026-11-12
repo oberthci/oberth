@@ -37,7 +37,7 @@ func TestRunListMCPMatchesHTTPOrderAndPassedAlias(t *testing.T) {
 		if _, err = f.store.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = f.store.MarkRunAdmitted(ctx, run.ID); err != nil {
+		if _, err = f.store.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 			t.Fatal(err)
 		}
 		finished, err := f.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed})

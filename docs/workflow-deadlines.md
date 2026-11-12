@@ -17,7 +17,7 @@ are part of the requested hold lifecycle. Executor credential delivery also
 retains identity issuance/observation failure handling; it grants no credentials
 to an unverified Pod and does not expire an ordinary unscheduled workload.
 
-The source-seed Pod still has its existing three-minute preparation wait before
-the Workflow exists; see [source delivery](native-scheduling.md#source-delivery-and-load).
+The source-seed Pod waits while Pending before the Workflow exists;
+cancellation or supersession stops preparation and cleans its Pod and PVC; see [source delivery](native-scheduling.md#source-delivery-and-load).
 A seed failure is preparation failure; use manual run_retry after cleanup settles.
 Argo retryStrategy cannot retry preparation before the Workflow exists.

@@ -343,7 +343,7 @@ argo:
   # default, and what oberth install/upgrade set) follows the profile the
   # controller names in --configmap: its name is a digest of its content and
   # the content is verified against it, so Argo limits change without an
-  # ordered second release or an admission pause (docs/where-limits-live.md).
+  # ordered second release; profile verification still applies (docs/where-limits-live.md).
   # A name here pins exactly that profile.
   controllerProfileConfigMap: ""
   # Optional workflow annotation oberth.ci/nonroot-templates selects fixed

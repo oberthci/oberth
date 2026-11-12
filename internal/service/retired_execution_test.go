@@ -40,7 +40,7 @@ func TestRetiredUnsubmittedRunFailsAfterRequeue(t *testing.T) {
 	if _, err := f.store.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.MarkRunAdmitted(t.Context(), run.ID); err != nil {
+	if _, err := f.store.MarkRunSubmissionStarted(t.Context(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.RecoverOwnerState(t.Context()); err != nil {
@@ -66,7 +66,7 @@ func TestPolicyWaitAuditOutageDoesNotFinishRun(t *testing.T) {
 		}
 		return nil
 	}
-	f.scheduler.capacityWait = func(context.Context) error { blocked = true; return nil }
+	f.scheduler.policyRetryWait = func(context.Context) error { blocked = true; return nil }
 	run, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "audit-policy", Repository: f.repo, Branch: "feature/policy", SHA: strings.Repeat("a", 40), Actor: "owner"})
 	if err != nil {
 		t.Fatal(err)

@@ -97,7 +97,7 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 				if err != nil || claimed.ID != want.ID {
 					t.Fatalf("queue order: got %s (%v), want %s", claimed.ID, err, want.ID)
 				}
-				_, err = s.MarkRunAdmitted(ctx, claimed.ID)
+				_, err = s.MarkRunSubmissionStarted(ctx, claimed.ID)
 				requireRestartNoError(t, err)
 			}
 		})
@@ -133,7 +133,7 @@ func TestOwnerRestartKeepsAdmittedRecovery(t *testing.T) {
 				requireRestartNoError(t, err)
 				claimed, err := s.ClaimNextRun(ctx)
 				requireRestartNoError(t, err)
-				_, err = s.MarkRunAdmitted(ctx, claimed.ID)
+				_, err = s.MarkRunSubmissionStarted(ctx, claimed.ID)
 				requireRestartNoError(t, err)
 				if named {
 					_, err = s.SetRunWorkflowName(ctx, claimed.ID, "workflow-running")

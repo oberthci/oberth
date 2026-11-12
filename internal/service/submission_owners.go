@@ -15,19 +15,18 @@ type submissionRegistry struct {
 	owners map[int64]*submissionOwner
 }
 type submissionOwner struct {
-	gate                                                                  *submissionRegistry
-	withdrawn                                                             chan struct{}
-	sequence, order, repoID                                               int64
-	runID, repo, ref, sha                                                 string
-	refKind                                                               model.RefKind
-	prepared, granted, submitted, released, canceled, retained, abandoned bool
+	gate                                                        *submissionRegistry
+	withdrawn                                                   chan struct{}
+	sequence, order, repoID                                     int64
+	runID                                                       string
+	granted, submitted, released, canceled, retained, abandoned bool
 }
 
 func newSubmissionRegistry() *submissionRegistry {
 	return &submissionRegistry{owners: map[int64]*submissionOwner{}}
 }
 func (g *submissionRegistry) trackRun(run model.Run) *submissionOwner {
-	r := &submissionOwner{withdrawn: make(chan struct{}), gate: g, sequence: run.QueueSequence, order: run.AdmissionSequence, repoID: run.RepoID, runID: run.ID, ref: run.Ref, sha: run.SHA, refKind: run.RefKind}
+	r := &submissionOwner{withdrawn: make(chan struct{}), gate: g, sequence: run.QueueSequence, order: run.AdmissionSequence, repoID: run.RepoID, runID: run.ID}
 	if r.order <= 0 {
 		r.order = r.sequence
 	}
@@ -49,7 +48,6 @@ func (r *submissionOwner) beginSubmission(ctx context.Context) (func(), error) {
 	if r.canceled || r.released {
 		return nil, context.Canceled
 	}
-	r.prepared = true
 	r.granted = true
 	return r.release, nil
 }

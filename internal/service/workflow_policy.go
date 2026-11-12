@@ -29,7 +29,7 @@ func policyWaitFailure(cause error) error {
 
 const maximumPolicyWait = 30 * time.Minute
 
-func waitCapacityRetry(ctx context.Context) error {
+func waitPolicyRetry(ctx context.Context) error {
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
 	select {
@@ -144,7 +144,7 @@ func (scheduler *Scheduler) awaitWorkflowPolicy(ctx context.Context, repository 
 		// Suspending dispatch liveness while waiting matches upstream policy IO;
 		// the mutation gate and cancellation are rechecked before the next read.
 		resume = suspendDispatch(ctx)
-		err = scheduler.capacityWait(waitCtx)
+		err = scheduler.policyRetryWait(waitCtx)
 		resume()
 		if ctx.Err() != nil {
 			return true, nil

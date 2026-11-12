@@ -70,7 +70,7 @@ func TestRefiredFlatQueueUsesGlobalAdmissionPositions(t *testing.T) {
 		}
 	}
 	assertFilteredPosition(2)
-	if _, err := s.MarkRunAdmitted(ctx, copy.ID); err != nil {
+	if _, err := s.MarkRunSubmissionStarted(ctx, copy.ID); err != nil {
 		t.Fatal(err)
 	}
 	assertFilteredPosition(1)

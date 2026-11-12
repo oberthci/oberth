@@ -224,7 +224,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 					t.Fatal(err)
 				}
 				// A possible Workflow POST always follows durable admission.
-				run, err = f.store.MarkRunAdmitted(t.Context(), run.ID)
+				run, err = f.store.MarkRunSubmissionStarted(t.Context(), run.ID)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -179,7 +179,7 @@ spec:
 	enqueue("feature/running", model.RefBranch, "push")
 	running, err := s.ClaimNextRun(ctx)
 	must(err)
-	_, err = s.MarkRunAdmitted(ctx, running.ID)
+	_, err = s.MarkRunSubmissionStarted(ctx, running.ID)
 	must(err)
 	_, err = setWorkflowName(ctx, s, running.ID, "oberth-e2e-running")
 	must(err)

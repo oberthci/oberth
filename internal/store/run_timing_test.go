@@ -41,7 +41,7 @@ func TestRunTimingMilestonesAdmissionEpisodesAndRefire(t *testing.T) {
 	if err = s.RecordAdmissionRequested(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.MarkRunAdmitted(ctx, run.ID); err != nil {
+	if _, err = s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	granted := now
@@ -57,7 +57,7 @@ func TestRunTimingMilestonesAdmissionEpisodesAndRefire(t *testing.T) {
 	}
 	secondRequest := now
 	now = now.Add(time.Second)
-	if _, err = s.MarkRunAdmitted(ctx, run.ID); err != nil {
+	if _, err = s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.RecordRunTimingMilestone(ctx, run.ID, "checkout-ready"); err != nil {
