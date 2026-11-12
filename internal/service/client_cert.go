@@ -17,8 +17,9 @@ type ClientCertStore interface {
 }
 
 type ClientCertIssuer struct {
-	Authority *clientcert.Authority
-	Store     ClientCertStore
+	ServerCAPin string
+	Authority   *clientcert.Authority
+	Store       ClientCertStore
 }
 
 // IssueClientCert is the shared issuance path for administrative enrollment,

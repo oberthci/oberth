@@ -49,6 +49,8 @@ func TestMetricsRequireUnscopedAdministrator(t *testing.T) {
 func TestMetricsScopedTokenReadsOnlyMetrics(t *testing.T) {
 	metrics := Actor{Identity: "metrics@prometheus", Fingerprint: "SHA256:metrics", Scope: []string{"metrics"}}
 	server, _ := testServer(t)
+	enrollment := &inviteTestBackend{}
+	server.tools = enrollment
 	server.auth = streamAuthFunc(func(context.Context, string) (Actor, error) { return metrics, nil })
 	WithMetrics(func(w io.Writer) { _, _ = fmt.Fprint(w, "oberth_fixture_total 7\n") })(server)
 	serve := func(method, path string) *httptest.ResponseRecorder {
@@ -67,6 +69,15 @@ func TestMetricsScopedTokenReadsOnlyMetrics(t *testing.T) {
 	public := map[string]bool{"GET /healthz": true, "GET /livez": true, "GET /readyz": true, "GET /metrics": true, "GET /assets/{asset...}": true, "GET /{$}": true, "GET /runs/{run}": true, "GET /runs": true, "GET /repos": true, "GET /issues": true, "GET /status": true}
 	for _, route := range server.mux.patterns {
 		if public[route] {
+			continue
+		}
+		if route == "POST /mcp/enroll" {
+			// Enrollment is an isolated invite boundary, not an authenticated
+			// route. It rejects bearer headers before exposing any tool.
+			response := serve(http.MethodPost, "/mcp/enroll")
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "enrollment accepts only an invite request") || enrollment.calls != 0 {
+				t.Errorf("%s: status=%d body=%s", route, response.Code, response.Body)
+			}
 			continue
 		}
 		method, path, _ := strings.Cut(route, " ")

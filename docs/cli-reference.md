@@ -813,6 +813,7 @@ Configure this machine's MCP client (Claude Code) for an Oberth server.
 
 Commands:
   setup   trust the server's CA in Claude Code and install the Oberth plugin
+  redeem  redeem a private invitation with a local CSR and SSH public key
   renew   renew with the current certificate and rotate the local key
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
@@ -867,6 +868,22 @@ equals this pin. The CA is --ca-file, else OBERTH_CA_CERT, else the ca.crt
 oberth install writes in ~/.config/oberth; the server is not contacted.
   -ca-file string
         the deployment's CA certificate (PEM)
+```
+
+## oberth client redeem
+
+```text
+Usage: oberth client redeem [flags]
+
+Flags:
+  -certificate-out string
+        new certificate file; also writes .ca.crt and .url public connection files
+  -csr string
+        local PEM CSR file (private key stays local)
+  -invite-file string
+        private 0600 invitation file; its contents never enter argv
+  -ssh-public-key string
+        local SSH public key file
 ```
 
 ## oberth client renew
@@ -2044,6 +2061,30 @@ Flags:
         SSH fingerprint to disambiguate the uplink
   -ttl duration
         certificate lifetime (default 2160h; 1h–8760h)
+```
+
+## oberth uplink invite
+
+```text
+Usage: oberth uplink invite [flags]
+
+Flags:
+  -ca-file string
+        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
+  -client-cert string
+        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
+  -client-key string
+        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
+  -expires duration
+        single-use invite lifetime (maximum 168h) (default 24h0m0s)
+  -out string
+        new 0600 invite file outside a git worktree; no credential is printed
+  -scope value
+        upstream name (repeatable or comma-separated)
+  -token-file string
+        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
+  -url string
+        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
 ## oberth uplink list

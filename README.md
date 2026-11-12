@@ -481,6 +481,7 @@ tools (a call to one is still refused by the server); available operations are:
 | `issue_unlock` | Break an issue lock, recording its previous owner. Admin only; visibility and audit gate enforced. |
 | `issue_close_many` | Close 1..50 unique issues with a reason and per-ID results. Admin only; active locks remain enforced, one audit action per closure. |
 | `issue_lock` | Acquire or renew the caller-owned five-minute issue lock. |
+| `uplink_invite` | Create a single-use, expiring CSR invitation from a locally generated credential digest; unscoped admin only. See [uplink invitations](docs/uplink-invites.md). |
 | `uplink_cert` | Issue a clientAuth certificate from a local CSR; unscoped admin only. |
 | `client_renew` | Renew this uplink using its current client certificate and a new local CSR. |
 | `uplink_list` | List public uplink identities and usage. Unscoped admin only. No tokens are returned. |

@@ -622,6 +622,43 @@ clear_client_credentials() {
  chmod 600 "$work/two"; write_file "$settings_file" "$work/two"
 }
 
+# The invite file is read only by the CLI, never by shell expansion or the model.
+redeem() {
+ [ "$#" -eq 1 ] || fail "usage: trust redeem <private invite file>"
+ invite_file=$1
+ cli=$(command -v oberth || true)
+ if [ -z "$cli" ]; then
+  fetcher=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/fetch-oberth
+  [ -f "$fetcher" ] || fail "the plugin verified fetcher is required; update the Oberth plugin"
+  sh "$fetcher" || fail "cannot obtain a verified Oberth CLI"
+  cli="$HOME/.local/bin/oberth"
+ fi
+ command -v ssh-keygen >/dev/null 2>&1 || fail "ssh-keygen is required to generate the local push key"
+ claude=$(claude_directory); store="$claude/oberth"
+ [ ! -e "$store/current/client.csr.crt" ] || fail "a client identity is already enrolled; use renewal or a separate Claude Code profile"
+ keygen >/dev/null
+ if [ ! -e "$store/push_ed25519" ]; then
+  [ ! -e "$store/push_ed25519.pub" ] || fail "push public key already exists without its private key"
+  ssh-keygen -q -t ed25519 -N '' -C oberth-uplink -f "$store/push_ed25519" >/dev/null 2>&1 || fail "cannot generate a local SSH key"
+ fi
+ [ -f "$store/push_ed25519" ] && [ ! -L "$store/push_ed25519" ] && [ -f "$store/push_ed25519.pub" ] || fail "local SSH key pair is incomplete or unsafe"
+ chmod 600 "$store/push_ed25519"
+ ssh_public=$(ssh-keygen -y -f "$store/push_ed25519" 2>/dev/null) || fail "invalid local SSH key"
+ ssh_public=$(printf '%s\n' "$ssh_public" | awk '{print $1 " " $2}')
+ saved_public=$(awk '{print $1 " " $2}' "$store/push_ed25519.pub")
+ [ "$ssh_public" = "$saved_public" ] || fail "SSH public key does not match the local private key"
+ "$cli" client redeem --invite-file "$invite_file" --csr "$store/current/client.csr" --ssh-public-key "$store/push_ed25519.pub" --certificate-out "$store/current/client.csr.crt" || fail "invite redemption failed; no credential was printed"
+ cert="$store/current/client.csr.crt"
+ url=$(cat "$cert.url")
+ pin=$("$cli" client pin --ca-file "$cert.ca.crt") || fail "cannot read the verified server CA pin"
+ # Each operation is a fresh invocation so its settings scratch traps cannot
+ # interfere with subsequent setup or disclose any part of the invite file.
+ sh "$0" connect --url "$url" --pin "$pin" --ca-file "$cert.ca.crt"
+ sh "$0" credentials
+ sh "$0" configure "$url"
+ echo "Local SSH push key registered; private key remains on this machine."
+}
+
 # Register only a configured endpoint. No empty MCP server exists at plugin install.
 configure() {
  url=${1:-}; token_file=${2:-}
@@ -653,6 +690,7 @@ configure() {
 }
 
 case "${1:-}" in
+redeem) shift; redeem "$@" ;;
 keygen) shift; keygen "$@" ;;
 renew) shift; renew "$@" ;;
 credentials) shift; credentials "$@" ;;

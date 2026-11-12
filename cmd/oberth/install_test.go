@@ -162,7 +162,7 @@ func TestRunCLIRoutesEveryCommandViaHelp(t *testing.T) {
 		{name: "serve help", args: []string{"serve", "--help"}, wantNil: true},
 		{name: "upstream usage", args: []string{"upstream"}, wantErr: "upstream add|list|remove"},
 		{name: "repo usage", args: []string{"repo"}, wantErr: "repo add|remove"},
-		{name: "uplink usage", args: []string{"uplink"}, wantErr: "uplink add|cert|list|remove"},
+		{name: "uplink usage", args: []string{"uplink"}, wantErr: "uplink add|cert|invite|list|remove"},
 		{name: "access usage", args: []string{"access"}, wantErr: "access list|allow|revoke"},
 		{name: "install help", args: []string{"install", "--help"}, wantNil: true},
 		{name: "upgrade help", args: []string{"upgrade", "--help"}, wantNil: true},

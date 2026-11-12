@@ -404,6 +404,7 @@ one with a non-admin token is still answered with the server's refusal.
 | `issue_unlock` | Admin-only audited lock break, scoped to visible issues |
 | `issue_close_many` | Admin-only closure of 1..50 unique IDs with a reason and per-ID results; honors locks |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
+| `uplink_invite` | Create a single-use, expiring CSR invitation from a locally generated credential digest; unscoped admin only. See [uplink invitations](uplink-invites.md). |
 | `uplink_cert` | Issue a clientAuth certificate from a local CSR; unscoped admin only. |
 | `client_renew` | Renew this uplink using its current client certificate and a new local CSR. |
 | `uplink_list` | Unscoped-admin-only public credential lifecycle metadata for all registrations |
@@ -1131,7 +1132,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **95 tools**, including administrator-only
+The current MCP surface has **96 tools**, including administrator-only
 `publication_abandon`; a non-admin token's `tools/list` omits the
 administrator-only ones.
 

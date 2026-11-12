@@ -441,6 +441,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "admission_hold":
 		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).
+	case "uplink_invite":
+		return service.uplinkInviteTool(ctx, actor, raw)
 	case "uplink_cert", "client_renew":
 		return service.clientCertTool(ctx, actor, name, raw)
 	case "uplink_list", "uplink_revoke", "uplink_rotate":
@@ -3193,7 +3195,7 @@ func wireIssueLock(lock model.IssueLock) api.IssueLockResponse {
 // use it to prove their automatic reconnect allowlist holds no mutation.
 func MutatingTool(name string) bool {
 	switch name {
-	case "uplink_cert", "client_renew", "uplink_revoke", "uplink_rotate", "access_dismiss":
+	case "uplink_invite", "uplink_cert", "client_renew", "uplink_revoke", "uplink_rotate", "access_dismiss":
 		return true
 	case "issue_unlock", "issue_close_many":
 		return true

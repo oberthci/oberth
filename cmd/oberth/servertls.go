@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -236,4 +238,18 @@ type serverLeafRenewal struct {
 	pki    serverPKI
 	store  *baoIdentityStore
 	issued secretstore.IssuedServerCertificate
+}
+
+// Invitations bind the CA actually presented by the HTTPS listener.
+func servedCAPin(served *servedCertificate) string {
+	pair := served.current.Load()
+	if pair == nil || len(pair.Certificate) < 2 {
+		return ""
+	}
+	root, err := x509.ParseCertificate(pair.Certificate[len(pair.Certificate)-1])
+	if err != nil || !root.IsCA {
+		return ""
+	}
+	digest := sha256.Sum256(root.Raw)
+	return hex.EncodeToString(digest[:])
 }

@@ -519,6 +519,30 @@
     "value:ordinary-tag-ci": {
       "doc_anchor": "docs/tag-runs.md#ordinary-tag-runs-and-release-tags",
       "test_ref": "internal/service/tag_ci_test.go TestPromotionTagRealPublisherEnqueuesOrdinaryTagRun"
+    },
+    "flag:out": {
+      "doc_anchor": "docs/uplink-invites.md#create-and-transfer",
+      "test_ref": "cmd/oberth/uplink_invite_test.go TestUplinkInviteWritesPrivateHandoffWithoutPrintingSecret"
+    },
+    "flag:expires": {
+      "doc_anchor": "docs/uplink-invites.md#create-and-transfer",
+      "test_ref": "cmd/oberth/uplink_invite_test.go TestUplinkInviteWritesPrivateHandoffWithoutPrintingSecret"
+    },
+    "flag:invite-file": {
+      "doc_anchor": "docs/uplink-invites.md#connect-from-the-plugin",
+      "test_ref": "cmd/oberth/uplink_invite_test.go TestClientRedeemPinsBeforeSendingAndKeepsSecretsLocal"
+    },
+    "flag:certificate-out": {
+      "doc_anchor": "docs/uplink-invites.md#connect-from-the-plugin",
+      "test_ref": "cmd/oberth/uplink_invite_test.go TestClientRedeemPinsBeforeSendingAndKeepsSecretsLocal"
+    },
+    "value:uplink_invite": {
+      "doc_anchor": "docs/uplink-invites.md#enrollment-boundary-and-recovery",
+      "test_ref": "internal/service/uplink_invite_test.go TestUplinkInviteCSRRedemption"
+    },
+    "value:uplink_redeem": {
+      "doc_anchor": "docs/uplink-invites.md#enrollment-boundary-and-recovery",
+      "test_ref": "internal/service/uplink_invite_http_test.go TestInviteRedemptionOverMCPAndMutualTLS"
     }
   }
 }

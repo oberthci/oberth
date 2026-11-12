@@ -1361,9 +1361,11 @@ func runUplink(ctx context.Context, arguments []string, input io.Reader, output 
 
 func runUplinkWithDependencies(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies uplinkDependencies) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: uplink add|cert|list|remove|rotate|scope", errUsage)
+		return fmt.Errorf("%w: uplink add|cert|invite|list|remove|rotate|scope", errUsage)
 	}
 	switch arguments[0] {
+	case "invite":
+		return runUplinkInvite(ctx, arguments[1:], output)
 	case "cert":
 		return runUplinkCert(ctx, arguments[1:], input, output, dependencies)
 	case "add":
@@ -1376,7 +1378,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	case "scope":
 		return runUplinkScope(ctx, arguments[1:], output, dependencies.mutationGate)
 	default:
-		return fmt.Errorf("%w: uplink add [--admin] [--ttl DURATION] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink cert <identity> --csr <file|-> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
+		return fmt.Errorf("%w: uplink add [--admin] [--ttl DURATION] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink cert <identity> --csr <file|-> | uplink invite <identity> --out <private-file> [--expires 24h] [--scope upstream] | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
 	}
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
