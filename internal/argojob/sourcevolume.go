@@ -565,6 +565,9 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, expected ...*corev1.Pod) error {
 	interval := seeder.interval()
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pod, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if err == nil {
 			switch pod.Status.Phase {
@@ -582,11 +585,12 @@ func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, exp
 				}
 				return nil
 			case corev1.PodFailed, corev1.PodSucceeded:
-				return fmt.Errorf("argojob: source seed pod %s ended in phase %s before it could be written to",
-					name, pod.Status.Phase)
+				return &sourceSeedFailure{failure: fmt.Errorf("argojob: source seed pod %s ended in phase %s before it could be written to", name, pod.Status.Phase), reason: "source seed Pod ended in phase " + string(pod.Status.Phase)}
 			case corev1.PodPending, corev1.PodUnknown:
 			}
-		} else if !apierrors.IsNotFound(err) {
+		} else if apierrors.IsNotFound(err) {
+			return &sourceSeedFailure{failure: fmt.Errorf("argojob: source seed pod %s disappeared before source preparation completed: %w", name, err), reason: "source seed Pod disappeared"}
+		} else {
 			return fmt.Errorf("argojob: read source seed pod %s: %w", name, err)
 		}
 		select {
