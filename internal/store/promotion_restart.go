@@ -15,7 +15,15 @@ func (s *Store) InterruptedPromotionRetryEligible(ctx context.Context, id string
 	if err != nil {
 		return false, err
 	}
-	return interruptedPromotionRetryEligible(ctx, s.reader(), promotion)
+	eligible, err := interruptedPromotionRetryEligible(ctx, s.reader(), promotion)
+	if err != nil || !eligible {
+		return eligible, err
+	}
+	// A delivered tuple needs no startup retry. The admission transaction
+	// separately classifies a delivery racing this read.
+	err = s.reader().QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM promotions
+ WHERE repo_id=? AND lower(source_sha)=lower(?) AND target_ref=? AND train_key=? AND status='passed')`, promotion.RepoID, promotion.SourceSHA, promotion.TargetRef, promotionTrainKey(promotion.Train)).Scan(&eligible)
+	return eligible, err
 }
 
 func interruptedPromotionRetryEligible(ctx context.Context, queryer auditQueryer, promotion model.Promotion) (bool, error) {

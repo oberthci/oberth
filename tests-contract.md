@@ -456,3 +456,9 @@ schema/flag validation. `TestStatusProbeIdentityUsesResolvedCredentialsAndPins`
 checks projected-key fallback and rotation. The receive-adapter integration test
 runs readiness, mirror refresh, promotion delivery and real tag pushes with an
 unavailable diagnostic; dashboard behavior preserves escaped errors/check times.
+
+Startup promotion recovery: `TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion`
+creates a real interrupted promotion and a later delivered promotion, repeats
+startup recovery without new retries or failure logs, and checks the typed
+admission refusal for a delivery racing recovery. Existing grant, failed-step,
+manual-cancel and removed-uplink recovery cases remain enforced.
