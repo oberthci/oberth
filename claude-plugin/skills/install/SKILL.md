@@ -47,7 +47,9 @@ Arguments given to the command: `$ARGUMENTS`
       fingerprint from a scan of the forge yourself: that is trust on first
       use.
    3. How do clients reach the server? On this machine: `--client-host
-      localhost`. From other machines: this host's name or address. When the
+      localhost`. From other machines: this host's DNS name or `<host>.local`;
+      clients never connect by IP address. Keep the CA's DNS-only constraints;
+      IP constraints remain deferred until Bun releases its fix. When the
       NodePorts are forwarded to other ports, the next step proposes `--client-ssh-port` and
       `--client-https-port`; the user does not need to discover these numbers.
    4. Turn on assisted continuation (`--assist`), so a failed step of a run

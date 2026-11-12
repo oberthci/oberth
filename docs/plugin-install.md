@@ -30,6 +30,10 @@ sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' 
 oberth client ports --plan-file '<public plan JSON>' --client-host localhost
 ```
 
+Clients use DNS names (`localhost`, the host name or `<host>.local`), never IP
+addresses. Keep the CA's DNS-only name constraints; IP constraints are deferred
+until Bun releases its fix, as described in [client certificates](client-certificates.md).
+
 The result proposes `install_flags` with the HTTPS and SSH host ports. It
 uses exact node identities from that plan to find a matching local Docker
 cluster's published TCP ports, including k3d's serverlb and direct node
