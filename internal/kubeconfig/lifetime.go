@@ -85,6 +85,9 @@ func Sweep() (resultErr error) {
 			continue
 		}
 		info, err := root.Lstat(entry.Name())
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -92,6 +95,9 @@ func Sweep() (resultErr error) {
 			continue
 		}
 		dir, err := root.OpenRoot(entry.Name())
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -148,6 +154,9 @@ func sweepCopy(root, dir *os.Root, name string, info os.FileInfo, now time.Time)
 		return errors.New("ownership or age is unverified; preserved")
 	}
 	current, err := root.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

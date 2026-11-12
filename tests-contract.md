@@ -483,3 +483,8 @@ Mac onboarding R3 #1549: `TestSweepReclaimsOnlyUnlockedOwnedCopies`,
 `TestCLIPrivateKubeconfigSignalsAndCrashRecovery` cover active leases, stale
 marked copies, unknown/future/trailing metadata, directory replacement, all
 handled signals and SIGKILL followed by startup reclamation after child exit.
+
+Integration #1549: `TestConcurrentPrivateCopyLifetimes` runs four concurrent
+owners through 100 create/cleanup cycles each, then requires an empty copy root.
+A swept entry that disappeared is already cleaned; existing malformed, replaced,
+foreign, future or leased objects retain their strict preservation rules.
