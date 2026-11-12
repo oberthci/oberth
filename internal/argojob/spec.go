@@ -30,7 +30,6 @@ import (
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/podpriority"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -1220,8 +1219,6 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	workflow.Name = request.Name
 	workflow.GenerateName = ""
 	workflow.Namespace = config.Namespace
-	workflow.Spec.PodPriorityClassName = podpriority.PipelineClass(config.Namespace)
-	workflow.Spec.PodSpecPatch = `{"preemptionPolicy":"Never"}`
 	if workflow.Labels == nil {
 		workflow.Labels = map[string]string{}
 	}
