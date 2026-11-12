@@ -3413,6 +3413,14 @@ advisory and DNS-only CA constraints remain unchanged.
 Installer NetworkPolicy preflight uses live scratch-Pod traffic, not CNI names
 or controller readiness/configuration. Allowed → default-deny blocked → allowed
 after deletion is required; absent and unverified are distinct failing states.
+Timeouts, refusals and resets are denial candidates only when each of two
+sources fails while selected and connects while unselected across randomized
+selection order. Three samples per round require an unselected HTTP response
+whose token-matched start precedes the selected attempt and whose successful
+completion follows it; its end marker must be absent after that attempt, before
+an explicit server-side release allows the response to complete.
+Both sources must connect at baseline and after removal. Missing overlap or
+failed peers remain unverified. Probe work is bounded to 120s plus 30s cleanup.
 Only the random ownership-labelled namespace is cleaned with a UID precondition,
 under a separate bounded cleanup context even after cancellation. The pinned
 utility image and restricted, non-root, tokenless Pods are shared across CPU

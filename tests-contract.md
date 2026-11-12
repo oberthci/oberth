@@ -443,6 +443,16 @@ response and cleanup refusal. It verifies the shared image pin, restricted
 tokenless Pods, allowed/blocked/recovered sequence and UID-bound cleanup.
 `TestPolicyPreflightUsesLiveEvidenceForEveryDistribution` keeps enforcement
 independent of kind/managed/unknown controller and distribution names.
+`TestProbeEvidenceRejectsAndRecovers` covers drop/reject/reset enforcement,
+refused baseline, missing recovery, both selections and verified HTTP overlap.
+`TestReview1548RejectingSourceWithoutEnforcement` injects independent source-only
+bursts without a dataplane or policy-dependent failures and requires unverified.
+`TestReview1548DuringSampleCanHappenOnlyAfter` rejects a delayed handshake before
+any selected attempt; early/failed completion tests reject missing overlap.
+The positive model evaluates actual Pod labels against egress selectors; it does
+not treat policy existence as enforcement.
+`TestPolicyTrafficScriptDistinguishesTransportFailures` executes the shell
+classifier against timeout/refusal/reset, HTTP-error and unexpected-body outputs.
 
 Mac onboarding #1549: `TestPluginPlanAndInstallKeepKubeconfigBytes` retains two
 operator files, comments, current-context fields and both contexts without changing bytes

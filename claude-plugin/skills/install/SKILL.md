@@ -235,10 +235,21 @@ controller names or CNI brands. A server and one client/control pair per Ready,
 schedulable, untainted node run in an owned scratch namespace. The control Pod
 shares its client's node and stays outside the egress-deny selector. Receiver
 ingress stays open. Each denial observation checks a working path to the same
-server before, throughout, and after the tested client request. HTTP errors, refused
-listeners, changed Pod health or failed controls are unverified. Only timeouts
-without an HTTP response are denial candidates; three observations and two
-separate deny/recover transitions are required.
+server with two differently labelled sources per node. The first selected source
+is randomized. Each source must time out, refuse or reset only while selected by
+the egress-deny policy, and the unselected peer must connect to the same server.
+The selection then swaps. Three paired observations are required in each round;
+both sources must connect at baseline and after each policy removal.
+
+Overlap uses a token-matched, held HTTP response from the unselected peer: its
+start chunk must arrive before the selected attempt and its end chunk must still
+be absent after that attempt. The probe then releases the held response through
+its server Pod; the complete response must succeed, with completion recorded
+after the selected attempt. A goroutine start or a sample
+count alone never proves overlap. Missing overlap, HTTP errors, changed Pod
+health, failed peers or behavior that does not follow the selection is unverified.
+Public evidence names round order and verified overlap; remedies describe the
+observed client/peer failure.
 
 The public check's `evidence` states the scratch and pipeline namespaces,
 client/control nodes and server node. Existing pipeline namespace labels are
@@ -257,7 +268,7 @@ failures are unverified too. Failed or disabled security checks refuse a fresh i
 verification; repeat after repairing the reported condition. Required rights are
 namespaces create/get/list/delete, Pods create/get, pods/exec get/create, and
 NetworkPolicies create/delete, in addition to existing cluster reads. The probe
-has a 90-second budget plus a separate 30-second cleanup budget after normal
+has a 120-second budget plus a separate 30-second cleanup budget after normal
 return or cancellation. This is not a hard-kill cleanup guarantee: the next run
 finds ownership-labelled leftovers and removes only an expired object with the
 same listed UID, rechecking its expiry and binding deletion to UID/resource

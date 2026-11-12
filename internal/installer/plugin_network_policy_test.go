@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -69,27 +68,18 @@ func TestPluginNetworkPolicyLiveProbeAndCleanup(t *testing.T) {
 				}
 				return false, nil, nil
 			})
-			stages := []string{}
-			var trafficMu sync.Mutex
-			deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: func(ctx context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-				trafficMu.Lock()
-				defer trafficMu.Unlock()
+			model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "timeout"}
+			if mode == "absent" {
+				model.mode = "absent"
+			}
+			deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 				if name != "kubectl" || !strings.Contains(strings.Join(args, " "), "--context chosen --namespace "+namespace+" exec ") {
 					t.Fatal(args)
 				}
 				if mode == "exec forbidden" {
 					return nil, errors.New("private diagnostic")
 				}
-				policies, err := kube.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				state := "allowed"
-				if len(policies.Items) > 0 && mode != "absent" && strings.Contains(strings.Join(args, " "), " exec client-") {
-					state = "blocked"
-				}
-				stages = append(stages, state)
-				return []byte(state), nil
+				return model.run(ctx, input, name, args...)
 			}}
 			result := probeNetworkPolicy(ctx, Config{}, deps, policyProbeTiming{time.Second, 8 * time.Millisecond, 100 * time.Millisecond, 50 * time.Millisecond, time.Millisecond})
 			want := "unverified"
@@ -125,8 +115,8 @@ func TestPluginNetworkPolicyLiveProbeAndCleanup(t *testing.T) {
 			if mode != "cleanup forbidden" && !apierrors.IsNotFound(err) {
 				t.Fatalf("scratch namespace remains: %v", err)
 			}
-			if mode == "enforced" && (createdPods != 3 || !strings.Contains(strings.Join(stages, ","), "blocked")) {
-				t.Fatal(stages)
+			if mode == "enforced" && (createdPods != 3 || !strings.Contains(strings.Join(model.stages, ","), "timeout")) {
+				t.Fatal(model.stages)
 			}
 			for _, action := range kube.Actions() {
 				if action.GetResource().Resource == "daemonsets" {

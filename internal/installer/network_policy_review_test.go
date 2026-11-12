@@ -3,13 +3,11 @@ package installer
 import (
 	"context"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -27,78 +25,19 @@ func TestProbeEvidenceRequiresEgressControlAndConvergence(t *testing.T) {
 			pipeline := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "pipelines", Labels: map[string]string{"domain": "pipeline"}}}
 			kube := fake.NewClientset(node, other, pipeline)
 			probeNamespaceUIDFixture(kube)
-			attempts := 0
-			var trafficMu sync.Mutex
-			var policyCreated time.Time
-			kube.PrependReactor("create", "networkpolicies", func(a k8stesting.Action) (bool, runtime.Object, error) {
-				policyCreated = time.Now()
-				return false, nil, nil
-			})
-			kube.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
-				pod := a.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
-				pod.Status = corev1.PodStatus{PodIP: "192.0.2.10", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
-				return false, nil, nil
-			})
-			deps := Deps{KubeClient: kube, ContextName: "fixture", RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
-				trafficMu.Lock()
-				defer trafficMu.Unlock()
-				attempts++
-				podName := ""
-				for i, arg := range args {
-					if arg == "exec" && i+1 < len(args) {
-						podName = args[i+1]
+			kube.PrependReactor("create", "pods", readyPolicyModelPod)
+			model := &policyTrafficModel{kube: kube, mode: mode, denial: "timeout"}
+			if mode == "unrelated-http-outage" {
+				model.mode = "absent"
+				model.fault = func(_ string, n int) string {
+					if n == 2 || n == 3 {
+						return "refused"
 					}
+					return ""
 				}
-				ns := ""
-				for i, arg := range args {
-					if arg == "--namespace" && i+1 < len(args) {
-						ns = args[i+1]
-					}
-				}
-				pod, err := kube.CoreV1().Pods(ns).Get(ctx, podName, metav1.GetOptions{})
-				if err != nil {
-					return nil, err
-				}
-				domain, err := kube.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
-				if err != nil {
-					return nil, err
-				}
-				policies, err := kube.NetworkingV1().NetworkPolicies("").List(ctx, metav1.ListOptions{})
-				if err != nil {
-					return nil, err
-				}
-				blocked := false
-				for _, p := range policies.Items {
-					for _, typ := range p.Spec.PolicyTypes {
-						if mode == "ingress-only" && typ == networkingv1.PolicyTypeIngress {
-							blocked = true
-						}
-						if mode == "egress-only" && typ == networkingv1.PolicyTypeEgress {
-							blocked = true
-						}
-					}
-					if mode == "programming-slower-than-window" && time.Since(policyCreated) >= 250*time.Millisecond {
-						blocked = true
-					}
-				}
-				if mode == "unrelated-http-outage" {
-					blocked = attempts == 2 || attempts == 3
-				} // Independent transient failure sequence.
-				if mode == "namespace-exclusion" {
-					blocked = len(policies.Items) > 0 && domain.Labels["domain"] != "pipeline"
-				}
-				if mode == "partial-node" {
-					blocked = len(policies.Items) > 0 && pod.Spec.NodeName != "other-node"
-				}
-				if !strings.HasPrefix(podName, "client-") && mode != "unrelated-http-outage" {
-					blocked = false
-				}
-				if blocked {
-					return []byte("blocked"), nil
-				}
-				return []byte("allowed"), nil
-			}}
-			result := probeNetworkPolicy(t.Context(), Config{ArgoNamespace: "pipelines"}, deps, policyProbeTiming{time.Second, 50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond, time.Millisecond})
+			}
+			deps := Deps{KubeClient: kube, ContextName: "fixture", RunCommand: model.run}
+			result := probeNetworkPolicy(t.Context(), Config{ArgoNamespace: "pipelines"}, deps, policyModelTiming())
 			want := "unverified"
 			if mode == "egress-only" {
 				want = "enforced"
@@ -152,50 +91,155 @@ func TestProbeReconcilesStaleNamespacesAndProtectsActiveAndForeign(t *testing.T)
 	}
 }
 
-func TestControlOutageDuringClientRequestIsUnverified(t *testing.T) {
-	kube := fake.NewClientset(preflightNode())
-	probeNamespaceUIDFixture(kube)
-	kube.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		pod := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
-		pod.Status = corev1.PodStatus{PodIP: "192.0.2.10", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
-		return false, nil, nil
-	})
-	var inClient atomic.Bool
-	deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
-		name := ""
-		for i, arg := range args {
-			if arg == "exec" && i+1 < len(args) {
-				name = args[i+1]
-			}
-		}
-		policies, err := kube.NetworkingV1().NetworkPolicies("").List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return nil, err
-		}
-		if len(policies.Items) == 0 {
-			return []byte("allowed"), nil
-		}
-		if strings.HasPrefix(name, "control-") {
-			if inClient.Load() {
-				return []byte("blocked"), nil
-			}
-			return []byte("allowed"), nil
-		}
-		inClient.Store(true)
-		time.Sleep(20 * time.Millisecond)
-		inClient.Store(false)
-		return []byte("blocked"), nil
-	}}
-	result := probeNetworkPolicy(t.Context(), Config{}, deps, policyProbeTiming{time.Second, 50 * time.Millisecond, 100 * time.Millisecond, 50 * time.Millisecond, time.Millisecond})
-	if result.Status != "unverified" {
-		t.Fatal("a control outage during denial became enforcement evidence", result)
-	}
-}
-
 func probeNamespaceUIDFixture(kube *fake.Clientset) {
 	kube.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		ns := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace)
 		ns.UID = types.UID(ns.Name)
 		return false, nil, nil
 	})
+}
+
+func readyPolicyModelPod(action k8stesting.Action) (bool, runtime.Object, error) {
+	pod := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+	pod.Status = corev1.PodStatus{PodIP: "192.0.2.10", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
+	return false, nil, nil
+}
+
+func TestProbeEvidenceRejectsAndRecovers(t *testing.T) {
+	for _, tc := range []struct{ name, denial, want string }{
+		{"drop", "timeout", "enforced"}, {"reject", "refused", "enforced"}, {"reset", "reset", "enforced"},
+		{"delayed recovery", "refused", "enforced"},
+		{"refused baseline", "refused", "unverified"}, {"refused peer baseline", "refused", "unverified"}, {"never recovers", "refused", "unverified"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kube := fake.NewClientset(preflightNode())
+			probeNamespaceUIDFixture(kube)
+			kube.PrependReactor("create", "pods", readyPolicyModelPod)
+			model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: tc.denial}
+			if tc.name == "refused baseline" {
+				model.fault = func(string, int) string { return "refused" }
+			}
+			if tc.name == "refused peer baseline" {
+				model.fault = func(source string, _ int) string {
+					if !policyModelSourceA(source) {
+						return "refused"
+					}
+					return ""
+				}
+			}
+			if tc.name == "delayed recovery" {
+				model.fault = func(_ string, n int) string {
+					if n == 7 {
+						return "refused"
+					}
+					return ""
+				}
+			}
+			if tc.name == "never recovers" {
+				model.fault = func(_ string, n int) string {
+					if n > 6 {
+						return "refused"
+					}
+					return ""
+				}
+			}
+			result := probeNetworkPolicy(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming())
+			if result.Status != tc.want {
+				t.Fatalf("got %+v, want %s", result, tc.want)
+			}
+			if tc.name == "refused peer baseline" && !strings.Contains(result.Remedy, "Client control-0: connection refused") {
+				t.Fatal("wrong failed source", result)
+			}
+			if tc.want == "enforced" {
+				if !strings.Contains(result.Evidence, "selects client") || !strings.Contains(result.Evidence, "selects control") || strings.Count(result.Evidence, "3 paired denials verified") != 2 {
+					t.Fatal("missing selection/overlap evidence", result)
+				}
+			} else if !strings.Contains(result.Remedy, "connection refused") {
+				t.Fatal("missing observed failure", result)
+			}
+		})
+	}
+}
+
+// The review's independent source fault: no dataplane, no policy reads in the
+// traffic failure function. It must fail for either randomized round order.
+func TestReview1548RejectingSourceWithoutEnforcement(t *testing.T) {
+	for _, failure := range []string{"refused", "reset"} {
+		t.Run(failure, func(t *testing.T) {
+			kube := fake.NewClientset(preflightNode())
+			probeNamespaceUIDFixture(kube)
+			kube.PrependReactor("create", "pods", readyPolicyModelPod)
+			model := &policyTrafficModel{kube: kube, mode: "absent", denial: failure, fault: func(source string, n int) string {
+				if policyModelSourceA(source) && (n-1)/3%2 == 1 {
+					return failure
+				}
+				return ""
+			}}
+			result := probeNetworkPolicy(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming())
+			if result.Status != "unverified" {
+				t.Fatal("unrelated per-source burst became enforcement", result)
+			}
+		})
+	}
+}
+
+func TestReview1548DuringSampleCanHappenOnlyAfter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	var clients atomic.Int32
+	deps := Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+		_, _, script, _ := policyModelArgs(args)
+		switch script {
+		case policyOverlapScript:
+			<-ctx.Done()
+			return nil, ctx.Err()
+		case policyOverlapReadyScript:
+			return []byte("pending"), nil
+		default:
+			clients.Add(1)
+			return []byte("refused"), nil
+		}
+	}}
+	state, err := policyProbePair(ctx, Config{}, deps, policyProbeTiming{interval: time.Millisecond}, "scratch", "client-0", "control-0", "http://192.0.2.10:8080")
+	if err == nil || state != "" || clients.Load() != 0 {
+		t.Fatal("attempt ran before a real overlap handshake", state, err, clients.Load())
+	}
+}
+
+func TestPolicyOverlapRejectsEarlyCompletionAndControlFailure(t *testing.T) {
+	for _, mode := range []string{"early completion", "failed completion"} {
+		t.Run(mode, func(t *testing.T) {
+			var reads atomic.Int32
+			release := make(chan struct{})
+			deps := Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+				_, _, script, _ := policyModelArgs(args)
+				switch script {
+				case policyOverlapScript:
+					select {
+					case <-release:
+						return []byte("refused"), nil
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				case policyOverlapReleaseScript:
+					return []byte("released"), nil
+				case policyOverlapReadyScript:
+					n := reads.Add(1)
+					if n == 2 {
+						if mode == "early completion" {
+							return []byte("closed"), nil
+						}
+						close(release)
+					}
+					return []byte("open"), nil
+				default:
+					return []byte("refused"), nil
+				}
+			}}
+			state, err := policyProbePair(t.Context(), Config{}, deps, policyProbeTiming{interval: time.Millisecond}, "scratch", "client-0", "control-0", "http://192.0.2.10:8080")
+			if err == nil || state != "" {
+				t.Fatal("missing overlap/control success accepted", state, err)
+			}
+		})
+	}
 }
