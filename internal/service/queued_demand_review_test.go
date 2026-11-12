@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -54,15 +53,9 @@ func TestQueuedListsKeepSuccessfulDemandAcrossPolls(t *testing.T) {
 			control.waitClock = clock
 			for poll := range 3 {
 				clock.Step(time.Hour) // Success must not expire after 30 seconds.
-				value, err := control.Runs(t.Context(), api.Actor{Identity: "reader"}, api.RunFilter{View: view, Limit: 100})
-				if err != nil {
-					t.Fatal(err)
-				}
-				rows := 0
-				switch list := value.(type) {
-				case []model.Run:
-					rows = len(list)
-				}
+				value := pollDiagnosticList(t, control, api.Actor{Identity: "reader"}, api.RunFilter{View: view, Limit: 100}, func(_ []model.Run) bool { return reader.calls.Load() == count })
+
+				rows := len(value)
 				if rows != count || reader.calls.Load() != count {
 					t.Fatalf("poll %d rows=%d source reads=%d, want %d then zero more", poll, rows, reader.calls.Load(), count)
 				}
@@ -71,37 +64,37 @@ func TestQueuedListsKeepSuccessfulDemandAcrossPolls(t *testing.T) {
 	}
 }
 
-func TestQueuedListsShareOneDemandBudgetAndCacheFailures(t *testing.T) {
-	for _, view := range []string{""} {
-		for _, slow := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/timeout=%v", view, slow), func(t *testing.T) {
-				reader := &queueDemandReviewReader{read: func(ctx context.Context) (*argoworkflow.PodDemand, error) {
-					if slow {
-						<-ctx.Done()
-						return nil, ctx.Err()
-					}
-					return nil, errors.New("source unavailable")
-				}}
-				control := queueDemandListFixture(t, 20, reader)
-				for poll := range 2 {
-					started := time.Now()
-					_, err := control.Runs(t.Context(), api.Actor{Identity: "reader"}, api.RunFilter{View: view, Limit: 100})
-					if err != nil {
-						t.Fatal(err)
-					}
-					if elapsed := time.Since(started); elapsed > 2*queueDemandReadBudget {
-						t.Fatalf("per-row waits escaped list budget: %s", elapsed)
-					}
-					want := int32(20)
-					if slow {
-						want = int32(poll + 1)
-					} // First timed-out row stays negative cached.
-					if reader.calls.Load() != want {
-						t.Fatalf("poll %d reads=%d want %d", poll, reader.calls.Load(), want)
-					}
-				}
-			})
+func TestQueuedListsDoNotWaitForDemandAndCacheFailures(t *testing.T) {
+	reader := &queueDemandReviewReader{read: func(ctx context.Context) (*argoworkflow.PodDemand, error) { <-ctx.Done(); return nil, ctx.Err() }}
+	const count = 8
+	control := queueDemandListFixture(t, count, reader)
+	for range 2 {
+		started := time.Now()
+		if _, err := control.Runs(t.Context(), api.Actor{Identity: "reader"}, api.RunFilter{Limit: 100}); err != nil {
+			t.Fatal(err)
 		}
+		if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+			t.Fatalf("list blocked on demand: %s", elapsed)
+		}
+	}
+	drainListDiagnostics(t, control)
+	if got := reader.calls.Load(); got != count {
+		t.Fatalf("some rows never refreshed: %d", got)
+	}
+	// Restrict the next page to the first row, whose failed result is cached.
+	value, err := control.Runs(t.Context(), api.Actor{Identity: "reader"}, api.RunFilter{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := value.([]model.Run)[0]
+	drainListDiagnostics(t, control)
+	calls := reader.calls.Load()
+	if _, err := control.Runs(t.Context(), api.Actor{Identity: "reader"}, api.RunFilter{Ref: run.Ref}); err != nil {
+		t.Fatal(err)
+	}
+	drainListDiagnostics(t, control)
+	if reader.calls.Load() != calls {
+		t.Fatal("failed demand refreshed before expiry")
 	}
 }
 

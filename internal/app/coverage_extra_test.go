@@ -151,7 +151,7 @@ func TestHealthReady_NilDependencies(t *testing.T) {
 func TestHealthStatus_NilStore(t *testing.T) {
 	t.Parallel()
 	health := Health{}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatalf("Status with nil store: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestHealthStatus_AuditChainError(t *testing.T) {
 			return AuditChainStatus{}, errors.New("chain broken")
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestHealthStatus_IdentityError(t *testing.T) {
 		VCS:        func(context.Context, model.Upstream) error { return nil },
 		Identity:   func(context.Context) (string, error) { return "", errors.New("key missing") },
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestHealthStatus_ZeroUpstreams(t *testing.T) {
 		Audit:   func(context.Context) error { return nil },
 		VCS:     func(context.Context, model.Upstream) error { return nil },
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

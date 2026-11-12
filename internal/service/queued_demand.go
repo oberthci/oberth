@@ -89,15 +89,6 @@ func (cache *queueDemandCache) read(ctx context.Context, key queueDemandKey, now
 	}
 }
 
-type queueDemandBudgetKey struct{}
-
-// The whole list shares this demand deadline, without cancelling unrelated
-// row observations or the database read when the demand budget is spent.
-func withQueueDemandBudget(ctx context.Context) (context.Context, context.CancelFunc) {
-	budget, cancel := context.WithTimeout(ctx, queueDemandReadBudget)
-	return context.WithValue(ctx, queueDemandBudgetKey{}, budget), cancel
-}
-
 func queuePodRequests(demand *argoworkflow.PodDemand) *argoworkflow.PodRequests {
 	if demand == nil || !demand.Valid() {
 		return nil
@@ -113,8 +104,10 @@ func (s *API) queuedRequests(ctx context.Context, run model.Run) *argoworkflow.P
 		return nil
 	}
 	key := queueDemandKey{runID: run.ID, sha: run.SHA, testedSHA: run.TestedSHA}
-	if budget, ok := ctx.Value(queueDemandBudgetKey{}).(context.Context); ok {
-		ctx = budget
+	if list, _ := ctx.Value(listDiagnosticContextKey{}).(bool); list {
+		return s.listDiagnostic(run, "demand", func(ctx context.Context) listDiagnosticValue {
+			return listDiagnosticValue{requests: s.queuedRequests(ctx, run)}
+		}).requests
 	}
 	ctx, cancel := context.WithTimeout(ctx, queueDemandReadBudget)
 	defer cancel()

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
@@ -70,7 +71,7 @@ func TestHealthRequiresConfiguredUpstreamAndDatabase(t *testing.T) {
 	if err := health.Ready(context.Background()); err != nil {
 		t.Fatalf("audit outage removed cached service from readiness: %v", err)
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestHealthStatusIsUsefulDuringOutage(t *testing.T) {
 		Audit:      func(context.Context) error { return nil },
 		VCS:        func(context.Context, model.Upstream) error { return nil },
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestHealthStatusReportsSchemaVersion(t *testing.T) {
 		VCS:           func(context.Context, model.Upstream) error { return nil },
 		SchemaVersion: 17,
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +175,7 @@ func TestHealthStatusReportsDashboardDetail(t *testing.T) {
 			return AuditChainStatus{HeadID: 41, HeadSHA256: "aa11", Anchored: true, AnchorID: 7, TSAURL: "https://tsa.example", AnchoredAt: "2026-08-08T10:00:00Z"}, nil
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +223,7 @@ func TestHealthStatusReportsLocalAuditMode(t *testing.T) {
 			return AuditChainStatus{HeadID: 3, HeadSHA256: "bb22", Anchored: false}, nil
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestHealthStatusIncludesSecretStoreProbeReady(t *testing.T) {
 		SecretStore:      &SecretStoreStatus{Configured: true, Address: "https://bao.internal:8200", AuthMount: "kubernetes", Role: "oberth", Transport: "https"},
 		SecretStoreProbe: func(context.Context) error { return nil },
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +281,7 @@ func TestHealthStatusIncludesSecretStoreProbeFailure(t *testing.T) {
 			return errors.New("secret store Kubernetes auth login failed: HTTP 503 Service Unavailable")
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +309,7 @@ func TestHealthStatusOmitsProbeWhenUnconfigured(t *testing.T) {
 			return nil
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,13 +334,14 @@ func TestHealthStatusConcurrentSecretStoreProbeNoDataRace(t *testing.T) {
 		SecretStoreProbe: func(context.Context) error { return nil },
 		SecretStoreCache: &SecretStoreProbeSnapshot{},
 	}
+	health.RefreshSecretStore(t.Context())
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
-				value, err := health.Status(context.Background())
+				value, err := sampledStatus(health, context.Background())
 				if err != nil {
 					t.Errorf("Status() error = %v", err)
 					return
@@ -374,7 +376,7 @@ func TestHealthProbeReportsSealed(t *testing.T) {
 			return true, nil
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +392,7 @@ func TestHealthProbeReportsSealed(t *testing.T) {
 	}
 	health.SecretStore = status.SecretStore
 	health.SecretStoreProbe = func(context.Context) error { return nil }
-	value, err = health.Status(context.Background())
+	value, err = sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +421,7 @@ func TestHealthProbeReportsLoginDetailWhenSealStatusErrors(t *testing.T) {
 			return false, errors.New("seal-status also unreachable")
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +458,7 @@ func TestHealthProbeReadyIgnoresSealedCallback(t *testing.T) {
 			return true, nil // would report sealed if consulted
 		},
 	}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +500,7 @@ func TestRefreshSecretStoreUpdatesCachedSnapshot(t *testing.T) {
 		t.Fatalf("refresh = %q, probeCount = %d", result, probeCount)
 	}
 	// Status() within TTL reads the cached result without re-probing.
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +615,7 @@ func TestHealthStorageStatusIsInstallationWide(t *testing.T) {
 		called++
 		return map[string]int64{"logs_bytes": 100, "artifacts_bytes": 200}, nil
 	}}
-	value, err := health.Status(context.Background())
+	value, err := sampledStatus(health, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,4 +629,32 @@ func TestHealthStorageStatusIsInstallationWide(t *testing.T) {
 	if scoped.(HealthStatus).Storage != nil || called != 1 {
 		t.Fatalf("scoped storage leak=%#v calls=%d", scoped, called)
 	}
+}
+
+// sampleHealth prepares projection fixtures explicitly; production status reads
+// never perform these network operations, even when a snapshot is absent.
+func sampleHealth(health Health, ctx context.Context) Health {
+	if health.ClusterCache == nil {
+		state := "unavailable"
+		if health.Cluster != nil && health.Cluster(ctx) == nil {
+			state = "ready"
+		}
+		health.ClusterCache = &ClusterSnapshot{state: state, checkedAt: time.Now().UTC()}
+	}
+	if health.VCSCache == nil && health.VCS != nil && health.Store != nil {
+		health.VCSCache = &VCSSnapshot{}
+		ups, err := health.Store.ListUpstreams(ctx)
+		repos, repoErr := health.Store.ListRepositories(ctx)
+		if err == nil && repoErr == nil {
+			health.probeVCS(ctx, activeProbeUpstreams(ups, repos))
+		}
+	}
+	if health.SecretStoreCache == nil && health.SecretStoreProbe != nil {
+		health.SecretStoreCache = &SecretStoreProbeSnapshot{}
+		health.RefreshSecretStore(ctx)
+	}
+	return health
+}
+func sampledStatus(health Health, ctx context.Context) (any, error) {
+	return sampleHealth(health, ctx).Status(ctx)
 }

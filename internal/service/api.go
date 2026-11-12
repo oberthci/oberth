@@ -138,6 +138,7 @@ type API struct {
 	receiveOutbox             ReceiveOutbox
 	receiveHandler            gitcache.ReceiveHandler
 	queueDemands              *queueDemandCache
+	listDiagnostics           *listDiagnosticCache
 	branchCounts              *branchCountCache
 	issueStaleAfter           time.Duration
 	issueActiveStaleAfter     time.Duration
@@ -289,6 +290,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		queueDemands:      &queueDemandCache{},
+		listDiagnostics:   &listDiagnosticCache{},
 		branchCounts:      &branchCountCache{},
 		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
@@ -1192,14 +1194,13 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancelDemand := withQueueDemandBudget(ctx)
-	defer cancelDemand()
+	ctx = context.WithValue(ctx, listDiagnosticContextKey{}, true)
 	for i := range runs {
 		if service.scope != nil {
 			runs[i].QueuePosition = 0
 		}
 		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayRunning {
-			runs[i].Scheduling = service.observeRunListStartup(ctx, runs[i])
+			runs[i].Scheduling = service.cachedRunListStartup(runs[i])
 			applyExecutionDisplay(&runs[i], runs[i].Scheduling)
 		}
 		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayQueued {

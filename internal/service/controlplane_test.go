@@ -1354,6 +1354,13 @@ func (fixture *controlFixture) api(t *testing.T) *API {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(5*time.Second))
+		defer cancel()
+		if err := service.Shutdown(ctx); err != nil {
+			t.Error(err)
+		}
+	})
 	return service
 }
 

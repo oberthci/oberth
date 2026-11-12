@@ -272,7 +272,7 @@ DELETE FROM schema_migrations WHERE id='20261111190000-client-certificates';
 `
 
 // PostCanonicalPrioritiesDowngrade removes the receipt in disposable fixtures.
-const PostCanonicalPrioritiesDowngrade = `
+const PostCanonicalPrioritiesDowngrade = PostAPIReadIndexesDowngrade + `
 DROP TABLE IF EXISTS node_boot_observations;
 DELETE FROM schema_migrations WHERE id='20261111220000-node-boot-observations';
 ` + PostUplinkInvitesDowngrade + `
@@ -285,4 +285,14 @@ DELETE FROM schema_migrations WHERE id='20261111200000-canonical-priorities';
 const PostUplinkInvitesDowngrade = `
 DROP TABLE IF EXISTS uplink_invites;
 DELETE FROM schema_migrations WHERE id='20261111202000-uplink-invites';
+`
+
+// PostAPIReadIndexesDowngrade removes indexes and their receipt only from
+// disposable fixtures before replaying historical schemas.
+const PostAPIReadIndexesDowngrade = `
+DROP INDEX IF EXISTS runs_counts_idx;
+DROP INDEX IF EXISTS runs_active_ref_idx;
+DROP INDEX IF EXISTS runs_terminal_end_idx;
+DROP INDEX IF EXISTS audit_actions_type_idx;
+DELETE FROM schema_migrations WHERE id='20261112095139-api-read-indexes-5088d2686292709cb56a6d94bddb707b';
 `
