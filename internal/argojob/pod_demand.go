@@ -34,9 +34,11 @@ func readResourceFallback(wf *wfv1.Workflow) (model.ResourceAdmissionFallback, e
 
 func stampPodDemand(workflow *wfv1.Workflow, demand *argoworkflow.PodDemand) {
 	delete(workflow.Annotations, podDemandAnnotation)
-	if demand != nil {
+	if demand != nil && demand.Valid() {
 		body, _ := json.Marshal(demand)
-		workflow.Annotations[podDemandAnnotation] = string(body)
+		if len(body) <= 16<<10 {
+			workflow.Annotations[podDemandAnnotation] = string(body)
+		}
 	}
 }
 

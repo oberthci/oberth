@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -14,40 +13,45 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// Sum eligible nodes for admission and cap each step against the largest node.
-// Restart the server after changing the node pool to refresh this snapshot.
-func schedulingCPU(ctx context.Context, kube kubernetes.Interface, headroom, stepPercent int64) (int64, int64, error) {
+func schedulingCPU(ctx context.Context, kube kubernetes.Interface, nodeName string, headroom, stepPercent int64, tolerations ...corev1.Toleration) (argoworkflow.CPUAdmission, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	nodes, err := kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return 0, 0, fmt.Errorf("read allocatable CPU for admission: %w", err)
+	var nodes []corev1.Node
+	if nodeName != "" {
+		node, err := kube.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return argoworkflow.CPUAdmission{}, err
+		}
+		nodes = []corev1.Node{*node}
+	} else {
+		list, err := kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return argoworkflow.CPUAdmission{}, err
+		}
+		nodes = list.Items
 	}
-	var cpu, largest int64
-	for _, node := range nodes.Items {
+	var total, largest int64
+	for _, node := range nodes {
 		ready := false
 		for _, c := range node.Status.Conditions {
 			if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
 				ready = true
 			}
 		}
-		if !ready || node.Spec.Unschedulable || schedulingTainted(node) {
+		if !ready || node.Spec.Unschedulable || schedulingTainted(node, tolerations...) {
 			continue
 		}
 		n := node.Status.Allocatable.Cpu().MilliValue()
 		if n > 0 {
-			cpu += n
+			total += n
 			largest = max(largest, n)
 		}
 	}
-	if cpu <= 0 {
-		return 0, 0, fmt.Errorf("CPU admission requires a Ready schedulable node with positive allocatable CPU")
+	p := argoworkflow.CPUAdmission{Milli: total * (100 - headroom) / 100, NodeMilli: largest, StepMaxMilli: largest * stepPercent / 100}
+	if p.Milli <= 0 {
+		p.HoldReason = "CPU admission held: no eligible Ready schedulable node"
 	}
-	budget := cpu * (100 - headroom) / 100
-	if budget <= 0 {
-		return 0, 0, fmt.Errorf("no allocatable CPU remains after admission headroom")
-	}
-	return budget, max(int64(1), largest*stepPercent/100), nil
+	return p, nil
 }
 
 func schedulingKubernetesClient(ctx context.Context, config *rest.Config, options *serveOptions) (kubernetes.Interface, error) {
@@ -58,18 +62,26 @@ func schedulingKubernetesClient(ctx context.Context, config *rest.Config, option
 	if !options.admissionCPUEnabled {
 		return kube, nil
 	}
-	options.admissionCPUPool = config.Host
-	options.admissionCPUMilli, options.stepCPURequestMaxMilli, err = schedulingCPU(ctx, kube, options.admissionCPUHeadroomPercent, options.stepCPURequestPercent)
-	if err != nil {
-		return nil, err
-	}
+	monitor := newCPUCapacity(ctx, kube, config.Host, "", options.admissionCPUHeadroomPercent, options.stepCPURequestPercent)
+	options.cpuCapacity = monitor.snapshot
+	p := monitor.snapshot(ctx)
+	options.admissionCPUPool, options.admissionCPUMilli, options.stepCPURequestMaxMilli = p.Pool, p.Milli, p.StepMaxMilli
+
 	return kube, nil
 }
 
-func schedulingTainted(node corev1.Node) bool {
+func schedulingTainted(node corev1.Node, tolerations ...corev1.Toleration) bool {
 	for _, taint := range node.Spec.Taints {
 		if taint.Effect == corev1.TaintEffectNoSchedule || taint.Effect == corev1.TaintEffectNoExecute {
-			return true
+			allowed := false
+			for _, t := range tolerations {
+				if t.Key == taint.Key && t.Value == taint.Value && t.Effect == taint.Effect && t.Operator == corev1.TolerationOpEqual {
+					allowed = true
+				}
+			}
+			if !allowed {
+				return true
+			}
 		}
 	}
 	return false
@@ -86,12 +98,10 @@ func buildSchedulingArgoTargets(ctx context.Context, policy *argoTargetPolicy, o
 		if !options.admissionCPUEnabled {
 			continue
 		}
-		budget, cap, err := schedulingCPU(ctx, target.Kubernetes, options.admissionCPUHeadroomPercent, options.stepCPURequestPercent)
-		if err != nil {
-			return nil, fmt.Errorf("execution target %s: %w", target.ID, err)
-		}
-		target.Config.CPUAdmission = argoworkflow.CPUAdmission{Pool: target.Transport.Host, Milli: budget}
-		target.Config.StepCPURequestMaxMilli = cap
+		monitor := newCPUCapacity(ctx, target.Kubernetes, target.Transport.Host, target.Config.ExecutionPlacement.CPUNodeName(), options.admissionCPUHeadroomPercent, options.stepCPURequestPercent, target.Config.ExecutionPlacement.CPUTolerations()...)
+		target.Config.CPUCapacity = monitor.snapshot
+		target.Config.CPUAdmission = monitor.snapshot(ctx)
+		target.Config.StepCPURequestMaxMilli = target.Config.CPUAdmission.StepMaxMilli
 	}
 	return targets, nil
 }

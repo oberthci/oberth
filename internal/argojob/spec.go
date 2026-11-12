@@ -72,9 +72,10 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
-	CPUAdmission           argoworkflow.CPUAdmission `json:"-"`
-	CPUAdmissionDisabled   bool                      `json:"-"`
-	StepCPURequestMaxMilli int64                     `json:"-"`
+	CPUCapacity            argoworkflow.CPUCapacitySource `json:"-"`
+	CPUAdmission           argoworkflow.CPUAdmission      `json:"-"`
+	CPUAdmissionDisabled   bool                           `json:"-"`
+	StepCPURequestMaxMilli int64                          `json:"-"`
 	// Custody journals remote effects; it is not serialized operator authority.
 	Custody TargetCustody `json:"-"`
 	// ExecutionPlacement selects an immutable isolated administrator profile.
@@ -880,7 +881,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	// Admission and receipt verification inspect the immutable authored graph.
 	// Default only afterwards, before any server-owned helper is injected.
 	applyRequestDefaultsPolicy(workflow, request.omitRequestDefaults, request.legacyHelperRequestDefaults)
-	applySchedulingCPU(workflow, request.cpuRequestPolicy(config))
+	request.applyCPU(config, workflow)
 	if request.ResourceCeiling != nil {
 		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
 			return nil, err

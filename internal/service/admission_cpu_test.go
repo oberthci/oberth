@@ -26,30 +26,40 @@ func TestAdmissionCPUMixedLoad(t *testing.T) {
 		r.requests = &argoworkflow.PodRequests{CPUMilli: cpu}
 	}
 	g.holdUpdating = false
+	now := time.Unix(100000, 0)
+	g.now = func() time.Time { return now }
 	completed := 0
-	for tick := 0; tick < 100 && completed < 50; tick++ {
-		g.mu.Lock()
-		g.grantLocked()
-		var active []*admissionReservation
-		var cpu int64
-		for _, r := range g.reservations {
-			if r.granted && !r.released {
-				active = append(active, r)
-				cpu += r.requests.CPUMilli
+	ends := map[int64]int{}
+	for tick := 0; tick < 500 && completed < 50; tick++ {
+		now = now.Add(15 * time.Second)
+		var finished []*admissionReservation
+		for seq, end := range ends {
+			if end <= tick {
+				finished = append(finished, g.reservations[seq])
+				delete(ends, seq)
 			}
 		}
-		if cpu > 9600 {
-			t.Fatalf("started Pods exceed allocatable minus headroom: %dm", cpu)
-		}
-		if len(active) == 0 {
-			t.Fatal("workload stopped making progress")
-		}
-		g.mu.Unlock()
-		for _, r := range active {
+		for _, r := range finished {
 			r.release()
 			completed++
 		}
+		g.mu.Lock()
+		g.grantLocked()
+		var cpu int64
+		for seq, r := range g.reservations {
+			if r.granted && !r.released {
+				cpu += g.credit(r, g.pool(r))
+				if _, ok := ends[seq]; !ok {
+					ends[seq] = tick + 2 + int(seq%8)
+				}
+			}
+		}
+		g.mu.Unlock()
+		if cpu > 9600 {
+			t.Fatalf("live simulated requests exceed pool: %dm", cpu)
+		}
 	}
+
 	if completed != 50 {
 		t.Fatalf("completed %d runs", completed)
 	}
@@ -89,38 +99,33 @@ func TestAdmissionCPUPromotionOvertakesAndRepositoryFairness(t *testing.T) {
 	}
 	second.release()
 }
-func TestAdmissionCPUDoesNotBackfillPastLargeWaiter(t *testing.T) {
+func TestAdmissionCPUBoundedBackfillProtectsLargeWaiter(t *testing.T) {
+	now := time.Unix(10000, 0)
 	g := newAdmissionGate()
 	g.cpuMilli = 5000
-	holder := g.reserve(1)
-	holder.requests = &argoworkflow.PodRequests{CPUMilli: 3000}
-	holder.prepared = true
-	g.mu.Lock()
-	g.grantLocked()
-	g.mu.Unlock()
-	large := g.reserve(2)
-	large.requests = &argoworkflow.PodRequests{CPUMilli: 4000}
-	large.prepared = true
-	small := g.reserve(3)
-	small.requests = &argoworkflow.PodRequests{CPUMilli: 1000}
-	small.prepared = true
-	g.mu.Lock()
-	g.grantLocked()
-	g.mu.Unlock()
-	if large.granted || small.granted {
-		t.Fatal("small jobs must not keep a whole-run request from fitting")
+	g.now = func() time.Time { return now }
+	holder := reviewPrepared(g, 1, 3000, model.PriorityStandard)
+	large := reviewPrepared(g, 2, 4000, model.PriorityStandard)
+	small := reviewPrepared(g, 3, 1000, model.PriorityStandard)
+	if large.granted || !small.granted {
+		t.Fatal("bounded backfill did not start")
 	}
 	snapshot := (&Scheduler{admission: g}).AdmissionSnapshot(2)
 	if snapshot.BlockedBy == nil || !snapshot.BlockedBy.CPUCapacity {
-		t.Fatal("CPU hold is not observable", snapshot)
+		t.Fatal("CPU hold is not observable")
+	}
+	small.release()
+	now = now.Add(cpuBackfillWindow)
+	next := reviewPrepared(g, 4, 1000, model.PriorityStandard)
+	if next.granted {
+		t.Fatal("protected drain reopened")
 	}
 	holder.release()
-	if !large.granted || !small.granted {
-		t.Fatal("whole requests did not fit on release")
+	if !large.granted || !next.granted {
+		t.Fatal("protected head or fitting successor did not start")
 	}
-	large.release()
-	small.release()
 }
+
 func TestHardPressureDefaultDeferralIsBounded(t *testing.T) {
 	now := time.Now()
 	g := newAdmissionGate()
@@ -172,64 +177,36 @@ func TestAdmissionCPUClampsUnknownAndWideFanout(t *testing.T) {
 		g.cpuMilli = 9600
 		r := g.reserve(1)
 		release, err := r.acquireRequest(t.Context(), admissionRequest{Requests: requests, CPU: argoworkflow.CPUAdmission{Milli: 9600}})
-		if err != nil || !r.granted || r.requests.CPUMilli != 9600 {
+		if err != nil || !r.granted || g.credit(r, g.pool(r)) != 9600 {
 			t.Fatalf("reservation=%+v err=%v", r, err)
 		}
 		release()
 	}
 }
 func TestAdmissionCPUAgedBackfillAndIndependentPools(t *testing.T) {
-	now := time.Now()
+	now := time.Unix(10000, 0)
 	g := newAdmissionGate()
 	g.cpuMilli = 5000
 	g.now = func() time.Time { return now }
-	holder := g.reserve(1)
-	holder.prepared = true
-	holder.requests = &argoworkflow.PodRequests{CPUMilli: 3000}
-	g.mu.Lock()
-	g.grantLocked()
-	g.mu.Unlock()
-	large := g.reserve(2)
-	large.prepared = true
-	large.requests = &argoworkflow.PodRequests{CPUMilli: 4000}
-	small := g.reserve(3)
-	small.prepared = true
-	small.requests = &argoworkflow.PodRequests{CPUMilli: 1000}
-	remote := g.reserve(4)
-	remote.prepared = true
-	remote.poolKnown = true
+	holder := reviewPrepared(g, 1, 3000, model.PriorityStandard)
+	large := reviewPrepared(g, 2, 4000, model.PriorityStandard)
+	now = now.Add(cpuBackfillWindow)
+	remote := g.reserve(3)
 	remote.cpu = argoworkflow.CPUAdmission{Pool: "remote", Milli: 1000}
+	remote.poolKnown = true
+	remote.prepared = true
 	remote.requests = &argoworkflow.PodRequests{CPUMilli: 1000}
-	g.mu.Lock()
-	g.grantLocked()
-	g.mu.Unlock()
-	if large.granted || small.granted || !remote.granted {
-		t.Fatal("drain window or independent cluster violated")
-	}
-	now = now.Add(time.Minute)
-	g.mu.Lock()
-	g.grantLocked()
-	g.mu.Unlock()
-	if !small.granted || large.granted {
-		t.Fatal("aged head prevented backfill")
-	}
-	small.release()
-	now = now.Add(time.Minute)
-	next := g.reserve(5)
-	next.prepared = true
-	next.requests = &argoworkflow.PodRequests{CPUMilli: 1000}
-	g.mu.Lock()
-	g.grantLocked()
-	g.mu.Unlock()
-	if next.granted {
-		t.Fatal("continuous backfill defeated drain window")
+	probeGrant(g)
+	if !remote.granted || large.granted {
+		t.Fatal("local drain blocked another pool")
 	}
 	holder.release()
 	if !large.granted {
-		t.Fatal("large run starved")
+		t.Fatal("head did not start after drain")
 	}
 }
-func TestAdmissionCPUUnknownAdoptionAndAssistedHoldHaveBoundedLeases(t *testing.T) {
+
+func TestAdmissionCPUUnknownAdoptionAndAssistedHoldRetainLiveCredits(t *testing.T) {
 	for _, assisted := range []bool{false, true} {
 		now := time.Now()
 		g := newAdmissionGate()
@@ -257,8 +234,8 @@ func TestAdmissionCPUUnknownAdoptionAndAssistedHoldHaveBoundedLeases(t *testing.
 		g.mu.Lock()
 		g.grantLocked()
 		g.mu.Unlock()
-		if !waiter.granted || holder.released {
-			t.Fatal("expired lease blocked or discarded resource ownership")
+		if waiter.granted || holder.released {
+			t.Fatal("age discarded live CPU credit")
 		}
 	}
 }
@@ -271,14 +248,46 @@ func (failedAdoptedSizer) AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, 
 func TestAdoptedDemandErrorDegradesToUnknownReservation(t *testing.T) {
 	g := newAdmissionGate()
 	g.cpuMilli = 9600
-	run := model.Run{ID: "restored", QueueSequence: 1}
+	started := time.Now().Add(-time.Hour)
+	run := model.Run{ID: "restored", QueueSequence: 1, StartedAt: &started}
 	r, err := g.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &Scheduler{jobs: failedAdoptedSizer{}, admission: g}
 	s.sizeAdoptedReservation(t.Context(), run, r)
-	if !r.unknownAdopted || r.requests.CPUMilli != 9600 {
+	if !r.unknownAdopted || g.credit(r, g.pool(r)) != 9600 {
 		t.Fatalf("demand read failure did not degrade to whole pool: %+v", r)
+	}
+}
+
+func TestHardPressureBypassIsOnePerDeferralWindow(t *testing.T) {
+	now := time.Unix(100000, 0)
+	g := newAdmissionGate()
+	g.now = func() time.Time { return now }
+	c := DefaultAdmissionPressureConfig()
+	c.HardOnly = true
+	c.Logf = func(string, ...any) {}
+	c.Source = func() (model.PressureSample, error) {
+		return model.PressureSample{CPU: model.PressureResource{SomeAvg10: 90}}, nil
+	}
+	g.pressure = newPressureCheck(c)
+	first := reviewPrepared(g, 1, 1000, model.PriorityStandard)
+	second := reviewPrepared(g, 2, 1000, model.PriorityStandard)
+	now = now.Add(300 * time.Second)
+	probeGrant(g)
+	if !first.granted || second.granted {
+		t.Fatal("deferral granted more than one")
+	}
+	first.release()
+	third := reviewPrepared(g, 3, 1000, model.PriorityStandard)
+	probeGrant(g)
+	if second.granted || third.granted {
+		t.Fatal("claim/release reset pressure window")
+	}
+	now = now.Add(300 * time.Second)
+	probeGrant(g)
+	if !second.granted || third.granted {
+		t.Fatal("next pressure window did not admit exactly one")
 	}
 }

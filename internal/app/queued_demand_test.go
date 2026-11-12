@@ -42,10 +42,10 @@ spec:
 	for _, parallel := range []bool{true, false} {
 		t.Run(map[bool]string{true: "parallel", false: "serial"}[parallel], func(t *testing.T) {
 			document := source
-			cpu, memory := int64(10000), int64(16<<30)
+			cpu, memory := int64(10000), int64((16<<30)+(128<<20))
 			if !parallel {
 				document = strings.Replace(document, "  entrypoint: root", "  entrypoint: root\n  parallelism: 1", 1)
-				cpu, memory = 5050, 8<<30
+				cpu, memory = 5050, (8<<30)+(64<<20)
 			}
 			blobs := &resourceBlobStub{source: []byte(document)}
 			jobs := &ArgoJobs{resourceBlobs: blobs}
@@ -57,7 +57,7 @@ spec:
 			jobs.config.StepCPURequestMaxMilli = 3000
 			jobs.config.CPUAdmission.Milli = 4000
 			capped, err := jobs.RunPodDemand(t.Context(), request)
-			want := int64(4000)
+			want := int64(3050)
 			if !parallel {
 				want = 3050
 			}

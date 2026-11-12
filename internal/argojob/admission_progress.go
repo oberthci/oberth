@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +22,7 @@ const executorReadinessTimeout = 2 * time.Minute
 const executorIdentityRetryAnnotation = "oberth.ci/executor-identity-retry-at"
 
 type admissionProgress struct {
+	maxPodCPU                int64
 	lastProgress             time.Time
 	scheduled                bool
 	identity                 map[types.UID]identityWait
@@ -121,7 +124,7 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
-		if waitingForKubernetesCapacity(pod) {
+		if waitingForKubernetesCapacity(pod) && p.maxPodCPU > 0 && argoworkflow.PodCPURequests(pod) > p.maxPodCPU {
 			for _, condition := range pod.Status.Conditions {
 				if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse && strings.Contains(condition.Message, "Insufficient cpu") {
 					since := pod.CreationTimestamp.Time
@@ -129,7 +132,7 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 						since = condition.LastTransitionTime.Time
 					}
 					if !since.IsZero() && !since.After(now) && now.Sub(since) >= timeout {
-						return &admissionProgressError{reason: fmt.Sprintf("pod CPU capacity wait exceeded %s; reduce requests or add allocatable CPU", timeout)}
+						return &admissionProgressError{reason: fmt.Sprintf("pod CPU request %dm exceeds largest eligible node %dm for %s; reduce pod requests", argoworkflow.PodCPURequests(pod), p.maxPodCPU, timeout)}
 					}
 				}
 			}
@@ -306,6 +309,7 @@ func (controller *Controller) checkAdmissionProgress(ctx context.Context, wf *wf
 		return nil
 	}
 	progress.readFailingSince = time.Time{}
+	progress.maxPodCPU = controller.config.CurrentCPU(ctx).NodeMilli
 	err = progress.check(wf, pods.Items, delivered, time.Now(), controller.config.stalledRunTimeout())
 	if err != nil {
 		return err

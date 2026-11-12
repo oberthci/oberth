@@ -13,6 +13,9 @@ func CPURequestPercentile(history []model.StepResourceUsage) map[string]int64 {
 		if !v.Terminal || v.ExitCode == nil || *v.ExitCode != 0 || v.TemplateName == "" || v.RunID == "" || v.ContainerName != "main" || v.EffectiveContainerKind() != "app" || v.EffectivePodKind() != "workflow" || v.RestartCount != 0 || v.Saturated || v.CounterReset || v.RequestsChanged || v.CPUTimeNS == nil || *v.CPUTimeNS < 0 || v.ContainerStartedAt.IsZero() || !v.ContainerFinishedAt.After(v.ContainerStartedAt) || !coveredCPU(v) {
 			continue
 		}
+		if v.CPULimitNanoCores != nil && *v.CPULimitNanoCores > 0 && v.CPUPeakNanoCores != nil && *v.CPUPeakNanoCores >= *v.CPULimitNanoCores {
+			continue
+		}
 		n, saturated := model.ResourceRate(*v.CPUTimeNS, v.ContainerFinishedAt.Sub(v.ContainerStartedAt))
 		if saturated || n > 1_000_000_000_000 {
 			continue

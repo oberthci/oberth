@@ -57,6 +57,7 @@ type SchedulerConfig struct {
 	StalledRunTimeout time.Duration
 	// AdmissionCPUMilli is allocatable CPU minus administrator headroom.
 	AdmissionCPUMilli int64
+	AdmissionCPUPool  string
 	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root.
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
@@ -198,6 +199,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	scheduler.workspaces.owners = scheduler.database()
 	// Reserve complete CPU envelopes before handing Workflows to Argo.
 	scheduler.admission.cpuMilli = config.AdmissionCPUMilli
+	scheduler.admission.cpuPool = config.AdmissionCPUPool
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	if config.AdmissionDiskFloorBytes > 0 {
 		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
@@ -625,7 +627,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 				return fmt.Errorf("claim priority run: %w", err)
 			}
-			reservation := scheduler.admission.reserveRun(run)
+			reservation := scheduler.reserveAdmission(dispatchCtx, run)
 			active++
 			workers.Add(1)
 			go func(run model.Run, reservation *admissionReservation) {
@@ -720,7 +722,7 @@ func (scheduler *Scheduler) executeAndCleanup(ctx context.Context, run model.Run
 }
 
 func (scheduler *Scheduler) executeAndCleanupWithGate(ctx context.Context, run model.Run, require mutationRequirement) error {
-	reservation := scheduler.admission.reserveRun(run)
+	reservation := scheduler.reserveAdmission(ctx, run)
 	return scheduler.executeAndCleanupReservedWithGate(ctx, run, require, reservation)
 }
 

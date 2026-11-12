@@ -57,8 +57,9 @@ type AdmissionBlocker struct {
 	Repo     string            `json:"repo"`
 	Ref      string            `json:"ref"`
 	// DiskFloor names why the head waits: the data disk is below its floor.
-	DiskFloor   bool `json:"disk_floor,omitempty"`
-	CPUCapacity bool `json:"cpu_capacity,omitempty"`
+	DiskFloor   bool   `json:"disk_floor,omitempty"`
+	CPUCapacity bool   `json:"cpu_capacity,omitempty"`
+	CPUReason   string `json:"cpu_reason,omitempty"`
 	// Used is how many runs hold a grant. Zero for a scoped viewer.
 	Used         int       `json:"used"`
 	WaitingSince time.Time `json:"waiting_since"`
@@ -71,6 +72,9 @@ func (blocker AdmissionBlocker) Reason() string {
 	case blocker.DiskFloor:
 		return "waiting for disk space"
 	case blocker.CPUCapacity:
+		if blocker.CPUReason != "" {
+			return blocker.CPUReason
+		}
 		return "waiting for CPU capacity for the whole run"
 	case blocker.Pressure != nil:
 		switch blocker.Pressure.Resource {

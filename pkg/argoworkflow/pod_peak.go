@@ -276,63 +276,10 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 		fanoutLimit = g.parallelism
 	}
 	var children []PodDemand
-	expandChild := func(child *wfv1.Template) (int, int, error) {
-		first := len(g.edges)
-		a, b, err := g.expand(child, depth+1)
-		if err != nil || localLimit == 0 {
-			return a, b, err
-		}
-		d, err := g.peak(first, len(g.edges))
-		if err != nil {
-			return 0, 0, err
-		}
-		children = append(children, d)
-		if child.DAG != nil || len(child.Steps) > 0 {
-			g.assumptions |= PodPeakNested
-		}
-		return a, b, nil
-	}
 	call := func(name string, inline *wfv1.Template, ref *wfv1.TemplateRef, exit string, hooks wfv1.LifecycleHooks, copies int) (int, int, error) {
-		if ref != nil || exit != "" || len(hooks) != 0 {
-			return 0, 0, errPodGraph
-		}
-		child := g.templates[name]
-		if inline != nil {
-			child = inline
-		}
-		if copies < 0 {
-			if fanoutLimit == 0 {
-				return 0, 0, errPodGraph
-			}
-			copies = int(fanoutLimit)
-			g.assumptions |= PodPeakDynamic
-		} else if fanoutLimit > 0 {
-			copies = min(copies, int(fanoutLimit))
-		} else if copies > 128 {
-			return 0, 0, errPodGraph
-		}
-		if copies == 1 {
-			return expandChild(child)
-		}
-		a, err := g.node(PodDemand{})
-		if err != nil {
-			return 0, 0, err
-		}
-		b, err := g.node(PodDemand{})
-		if err != nil {
-			return 0, 0, err
-		}
-		g.edges[a] = append(g.edges[a], b)
-		for range copies {
-			x, y, e := expandChild(child)
-			if e != nil {
-				return 0, 0, e
-			}
-			g.edges[a] = append(g.edges[a], x)
-			g.edges[y] = append(g.edges[y], b)
-		}
-		return a, b, nil
+		return g.expandCall(name, inline, ref, exit, hooks, copies, fanoutLimit, localLimit, depth, &children)
 	}
+
 	if t.DAG != nil {
 		starts, ends := map[string]int{}, map[string]int{}
 		deps := map[string][]string{}
@@ -451,15 +398,12 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 		t := &wf.Spec.Templates[i]
 		g.templates[t.Name] = t
 	}
-	_, _, err := g.expand(g.templates[wf.Spec.Entrypoint], 0)
+	err := g.expandWorkflow(wf)
 	if errors.Is(err, errPodUndeclared) {
 		return nil, nil
 	}
 	if errors.Is(err, ErrMemoryUnbounded) {
 		return nil, err
-	}
-	if wf.Spec.OnExit != "" || len(wf.Spec.Hooks) != 0 {
-		return nil, errPodGraph
 	}
 	// Sequences require an effective parallelism limit for bounded analysis.
 	if err != nil || g.sequence && !g.limited && parallelism == 0 {
@@ -575,8 +519,8 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 			tasks = t.DAG.Tasks
 		}
 		for _, task := range tasks {
-			if task.OnExit != "" || len(task.Hooks) != 0 {
-				return errPodGraph
+			if err := scanHooks(task.OnExit, task.Hooks, templates, scan, depth+1); err != nil {
+				return err
 			}
 			child := task.Inline
 			if child == nil {
@@ -588,8 +532,8 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 		}
 		for _, group := range t.Steps {
 			for _, step := range group.Steps {
-				if step.OnExit != "" || len(step.Hooks) != 0 {
-					return errPodGraph
+				if err := scanHooks(step.OnExit, step.Hooks, templates, scan, depth+1); err != nil {
+					return err
 				}
 				child := step.Inline
 				if child == nil {
@@ -605,6 +549,9 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 	if err := scan(templates[wf.Spec.Entrypoint], 0); errors.Is(err, errPodUndeclared) {
 		return nil, nil
 	} else if err != nil {
+		return nil, err
+	}
+	if err := scanHooks(wf.Spec.OnExit, wf.Spec.Hooks, templates, scan, 0); err != nil {
 		return nil, err
 	}
 	d := PodDemand{ExtendedResources: scaleExtended(maximum.ExtendedResources, *p), CPUMilli: maximum.CPUMilli * *p, MemoryBytes: maximum.MemoryBytes * *p, Pods: *p, Assumptions: PodPeakGraph}

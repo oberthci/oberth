@@ -38,7 +38,7 @@ func declaredPodTotal(wf *wfv1.Workflow, resourcePods bool) *PodRequests {
 		t := &wf.Spec.Templates[i]
 		g.templates[t.Name] = t
 	}
-	if _, _, err := g.expand(g.templates[wf.Spec.Entrypoint], 0); err != nil {
+	if err := g.expandWorkflow(wf); err != nil {
 		return nil
 	}
 	total := &PodRequests{}

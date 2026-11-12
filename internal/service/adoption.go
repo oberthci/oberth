@@ -76,7 +76,7 @@ func (gate *admissionGate) adopt(run model.Run) (*admissionReservation, error) {
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
 		prepared: true, granted: true, submitted: true,
-		assistRequested: run.AssistRequested, unknownAdopted: true,
+		assistRequested: run.AssistRequested, unknownAdopted: true, cpuUncertain: true,
 		claimedAt: now, preparedAt: now, grantedAt: started, ready: make(chan struct{}),
 	}
 	close(reservation.ready)

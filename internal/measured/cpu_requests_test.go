@@ -36,7 +36,7 @@ func TestCPURequestsUseP95OfRunAveragesNotPeaks(t *testing.T) {
 	}
 }
 func TestCPURequestHistoryNeedsDistinctCompleteSuccessfulRuns(t *testing.T) {
-	for _, change := range []string{"duplicate", "short", "failed", "reset", "saturated", "restart", "unknown-template", "changed"} {
+	for _, change := range []string{"duplicate", "short", "failed", "reset", "saturated", "restart", "unknown-template", "changed", "at-cpu-limit"} {
 		t.Run(change, func(t *testing.T) {
 			var rows []model.StepResourceUsage
 			for i := range 5 {
@@ -56,6 +56,8 @@ func TestCPURequestHistoryNeedsDistinctCompleteSuccessfulRuns(t *testing.T) {
 					v.RestartCount = 1
 				case "unknown-template":
 					v.TemplateName = ""
+				case "at-cpu-limit":
+					v.CPULimitNanoCores = ptr.To(int64(8_000_000_000))
 				case "changed":
 					v.RequestsChanged = true
 				}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -108,7 +109,10 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	}
 	pods, err := readPodDemand(workflow)
 	if err != nil {
-		return Adoption{}, err
+		// Admission metadata is advisory. Keep the immutable spec binding and
+		// recover scheduling credits from owned live Pods instead.
+		log.Printf("Workflow %s: CPU demand binding unreadable; using live Pod requests: %v", workflow.Name, err)
+		pods = nil
 	}
 	var peak argoworkflow.PodDemand
 	if pods != nil {

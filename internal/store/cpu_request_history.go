@@ -13,7 +13,7 @@ const cpuRequestHistorySQL = `WITH recent AS MATERIALIZED (
  WHERE repo_id=? AND started_at IS NOT NULL ORDER BY started_at DESC LIMIT 128
 )
  SELECT u.observation_json FROM recent r
- CROSS JOIN step_resource_usage u INDEXED BY sqlite_autoindex_step_resource_usage_1 ON u.run_id=r.id
+ CROSS JOIN step_resource_usage u ON u.run_id=r.id
  WHERE r.status='passed' AND CASE WHEN r.release=1 THEN 'release' WHEN r.trigger IN ('promotion','schedule') THEN r.trigger ELSE 'branch' END=?
  AND json_extract(u.observation_json,'$.container_name')='main'
  AND COALESCE(json_extract(u.observation_json,'$.container_kind'),'app')='app'

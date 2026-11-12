@@ -152,8 +152,9 @@ func (jobs *ArgoJobs) queuedCPU(ctx context.Context, request service.WorkflowReq
 	}
 	policy := jobs.cpuPolicy(ctx, request.Run, config, resolved.Workflow())
 	demand, _ := argojob.SchedulingDemand(resolved.Workflow(), policy)
-	if demand != nil && config.CPUAdmission.Milli > 0 {
-		demand.CPUMilli = min(demand.CPUMilli, config.CPUAdmission.Milli)
+	pool := config.CurrentCPU(ctx)
+	if demand != nil && pool.Milli > 0 {
+		demand.CPUMilli = min(demand.CPUMilli, pool.Milli)
 	}
 	return demand, nil
 }

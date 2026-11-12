@@ -95,6 +95,7 @@ func WithExecutionTargets(local *ArgoJobs, database *store.Store, definitions []
 		if err = json.Unmarshal(body, &definition.Config); err != nil {
 			return nil, err
 		}
+		definition.Config.CPUCapacity = runtime.CPUCapacity
 		definition.Config.CPUAdmission = runtime.CPUAdmission
 		definition.Config.CPUAdmissionDisabled = runtime.CPUAdmissionDisabled
 		definition.Config.StepCPURequestMaxMilli = runtime.StepCPURequestMaxMilli
@@ -290,6 +291,7 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	if child, ok := r.children[b.RunID]; ok {
 		return child, nil
 	}
+	snapshot.Config.CPUCapacity = definition.Config.CPUCapacity
 	snapshot.Config.CPUAdmission = definition.Config.CPUAdmission
 	snapshot.Config.CPUAdmissionDisabled = definition.Config.CPUAdmissionDisabled
 	snapshot.Config.StepCPURequestMaxMilli = definition.Config.StepCPURequestMaxMilli

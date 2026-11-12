@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,7 +92,16 @@ func SchedulingDemand(wf *wfv1.Workflow, policy argoworkflow.CPURequestPolicy) (
 	if d == nil {
 		return nil, errors.New("workflow scheduling requests cannot be bounded")
 	}
-	d.CPUMilli += d.Pods * 50
+	helper := executorControlResources().Requests
+	d.CPUMilli += d.Pods * helper.Cpu().MilliValue()
+	d.MemoryBytes += d.Pods * helper.Memory().Value()
+	if d.DeclaredTotal != nil {
+		d.DeclaredTotal.CPUMilli += d.DeclaredTotal.Pods * helper.Cpu().MilliValue()
+		d.DeclaredTotal.MemoryBytes += d.DeclaredTotal.Pods * helper.Memory().Value()
+	}
+	if !d.Valid() {
+		return nil, errors.New("effective scheduling demand cannot be bounded")
+	}
 	return d, nil
 }
 
@@ -101,11 +111,37 @@ func (request Request) cpuRequestPolicy(config Config) argoworkflow.CPURequestPo
 	if request.recoveredCPU != nil {
 		return request.recoveredCPU.Clone()
 	}
+	policy := argoworkflow.CPURequestPolicy{MaxMilli: config.StepCPURequestMaxMilli}
 	if p := request.DemandReceipt.CPURequestPolicy(); p != nil {
-		return *p
+		policy = *p
 	}
-	return argoworkflow.CPURequestPolicy{MaxMilli: config.StepCPURequestMaxMilli}
+	if config.CPUAdmissionDisabled {
+		return argoworkflow.CPURequestPolicy{}
+	}
+	// A pool may have been unavailable during preparation. Resolve its node
+	// cap before first submission; a later smaller cap can only lower demand.
+	// Recovery above retains the exact policy already submitted.
+	if config.CPUCapacity != nil {
+		current := config.CurrentCPU(context.Background()).StepMaxMilli
+		if current > 0 && (policy.MaxMilli == 0 || current < policy.MaxMilli) {
+			policy.MaxMilli = current
+		}
+	}
+	return policy
 }
+
+// FreezeSchedulingCPU completes the cached node-cap decision once, before
+// submission audit and native creation. It never resamples usage history.
+func (request Request) FreezeSchedulingCPU(config Config) Request {
+	policy := request.cpuRequestPolicy(config)
+	request.recoveredCPU = &policy
+	return request
+}
+func (request *Request) applyCPU(config Config, wf *wfv1.Workflow) {
+	*request = request.FreezeSchedulingCPU(config)
+	applySchedulingCPU(wf, *request.recoveredCPU)
+}
+
 func recoverCPURequestPolicy(wf *wfv1.Workflow, request *Request) error {
 	raw := wf.Annotations[cpuRequestsAnnotation]
 	if raw == "" {
@@ -119,7 +155,10 @@ func recoverCPURequestPolicy(wf *wfv1.Workflow, request *Request) error {
 	return nil
 }
 func applySchedulingCPU(wf *wfv1.Workflow, policy argoworkflow.CPURequestPolicy) {
-	capCPURequests(wf, policy.MaxMilli)
+	if policy.Parallelism > 0 && wf.Spec.Parallelism == nil {
+		n := policy.Parallelism
+		wf.Spec.Parallelism = &n
+	}
 	visit := func(t *wfv1.Template) {
 		milli := policy.Templates[t.Name]
 		if milli <= 0 {
@@ -133,12 +172,20 @@ func applySchedulingCPU(wf *wfv1.Workflow, policy argoworkflow.CPURequestPolicy)
 			return
 		}
 		q, ok := c.Resources.Requests[corev1.ResourceCPU]
-		if ok && q.MilliValue() > milli {
-			c.Resources.Requests[corev1.ResourceCPU] = *resource.NewMilliQuantity(milli, resource.DecimalSI)
+		if ok {
+			declared := q.MilliValue()
+			milli = max(milli, max(int64(50), (declared+9)/10))
+			if declared > milli {
+				c.Resources.Requests[corev1.ResourceCPU] = *resource.NewMilliQuantity(milli, resource.DecimalSI)
+			}
 		}
 	}
 	walkTemplates(wf, visit)
+	// The operator's node fraction remains the final safety cap, including
+	// sidecars and init containers. Limits are never modified.
+	capCPURequests(wf, policy.MaxMilli)
 }
+
 func stampSchedulingDemand(workflow *wfv1.Workflow, config Config, request Request) error {
 	policy := request.cpuRequestPolicy(config)
 	if !policy.Valid() {
@@ -146,7 +193,7 @@ func stampSchedulingDemand(workflow *wfv1.Workflow, config Config, request Reque
 	}
 	delete(workflow.Annotations, cpuRequestsAnnotation)
 	demand := request.PodDemand
-	if (policy.MaxMilli > 0 || len(policy.Templates) > 0) && request.DemandReceipt != nil {
+	if (policy.MaxMilli > 0 || len(policy.Templates) > 0 || policy.Parallelism > 0) && request.DemandReceipt != nil {
 		// Unsupported graph shapes reserve the whole admission pool; they remain valid Argo workflows.
 		demand, _ = SchedulingDemand(request.DemandReceipt.Workflow(), policy)
 		body, _ := json.Marshal(policy)
@@ -154,4 +201,15 @@ func stampSchedulingDemand(workflow *wfv1.Workflow, config Config, request Reque
 	}
 	stampPodDemand(workflow, demand)
 	return stampResourceFallback(workflow, request.ResourceFallback)
+}
+
+// CurrentCPU reads a cached observation; operator clients refresh independently.
+func (config Config) CurrentCPU(ctx context.Context) argoworkflow.CPUAdmission {
+	if config.CPUAdmissionDisabled {
+		return argoworkflow.CPUAdmission{Pool: config.CPUAdmission.Pool}.Canonical()
+	}
+	if config.CPUCapacity != nil {
+		return config.CPUCapacity(ctx).Canonical()
+	}
+	return config.CPUAdmission.Canonical()
 }

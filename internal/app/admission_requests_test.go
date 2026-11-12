@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 func TestSubmissionPropagatesFrozenAgedPriorityAndCPUReservation(t *testing.T) {
@@ -82,8 +83,8 @@ func TestCPUHistorySizingPrecedesAdmissionAndIsFrozenForSubmission(t *testing.T)
 	frozen.Templates["main"] = 3000
 	a.rows = nil
 	demand, err := jobs.AdmissionRequests(t.Context(), request)
-	if err != nil || demand.CPUMilli != 100 {
-		t.Fatalf("admission did not pack resized 50m + 50m executor: %+v %v", demand, err)
+	if err != nil || demand.CPUMilli != 155 {
+		t.Fatalf("admission did not pack declared floor 105m + 50m executor: %+v %v", demand, err)
 	}
 	if err = jobs.CreateWorkflow(t.Context(), request); err != nil {
 		t.Fatal(err)
@@ -93,7 +94,7 @@ func TestCPUHistorySizingPrecedesAdmissionAndIsFrozenForSubmission(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, tmpl := range wf.Spec.Templates {
-		if tmpl.Name == "main" && (tmpl.Container.Resources.Requests.Cpu().MilliValue() != 50 || tmpl.Container.Resources.Limits.Cpu().MilliValue() != 4000) {
+		if tmpl.Name == "main" && (tmpl.Container.Resources.Requests.Cpu().MilliValue() != 105 || tmpl.Container.Resources.Limits.Cpu().MilliValue() != 4000) {
 			t.Fatal("submission changed frozen requests or burst limit", tmpl.Container.Resources)
 		}
 	}
@@ -105,7 +106,7 @@ func TestCPUHistorySizingPrecedesAdmissionAndIsFrozenForSubmission(t *testing.T)
 func TestCPUAdmissionDisabledSkipsHistorySizing(t *testing.T) {
 	a := &sizingAuditor{}
 	jobs := &ArgoJobs{auditor: a}
-	policy := jobs.cpuPolicy(t.Context(), model.Run{}, argojob.Config{CPUAdmissionDisabled: true}, nil)
+	policy := jobs.cpuPolicy(t.Context(), model.Run{}, argojob.Config{CPUAdmissionDisabled: true, StepCPURequestMaxMilli: 3000}, nil)
 	if a.calls != 0 || policy.MaxMilli != 0 || len(policy.Templates) != 0 {
 		t.Fatal("off switch retained measured overrides", policy, a.calls)
 	}
@@ -125,5 +126,100 @@ func TestCPUHistoryRetiredTemplatesCannotInvalidateCurrentPolicy(t *testing.T) {
 	policy := jobs.cpuPolicy(t.Context(), model.Run{RepoID: 1}, argojob.Config{StepCPURequestMaxMilli: 3000}, wf)
 	if !policy.Valid() || len(policy.Templates) != 1 || policy.Templates["template-1"] != 50 {
 		t.Fatal("history invalidated policy", policy)
+	}
+}
+
+func TestWideFanoutFreezesArgoParallelismToPoolCapacity(t *testing.T) {
+	source := `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: root
+  templates:
+  - name: root
+    steps:
+    - - name: work
+        template: work
+        withItems: [1,2,3,4,5,6,7,8,9,10]
+  - name: work
+    container:
+      image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      command: [/bin/true]
+      resources:
+        requests: {cpu: 1, memory: 256Mi}
+        limits: {cpu: 4, memory: 1Gi}
+`
+	wf, err := argoworkflow.Decode([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := &ArgoJobs{}
+	config := argojob.Config{StepCPURequestMaxMilli: 3000, CPUAdmission: argoworkflow.CPUAdmission{Milli: 9600}}
+	policy := jobs.cpuPolicy(t.Context(), model.Run{}, config, wf)
+	if policy.Parallelism != 9 {
+		t.Fatal("fanout not bounded before admission", policy)
+	}
+	demand, err := argojob.SchedulingDemand(wf, policy)
+	if err != nil || demand.CPUMilli != 9450 {
+		t.Fatalf("effective demand: %+v %v", demand, err)
+	}
+	dir := t.TempDir()
+	writePipeline(t, dir, "build.yaml", source)
+	c := &routeController{}
+	config.Namespace = "pipelines"
+	config.PipelineServiceAccount = "pipeline"
+	config.CredentialedServiceAccount = "release"
+	config.CISecretsServiceAccount = "ci"
+	config.ExecutorServiceAccount = "executor"
+	jobs, err = NewArgoJobs(c, config, &stubAuditor{}, emptySecretAccess{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := service.WorkflowRequest{WorkflowName: "fanout", Run: model.Run{ID: "fanout", Actor: "operator@example.test", RepoID: 7, Trigger: "branch", RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("b", 40)}, Repository: model.Repository{ID: 7, Name: "repo"}, SourceDir: dir}
+	request.DemandReceipt, err = jobs.PipelineDemandReceipt(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = jobs.CreateWorkflow(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	built, err := argojob.Build(config, c.request)
+	if err != nil || built.Spec.Parallelism == nil || *built.Spec.Parallelism != 9 {
+		t.Fatalf("submitted fanout not bounded: %v %v", built, err)
+	}
+}
+
+func TestRecoveredCapacityPolicyFreezesBeforeSubmissionAudit(t *testing.T) {
+	dir := t.TempDir()
+	writePipeline(t, dir, "build.yaml", groupedPipeline(""))
+	current := argoworkflow.CPUAdmission{Pool: "cluster", HoldReason: "node capacity unavailable"}
+	config := argojob.Config{Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor", CPUCapacity: func(context.Context) argoworkflow.CPUAdmission { return current }}
+	c := &routeController{}
+	jobs, err := NewArgoJobs(c, config, &stubAuditor{}, emptySecretAccess{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := service.WorkflowRequest{WorkflowName: "recovered", Run: model.Run{ID: "recovered", Actor: "operator@example.test", RepoID: 7, Trigger: "branch", RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("b", 40)}, Repository: model.Repository{ID: 7, Name: "repo"}, SourceDir: dir}
+	request.DemandReceipt, err = jobs.PipelineDemandReceipt(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.DemandReceipt.CPURequestPolicy().MaxMilli != 0 {
+		t.Fatal("test requires unavailable preparation capacity")
+	}
+	current = argoworkflow.CPUAdmission{Pool: "cluster", Milli: 3200, NodeMilli: 4000, StepMaxMilli: 1000}
+	if err = jobs.CreateWorkflow(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	// The request retained by audit/controller creation must not change if a
+	// capacity refresh occurs between the two native Build calls.
+	current.StepMaxMilli = 500
+	built, err := argojob.Build(config, c.request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range built.Spec.Templates {
+		if template.Name == "main" && template.Container.Resources.Requests.Cpu().MilliValue() != 1000 {
+			t.Fatal("submitted CPU policy changed after freeze", template.Container.Resources)
+		}
 	}
 }

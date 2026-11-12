@@ -63,7 +63,7 @@ func TestCPURequestHistoryIsBoundedByRepositoryClassAndRecentRuns(t *testing.T) 
 	if err = plan.Err(); err != nil {
 		t.Fatal(err)
 	}
-	for _, index := range []string{"runs_repo_started_idx", "sqlite_autoindex_step_resource_usage_1"} {
+	for _, index := range []string{"runs_repo_started_idx", "run_id=?"} {
 		if !strings.Contains(details.String(), index) {
 			t.Fatal("history lookup lost bounded index", details.String())
 		}

@@ -15,9 +15,37 @@ func (s *Scheduler) admissionCPU(ctx context.Context, request WorkflowRequest) (
 	}); ok {
 		return sizing.AdmissionCPU(ctx, request)
 	}
-	return argoworkflow.CPUAdmission{Milli: s.admission.cpuMilli}, nil
+	return s.admission.defaultPool(), nil
 }
 
+func (s *Scheduler) reservationCPU(ctx context.Context, run model.Run) (argoworkflow.CPUAdmission, bool) {
+	pool := s.admission.defaultPool()
+	if sizing, ok := s.jobs.(interface {
+		AdoptedAdmissionCPU(context.Context, model.Run) (argoworkflow.CPUAdmission, error)
+	}); ok {
+		current, err := sizing.AdoptedAdmissionCPU(ctx, run)
+		if err != nil {
+			log.Printf("run %s: CPU pool unavailable: %v", run.ID, err)
+			return pool, false
+		}
+		pool = current
+	}
+	return pool.Canonical(), true
+}
+func (s *Scheduler) readLiveRequests(ctx context.Context, run model.Run) *argoworkflow.PodRequests {
+	if reader, ok := s.jobs.(interface {
+		LivePodRequests(context.Context, model.Run) (*argoworkflow.PodRequests, error)
+	}); ok {
+		readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		requests, err := reader.LivePodRequests(readCtx, run)
+		if err == nil {
+			return requests
+		}
+		log.Printf("run %s: live CPU requests unavailable; reserving whole pool: %v", run.ID, err)
+	}
+	return nil
+}
 func (s *Scheduler) sizeAdoptedReservation(ctx context.Context, run model.Run, r *admissionReservation) {
 	var demand *argoworkflow.PodDemand
 	if sizing, ok := s.jobs.(interface {
@@ -30,66 +58,112 @@ func (s *Scheduler) sizeAdoptedReservation(ctx context.Context, run model.Run, r
 			demand = nil
 		}
 	}
-	pool := argoworkflow.CPUAdmission{Milli: s.admission.cpuMilli}
-	if sizing, ok := s.jobs.(interface {
-		AdoptedAdmissionCPU(context.Context, model.Run) (argoworkflow.CPUAdmission, error)
-	}); ok {
-		var err error
-		pool, err = sizing.AdoptedAdmissionCPU(ctx, run)
-		if err != nil {
-			log.Printf("run %s: adopted CPU pool unavailable: %v", run.ID, err)
-		}
+	pool, known := s.reservationCPU(ctx, run)
+	unknown := demand == nil || demand.CPUMilli <= 0
+	var live *argoworkflow.PodRequests
+	if unknown {
+		live = s.readLiveRequests(ctx, run)
 	}
 	s.admission.mu.Lock()
 	defer s.admission.mu.Unlock()
-	r.cpu, r.poolKnown = pool, true
-	r.requests = clampAdmissionRequests(queuePodRequests(demand), pool.Milli)
-	r.unknownAdopted = demand == nil || demand.CPUMilli <= 0
+	r.cpu, r.poolKnown = pool, known
+	r.cpuUncertain = !known
+	r.requests = queuePodRequests(demand)
+	r.unknownAdopted = unknown
+	r.trackLive = unknown
+	r.liveRequests = live
 }
 
-// refreshAdmission reads held attempts outside the gate lock. Failed reads retain
-// the previous reservation; continued attempts regain their full CPU credit.
 func (s *Scheduler) refreshAdmission(ctx context.Context) {
 	gate := s.admission
+	if sizing, ok := s.jobs.(interface {
+		AdmissionCPUPools(context.Context) []argoworkflow.CPUAdmission
+	}); ok {
+		pools := sizing.AdmissionCPUPools(ctx)
+		gate.mu.Lock()
+		if gate.pools == nil {
+			gate.pools = map[string]argoworkflow.CPUAdmission{}
+		}
+		for _, pool := range pools {
+			pool = pool.Canonical()
+			gate.pools[pool.Pool] = pool
+		}
+		gate.mu.Unlock()
+	}
 	gate.mu.Lock()
 	refresh := gate.lastHoldRefresh.IsZero() || gate.clock().Sub(gate.lastHoldRefresh) >= 15*time.Second
+	var candidates []*admissionReservation
 	if refresh {
 		gate.lastHoldRefresh = gate.clock()
-	}
-	gate.mu.Unlock()
-	if holds, ok := s.jobs.(interface {
-		ListAssistHolds(context.Context, string) ([]model.AssistHold, error)
-	}); ok && refresh {
-		gate.mu.Lock()
-		var candidates []*admissionReservation
 		for _, r := range gate.reservations {
-			if r.granted && !r.released && r.assistRequested {
+			if !r.released && (r.granted && (r.assistRequested || r.unknownAdopted || r.trackLive) || !r.poolKnown) {
 				candidates = append(candidates, r)
 			}
 		}
-		gate.mu.Unlock()
-		for _, r := range candidates {
-			readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			run, err := s.database().Run(readCtx, r.runID)
-			var since time.Time
-			if err == nil {
-				var found []model.AssistHold
-				found, err = holds.ListAssistHolds(readCtx, run.WorkflowName)
-				for _, hold := range found {
-					if !assistReleased(run.Assist, hold.Pod) && (since.IsZero() || hold.HeldSince.Before(since)) {
-						since = hold.HeldSince
-					}
-				}
-			}
-			cancel()
-			if err == nil {
-				gate.mu.Lock()
-				r.heldSince = since
-				gate.mu.Unlock()
-			}
-		}
+	}
+	gate.mu.Unlock()
+	for _, r := range candidates {
+		s.refreshReservationCPU(ctx, r)
 	}
 	gate.mu.Lock()
 	gate.grantLocked()
 	gate.mu.Unlock()
+}
+func (s *Scheduler) refreshReservationCPU(ctx context.Context, r *admissionReservation) {
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	run, err := s.database().Run(readCtx, r.runID)
+	if err != nil {
+		s.clearLiveCPU(r)
+		return
+	}
+	pool, known := s.reservationCPU(readCtx, run)
+	var since time.Time
+	if run.AssistRequested {
+		if reader, ok := s.jobs.(interface {
+			ListAssistHolds(context.Context, string) ([]model.AssistHold, error)
+		}); ok {
+			holds, err := reader.ListAssistHolds(readCtx, run.WorkflowName)
+			if err != nil {
+				s.clearLiveCPU(r)
+				return
+			}
+			for _, hold := range holds {
+				if !assistReleased(run.Assist, hold.Pod) && (since.IsZero() || hold.HeldSince.Before(since)) {
+					since = hold.HeldSince
+				}
+			}
+		}
+	}
+	gate := s.admission
+	gate.mu.Lock()
+	unknown := r.unknownAdopted || r.trackLive
+	gate.mu.Unlock()
+	var live *argoworkflow.PodRequests
+	if unknown || !since.IsZero() {
+		live = s.readLiveRequests(readCtx, run)
+	}
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	r.cpu, r.poolKnown = pool, known
+	r.cpuUncertain = !known
+	r.heldSince = since
+	r.trackLive = unknown || !since.IsZero()
+	r.liveRequests = live
+}
+
+func (s *Scheduler) clearLiveCPU(r *admissionReservation) {
+	s.admission.mu.Lock()
+	r.liveRequests = nil
+	s.admission.mu.Unlock()
+}
+
+func (s *Scheduler) reserveAdmission(ctx context.Context, run model.Run) *admissionReservation {
+	r := s.admission.reserveRun(run)
+	pool, known := s.reservationCPU(ctx, run)
+	s.admission.mu.Lock()
+	defer s.admission.mu.Unlock()
+	r.cpu, r.poolKnown, r.cpuUncertain = pool, known, !known
+	s.admission.grantLocked()
+	return r
 }

@@ -150,8 +150,8 @@ func TestCapabilityDemandBindingRetainsAllGrantedDimensions(t *testing.T) {
 	for _, invalid := range []map[string]int64{{"unqualified": 1}, {"kubernetes.io/worker": 1}} {
 		demand.ExtendedResources = invalid
 		stampPodDemand(wf, demand)
-		if _, err := readPodDemand(wf); err == nil {
-			t.Fatal("unqualified or reserved resource survived recovery")
+		if restored, err := readPodDemand(wf); err != nil || restored != nil {
+			t.Fatal("invalid derived resource demand was persisted", restored, err)
 		}
 	}
 }

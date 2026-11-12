@@ -8,9 +8,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	wffake "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/fake"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -204,12 +207,13 @@ func TestAdmissionDeadlineMissingWaiterDoesNotChargePriorCapacityWait(t *testing
 	wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
 	pod.CreationTimestamp = wf.CreationTimestamp
 	pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu"}}}
-	if err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err == nil || !strings.Contains(err.Error(), "CPU capacity wait exceeded") {
-		t.Fatal("CPU capacity wait escaped its bound", err)
+	pod.Spec.Containers = []corev1.Container{{Name: "main", Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}}}}
+	if err := (&admissionProgress{maxPodCPU: 12000}).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err != nil {
+		t.Fatal("ordinary capacity wait charged to startup", err)
 	}
 	pod.Spec.NodeName = "worker"
 	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(now)}}
-	watch := admissionProgress{} // reconstruct from durable scheduling evidence
+	watch := admissionProgress{maxPodCPU: 12000} // reconstruct from durable scheduling evidence
 	if err := watch.check(wf, []corev1.Pod{*pod}, nil, now.Add(9*time.Minute), 10*time.Minute); err != nil {
 		t.Fatal("pre-scheduling wait consumed identity observation budget", err)
 	}
@@ -279,7 +283,7 @@ func TestAdmissionDeadlineLeavesSynchronizationWaitToArgo(t *testing.T) {
 	}
 }
 
-func TestAdmissionCPUWaitExpiresAfterEarlierScheduledStep(t *testing.T) {
+func TestImpossibleCPUWaitExpiresAfterEarlierScheduledStep(t *testing.T) {
 	_, wf, pod, _ := executorRetryFixture(t)
 	now := time.Now()
 	wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
@@ -287,13 +291,34 @@ func TestAdmissionCPUWaitExpiresAfterEarlierScheduledStep(t *testing.T) {
 	pod.Spec.NodeName = ""
 	pod.CreationTimestamp = metav1.NewTime(now.Add(-10 * time.Minute))
 	pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu", LastTransitionTime: pod.CreationTimestamp}}}
-	watch := new(admissionProgress)
+	watch := &admissionProgress{maxPodCPU: 1}
+	pod.Spec.Containers = []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("13")}}}}
 	if err := watch.check(wf, []corev1.Pod{*pod}, nil, now.Add(-time.Second), 10*time.Minute); err != nil {
 		t.Fatal("CPU wait expired before its bound", err)
 	}
 	// Reconstruct the observer: earlier scheduled work must not exempt this Pod.
-	err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute)
-	if err == nil || !strings.Contains(err.Error(), "CPU capacity wait exceeded") {
+	err := (&admissionProgress{maxPodCPU: 12000}).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "exceeds largest eligible node") {
 		t.Fatal("later CPU wait escaped its bound", err)
+	}
+}
+
+func TestCPUAdmissionOffAndFittingPodsKeepCapacityWaitExempt(t *testing.T) {
+	_, wf, pod, _ := executorRetryFixture(t)
+	now := time.Now()
+	wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+	pod.CreationTimestamp = wf.CreationTimestamp
+	pod.Spec.NodeName = ""
+	pod.Spec.Containers = []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("13")}}}}
+	pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu", LastTransitionTime: pod.CreationTimestamp}}}
+	config := Config{CPUAdmissionDisabled: true, CPUAdmission: argoworkflow.CPUAdmission{NodeMilli: 12000}}
+	watch := &admissionProgress{maxPodCPU: config.CurrentCPU(t.Context()).NodeMilli}
+	if err := watch.check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err != nil {
+		t.Fatal("off switch retained CPU expiry", err)
+	}
+	pod.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU] = resource.MustParse("1")
+	watch = &admissionProgress{maxPodCPU: 12000}
+	if err := watch.check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err != nil {
+		t.Fatal("fitting Pod expired during outside capacity wait", err)
 	}
 }

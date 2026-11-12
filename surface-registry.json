@@ -26,7 +26,7 @@
     },
     "value:cpu_capacity": {
       "doc_anchor": "docs/cpu-admission.md#ordering-and-bounded-waits",
-      "test_ref": "internal/service/admission_cpu_test.go TestAdmissionCPUDoesNotBackfillPastLargeWaiter"
+      "test_ref": "internal/service/admission_cpu_test.go TestAdmissionCPUBoundedBackfillProtectsLargeWaiter"
     },
     "flag:admission-cpu-headroom-percent": {
       "doc_anchor": "docs/cpu-admission.md#defaults",
@@ -763,6 +763,10 @@
     "annotation:oberth.ci/cpu-requests": {
       "doc_anchor": "docs/cpu-admission.md#defaults",
       "test_ref": "internal/app/admission_requests_test.go TestCPUHistorySizingPrecedesAdmissionAndIsFrozenForSubmission"
+    },
+    "value:cpu_reason": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "internal/service/admission_live_test.go TestCapacityHeldPoolRefreshUnblocksWithoutRestart"
     }
   }
 }

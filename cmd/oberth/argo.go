@@ -86,6 +86,7 @@ func buildArgoEngine(
 	stepStartupAllowance := options.stepStartupAllowance
 	config := argojob.Config{
 		StepCPURequestMaxMilli:     options.stepCPURequestMaxMilli,
+		CPUCapacity:                options.cpuCapacity,
 		CPUAdmissionDisabled:       !options.admissionCPUEnabled,
 		CPUAdmission:               argoworkflow.CPUAdmission{Pool: options.admissionCPUPool, Milli: options.admissionCPUMilli},
 		ExecutionPlacement:         placementConfig,
@@ -282,6 +283,7 @@ func validateArgoServeOptions(options serveOptions) error {
 	}
 	return argojob.Config{
 		StepCPURequestMaxMilli:     options.stepCPURequestMaxMilli,
+		CPUCapacity:                options.cpuCapacity,
 		CPUAdmissionDisabled:       !options.admissionCPUEnabled,
 		CPUAdmission:               argoworkflow.CPUAdmission{Pool: options.admissionCPUPool, Milli: options.admissionCPUMilli},
 		ExecutionPlacement:         placementConfig,

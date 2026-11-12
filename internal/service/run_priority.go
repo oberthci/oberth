@@ -217,23 +217,18 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 // priorityDispatchAvailable admits at most one extra waiting claim per higher
 // class, so a queue of ordinary claims cannot hide a release behind the
 // dispatch ceiling. Granted work still owns its full budget/run permits.
-func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, active int) (bool, error) {
-	reader, ok := scheduler.store.(priorityQueueReader)
+func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, _ int) (bool, error) {
+	reader, ok := scheduler.store.(interface {
+		NextQueuedRun(context.Context) (model.Run, error)
+	})
 	if !ok {
 		return false, nil
 	}
-	// Ordinary dispatch can fill its allowance with held lower waiters. Each
-	// higher class needs an extra claim: standard, promotion, then high. Count
-	// all three transitions so parked lower classes cannot exhaust high's path.
-	// This bounds claims/checkouts only.
 	gate := scheduler.admission
 	gate.mu.Lock()
-	// Granted runs are running Workflows, not claims waiting here.
-	ceiling := model.PriorityHigh.Rank() - model.PriorityLow.Rank()
-	waiting := active - gate.runs
 	hasWaiters := len(gate.waiters) > 0
 	gate.mu.Unlock()
-	if waiting >= ceiling || !hasWaiters {
+	if !hasWaiters {
 		return false, nil
 	}
 	next, err := retryDatabase(ctx, "NextQueuedRun", reader.NextQueuedRun)

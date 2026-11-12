@@ -134,6 +134,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 		}
 	}
 	scheduler.admission.mu.Lock()
+	grant.unknownAdopted = grant.requests == nil
 	grant.retained = true
 	grant.submitted = false
 	scheduler.admission.mu.Unlock()

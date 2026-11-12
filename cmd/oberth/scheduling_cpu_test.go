@@ -13,12 +13,14 @@ import (
 func TestSchedulingCPUAllocatableHeadroomAndStepCap(t *testing.T) {
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}, Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("12")}, Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	client := fake.NewClientset(node)
-	budget, cap, err := schedulingCPU(t.Context(), client, 20, 25)
+	p, err := schedulingCPU(t.Context(), client, "", 20, 25)
+	budget, cap := p.Milli, p.StepMaxMilli
 	if err != nil || budget != 9600 || cap != 3000 {
 		t.Fatalf("budget=%d cap=%d err=%v", budget, cap, err)
 	}
-	if _, _, err = schedulingCPU(t.Context(), fake.NewClientset(), 20, 25); err == nil {
-		t.Fatal("unknown capacity opened admission")
+	empty, err := schedulingCPU(t.Context(), fake.NewClientset(), "", 20, 25)
+	if err != nil || empty.Milli != 0 || empty.StepMaxMilli != 0 || empty.HoldReason == "" {
+		t.Fatalf("empty capacity should start held: %+v %v", empty, err)
 	}
 }
 
@@ -31,7 +33,8 @@ func TestSchedulingCPUExcludesTaintsAndSumsEligibleNodes(t *testing.T) {
 	d.Spec.Taints = []corev1.Taint{{Key: "dedicated", Effect: corev1.TaintEffectNoExecute}}
 	e.Spec.Unschedulable = true
 	f.Status.Conditions[0].Status = corev1.ConditionFalse
-	budget, cap, err := schedulingCPU(t.Context(), fake.NewClientset(a, b, c, d, e, f), 20, 25)
+	p, err := schedulingCPU(t.Context(), fake.NewClientset(a, b, c, d, e, f), "", 20, 25)
+	budget, cap := p.Milli, p.StepMaxMilli
 	if err != nil || budget != 12800 || cap != 3000 {
 		t.Fatalf("budget=%d cap=%d err=%v", budget, cap, err)
 	}

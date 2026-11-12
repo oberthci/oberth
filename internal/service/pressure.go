@@ -101,6 +101,7 @@ type pressureCheck struct {
 	state               model.AdmissionPressure
 	sampledAt           time.Time
 	lastGrant           time.Time
+	lastHardGrant       time.Time
 	starvationGranted   bool
 	ioHeld, cpuHeld     bool
 	warned              bool
@@ -274,7 +275,9 @@ func (gate *admissionGate) deferPressureLocked(r *admissionReservation, now time
 			r.pressureSince = now
 			p.deferrals++
 		}
-		if now.Sub(r.pressureSince) >= time.Duration(p.config.MaxWaitSeconds)*time.Second && !p.starvationGranted {
+		window := time.Duration(p.config.MaxWaitSeconds) * time.Second
+		if now.Sub(r.pressureSince) >= window && !p.starvationGranted && (p.lastHardGrant.IsZero() || now.Sub(p.lastHardGrant) >= window) {
+			p.lastHardGrant = now
 			p.starvationGranted = true
 			p.bypasses++
 			return false

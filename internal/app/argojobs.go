@@ -493,7 +493,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
 		Fragments:  fragments,
-	}
+	}.FreezeSchedulingCPU(jobs.config)
 
 	sources, err := argoworkflow.PinnedSources(resolved.Workflow())
 	if err != nil {

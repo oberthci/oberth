@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -80,6 +82,7 @@ type serveOptions struct {
 	stepCPURequestPercent       int64
 	admissionCPUMilli           int64
 	admissionCPUPool            string
+	cpuCapacity                 argoworkflow.CPUCapacitySource
 	stepCPURequestMaxMilli      int64
 
 	issueStaleAfter         time.Duration
@@ -918,6 +921,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 		AdmissionPressure:       options.admissionPressure,
 		AdmissionCPUMilli:       options.admissionCPUMilli,
+		AdmissionCPUPool:        options.admissionCPUPool,
 		StalledRunTimeout:       options.admissionStallTimeout,
 		RestoredRunsFile:        filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})

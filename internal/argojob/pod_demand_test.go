@@ -97,8 +97,9 @@ func TestDeclaredPodAdoptionRestoresSealedDemand(t *testing.T) {
 		t.Fatal("adopted reservation annotation changed undetected")
 	}
 	changed.Annotations[podDemandAnnotation] = "{}"
-	if _, err := c.bindAdoption(changed, req); err == nil {
-		t.Fatal("malformed reservation restored")
+	unknown, err := c.bindAdoption(changed, req)
+	if err != nil || unknown.Pods.Valid() || !unknown.matches(changed) || binding.matches(changed) {
+		t.Fatalf("optional demand must degrade while retaining immutable binding: %+v %v", unknown, err)
 	}
 }
 

@@ -44,17 +44,42 @@ func (jobs *ArgoJobs) AdmissionCPU(ctx context.Context, request service.Workflow
 		if err != nil {
 			return argoworkflow.CPUAdmission{}, err
 		}
-		return child.config.CPUAdmission, nil
+		return child.config.CurrentCPU(ctx), nil
 	}
-	return jobs.config.CPUAdmission, nil
+	return jobs.config.CurrentCPU(ctx), nil
 }
 func (jobs *ArgoJobs) AdoptedAdmissionCPU(ctx context.Context, run model.Run) (argoworkflow.CPUAdmission, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
-		if err != nil {
-			return argoworkflow.CPUAdmission{}, err
-		}
-		return child.config.CPUAdmission, nil
+	if jobs.routes == nil {
+		return jobs.config.CurrentCPU(ctx), nil
 	}
-	return jobs.config.CPUAdmission, nil
+	r := jobs.routes
+	binding, found, err := r.store.ExecutionTarget(ctx, run.ID, run.WorkflowName)
+	if err != nil {
+		return r.local.config.CurrentCPU(ctx), err
+	}
+	if found && binding.Target != "local" {
+		if target, ok := r.definitions[binding.Target]; ok {
+			return target.Config.CurrentCPU(ctx), nil
+		}
+		return argoworkflow.CPUAdmission{Pool: "target:" + binding.Target, HoldReason: "CPU admission held: execution target unavailable"}, nil
+	}
+	if !found {
+		for _, target := range r.definitions {
+			_, repoID, ref, _, _, _, _ := target.Config.ExecutionPlacement.Identity()
+			if run.RepoID == repoID && run.Ref == ref && run.RefKind == model.RefBranch {
+				return target.Config.CurrentCPU(ctx), nil
+			}
+		}
+	}
+	return r.local.config.CurrentCPU(ctx), nil
+}
+func (jobs *ArgoJobs) AdmissionCPUPools(ctx context.Context) []argoworkflow.CPUAdmission {
+	if jobs.routes == nil {
+		return []argoworkflow.CPUAdmission{jobs.config.CurrentCPU(ctx)}
+	}
+	pools := []argoworkflow.CPUAdmission{jobs.routes.local.config.CurrentCPU(ctx)}
+	for _, target := range jobs.routes.definitions {
+		pools = append(pools, target.Config.CurrentCPU(ctx))
+	}
+	return pools
 }
