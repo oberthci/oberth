@@ -2282,3 +2282,18 @@ func TestUpstreamAuthStatusReportsWithoutProbingNonSSH(t *testing.T) {
 		t.Fatalf("missing key: %q", got)
 	}
 }
+
+func TestRepoAddAcceptsMatchingQualifiedPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oberth.sqlite")
+	registerTestUpstream(t, path, "forge", "ssh://git@forge.example/team")
+	for _, name := range []string{"forge/team/project.git", "project", "team/project"} {
+		if err := runRepoAdd(t.Context(), []string{"--database", path, name, "forge"}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"other/team/project", "forge/other/project", "other/project", "forge/team/../project"} {
+		if err := runRepoAdd(t.Context(), []string{"--database", path, name, "forge"}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err == nil {
+			t.Fatalf("accepted mismatched path %s", name)
+		}
+	}
+}

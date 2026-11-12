@@ -271,8 +271,16 @@ ALTER TABLE token_credentials DROP COLUMN certificate_only;
 DELETE FROM schema_migrations WHERE id='20261111190000-client-certificates';
 `
 
+// PostPromotionConfirmationDowngrade reconstructs historical fixtures without
+// claiming a forge observation that the old server never made.
+const PostPromotionConfirmationDowngrade = `
+DROP TRIGGER IF EXISTS promotions_confirmation_guard;
+ALTER TABLE promotions DROP COLUMN observed_target_sha;
+DELETE FROM schema_migrations WHERE id='20261112094524-promotion-forge-confirmation-edaf1e2c27e6e0e3d0d942490834bbb2';
+`
+
 // PostCanonicalPrioritiesDowngrade removes the receipt in disposable fixtures.
-const PostCanonicalPrioritiesDowngrade = `
+const PostCanonicalPrioritiesDowngrade = PostPromotionConfirmationDowngrade + `
 DROP TABLE IF EXISTS node_boot_observations;
 DELETE FROM schema_migrations WHERE id='20261111220000-node-boot-observations';
 ` + PostUplinkInvitesDowngrade + `

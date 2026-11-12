@@ -147,21 +147,25 @@ func attemptPublicationMutation(
 	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	ctx = finalizeCtx
-	if mutationErr == nil {
+	if mutationErr == nil && publication.PromotionID == "" {
 		return finalizePublication(ctx, publications, publication.ID, model.PublicationDelivered, "")
 	}
 
-	// A failed push or audit response can be ambiguous: the remote may already
-	// hold the exact result. Read it before deciding whether the operation is red.
+	// Confirm every promotion through the configured server-side transport,
+	// including successful pushes. A push acknowledgement alone is not forge
+	// observation. Failed pushes also need read-back because replies can be lost.
 	resume := suspendDispatch(ctx)
 	remoteSHA, exists, verifyErr := git.RemoteRef(ctx, repositoryInput, ref)
 	resume()
 	if verifyErr != nil {
-		failure := errors.Join(
-			fmt.Errorf("publication %s mutation was ambiguous: %w", publication.ID, mutationErr),
-			fmt.Errorf("verify remote ref after ambiguous publication: %w", verifyErr),
-		)
+		failure := fmt.Errorf("verify remote ref after publication: %w", verifyErr)
+		if mutationErr != nil {
+			failure = errors.Join(fmt.Errorf("publication %s mutation was ambiguous: %w", publication.ID, mutationErr), failure)
+		}
 		return retryPublicationFailure(ctx, publications, publication, failure)
+	}
+	if mutationErr == nil {
+		mutationErr = fmt.Errorf("upstream promotion target %s was not confirmed at %s", ref, publication.ResultSHA)
 	}
 	switch classifyRemotePublication(publication, remoteSHA, exists) {
 	case remotePublicationResult:

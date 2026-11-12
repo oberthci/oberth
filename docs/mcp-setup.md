@@ -1177,3 +1177,24 @@ Repository concurrency groups, `concurrency_groups` and `oberth admission
 groups` are gone since v0.20.0; runs that must not overlap declare a native
 Argo mutex or semaphore, and `sync_status` reports holders, waiters and
 history. See [where limits live](where-limits-live.md#migrating-from-concurrency-groups).
+
+## Promotion forge confirmation
+
+`promote_status {"id":"<promotion-id>"}` returns a durable
+`promotion.observed_target_sha` when the promotion passed after server-side
+forge confirmation. The server uses the configured upstream transport and deploy
+key for an exact `git ls-remote --refs upstream refs/heads/<branch>` read after
+publishing, including after a successful push acknowledgement. The observed SHA
+must equal `promotion.ResultSHA` before the promotion can pass. Read failures
+follow the bounded publication retry policy; missing or moved refs cannot
+produce a passed confirmation. A retry can confirm a previously delivered result
+without pushing again. The same SHA appears in `promotion.finished` event data.
+The observation is persisted with terminal publication and promotion state in
+one transaction, so status and events survive a restart. It describes the forge
+head at completion, not the current head after later pushes. Historical records
+from before this feature have no observation and are not backfilled.
+
+For receive repair, use `receive_outbox {"action":"list"}`, then
+`{"action":"show","repo":"<repo-from-list>"}` with the same tool. There is no
+`limit` or `operation` argument. See [receive repair](architecture.md) for retry
+and abandon examples.

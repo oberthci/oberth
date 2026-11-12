@@ -3691,7 +3691,7 @@ func decodeTool(raw json.RawMessage, value any) error {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
 		if strings.HasPrefix(err.Error(), "json: unknown field ") {
-			return fmt.Errorf("%w: %s; accepted arguments: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "json: "), strings.Join(toolArgumentNames(value), ", "))
+			return refuse(ErrInvalidInput, "%s; accepted arguments: %s", strings.TrimPrefix(err.Error(), "json: "), strings.Join(toolArgumentNames(value), ", "))
 		}
 		var typeErr *json.UnmarshalTypeError
 		if errors.As(err, &typeErr) && typeErr.Field != "" {
@@ -3707,7 +3707,7 @@ func decodeTool(raw json.RawMessage, value any) error {
 					expected = "non-negative integer line count"
 				}
 			}
-			return fmt.Errorf("%w: %s must be %s", ErrInvalidInput, typeErr.Field, expected)
+			return refuse(ErrInvalidInput, "%s must be %s", typeErr.Field, expected)
 		}
 		return fmt.Errorf("%w: decode tool arguments: %w", ErrInvalidInput, err)
 	}

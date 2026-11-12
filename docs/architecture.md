@@ -302,7 +302,19 @@ and publication refuse the affected repository until its record is repaired.
 An unscoped admin repairs it with the `receive_outbox` MCP tool or `oberth outbox`:
 `show` reads the record, `retry` delivers it (an operator-set `quarantined` state
 is restored first when the rest validates), and `abandon` moves it to
-`.receive-outbox/abandoned/` with an audit entry.
+`.receive-outbox/abandoned/` with an audit entry. MCP arguments use `action`
+(not `operation` or `command`), with `repo` exactly as returned by `list`:
+
+```json
+{"action":"list"}
+{"action":"show","repo":"forge/team/project"}
+{"action":"retry","repo":"forge/team/project"}
+{"action":"abandon","repo":"forge/team/project","id":"<record-id-from-show>","reason":"already delivered"}
+```
+
+`list` takes no pagination arguments. An invalid argument names the field and,
+for unknown fields, lists accepted arguments; argument values and private
+storage/transport errors are not included in schema diagnostics.
 
 Branch deletions never wait for the forge. Receive finalization, under the
 repository lock, writes a private `refs/oberth/deleting/heads/<branch>` marker

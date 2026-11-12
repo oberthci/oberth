@@ -671,6 +671,10 @@
     "env:DOCKER_CONTEXT": {
       "doc_anchor": "docs/plugin-install.md#client-ports-before-install",
       "test_ref": "internal/installer/client_probe_test.go TestClientPortProbeDoesNotBorrowRemoteOrOtherClusterBindings"
+    },
+    "value:observed_target_sha": {
+      "doc_anchor": "docs/mcp-setup.md#promotion-forge-confirmation",
+      "test_ref": "internal/service/promotion_confirmation_test.go TestPromotionConfirmsForgeBeforePassing"
     }
   }
 }

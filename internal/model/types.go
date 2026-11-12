@@ -425,23 +425,25 @@ func (s PromotionStatus) Valid() bool {
 func (s PromotionStatus) Terminal() bool { return s.Valid() && s != PromotionPending }
 
 type Promotion struct {
-	BranchCISkipped bool
-	Train           *PromotionTrain `json:"train,omitempty"`
-	ID              string
-	Sequence        int64
-	RepoID          int64
-	SourceBranch    string
-	SourceSHA       string
-	TargetRef       string
-	PreviousSHA     string
-	ResultSHA       string
-	Actor           string
-	Status          PromotionStatus
-	RunID           string
-	GrantID         string
-	Error           string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// ObservedTargetSHA is the exact forge head read before publication settled.
+	ObservedTargetSHA string `json:"observed_target_sha,omitempty"`
+	BranchCISkipped   bool
+	Train             *PromotionTrain `json:"train,omitempty"`
+	ID                string
+	Sequence          int64
+	RepoID            int64
+	SourceBranch      string
+	SourceSHA         string
+	TargetRef         string
+	PreviousSHA       string
+	ResultSHA         string
+	Actor             string
+	Status            PromotionStatus
+	RunID             string
+	GrantID           string
+	Error             string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // PromotionListFilter uses exact scope filters and an exclusive sequence cursor.

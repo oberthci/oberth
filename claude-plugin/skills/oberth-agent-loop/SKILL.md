@@ -74,6 +74,12 @@ of failing the run: event `run.held` with `step`, `pod` and `abandon_at`.
   completion evidence either.
 - Only a passed, unassisted run of the exact SHA, or a passed promotion
   (`promote_status`), counts. `promote` takes the target branch as `branch`.
+  Follow the promotion ID with `promote_status {"id":"<promotion-id>"}`.
+  After publication, the server reads the forge target with its configured
+  deploy key; a passed result records `promotion.observed_target_sha`, equal
+  to `promotion.ResultSHA`. Use that observation to confirm publication when
+  the private forge is inaccessible locally. It records the completion-time
+  head; the branch can move afterward.
 
 ## Connection
 

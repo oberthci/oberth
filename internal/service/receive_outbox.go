@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -42,8 +41,13 @@ func (service *API) receiveOutboxTool(ctx context.Context, actor api.Actor, raw 
 	if err := decodeTool(raw, &args); err != nil {
 		return nil, err
 	}
+	switch args.Action {
+	case "list", "show", "retry", "abandon":
+	default:
+		return nil, refuse(ErrInvalidInput, "action must be list, show, retry or abandon")
+	}
 	if args.Action != "list" && strings.TrimSpace(args.Repo) == "" {
-		return nil, fmt.Errorf("%w: repo is required for %s", ErrInvalidInput, args.Action)
+		return nil, refuse(ErrInvalidInput, "repo is required for %s", args.Action)
 	}
 	switch args.Action {
 	case "list":
@@ -79,14 +83,14 @@ func (service *API) receiveOutboxTool(ctx context.Context, actor api.Actor, raw 
 	case "abandon":
 		reason := strings.TrimSpace(args.Reason)
 		if reason == "" || len(reason) > 512 {
-			return nil, fmt.Errorf("%w: abandon requires a reason of 1..512 bytes", ErrInvalidInput)
+			return nil, refuse(ErrInvalidInput, "reason for abandon must be 1..512 bytes")
 		}
 		record, inspectErr := service.receiveOutbox.InspectReceiveRecord(args.Repo)
 		if inspectErr != nil {
 			return nil, inspectErr
 		}
 		if record.ID != "" && args.ID != record.ID {
-			return nil, fmt.Errorf("%w: abandon requires id %q (from show) to name the exact record", ErrInvalidInput, record.ID)
+			return nil, refuse(ErrInvalidInput, "id is required to equal the exact record id from show")
 		}
 		var result gitcache.ReceiveRecord
 		err := auditedGitMutation(ctx, service.auditor, actor.Identity, "receive_outbox.abandon", "receive", outboxAuditResource(record), outboxAuditDetails(record, reason),
@@ -100,7 +104,7 @@ func (service *API) receiveOutboxTool(ctx context.Context, actor api.Actor, raw 
 		}
 		return result, nil
 	default:
-		return nil, fmt.Errorf("%w: action must be list, show, retry or abandon", ErrInvalidInput)
+		return nil, refuse(ErrInvalidInput, "action must be list, show, retry or abandon")
 	}
 }
 

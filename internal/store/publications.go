@@ -75,7 +75,7 @@ func (s *Store) BeginPublication(ctx context.Context, spec model.PublicationSpec
 	if spec.PromotionID != "" {
 		promotion, promotionErr := scanPromotion(tx.QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, grant_id, branch_ci_skipped, error, created_at, updated_at, train_json
+       result_sha, actor, status, run_id, grant_id, branch_ci_skipped, error, created_at, updated_at, train_json, observed_target_sha
 FROM promotions WHERE id = ?`, spec.PromotionID))
 		if errors.Is(promotionErr, sql.ErrNoRows) {
 			return model.Publication{}, fmt.Errorf("%w: publication promotion", ErrNotFound)
@@ -227,6 +227,8 @@ WHERE status = 'pending' ORDER BY sequence`)
 // FinalizePublication closes the outbox obligation and every attached durable
 // owner in one SQLite transaction. There is no state in which the external ref
 // is recorded as delivered while its run or promotion remains pending.
+// Promotion delivery callers must first read the exact result at the forge;
+// equality lets this transaction retain that observed SHA with terminal state.
 func (s *Store) FinalizePublication(ctx context.Context, id string, status model.PublicationStatus, failure string) (model.PublicationFinalization, error) {
 	if status == model.PublicationAbandoned {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: use AbandonPublication with an actor and reason", ErrInvalid)
@@ -338,11 +340,12 @@ RETURNING `+runColumns, runStatus, phase, runError, runReason, runReason, failed
 		}
 		finalization.Promotion, err = scanPromotion(tx.QueryRowContext(ctx, `
 UPDATE promotions
-SET status = ?, error = ?, updated_at = ?
+SET status = ?, error = ?, updated_at = ?,
+    observed_target_sha = CASE WHEN ? = 'delivered' THEN result_sha ELSE '' END
 WHERE id = ? AND status = 'pending'
 RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-          result_sha, actor, status, run_id, grant_id, branch_ci_skipped, error, created_at, updated_at, train_json`,
-			promotionStatus, failure, now, publication.PromotionID))
+          result_sha, actor, status, run_id, grant_id, branch_ci_skipped, error, created_at, updated_at, train_json, observed_target_sha`,
+			promotionStatus, failure, now, status, publication.PromotionID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.PublicationFinalization{}, fmt.Errorf("%w: publication promotion is not pending", ErrInvalidState)
 		}

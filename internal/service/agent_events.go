@@ -658,6 +658,9 @@ func (recorder *agentEventRecorder) observePromotionRequests(ctx context.Context
 	if promotion.ResultSHA != "" {
 		data["result_sha"] = promotion.ResultSHA
 	}
+	if promotion.ObservedTargetSHA != "" {
+		data["observed_target_sha"] = promotion.ObservedTargetSHA
+	}
 	if promotion.RunID != "" {
 		data["run_id"] = promotion.RunID
 	}

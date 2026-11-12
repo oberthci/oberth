@@ -1118,7 +1118,7 @@ func runRepoAdd(ctx context.Context, arguments []string, output io.Writer, depen
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: repo add requires a repository name and an upstream name", errUsage)
 	}
-	name, err := gitcache.NormalizeRepo(flags.Arg(0))
+	pathUpstream, pathOrg, name, err := gitcache.ParseRepoPath(flags.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -1152,6 +1152,9 @@ func runRepoAdd(ctx context.Context, arguments []string, output io.Writer, depen
 	}
 	if upstream.ID <= 0 {
 		return fmt.Errorf("upstream %q is not registered (configured: %s)", upstreamName, strings.Join(names, ", "))
+	}
+	if pathUpstream != "" && pathUpstream != upstream.Name || pathOrg != "" && pathOrg != upstream.Org() {
+		return fmt.Errorf("repository path does not belong to upstream %q: use %q or %q", upstream.Name, name, upstream.QualifiedRepo(name))
 	}
 	// Idempotency is scoped to THIS upstream: same-named repositories may
 	// exist under different upstreams (issue #264), so a name registered

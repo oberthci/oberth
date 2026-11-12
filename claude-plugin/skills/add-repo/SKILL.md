@@ -76,8 +76,9 @@ same approved change. Commits and pushes still need their explicit approval.
    upstream and never rotate its key silently.
 4. **Register and verify the path.** With consent to this repository mapping,
    run `helper register '<context>' '<namespace>' '<pod>' '<repo>' '<upstream>'
-   '<default-branch>' --consent`. Repository names are the final slug, not the
-   whole forge path. Call MCP `repo_list` and take this registration's exact
+   '<default-branch>' --consent`. Use the final repository slug or its qualified
+   `<upstream>/<route-org>/<repo>` git path; qualified paths are checked against the
+   selected upstream and organization. Call MCP `repo_list` and take this registration's exact
    `git_path`, then run `helper verify '<context>' '<namespace>' '<pod>'
    '<git_path>'`. This verifies forge access after the public key is accepted;
    `--no-wait` preparation alone does not. Run `helper upstreams ...` and check
@@ -154,3 +155,10 @@ After an in-place fix, commit the same change with user approval, then use the
 same smoke command with `--unassisted` after `--consent` and a new branch.
 Wait for that unassisted run to pass before promotion; a green assisted run
 remains not-evidence. Use the returned `push_url` exactly, never an alias.
+
+After an unassisted green commit is promoted, follow its ID with
+`promote_status {"id":"<promotion-id>"}`. A passed promotion's
+`promotion.observed_target_sha` is the forge head read by the server with its
+configured deploy key and equals `promotion.ResultSHA`. Report that SHA as
+publication evidence; a private forge need not grant the local agent access.
+This is the observation at completion, not a promise that the branch never moves.
