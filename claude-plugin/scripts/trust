@@ -37,7 +37,7 @@ fail() {
 # normal_pin prints a pin as 64 lowercase hex digits, or nothing when it is
 # not a SHA-256 fingerprint. Colons, spaces and a sha256: prefix are allowed.
 normal_pin() {
-	value=$(printf '%s' "$1" | tr -d ' :\t\r\n' | tr 'A-Z' 'a-z')
+	value=$(printf '%s' "$1" | tr -d ' :\t\r\n' | tr '[:upper:]' '[:lower:]')
 	value=${value#sha256}
 	value=${value#fingerprint=}
 	case "$value" in
@@ -507,7 +507,7 @@ connect() {
 		;;
 	esac
 	if [ "$want" = "$store/bundle.pem" ]; then
-		[ -n "$origin" ] && [ -r "$origin" ] || fail "the bundle $store/bundle.pem was built from a file that cannot be read any more; repair env.$variable in $settings_file first. Nothing was changed."
+		if ! { [ -n "$origin" ] && [ -r "$origin" ]; }; then fail "the bundle $store/bundle.pem was built from a file that cannot be read any more; repair env.$variable in $settings_file first. Nothing was changed."; fi
 		cat "$origin" >"$work/bundle.pem"
 		printf '\n' >>"$work/bundle.pem"
 		cat "$work/ca.crt" >>"$work/bundle.pem"
@@ -559,7 +559,7 @@ keygen() {
  mkdir -p "$store"; chmod 700 "$store"
  if [ -L "$store/current" ]; then
   [ "$(cat "$store/current/.oberth-client-identity" 2>/dev/null)" = oberth-client-identity-v1 ] || fail "current directory is not a managed client identity"
-  [ -f "$store/current/client.key" ] && [ -f "$store/current/client.csr" ] || fail "incomplete client key/CSR pair"
+  if ! { [ -f "$store/current/client.key" ] && [ -f "$store/current/client.csr" ]; }; then fail "incomplete client key/CSR pair"; fi
   openssl req -in "$store/current/client.csr" -verify -noout >/dev/null 2>&1 || fail "invalid client CSR"
   csrpub=$(openssl req -in "$store/current/client.csr" -pubkey -noout 2>/dev/null) || fail "invalid client CSR"
   keypub=$(openssl pkey -in "$store/current/client.key" -pubout 2>/dev/null) || fail "invalid client key"
@@ -580,7 +580,7 @@ keygen() {
 credentials() {
  claude=$(claude_directory); store="$claude/oberth"
  cert=${1:-$store/current/client.csr.crt}; key=${2:-$store/current/client.key}
- [ -f "$key" ] && [ ! -L "$key" ] || fail "client key must be a regular file"
+ if ! { [ -f "$key" ] && [ ! -L "$key" ]; }; then fail "client key must be a regular file"; fi
  openssl x509 -in "$cert" -checkend 0 -noout >/dev/null 2>&1 || fail "missing, invalid or expired client certificate"
  certpub=$(openssl x509 -in "$cert" -pubkey -noout 2>/dev/null) || fail "invalid client certificate"
  keypub=$(openssl pkey -in "$key" -pubout 2>/dev/null) || fail "invalid client key"
@@ -628,7 +628,7 @@ redeem() {
  invite_file=$1
  cli=$(command -v oberth || true)
  if [ -z "$cli" ]; then
-  fetcher=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/fetch-oberth
+  fetcher=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/fetch-oberth
   [ -f "$fetcher" ] || fail "the plugin verified fetcher is required; update the Oberth plugin"
   sh "$fetcher" || fail "cannot obtain a verified Oberth CLI"
   cli="$HOME/.local/bin/oberth"
@@ -641,7 +641,7 @@ redeem() {
   [ ! -e "$store/push_ed25519.pub" ] || fail "push public key already exists without its private key"
   ssh-keygen -q -t ed25519 -N '' -C oberth-uplink -f "$store/push_ed25519" >/dev/null 2>&1 || fail "cannot generate a local SSH key"
  fi
- [ -f "$store/push_ed25519" ] && [ ! -L "$store/push_ed25519" ] && [ -f "$store/push_ed25519.pub" ] || fail "local SSH key pair is incomplete or unsafe"
+ if ! { [ -f "$store/push_ed25519" ] && [ ! -L "$store/push_ed25519" ] && [ -f "$store/push_ed25519.pub" ]; }; then fail "local SSH key pair is incomplete or unsafe"; fi
  chmod 600 "$store/push_ed25519"
  ssh_public=$(ssh-keygen -y -f "$store/push_ed25519" 2>/dev/null) || fail "invalid local SSH key"
  ssh_public=$(printf '%s\n' "$ssh_public" | awk '{print $1 " " $2}')
@@ -668,7 +668,7 @@ configure() {
  if [ -n "$token_file" ]; then
   # The helper, not an argv value, supplies the bearer to Claude Code.
   case "$token_file" in *[!A-Za-z0-9/@._-]*) fail "token file path must contain only letters, digits, / . _ -";; esac
-  source_helper=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/bearer-headers
+  source_helper=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/bearer-headers
   helper_store=$(claude_directory)/oberth
   mkdir -p "$helper_store"; chmod 700 "$helper_store"
   cp "$source_helper" "$helper_store/bearer-headers.new"

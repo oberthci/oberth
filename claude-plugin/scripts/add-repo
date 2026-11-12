@@ -13,8 +13,12 @@ find_cli() {
 }
 safe_path() {
  case "$1" in ''|/*|*/|*//*|*..*|*[!A-Za-z0-9_./-]*) return 1;; esac
- old_ifs=$IFS; IFS=/; set -- $1; IFS=$old_ifs
- for segment do case "$segment" in [A-Za-z0-9_]*) :;; *) return 1;; esac; done
+ path_rest=$1
+ while :; do
+  segment=${path_rest%%/*}
+  case "$segment" in [A-Za-z0-9_]*) :;; *) return 1;; esac
+  case "$path_rest" in */*) path_rest=${path_rest#*/};; *) break;; esac
+ done
 }
 root_at() {
  root=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || fail 'choose a non-bare git repository'
@@ -32,16 +36,16 @@ detect() {
  *) fail 'origin must be an HTTPS or SSH forge URL';;
  esac
  case "$ssh_user" in ''|-*|*[!A-Za-z0-9_.-]*) fail 'unsupported SSH user';; esac
- host=$(printf '%s' "$host" | tr 'A-Z' 'a-z')
+ host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
  case "$host" in ''|*[!a-z0-9.-]*|.*|-*) fail 'unsupported forge host';; esac
  for port in "$ssh_port" "$web_port"; do
   [ -n "$port" ] || continue
   case "$port" in *[!0-9]*) fail 'invalid port in origin';; esac
-  [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail 'invalid port in origin'
+  if ! { [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; }; then fail 'invalid port in origin'; fi
  done
  web_host=$host${web_port:+:$web_port}
  slug=${slug%/}; slug=${slug%.git}
- case "$slug" in \~/*) home_prefix="~/"; slug=${slug#\~/};; esac
+ case "$slug" in \~/*) home_prefix=\~/; slug=${slug#\~/};; esac
  safe_path "$slug" || fail 'unsupported repository path in origin'
  case "$slug" in */*) organization=${slug%/*}; repository=${slug##*/};; *) fail 'origin needs an organization and repository';; esac
  forge=${2:-}
@@ -69,7 +73,7 @@ run_kubectl() {
 }
 server() {
  context=$1; namespace=$2; pod=$3; shift 3
- [ -n "$context" ] && [ -n "$namespace" ] && [ -n "$pod" ] || fail 'explicit context, namespace and pod are required'
+ if ! { [ -n "$context" ] && [ -n "$namespace" ] && [ -n "$pod" ]; }; then fail 'explicit context, namespace and pod are required'; fi
  command -v kubectl >/dev/null 2>&1 || fail 'install kubectl yourself: https://kubernetes.io/docs/tasks/tools/'
  run_kubectl --context="$context" exec -n "$namespace" "$pod" -c oberth -- /usr/local/bin/oberth "$@"
 }
@@ -141,7 +145,7 @@ prerequisites)
  done
  find_cli;;
 inspect)
- [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'inspect <path> [forge]'
+ if ! { [ "$#" -ge 1 ] && [ "$#" -le 2 ]; }; then fail 'inspect <path> [forge]'; fi
  detect "$1" "${2:-}"
  printf 'root=%s\nforge=%s\nhost=%s\norganization=%s\nrepository=%s\nroute_org=%s\nupstream_url=ssh://%s@%s/%s\nkey_settings=%s\nlanguage=%s\n' "$root" "$forge" "$host" "$organization" "$repository" "${organization##*/}" "$ssh_user" "$host${ssh_port:+:$ssh_port}" "$home_prefix$organization" "$settings" "$language"
  if [ -e "$root/.oberth" ] || [ -L "$root/.oberth" ]; then echo 'workflow=existing'; else echo 'workflow=missing'; fi;;
@@ -156,7 +160,7 @@ public-key)
  [ "$#" -eq 3 ] || fail 'public-key <context> <namespace> <pod>'
  server "$1" "$2" "$3" admin read-file /run/oberth-identities/upstream/id_ed25519.pub;;
 prepare-upstream)
- [ "$#" -ge 8 ] && [ "$#" -le 9 ] || fail 'prepare-upstream <context> <namespace> <pod> <name> <base-url> <repo> shared|dedicated --consent [authoritative-host-fingerprint]'
+ if ! { [ "$#" -ge 8 ] && [ "$#" -le 9 ]; }; then fail 'prepare-upstream <context> <namespace> <pod> <name> <base-url> <repo> shared|dedicated --consent [authoritative-host-fingerprint]'; fi
  consent "$8"
  expected=${9:-}
  if [ -n "$expected" ]; then
@@ -175,11 +179,11 @@ verify)
  [ "$#" -eq 4 ] || fail 'verify <context> <namespace> <pod> <upstream/route-org/repo>'
  server "$1" "$2" "$3" repo verify "$4";;
 deploy-key)
- [ "$#" -ge 3 ] && [ "$#" -le 4 ] || fail 'deploy-key <path> <public-key-file> --consent [forge]'
+ if ! { [ "$#" -ge 3 ] && [ "$#" -le 4 ]; }; then fail 'deploy-key <path> <public-key-file> --consent [forge]'; fi
  consent "$3"; detect "$1" "${4:-}"
  public_file=$2
  case "$public_file" in /*) :;; *) public_file="$(pwd)/$public_file";; esac
- [ -f "$public_file" ] && [ ! -L "$public_file" ] || fail 'provide a regular public key file'
+ if ! { [ -f "$public_file" ] && [ ! -L "$public_file" ]; }; then fail 'provide a regular public key file'; fi
  # Canonicalize a single public line before any forge CLI can read it. Never
  # pass the original file: ssh-keygen accepts a public line before other data.
  key_directory=$(mktemp -d "${TMPDIR:-/tmp}/oberth-deploy-key.XXXXXX")
@@ -220,23 +224,23 @@ workflow-preview|workflow-write)
  root_at "$1"; detect_language
  if [ "$action" = workflow-preview ]; then workflow
  else
-  [ ! -e "$root/.oberth" ] && [ ! -L "$root/.oberth" ] || fail '.oberth already exists; review it without overwriting'
+  if ! { [ ! -e "$root/.oberth" ] && [ ! -L "$root/.oberth" ]; }; then fail '.oberth already exists; review it without overwriting'; fi
   mkdir "$root/.oberth"
   (set -C; workflow > "$root/.oberth/build.yaml")
   echo 'Wrote .oberth/build.yaml for review; nothing was staged or committed.'
  fi;;
 validate)
- [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'validate <path> [approved-runner-image-prefixes]'
+ if ! { [ "$#" -ge 1 ] && [ "$#" -le 2 ]; }; then fail 'validate <path> [approved-runner-image-prefixes]'; fi
  find_cli
  if [ "$#" -eq 2 ]; then "$oberth_cli" validate --runner-image-prefixes "$2" "$1"; else "$oberth_cli" validate "$1"; fi;;
 smoke)
- [ "$#" -ge 6 ] && [ "$#" -le 7 ] || fail 'smoke <path> oberth|origin <new-branch> <approved-oberth-url> <approved-commit> --consent [--unassisted]'
+ if ! { [ "$#" -ge 6 ] && [ "$#" -le 7 ]; }; then fail 'smoke <path> oberth|origin <new-branch> <approved-oberth-url> <approved-commit> --consent [--unassisted]'; fi
  [ "$#" -eq 6 ] || [ "$7" = --unassisted ] || fail 'expected --unassisted'
  unassisted=false; [ "$#" -eq 6 ] || unassisted=true
  consent "$6"; root_at "$1"; remote=$2; branch=$3; approved=$4; approved_commit=$5
  case "$remote" in oberth|origin) :;; *) fail 'choose the configured Oberth push remote';; esac
  git check-ref-format "refs/heads/$branch" >/dev/null 2>&1 || fail 'invalid smoke branch'
- git -C "$root" diff --quiet && git -C "$root" diff --cached --quiet || fail 'review and commit changes with approval before smoke testing'
+ if ! { git -C "$root" diff --quiet && git -C "$root" diff --cached --quiet; }; then fail 'review and commit changes with approval before smoke testing'; fi
  current_commit=$(git -C "$root" rev-parse --verify HEAD) || fail 'repository has no committed HEAD'
  [ "$current_commit" = "$approved_commit" ] || fail 'HEAD differs from the approved commit; review the new SHA before pushing'
  git -C "$root" cat-file -e "$approved_commit:.oberth/build.yaml" 2>/dev/null || fail 'the workflow must be committed with approval before pushing'
@@ -246,13 +250,13 @@ smoke)
  command=$(git -C "$root" config --local --get core.sshCommand) || fail 'missing per-install SSH command'
  escaped_config=$(printf '%s' "$config" | sed "s/'/'\"'\"'/g")
  expected_command="ssh -F '$escaped_config'"
- [ "$command" = "$expected_command" ] && [ -f "$config" ] && [ "$approved" = "$bound" ] || fail 'repository SSH binding differs from the reviewed server'
+ if ! { [ "$command" = "$expected_command" ] && [ -f "$config" ] && [ "$approved" = "$bound" ]; }; then fail 'repository SSH binding differs from the reviewed server'; fi
  server_id=$(git -C "$root" config --local --get oberth.serverID) || fail 'missing server identity binding'
  case "$server_id" in ''|*[!0-9a-f]*) fail 'invalid server identity binding';; esac
  [ "${#server_id}" -eq 64 ] || fail 'invalid server identity binding'
  claude=${CLAUDE_CONFIG_DIR:-${HOME:?}/.claude}
  case "$claude" in /*) :;; *) claude="$(pwd)/$claude";; esac
- [ "$config" = "$claude/oberth/$server_id/ssh_config" ] && [ ! -L "$config" ] || fail 'SSH config is not the managed per-install binding'
+ if ! { [ "$config" = "$claude/oberth/$server_id/ssh_config" ] && [ ! -L "$config" ]; }; then fail 'SSH config is not the managed per-install binding'; fi
  target=$(git -C "$root" remote get-url --push --all "$remote")
  [ "$target" = "$approved" ] || fail 'push URL differs from the reviewed Oberth URL'
  case "$target" in *[!A-Za-z0-9_./:@\[\]-]*|*..*) fail 'smoke requires one safe SSH URL';; esac
@@ -269,7 +273,7 @@ smoke)
  resolved_port=$(printf '%s\n' "$resolved" | awk '$1=="port" {print $2}')
  resolved_alias=$(printf '%s\n' "$resolved" | awk '$1=="hostkeyalias" {print $2}')
  resolved_strict=$(printf '%s\n' "$resolved" | awk '$1=="stricthostkeychecking" {print $2}')
- [ "$resolved_host" = "$expected_host" ] && [ "$resolved_port" = "$expected_port" ] && [ "$resolved_alias" = "oberth-$server_id" ] || fail 'SSH binding does not match the selected server URL'
+ if ! { [ "$resolved_host" = "$expected_host" ] && [ "$resolved_port" = "$expected_port" ] && [ "$resolved_alias" = "oberth-$server_id" ]; }; then fail 'SSH binding does not match the selected server URL'; fi
  case "$resolved_strict" in true|yes) :;; *) fail 'pinned host-key checking is required';; esac
  existing=$(git -C "$root" ls-remote --heads "$target" "refs/heads/$branch") || fail 'cannot inspect smoke branch on Oberth'
  [ -z "$existing" ] || fail 'smoke branch already exists; choose a new branch'

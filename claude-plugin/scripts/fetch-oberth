@@ -7,7 +7,7 @@ fail() { printf 'fetch-oberth: %s\n' "$1" >&2; exit 1; }
 version=${1:-latest}
 origin=https://releases.oberth.ci/oberth
 release_public_key_sha256=036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || fail 'cannot locate the plugin'
+if ! { script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd); }; then fail 'cannot locate the plugin'; fi
 key=$script_dir/../pins/release-cosign.pub
 for tool in openssl awk grep mktemp uname; do
     command -v "$tool" >/dev/null 2>&1 || fail "required tool is missing: $tool"
@@ -19,7 +19,7 @@ elif command -v shasum >/dev/null 2>&1; then
 else
     fail 'install sha256sum (coreutils) or shasum before fetching Oberth'
 fi
-[ -f "$key" ] && [ ! -L "$key" ] || fail 'the plugin release public key is missing or unsafe'
+if ! { [ -f "$key" ] && [ ! -L "$key" ]; }; then fail 'the plugin release public key is missing or unsafe'; fi
 [ "$(hash "$key")" = "$release_public_key_sha256" ] || fail 'the plugin release public key does not match its pin'
 if command -v curl >/dev/null 2>&1; then
     download() {
@@ -54,7 +54,7 @@ if [ "$version" = latest ]; then
 fi
 # No path separators, shell syntax or option prefixes can enter a release path.
 case "$version" in *[!0-9A-Za-z.+-]*) fail 'version must be a v-prefixed semantic version';; esac
-[ "${#version}" -le 128 ] && printf '%s\n' "$version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$' || fail 'version must be a v-prefixed semantic version'
+if ! { [ "${#version}" -le 128 ] && printf '%s\n' "$version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; }; then fail 'version must be a v-prefixed semantic version'; fi
 artifact=oberth-$os-$arch
 download "$origin/$version/SHA256SUMS" "$work/SHA256SUMS" 8192
 download "$origin/$version/SHA256SUMS.sig" "$work/SHA256SUMS.sig" 72
@@ -74,7 +74,7 @@ download "$origin/$version/$artifact" "$work/binary" 536870912
 [ -n "${HOME:-}" ] || fail 'HOME must name the user home directory'
 bin=$HOME/.local/bin
 mkdir -p -- "$bin" || fail 'cannot create ~/.local/bin'
-[ ! -d "$bin/oberth" ] && [ ! -L "$bin/oberth-$version" ] && [ ! -d "$bin/oberth-$version" ] || fail 'installation target is an unsafe file type'
+if ! { [ ! -d "$bin/oberth" ] && [ ! -L "$bin/oberth-$version" ] && [ ! -d "$bin/oberth-$version" ]; }; then fail 'installation target is an unsafe file type'; fi
 mkdir -- "$bin/.oberth-fetch-lock" 2>/dev/null || fail 'another fetch is installing; retry when it finishes'
 lock=$bin/.oberth-fetch-lock
 stage=$(mktemp -d "$bin/.oberth-fetch.XXXXXXXX") || fail 'cannot stage the verified binary'
