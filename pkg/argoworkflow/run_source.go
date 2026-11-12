@@ -73,6 +73,9 @@ func (r *DemandReceipt) DeclaredPodDemand() (*PodDemand, error) {
 	return DeclaredPodPeak(r.pods.DeepCopy())
 }
 
+// Workflow returns an isolated copy of the exact admitted source graph.
+func (r *DemandReceipt) Workflow() *wfv1.Workflow { return r.pods.DeepCopy() }
+
 func (r *DemandReceipt) Summary() RunSourceSummary { return r.summary }
 
 func (r *DemandReceipt) Fragments() map[FragmentKey]Fragment {

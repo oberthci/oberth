@@ -207,6 +207,7 @@ func inspectClusterPreflight(ctx context.Context, cfg *Config, deps Deps, identi
 			item.AvailableBytes = stats.Node.FS.AvailableBytes
 		}
 		r.check("disk/"+node.Name, !diskPressure && item.AvailableBytes != nil && *item.AvailableBytes >= 1<<30, "Free at least 1 GiB on the node filesystem and allow the administrator to read node stats; unknown free space fails this check.")
+		inspectHostPrep(ctx, *cfg, deps, node, r)
 		identity.Nodes = append(identity.Nodes, item)
 	}
 	classes, err := deps.KubeClient.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
@@ -265,7 +266,7 @@ func PrintPlan(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) e
 		_, _ = fmt.Fprintf(deps.Output, "Cluster: %s %s; CA sha256 %s; files %v\n", plan.Identity.Context, plan.Identity.Server, plan.Identity.CAPin, plan.Identity.Files)
 		PrintReview(deps.Output, cfg)
 		for _, check := range plan.Checks {
-			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s\n", check.Code, check.OK, check.Remedy)
+			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
 		}
 	}
 	if !plan.OK {

@@ -1,9 +1,8 @@
 # Where limits live
 
-Since v0.20.0 every limit on what runs at the same time lives in Argo (#1517).
-Oberth submits each admitted run's Workflow at once; the Argo workflow
-controller decides when it starts and which steps wait for which. Oberth keeps
-no run ceiling, no concurrency groups and no semaphore table of its own.
+Since v0.21.9 Oberth packs whole-run CPU reservations before submission.
+Argo owns workflow parallelism and native locks; Kubernetes places each Pod.
+See [CPU admission](cpu-admission.md) for the capacity defaults and overrides.
 
 | Limit | Where | Set with |
 | --- | --- | --- |
@@ -12,11 +11,10 @@ no run ceiling, no concurrency groups and no semaphore table of its own.
 | One at a time across runs | a native Argo mutex in the pipeline document | `synchronization.mutexes` in the repository's YAML |
 | Releases one at a time | the mutex `oberth-release`, injected by Oberth for every release run | `releases.serialize: true` in the Oberth chart |
 
-What Oberth still holds back, because it reads the host and not a workflow:
-the PSI hard valve (`admission.pressure.*`), the disk floor
-(`admission.diskFloorBytes`, 1 GiB free by default since v0.21.0; 0 disables
-it) and the administrator hold (`admission_hold`).
-Priority still orders Oberth's queue; see [Ordering](#ordering).
+Oberth also holds new work for bounded host PSI deferral, the disk floor
+(`admission.diskFloorBytes`, 1 GiB free by default; 0 disables it), and the
+administrator hold (`admission_hold`). Priority and repository fair share order
+admission; see [Ordering](#ordering).
 
 ## How many Workflows run at once
 
@@ -97,9 +95,7 @@ the profile after the upgrade either way.
 that creates the argo-workflows release sets `parallelism` to half the
 cluster's allocatable CPUs, at least 2 (it prints the number). An explicit
 `--argo-parallelism N` wins, `0` is no limit, and an existing release keeps
-whatever it has: an upgrade never adds a limit. Without a limit Kubernetes
-places each step Pod by its `resources`, and only the PSI valve and the disk
-floor hold new runs on an overloaded host.
+whatever it has: an upgrade never adds a limit. With no Argo limit, Oberth still packs CPU requests before submission.
 
 A Workflow beyond the limit stays `Pending` with Argo's message
 `Workflow processing has been postponed because too many workflows are already running`
@@ -143,15 +139,12 @@ restart Argo counts only `Running` Workflows until it has re-processed the
 
 ### Ordering
 
-Oberth's queue order (priority `low < standard < promotion < high`, then
-FIFO) decides the order in which runs are submitted. Argo admits postponed
-Workflows by `spec.priority`, then creation time. Since v0.20.1 Oberth sets
-`spec.priority: 1` on every release run, decided by the trigger alone;
-every other run carries none (Argo orders it as 0), and documents cannot set
-one. A release submitted after ten postponed branch runs is therefore
-admitted before them; among postponed runs of the same kind the earlier
-submission starts first. The priority orders only Argo's queues: it is not a
-Pod priority and preempts nothing.
+Oberth orders admission by `low < standard < promotion < high`, then fair
+share across repositories and FIFO within each repository. Argo receives
+`spec.priority` -1, 0, 1 and 2 respectively; release runs have at least 1.
+Argo orders postponed Workflows and lock waiters by this value, then creation
+time. Repository documents cannot set priority. This queue order does not
+raise Pod priority or preempt running work. See [CPU admission](cpu-admission.md).
 
 ## Shared step limits
 

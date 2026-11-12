@@ -77,7 +77,7 @@ func installResultError(result InstallResult) error {
 	}
 	pending := false
 	for _, check := range result.Checks {
-		if check.OK {
+		if check.OK || check.Warning {
 			continue
 		}
 		if check.Code != "upstream_key_pending" {

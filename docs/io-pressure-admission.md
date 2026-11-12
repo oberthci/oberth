@@ -1,36 +1,36 @@
 # Host pressure admission
 
-Oberth bounds concurrent workflows and uses a configurable hard host CPU/IO
-pressure valve. Kubernetes places each step Pod by its requests; no declared
-CPU/memory pool or size-weight budget controls workflow placement. Running and
-adopted workflows keep their slots. This valve observes one shared host: on a
-multi-node installation, the server's node may differ from the execution node.
+Oberth packs whole Workflow CPU reservations and applies a bounded host CPU/IO
+PSI valve. Running and adopted Workflows retain their CPU reservations. The
+valve observes the server's host; co-locate server and execution for a
+single-host policy. See [CPU admission](cpu-admission.md).
 
 ```yaml
 admission:
   pressure:
     enabled: true
-    hardCpu: 50
+    hardCpu: 25
+    deferSeconds: 300
     hardIo: 40
 ```
 
 The active flags are `--admission-pressure-enabled`,
-`--admission-pressure-hard-cpu` and `--admission-pressure-hard-io`. Disabling the
-valve leaves the administrator's concurrent-workflow ceiling in control.
-Historical soft thresholds, observation mode, max-wait/defer settings and avg60
-settings remain accepted but are ignored by serving admission.
+`--admission-pressure-hard-cpu`, `--admission-pressure-hard-io` and
+`--admission-pressure-defer-seconds`. Disabling PSI leaves CPU request packing,
+the disk floor and administrator holds active.
 
 Admission reads bounded `/proc/pressure/cpu` and `/proc/pressure/io` samples.
-Hard CPU and IO thresholds use **some avg10**, defaulting to 50% and 40%.
+Hard CPU and IO thresholds use **some avg10**, defaulting to 25% and 40%.
 Each resource has an independent latch and recovers strictly below its hard
 threshold minus ten percentage points. One recovering resource cannot clear
-the other's latch. Hard pressure has no idle, release/tag, priority or starvation
-bypass. There is no settle window or resource drain forecast.
+the other's latch. A fitting run waits at most 300 seconds (configurable), then one run may
+start despite PSI. CPU packing, disk floor and administrator holds still
+apply. There is no settle window or resource drain forecast.
 
 PSI measures stall time, not CPU utilization or load average. These thresholds
 need qualification against representative workloads and cannot guarantee a
 load ceiling. Missing, malformed or unavailable PSI retains the existing
-fail-open behavior: status reports `PSI unavailable; workflow ceiling admission`.
+fail-open behavior: status reports `PSI unavailable; CPU request admission`.
 One warning is logged per outage; valid readings restore the valve. Status and
 metrics use the last admission sample and never read procfs themselves.
 

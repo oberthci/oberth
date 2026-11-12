@@ -158,8 +158,9 @@ func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
 	if err := yaml.Unmarshal(body, &overlay); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := overlay["controller"].(map[string]any)["resources"]; ok {
-		t.Fatal("priority overlay must not impose our installation's resource sizing")
+	resources, err := json.Marshal(overlay["controller"].(map[string]any)["resources"])
+	if err != nil || string(resources) != `{"requests":{"cpu":"100m","memory":"128Mi"}}` {
+		t.Fatalf("dependency defaults: %s %v", resources, err)
 	}
 	for _, profile := range []bool{false, true} {
 		values := map[string]any{}

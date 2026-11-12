@@ -72,6 +72,7 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
+	StepCPURequestMaxMilli int64 `json:"-"`
 	// Custody journals remote effects; it is not serialized operator authority.
 	Custody TargetCustody `json:"-"`
 	// ExecutionPlacement selects an immutable isolated administrator profile.
@@ -629,6 +630,7 @@ type Request struct {
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
 
+	Priority     model.RunPriority
 	RunID        string
 	RepositoryID int64
 	// Name is the durable, deterministic object name the scheduler already
@@ -875,6 +877,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	// Admission and receipt verification inspect the immutable authored graph.
 	// Default only afterwards, before any server-owned helper is injected.
 	applyRequestDefaultsPolicy(workflow, request.omitRequestDefaults, request.legacyHelperRequestDefaults)
+	capCPURequests(workflow, config.StepCPURequestMaxMilli)
 	if request.ResourceCeiling != nil {
 		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
 			return nil, err
@@ -1010,10 +1013,10 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := injectAssistHolds(workflow, config.Assist); err != nil {
 		return nil, err
 	}
-	stampPodDemand(workflow, request.PodDemand)
-	if err := stampResourceFallback(workflow, request.ResourceFallback); err != nil {
+	if err := stampSchedulingDemand(workflow, config, request); err != nil {
 		return nil, err
 	}
+
 	digest, err := specIdentity(workflow)
 	if err != nil {
 		return nil, err
@@ -1334,23 +1337,28 @@ func serializeReleases(workflow *wfv1.Workflow, config Config, request Request) 
 	workflow.Spec.Synchronization.Mutexes = append(workflow.Spec.Synchronization.Mutexes, &wfv1.Mutex{Name: ReleaseMutexName})
 }
 
-// ReleasePriority is the Argo spec.priority every release run carries. The
-// controller admits postponed Workflows (workflow/sync/multi_throttler.go)
-// and grants mutexes and semaphores (workflow/sync/semaphore.go) by priority,
-// then creation time, so a release is admitted and locked before the branch
-// runs queued ahead of it, as Oberth's own queue orders releases first
-// (docs/release-priority.md). It is decided by the trigger alone: documents
-// cannot set spec.priority (argoworkflow.Admit refuses it), so no repository
-// can place itself ahead of a release.
+// ReleasePriority is the minimum Argo queue priority for a release.
+// It orders controller admission and native lock acquisition, never Pods.
 const ReleasePriority int32 = 1
 
-// prioritizeReleases sets ReleasePriority on a release run's Workflow and
-// leaves every other run at Argo's default (none, which orders as 0).
+// prioritizeReleases propagates the server-accepted class. Repository YAML
+// cannot choose Argo priority; releases retain at least ReleasePriority.
 func prioritizeReleases(workflow *wfv1.Workflow, request Request) {
-	if request.Trigger != pipeline.TriggerRelease {
+	if request.Trigger != pipeline.TriggerRelease && request.Priority.Rank() == 0 {
 		return
 	}
-	priority := ReleasePriority
+	priority := int32(0)
+	switch request.Priority {
+	case model.PriorityLow:
+		priority = -1
+	case model.PriorityPromotion:
+		priority = 1
+	case model.PriorityHigh:
+		priority = 2
+	}
+	if request.Trigger == pipeline.TriggerRelease {
+		priority = max(priority, ReleasePriority)
+	}
 	workflow.Spec.Priority = &priority
 }
 

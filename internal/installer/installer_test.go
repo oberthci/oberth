@@ -1121,6 +1121,8 @@ func TestOpenBaoHelmArgsDevMode(t *testing.T) {
 		// webhook out of both install modes.
 		"--set", "injector.enabled=false",
 		"--set-string", "server.priorityClassName=oberth-oberth-control-plane",
+		"--set-string", "server.resources.requests.cpu=100m",
+		"--set-string", "server.resources.requests.memory=128Mi",
 		"--set", "global.tlsDisable=true",
 		"--set", "server.dev.enabled=true",
 		"--version", "0.6.0",
@@ -1143,6 +1145,8 @@ func TestOpenBaoHelmArgsProductionMode(t *testing.T) {
 		"-n", "openbao", "--create-namespace",
 		"--set", "injector.enabled=false",
 		"--set-string", "server.priorityClassName=oberth-oberth-control-plane",
+		"--set-string", "server.resources.requests.cpu=100m",
+		"--set-string", "server.resources.requests.memory=128Mi",
 		"--set", "global.tlsDisable=false",
 		// dev pinned false so --reuse-values cannot resurrect a previous
 		// dev-mode install's flag through an --upgrade mode switch.

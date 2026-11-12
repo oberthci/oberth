@@ -44,8 +44,10 @@ Priority classes are mandatory. If the stored Helm values contain
 `oberth upgrade --set platformProtection=null`; the chart refuses that toggle.
 
 For separately managed dependencies, the examples in `deploy/platform-protection/`
-set only their priority. Use the names rendered for the chosen Oberth release.
-Keep existing resource requests, TLS, storage, identities and controller profiles.
+set their priority and small CPU/memory requests. Use the names rendered for the chosen Oberth release.
+Review requests against actual usage. Apply the default overlay before your
+explicit sizing values (`-f deploy/platform-protection/argo-workflows-values.yaml
+-f custom-values.yaml`), preserving TLS, storage, identities and controller profiles.
 OpenBao uses OnDelete: updating its template protects replacement Pods and does
 not restart or unseal the current Pod. Use the normal authorized replacement and
 unseal procedure. Never put unseal keys on command arguments.
@@ -67,5 +69,29 @@ fake-client and rendering tests cannot measure a real recovery deadline.
 
 Priority makes CPU requests reclaimable. It does not add capacity or override
 node affinity, taints, unavailable storage, image pulls or memory pressure.
-Requests, QoS and node health still matter. Admission capacity limits are
-unchanged.
+Requests, QoS and node health still matter. See [CPU admission](cpu-admission.md)
+and [host preparation](host-preparation.md).
+
+## Dependencies and user-added ingress
+
+Managed OpenBao and Argo controller Pods request 100m CPU and 128Mi memory.
+For a user-added ingress or tunnel Deployment, set its Pod template
+`priorityClassName: oberth-oberth-control-plane` (use your rendered class name)
+and give each container positive requests, for example:
+
+```yaml
+spec:
+  template:
+    spec:
+      priorityClassName: oberth-oberth-control-plane
+      containers:
+        - name: tunnel
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+```
+
+Merge this into the existing Deployment, retaining its image, arguments and
+other settings. Size requests using observed usage. Only dependencies needed
+for the control plane should use this preempting class.

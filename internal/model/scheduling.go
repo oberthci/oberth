@@ -23,12 +23,11 @@ type RunScheduling struct {
 	Execution     *ExecutionObservation     `json:"execution,omitempty"`
 }
 
-// AdmissionObservation is one run's place in the admission gate. Used and
-// Runs are how many runs hold a grant. Oberth has no run ceiling: the Argo
-// controller's parallelism bounds running Workflows, and Kubernetes places
-// each Pod.
+// AdmissionObservation is one run's place in the CPU admission gate. Used
+// and Runs count granted reservations. Argo parallelism may further bound
+// running Workflows, and Kubernetes places each Pod.
 type AdmissionObservation struct {
-	// Requests is this run's peak pod requests, shown for context only.
+	// Requests is the run's effective peak Pod request reservation.
 	Requests *argoworkflow.PodRequests `json:"requests,omitempty"`
 
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
@@ -58,7 +57,8 @@ type AdmissionBlocker struct {
 	Repo     string            `json:"repo"`
 	Ref      string            `json:"ref"`
 	// DiskFloor names why the head waits: the data disk is below its floor.
-	DiskFloor bool `json:"disk_floor,omitempty"`
+	DiskFloor   bool `json:"disk_floor,omitempty"`
+	CPUCapacity bool `json:"cpu_capacity,omitempty"`
 	// Used is how many runs hold a grant. Zero for a scoped viewer.
 	Used         int       `json:"used"`
 	WaitingSince time.Time `json:"waiting_since"`
@@ -70,6 +70,8 @@ func (blocker AdmissionBlocker) Reason() string {
 	switch {
 	case blocker.DiskFloor:
 		return "waiting for disk space"
+	case blocker.CPUCapacity:
+		return "waiting for CPU capacity for the whole run"
 	case blocker.Pressure != nil:
 		switch blocker.Pressure.Resource {
 		case "io":

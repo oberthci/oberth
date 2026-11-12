@@ -1,22 +1,21 @@
 # Admission and native synchronization
 
-Oberth admits runs by counting them. What a step needs is the step's own
-`resources` block, placed by Kubernetes. What a step must not share with other
-steps is native Argo `synchronization`, queued by the Argo workflow controller.
-Oberth reads nothing from a workflow document to decide whether a run may
-start, and it submits `synchronization` exactly as written.
+Oberth admits whole runs by their peak concurrent CPU requests. Kubernetes
+places each step Pod; native Argo `synchronization` controls which steps may
+share a resource. See [CPU admission](cpu-admission.md).
 
 ## What Oberth keeps
 
-Since v0.20.0 Oberth has no run ceiling and no concurrency groups: every limit
-on what runs at once lives in Argo ([where limits live](where-limits-live.md)).
+CPU admission bounds reservations before submission. Argo owns workflow
+parallelism and native locks ([where limits live](where-limits-live.md)).
 
 | Setting | Helm | Meaning |
 | --- | --- | --- |
-| Pressure valve | `admission.pressure.{enabled,hardCpu,hardIo}` | Holds new grants while host CPU or IO PSI is above the hard limit. Reads `/proc/pressure`, never a workflow. |
+| CPU reservations | `admission.{cpuHeadroomPercent,stepCPURequestPercent}` | Packs whole-workflow effective requests against allocatable CPU minus headroom. |
+| Pressure valve | `admission.pressure.{enabled,hardCpu,hardIo,deferSeconds}` | Defers fitting runs under host CPU or IO PSI, with a 300-second default bound. Reads `/proc/pressure`, never a workflow. |
 | Disk floor | `admission.diskFloorBytes` | Holds new grants while the data disk is below the floor. |
 | Administrator hold | `admission_hold` | Keeps selected run classes queued. |
-| Startup stall bound | `admission.stallTimeout` | Fails an admitted Workflow that neither schedules a Pod nor makes progress. Kubernetes capacity waits, Argo synchronization waits and Argo parallelism postponement are exempt. |
+| Startup stall bound | `admission.stallTimeout` | Fails an admitted Workflow that neither schedules a Pod nor makes progress. Insufficient-CPU Pod waits are bounded too, including later steps. Argo synchronization waits and Argo parallelism postponement remain exempt. |
 
 Priority (`low < standard < promotion < high`) orders Oberth's queue, which is
 the order runs are submitted in.

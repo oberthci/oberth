@@ -397,7 +397,7 @@ UPDATE runs
 SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
     SELECT queue_sequence FROM runs WHERE `+claimableRunSQL+` AND `+automaticRetryReadySQL(fromUnixNano(now))+` AND `+admissionHoldAllowedSQL+`
-    ORDER BY `+priorityOrderSQL(fromUnixNano(now))+` LIMIT 1
+    ORDER BY `+fairPriorityOrderSQL(fromUnixNano(now))+` LIMIT 1
 )
 RETURNING `+runColumns, now, now))
 	if err != nil {

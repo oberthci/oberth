@@ -129,6 +129,11 @@ func renderDependencyPriority(t *testing.T, cfg Config, chart string, installerA
 		}
 		if object.Kind == kind {
 			found = true
+			for _, c := range object.Spec.Template.Spec.Containers {
+				if c.Resources.Requests.Cpu().MilliValue() != 100 || c.Resources.Requests.Memory().Value() != 128<<20 {
+					t.Fatalf("%s lacks dependency CPU/memory reservations: %+v", kind, c.Resources)
+				}
+			}
 			if object.Spec.Template.Spec.PriorityClassName != expected {
 				t.Fatalf("%s priority=%s, want %s", kind, object.Spec.Template.Spec.PriorityClassName, expected)
 			}

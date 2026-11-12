@@ -323,7 +323,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 		if !preflight.OK {
 			var failures []string
 			for _, check := range preflight.Checks {
-				if !check.OK {
+				if !check.OK && !check.Warning {
 					failures = append(failures, check.Code+": "+check.Remedy)
 				}
 			}

@@ -480,6 +480,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		}
 	}
 	submission := argojob.Request{
+		Priority:         workflowPriority(request.Run),
 		BranchAuthority:  branchAuthority,
 		PodDemand:        request.PodDemand,
 		ResourceFallback: request.ResourceFallback,

@@ -166,21 +166,23 @@ promotion:
 branches:
   reserved: [main, master]
 
-# Admission keeps only host safety that reads nothing from a workflow: the PSI
-# hard-limit valve and the disk floor. Kubernetes schedules each step pod by
-# its requests; steps that must not overlap declare native Argo
-# synchronization (docs/native-synchronization.md).
+# Admission packs effective whole-workflow CPU requests into allocatable CPU
+# minus headroom. Native Argo synchronization still controls shared resources.
+# See docs/cpu-admission.md.
 admission:
+  cpuHeadroomPercent: 20
+  stepCPURequestPercent: 25
   pressure:
     enabled: true
-    hardCpu: 50
+    hardCpu: 25
+    deferSeconds: 300
     hardIo: 40
   # Hold new workflow admission below this free-space floor on the data
   # volume; existing grants continue. The 1 GiB default keeps SQLite writable
   # on a full volume; zero disables the disk floor.
   diskFloorBytes: 1073741824
   # Startup bound for an admitted workflow that has neither a scheduled pod nor
-  # progress (Kubernetes capacity waits are exempt). Go duration, e.g. 10m.
+  # progress, and for Pods waiting on Insufficient cpu. Go duration, e.g. 10m.
   stallTimeout: "10m"
   # Pod start-up allowance added to every literal step activeDeadlineSeconds
   # (#1499): clamp(declared * factorPercent / 100, minSeconds, maxSeconds).

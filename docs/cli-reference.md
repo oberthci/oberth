@@ -1673,16 +1673,20 @@ Flags:
         one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain
   -accept-witness-genesis string
         one-shot acknowledgment: exact current audit chain head as <auditID>:<sha256hex>; marks it as the witness genesis so external witnessing starts there, explicitly trusting all prior local history (enables Rekor on an existing deployment)
+  -admission-cpu-headroom-percent int
+        allocatable CPU reserved for platform and host work (1-90 percent) (default 20)
   -admission-disk-floor-bytes int
         when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
+  -admission-pressure-defer-seconds int
+        maximum PSI deferral before one otherwise fitting workflow may start (1-3600 seconds) (default 300)
   -admission-pressure-enabled
         hold new workflow grants at the hard host CPU/IO PSI limits (default true)
   -admission-pressure-hard-cpu float
-        hard host CPU some PSI avg10 percentage for new workflow grants (default 50)
+        hard host CPU some PSI avg10 percentage for new workflow grants (default 25)
   -admission-pressure-hard-io float
         hard host IO some PSI avg10 percentage for new workflow grants (default 40)
   -admission-stall-timeout duration
-        workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt (default 10m0s)
+        workflow startup or Insufficient-CPU Pod wait bound; native Argo synchronization waits are exempt (default 10m0s)
   -admission-step-startup-allowance-max-seconds int
         largest step start-up allowance in seconds (0-3600); 0 disables the allowance (default 600)
   -admission-step-startup-allowance-min-seconds int
@@ -1895,6 +1899,8 @@ Flags:
         SSH host private key (default "/etc/oberth/ssh/ssh_host_key")
   -ssh-listen string
         SSH listen address (default ":2222")
+  -step-cpu-request-percent int
+        maximum step container CPU request as percent of node allocatable CPU (1-100); limits remain unchanged (default 25)
   -tls-cert string
         TLS certificate (default "/etc/oberth/tls/tls.crt")
   -tls-key string

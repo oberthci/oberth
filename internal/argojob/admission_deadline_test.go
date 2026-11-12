@@ -204,8 +204,8 @@ func TestAdmissionDeadlineMissingWaiterDoesNotChargePriorCapacityWait(t *testing
 	wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
 	pod.CreationTimestamp = wf.CreationTimestamp
 	pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu"}}}
-	if err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err != nil {
-		t.Fatal("capacity wait charged against identity readiness", err)
+	if err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err == nil || !strings.Contains(err.Error(), "CPU capacity wait exceeded") {
+		t.Fatal("CPU capacity wait escaped its bound", err)
 	}
 	pod.Spec.NodeName = "worker"
 	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(now)}}
@@ -276,5 +276,24 @@ func TestAdmissionDeadlineLeavesSynchronizationWaitToArgo(t *testing.T) {
 				t.Fatal("startup stall after the lock freed escaped the deadline")
 			}
 		})
+	}
+}
+
+func TestAdmissionCPUWaitExpiresAfterEarlierScheduledStep(t *testing.T) {
+	_, wf, pod, _ := executorRetryFixture(t)
+	now := time.Now()
+	wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+	wf.Status.Nodes = wfv1.Nodes{"finished": {Type: wfv1.NodeTypePod, Phase: wfv1.NodeSucceeded, HostNodeName: "worker", FinishedAt: metav1.NewTime(now.Add(-20 * time.Minute))}}
+	pod.Spec.NodeName = ""
+	pod.CreationTimestamp = metav1.NewTime(now.Add(-10 * time.Minute))
+	pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu", LastTransitionTime: pod.CreationTimestamp}}}
+	watch := new(admissionProgress)
+	if err := watch.check(wf, []corev1.Pod{*pod}, nil, now.Add(-time.Second), 10*time.Minute); err != nil {
+		t.Fatal("CPU wait expired before its bound", err)
+	}
+	// Reconstruct the observer: earlier scheduled work must not exempt this Pod.
+	err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute)
+	if err == nil || !strings.Contains(err.Error(), "CPU capacity wait exceeded") {
+		t.Fatal("later CPU wait escaped its bound", err)
 	}
 }

@@ -9,14 +9,12 @@ Waiting admission uses four classes, in this order:
 | `promotion` | Ordinary promotion CI and eligible tag/release delivery | Server classification, or an unscoped admin / unexpired grant for an explicit request |
 | `high` | Explicitly authorized urgent work | Unscoped admin, or an unexpired grant permitting `high` |
 
-Both durable claims and in-memory admission order `high > promotion > standard
-> low`, then the original admission sequence and queue sequence. Running or
-already granted work is never preempted. Priority does not bypass admission
-holds, PSI/pressure, per-container resource ceilings, cleanup or publication
-guards. Priority dispatch lookahead is bounded at three claims, covering
-standard, promotion and high overtaking low work. Parked lower classes cannot consume high's extra path.
-This bounds claims/checkouts without increasing execution capacity or group
-limits; ordinary dispatch's existing hold/parking rules still apply.
+Durable claims and in-memory admission order `high > promotion > standard > low`.
+Within a class, repositories with fewer active runs go first, then least recent
+service and FIFO. Running or granted work retains its reservation. Priority does
+not bypass CPU capacity, administrator holds, the disk floor, bounded PSI
+deferral, cleanup or publication guards. Dispatch prepares at most one checkout
+at a time and looks through up to 64 prepared waiters for priority work.
 
 An ordinary promotion receives `promotion`, never automatic `high`. The oldest
 waiting server-classified tag/release per repository also receives `promotion`
@@ -87,16 +85,14 @@ never fails release execution; the tag retains its reviewed execution size.
 repository. `size_grant` re-enables it within the selected maximum. Explicit
 urgency, promotions and aging are independent of that opt-out.
 
-Serving admission uses the configured disk floor and the enabled PSI
-hard-limit valve; Argo's controller parallelism bounds running Workflows
-([where limits live](where-limits-live.md)). Kubernetes places each step Pod
-by its requests; Oberth reads nothing from a document to decide whether a run
-fits. Priority orders submission within these controls; Argo admits postponed
-Workflows, and grants mutexes and semaphores, by `spec.priority` then creation
-order, and Oberth sets `spec.priority: 1` on release runs only (by trigger;
-documents cannot set it), so a release is not queued behind branch runs
-there either. It never preempts running work. See
-[admission and native synchronization](native-synchronization.md).
+Serving admission packs whole-run CPU requests against allocatable CPU minus
+headroom, then applies the disk floor and bounded PSI valve. Argo parallelism
+may further limit running Workflows ([where limits live](where-limits-live.md)).
+Argo receives low=-1, standard=0, promotion=1 and high=2, including standard work
+that aged into promotion before admission. Releases have at least priority 1.
+Argo orders postponed Workflows and native lock waiters by this priority and
+creation time. Repository YAML cannot set it; Pod priority is unchanged. See
+[CPU admission](cpu-admission.md).
 
 A new branch-head push supersedes queued, not-started runs at older SHAs in the
 same repository/ref/schedule lane, regardless of priority. The most recent

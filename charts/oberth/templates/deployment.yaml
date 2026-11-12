@@ -291,7 +291,10 @@ spec:
             {{- $pressure := $admission.pressure | default dict }}
             {{- $pressureEnabled := true }}
             {{- if hasKey $pressure "enabled" }}{{- $pressureEnabled = $pressure.enabled }}{{- end }}
-            {{- $hostPressure := merge (deepCopy $pressure) (dict "hardCpu" 50 "hardIo" 40) }}
+            {{- $hostPressure := merge (deepCopy $pressure) (dict "hardCpu" 25 "hardIo" 40 "deferSeconds" 300) }}
+            - {{ printf "--admission-cpu-headroom-percent=%v" ($admission.cpuHeadroomPercent | default 20) | quote }}
+            - {{ printf "--step-cpu-request-percent=%v" ($admission.stepCPURequestPercent | default 25) | quote }}
+            - {{ printf "--admission-pressure-defer-seconds=%v" $hostPressure.deferSeconds | quote }}
             - {{ printf "--admission-pressure-enabled=%v" $pressureEnabled | quote }}
             - {{ printf "--admission-pressure-hard-cpu=%v" $hostPressure.hardCpu | quote }}
             - {{ printf "--admission-pressure-hard-io=%v" $hostPressure.hardIo | quote }}

@@ -2,3 +2,7 @@
 # release, use the class rendered by the Oberth chart in the chosen namespace.
 server:
   priorityClassName: oberth-oberth-control-plane
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi

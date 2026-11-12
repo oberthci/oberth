@@ -439,7 +439,10 @@ func TestServeOptionsWitnessGenesisValidation(t *testing.T) {
 }
 
 func minimalValidServeOptions() serveOptions {
-	return serveOptions{
+	options := serveOptions{
+		admissionCPUHeadroomPercent: 20,
+		stepCPURequestPercent:       25,
+
 		kubernetesQPS:           50,
 		kubernetesBurst:         100,
 		retentionInterval:       10 * time.Minute,
@@ -467,6 +470,8 @@ func minimalValidServeOptions() serveOptions {
 		secretStoreAuthMount:    secretstore.DefaultAuthMountPath,
 		secretStoreKVPath:       secretstore.DefaultKVPath,
 	}
+	options.admissionPressure.MaxWaitSeconds = 300
+	return options
 }
 
 // T12: AdoptPhase1RefusesTSAAnchoredHistory

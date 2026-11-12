@@ -121,6 +121,19 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
 			continue
 		}
+		if waitingForKubernetesCapacity(pod) {
+			for _, condition := range pod.Status.Conditions {
+				if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse && strings.Contains(condition.Message, "Insufficient cpu") {
+					since := pod.CreationTimestamp.Time
+					if !condition.LastTransitionTime.IsZero() {
+						since = condition.LastTransitionTime.Time
+					}
+					if !since.IsZero() && !since.After(now) && now.Sub(since) >= timeout {
+						return &admissionProgressError{reason: fmt.Sprintf("pod CPU capacity wait exceeded %s; reduce requests or add allocatable CPU", timeout)}
+					}
+				}
+			}
+		}
 		capacityWait = capacityWait || waitingForKubernetesCapacity(pod)
 		running, complete := identityWaiterState(pod)
 		if assigned && !running && !complete && !delivered[pod.UID] {

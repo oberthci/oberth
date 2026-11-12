@@ -83,6 +83,7 @@ func buildArgoEngine(
 	}
 	stepStartupAllowance := options.stepStartupAllowance
 	config := argojob.Config{
+		StepCPURequestMaxMilli:     options.stepCPURequestMaxMilli,
 		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
 		MaxRunLogBytes:             options.runLogLimitBytes,
@@ -276,6 +277,7 @@ func validateArgoServeOptions(options serveOptions) error {
 		return err
 	}
 	return argojob.Config{
+		StepCPURequestMaxMilli:     options.stepCPURequestMaxMilli,
 		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
 		MaxRunLogBytes:             options.runLogLimitBytes,

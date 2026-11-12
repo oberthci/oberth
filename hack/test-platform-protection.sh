@@ -66,6 +66,10 @@ if grep -Eq '^[[:space:]]+(podPriorityClassName|priorityClassName):' "$work/argo
   echo 'baseline Argo chart unexpectedly assigns workload priority' >&2
   exit 1
 fi
+# Apply platform defaults before the operator's explicit sizing overrides.
+argo_render -f "$root/deploy/platform-protection/argo-workflows-values.yaml" >"$work/argo-default.yaml"
+grep -Eq '^[[:space:]]+cpu: 100m$' "$work/argo-default.yaml"
+grep -Eq '^[[:space:]]+memory: 128Mi$' "$work/argo-default.yaml"
 cat >"$work/argo-existing.yaml" <<'EOF'
 controller:
   resources:
@@ -73,7 +77,7 @@ controller:
       cpu: 321m
       memory: 654Mi
 EOF
-argo_render -f "$work/argo-existing.yaml" -f "$root/deploy/platform-protection/argo-workflows-values.yaml" >"$work/argo-on.yaml"
+argo_render -f "$root/deploy/platform-protection/argo-workflows-values.yaml" -f "$work/argo-existing.yaml" >"$work/argo-on.yaml"
 test "$(grep -c '^[[:space:]]*priorityClassName:' "$work/argo-on.yaml")" -eq 1
 grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/argo-on.yaml"
 grep -Eq '^[[:space:]]+cpu: 321m$' "$work/argo-on.yaml"
@@ -93,6 +97,9 @@ if grep -q 'priorityClassName:' "$work/bao-off.yaml"; then
   echo 'baseline OpenBao chart unexpectedly assigns platform priority' >&2
   exit 1
 fi
+openbao_render -f "$root/deploy/platform-protection/openbao-values.yaml" >"$work/bao-default.yaml"
+grep -Eq '^[[:space:]]+cpu: 100m$' "$work/bao-default.yaml"
+grep -Eq '^[[:space:]]+memory: 128Mi$' "$work/bao-default.yaml"
 cat >"$work/bao-existing.yaml" <<'EOF'
 server:
   resources:
@@ -100,7 +107,7 @@ server:
       cpu: 432m
       memory: 765Mi
 EOF
-openbao_render -f "$work/bao-existing.yaml" -f "$root/deploy/platform-protection/openbao-values.yaml" >"$work/bao-on.yaml"
+openbao_render -f "$root/deploy/platform-protection/openbao-values.yaml" -f "$work/bao-existing.yaml" >"$work/bao-on.yaml"
 for source in "$work/bao-off.yaml" "$work/bao-on.yaml"; do
   grep -A1 -Fx '  updateStrategy:' "$source" | grep -Fxq '    type: OnDelete'
 done

@@ -11,16 +11,10 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// admissionGate counts runs. A run claimed from the queue holds a reservation
-// here from its claim until its Workflow is terminal; a grant is one run slot.
-// Nothing in the gate reads the run's workflow document: what a step needs
-// is the step's own resources block, placed by Kubernetes, and what a step
-// may share with other steps is native Argo synchronization, queued by the
-// workflow controller. How many Workflows run at once is the Argo
-// controller's parallelism (docs/where-limits-live.md): Oberth submits every
-// granted run and Argo postpones the excess. The gate keeps only host safety
-// that is independent of workflow contents: the administrator hold, the disk
-// floor and the PSI pressure valve.
+// admissionGate reserves whole-workflow CPU requests until execution is gone.
+// Priority and repository fair share choose the next candidate; a whole request
+// must fit before any Pod is submitted. Native Argo locks still govern shared
+// step resources, and the disk floor, PSI valve and administrator hold apply.
 type admissionGate struct {
 	adminHold    model.AdmissionHold
 	holdUpdating bool
@@ -30,9 +24,12 @@ type admissionGate struct {
 	priorityChanges map[string]bool
 	// runs counts reservations holding a grant: runs whose Workflow Oberth
 	// submitted or is about to submit.
-	runs         int
-	waiters      []*admissionReservation
-	reservations map[int64]*admissionReservation
+	cpuMilli      int64
+	lastRepo      map[int64]int64
+	grantSequence int64
+	runs          int
+	waiters       []*admissionReservation
+	reservations  map[int64]*admissionReservation
 	// onPark, when set, is called under the lock (it must not block) after a
 	// reservation is prepared while some prepared reservation is parked by
 	// the administrator hold, so the dispatch loop can claim past it.
@@ -48,7 +45,7 @@ type admissionGate struct {
 }
 
 type admissionReservation struct {
-	// requests is the run's peak pod requests, carried for display only.
+	// requests is the effective peak Pod request reservation.
 	requests *argoworkflow.PodRequests
 	gate     *admissionGate
 	sequence int64
@@ -117,7 +114,7 @@ type admissionRequest struct {
 	SHA                  string
 }
 
-// newAdmissionGate builds a gate without a run ceiling.
+// newAdmissionGate builds a gate; production configures its CPU pool.
 func newAdmissionGate() *admissionGate {
 	return &admissionGate{reservations: make(map[int64]*admissionReservation)}
 }
@@ -206,7 +203,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	granted := reservation.granted
 	reservation.delayed = !granted
 	// Preparing may leave this run parked by the administrator hold.
-	if gate.onPark != nil && gate.parkedLocked() > 0 {
+	if gate.onPark != nil && (gate.parkedLocked() > 0 || gate.cpuMilli > 0) {
 		gate.onPark()
 	}
 	gate.mu.Unlock()
@@ -310,11 +307,10 @@ func (reservation *admissionReservation) retain() {
 	}
 }
 
-// grantLocked admits waiters in claim order. An unprepared claim at the head
-// holds its place, and so does a prepared head the disk floor or host
-// pressure holds back: the first run that cannot start stops the pass and
-// nothing later overtakes it. A run the administrator hold parks is passed
-// over.
+// grantLocked chooses by priority and repository fair share, then reserves
+// whole-run CPU. The first eligible candidate that cannot fit holds its place;
+// smaller jobs cannot continuously backfill ahead of it. Administrator-held
+// candidates are skipped.
 func (gate *admissionGate) grantLocked() {
 	if gate.holdUpdating {
 		return
@@ -347,7 +343,14 @@ func (gate *admissionGate) grantLocked() {
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
 		reservation.grantedAt = now.UTC()
+		if gate.lastRepo == nil {
+			gate.lastRepo = make(map[int64]int64)
+		}
+		gate.grantSequence++
+		gate.lastRepo[reservation.repoID] = gate.grantSequence
 		gate.runs++
+		gate.sortWaitersLocked()
+		index = 0
 		close(reservation.ready)
 		if gate.onGrant != nil {
 			gate.onGrant()
@@ -363,20 +366,29 @@ func (gate *admissionGate) grantLocked() {
 	}
 }
 
-// spareSlotForClaim reports whether the dispatch loop may claim one more run:
-// no claimed run the administrator hold does not park is still waiting in
-// the gate (checking out, or held back by the disk floor or pressure). A
-// claim reserves at once, so at most one run waits here at a time. A run
-// that already released its grant (publishing) does not count, and below
-// the disk floor one run is still claimed, so it can say why it waits.
+// spareSlotForClaim bounds preparation to one checkout at a time and, with
+// CPU packing, up to 64 prepared waiters. This lookahead makes room for newly
+// queued priority work while a standard candidate waits for CPU.
 func (gate *admissionGate) spareSlotForClaim() bool {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
+	if gate.cpuMilli > 0 {
+		if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
+			return len(gate.waiters)-gate.parkedLocked() == 0
+		}
+		// Bound checkout work while still looking past capacity-held work for
+		// newly queued promotions. Only one checkout prepares at a time.
+		for _, r := range gate.waiters {
+			if !r.prepared && !gate.adminHeldLocked(r) {
+				return false
+			}
+		}
+		return len(gate.waiters)-gate.parkedLocked() < 64
+	}
 	return len(gate.waiters)-gate.parkedLocked() == 0
 }
 
-// canGrantLocked admits unless the administrator hold or the disk floor
-// says otherwise.
+// canGrantLocked checks non-pressure admission constraints.
 func (gate *admissionGate) canGrantLocked(reservation *admissionReservation) bool {
 	if gate.adminHeldLocked(reservation) {
 		return false
@@ -385,7 +397,30 @@ func (gate *admissionGate) canGrantLocked(reservation *admissionReservation) boo
 	// configured floor, hold all new admissions until disk frees up. The
 	// check uses a cached statfs result (sub-microsecond syscall, 5 s TTL)
 	// so calling it under the lock is safe.
-	return gate.diskFloor == nil || gate.diskFloor.freeAboveFloor()
+	return gate.cpuFitsLocked(reservation) && (gate.diskFloor == nil || gate.diskFloor.freeAboveFloor())
+}
+
+func (gate *admissionGate) cpuFitsLocked(reservation *admissionReservation) bool {
+	if gate.cpuMilli > 0 {
+		if reservation.requests == nil || reservation.requests.CPUMilli <= 0 {
+			return false
+		}
+		remaining := gate.cpuMilli
+		for _, r := range gate.reservations {
+			if !r.granted || r.released {
+				continue
+			}
+			// Unknown restored demand consumes the entire pool until cleanup.
+			if r.requests == nil || r.requests.CPUMilli <= 0 {
+				return false
+			}
+			remaining -= r.requests.CPUMilli
+		}
+		if reservation.requests.CPUMilli > remaining {
+			return false
+		}
+	}
+	return true
 }
 
 func (gate *admissionGate) releaseLocked(reservation *admissionReservation) {
@@ -443,6 +478,7 @@ func (gate *admissionGate) blockerLocked(reservation *admissionReservation) *mod
 	blocker := &model.AdmissionBlocker{
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Used:         gate.runs,
+		CPUCapacity:  !gate.cpuFitsLocked(reservation),
 		WaitingSince: reservation.preparedAt,
 		Pressure:     gate.pressureWaitLocked(reservation),
 	}
@@ -527,5 +563,26 @@ func (scheduler *Scheduler) QueuedAdmissionMessage() queuedAdmissionMessage {
 // Re-sort on every admission pass because aging changes effective class.
 func (gate *admissionGate) sortWaitersLocked() {
 	now := gate.clock()
-	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBeforeAt(gate.waiters[i], gate.waiters[j], now) })
+	sort.SliceStable(gate.waiters, func(i, j int) bool {
+		a, b := gate.waiters[i], gate.waiters[j]
+		if gate.cpuMilli > 0 && a.effectivePriority(now) == b.effectivePriority(now) && a.repoID != b.repoID {
+			active := func(repo int64) int {
+				n := 0
+				for _, r := range gate.reservations {
+					if r.repoID == repo && r.granted && !r.released {
+						n++
+					}
+				}
+				return n
+			}
+			ac, bc := active(a.repoID), active(b.repoID)
+			if ac != bc {
+				return ac < bc
+			}
+			if gate.lastRepo[a.repoID] != gate.lastRepo[b.repoID] {
+				return gate.lastRepo[a.repoID] < gate.lastRepo[b.repoID]
+			}
+		}
+		return admissionBeforeAt(a, b, now)
+	})
 }

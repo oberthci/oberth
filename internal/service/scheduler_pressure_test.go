@@ -13,6 +13,9 @@ func TestSchedulerPressureBlocksSecondRunWithinBudget(t *testing.T) {
 	fixture := newConcurrencyFixture(t, pipeline.M, 2)
 	gate := fixture.scheduler.admission
 	config := DefaultAdmissionPressureConfig()
+	// This scenario exercises the soft threshold and settle window directly.
+	// Serving admission selects the bounded hard-only policy instead.
+	config.CPUSomeAvg10, config.HardCPU = 30, 50
 	// PSI lags pod startup: repeated samples stay moderate after the grant.
 	// The gate must wait for settling rather than expect an immediate spike.
 	cpu := 20.0

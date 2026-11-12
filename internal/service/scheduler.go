@@ -55,7 +55,9 @@ type SchedulerConfig struct {
 	MutationGate    func(context.Context) error
 	// StalledRunTimeout bounds granted runs before submission. Zero is ten minutes.
 	StalledRunTimeout time.Duration
-	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root (#673).
+	// AdmissionCPUMilli is allocatable CPU minus administrator headroom.
+	AdmissionCPUMilli int64
+	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root.
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
 	// RestoredRunsFile is oberth restore's marker (RestoredRunsFile in the
@@ -194,8 +196,8 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
-	// The Argo controller's parallelism bounds running Workflows; Kubernetes
-	// decides whether each step pod fits its node by the declared requests.
+	// Reserve complete CPU envelopes before handing Workflows to Argo.
+	scheduler.admission.cpuMilli = config.AdmissionCPUMilli
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	if config.AdmissionDiskFloorBytes > 0 {
 		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
@@ -489,6 +491,17 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if sizing, ok := scheduler.jobs.(interface {
+			AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error)
+		}); ok {
+			demand, err := sizing.AdoptedPodDemand(run)
+			if err != nil {
+				return err
+			}
+			scheduler.admission.mu.Lock()
+			reservation.requests = queuePodRequests(demand)
+			scheduler.admission.mu.Unlock()
+		}
 		adopted = append(adopted, adoptedRun{run: run, reservation: reservation})
 		return nil
 	}); err != nil {
@@ -692,15 +705,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 }
 
-// dispatchSlotAvailable reports whether the dispatch loop may claim another
-// run while active claimed runs are in flight.
-//
-// Oberth has no run ceiling: the Argo controller's parallelism postpones
-// Workflows beyond its limit. The loop claims one more run once no claimed
-// run is still waiting in the gate, so at most one checkout waits for the
-// disk floor or host pressure at a time. Claims the administrator hold parks
-// do not count: ClaimNextRun cannot replenish them, and counting them would
-// strand the allowed classes behind earlier claims.
+// dispatchSlotAvailable bounds checkout preparation while allowing priority
+// lookahead past capacity-held work. Administrator-held claims do not count.
 func (scheduler *Scheduler) dispatchSlotAvailable(int) bool {
 	return scheduler.admission.spareSlotForClaim()
 }
@@ -888,6 +894,19 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		demand, _ := receipt.WorkflowPodDemand()
 		requests = queuePodRequests(demand)
 	}
+	if sizing, ok := scheduler.jobs.(interface {
+		AdmissionRequests(context.Context, WorkflowRequest) (*argoworkflow.PodRequests, error)
+	}); ok {
+		requests, err = sizing.AdmissionRequests(ctx, jobRequest)
+		if err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("size workflow requests: %w", err))
+		}
+	}
+	if scheduler.admission.cpuMilli > 0 && (requests == nil || requests.CPUMilli <= 0 || requests.CPUMilli > scheduler.admission.cpuMilli) {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("workflow CPU requests are unknown or exceed allocatable CPU minus headroom; bound workflow parallelism or reduce requests"))
+	}
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Requests: requests,
 		RefKind: run.RefKind, SHA: run.SHA, PriorityLookupFailed: priorityErr != nil,
@@ -949,6 +968,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
 	}
+	jobRequest.Run = current
 	{
 		upstream, upstreamErr := scheduler.database().Upstream(ctx, repository.UpstreamID)
 		if upstreamErr != nil {

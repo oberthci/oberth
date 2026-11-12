@@ -218,6 +218,8 @@ func ArgoHelmArgs(cfg Config) []string {
 		"--set", "singleNamespace=true",
 		"--set", "server.enabled=false",
 		"--set-string", "controller.priorityClassName=" + controlPlanePriority(cfg),
+		"--set-string", "controller.resources.requests.cpu=100m",
+		"--set-string", "controller.resources.requests.memory=128Mi",
 		"--set", "createAggregateRoles=false",
 		"--set", "controller.clusterWorkflowTemplates.enabled=false",
 		"--set", "workflow.serviceAccount.create=false",

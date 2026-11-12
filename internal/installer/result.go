@@ -25,6 +25,7 @@ import (
 
 // CheckResult is a stable public check. Diagnostics never include subprocess output.
 type CheckResult struct {
+	Warning         bool   `json:"warning,omitempty"`
 	DeployPublicKey string `json:"deploy_public_key,omitempty"`
 	Code            string `json:"code"`
 	OK              bool   `json:"ok"`
@@ -249,7 +250,7 @@ func PrintVerification(ctx context.Context, cfg Config, deps InstallDeps, asJSON
 		}
 	} else {
 		for _, check := range result.Checks {
-			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s\n", check.Code, check.OK, check.Remedy)
+			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
 		}
 	}
 	if !result.OK {

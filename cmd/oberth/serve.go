@@ -45,7 +45,6 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/pipeline"
 
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
@@ -76,6 +75,11 @@ func (values *stringList) Set(value string) error {
 }
 
 type serveOptions struct {
+	admissionCPUHeadroomPercent int64
+	stepCPURequestPercent       int64
+	admissionCPUMilli           int64
+	stepCPURequestMaxMilli      int64
+
 	issueStaleAfter         time.Duration
 	issueActiveStaleAfter   time.Duration
 	uplinkTokenPolicy       model.UplinkTokenPolicy
@@ -243,10 +247,13 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 
 	flags.IntVar(&options.autoRetryBudget, "auto-retry-infrastructure-budget", model.DefaultInfrastructureAutoRetryBudget, fmt.Sprintf("automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most %d)", model.MaxInfrastructureAutoRetryBudget))
-	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt")
+	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup or Insufficient-CPU Pod wait bound; native Argo synchronization waits are exempt")
+	flags.Int64Var(&options.admissionCPUHeadroomPercent, "admission-cpu-headroom-percent", 20, "allocatable CPU reserved for platform and host work (1-90 percent)")
+	flags.Int64Var(&options.stepCPURequestPercent, "step-cpu-request-percent", 25, "maximum step container CPU request as percent of node allocatable CPU (1-100); limits remain unchanged")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
 	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard host CPU some PSI avg10 percentage for new workflow grants")
+	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-defer-seconds", defaults.MaxWaitSeconds, "maximum PSI deferral before one otherwise fitting workflow may start (1-3600 seconds)")
 	flags.Float64Var(&options.admissionPressure.HardIO, "admission-pressure-hard-io", defaults.HardIO, "hard host IO some PSI avg10 percentage for new workflow grants")
 
 	flags.Int64Var(&options.stepStartupAllowance.FactorPercent, "admission-step-startup-allowance-percent", argojob.DefaultStepStartupAllowance.FactorPercent, "Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499)")
@@ -435,6 +442,12 @@ func validateAgentEventOptions(options serveOptions) error {
 }
 
 func validateServeOptions(options serveOptions) error {
+	if options.admissionCPUHeadroomPercent < 1 || options.admissionCPUHeadroomPercent > 90 || options.stepCPURequestPercent < 1 || options.stepCPURequestPercent > 100 {
+		return errors.New("admission CPU headroom must be 1-90 percent and step CPU request percent must be 1-100")
+	}
+	if options.admissionPressure.MaxWaitSeconds < 1 || options.admissionPressure.MaxWaitSeconds > 3600 {
+		return errors.New("admission pressure defer seconds must be 1-3600")
+	}
 
 	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
 		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
@@ -627,7 +640,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 	}
 	restConfig = serverKubernetesConfig(restConfig, options)
-	kube, err := kubernetes.NewForConfig(restConfig)
+	kube, err := schedulingKubernetesClient(ctx, restConfig, &options)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
@@ -901,6 +914,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 		AdmissionPressure:       options.admissionPressure,
+		AdmissionCPUMilli:       options.admissionCPUMilli,
 		StalledRunTimeout:       options.admissionStallTimeout,
 		RestoredRunsFile:        filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})

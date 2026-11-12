@@ -18,6 +18,9 @@ import (
 func hostPressureTestGate() *pressureFixture {
 	f := pressureTestGate()
 	c := DefaultAdmissionPressureConfig()
+	c.CPUSomeAvg10 = 30
+	c.HardCPU = 50
+	c.MaxWaitSeconds = 1200
 	c.Source = func() (model.PressureSample, error) { f.reads++; return f.sample, f.err }
 	c.Logf = func(string, ...any) {}
 	f.gate.pressure = newPressureCheck(c)
@@ -177,6 +180,9 @@ func TestHostPressureConfigurationAndSampleValidation(t *testing.T) {
 		func(c *AdmissionPressureConfig) { c.MaxWaitSeconds = 0 },
 	} {
 		c := DefaultAdmissionPressureConfig()
+		c.CPUSomeAvg10 = 30
+		c.HardCPU = 50
+		c.MaxWaitSeconds = 1200
 		mutate(&c)
 		if c.Validate() == nil {
 			t.Fatalf("invalid config accepted: %+v", c)
@@ -319,6 +325,9 @@ func TestHostPressureStarvationOnePerPassAndSettleWindow(t *testing.T) {
 func TestHostPressureLegacyObserveStartupWarning(t *testing.T) {
 	for _, mode := range []string{"", PressureEnforce, PressureObserve} {
 		c := DefaultAdmissionPressureConfig()
+		c.CPUSomeAvg10 = 30
+		c.HardCPU = 50
+		c.MaxWaitSeconds = 1200
 		c.Mode = mode
 		var logs bytes.Buffer
 		c.Logf = func(format string, args ...any) { fmt.Fprintf(&logs, format, args...) }

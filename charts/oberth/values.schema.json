@@ -182,14 +182,17 @@
             "maxSeconds": {"type": "integer", "minimum": 0, "maximum": 3600}
           }
         },
+        "cpuHeadroomPercent": {"type": "integer", "minimum": 1, "maximum": 90},
+        "stepCPURequestPercent": {"type": "integer", "minimum": 1, "maximum": 100},
         "pressure": {
           "type": "object",
           "additionalProperties": false,
-          "description": "PSI hard-limit safety valve; missing PSI retains the workflow ceiling.",
+          "description": "Bounded host PSI valve; missing PSI retains CPU packing.",
           "properties": {
             "enabled": {
               "type": "boolean"
             },
+            "deferSeconds": {"type": "integer", "minimum": 1, "maximum": 3600},
             "hardCpu": {
               "type": "number",
               "exclusiveMinimum": 10,

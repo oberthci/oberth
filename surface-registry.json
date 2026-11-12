@@ -1,5 +1,57 @@
 {
   "entries": {
+    "flag:admission-stall-timeout": {
+      "doc_anchor": "docs/cpu-admission.md#ordering-and-bounded-waits",
+      "test_ref": "internal/argojob/admission_deadline_test.go TestAdmissionDeadlineMissingWaiterDoesNotChargePriorCapacityWait"
+    },
+    "value:warning": {
+      "doc_anchor": "docs/host-preparation.md",
+      "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
+    },
+    "value:hardCpu": {"doc_anchor": "docs/io-pressure-admission.md", "test_ref": "cmd/oberth/pressure_flags_test.go TestServePressureHardValveDefaultsAndValidation"},
+    "value:memory": {"doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress", "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"},
+    "value:requests": {"doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress", "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"},
+    "value:resources": {"doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress", "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"},
+    "value:cpu_capacity": {
+      "doc_anchor": "docs/cpu-admission.md#ordering-and-bounded-waits",
+      "test_ref": "internal/service/admission_cpu_test.go TestAdmissionCPUDoesNotBackfillPastLargeWaiter"
+    },
+    "flag:admission-cpu-headroom-percent": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUAllocatableHeadroomAndStepCap"
+    },
+    "flag:step-cpu-request-percent": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "internal/argojob/scheduling_requests_test.go TestSchedulingCPUCapPreservesBurstAndCountsHelpers"
+    },
+    "flag:admission-pressure-defer-seconds": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "internal/service/admission_cpu_test.go TestHardPressureDefaultDeferralIsBounded"
+    },
+    "value:cpuHeadroomPercent": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUAllocatableHeadroomAndStepCap"
+    },
+    "value:stepCPURequestPercent": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "internal/argojob/scheduling_requests_test.go TestSchedulingCPUCapPreservesBurstAndCountsHelpers"
+    },
+    "value:deferSeconds": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "internal/service/admission_cpu_test.go TestHardPressureDefaultDeferralIsBounded"
+    },
+    "value:host_swap": {
+      "doc_anchor": "docs/host-preparation.md#swap-or-zram",
+      "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
+    },
+    "value:host_inotify": {
+      "doc_anchor": "docs/host-preparation.md#inotify",
+      "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
+    },
+    "value:host_kubelet": {
+      "doc_anchor": "docs/host-preparation.md#kubelet",
+      "test_ref": "internal/installer/host_prep_test.go TestHostPrepKubeletConfigUsesSelectedNodeAndWarnsOnUnknown"
+    },
     "value:cpu": {
       "doc_anchor": "docs/server-cpu.md#overrides-and-upgrades",
       "test_ref": "cmd/oberth/chart_server_resources_test.go TestChartServerCPUReservationAndOverride"

@@ -1324,6 +1324,8 @@ func OpenBaoHelmArgs(cfg Config) []string {
 		// modes.
 		"--set", "injector.enabled=false",
 		"--set-string", "server.priorityClassName=" + controlPlanePriority(cfg),
+		"--set-string", "server.resources.requests.cpu=100m",
+		"--set-string", "server.resources.requests.memory=128Mi",
 	}
 	if cfg.InstallSecretStoreDev {
 		args = append(args,

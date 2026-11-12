@@ -2,13 +2,13 @@ package main
 
 import "testing"
 
-func TestNodeBootChartGrantsOnlyNodeGetToServer(t *testing.T) {
+func TestNodeChartGrantsOnlyCapacityAndBootReadsToServer(t *testing.T) {
 	for _, namespace := range []string{"first", "second"} {
 		t.Run(namespace, func(t *testing.T) {
 			docs := renderArgoRBAC(t, "-s", "templates/rbac-node-boots.yaml", "--namespace", namespace)
 			name := "oberth-" + namespace + "-node-boots"
 			role := findChartRBACDoc(t, docs, "ClusterRole", name)
-			want := []map[string]any{{"apiGroups": []any{""}, "resources": []any{"nodes"}, "verbs": []any{"get"}}}
+			want := []map[string]any{{"apiGroups": []any{""}, "resources": []any{"nodes"}, "verbs": []any{"get", "list"}}}
 			if canonicalRules(t, role.Rules) != canonicalRules(t, want) {
 				t.Fatalf("node read permission broadened: %+v", role.Rules)
 			}

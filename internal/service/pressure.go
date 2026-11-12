@@ -27,7 +27,8 @@ const (
 // for existing in-process callers; serve and the chart use the avg10 gate.
 // Source and Logf permit deterministic tests without observing the test host.
 type AdmissionPressureConfig struct {
-	// HardOnly is forced by workflow admission. Legacy soft/defer fields are ignored.
+	// HardOnly is forced by workflow admission. MaxWaitSeconds bounds deferral;
+	// only the avg10 thresholds below apply.
 	HardOnly        bool
 	Enabled         bool
 	CPUSomeAvg10    float64
@@ -45,11 +46,14 @@ type AdmissionPressureConfig struct {
 }
 
 func DefaultAdmissionPressureConfig() AdmissionPressureConfig {
-	return AdmissionPressureConfig{Enabled: true, Mode: PressureEnforce, CPUSomeAvg10: 30, IOSomeAvg10: 20, HardCPU: 50, HardIO: 40, MaxWaitSeconds: 1200, Hysteresis: 10}
+	return AdmissionPressureConfig{Enabled: true, Mode: PressureEnforce, CPUSomeAvg10: 20, IOSomeAvg10: 20, HardCPU: 25, HardIO: 40, MaxWaitSeconds: 300, Hysteresis: 10}
 }
 
 func (c AdmissionPressureConfig) Validate() error {
 	if c.HardOnly {
+		if c.MaxWaitSeconds < 0 {
+			return errors.New("pressure max defer must be nonnegative")
+		}
 		if !c.Enabled {
 			return nil
 		}
@@ -110,7 +114,9 @@ func newPressureCheck(config AdmissionPressureConfig) *pressureCheck {
 		}
 		config.Mode = PressureEnforce
 		config.CPUSomeAvg10, config.IOSomeAvg10 = config.HardCPU, config.HardIO
-		config.MaxWaitSeconds = 0
+		if config.MaxWaitSeconds == 0 {
+			config.MaxWaitSeconds = 300
+		}
 		config.IOFullAvg60Max, config.CPUSomeAvg60Max, config.MaxDefer = 0, 0, 0
 	}
 	if config.Mode == "" {
@@ -132,7 +138,7 @@ func newPressureCheck(config AdmissionPressureConfig) *pressureCheck {
 		config.Mode = PressureEnforce
 		config.Hysteresis = 10
 	}
-	return &pressureCheck{config: config, state: model.AdmissionPressure{Enabled: true, Mode: config.Mode, CPUSomeAvg10: config.CPUSomeAvg10, IOSomeAvg10: config.IOSomeAvg10, HardCPU: config.HardCPU, HardIO: config.HardIO, MaxWaitSeconds: config.MaxWaitSeconds, IOFullAvg60Max: config.IOFullAvg60Max, CPUSomeAvg60Max: config.CPUSomeAvg60Max, Hysteresis: config.Hysteresis, MaxDeferSeconds: int64(config.MaxDefer / time.Second)}}
+	return &pressureCheck{config: config, state: model.AdmissionPressure{Enabled: true, Mode: config.Mode, CPUSomeAvg10: config.CPUSomeAvg10, IOSomeAvg10: config.IOSomeAvg10, HardCPU: config.HardCPU, HardIO: config.HardIO, MaxWaitSeconds: config.MaxWaitSeconds, IOFullAvg60Max: config.IOFullAvg60Max, CPUSomeAvg60Max: config.CPUSomeAvg60Max, Hysteresis: config.Hysteresis, MaxDeferSeconds: max(config.MaxWaitSeconds, int64(config.MaxDefer/time.Second))}}
 }
 
 // Read in admission, never from status/metrics requests. The avg10 gate reads
@@ -154,7 +160,7 @@ func (p *pressureCheck) refresh(now time.Time) {
 		p.state.Sample = nil
 		p.state.Fallback = "PSI unavailable; budget-only admission"
 		if p.config.HardOnly {
-			p.state.Fallback = "PSI unavailable; workflow ceiling admission"
+			p.state.Fallback = "PSI unavailable; CPU request admission"
 		}
 		p.ioHeld, p.cpuHeld = false, false
 		if !p.warned {
@@ -267,6 +273,11 @@ func (gate *admissionGate) deferPressureLocked(r *admissionReservation, now time
 		if r.pressureSince.IsZero() {
 			r.pressureSince = now
 			p.deferrals++
+		}
+		if now.Sub(r.pressureSince) >= time.Duration(p.config.MaxWaitSeconds)*time.Second && !p.starvationGranted {
+			p.starvationGranted = true
+			p.bypasses++
+			return false
 		}
 		r.pressureDeferred = true
 		return true
