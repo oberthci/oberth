@@ -369,30 +369,24 @@ func (s stubRefResolver) TagObjectSHA(ctx context.Context, repo, tag string) (st
 	return s.RefSHA(ctx, repo, "refs/tags/"+tag)
 }
 
-func TestRunRerunKeepsOperatorReasonInAutomaticLineage(t *testing.T) {
+func TestRunRerunKeepsOperatorReasonWithoutAutomaticRetry(t *testing.T) {
 	now := time.Now()
 	harness := newRerunHarnessWithOptions(t, store.Options{Now: func() time.Time { return now }}, infraFailure, infraFailure)
-	harness.scheduler.infrastructureAutoRetryBudget = 1 // spend the lineage's whole budget
 	first, err := harness.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "manual-reason", Repository: harness.fixture.repo, Branch: rerunBranch, SHA: rerunSHA, Actor: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	harness.process(t)
 	failed := harness.run(t, first.ID)
-	if failed.AutoRetriedBy == "" {
-		t.Fatal("missing automatic successor")
-	}
-	now = now.Add(5 * time.Second)
-	harness.process(t)
 	const reason = "fixture repaired; check the same commit again"
-	response := harness.rerun(t, rerunUplink, map[string]any{"id": failed.AutoRetriedBy, "reason": reason})
+	response := harness.rerun(t, rerunUplink, map[string]any{"id": failed.ID, "reason": reason})
 	value, err := harness.call(rerunUplink, "run_get", map[string]any{"id": response.RunID, "summary": false})
 	if err != nil {
 		t.Fatal(err)
 	}
 	detail := value.(RunDetailResponse)
-	want := "rerun of " + failed.AutoRetriedBy + " (lineage: automatic retry of " + first.ID + "): " + reason
-	if detail.Run.Reason != want || detail.RerunOf != failed.AutoRetriedBy || detail.Run.AutoRetryOf != first.ID {
+	want := "rerun of " + failed.ID + ": " + reason
+	if detail.Run.Reason != want || detail.RerunOf != failed.ID {
 		t.Fatalf("manual rerun detail: %+v", detail)
 	}
 	if shown := presentationRun(detail.Run); shown.Reason != want {

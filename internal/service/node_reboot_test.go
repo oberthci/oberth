@@ -7,55 +7,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/internal/store"
 )
-
-func TestNodeRebootBranchRetriesWithinBudget(t *testing.T) {
-	now := time.Now()
-	f := newRecoveryFixtureWithOptions(t, store.Options{Now: func() time.Time { return now }})
-	run := f.enqueueAndClaim(t, "feature/reboot", strings.Repeat("b", 40))
-	for attempt := 0; attempt <= model.DefaultInfrastructureAutoRetryBudget; attempt++ {
-		name, err := deterministicWorkflowName(f.repo.Name, run.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		result := evictionResult(name, time.Now().UTC())
-		result.Error = model.NodeRebootReasonPrefix + "node worker restarted after 2026-11-11T21:00:00Z; new boot first observed at 2026-11-11T21:01:00Z"
-		result.TerminalObservation.Steps[0].Evicted = false
-		result.TerminalObservation.Steps[0].NodeReboot = true
-		result.Steps[0].ExitCode = 255
-		jobs := &rcaCreateFailure{}
-		jobs.waitResult = result
-		if err = f.scheduler(t, jobs).executeAndCleanup(t.Context(), run); err != nil {
-			t.Fatal(err)
-		}
-		failed, err := f.store.Run(t.Context(), run.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		hint := runRetryHint(failed, nil)
-		if hint == nil || hint.Class != model.RetryInfrastructure {
-			t.Fatalf("reboot retry hint: %+v", hint)
-		}
-		if failed.Status != model.RunFailed || failed.Phase != "infrastructure" || failed.FailedStep != "" {
-			t.Fatalf("verdict: %+v", failed)
-		}
-		if attempt == model.DefaultInfrastructureAutoRetryBudget {
-			if failed.AutoRetriedBy != "" {
-				t.Fatal("reboot exceeded retry budget")
-			}
-			break
-		}
-		if failed.AutoRetriedBy == "" {
-			t.Fatalf("reboot not retried: %+v", failed)
-		}
-		now = now.Add(5 * time.Second)
-		run, err = f.store.ClaimNextRun(t.Context())
-		if err != nil || run.ID != failed.AutoRetriedBy {
-			t.Fatalf("retry queue: %+v %v", run, err)
-		}
-	}
-}
 
 func TestTagSkippedPublicationTimestampsNeedNoForce(t *testing.T) {
 	for _, kind := range []string{"skipped", "skipped with synthesized start", "pending", "earlier failed publication", "earlier publication attempt"} {
@@ -115,13 +67,8 @@ func TestTagSkippedPublicationTimestampsNeedNoForce(t *testing.T) {
 
 func TestNodeRebootDisplayKeepsNodeTimeAndRetryLink(t *testing.T) {
 	run := model.Run{Status: model.RunFailed, Phase: "infrastructure", Error: model.NodeRebootReasonPrefix + "node worker restarted after 2026-11-11T21:00:00Z; new boot first observed at 2026-11-11T21:01:00Z"}
-	for _, retried := range []bool{false, true} {
-		if retried {
-			run.AutoRetriedBy = strings.Repeat("a", 32)
-		}
-		shown := presentationRun(run)
-		if !strings.Contains(shown.DisplayReason, "node worker restarted") || !strings.Contains(shown.DisplayReason, "2026-11-11T21:01:00Z") || strings.Contains(shown.DisplayReason, "…") || (retried && !strings.Contains(shown.DisplayReason, "retried as")) {
-			t.Fatalf("reason clipped: %s", shown.DisplayReason)
-		}
+	shown := presentationRun(run)
+	if !strings.Contains(shown.DisplayReason, "node worker restarted") || !strings.Contains(shown.DisplayReason, "2026-11-11T21:01:00Z") {
+		t.Fatal(shown.DisplayReason)
 	}
 }

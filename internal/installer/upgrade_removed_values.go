@@ -15,6 +15,7 @@ import (
 // never silently ignored.
 var removedChartValues = []string{
 	"admission",
+	"autoRetryInfrastructureBudget",
 	"argo.ciSecretsServiceAccount",
 	"argo.ciServiceAccount",
 	"argo.containerDiskPrefixes",

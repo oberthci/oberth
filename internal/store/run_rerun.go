@@ -97,7 +97,11 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 			return model.RunRerunResult{}, err
 		}
 	}
-	spec, err := validateRunSpec(model.RunSpec{Assist: request.Assist,
+	reason := "rerun of " + source.ID
+	if request.Reason != "" {
+		reason += ": " + request.Reason
+	}
+	spec, err := validateRunSpec(model.RunSpec{Assist: request.Assist, Reason: reason,
 		RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: request.Actor,
 		Release: source.Release, Credentialed: source.Release && source.Credentialed, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry,
 		TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA,
@@ -113,20 +117,6 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
 	if err != nil {
 		return model.RunRerunResult{}, fmt.Errorf("enqueue rerun: %w", err)
-	}
-	if err := s.inheritAutoRetryTx(ctx, tx, source, &enqueued.Run); err != nil {
-		return model.RunRerunResult{}, err
-	}
-	if enqueued.AutoRetryOf != "" {
-		// This is an operator action. Keep its reason distinct from the spent
-		// automatic-retry budget, whose immutable audit receipt was inherited.
-		enqueued.Reason = "rerun of " + source.ID + manualAutoRetryLineage + enqueued.AutoRetryOf + ")"
-		if request.Reason != "" {
-			enqueued.Reason += ": " + request.Reason
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason=? WHERE id=?`, enqueued.Reason, enqueued.ID); err != nil {
-			return model.RunRerunResult{}, fmt.Errorf("record manual rerun reason: %w", err)
-		}
 	}
 
 	detailsMap := replayAuditDetails(source.Release || source.RefKind == model.RefTag, request.ReplayAudit)

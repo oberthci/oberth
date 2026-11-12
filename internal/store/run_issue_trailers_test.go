@@ -102,7 +102,7 @@ func TestFailureSummaryPreservesAutomaticRetryLineage(t *testing.T) {
 	if rawReason != reason || cause != result.FailureCause {
 		t.Fatalf("failure cause corrupted durable reason: %q, %q", rawReason, cause)
 	}
-	if result.Reason != reason || result.AutoRetryOf != origin || result.FailureCause != "infrastructure error: cpu limit 6 over ceiling 4" || result.Error != "full raw failure" {
+	if result.Reason != reason || result.FailureCause != "infrastructure error: cpu limit 6 over ceiling 4" || result.Error != "full raw failure" {
 		t.Fatalf("summary changed lineage/evidence: %+v", result)
 	}
 }

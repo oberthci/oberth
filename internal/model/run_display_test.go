@@ -7,7 +7,7 @@ import (
 )
 
 // Every raw status, phase and projection a run can carry maps to exactly one
-// of the seven user-facing statuses; "waiting", "infra-pending" and
+// of the six user-facing statuses; "waiting", "infra-pending" and
 // "deadline-exceeded" are reasons, never statuses.
 func TestEveryRawPhaseMapsToExactlyOneDisplayStatus(t *testing.T) {
 	started := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
@@ -18,8 +18,8 @@ func TestEveryRawPhaseMapsToExactlyOneDisplayStatus(t *testing.T) {
 		for _, phase := range phases {
 			for _, startedAt := range []*time.Time{nil, &started} {
 				for _, superseded := range []string{"", "newer"} {
-					for _, retried := range []string{"", "retry"} {
-						run := Run{Status: status, Phase: phase, StartedAt: startedAt, SupersededBy: superseded, AutoRetriedBy: retried}
+					for range 1 {
+						run := Run{Status: status, Phase: phase, StartedAt: startedAt, SupersededBy: superseded}
 						got := DisplayRunStatus(run)
 						if !slices.Contains(DisplayStatuses, got) {
 							t.Fatalf("%+v displays %q, outside the vocabulary %v", run, got, DisplayStatuses)
@@ -57,7 +57,7 @@ func TestDisplayRunStatusCollapsesNotStartedRunsIntoQueued(t *testing.T) {
 		{"failed step", Run{Status: RunFailed, Phase: "job", StartedAt: &started}, DisplayFailed},
 		{"failed by deadline", Run{Status: RunFailed, Phase: "job", Error: ExecutionDeadlineMessage, StartedAt: &started}, DisplayFailed},
 		{"failed by memory", Run{Status: RunFailed, Phase: "job", Error: "OOMKilled", StartedAt: &started}, DisplayFailed},
-		{"infra error retried", Run{Status: RunFailed, Phase: "infrastructure", AutoRetriedBy: "retry"}, DisplayInfraRetried},
+		{"infra error retried", Run{Status: RunFailed, Phase: "infrastructure"}, DisplayFailed},
 		{"cancelled", Run{Status: RunInterrupted, Phase: PhaseCancelled}, DisplayCancelled},
 		{"cancelled despite a successor", Run{Status: RunInterrupted, Phase: PhaseCancelled, SupersededBy: "newer"}, DisplayCancelled},
 		{"superseded", Run{Status: RunInterrupted, Phase: "interrupted", SupersededBy: "newer"}, DisplaySuperseded},

@@ -37,11 +37,6 @@ uplinkTokens:
 
 replicaCount: 1
 # Argo controller.parallelism controls the number of concurrent pipeline Workflows.
-# Automatic retries per lineage for eligible branch infrastructure failures
-# (retry_hint class infrastructure, never code); each retains the original
-# queue position and is audited. 0 disables, at most 5.
-autoRetryInfrastructureBudget: 2
-
 # Agent-assisted CI continuation (retry hold). Off by default. When enabled,
 # a branch run pushed with `git push -o oberth.assist=1` (or rerun with
 # assist) parks the retry of a failed credential-free step before its command,

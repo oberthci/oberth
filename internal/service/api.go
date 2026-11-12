@@ -1728,14 +1728,6 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if visible.DisplayStatus == model.DisplayQueued {
 		visible.DisplayReason = queuedDisplayReason(nil)
 	}
-	if visible.DisplayStatus == model.DisplayInfraRetried {
-		visible.DisplayReason = "retried as " + shortRunID(run.AutoRetriedBy)
-		if cause := evictionDisplayReason(run); cause != "" {
-			visible.DisplayReason = joinRunMessage(cause, visible.DisplayReason)
-		} else if cause := nodeRebootDisplayReason(run); cause != "" {
-			visible.DisplayReason = joinRunMessage(cause, visible.DisplayReason)
-		}
-	}
 	if run.Status == model.RunRunning && isPendingCreate(run) {
 		visible.DisplayReason = "workflow create uncertain, cleanup pending"
 	}

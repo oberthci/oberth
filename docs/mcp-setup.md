@@ -458,14 +458,14 @@ An explicit burn without step defaults only when that burn has exactly one step.
 
 `run_list` accepts `status` as one existing display status or a non-empty list:
 `queued`, `running`, `passed`, `failed`, `cancelled`, `superseded`,
-or `infra-retried`. `repo` and `ref` remain
+or `cancelled`. `repo` and `ref` remain
 optional exact filters. Filtering precedes the page limit; queue-first ordering,
 active-row limits and terminal cursors are unchanged. Send the same filters with
 the returned cursor. REST accepts repeated or comma-separated `status` values.
 
 ```sh
 oberth mcp call run_list '{"status":"queued","repo":"project"}'
-oberth mcp call run_list '{"status":["failed","infra-retried"],"limit":25}'
+oberth mcp call run_list '{"status":["failed"],"limit":25}'
 oberth mcp call run_logs '{"id":"01234567","step":"compile"}'
 ```
 
@@ -770,7 +770,7 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
 
 Every run response includes `display_status` and `display_reason`, while
 durable `Status` stays unchanged. `display_status` is exactly one of
-`queued`, `running`, `passed`, `failed`, `infra-retried`, `superseded` and
+`queued`, `running`, `passed`, `failed`, `superseded` and
 `cancelled`; everything finer is the reason line. Every run that has not
 started is `queued`: durable queued, or claimed before admission (raw
 `Status` `waiting`). Its `display_reason` names what it waits for in plain
@@ -785,7 +785,7 @@ optionally followed by `schedule <entry>`. This display is independent of the
 repository policy authorizing closure; it cannot close issues by itself.
 Terminal runs display
 `passed` (including published releases), `failed` (a deadline or memory
-kill is the reason), `infra-retried`, `superseded` with the superseding SHA,
+kill is the reason), `superseded` with the superseding SHA,
 or `cancelled` with the cancelling actor or restart action.
 After a server restart, a
 running branch run whose Argo Workflow still exists is adopted first: it keeps

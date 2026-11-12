@@ -2,7 +2,7 @@
 
 | Control | Owner | Configuration |
 | --- | --- | --- |
-| Workflows running at once | Argo | `oberth install --argo-parallelism N`, or controller `parallelism` / `namespaceParallelism` |
+| Workflows running at once | Argo | `oberth install --argo-parallelism N`, or controller `parallelism` |
 | Container requests/limits and Pod placement | Repository and Kubernetes | Native Argo YAML and cluster admission/quotas |
 | Shared step concurrency | Argo and operator | Native mutexes or an operator-created semaphore ConfigMap |
 | Workflow/template deadlines and retries | Repository and Argo | Native `activeDeadlineSeconds` and `retryStrategy` |
@@ -10,7 +10,7 @@
 Oberth has no CPU pool, fair-share queue, size/resource grant, PSI gate, disk
 floor, admin hold or startup-stall policy. The [native model](native-scheduling.md)
 describes source retention, security boundaries, metadata selectors and the
-separate infrastructure auto-retry policy.
+native retry policy.
 
 `0` parallelism is unlimited. Pause by scaling the workflow-controller to zero
 replicas or using `argo suspend WORKFLOW`. The fresh-install default is

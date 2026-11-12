@@ -142,13 +142,6 @@
         }
       }
     },
-    "autoRetryInfrastructureBudget": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 5,
-      "default": 2,
-      "description": "Automatic retries per lineage of an eligible branch infrastructure failure (retry_hint class infrastructure), retaining queue position and priority. 0 disables."
-    },
     "assist": {
       "type": "object",
       "additionalProperties": false,

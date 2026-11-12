@@ -449,7 +449,7 @@ func TestRetryHintClassification(t *testing.T) {
 		{"infrastructure", failed("infrastructure", "", "workflow error"), model.RetryInfrastructure, "infrastructure"},
 		{"step", failed("test", "unit", "exit 1"), model.RetryCode, "step_failed"},
 		{"interrupted", model.Run{Status: model.RunInterrupted, Phase: "restart"}, model.RetryInfrastructure, "interrupted"},
-		{"auto retried", model.Run{Status: model.RunFailed, Phase: "infrastructure", AutoRetriedBy: "next"}, model.RetryInfrastructure, "auto_retried"},
+		{"auto retried", model.Run{Status: model.RunFailed, Phase: "infrastructure"}, model.RetryInfrastructure, "auto_retried"},
 	} {
 		hint := runRetryHint(test.run, nil)
 		if hint == nil || hint.Class != test.class || hint.Cause != test.cause {

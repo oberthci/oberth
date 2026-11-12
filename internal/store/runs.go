@@ -183,9 +183,6 @@ func (s *Store) resetRunAfterRestartTx(ctx context.Context, tx *sql.Tx, run mode
 		return model.Run{}, err
 	}
 	reason := RestartRequeueReason
-	if run.AutoRetryOf != "" {
-		reason += "; " + strings.TrimPrefix(strings.TrimSuffix(run.Reason, "; "+PolicyRefreshWaitingReason), RestartRequeueReason+"; ")
-	}
 	reset, err := scanRun(tx.QueryRowContext(ctx, `UPDATE runs SET status='queued',phase='queued',job_name='',credentialed=0,started_at=NULL,finished_at=NULL,error='',failed_burn='',failed_step='',reason=?,updated_at=? WHERE id=? AND status='running' RETURNING `+runColumns, reason, now, run.ID))
 	if err != nil {
 		return model.Run{}, err
@@ -355,7 +352,7 @@ func (s *Store) claimNextRun(ctx context.Context, id string) (model.Run, error) 
 UPDATE runs
 SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
-    SELECT queue_sequence FROM runs WHERE (?='' OR id=?) AND `+claimableRunSQL+` AND `+automaticRetryReadySQL(fromUnixNano(now))+`
+    SELECT queue_sequence FROM runs WHERE (?='' OR id=?) AND `+claimableRunSQL+`
     ORDER BY `+submissionOrderSQL()+` LIMIT 1
 )
 RETURNING `+runColumns, now, id, id))
@@ -937,12 +934,6 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.Run{}, fmt.Errorf("finish run: %w", err)
 	}
-	if result.AutoRetryBudget > 0 {
-		value, err = s.autoRetryInfrastructureTx(ctx, tx, value, result.TerminalObservation, now, result.AutoRetryBudget)
-		if err != nil {
-			return model.Run{}, err
-		}
-	}
 
 	if value.Trigger == "promotion" {
 		promotion, promotionErr := promotionByRunTx(ctx, tx, value.ID)
@@ -964,7 +955,7 @@ RETURNING `+runColumns,
 		if promotionErr != nil {
 			return model.Run{}, promotionErr
 		}
-	} else if value.AutoRetriedBy == "" {
+	} else {
 		if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
 			return model.Run{}, err
 		}
@@ -1372,8 +1363,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	}
 	value.AssistRequested = assistRequested != 0
 	value.Assisted = assisted != 0
-	value.AutoRetryOf = automaticRetryOrigin(value.Reason)
-	value.AutoRetriedBy = automaticRetrySuccessor(value.Reason)
+
 	value.Release = release != 0
 	value.Credentialed = credentialed != 0
 	value.QueuedAt = fromUnixNano(queued)

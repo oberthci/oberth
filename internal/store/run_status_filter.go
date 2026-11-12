@@ -30,7 +30,7 @@ func init() {
 			at := time.Unix(0, started)
 			run.StartedAt = &at
 		}
-		run.AutoRetriedBy = automaticRetrySuccessor(run.Reason)
+
 		return model.DisplayRunStatus(run), nil
 	})
 	// The run list's ref_glob (#1524) uses the same path.Match semantics as
@@ -65,7 +65,7 @@ func runStatusRestriction(statuses model.RunStatusFilter) (string, []any, error)
 			durable["queued"], durable["running"] = true, true
 		case "running":
 			durable["running"] = true
-		case "failed", "infra-retried":
+		case "failed":
 			durable["failed"] = true
 		case "cancelled", "superseded":
 			durable["interrupted"] = true

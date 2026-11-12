@@ -1391,7 +1391,7 @@ containing CI and real workload qualification remain separately required.
   the read-only `waiting` projection.
 
   `display_status` is exactly one of seven values: `queued`, `running`,
-  `passed`, `failed`, `infra-retried`, `superseded`, `cancelled`
+  `passed`, `failed`, `superseded`, `cancelled`
   (`model.DisplayStatuses`; `model.DisplayRunStatus` is the only mapping,
   and `TestEveryRawPhaseMapsToExactlyOneDisplayStatus` holds every raw
   status, phase and projection to it). A status says what to do with the
@@ -1436,14 +1436,13 @@ containing CI and real workload qualification remain separately required.
   | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
   | queued publication retry | `running` | publication attempt/backoff message; not replaced by queue priority |
-  | infrastructure failure automatically retried | `infra-retried` | `infra error, retried`; linked successor |
   | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
   | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `superseded` | `server restart, re-queued as <run12>` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
   | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
   Raw status fields retain their values, but existing `display_status` values
-  can change from `cancelled` to `superseded`, or `failed` to `infra-retried`.
+  can change from `cancelled` to `superseded` when a successor is known.
   Clients must accept these display enum values. The former `waiting`
   dashboard label and the `infra-pending` and `deadline-exceeded`
   `display_status` values are gone: they are `queued`, `running` and
@@ -3096,35 +3095,11 @@ bytes). Log summaries quote control characters. Message contents do not establis
 infrastructure authority. Container OOM reason and Pod deadline reason are
 separate observations; exit 137 alone means neither.
 
-**Step deadlines exclude Pod start-up (#1499).** Build widens every literal leaf
-template `activeDeadlineSeconds` (including inline templates and
-`templateDefaults`) to `declared + clamp(declared * factorPercent / 100,
-minSeconds, maxSeconds)`, from Helm `admission.stepStartupAllowance`
-(`--admission-step-startup-allowance-{percent,min-seconds,max-seconds}`,
-defaults 50/120/600, percent 0-400, seconds 0-3600, min <= max; `enabled:
-false` or `maxSeconds: 0` disables it and submits deadlines as declared). It
-records the declared value and the allowance in the server-owned Pod
-annotations `oberth.ci/step-deadline-seconds` and
-`oberth.ci/step-start-allowance-seconds`, which template-metadata admission
-refuses from repositories; classification checks the Pod deadline against
-those recorded values, never the current setting. The workflow deadline is unchanged. A step Pod with Pod
-reason `DeadlineExceeded`, outside a workflow-deadline kill, whose owned `main`
-container exited 0, or never started (`ContainerCreating`/`PodInitializing`, or
-kubelet's `ContainerStatusUnknown`/137 with no container and no start time), or
-was stopped at the Pod deadline before it ran the declared budget recorded
-beside the exact floored Pod deadline, is an infrastructure attempt:
-the run error starts with `Startup deadline: `, the terminal observation marks
-the attempt `startup_deadline`, the existing single automatic infrastructure
-retry applies exactly as for eviction evidence, no CI-red issue is opened, and
-resource deadline guidance does not replace the reason. A `main` container that
-used its declared budget, exited nonzero or was OOM-killed before the Pod
-deadline, or never started because of an image or configuration error, a Pod
-whose deadline Argo lowered to the remaining workflow budget, and a workflow
-deadline stay the step's own failure (`Execution deadline exceeded.` for
-deadline kills) and open a CI-red issue.
-Pods without both annotations (pre-upgrade, or allowance disabled) get only the
-exit-0 rule. See
-[workflow deadlines](docs/workflow-deadlines.md#step-deadlines-exclude-pod-start-up-1499).
+**Native deadlines:** Workflow and template deadlines are authored unchanged.
+No default, ceiling, startup allowance, no-progress expiry or server watchdog is applied.
+Deadlines are optional. A never-schedulable Pod without an authored deadline holds its Argo global slot until cancellation.
+Only explicitly enabled assisted holds extend deadlines for their own lifecycle.
+Old scheduling annotations on adopted running Workflows are historical evidence and ignored as policy inputs.
 
 **Agent-assisted continuation (retry hold).** Off by default (`assist.enabled`).
 A branch-tier CI run that asked (`git push -o oberth.assist=1`, `run_rerun`
@@ -3445,16 +3420,6 @@ explicit dry-run/help also succeed.
 Existing Workflow adoption and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).
 
-**Host PSI admission:** the configurable serving valve uses hard CPU and IO
-`some avg10` thresholds (defaults 50% and 40%) with independent latches and
-recovery strictly below each threshold minus ten percentage points. Priority,
-release/tag status, idle state and starvation timers cannot bypass hard pressure.
-Historical observe/enforce, avg60 and max-defer settings remain accepted and are
-ignored by serving admission. Existing/adopted work continues. Missing or invalid
-PSI retains the established fail-open behavior and reports its absence; the
-workflow ceiling and configured disk floor still apply. Qualify the host scope
-and actual thresholds separately. See [host pressure](docs/native-scheduling.md).
-
 A currently observed nonzero init-container termination always refuses restart-cut
 classification, including when main is still Waiting/PodInitializing. This guard
 is local to restart-cut and does not depend on the log-continuity input. The
@@ -3462,39 +3427,13 @@ shared partial-execution evidence contract and its RCA/fallback regression are
 compiled in this topic and included in its bundle.
 
 
-**RCA recovery / run-list UX:** eligible branch failures in the infrastructure or
-workflow-level job classes accepted by `run_retry`, whose `retry_hint` class is
-`infrastructure` (never `code`), receive atomic, audited retries up to a budget
-per lineage (default 2). `--auto-retry-infrastructure-budget` / Helm
-`autoRetryInfrastructureBudget` sets it, 0 disables, at most 5.
-Trusted-policy-refresh deadlines, lost executors and step-free workflow failures
-qualify after terminal observation or cleanup. Missing/corrupt progress history,
-any retained failed step (including infrastructure-classified failures),
-cancellation, release/tag, promotion, plan, apply, publication or pending deletion
-prevent this retry. An execution deadline after any step
-started or passed is never retried; pre-step deadlines remain eligible.
-Started/passed steps alone do not prevent non-deadline workflow recovery. All retained progress attempts,
-engine observations and writer-side newest/protected-work fences apply.
-Admission sequence, queued time and priority are inherited for every retry;
-the history sequence and run ID are new. The existing reason and `run.retry.auto`
-audit record `automatic retry of <id> after infrastructure failure: <reason>`.
-The automatic budget survives restart, legacy reasons and `run_rerun` replay
-lineage. A manual rerun in that lineage keeps the operator's text after the
-server-owned header `rerun of <id> (lineage: automatic retry of <origin>)`.
-Only that header determines the inherited budget; operator text cannot change
-the origin. Its reason and the lineage retain their separate audit receipts.
-Explicit `run_retry` creates a fresh manual request with ordinary
-presentation and its own single automatic-retry budget; it never inherits the
-automatic reason or lineage. No historical terminal backlog is retried and no
-new migration is required.
-See [administrator and upgrade policy](docs/infrastructure-retries.md).
-Raw failed/interrupted statuses remain; additive retry links and `infra-retried`
-(amber) / `superseded` display states explain them. The dashboard's all-status
-view shows scoped latest-ref heads plus any missing active runs on every page;
-status chips use the flat retained list, so failures in other schedule lanes,
-superseded attempts and automatic retries remain findable. Branch/tag history
-lives on run detail and includes superseded runs. `latest_per_ref=1` remains
-opt-in for HTTP clients.
+**Infrastructure recovery / run-list UX:** no automatic infrastructure retry remains.
+Authors use native Argo `retryStrategy`; manual `run_retry` and `run_rerun` retain
+existing safety checks. Source preparation precedes Workflow creation and needs
+manual retry after a failure. Historical audit receipts remain immutable.
+Raw failed/interrupted statuses remain; public display states are queued,
+running, passed, failed, superseded and cancelled. No retry-link status is emitted.
+
 Readiness uses a 30s background reader budget, retaining green on deadline or
 typed SQLite reader contention without renewing the 90s last-success age.
 Confirmed writer failures receive no second 90s grace. Hard errors,

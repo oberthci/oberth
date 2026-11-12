@@ -177,6 +177,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -202,6 +208,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -261,6 +273,12 @@ spec:
   - name: tools-dir
     activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -323,6 +341,12 @@ spec:
   - name: link-go
     activeDeadlineSeconds: 180 # remeasure: censored 60s pod deadline x1.5; includes startup and wait; floor observed+120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -385,6 +409,12 @@ spec:
   - name: install-golangci-lint
     activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -456,6 +486,12 @@ spec:
   # [install-helm] go install helm v4.2.3
   - name: install-deadcode
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -528,6 +564,12 @@ spec:
   - name: install-helm
     activeDeadlineSeconds: 219 # remeasure: observed span unknown; provisional previous 99s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -599,6 +641,12 @@ spec:
   # Pinned helm-unittest binary; fetch, verification and extraction have separate statuses.
   - name: fetch-helm-unittest
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -647,6 +695,12 @@ spec:
 
   - name: verify-helm-unittest
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -676,6 +730,12 @@ spec:
 
   - name: install-helm-unittest
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -707,6 +767,12 @@ spec:
   - name: fetch-shellcheck
     activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -788,6 +854,12 @@ spec:
   - name: verify-shellcheck
     activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -855,6 +927,12 @@ spec:
   - name: decompress-shellcheck
     activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -920,6 +998,12 @@ spec:
   - name: install-shellcheck
     activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1002,6 +1086,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1059,6 +1149,12 @@ spec:
   - name: vet
     activeDeadlineSeconds: 182 # remeasure: observed 62s pod span x1.5; failed attempt retained; floor observed+120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1126,6 +1222,12 @@ spec:
   - name: golangci-lint-run
     activeDeadlineSeconds: 436
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1204,6 +1306,12 @@ spec:
   # Give each group a bounded two-CPU lane; workflow parallelism bounds the group overlap to three Pods.
   - name: deadcode
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1282,6 +1390,12 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 1Gi
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1362,6 +1476,12 @@ spec:
     # Maximum observed race duration: max(1.5 x observed, observed + 120s), rounded up to minutes.
     # 2026-11-08: four runs at host load ~30 were killed at 59m5xs (censored > 60m); 1.5 x 60m.
     activeDeadlineSeconds: 5400
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1434,6 +1554,12 @@ spec:
     automountServiceAccountToken: false
     # Maximum observed race duration: max(1.5 x observed, observed + 120s), rounded up to minutes.
     activeDeadlineSeconds: 3300
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1508,6 +1634,12 @@ spec:
     # Observed 413s; retain max(1.5 x observed, observed + 120s) execution headroom.
     activeDeadlineSeconds: 620
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1578,6 +1710,12 @@ spec:
   - name: build-static-git-runtime
     activeDeadlineSeconds: 452
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0"
       workingDir: /work/src
@@ -1653,6 +1791,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /qualification/source/internal/gitcache
@@ -1700,6 +1844,12 @@ spec:
   - name: test-archive-history
     activeDeadlineSeconds: 224 # remeasure: observed span unknown; provisional previous 104s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1775,6 +1925,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c"
       workingDir: /work/src
@@ -1826,6 +1982,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1864,6 +2026,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1898,6 +2066,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1932,6 +2106,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1961,6 +2141,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1994,6 +2180,12 @@ spec:
   - name: build-amd64
     activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -2066,6 +2258,12 @@ spec:
   - name: build-arm64
     activeDeadlineSeconds: 173 # remeasure: observed 53s pod span x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -2137,6 +2335,12 @@ spec:
   - name: build-darwin-amd64
     activeDeadlineSeconds: 163 # remeasure: observed 43s pod span x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -2207,6 +2411,12 @@ spec:
   - name: build-darwin-arm64
     activeDeadlineSeconds: 170 # remeasure: observed 50s pod span x1.5; floor observed+120s for contention
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -2280,6 +2490,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
       workingDir: /work/src
@@ -2328,6 +2544,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     script:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -2426,6 +2648,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f"
       command: [/bin/sh, -c]
@@ -2458,6 +2686,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /tmp/vpt-tools/bin
@@ -2492,6 +2726,12 @@ spec:
   - name: test-openbao
     activeDeadlineSeconds: 791 # preserve release-base deadline; 45s + 600s + 120s + 26s cleanup
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     script:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -2584,6 +2824,12 @@ spec:
 
   - name: resource-guard
     automountServiceAccountToken: false
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
       workingDir: /work/src

@@ -30,13 +30,13 @@ const state = {
   pendingController: null, // AbortController for in-flight API requests
   statusPending: null, statusFailedAt: 0, statusLoadedAt: 0, // the background /api/status fetch (ensureStatus)
 };
-const runFilters = ["all", "queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"];
+const runFilters = ["all", "queued", "running", "passed", "failed", "superseded", "cancelled"];
 
 function readRunFilter() {
   const saved = localStorage.getItem("oberth-filter");
   if (saved === "waiting") return "queued";
   if (saved === "interrupted") return "cancelled";
-  return ["queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"].includes(saved) ? saved : "all";
+  return ["queued", "running", "passed", "failed", "superseded", "cancelled"].includes(saved) ? saved : "all";
 }
 
 /* ---------- tiny utilities (unchanged from the old dashboard) ---------- */
@@ -169,7 +169,6 @@ function statusKind(status) {
     case "passed": case "delivered": return "pass";
     case "failed": case "timed_out": return "fail";
     case "running": return "run";
- case "infra-retried": return "warn";
     /* "queued" is Argo made a Pod for this and it has not started; "pending"
        is the pipeline declares this and execution has not reached it. Both
        read as not-yet-started to the eye, so they share a kind and a glyph —
@@ -182,7 +181,6 @@ function statusKind(status) {
 function statusLabel(status) {
   const s = String(status || "").toLowerCase();
   if (s === "timed_out") return "timed out";
- if (s === "infra-retried") return "infra error, retried";
   return s || "unknown";
 }
 function pill(label, kind) {
@@ -201,25 +199,18 @@ function bigIcon(status) {
   const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", warn: "↻", unknown: "?" }[kind] || "?";
   return `<span class="ic ${cls}">${glyph}</span>`;
 }
-/* display_status is the server's one raw-to-display mapping (seven values:
-   queued, running, passed, failed, infra-retried, superseded, cancelled).
+/* display_status is the server's one raw-to-display mapping (six values:
+   queued, running, passed, failed, superseded, cancelled).
    The fallback mirrors it for rows that carry only raw fields; the raw wire
    status "waiting" (claimed, not started) is one of the queued rows. */
 function displayRunStatus(run) {
   if (run.display_status) return run.display_status;
-  if (run.auto_retried_by) return "infra-retried";
   if (run.status === "interrupted") return run.superseded_by && run.phase !== "cancelled" ? "superseded" : "cancelled";
   if (run.status === "waiting" || run.status === "queued" || (run.status === "running" && !run.started_at)) return "queued";
   return run.status;
 }
 function scheduleBadge(run) { return run.trigger === "schedule" && run.schedule_entry ? `<span class="v4b dim" title="schedule entry">${esc(run.schedule_entry)}</span>` : ""; }
-function priorityClass(run) { return run.priority_class || "standard"; }
-function priorityBadge(run) {
-  const priority = priorityClass(run);
-  const label = {low:"low priority", high:"high priority", promotion:"priority promotion"}[priority];
-  return label ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${label}</span>` : "";
-}
-function releaseBadge(run) { return priorityBadge(run) + (run.release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
+function releaseBadge(run) { return (run.release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
 function runDuration(run) {
   return spanSeconds(run.started_at, run.finished_at, run.status === "running");
 }
@@ -538,15 +529,14 @@ function orderRuns(runs) {
   const positioned = queued.length > 0 && queued.every(run => run.queue_position > 0 || run.scheduling?.queue_position > 0);
   const activeIndex = new Map(state.activeRuns.map((run, index) => [run.id, index + 1]));
   const position = run => positioned ? run.queue_position || run.scheduling?.queue_position : activeIndex.get(run.id) || 0;
-  const priorityRank = run => ({low:-1, standard:0, promotion:1, high:2})[priorityClass(run)] ?? 0;
+
   const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
   return runs.map((run, index) => ({ run, index })).sort((a, b) => {
     const group = runListGroup(a.run) - runListGroup(b.run);
     if (group) return group;
     let key = 0;
     if (runListGroup(a.run) === 0) {
-      key = priorityRank(b.run) - priorityRank(a.run);
-      if (!key) key = position(a.run) && position(b.run) ? position(a.run) - position(b.run) : 0;
+      key = position(a.run) && position(b.run) ? position(a.run) - position(b.run) : 0;
       return -key || b.index - a.index;
     }
     else if (runListGroup(a.run) === 1) key = stamp(b.run.started_at) - stamp(a.run.started_at);
@@ -625,13 +615,8 @@ function tickRunTimers() {
 }
 setInterval(tickRunTimers, 1000);
 document.addEventListener?.("visibilitychange", () => { if (!document.hidden) tickRunTimers(); });
-function prioritySummary(run) {
-  const position = run.queue_position || run.scheduling?.queue_position;
-  return [`priority ${priorityClass(run)}`, run.priority_requested_by ? `requested by ${run.priority_requested_by}` : "", run.priority_reason, position ? `queue position ${position}` : "", run.priority_refusal].filter(Boolean).join(" · ");
-}
 function runMessageCell(run) {
   const message = rowMessage(run);
-  if (run.auto_retried_by) return `<button type="button" class="run-successor retry-warning" data-run-id="${esc(run.auto_retried_by)}">${esc(message)}</button>`;
  if (run.superseded_by) {
     return `<button type="button" class="run-successor" data-run-id="${esc(run.superseded_by)}">${esc(message)}</button>`;
   }
@@ -639,7 +624,7 @@ function runMessageCell(run) {
 }
 function runRow(run) {
   const status = displayRunStatus(run);
-  return `<div class="trow" data-run-id="${esc(run.id)}" tabindex="0" role="link" aria-label="${esc(`run ${repoName(run.repo_id)} ${run.ref || ""} ${statusLabel(status)}`)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.sha || ""} · actor ${run.actor || ""}`)}"><div class="run-name"><div class="repo-name">${esc(repoName(run.repo_id))}</div>${status === "queued" ? priorityBadge(run) : ""}</div><div class="branch">${esc(run.ref_kind === "tag" ? "tag " : "")}${esc(run.ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
+  return `<div class="trow" data-run-id="${esc(run.id)}" tabindex="0" role="link" aria-label="${esc(`run ${repoName(run.repo_id)} ${run.ref || ""} ${statusLabel(status)}`)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.sha || ""} · actor ${run.actor || ""}`)}"><div class="run-name"><div class="repo-name">${esc(repoName(run.repo_id))}</div></div><div class="branch">${esc(run.ref_kind === "tag" ? "tag " : "")}${esc(run.ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
@@ -1399,7 +1384,7 @@ async function renderRunDetailView(detail, seq) {
         <span>sha <span class="sha cpy" data-copy-text="${esc(run.sha)}" tabindex="0" role="button" title="${esc(run.sha)} — click to copy">${esc(shortSha(run.sha))}</span></span>
         <span class="cpy" data-copy-text="${esc(run.id)}" tabindex="0" role="button" title="${esc(run.id)} — click to copy">run ${esc(shortId(run.id))} ⧉</span>
         <span>trigger ${esc(run.trigger || "--")}</span>
-        <span class="priority-detail">${esc(prioritySummary(run))}</span>
+
         <span>${esc(run.ref_kind === "tag" ? "tag" : "branch")}</span>
         <span>queued ${esc(fmtTime(run.queued_at))}</span>
         ${run.finished_at ? `<span>finished ${esc(fmtTime(run.finished_at))}</span>` : ""}
@@ -1407,7 +1392,6 @@ async function renderRunDetailView(detail, seq) {
     </div>
     <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.failed_step ? (run.failed_burn ? run.failed_burn + " / " : "") + run.failed_step : "run failed")}</b><span class="err" title="${esc(run.error)}">${esc(run.error || "")}</span></div>` : ""}
     ${(status === "cancelled" || status === "superseded") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span>${run.superseded_by ? `<button class="chip" data-run-id="${esc(run.superseded_by)}">view successor ${esc(shortSuccessor(run.superseded_by))}</button>` : ""}</div>` : ""}
-    ${status === "infra-retried" ? `<div class="sbanner retry-warning"><span>${esc(runMessage(run))}</span><button class="chip" data-run-id="${esc(run.auto_retried_by)}">view retry</button><span>${esc(run.error || "")}</span></div>` : ""}
     </div>
     <div id="runHistory" class="run-history">${runHistory(run)}</div>
     <div class="v4-body">

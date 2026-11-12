@@ -30,7 +30,7 @@ func TestAdminRunStatusUsesDisplayValuesBeforeBounds(t *testing.T) {
 		{status: model.RunFailed, want: "failed"},
 		{status: model.RunFailed, failure: "DeadlineExceeded", want: "failed"},
 		{status: model.RunFailed, failure: "observe adopted Workflow job: " + model.ExecutionDeadlineMessage + " Server watchdog expired: context deadline exceeded\ncleanup failure", want: "failed"},
-		{status: model.RunFailed, failure: "DeadlineExceeded", reason: autoRetriedByPrefix + strings.Repeat("f", 32), want: "infra-retried"},
+		{status: model.RunFailed, failure: "DeadlineExceeded", reason: "historical automatic retry " + strings.Repeat("f", 32), want: "failed"},
 		{status: model.RunInterrupted, phase: model.PhaseCancelled, superseded: strings.Repeat("f", 32), want: "cancelled"},
 		{status: model.RunInterrupted, superseded: strings.Repeat("f", 32), want: "superseded"},
 		{status: model.RunInterrupted, want: "cancelled"},
@@ -102,7 +102,7 @@ func TestAdminRunStatusDoesNotResurrectEarlierRefAttempt(t *testing.T) {
 func TestAdminRunStatusRejectsReasonsOutsideCandidateVocabulary(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
-	for _, status := range []string{"waiting", "infra-pending", "deadline-exceeded"} {
+	for _, status := range []string{"waiting", "infra-pending", "deadline-exceeded", "infra-retried"} {
 		if _, err := s.ListRecentRuns(t.Context(), model.RunListFilter{Status: model.RunStatusFilter{status}}); err == nil {
 			t.Fatalf("reason %q accepted as a display status", status)
 		}

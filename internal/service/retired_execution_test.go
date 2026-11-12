@@ -75,7 +75,7 @@ func TestPolicyWaitAuditOutageDoesNotFinishRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := f.store.Run(t.Context(), run.ID)
-	if err != nil || got.Status != model.RunRunning || got.FinishedAt != nil || got.AutoRetriedBy != "" {
+	if err != nil || got.Status != model.RunRunning || got.FinishedAt != nil {
 		t.Fatalf("audit outage terminalized run: %+v %v", got, err)
 	}
 }

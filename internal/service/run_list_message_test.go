@@ -40,7 +40,6 @@ func TestRunListMessageContract(t *testing.T) {
 		{"infrastructure", model.Run{Status: model.RunFailed, Phase: "infrastructure", Error: "controller unavailable"}, "infrastructure error: controller unavailable"},
 		{"cancelled", model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "by owner: no longer needed"},
 		{"superseded", model.Run{Status: model.RunInterrupted, SupersededBy: "successor", Reason: "superseded by newer run"}, "superseded by newer run"},
-		{"infra-retried", model.Run{Status: model.RunFailed, AutoRetriedBy: "abcdef0123456789"}, "retried as abcdef012345"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := tc.run

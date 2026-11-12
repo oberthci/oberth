@@ -10,7 +10,7 @@ func TestRunPolicyWaitAfterSubmissionIsVisible(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	autoRetrySource(t, s, repo.ID, "feature/policy-submitted")
+	queuedRunForTest(t, s, repo.ID, "feature/policy-submitted")
 	run, err := s.ClaimNextRun(t.Context())
 	if err != nil {
 		t.Fatal(err)

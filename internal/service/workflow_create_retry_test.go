@@ -23,7 +23,7 @@ func (jobs *workflowCreateFailureJobs) CreateRelease(ctx context.Context, reques
 func TestWorkflowCreateExhaustionIsInfrastructureAndRunRetryApplies(t *testing.T) {
 	fixture := newControlFixture(t)
 	// Manual run_retry remains available when the administrator disables automatic recovery.
-	fixture.scheduler.disableInfrastructureAutoRetry = true
+
 	fixture.scheduler.jobs = &workflowCreateFailureJobs{fixture.jobs}
 	source, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "create-timeout", Repository: fixture.repo, Branch: "feature/create-timeout", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {

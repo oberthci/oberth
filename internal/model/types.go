@@ -147,9 +147,7 @@ type Run struct {
 	Assisted        bool             `json:"assisted,omitempty"`
 	Assist          *RunAssistRecord `json:"assist,omitempty"`
 
-	EarlierAttempts int    `json:"earlier_attempts,omitempty"`
-	AutoRetryOf     string `json:"auto_retry_of,omitempty"`
-	AutoRetriedBy   string `json:"auto_retried_by,omitempty"`
+	EarlierAttempts int `json:"earlier_attempts,omitempty"`
 
 	// The explicit admin fallback survives a withheld automatic tag boost.
 
@@ -212,11 +210,6 @@ type RunResult struct {
 	// FailureCause is server-classified summary metadata in the dedicated failure_cause column.
 	// The complete error stays in Error. It never changes terminal status.
 	FailureCause string `json:"-"`
-
-	// AutoRetryBudget is set only by the scheduler after workload settlement
-	// and failure checks: the automatic infrastructure retries the run's whole
-	// lineage may spend (#1524). Zero never retries.
-	AutoRetryBudget int `json:"-"`
 
 	TerminalObservation *RunTerminalObservation
 	Status              RunStatus

@@ -206,6 +206,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -261,6 +267,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -305,6 +317,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f
       workingDir: /work/src
@@ -361,6 +379,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -419,6 +443,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -475,6 +505,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -540,6 +576,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -613,6 +655,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -669,6 +717,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -726,6 +780,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -793,6 +853,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -860,6 +926,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -915,6 +987,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -988,6 +1066,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1052,6 +1136,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1109,6 +1199,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1170,6 +1266,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1227,6 +1329,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f
       workingDir: /work/src
@@ -1313,6 +1421,12 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 1Gi
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1384,6 +1498,12 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     activeDeadlineSeconds: 5400
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1452,6 +1572,12 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     activeDeadlineSeconds: 3300
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1526,6 +1652,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1589,6 +1721,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1645,6 +1783,12 @@ spec:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
     activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1990,6 +2134,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -2302,6 +2452,12 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnError
+      backoff:
+        duration: 30s
+        factor: 2
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src

@@ -1,25 +1,25 @@
 package model
 
 // The user-facing run vocabulary. Every durable status, phase and projection
-// maps to exactly one of these seven labels; anything finer (what a queued
+// maps to exactly one of these six labels; anything finer (what a queued
 // run waits for, why a run failed, which run replaced it) is the reason line,
 // never a second status. Raw Status and Phase stay on the wire for machines.
 //
 // A status says what to do with the run: wait (queued), watch (running), read
 // the result (passed, failed), or follow the successor (superseded,
-// infra-retried). Cancelled covers every interruption without a successor.
+// cancelled). Cancelled covers every interruption without a successor.
 const (
-	DisplayQueued       = "queued"
-	DisplayRunning      = "running"
-	DisplayPassed       = "passed"
-	DisplayFailed       = "failed"
-	DisplayInfraRetried = "infra-retried"
-	DisplaySuperseded   = "superseded"
-	DisplayCancelled    = "cancelled"
+	DisplayQueued  = "queued"
+	DisplayRunning = "running"
+	DisplayPassed  = "passed"
+	DisplayFailed  = "failed"
+
+	DisplaySuperseded = "superseded"
+	DisplayCancelled  = "cancelled"
 )
 
 // DisplayStatuses lists the whole user-facing vocabulary, in list order.
-var DisplayStatuses = []string{DisplayQueued, DisplayRunning, DisplayPassed, DisplayFailed, DisplayInfraRetried, DisplaySuperseded, DisplayCancelled}
+var DisplayStatuses = []string{DisplayQueued, DisplayRunning, DisplayPassed, DisplayFailed, DisplaySuperseded, DisplayCancelled}
 
 // ClaimedUnstarted reports a run the scheduler has claimed but not admitted
 // or submitted: durable status running with no started_at (phase waiting,
@@ -44,9 +44,6 @@ func DisplayRunStatus(run Run) string {
 	case RunPassed:
 		return DisplayPassed
 	case RunFailed:
-		if run.AutoRetriedBy != "" {
-			return DisplayInfraRetried
-		}
 		return DisplayFailed
 	case RunInterrupted:
 		if run.Phase == PhaseCancelled || run.SupersededBy == "" {

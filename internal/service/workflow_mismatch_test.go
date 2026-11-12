@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
+
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -21,7 +23,7 @@ func (*ownedWorkflowMismatch) WorkflowSpecMismatch() bool { return true }
 func TestWorkflowSpecMismatchStaysRunLocalUntilCleanup(t *testing.T) {
 	f := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "infrastructure"})
 	// Keep this one-attempt cleanup contract separate from the default-on retry below.
-	f.scheduler.disableInfrastructureAutoRetry = true
+
 	jobs := &pendingCreateJobs{fakeJobs: f.jobs}
 	jobs.createHook = func(ctx context.Context, request WorkflowRequest) error {
 		if request.Run.Ref == "feature/mismatch" {
@@ -84,7 +86,7 @@ func TestWorkflowSpecMismatchStaysRunLocalUntilCleanup(t *testing.T) {
 	}
 }
 
-func TestWorkflowMismatchCleanupReleasesOriginalBeforeAutomaticRetry(t *testing.T) {
+func TestWorkflowMismatchCleanupReleasesOriginalBeforeManualRetry(t *testing.T) {
 	f := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed"})
 	resume := make(chan struct{})
 	releaseRetry := sync.OnceFunc(func() { close(resume) })
@@ -92,8 +94,10 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeAutomaticRetry(t *testing.
 	entered := make(chan WorkflowRequest, 1)
 	var retries atomic.Int32
 	jobs := &pendingCreateJobs{fakeJobs: f.jobs}
+	var firstCreate atomic.Bool
+	firstCreate.Store(true)
 	jobs.createHook = func(ctx context.Context, request WorkflowRequest) error {
-		if request.Run.AutoRetryOf == "" {
+		if firstCreate.Swap(false) {
 			return &ownedWorkflowMismatch{}
 		}
 		retries.Add(1)
@@ -126,7 +130,7 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeAutomaticRetry(t *testing.
 	}
 	awaitCreateState(t, f.scheduler, source.ID, 1, false)
 	original, err := f.store.Run(t.Context(), source.ID)
-	if err != nil || original.Status != model.RunRunning || original.AutoRetriedBy != "" || retries.Load() != 0 {
+	if err != nil || original.Status != model.RunRunning || retries.Load() != 0 {
 		t.Fatalf("uncertain cleanup authorized a retry: %+v retries=%d err=%v", original, retries.Load(), err)
 	}
 	state := f.scheduler.submissionStateForTest()
@@ -141,14 +145,20 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeAutomaticRetry(t *testing.
 		t.Fatal("cleanup worker stopped")
 	}
 	awaitCreateState(t, f.scheduler, source.ID, 0, true)
+	control := f.api(t)
+	control.runRetries = f.store
+	manual, err := control.retryRun(t.Context(), api.Actor{Identity: "pusher"}, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var retry WorkflowRequest
 	select {
 	case retry = <-entered:
 	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("confirmed cleanup did not admit the automatic retry")
+		t.Fatal("confirmed cleanup did not admit the manual retry")
 	}
 	original, err = f.store.Run(t.Context(), source.ID)
-	if err != nil || original.Status != model.RunFailed || original.AutoRetriedBy != retry.Run.ID || retry.Run.AutoRetryOf != source.ID || !strings.Contains(original.Error, "cleanup confirmed") {
+	if err != nil || original.Status != model.RunFailed || retry.Run.ID != manual.ID || retry.Run.ID == source.ID || !strings.Contains(original.Error, "cleanup confirmed") {
 		t.Fatalf("retry lost original cleanup verdict or lineage: original=%+v retry=%+v err=%v", original, retry.Run, err)
 	}
 	state = f.scheduler.submissionStateForTest()

@@ -36,12 +36,6 @@ var errMutationBlocked = errors.New("service: mutation blocked by unavailable au
 type mutationRequirement func(context.Context) error
 
 type SchedulerConfig struct {
-	// DisableInfrastructureAutoRetry turns off the default-on automatic retry.
-	DisableInfrastructureAutoRetry bool
-	// InfrastructureAutoRetryBudget is the automatic retries per lineage;
-	// zero is model.DefaultInfrastructureAutoRetryBudget (#1524).
-	InfrastructureAutoRetryBudget int
-
 	Store           SchedulerStore
 	Git             WorkspaceGit
 	Logs            LogStore
@@ -60,9 +54,7 @@ type SchedulerConfig struct {
 }
 
 type Scheduler struct {
-	restoredRunsFile               string
-	disableInfrastructureAutoRetry bool
-	infrastructureAutoRetryBudget  int
+	restoredRunsFile string
 
 	databaseRetryCount atomic.Uint64
 	dispatchProgress   liveness.Heartbeat
@@ -163,8 +155,6 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	deliveryPermit := make(chan struct{}, 1)
 	deliveryPermit <- struct{}{}
 	scheduler := &Scheduler{
-		disableInfrastructureAutoRetry: config.DisableInfrastructureAutoRetry,
-		infrastructureAutoRetryBudget:  config.InfrastructureAutoRetryBudget,
 
 		store: config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
 		releaseJobs: config.ReleaseJobs,
@@ -1232,8 +1222,8 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			failureTail = string(tail)
 		}
 	}
-	finished, err := scheduler.database().FinishRun(finalizeCtx, run.ID, model.RunResult{
-		AutoRetryBudget:     scheduler.infrastructureAutoRetry(run, jobResult),
+	_, err := scheduler.database().FinishRun(finalizeCtx, run.ID, model.RunResult{
+
 		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
 		FailureCause: jobResult.FailureCause, FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
@@ -1246,10 +1236,6 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	}
 	if err != nil {
 		return fmt.Errorf("finish run %s: %w", run.ID, err)
-	}
-	if finished.AutoRetriedBy != "" {
-		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
-		scheduler.signalQueue()
 	}
 	if promotion.ID != "" {
 		scheduler.signals.NotifyPromotion(promotion.ID)
@@ -1614,22 +1600,13 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 	if errors.As(failure, &cause) {
 		result.FailureCause = displayFailureText(cause.RunFailureCause())
 	}
-	var admission *argoworkflow.AdmissionError
-	retry := 0
-	if !errors.As(failure, &admission) {
-		retry = scheduler.infrastructureAutoRetry(run, result)
-	}
-	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryBudget: retry, Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
+	_, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
 	}
 	if err != nil {
 		return errors.Join(failure, err)
-	}
-	if finished.AutoRetriedBy != "" {
-		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
-		scheduler.signalQueue()
 	}
 	if run.Trigger == "promotion" {
 		promotion, promotionErr := scheduler.database().PromotionByRun(ctx, run.ID)
@@ -1838,8 +1815,8 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 			return nil
 		}
 	}
-	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
-		AutoRetryBudget:     scheduler.infrastructureAutoRetry(run, jobResult),
+	_, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
+
 		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase,
 		FailureCause: jobResult.FailureCause, FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep,
 		Error: jobResult.Error,
@@ -1850,10 +1827,6 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	}
 	if err != nil {
 		return fmt.Errorf("finish reconciled run %s: %w", run.ID, err)
-	}
-	if finished.AutoRetriedBy != "" {
-		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
-		scheduler.signalQueue()
 	}
 	if promotion.ID != "" {
 		scheduler.signals.NotifyPromotion(promotion.ID)

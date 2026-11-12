@@ -27,7 +27,7 @@ func (failure *identityObservationFailure) InfrastructureFailure() bool { return
 func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T) {
 	fixture := newControlFixture(t)
 	// Manual run_retry remains available when the administrator disables automatic recovery.
-	fixture.scheduler.disableInfrastructureAutoRetry = true
+
 	fixture.jobs.waitErr = fmt.Errorf("observe: %w", &identityObservationFailure{cause: context.DeadlineExceeded})
 	source, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "identity-delivery", Repository: fixture.repo, Branch: "feature/identity", SHA: strings.Repeat("a", 40), Actor: "pusher"})
 	if err != nil {
@@ -45,9 +45,6 @@ func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T)
 	}
 	if len(fixture.jobs.deleted) != 1 {
 		t.Fatal("live Workflow was not deleted before recording infrastructure failure")
-	}
-	if failed.AutoRetriedBy != "" {
-		t.Fatal("post-create identity observation incorrectly authorized automatic replay", failed)
 	}
 	control := fixture.api(t)
 	control.runRetries = fixture.store

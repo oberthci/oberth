@@ -103,7 +103,6 @@ type serveOptions struct {
 	runLogLimitBytes      int64
 	retentionInterval     time.Duration
 	retentionKeepNewest   int
-	autoRetryBudget       int
 
 	assist                  argojob.AssistConfig
 	agentEvents             service.AgentEventPolicy
@@ -235,8 +234,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 
-	flags.IntVar(&options.autoRetryBudget, "auto-retry-infrastructure-budget", model.DefaultInfrastructureAutoRetryBudget, fmt.Sprintf("automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most %d)", model.MaxInfrastructureAutoRetryBudget))
-
 	flags.BoolVar(&options.assist.Enabled, "assist-enabled", false, "allow agent-assisted continuation: opted-in credential-free branch CI steps park a failed retry for run_hold_* instead of failing (Helm assist.enabled)")
 	flags.DurationVar(&options.assist.HoldTTL, "assist-hold-ttl", argojob.DefaultAssistHoldTTL, "how long an idle assist hold waits for its agent before the server abandons it; a hold with an agent action ages from its last action, at most 2x this TTL; the held Pod deadline is the step budget plus 2x this TTL (whole seconds, at most 4h)")
 	flags.IntVar(&options.assist.MaxConcurrentHolds, "assist-max-concurrent-holds", argojob.DefaultAssistMaxConcurrentHolds, "parked assist retries allowed at once across the installation; newer holds above it are abandoned (1-64)")
@@ -335,9 +332,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if flags.NArg() != 0 {
 		return serveOptions{}, fmt.Errorf("%w: serve accepts flags only", errUsage)
 	}
-	if options.autoRetryBudget < 0 || options.autoRetryBudget > model.MaxInfrastructureAutoRetryBudget {
-		return serveOptions{}, fmt.Errorf("%w: --auto-retry-infrastructure-budget must be 0..%d", errUsage, model.MaxInfrastructureAutoRetryBudget)
-	}
+
 	activeStaleExplicit := false
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name == "issue-active-stale-after" {
@@ -849,7 +844,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"),
-		DisableInfrastructureAutoRetry: options.autoRetryBudget == 0, InfrastructureAutoRetryBudget: options.autoRetryBudget,
+
 		MaxRunLogBytes: options.runLogLimitBytes,
 		MutationGate:   anchors.AllowMutation,
 

@@ -71,15 +71,14 @@ func TestRCARevisionDefiniteCreateFailureRetriesWithoutDeletingName(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if current.AutoRetriedBy == "" || len(jobs.deleted) != 0 {
-				t.Fatal("unsafe retry/cleanup", current, jobs.deleted)
+			if current.Status != model.RunFailed || len(jobs.deleted) != 0 {
+				t.Fatal("definite failure changed custody", current, jobs.deleted)
 			}
-			if current.AutoRetriedBy != "" {
-				child, err := fixture.store.Run(t.Context(), current.AutoRetriedBy)
-				if err != nil || child.Status != model.RunQueued || child.AutoRetryOf != run.ID {
-					t.Fatal("missing atomic child", child, err)
-				}
+			counts, err := fixture.store.CountRuns(t.Context())
+			if err != nil || counts.Total != 1 {
+				t.Fatal("automatic attempt created", counts, err)
 			}
+
 		})
 	}
 }
@@ -129,8 +128,8 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 				}
 			}
 			current, err := fixture.store.Run(t.Context(), run.ID)
-			wantRetry := kind != "completed-while-down"
-			if err != nil || current.Status != model.RunFailed || (current.AutoRetriedBy != "") != wantRetry {
+			wantRetry := false
+			if err != nil || current.Status != model.RunFailed {
 				t.Fatal("settled infrastructure/test failure classification", current, err)
 			}
 			counts, err := fixture.store.CountRuns(t.Context())
@@ -242,7 +241,7 @@ func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 	default:
 	}
 	pending, err := fixture.store.Run(t.Context(), runs[0].ID)
-	if err != nil || !isPendingCreate(pending) || pending.AutoRetriedBy != "" {
+	if err != nil || !isPendingCreate(pending) {
 		t.Fatal("uncertain run not retained", pending, err)
 	}
 	if state := scheduler.submissionStateForTest(); state.Runs == 0 {
@@ -267,7 +266,7 @@ func TestRCARevisionExistingIntentDoesNotManufactureMissingJournal(t *testing.T)
 		t.Fatal(err)
 	}
 	finished, err := fixture.store.Run(t.Context(), run.ID)
-	if err != nil || finished.AutoRetriedBy != "" {
+	if err != nil {
 		t.Fatal("unknown old intent acquired empty evidence", finished, err)
 	}
 	if _, err := scheduler.logs.StepProgressHistory(run.ID); err == nil {

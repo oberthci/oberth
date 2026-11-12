@@ -13,9 +13,9 @@ func TestLatestRefHeadsCountAllAttemptsAndDoNotResurrectOnOlderPages(t *testing.
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	old := autoRetrySource(t, s, repo.ID, "feature/a")
-	middle := autoRetrySource(t, s, repo.ID, "feature/b")
-	newest := autoRetrySource(t, s, repo.ID, "feature/a")
+	old := queuedRunForTest(t, s, repo.ID, "feature/a")
+	middle := queuedRunForTest(t, s, repo.ID, "feature/b")
+	newest := queuedRunForTest(t, s, repo.ID, "feature/a")
 	// Terminal heads page by finish time; a queued head is never paged out.
 	for _, id := range []string{middle.ID, newest.ID} {
 		now = now.Add(time.Minute)
@@ -56,11 +56,11 @@ func TestLatestRefHeadsFilterByRefGlob(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	autoRetrySource(t, s, repo.ID, "land/a")
-	newestA := autoRetrySource(t, s, repo.ID, "land/a")
-	landB := autoRetrySource(t, s, repo.ID, "land/b")
-	autoRetrySource(t, s, repo.ID, "land/nested/c")
-	autoRetrySource(t, s, repo.ID, "feature/land")
+	queuedRunForTest(t, s, repo.ID, "land/a")
+	newestA := queuedRunForTest(t, s, repo.ID, "land/a")
+	landB := queuedRunForTest(t, s, repo.ID, "land/b")
+	queuedRunForTest(t, s, repo.ID, "land/nested/c")
+	queuedRunForTest(t, s, repo.ID, "feature/land")
 	heads, err := s.ListRecentRuns(t.Context(), model.RunListFilter{LatestPerRef: true, RefGlob: "land/*", Limit: 100})
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestLatestRefHeadsRetainGlobalQueuePosition(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	for _, ref := range []string{"a", "b", "a", "c"} {
-		autoRetrySource(t, s, repo.ID, ref)
+		queuedRunForTest(t, s, repo.ID, ref)
 	}
 	flat, err := s.ListRecentRuns(t.Context(), model.RunListFilter{Limit: 100})
 	if err != nil {
@@ -116,7 +116,7 @@ func TestSchemaV34LatestRefIndexUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := createRepo(t, s)
-	source := autoRetrySource(t, s, repo.ID, "kept")
+	source := queuedRunForTest(t, s, repo.ID, "kept")
 	if _, err := s.db.Exec(publicationRetryDowngradeSQL + `DROP TABLE step_resource_usage; DROP INDEX runs_latest_ref_idx; DELETE FROM schema_migrations WHERE version>=35`); err != nil {
 		t.Fatal(err)
 	}

@@ -183,12 +183,6 @@ spec:
             the Deployment could not be applied with the chart's own defaults.
             */}}
             - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
-            {{- $autoRetryBudget := 2 }}
-            {{- if hasKey .Values "autoRetryInfrastructureBudget" }}
-            {{- $autoRetryBudget = int .Values.autoRetryInfrastructureBudget }}
-            {{- end }}
-            - --auto-retry-infrastructure-budget={{ $autoRetryBudget }}
-
             {{- $kubernetesClient := .Values.kubernetesClient | default dict }}
             - --kubernetes-client-qps={{ $kubernetesClient.qps | default 50 }}
             - --kubernetes-client-burst={{ int64 ($kubernetesClient.burst | default 100) }}

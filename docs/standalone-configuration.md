@@ -62,16 +62,11 @@ commit and durable receive journal stay local while run creation is deferred.
 Automatic upstream publication follows successful CI through the existing
 publication path, including the default branch's non-forced update. Explicit
 park and sync operations retain their existing policy and default-branch guards.
-A deferred SHA has no run yet; wait for run creation before using run-based
-commands such as `sync`.
+Accepted receives create ordinary runs before preparation; use the returned run ID for observation.
 
-## Automatic infrastructure recovery
+## Infrastructure failures
 
-`autoRetryInfrastructureBudget` defaults to 2 in Helm; the server equivalent is
-`--auto-retry-infrastructure-budget=2`. Failed steps, including infrastructure-classified
-step failures, execution deadlines after any step started or passed, and any
-failure whose `retry_hint` class is `code` are excluded. Eligible branch
-infrastructure failures get up to that many fresh attempts per lineage, each at
-the original admission position and priority. Set it to 0 in
-administrator-owned upgrade values for manual-only recovery; at most 5. See [eligibility, audit records and
-upgrade behavior](infrastructure-retries.md).
+Oberth does not automatically retry infrastructure failures. Authors configure
+native Argo `retryStrategy`; manual `run_retry` and `run_rerun` remain. A source
+preparation failure happens before Workflow creation and needs manual retry.
+See [infrastructure failures and retries](infrastructure-retries.md).

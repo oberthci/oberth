@@ -111,7 +111,7 @@ as it would have, recorded as a server abandon (see *Capacity, supersession
 and bounds*); the kubelet deadline (budget plus two TTLs) is the backstop if
 the server is down, and such a kubelet kill is not recorded. That deadline is not the recorded floored step deadline,
 so #1499 never classifies a timed-out hold as a start-up failure, and a
-retained failed step prevents the automatic infrastructure retry.
+retained failed step is not automatically retried as a separate run.
 
 ## Opting in
 

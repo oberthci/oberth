@@ -40,9 +40,6 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 	}
 	message := run.Error
 	lower := strings.ToLower(message)
-	if run.AutoRetriedBy != "" {
-		return infrastructure("auto_retried", "none: follow auto_retried_by "+run.AutoRetriedBy, "the server already retried this infrastructure failure")
-	}
 	if pushretry.PublicationFailure(message) || run.Phase == "publishing" {
 		for _, rejected := range []string{"non-fast-forward", "fetch first", "permission denied", "authentication failed", "access denied", "pre-receive hook declined", "protected" + " branch", "protected tag"} {
 			if strings.Contains(lower, rejected) && !pushretry.Transient(errors.New(message)) {
