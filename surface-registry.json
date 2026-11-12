@@ -931,6 +931,18 @@
     "value:status.upstream_info[].consecutive_failures": {
       "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
       "test_ref": "internal/app/upstream_status_test.go TestUpstreamFailureThresholdAndBackoff"
+    },
+    "flag:state-dir": {
+      "doc_anchor": "hack/bootstrap-acceptance/README.md#fresh-linux-vm-outside-ci",
+      "test_ref": "hack/bootstrap-acceptance/test_cell.py FreshHostBoundary"
+    },
+    "flag:confirm-disposable-host": {
+      "doc_anchor": "hack/bootstrap-acceptance/README.md#fresh-linux-vm-outside-ci",
+      "test_ref": "hack/bootstrap-acceptance/test_cell.py FreshHostBoundary"
+    },
+    "flag:bootstrap-credential-leak-control": {
+      "doc_anchor": "hack/bootstrap-acceptance/README.md#captured-output-boundary",
+      "test_ref": "internal/installer/client_cert_test.go TestFirstAdminCSRDoesNotMintBearer"
     }
   }
 }

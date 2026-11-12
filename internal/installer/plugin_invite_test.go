@@ -80,6 +80,7 @@ exit 1
 }
 
 func TestPluginInviteConfiguresMutualTLSAfterRedemption(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	requireOpenSSL(t)
 	authority := newTestAuthorityFor(t, "Invite test CA", "localhost")
 	leaf, key := authority.issue(t)

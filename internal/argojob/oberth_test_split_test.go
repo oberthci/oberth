@@ -221,7 +221,7 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 			wantArgs := []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}
 			if group == "rest" {
 				wantCommand = []string{"/bin/sh"}
-				wantArgs = append([]string{"hack/with-test-node.sh", "/usr/bin/python3"}, wantArgs...)
+				wantArgs = append([]string{"hack/with-test-node.sh", "/bin/sh", "hack/bootstrap-acceptance/rest.sh", "/usr/bin/python3"}, wantArgs...)
 			}
 			if group == "gitcache" {
 				// Retain the static-Git package contract before the dedicated

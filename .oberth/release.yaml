@@ -1609,6 +1609,9 @@ spec:
       - bootstrap-clean
       - /bin/sh
       - hack/with-test-node.sh
+      # The no-VM contract consumes this race run and gates release completion.
+      - /bin/sh
+      - hack/bootstrap-acceptance/rest.sh
       - /usr/bin/python3
       - -I
       - -S

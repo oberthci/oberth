@@ -45,7 +45,7 @@ func pkiLifecycleDeps(t *testing.T, dns, ips []string) (Deps, *fakeBaoRunner) {
 	role["allow_ip_sans"] = len(ips) > 0
 	role["ttl"], role["max_ttl"] = 2592000, 2592000
 	roleJSON, _ := json.Marshal(map[string]any{"data": role})
-	issuerJSON, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(newTestServerCA(append(base, dns...)))}})
+	issuerJSON, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(newTestServerCA(t, append(base, dns...)))}})
 	responses := freshStoreResponses()
 	responses["read -format=json oberth-pki/roles/oberth-server"] = fakeBaoResponse{out: string(roleJSON)}
 	responses["read -format=json oberth-pki/issuer/default"] = fakeBaoResponse{out: string(issuerJSON)}

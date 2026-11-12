@@ -1565,7 +1565,8 @@ spec:
       # Reuse a verified Node archive from the existing repository cache; only
       # this leaf extracts/runs Node. No extra Pod or global setup dependency.
       command: ["/bin/sh"]
-      args: ["hack/with-test-node.sh", "/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest"]
+      # Bootstrap contracts consume this race run; failure blocks every build leaf.
+      args: ["hack/with-test-node.sh", "/bin/sh", "hack/bootstrap-acceptance/rest.sh", "/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest"]
       env:
       # Scale test fixture waits on loaded CI hosts.
       - name: OBERTH_TEST_TIMEOUT_SCALE

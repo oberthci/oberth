@@ -352,7 +352,7 @@ func TestRefreshPinnedServerCARewritesStaleCA(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	newCA := string(newTestServerCA([]string{"oberth"}))
+	newCA := string(newTestServerCA(t, []string{"oberth"}))
 	var table bytes.Buffer
 	deps := Deps{
 		Output: &table,

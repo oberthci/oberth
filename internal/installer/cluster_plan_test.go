@@ -64,6 +64,7 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 }
 
 func TestMultifileKubeconfigKeepsExplicitContext(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	dir := t.TempDir()
 	first, second := filepath.Join(dir, "first"), filepath.Join(dir, "second")
 	if err := os.WriteFile(first, []byte(testKubeconfig), 0600); err != nil {
@@ -126,7 +127,8 @@ func TestFreshK3sNeverUsedWhenUserFileExists(t *testing.T) {
 }
 
 func TestPlanReportsSelectedRemoteClusterWithoutAnotherGate(t *testing.T) {
-	ca := newTestServerCA([]string{"api.example.test"})
+	bootstrapCredentialInventory(t)
+	ca := newTestServerCA(t, []string{"api.example.test"})
 	kube := fake.NewClientset(preflightNode(), preflightStorage())
 	deps := InstallDeps{LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(name string) (kubernetes.Interface, *rest.Config, string, error) {
 		if name != "chosen" {
@@ -150,7 +152,7 @@ func TestExecuteRefusesUnknownNetworkPolicyBeforeHelm(t *testing.T) {
 	node.Annotations = nil
 	kube := fake.NewClientset(node, preflightStorage())
 	deps := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
+		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 	}, RunCommand: preflightStats, RunHelm: func(context.Context, []string) ([]byte, error) {
 		t.Fatal("Helm ran without network-policy enforcement")
 		return nil, nil
@@ -221,7 +223,7 @@ func TestPolicyPreflightReadsControllerConfiguration(t *testing.T) {
 }
 
 func TestAllInstallModesRefuseUntrustedClusterBeforeAccess(t *testing.T) {
-	ca := newTestServerCA([]string{"api.example.test"})
+	ca := newTestServerCA(t, []string{"api.example.test"})
 	for _, config := range []*rest.Config{
 		{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca, Insecure: true}},
 		{Host: "https://api.example.test"},

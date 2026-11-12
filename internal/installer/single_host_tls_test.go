@@ -45,7 +45,7 @@ func TestSingleHostNamesFollowSelectedNode(t *testing.T) {
 func TestExistingCARequiresExplicitReissue(t *testing.T) {
 	cfg := Config{Namespace: DefaultNamespace, TLSExtraDNSNames: []string{"new.example.test"}}
 	base, _ := serverPKINames(Config{})
-	issuer, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(newTestServerCA(base))}})
+	issuer, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(newTestServerCA(t, base))}})
 	responses := freshStoreResponses()
 	responses["read -format=json oberth-pki/issuer/default"] = fakeBaoResponse{out: string(issuer)}
 	runner := &fakeBaoRunner{t: t, responses: responses}
@@ -61,7 +61,7 @@ func TestExistingCARequiresExplicitReissue(t *testing.T) {
 }
 
 func TestExistingIPConstrainedCANeverDowngrades(t *testing.T) {
-	pem := newTestServerCA([]string{"oberth", "localhost"}, "127.0.0.1", "::1")
+	pem := newTestServerCA(t, []string{"oberth", "localhost"}, "127.0.0.1", "::1")
 	current := map[string]any{"certificate": string(pem)}
 	cfg := Config{ReissueServerCA: true}
 	kept, err := selectExistingServerCA(cfg, current, []string{"oberth", "localhost"}, []string{"127.0.0.1/32", "::1/128"})
@@ -81,7 +81,7 @@ func TestInstallJSONKeepsDiscoveredNamesAfterPreflightRefusal(t *testing.T) {
 	kube := fake.NewClientset(preflightNode(), preflightStorage())
 	deps := InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil },
 		LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-			return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
+			return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 		}, RunCommand: preflightStats,
 		RunHelm: func(context.Context, []string) ([]byte, error) {
 			t.Fatal("Helm ran after failed preflight")

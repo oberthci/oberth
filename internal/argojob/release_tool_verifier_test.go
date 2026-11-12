@@ -29,7 +29,7 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 		"golangci-lint-run":     {"/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."},
 		"release-test-store":    {"/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "store"},
 		"release-test-service":  {"/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "service"},
-		"release-test-rest":     {"/bin/sh", "hack/with-test-node.sh", "/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest"},
+		"release-test-rest":     {"/bin/sh", "hack/with-test-node.sh", "/bin/sh", "hack/bootstrap-acceptance/rest.sh", "/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest"},
 		"release-test-gitcache": {"/bin/sh", "hack/test-gitcache.sh"},
 		"release-chart-test":    {"./hack/test-chart.sh"},
 		"release-scan": {"/usr/local/bin/trivy", "fs", "--cache-dir", "/tmp/oberth-trivy", "--no-progress", "--skip-check-update",

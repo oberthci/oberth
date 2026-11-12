@@ -275,6 +275,7 @@ func TestAddRepoWorkflowsAreNativeAndNeverCommittedOrOverwritten(t *testing.T) {
 }
 
 func TestAddRepoClusterActionsKeepTheChosenContext(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	f := newAddRepoFixture(t, "git@github.com:acme/project.git")
 	f.fake(t, "kubectl", `printf '%s\n' "$@" >> "$CALL_TRACE"`)
 	if _, err := f.call(t, "prepare-upstream", "chosen", "namespace", "pod", "github", "ssh://git@github.com/acme", "project", "dedicated", "no"); err == nil {

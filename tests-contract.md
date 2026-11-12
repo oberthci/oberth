@@ -397,3 +397,20 @@ creates a real interrupted promotion and a later delivered promotion, repeats
 startup recovery without new retries or failure logs, and checks the typed
 admission refusal for a delivery racing recovery. Existing grant, failed-step,
 manual-cancel and removed-uplink recovery cases remain enforced.
+
+# Bootstrap cell review follow-ups (#1533)
+
+The mandatory Python suite verifies release environment preservation, own wall
+budget enforcement, exact required Go pass events and safe event test identities,
+decoded/split Go output scanning, attempted mutation rejection for POST/PUT/PATCH/
+DELETE, stalled TLS teardown, refusal of every owned fresh-host path and exclusive
+unit creation against files and symlinks. CI additionally reruns the real CSR
+fixture with its test-only generated-key leak control and requires the parent
+scanner to reject that otherwise-passing Go fixture. The 18 named fixture pass
+events come from the normal rest race run rather than a separate non-race run.
+`test_failures.py` exercises advisory-plan success versus hard-check failure,
+package-bound terminal fixture passes, private failure metadata and preservation
+of the originating stage/check. A real one-shot cell alarm followed by a stalled
+final scan must still terminate under its independent failure-scan alarm.
+The real CLI plan must refuse zero available disk with exit 1 and the named hard
+check; a synthetic green JSON result with a nonzero exit must still fail.

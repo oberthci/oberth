@@ -21,11 +21,13 @@ import (
 // containing only the stated prerequisites. Only the release transport and
 // platform detection are substituted; the test key lives in a private copy.
 func TestPluginFetchVerifiedRelease(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	requireOpenSSL(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+	bootstrapPrivateKey(t, key)
 	der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +140,7 @@ cp "$FIXTURE_RELEASE/$name" "$out"
 						t.Fatal(err)
 					}
 				}
+				bootstrapPrivateKey(t, signer)
 				signature, err := ecdsa.SignASN1(rand.Reader, signer, digest[:])
 				if err != nil {
 					t.Fatal(err)
@@ -233,6 +236,7 @@ func TestPluginCommandsOnlyAllowOwnScripts(t *testing.T) {
 // Verify the actual downloader's TLS and redirect flags against an HTTPS
 // release origin, in addition to the transport-independent adversarial cases.
 func TestPluginFetchOverHTTPS(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	requireOpenSSL(t)
 	if _, err := exec.LookPath("curl"); err != nil {
 		t.Fatal("curl is required for the HTTPS bootstrap test")
@@ -241,6 +245,7 @@ func TestPluginFetchOverHTTPS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bootstrapPrivateKey(t, key)
 	publicDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
 		t.Fatal(err)
@@ -271,6 +276,7 @@ func TestPluginFetchOverHTTPS(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	bootstrapPrivateKey(t, server.TLS.Certificates[0].PrivateKey)
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0700); err != nil {
 		t.Fatal(err)
@@ -303,6 +309,7 @@ func TestPluginFetchOverHTTPS(t *testing.T) {
 }
 
 func TestPluginInstallRequiresRecoveryFile(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	root := t.TempDir()
 	for _, name := range []string{"bin/helm", "bin/kubectl", ".local/bin/oberth"} {
 		path := filepath.Join(root, name)
@@ -329,6 +336,7 @@ func TestPluginInstallRequiresRecoveryFile(t *testing.T) {
 }
 
 func TestPluginInstallUsesVerifiedCLIAndSharedModes(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	root := t.TempDir()
 	for name, body := range map[string]string{
 		"bin/helm":          "#!/bin/sh\nexit 0\n",

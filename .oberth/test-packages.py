@@ -38,6 +38,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group", nargs="?", choices=("store", "service", "gitcache", "rest"))
     parser.add_argument("--list", action="store_true", help="print the package partition without running tests")
+    parser.add_argument("--json", action="store_true", help="emit Go JSON events for the bootstrap contract recorder")
+    parser.add_argument("--outputdir", help="private standard Go test artifact directory")
     args = parser.parse_args()
     if not args.list and args.group is None:
         parser.error("a test group is required")
@@ -50,7 +52,10 @@ def main():
                                  str(Path(__file__).with_name("test-store.py"))])
     # Whole-package race deadlines need max(1.5 * observed, observed + 120s).
     timeout = {"service": "60m", "rest": "55m"}.get(args.group, "20m")
-    os.execvp("go", ["go", "test", "-race", *RACE_SCOPE, "-v", "-count=1", "-parallel=2", "-p=2", f"-timeout={timeout}", *groups[args.group]])
+    output = ["-json"] if args.json else ["-v"]
+    if args.outputdir:
+        output += ["-outputdir", str(Path(args.outputdir).resolve())]
+    os.execvp("go", ["go", "test", "-race", *RACE_SCOPE, *output, "-count=1", "-parallel=2", "-p=2", f"-timeout={timeout}", *groups[args.group]])
 
 
 if __name__ == "__main__":
