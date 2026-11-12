@@ -17,6 +17,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"sigs.k8s.io/yaml"
 )
 
 func TestPluginDNSRemedyWaitsForNameAndReprobes(t *testing.T) {
@@ -110,6 +111,60 @@ func TestPluginWaitLoadBalancerIsBoundedAndSelected(t *testing.T) {
 	_, err = waitClientLoadBalancer(ctx, fake.NewSimpleClientset(), "selected-namespace", time.Millisecond)
 	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "inspect Service") {
 		t.Fatal(err)
+	}
+}
+
+func TestPluginKindPrintsCompleteRemedyBeforeInstall(t *testing.T) {
+	plan := probePlan()
+	plan.Identity.Distribution = "kind"
+	result, err := ProbeClientPorts(t.Context(), plan, Config{ClientHTTPSPort: "32443", ClientSSHPort: "32022"}, ClientPortProbeDeps{})
+	if err != nil || result.KindRemedy == nil {
+		t.Fatalf("%+v %v", result, err)
+	}
+	var config kindConfig
+	if err := yaml.Unmarshal([]byte(result.KindRemedy.Config), &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.Kind != "Cluster" || config.APIVersion != "kind.x-k8s.io/v1alpha4" || len(config.Nodes) != 1 {
+		t.Fatalf("%+v", config)
+	}
+	ports := config.Nodes[0].ExtraPortMappings
+	if len(ports) != 2 || ports[0].ContainerPort != 30022 || ports[0].HostPort != 32022 || ports[1].ContainerPort != 30443 || ports[1].HostPort != 32443 || ports[0].ListenAddress != "127.0.0.1" || ports[1].Protocol != "TCP" {
+		t.Fatal(ports)
+	}
+	if result.KindRemedy.CreateCommand != "test ! -e oberth-kind.kubeconfig && test ! -L oberth-kind.kubeconfig && kind create cluster --name oberth-onboarding --config oberth-kind.yaml --kubeconfig oberth-kind.kubeconfig" {
+		t.Fatal(result.KindRemedy)
+	}
+}
+
+func TestPluginKindRecognizesSelectedClusterMappings(t *testing.T) {
+	plan := probePlan()
+	plan.Identity.Distribution = "kind"
+	plan.Identity.Nodes[0].Name = "chosen-control-plane"
+	deps := ClientPortProbeDeps{DockerHost: "unix:///var/run/docker.sock", Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch {
+		case args[0] == "inspect" && args[2] == `{{index .Config.Labels "k3d.cluster"}}`:
+			return nil, errors.New("not k3d")
+		case args[0] == "inspect" && args[2] == `{{index .Config.Labels "io.x-k8s.kind.cluster"}}`:
+			if args[3] != "chosen-control-plane" {
+				t.Fatal(args)
+			}
+			return []byte("chosen"), nil
+		case args[0] == "ps":
+			if args[2] != "label=io.x-k8s.kind.cluster=chosen" {
+				t.Fatal(args)
+			}
+			return []byte("abc123"), nil
+		case args[0] == "inspect" && args[3] == "abc123":
+			return []byte(forwardedProbePorts), nil
+		default:
+			t.Fatal(args)
+			return nil, errors.New("unexpected command")
+		}
+	}}
+	result, err := ProbeClientPorts(t.Context(), plan, Config{}, deps)
+	if err != nil || result.KindRemedy != nil || !result.HTTPS.Published || !result.SSH.Published || result.HTTPS.Port != "32443" {
+		t.Fatalf("%+v %v", result, err)
 	}
 }
 

@@ -98,3 +98,24 @@ and its events, keep the install status and secrets file, then retry the wait
 or review a forwarding remedy. Do not claim success until the original install
 and subsequent verification pass. Standard LoadBalancer Service ports are 443
 and 2222; NodePorts remain 30443 and 30022.
+
+### Existing kind cluster without published ports
+
+Before install starts, show `kind_remedy.config` in full when the selected
+kind cluster has missing or unverified mappings; save it as
+`oberth-kind.yaml` and show `kind_remedy.create_command` verbatim. It maps
+container NodePorts 30022/30443 to the proposed SSH/HTTPS host ports (including
+explicit overrides), bound to 127.0.0.1. Docker inspection recognizes only the
+selected nodes' kind cluster. A reachable unrelated listener is insufficient
+proof that kind has the required mappings.
+
+The ready-to-use create command uses the new name `oberth-onboarding`; if
+that exists, choose an unused name. Do not delete or recreate the selected
+cluster automatically. The user can create a new cluster, select its context
+and repeat the plan/probe, or keep this cluster and choose port-forward.
+Print these remedies before the same install Review; kind is never refused
+as an install target. These loopback mappings support clients on this Mac.
+
+The printed command targets a new `oberth-kind.kubeconfig` and refuses an
+existing file or symlink. Use that file and `kind-oberth-onboarding` explicitly
+for the next plan/install; choose unused names instead of replacing files.

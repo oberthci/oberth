@@ -27,6 +27,8 @@ func probeDocker(t *testing.T, ports string) ClientPortProbeDeps {
 				t.Fatal(args)
 			}
 			return []byte("abc123\n"), nil
+		case args[0] == "inspect" && args[2] == `{{index .Config.Labels "io.x-k8s.kind.cluster"}}`:
+			return nil, errors.New("not a kind cluster")
 		case args[0] == "inspect" && args[2] == `{{index .Config.Labels "k3d.cluster"}}`:
 			if args[3] != "k3d-example-server-0" {
 				return nil, errors.New("not this plan's node")

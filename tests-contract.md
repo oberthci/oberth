@@ -451,3 +451,9 @@ stale extra DNS addresses.
 provider/distribution matching. `TestPluginWaitLoadBalancerIsBoundedAndSelected`
 checks selected namespace/Service, delayed ingress and bounded missing-Service
 waits. The address wait is read-only and follows the approved install start.
+
+`TestPluginKindPrintsCompleteRemedyBeforeInstall` parses the printed kind YAML
+and verifies both Oberth NodePort mappings and explicit host ports.
+`TestPluginKindRecognizesSelectedClusterMappings` pins Docker inspection to
+the selected kind cluster and avoids printing a replacement remedy when its
+mappings are already present.

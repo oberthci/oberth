@@ -22,6 +22,7 @@ type ClientPortProbe struct {
 	SSH          ClientPortObservation       `json:"ssh"`
 	InstallFlags []string                    `json:"install_flags"`
 	NeedsAction  bool                        `json:"needs_action"`
+	KindRemedy   *ClientKindRemedy           `json:"kind_remedy,omitempty"`
 	LoadBalancer *ClientLoadBalancerProposal `json:"load_balancer,omitempty"`
 	DNS          *ClientDNSProposal          `json:"dns,omitempty"`
 	Advice       string                      `json:"advice"`
@@ -132,6 +133,9 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 	if result.NeedsAction {
 		result.Advice = "Planned client ports did not answer from this host and no unique local mapping was found. NodePorts are not reachable from this host; map them or use port-forward, then repeat this probe. A fresh server may not be listening yet: review the network path, not the cluster type."
 	}
+	if plan.Identity.Distribution == "kind" && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") && (!result.HTTPS.Published || !result.SSH.Published) {
+		result.KindRemedy = clientKindRemedy(result.HTTPS.Port, result.SSH.Port)
+	}
 	if result.NeedsAction && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") {
 		nodeReachable := reachableProbeNode(ctx, plan, deps)
 		if !nodeReachable {
@@ -175,7 +179,7 @@ func localPublishedPorts(ctx context.Context, plan InstallPlan, host string, dep
 	if !strings.HasPrefix(daemon, "unix://") && !strings.HasPrefix(daemon, "npipe://") {
 		return result
 	}
-	clusters := map[string]bool{}
+	clusters := map[string]string{}
 	for _, node := range plan.Identity.Nodes {
 		if !probeContainerName.MatchString(node.Name) {
 			continue
@@ -183,12 +187,18 @@ func localPublishedPorts(ctx context.Context, plan InstallPlan, host string, dep
 		raw, err := deps.Run(ctx, "docker", "inspect", "--format", `{{index .Config.Labels "k3d.cluster"}}`, node.Name)
 		cluster := strings.TrimSpace(string(raw))
 		if err == nil && probeContainerName.MatchString(cluster) {
-			clusters[cluster] = true
+			clusters[cluster] = "k3d.cluster="
+		} else {
+			raw, err = deps.Run(ctx, "docker", "inspect", "--format", `{{index .Config.Labels "io.x-k8s.kind.cluster"}}`, node.Name)
+			cluster = strings.TrimSpace(string(raw))
+			if err == nil && probeContainerName.MatchString(cluster) {
+				clusters[cluster] = "io.x-k8s.kind.cluster="
+			}
 		}
 	}
 	candidates := map[string]map[string]bool{}
-	for cluster := range clusters {
-		raw, err := deps.Run(ctx, "docker", "ps", "--filter", "label=k3d.cluster="+cluster, "--format", "{{.ID}}")
+	for cluster, label := range clusters {
+		raw, err := deps.Run(ctx, "docker", "ps", "--filter", "label="+label+cluster, "--format", "{{.ID}}")
 		if err != nil {
 			continue
 		}
