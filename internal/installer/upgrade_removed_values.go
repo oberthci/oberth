@@ -40,6 +40,7 @@ var removedChartValues = []string{
 	"gitBackend",
 	"gitcache",
 	"maxConcurrentJobs",
+	"platformProtection",
 	"secretCreatePolicy",
 	"trustedTests",
 	"upstream.createSecrets",

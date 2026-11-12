@@ -14,13 +14,13 @@
       "oberth.ci/trigger": "release"
     },
     "annotations": {
+      "example.com/tier": "L",
       "oberth.ci/helper-storage": "argo-256Mi-512Mi-v1",
       "oberth.ci/ref": "refs/tags/v1.0.0",
       "oberth.ci/release-wif-policy-sha256": "dcbc1acb3779d51e9a18f0dc3b7366c5d6dd354ee40605ed8a4621b55f7122ea",
       "oberth.ci/request-defaults": "2cpu-2Gi-helpers-250m-256Mi-v2",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "670f44fd87c73d2744611a56e9dcd00fb29ca207d907782a6e76743fefa8adcb",
+      "oberth.ci/spec-identity": "72b7fbdb230916750dd4f861de3853dc1a02fc8165891d686d217b6ea3ef5471",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -186,6 +186,7 @@
     },
     "activeDeadlineSeconds": 7200,
     "priority": 1,
+    "podPriorityClassName": "oberth-argo-oberth-pipeline",
     "securityContext": {
       "runAsUser": 0,
       "runAsGroup": 0,
@@ -194,6 +195,7 @@
         "type": "RuntimeDefault"
       }
     },
+    "podSpecPatch": "{\"preemptionPolicy\":\"Never\"}",
     "podMetadata": {
       "labels": {
         "oberth.ci/run": "run-abc123",

@@ -118,7 +118,7 @@
           "--log-format",
           "text",
           "--gloglevel",
-          ""
+          "0"
         ],
         "env": [
           {
@@ -165,7 +165,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:50:50Z"
+            "value": "2026-11-12T01:37:23Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -217,7 +217,7 @@
           "--log-format",
           "text",
           "--gloglevel",
-          ""
+          "0"
         ],
         "env": [
           {
@@ -263,7 +263,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:50:50Z"
+            "value": "2026-11-12T01:37:23Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -369,7 +369,7 @@
           "--log-format",
           "text",
           "--gloglevel",
-          "",
+          "0",
           "--",
           "/bin/true"
         ],
@@ -432,7 +432,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:50:50Z"
+            "value": "2026-11-12T01:37:23Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -534,7 +534,7 @@
           "--log-format",
           "text",
           "--gloglevel",
-          "",
+          "0",
           "--",
           "/bin/true"
         ],
@@ -597,7 +597,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-10T04:50:50Z"
+            "value": "2026-11-12T01:37:23Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -703,7 +703,9 @@
       "seccompProfile": {
         "type": "RuntimeDefault"
       }
-    }
+    },
+    "priorityClassName": "oberth-argo-oberth-pipeline",
+    "preemptionPolicy": "Never"
   },
   "status": {}
 }

@@ -191,6 +191,12 @@ func admitCapabilityResource(location string, r *wfv1.ResourceTemplate, capabili
 		return refuse("invalid or case-variant resource envelope keys")
 	}
 	var apiVersion, kind, namespace, name, generateName string
+	var resourceSpec any
+	if raw := object["spec"]; len(raw) != 0 {
+		if json.Unmarshal(raw, &resourceSpec) != nil || resourcePriorityOverride(resourceSpec) {
+			return refuse("resource Pod priority overrides are not admitted")
+		}
+	}
 	for _, field := range []struct {
 		raw         json.RawMessage
 		destination *string
@@ -214,6 +220,27 @@ func admitCapabilityResource(location string, r *wfv1.ResourceTemplate, capabili
 		}
 	}
 	return refuse("resource API version, kind or action is not granted")
+}
+
+// Operator resource grants do not delegate the control-plane scheduling tier.
+// Check embedded Pod templates too, without interpreting the operator's API.
+func resourcePriorityOverride(value any) bool {
+	pending := []any{value}
+	for len(pending) > 0 {
+		value, pending = pending[len(pending)-1], pending[:len(pending)-1]
+		switch node := value.(type) {
+		case map[string]any:
+			for key, child := range node {
+				if (strings.EqualFold(key, "priorityClassName") || strings.EqualFold(key, "podPriorityClassName") || strings.EqualFold(key, "podSpecPatch")) && child != nil && child != "" {
+					return true
+				}
+				pending = append(pending, child)
+			}
+		case []any:
+			pending = append(pending, node...)
+		}
+	}
+	return false
 }
 
 // Unknown spec/status fields remain operator-defined. Only the envelope keys

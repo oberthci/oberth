@@ -1,10 +1,4 @@
-# Opt in explicitly on the separate openbao chart 0.28.6 release.
-# These names assume Oberth release=oberth, namespace=oberth. Adjust together
-# with the rendered PriorityClasses for any other release/namespace.
+# The installer sets this priority automatically. For a separately managed
+# release, use the class rendered by the Oberth chart in the chosen namespace.
 server:
-  # Template changes require an explicit Pod delete; restart seals OpenBao
-  # until auto-unseal or an operator unseals it. See the rollout instructions.
-  updateStrategyType: OnDelete
-  priorityClassName: oberth-oberth-platform-openbao
-  # Preserve the installation's existing resource requests and limits.
-  # Qualify sizing separately; this example changes priority only.
+  priorityClassName: oberth-oberth-control-plane

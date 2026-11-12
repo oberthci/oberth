@@ -1120,6 +1120,7 @@ func TestOpenBaoHelmArgsDevMode(t *testing.T) {
 		// Oberth never uses the agent injector; keep the unused privileged
 		// webhook out of both install modes.
 		"--set", "injector.enabled=false",
+		"--set-string", "server.priorityClassName=oberth-oberth-control-plane",
 		"--set", "global.tlsDisable=true",
 		"--set", "server.dev.enabled=true",
 		"--version", "0.6.0",
@@ -1141,6 +1142,7 @@ func TestOpenBaoHelmArgsProductionMode(t *testing.T) {
 		"upgrade", "--install", "openbao", "openbao/openbao",
 		"-n", "openbao", "--create-namespace",
 		"--set", "injector.enabled=false",
+		"--set-string", "server.priorityClassName=oberth-oberth-control-plane",
 		"--set", "global.tlsDisable=false",
 		// dev pinned false so --reuse-values cannot resurrect a previous
 		// dev-mode install's flag through an --upgrade mode switch.
@@ -3166,6 +3168,16 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 		ClientConfigRoot: func() (string, error) { return clientRoot, nil },
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
+			case "upgrade":
+				if len(args) > 2 && args[2] == "argo-workflows" {
+					class, err := client.SchedulingV1().PriorityClasses().Get(t.Context(), "oberth-oberth-control-plane", metav1.GetOptions{})
+					if err != nil || class.Value != 1000000 {
+						t.Fatalf("dependency ran before priority bootstrap: %v", err)
+					}
+					if !slices.Contains(args, "controller.priorityClassName=oberth-oberth-control-plane") {
+						t.Fatal("controller lost its bootstrap class")
+					}
+				}
 			case "list":
 				return []byte("[]"), nil
 			case "show":

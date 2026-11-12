@@ -6,12 +6,12 @@ import (
 )
 
 // Platform class selection must remain unreachable from repository-authored
-// workflows, including resource pods and the VMIs that create launcher pods.
+// workflows. Resource capability tests cover embedded resource Pod templates.
 func TestPlatformPriorityClassesCannotBeSelectedByCI(t *testing.T) {
 	mustAdmit(t, admissibleDocument, Policy{})
 	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  priority: 1000000\n", 1), Policy{}, "spec.priority")
-	for _, component := range []string{"oberth", "argo-controller", "openbao"} {
-		class := "oberth-oberth-platform-" + component
+	for _, component := range []string{"control-plane", "pipeline"} {
+		class := "oberth-oberth-" + component
 		t.Run(component, func(t *testing.T) {
 			t.Run("workflow", func(t *testing.T) {
 				doc := strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  podPriorityClassName: "+class+"\n", 1)

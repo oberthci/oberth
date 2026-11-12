@@ -1,20 +1,25 @@
-{{- if (.Values.platformProtection | default dict).enabled }}
-{{- range $component := list "oberth" "argo-controller" "openbao" }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ include "oberth.controlPlanePriorityClass" . }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "Oberth server, Argo controller and OpenBao recover ahead of pipeline workloads."
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: {{ include "oberth.platformPriorityClass" (dict "root" $ "component" $component) }}
-  {{- if has $component (list "argo-controller" "openbao") }}
+  name: {{ include "oberth.pipelinePriorityClass" . }}
   annotations:
     helm.sh/resource-policy: keep
-  {{- end }}
   labels:
-    {{- include "oberth.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: {{ $component }}
-value: 1000000
+    {{- include "oberth.labels" . | nindent 4 }}
+value: 0
 globalDefault: false
-preemptionPolicy: PreemptLowerPriority
-description: {{ printf "Oberth platform recovery priority for %s; never assign to CI workloads." $component | quote }}
-{{- end }}
-{{- end }}
+preemptionPolicy: Never
+description: "Oberth pipeline workloads wait for capacity without preempting other Pods."

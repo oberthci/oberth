@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
+	"github.com/oberthci/oberth/internal/podpriority"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -366,6 +367,8 @@ func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: wf.Namespace, Labels: map[string]string{"oberth.ci/role": "executor-identity"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}},
 		Spec:       corev1.PodSpec{ServiceAccountName: serviceAccount, AutomountServiceAccountToken: ptr.To(false), RestartPolicy: corev1.RestartPolicyNever, SchedulingGates: []corev1.PodSchedulingGate{{Name: "oberth.ci/executor-identity"}}, Containers: []corev1.Container{{Name: "identity", Image: controller.config.SourceSeedImage, Command: []string{"/bin/false"}, SecurityContext: nonrootContainerSecurity(65534), Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1m"), corev1.ResourceMemory: resource.MustParse("1Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("8Mi")}}}}},
 	}
+	desired.Spec.PriorityClassName = podpriority.PipelineClass(controller.config.Namespace)
+	desired.Spec.PreemptionPolicy = ptr.To(corev1.PreemptNever)
 	pods := controller.kube.CoreV1().Pods(wf.Namespace)
 	pod, err := pods.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {

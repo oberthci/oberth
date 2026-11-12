@@ -1,5 +1,9 @@
 {
   "entries": {
+    "value:priorityClassName": {
+      "doc_anchor": "docs/platform-protection.md#platform-protection",
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+    },
     "flag:argo-controller-profile-configmap": {
       "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
       "test_ref": "internal/argojob/nonroot_parallelism_test.go TestNonrootVerifierAcceptsTheParallelismProfile"
@@ -253,8 +257,8 @@
       "test_ref": "hack/test-chart.sh retention and disk floor defaults"
     },
     "value:enabled": {
-      "doc_anchor": "docs/platform-protection.md#platform-protection",
-      "test_ref": "hack/test-platform-protection.sh default renders no platform priority"
+      "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
+      "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
     },
     "flag:json": {
       "doc_anchor": "docs/remote-cli.md#configuration",

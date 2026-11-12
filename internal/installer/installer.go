@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/oberthci/oberth/internal/podpriority"
 	"github.com/oberthci/oberth/internal/releaseverify"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -1013,6 +1014,10 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 	}
 
+	if err := ensurePlatformPriorities(ctx, cfg, deps); err != nil {
+		return err
+	}
+
 	// --- Commit the deferred cert rotation (#812 remediation 1) ---
 	// The Helm SSA preview confirmed no conflicts; it is now safe to write
 	// the rotated certificate to OpenBao.
@@ -1317,6 +1322,7 @@ func OpenBaoHelmArgs(cfg Config) []string {
 		// blocks any second OpenBao release on the same cluster. Off in both
 		// modes.
 		"--set", "injector.enabled=false",
+		"--set-string", "server.priorityClassName=" + controlPlanePriority(cfg),
 	}
 	if cfg.InstallSecretStoreDev {
 		args = append(args,
@@ -2238,6 +2244,11 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		step++
 	}
 
+	pipelineNamespace := cfg.ArgoNamespace
+	if pipelineNamespace == "" {
+		pipelineNamespace = DefaultArgoNamespace
+	}
+	_, _ = fmt.Fprintf(w, "\n     Before dependency Pods, establish Helm-owned scheduling classes %s (value %d, PreemptLowerPriority) and %s (value %d, Never).\n\n", controlPlanePriority(cfg), podpriority.ControlPlaneValue, podpriority.PipelineClass(pipelineNamespace), podpriority.PipelineValue)
 	openbaoAddr := ""
 	var rekor RekorResult
 	if cfg.wantsSecretStore() {

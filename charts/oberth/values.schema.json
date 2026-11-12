@@ -35,17 +35,6 @@
         }
       }
     },
-    "platformProtection": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": false
-        }
-      },
-      "description": "Opt-in platform PriorityClasses; external Argo/OpenBao releases require their own values overlays."
-    },
     "metrics": {
       "type": "object",
       "additionalProperties": false,

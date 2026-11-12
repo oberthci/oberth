@@ -123,7 +123,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-06T00:34:48Z"
+            "value": "2026-11-11T23:47:17Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -229,7 +229,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-06T00:34:48Z"
+            "value": "2026-11-11T23:47:17Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -362,7 +362,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-06T00:34:48Z"
+            "value": "2026-11-11T23:47:17Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -432,7 +432,8 @@
       "seccompProfile": {
         "type": "RuntimeDefault"
       }
-    }
+    },
+    "priorityClassName": "oberth-argo-oberth-pipeline"
   },
   "status": {}
 }
