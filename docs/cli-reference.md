@@ -893,6 +893,8 @@ TCP success does not establish server readiness or TLS trust. Nothing is install
         explicit host HTTPS port; overrides discovery
   -client-ssh-port string
         explicit host SSH port; overrides discovery
+  -endpoint-address string
+        detected node IP or load-balancer address to name and re-probe
   -plan-file string
         public JSON from install --plan --json
   -service-type string

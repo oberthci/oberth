@@ -22,6 +22,7 @@ type ClientPortProbe struct {
 	SSH          ClientPortObservation `json:"ssh"`
 	InstallFlags []string              `json:"install_flags"`
 	NeedsAction  bool                  `json:"needs_action"`
+	DNS          *ClientDNSProposal    `json:"dns,omitempty"`
 	Advice       string                `json:"advice"`
 }
 
@@ -32,14 +33,16 @@ type ClientPortObservation struct {
 }
 
 type ClientPortProbeDeps struct {
-	Run           func(context.Context, string, ...string) ([]byte, error)
-	Dial          func(context.Context, string) error
-	DockerHost    string
-	DockerContext string
+	Run             func(context.Context, string, ...string) ([]byte, error)
+	Dial            func(context.Context, string) error
+	LookupHost      func(context.Context, string) ([]string, error)
+	EndpointAddress string
+	DockerHost      string
+	DockerContext   string
 }
 
 func DefaultClientPortProbeDeps() ClientPortProbeDeps {
-	return ClientPortProbeDeps{DockerHost: os.Getenv("DOCKER_HOST"), DockerContext: os.Getenv("DOCKER_CONTEXT"), Run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return ClientPortProbeDeps{LookupHost: net.DefaultResolver.LookupHost, DockerHost: os.Getenv("DOCKER_HOST"), DockerContext: os.Getenv("DOCKER_CONTEXT"), Run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		commandCtx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 		// Only selected public labels and port bindings are requested. Never inspect
@@ -71,6 +74,15 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 		return result, errors.New("invalid advertised client host")
 	}
 	result.Host = host
+	if net.ParseIP(host) != nil || deps.EndpointAddress != "" {
+		proposal, err := proposeClientDNS(ctx, host, deps.EndpointAddress, deps.LookupHost)
+		if err != nil {
+			return result, err
+		}
+		result.DNS = &proposal
+		result.Host = proposal.Host
+		result.NeedsAction = !proposal.Resolves
+	}
 	switch cfg.ServiceType {
 	case "", "NodePort", "ClusterIP", "LoadBalancer":
 	default:
@@ -115,6 +127,9 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 	result.Advice = "TCP reachability and published mappings do not prove Oberth readiness or TLS identity. Review these client ports before install; verify the server afterwards."
 	if result.NeedsAction {
 		result.Advice = "Planned client ports did not answer from this host and no unique local mapping was found. NodePorts are not reachable from this host; map them or use port-forward, then repeat this probe. A fresh server may not be listening yet: review the network path, not the cluster type."
+	}
+	if result.DNS != nil && !result.DNS.Resolves {
+		result.Advice += " Show the DNS remedy, wait for the user to configure it, then repeat this probe with the proposed DNS name and the same --endpoint-address before continuing."
 	}
 	return result, nil
 }

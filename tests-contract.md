@@ -441,3 +441,8 @@ waits from the stall bound and the pre-start watchdog;
 `TestBuildSerializesReleasesWithOneNativeMutex` covers `releases.serialize`;
 `TestBuildIgnoresRetiredExclusiveAnnotationInFragments` keeps the retired
 annotation inert.
+
+Plugin macOS onboarding: `TestPluginDNSRemedyWaitsForNameAndReprobes` covers
+IPv4, IPv6, hostname targets and the before/after resolution boundary.
+`TestPluginDNSRejectsStaleOrInvalidAddresses` rejects invalid endpoints and
+stale extra DNS addresses.

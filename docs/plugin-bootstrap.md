@@ -56,3 +56,17 @@ sha256sum -c SHA256SUMS
 
 Never substitute a public key downloaded beside the artifacts for the
 trusted source pin.
+
+### Naming an IP or load-balancer endpoint
+
+When the only endpoint is an IP or load-balancer address, pass it as
+`--endpoint-address '<detected address>'` to `scripts/install ports`. If no
+name was chosen, propose `--client-host oberth.test` (the user may choose their
+own DNS name). Show the returned `dns.hosts_line` verbatim for `/etc/hosts` on
+each client, or `dns.dns_record` for the DNS administrator. A hostname endpoint
+uses a CNAME record; IP endpoints print an A/AAAA record and a hosts line.
+Never edit these automatically. Wait for the user to configure the name, then
+rerun with the chosen `--client-host` and the same `--endpoint-address`.
+Continue when `dns.resolves_to_endpoint` is true. This checks name resolution
+separately from TCP: a fresh service need not listen yet. Keep DNS-only CA
+constraints and include the chosen name in the install Review.

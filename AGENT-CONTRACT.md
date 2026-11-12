@@ -3714,3 +3714,9 @@ selected install CA pin and reads SSH host identity and canonical git_path over
 mTLS. Repo-local core.sshCommand uses a per-install SSH config and pinned
 known_hosts; the global oberth Host alias never chooses a plugin push target.
 See [plugin install and repository connections](docs/plugin-install.md).
+
+IP-only client endpoints produce a DNS proposal with the exact hosts line or
+A/AAAA record. Load-balancer hostnames can be named by CNAME. The plugin waits
+for the user's naming change and re-probes the chosen name against the detected
+endpoint; no hosts file or DNS is edited automatically. TCP checks remain
+advisory and DNS-only CA constraints remain unchanged.

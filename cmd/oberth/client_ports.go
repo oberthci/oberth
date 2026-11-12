@@ -22,9 +22,10 @@ TCP success does not establish server readiness or TLS trust. Nothing is install
 var clientPortsProbeDeps = installer.DefaultClientPortProbeDeps
 
 func runClientPorts(ctx context.Context, arguments []string, output io.Writer) error {
-	var planFile string
+	var planFile, endpointAddress string
 	var cfg installer.Config
 	flags := flag.NewFlagSet("client ports", flag.ContinueOnError)
+	flags.StringVar(&endpointAddress, "endpoint-address", "", "detected node IP or load-balancer address to name and re-probe")
 	flags.StringVar(&planFile, "plan-file", "", "public JSON from install --plan --json")
 	flags.StringVar(&cfg.ClientHost, "client-host", "", "advertised host (default: plan review client_host)")
 	flags.StringVar(&cfg.ClientHTTPSPort, "client-https-port", "", "explicit host HTTPS port; overrides discovery")
@@ -55,7 +56,9 @@ func runClientPorts(ctx context.Context, arguments []string, output io.Writer) e
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	result, err := installer.ProbeClientPorts(ctx, plan, cfg, clientPortsProbeDeps())
+	deps := clientPortsProbeDeps()
+	deps.EndpointAddress = endpointAddress
+	result, err := installer.ProbeClientPorts(ctx, plan, cfg, deps)
 	if err != nil {
 		return err
 	}
