@@ -566,17 +566,24 @@ if render --set argo.ciSecrets.serviceAccount=oberth-argo-credentialed >/dev/nul
   exit 1
 fi
 
-# Legacy reused values: a release installed before admission.diskFloorBytes
-# existed has no admission key in its merged values, and --reuse-values never
-# consults the new chart's values.yaml. Nulling the block reproduces that
-# shape; the template must render without error (dig defaults to 0).
-admission_legacy_manifest=$(mktemp)
-render --set admission=null >"$admission_legacy_manifest"
-# The disk floor flag must be absent (disabled by default when the key is nil).
-if grep -Fq -- '--admission-disk-floor-bytes=' "$admission_legacy_manifest"; then
+# The native chart emits no admission arguments. An unknown null also errors.
+render >"$manifest"
+if grep -Eq -- '--admission-|--step-cpu-request-percent' "$manifest"; then
+  echo 'retired admission flags rendered' >&2
   exit 1
 fi
-rm -f "$admission_legacy_manifest"
+for removed in admission=null admission.cpuEnabled=true admission.cpuHeadroomPercent=20 admission.stepCPURequestPercent=25 \
+  admission.pressure.enabled=false admission.pressure.hardCpu=50 admission.pressure.hardIo=40 \
+  admission.pressure.deferSeconds=300 admission.diskFloorBytes=0 admission.stallTimeout=10m \
+  admission.stepStartupAllowance.enabled=false; do
+  if render --set "$removed" >"$manifest" 2>&1; then
+    echo "removed admission value accepted: $removed" >&2
+    exit 1
+  fi
+  grep -Fq 'admission' "$manifest"
+done
+
+render >"$manifest"
 
 # Run limits live in Argo: the chart renders no limits ConfigMap,
 # no runtime-capacity ConfigMap and no run-ceiling flag.
@@ -733,10 +740,9 @@ rm -f "$promotion_manifest"
 
 
 # Retention defaults keep logs by age, bound them to a 2 GiB budget and keep
-# the existing artifact budget; the disk floor holds admission at 1 GiB free.
+# the existing artifact budget; no disk-space admission policy is rendered.
 render >"$manifest"
 for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=2147483648 --run-log-limit-bytes=67108864 \
-  --admission-disk-floor-bytes=1073741824 \
   --artifacts-budget-bytes=4294967296 --artifacts-limit-bytes=268435456 \
   --retention-sweep-interval=10m --retention-keep-newest=1; do
   grep -Fq -- "$flag" "$manifest"

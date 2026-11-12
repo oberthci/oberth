@@ -74,3 +74,20 @@ for source in "$legacy_chart" "$chart"; do
     --set-string "utilityImage=$mirror" >"$work/rendered.yaml"
   grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
 done
+
+# v0.21.10 retained Workflows still refer to the pipeline PriorityClass. Keep
+# that object while deleting admission values/arguments, under real reuse shape.
+native_fixture=$work/chart-values-v0.21.10.yaml
+awk -f "$script_dir/strip-removed-chart-values.awk" "$script_dir/testdata/chart-values-v0.21.10.yaml" >"$native_fixture"
+native_chart=$work/native-upgrade
+cp -R -- "$chart" "$native_chart"
+chmod -R u+w "$native_chart"
+cp -- "$native_fixture" "$native_chart/values.yaml"
+"$helm_tool" template oberth "$native_chart" --is-upgrade --namespace oberth \
+  --set-string "image.ref=$server_image" >"$work/native-upgrade.yaml"
+grep -Fxq '  name: oberth-argo-oberth-pipeline' "$work/native-upgrade.yaml"
+grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/native-upgrade.yaml"
+if grep -Eq -- '--admission-|--step-cpu-request-percent' "$work/native-upgrade.yaml"; then
+  echo 'native upgrade kept an admission argument' >&2
+  exit 1
+fi

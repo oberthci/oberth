@@ -95,10 +95,6 @@ An explicit value exceeding the ceiling or an invalid string fails here.
 {{- fail (printf "promotion.grantMaxLifetime %q exceeds the 168h (7-day) ceiling" $grantMaxLifetime) -}}
 {{- end -}}
 {{- end -}}
-{{- $admission := .Values.admission | default dict -}}
-{{- if lt (int ($admission.diskFloorBytes | default 0)) 0 -}}
-{{- fail "admission.diskFloorBytes must be zero (disabled) or a positive byte count" -}}
-{{- end -}}
 {{- /*
 An empty argo.vault.caCert is documented to mean the store presents a publicly
 trusted certificate. For a cluster-internal name that reading is impossible,

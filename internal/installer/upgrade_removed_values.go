@@ -14,20 +14,7 @@ import (
 // it, so a stored value never fails as an opaque Helm schema error and is
 // never silently ignored.
 var removedChartValues = []string{
-	"admission.declaredResources",
-	"admission.exclusiveClasses",
-	"admission.legacyResources",
-	"admission.maxHeadWait",
-	"admission.pressure.cpuSomeAvg10",
-	"admission.pressure.cpuSomeAvg60Max",
-	"admission.pressure.hysteresis",
-	"admission.pressure.ioFullAvg60Max",
-	"admission.pressure.ioSomeAvg10",
-	"admission.pressure.maxDefer",
-	"admission.pressure.maxWaitSeconds",
-	"admission.pressure.mode",
-	"admission.runtimeCapacity",
-	"admission.sizeWeights",
+	"admission",
 	"argo.ciSecretsServiceAccount",
 	"argo.ciServiceAccount",
 	"argo.containerDiskPrefixes",

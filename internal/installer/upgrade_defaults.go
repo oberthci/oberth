@@ -26,8 +26,6 @@ import (
 //     the profile the controller runs; it is cleared so the server follows the
 //     controller (#1517). A hand-set different name stays.
 //
-// The admission disk floor (0 -> 1 GiB) is applied: it only holds new
-// admission on a nearly full volume and deletes nothing.
 
 // changedDefaultsPlan is what reconcileChangedDefaults decided.
 type changedDefaultsPlan struct {

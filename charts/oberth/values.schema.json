@@ -157,58 +157,6 @@
       "minimum": 60,
       "maximum": 3600
     },
-    "admission": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "diskFloorBytes": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Opt-in disk-space admission floor in bytes. 0 = disabled."
-        },
-        "stallTimeout": {
-          "type": "string",
-          "description": "Startup bound for an admitted workflow without a scheduled pod or progress; positive Go duration.",
-          "pattern": "^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
-        },
-        "stepStartupAllowance": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Pod start-up allowance added to declared step deadlines: clamp(declared * factorPercent / 100, minSeconds, maxSeconds). enabled false or maxSeconds 0 disables it.",
-          "properties": {
-            "enabled": {"type": "boolean"},
-            "factorPercent": {"type": "integer", "minimum": 0, "maximum": 400},
-            "minSeconds": {"type": "integer", "minimum": 0, "maximum": 3600},
-            "maxSeconds": {"type": "integer", "minimum": 0, "maximum": 3600}
-          }
-        },
-        "cpuEnabled": {"type": "boolean"},
-        "cpuHeadroomPercent": {"type": "integer", "minimum": 1, "maximum": 90},
-        "stepCPURequestPercent": {"type": "integer", "minimum": 1, "maximum": 100},
-        "pressure": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Bounded host PSI valve; missing PSI retains CPU packing.",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "deferSeconds": {"type": "integer", "minimum": 1, "maximum": 3600},
-            "hardCpu": {
-              "type": "number",
-              "default": 50,
-              "exclusiveMinimum": 10,
-              "maximum": 100
-            },
-            "hardIo": {
-              "type": "number",
-              "exclusiveMinimum": 10,
-              "maximum": 100
-            }
-          }
-        }
-      }
-    },
     "schedules": {
       "type": "object",
       "additionalProperties": false,

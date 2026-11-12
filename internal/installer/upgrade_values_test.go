@@ -186,19 +186,19 @@ func TestUpgradeRefusesRemovedChartValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := checkRemovedUpgradeValues(UpgradeConfig{UserValues: []string{file}, UserSet: []string{"argo.kubevirtCeiling.maxVMs=4"}}, stored)
-	want := "chart schema validation failed: chart values that no longer exist are set: admission.sizeWeights (stored release values), argo.kubevirtCeiling (--set argo.kubevirtCeiling.maxVMs), maxConcurrentJobs (--values " + file + "), trustedTests (stored release values); no upgrade applied. " +
-		"Delete them from any --values file and re-run the upgrade with --set admission.sizeWeights=null --set argo.kubevirtCeiling=null --set maxConcurrentJobs=null --set trustedTests=null (Helm drops a null value from the stored release values)"
+	want := "chart schema validation failed: chart values that no longer exist are set: admission (stored release values), argo.kubevirtCeiling (--set argo.kubevirtCeiling.maxVMs), maxConcurrentJobs (--values " + file + "), trustedTests (stored release values); no upgrade applied. " +
+		"Delete them from any --values file and re-run the upgrade with --set admission=null --set argo.kubevirtCeiling=null --set maxConcurrentJobs=null --set trustedTests=null (Helm drops a null value from the stored release values)"
 	var schemaErr *ErrSchemaValidation
 	if !errors.As(err, &schemaErr) || err.Error() != want {
 		t.Fatalf("refusal = %v", err)
 	}
-	cfg := UpgradeConfig{UserSet: []string{"trustedTests=null", "admission.sizeWeights=null"}}
+	cfg := UpgradeConfig{UserSet: []string{"trustedTests=null", "admission=null"}}
 	if err := checkRemovedUpgradeValues(cfg, stored); err != nil {
 		t.Fatalf("cleared values still refused: %v", err)
 	}
 	// A clear of a value that is not stored is refused: Helm would keep the
 	// null and the chart schema would refuse it after the preflight.
-	for _, set := range []string{"gitBackend=null", "vm=null", "admission.maxHeadWait=null"} {
+	for _, set := range []string{"gitBackend=null", "vm=null", "gitcache=null"} {
 		err := checkRemovedUpgradeValues(UpgradeConfig{UserSet: append([]string{set}, cfg.UserSet...)}, stored)
 		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "--set "+set+" clears a removed chart value the stored release values do not set; no upgrade applied") {
 			t.Fatalf("%s for an unstored value accepted: %v", set, err)
@@ -206,13 +206,13 @@ func TestUpgradeRefusesRemovedChartValues(t *testing.T) {
 	}
 	// Only the exact removed key set to null clears it.
 	for _, set := range []string{"trustedTests.runtime=null", "trustedTests=", "trustedTests=false"} {
-		if err := checkRemovedUpgradeValues(UpgradeConfig{UserSet: []string{set, "admission.sizeWeights=null"}}, stored); !errors.As(err, &schemaErr) {
+		if err := checkRemovedUpgradeValues(UpgradeConfig{UserSet: []string{set, "admission=null"}}, stored); !errors.As(err, &schemaErr) {
 			t.Fatalf("%s cleared a removed value: %v", set, err)
 		}
 	}
 	dropClearedRemovedValues(cfg, stored)
-	admission := stored["admission"].(map[string]any)
-	if _, kept := stored["trustedTests"]; kept || admission["sizeWeights"] != nil || admission["diskFloorBytes"] != 1 || stored["pushBannerURL"] != "" {
+	_, admissionKept := stored["admission"]
+	if _, kept := stored["trustedTests"]; kept || admissionKept || stored["pushBannerURL"] != "" {
 		t.Fatalf("drop changed other values: %+v", stored)
 	}
 	chartValues := []byte("admission:\n  diskFloorBytes: 1\n")

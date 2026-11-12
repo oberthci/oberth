@@ -1,0 +1,23 @@
+suite: native scheduling has no Oberth admission flags
+templates:
+  - templates/deployment.yaml
+set:
+  image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+tests:
+  - it: leaves admission policy out of the server arguments
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --admission-cpu-enabled=true
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --admission-pressure-enabled=true
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --admission-disk-floor-bytes=1073741824
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --admission-stall-timeout=10m
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --assist-enabled=false

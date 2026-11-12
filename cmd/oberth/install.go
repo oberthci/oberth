@@ -135,7 +135,7 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 			"(--argo-namespace, the credentialed ServiceAccount)")
 	options.argoParallelism = flags.Int("argo-parallelism", -1,
 		"Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; "+
-			"the excess waits Pending as postponed (default: keep the release's value, none on a fresh install)")
+			"the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2)")
 	options.argoNamespaceParallelism = flags.Int("argo-namespace-parallelism", -1,
 		"Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value)")
 	flags.Var(&options.argoSyncLimits, "argo-sync-limit",

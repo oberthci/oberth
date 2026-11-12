@@ -256,12 +256,12 @@ func requireRemovedValuesRefusal(t *testing.T, cfg UpgradeConfig, deps Deps, cha
 	t.Helper()
 	_, err := prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
 	var schemaErr *ErrSchemaValidation
-	want := "admission.sizeWeights (stored release values), maxConcurrentJobs (stored release values), trustedTests (stored release values); no upgrade applied. " +
-		"Delete them from any --values file and re-run the upgrade with --set admission.sizeWeights=null --set maxConcurrentJobs=null --set trustedTests=null"
+	want := "admission (stored release values), maxConcurrentJobs (stored release values), trustedTests (stored release values); no upgrade applied. " +
+		"Delete them from any --values file and re-run the upgrade with --set admission=null --set maxConcurrentJobs=null --set trustedTests=null"
 	if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), want) {
 		t.Fatalf("stored removed values not refused clearly: %v", err)
 	}
-	clears := []string{"admission.sizeWeights=null", "maxConcurrentJobs=null", "trustedTests=null"}
+	clears := []string{"admission=null", "maxConcurrentJobs=null", "trustedTests=null"}
 	chartValues, err := os.ReadFile(filepath.Join(chart, "values.yaml"))
 	if err != nil {
 		t.Fatal(err)

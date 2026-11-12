@@ -218,32 +218,6 @@ spec:
             - --artifacts-budget-bytes={{ $artifactBudget }}
             - {{ printf "--retention-sweep-interval=%s" ($retention.interval | default "10m") | quote }}
             - --retention-keep-newest={{ $keepNewest }}
-            {{- $admission := .Values.admission | default dict -}}
-            {{- /* Helm roundtrips numeric values through float64; integer flags need decimal output. */}}
-            {{- $diskFloorBytes := int64 ($admission.diskFloorBytes | default 0) }}
-            {{- if gt $diskFloorBytes 0 }}
-            - --admission-disk-floor-bytes={{ $diskFloorBytes }}
-            {{- end }}
-            - {{ printf "--admission-stall-timeout=%s" ($admission.stallTimeout | default "10m") | quote }}
-            {{- /* hasKey, not default/merge: zero is a meaningful allowance value. */}}
-            {{- $allowance := $admission.stepStartupAllowance | default dict }}
-            {{- $allowanceEnabled := true }}
-            {{- if hasKey $allowance "enabled" }}{{- $allowanceEnabled = $allowance.enabled }}{{- end }}
-            {{- $allowancePercent := int64 50 }}
-            {{- if hasKey $allowance "factorPercent" }}{{- $allowancePercent = int64 $allowance.factorPercent }}{{- end }}
-            {{- $allowanceMin := int64 120 }}
-            {{- if hasKey $allowance "minSeconds" }}{{- $allowanceMin = int64 $allowance.minSeconds }}{{- end }}
-            {{- $allowanceMax := int64 600 }}
-            {{- if hasKey $allowance "maxSeconds" }}{{- $allowanceMax = int64 $allowance.maxSeconds }}{{- end }}
-            {{- if not $allowanceEnabled }}
-            {{- $allowancePercent = 0 }}{{- $allowanceMin = 0 }}{{- $allowanceMax = 0 }}
-            {{- end }}
-            {{- if gt $allowanceMin $allowanceMax }}
-            {{- fail "admission.stepStartupAllowance.minSeconds must not exceed maxSeconds" }}
-            {{- end }}
-            - --admission-step-startup-allowance-percent={{ $allowancePercent }}
-            - --admission-step-startup-allowance-min-seconds={{ $allowanceMin }}
-            - --admission-step-startup-allowance-max-seconds={{ $allowanceMax }}
             {{- /* Agent-assisted continuation: every knob is a flag with the binary default, so --reuse-values upgrades keep behaviour. */}}
             {{- $assist := .Values.assist | default dict }}
             {{- $assistEnabled := false }}
@@ -288,19 +262,6 @@ spec:
             {{- if hasKey $schedules "maxEntries" }}{{- $scheduleMaxEntries = int $schedules.maxEntries }}{{- end }}
             - {{ printf "--schedule-min-interval=%s" ($schedules.minInterval | default "15m") | quote }}
             - --schedule-max-entries={{ $scheduleMaxEntries }}
-            {{- $pressure := $admission.pressure | default dict }}
-            {{- $pressureEnabled := true }}
-            {{- if hasKey $pressure "enabled" }}{{- $pressureEnabled = $pressure.enabled }}{{- end }}
-            {{- $hostPressure := merge (deepCopy $pressure) (dict "hardCpu" 50 "hardIo" 40 "deferSeconds" 300) }}
-            {{- $cpuEnabled := true }}
-            {{- if hasKey $admission "cpuEnabled" }}{{- $cpuEnabled = $admission.cpuEnabled }}{{- end }}
-            - {{ printf "--admission-cpu-enabled=%v" $cpuEnabled | quote }}
-            - {{ printf "--admission-cpu-headroom-percent=%v" ($admission.cpuHeadroomPercent | default 20) | quote }}
-            - {{ printf "--step-cpu-request-percent=%v" ($admission.stepCPURequestPercent | default 25) | quote }}
-            - {{ printf "--admission-pressure-defer-seconds=%v" $hostPressure.deferSeconds | quote }}
-            - {{ printf "--admission-pressure-enabled=%v" $pressureEnabled | quote }}
-            - {{ printf "--admission-pressure-hard-cpu=%v" $hostPressure.hardCpu | quote }}
-            - {{ printf "--admission-pressure-hard-io=%v" $hostPressure.hardIo | quote }}
             - --ci-cache-root={{ .Values.cache.ciRoot }}
             - --release-cache-root={{ .Values.cache.releaseRoot }}
             {{- if .Values.pushBannerURL }}
