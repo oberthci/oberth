@@ -24,10 +24,10 @@ func TestSchedulingMessagesUsePlainWords(t *testing.T) {
 			{State: "waiting"},
 			{State: "waiting"},
 			{State: "waiting"},
-			{State: "waiting", DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 512 << 20}},
+			{State: "waiting"},
 			{State: "waiting"},
 			{State: "waiting", BlockedBy: &model.AdmissionBlocker{Repo: "org/repo", Ref: "main"}},
-			{State: "waiting", HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{DiskFloor: true}},
+			{State: "waiting", HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{}},
 		} {
 			control := &API{admission: schedulingLanguageObserver{observation}}
 			if scoped {
@@ -52,7 +52,7 @@ func TestSchedulingMessagesUsePlainWords(t *testing.T) {
 	// Detailed helper text may still be used outside a queued row.
 	for _, observation := range []*model.AdmissionObservation{
 		{},
-		{DiskFloor: &model.DiskFloorObservation{BelowFloor: true}},
+		{},
 		{HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{}},
 	} {
 		assertPlainScheduling(t, waitingAdmissionMessage(observation))

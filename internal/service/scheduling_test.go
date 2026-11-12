@@ -32,7 +32,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	blockOnDiskFloor(gate)
+	blockForLifecycleTest(gate)
 	second := gate.reserve(2)
 	if result := scheduler.AdmissionSnapshot(2); result.State != "preparing" || result.Position != 1 {
 		t.Fatalf("preparing=%#v", result)
@@ -47,7 +47,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 		t.Fatalf("admitted=%#v", result)
 	}
 	release()
-	clearDiskFloor(gate)
+	unblockLifecycleTest(gate)
 	releaseSecond := awaitAcquired(t, acquired)
 	releaseSecond()
 	if scheduler.AdmissionSnapshot(1) != nil || scheduler.AdmissionSnapshot(2) != nil {
@@ -69,7 +69,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer releaseFirst()
-	blockOnDiskFloor(gate)
+	blockForLifecycleTest(gate)
 	second := gate.reserve(2)
 	acquired := make(chan func(), 1)
 	go acquireForTest(second, pipeline.M, acquired)
@@ -86,7 +86,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 		t.Fatalf("capacity wait was not visible: %#v", observation)
 	}
 	releaseFirst()
-	clearDiskFloor(gate)
+	unblockLifecycleTest(gate)
 	releaseSecond := awaitAcquired(t, acquired)
 	defer releaseSecond()
 	observation, _ = service.observeScheduling(t.Context(), run, nil, true)

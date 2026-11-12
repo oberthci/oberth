@@ -27,8 +27,6 @@ type RetentionStatus struct {
 	LogsBytes      int64 `json:"logs_bytes"`
 	ArtifactsBytes int64 `json:"artifacts_bytes"`
 	FreeBytes      int64 `json:"free_bytes"`
-	DiskFloorBytes int64 `json:"disk_floor_bytes"`
-	BelowFloor     bool  `json:"below_floor"`
 	// DatabaseBytes is the live database plus its write-ahead log, measured
 	// at the last sweep; backups refuse a snapshot above their size ceiling.
 	DatabaseBytes int64 `json:"database_bytes"`
@@ -49,7 +47,6 @@ type Retention struct {
 	ArtifactPolicy RetentionPolicy
 	KeepNewest     int
 	DataRoot       string
-	DiskFloorBytes int64
 	MutationGate   func(context.Context) error
 	AcquirePurge   func(string) (func(), error)
 	Now            func() time.Time
@@ -163,9 +160,7 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 		if resultErr != nil {
 			status.LastError = resultErr.Error()
 		}
-		status.DiskFloorBytes = r.DiskFloorBytes
 		status.FreeBytes = statfsFreeBytes(r.DataRoot)
-		status.BelowFloor = status.DiskFloorBytes > 0 && status.FreeBytes < status.DiskFloorBytes
 		status.DatabaseBytes = r.Database.DatabaseBytes()
 		r.statusMu.Lock()
 		r.status = status

@@ -26,8 +26,8 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 // diskValve holds grants for lifecycle tests.
 func (fixture *groupFixture) diskValve(t *testing.T) func() {
 	t.Helper()
-	blockOnDiskFloor(fixture.scheduler.admission)
-	return func() { clearDiskFloor(fixture.scheduler.admission); fixture.scheduler.signalQueue() }
+	blockForLifecycleTest(fixture.scheduler.admission)
+	return func() { unblockLifecycleTest(fixture.scheduler.admission); fixture.scheduler.signalQueue() }
 }
 
 // A waiting run that a newer push supersedes must withdraw its reservation

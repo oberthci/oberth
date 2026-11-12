@@ -30,10 +30,6 @@ type admissionGate struct {
 	// onGrant, when set, is called under the lock (it must not block) after
 	// a grant, so the dispatch loop can claim the slot the grant may leave.
 	onGrant func()
-	// diskFloor is an opt-in disk-space admission hold (#673). When non-nil
-	// and below the configured floor, no new runs are admitted until disk
-	// frees up.
-	diskFloor *diskFloorCheck
 }
 
 type admissionReservation struct {
@@ -312,9 +308,6 @@ func (gate *admissionGate) grantLocked() {
 			continue
 		}
 		if !gate.canGrantLocked(reservation) {
-			if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
-				return
-			}
 			index++
 			continue
 		}
@@ -337,11 +330,8 @@ func (gate *admissionGate) canGrantLocked(reservation *admissionReservation) boo
 	if gate.adminHeldLocked(reservation) {
 		return false
 	}
-	// Disk floor hold (#673): when enabled and the filesystem is below the
-	// configured floor, hold all new admissions until disk frees up. The
-	// check uses a cached statfs result (sub-microsecond syscall, 5 s TTL)
-	// so calling it under the lock is safe.
-	return (gate.diskFloor == nil || gate.diskFloor.freeAboveFloor())
+	return true
+
 }
 
 func (gate *admissionGate) releaseLocked(reservation *admissionReservation) {
@@ -401,9 +391,6 @@ func (gate *admissionGate) blockerLocked(reservation *admissionReservation) *mod
 		Used:         gate.runs,
 		WaitingSince: reservation.preparedAt,
 	}
-	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
-		blocker.DiskFloor = true
-	}
 	return blocker
 }
 
@@ -451,9 +438,6 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		} else if head != nil && admissionBefore(head, reservation) {
 			result.BlockedBy = gate.blockerLocked(head)
 		}
-	}
-	if gate.diskFloor != nil {
-		result.DiskFloor = gate.diskFloor.observation()
 	}
 	return result
 }

@@ -54,9 +54,6 @@ func waitingReason(a *model.AdmissionObservation) (reason string) {
 			return reason
 		}
 	}
-	if a.DiskFloor != nil && a.DiskFloor.BelowFloor {
-		return fmt.Sprintf("waiting for disk space (%s free)", bytesText(a.DiskFloor.FreeBytes))
-	}
 	if a.HeadOfQueue {
 		return "next in line"
 	}

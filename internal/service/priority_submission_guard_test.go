@@ -41,7 +41,7 @@ func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	blockOnDiskFloor(g)
+	blockForLifecycleTest(g)
 	head := priorityWaiter(g, 2, model.PriorityHigh, time.Now(), pipeline.L)
 	small := priorityWaiter(g, 3, model.PriorityHigh, time.Now(), pipeline.M)
 	if granted(g, small) || granted(g, head) {
@@ -53,7 +53,7 @@ func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
 	if first != head {
 		t.Fatal("a later run overtook the priority head")
 	}
-	clearDiskFloor(g)
+	unblockLifecycleTest(g)
 	if !granted(g, head) || !granted(g, small) {
 		t.Fatal("waiters not admitted after the floor cleared")
 	}

@@ -104,7 +104,6 @@ type serveOptions struct {
 	retentionInterval       time.Duration
 	retentionKeepNewest     int
 	autoRetryBudget         int
-	admissionDiskFloorBytes int64
 	admissionStallTimeout   time.Duration
 	stepStartupAllowance    argojob.StepStartupAllowance
 	serializeReleases       bool
@@ -262,7 +261,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.agentEventStreams, "agent-events-max-streams-per-token", 4, "open MCP push streams (GET /mcp) allowed per bearer credential (1-64)")
 	flags.IntVar(&options.agentEventBacklog, "agent-events-max-backlog", 500, "agent events replayed to one MCP push stream on connect; older ones are left to events_since (1-10000)")
 	flags.DurationVar(&options.mcpHeartbeat, "agent-events-heartbeat", 20*time.Second, "keepalive interval of MCP streams (1s-5m)")
-	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
 	flags.StringVar(&options.secretStoreAddress, "secretstore-address", "", "OpenBao API base URL for store-sourced release secrets (HTTPS)")
@@ -822,7 +820,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Database: database, Logs: logs, Artifacts: artifactStore,
 		LogPolicy:      service.RetentionPolicy{Age: options.logRetention, BudgetBytes: options.logsBudgetBytes},
 		ArtifactPolicy: service.RetentionPolicy{Age: options.artifactRetention, BudgetBytes: options.artifactsBudgetBytes},
-		KeepNewest:     options.retentionKeepNewest, DataRoot: options.dataRoot, DiskFloorBytes: options.admissionDiskFloorBytes,
+		KeepNewest:     options.retentionKeepNewest, DataRoot: options.dataRoot,
 		MutationGate: anchors.AllowMutation,
 	}
 	perRepoIdentities, err := buildPerRepoIdentities(ctx, database)
@@ -876,11 +874,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		DisableInfrastructureAutoRetry: options.autoRetryBudget == 0, InfrastructureAutoRetryBudget: options.autoRetryBudget,
-		MaxRunLogBytes:          options.runLogLimitBytes,
-		MutationGate:            anchors.AllowMutation,
-		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
-		StalledRunTimeout:       options.admissionStallTimeout,
-		RestoredRunsFile:        filepath.Join(options.dataRoot, service.RestoredRunsFile),
+		MaxRunLogBytes:    options.runLogLimitBytes,
+		MutationGate:      anchors.AllowMutation,
+		StalledRunTimeout: options.admissionStallTimeout,
+		RestoredRunsFile:  filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})
 	if err != nil {
 		return err

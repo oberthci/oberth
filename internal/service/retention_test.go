@@ -785,11 +785,10 @@ func TestRetentionCallerCancellationIsNotRetried(t *testing.T) {
 // The historical floor remains observable even when evidence policies are
 // disabled. The sweeper reports the floor; admission enforces the hold without
 // turning it into an evidence-purge target.
-func TestRetentionReportsDiskFloorWithEvidencePoliciesDisabled(t *testing.T) {
+func TestRetentionReportsFreeSpaceWithEvidencePoliciesDisabled(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/floor", "push", true)
 	const floor int64 = 1 << 62
-	f.retention.DiskFloorBytes = floor
 	if err := f.retention.Sweep(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -798,7 +797,7 @@ func TestRetentionReportsDiskFloorWithEvidencePoliciesDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := value.(RetentionStatus)
-	if status.DiskFloorBytes != floor || status.FreeBytes <= 0 || status.FreeBytes >= floor || !status.BelowFloor || status.LastSweep.IsZero() || status.LastError != "" {
+	if status.FreeBytes <= 0 || status.LastSweep.IsZero() || status.LastError != "" {
 		t.Fatalf("disk floor observation lost: %+v", status)
 	}
 	f.retained(t, run.ID, true)

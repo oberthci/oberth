@@ -735,8 +735,7 @@ func TestEveryToolIsClassifiedForScopedUplinks(t *testing.T) {
 type busyAdmission struct{}
 
 func (busyAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "waiting", Position: 3, Used: 7,
-		DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 1, FloorBytes: 2}}
+	return &model.AdmissionObservation{State: "waiting", Position: 3, Used: 7}
 }
 
 // A scoped actor's waiting run says only that capacity is short: the queue
@@ -747,7 +746,7 @@ func TestScopedSchedulingHidesInstallationLoad(t *testing.T) {
 	unscoped := &API{admission: busyAdmission{}}
 	run := model.Run{ID: "run", Status: model.RunRunning, QueueSequence: 5}
 	got, _ := scoped.observeScheduling(context.Background(), run, nil, true)
-	if got.Admission.Position != 0 || got.Admission.Used != 0 || got.Admission.DiskFloor != nil ||
+	if got.Admission.Position != 0 || got.Admission.Used != 0 ||
 		got.Message != "In line." {
 		t.Fatalf("scoped scheduling = %#v %#v", got, got.Admission)
 	}

@@ -65,7 +65,7 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer release()
-			blockOnDiskFloor(gate)
+			blockForLifecycleTest(gate)
 			var runs []model.Run
 			for _, ref := range []string{"head", "next"} {
 				queued, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
@@ -104,7 +104,7 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 			if first != waiting[1] {
 				t.Fatal("lowered head still leads ordinary work")
 			}
-			clearDiskFloor(gate)
+			unblockLifecycleTest(gate)
 			if !granted(gate, waiting[1]) || !granted(gate, waiting[0]) {
 				t.Fatal("lowered run lost its reservation")
 			}

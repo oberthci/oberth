@@ -36,7 +36,6 @@ func (health Health) WriteStatusMetrics(ctx context.Context, w io.Writer) {
 			var storage struct {
 				DatabaseBytes *int64 `json:"database_bytes"`
 				FreeBytes     *int64 `json:"free_bytes"`
-				BelowFloor    *bool  `json:"below_floor"`
 			}
 			if body, err := json.Marshal(raw); err == nil && json.Unmarshal(body, &storage) == nil {
 				if storage.DatabaseBytes != nil && *storage.DatabaseBytes > 0 {
@@ -44,9 +43,6 @@ func (health Health) WriteStatusMetrics(ctx context.Context, w io.Writer) {
 				}
 				if storage.FreeBytes != nil {
 					gauge("oberth_data_free_bytes", "free bytes on the data volume at the last retention sweep", float64(*storage.FreeBytes))
-				}
-				if storage.BelowFloor != nil {
-					gauge("oberth_data_below_disk_floor", "1 while free space is below the admission disk floor", flag(*storage.BelowFloor))
 				}
 			}
 		}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -59,19 +60,19 @@ func awaitWaiting(t *testing.T, reservation *admissionReservation) {
 	}
 }
 
-// blockOnDiskFloor holds every new grant on the disk floor, the admission
+// blockForLifecycleTest holds every new grant on the disk floor, the admission
 // guard tests use to keep a run waiting now that Oberth has no run ceiling.
-func blockOnDiskFloor(gate *admissionGate) {
+func blockForLifecycleTest(gate *admissionGate) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
-	gate.diskFloor = &diskFloorCheck{floorBytes: 100, cachedFree: 0, cacheTime: time.Now(), cacheTTL: time.Hour}
+	gate.adminHold = model.AdmissionHold{On: true, ExpiresAt: time.Now().Add(time.Hour), Allow: []string{}}
 }
 
-// clearDiskFloor lifts blockOnDiskFloor and runs a grant pass.
-func clearDiskFloor(gate *admissionGate) {
+// unblockLifecycleTest lifts blockForLifecycleTest and runs a grant pass.
+func unblockLifecycleTest(gate *admissionGate) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
-	gate.diskFloor = nil
+	gate.adminHold = model.AdmissionHold{}
 	gate.grantLocked()
 }
 

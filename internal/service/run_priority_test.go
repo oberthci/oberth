@@ -36,7 +36,7 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blockOnDiskFloor(g)
+	blockForLifecycleTest(g)
 	now := time.Now()
 	normal := priorityWaiter(g, 2, model.PriorityStandard, now, pipeline.XL)
 	high := priorityWaiter(g, 3, model.PriorityPromotion, now, pipeline.XL)
@@ -44,7 +44,7 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	highest2 := priorityWaiter(g, 5, model.PriorityHigh, now, pipeline.XL)
 	release()
 	assertWaiterOrder(t, g, highest, highest2, high, normal)
-	clearDiskFloor(g)
+	unblockLifecycleTest(g)
 	for _, r := range []*admissionReservation{highest, highest2, high, normal} {
 		if !granted(g, r) {
 			t.Fatal("waiter not admitted after the floor cleared")
@@ -63,14 +63,14 @@ func TestPriorityAdmissionStarvationReordersExistingWaiters(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	blockOnDiskFloor(g)
+	blockForLifecycleTest(g)
 	normal := priorityWaiter(g, 2, model.PriorityStandard, clock.now.Add(-time.Hour+time.Nanosecond), pipeline.XL)
 	highest := priorityWaiter(g, 3, model.PriorityHigh, clock.now, pipeline.XL)
 	assertWaiterOrder(t, g, highest, normal)
 	clock.now = clock.now.Add(time.Nanosecond)
 	// Aging lifts normal, but never above base highest.
 	assertWaiterOrder(t, g, highest, normal)
-	clearDiskFloor(g)
+	unblockLifecycleTest(g)
 	if !granted(g, highest) || !granted(g, normal) {
 		t.Fatal("waiters not admitted after the floor cleared")
 	}
@@ -141,7 +141,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	}
 	defer release()
 	// The disk floor keeps the claimed runs waiting.
-	blockOnDiskFloor(g)
+	blockForLifecycleTest(g)
 	enqueue := func(ref string, kind model.RefKind) model.Run {
 		t.Helper()
 		trigger := "push"
@@ -189,7 +189,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	g.mu.Unlock()
 	release()
 	assertWaiterOrder(t, g, tagReservation, g.reservations[second.QueueSequence])
-	clearDiskFloor(g)
+	unblockLifecycleTest(g)
 	if !granted(g, tagReservation) || !granted(g, g.reservations[second.QueueSequence]) {
 		t.Fatal("waiters not admitted after the floor cleared")
 	}
@@ -208,14 +208,14 @@ func TestPriorityAdmissionAgesHighBeforeNewerNormal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blockOnDiskFloor(g)
+	blockForLifecycleTest(g)
 	high := priorityWaiter(g, 2, model.PriorityHigh, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Minute)
 	normal := priorityWaiter(g, 3, model.PriorityStandard, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Hour)
 	release()
 	assertWaiterOrder(t, g, high, normal)
-	clearDiskFloor(g)
+	unblockLifecycleTest(g)
 	if !granted(g, high) || !granted(g, normal) {
 		t.Fatal("waiters not admitted after the floor cleared")
 	}

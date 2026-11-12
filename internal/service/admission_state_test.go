@@ -63,7 +63,7 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	acquireRequestWithinBudget(t, held, admissionRequest{RunID: stale.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/stale"})
 	held.retain()
 
-	blockOnDiskFloor(gate)
+	blockForLifecycleTest(gate)
 	waiter := gate.reserve(stale.QueueSequence + 1)
 	waiterReady := make(chan func(), 1)
 	go acquireRequestForTest(waiter, admissionRequest{RunID: "waiting-run", RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/next"}, waiterReady)
@@ -100,7 +100,7 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	if err != nil || !released.Verified || released.State != "retained" {
 		t.Fatalf("release = %#v, %v", released, err)
 	}
-	clearDiskFloor(gate)
+	unblockLifecycleTest(gate)
 	awaitAcquired(t, waiterReady)()
 	if len(auditor.actions) != 1 || auditor.actions[0].Action != "admission.release" || auditor.actions[0].ResourceID != stale.ID ||
 		!strings.Contains(auditor.actions[0].Details, `"verified":true`) {

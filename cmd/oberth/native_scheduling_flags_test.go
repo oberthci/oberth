@@ -8,7 +8,7 @@ import (
 
 func TestRemovedSchedulingFlagsAreErrors(t *testing.T) {
 	for _, flag := range []string{
-		"admission-cpu-enabled=true", "admission-cpu-headroom-percent=20", "step-cpu-request-percent=25",
+		"admission-disk-floor-bytes=1", "admission-cpu-enabled=true", "admission-cpu-headroom-percent=20", "step-cpu-request-percent=25",
 		"admission-pressure-enabled=false", "admission-pressure-hard-cpu=50", "admission-pressure-hard-io=40", "admission-pressure-defer-seconds=300",
 	} {
 		t.Run(flag, func(t *testing.T) {

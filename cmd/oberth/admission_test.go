@@ -20,7 +20,7 @@ func TestRenderAdmissionShowsRetainedReservations(t *testing.T) {
 			{RunID: "aaaa", State: "retained", Repo: "exampleorg-ebpf", Ref: "main", Since: now.Add(-90 * time.Second)},
 			{RunID: "bbbb", State: "waiting", Repo: "cli", Ref: "feature/x"},
 		},
-		Blocker: &model.AdmissionBlocker{Repo: "cli", Ref: "feature/x", DiskFloor: true, Used: 2},
+		Blocker: &model.AdmissionBlocker{Repo: "cli", Ref: "feature/x", Used: 2},
 	}, now)
 	if err != nil {
 		t.Fatal(err)

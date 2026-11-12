@@ -133,7 +133,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			// run, in or out of a scoped actor's scope; a full pool of
 			// invisible work must not show (#073).
 			admission := *result.Admission
-			admission.Position, admission.Used, admission.Runs, admission.DiskFloor = 0, 0, 0, nil
+			admission.Position, admission.Used, admission.Runs = 0, 0, 0
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
 			} else {
@@ -196,10 +196,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 // waitingAdmissionMessage names why a prepared run is not granted yet.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 	switch {
-	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
-		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+
-			"Runs wait until free bytes exceed the configured floor.",
-			admission.DiskFloor.FreeBytes, admission.DiskFloor.FloorBytes)
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
 		return fmt.Sprintf("At the head of the run queue (%s); every later run waits behind it.",
 			admission.BlockedBy.Reason())

@@ -51,7 +51,7 @@ func TestAdmissionHasNoRunCeiling(t *testing.T) {
 // that is still preparing.
 func TestAdmissionIsFIFO(t *testing.T) {
 	gate := newAdmissionGate()
-	blockOnDiskFloor(gate)
+	blockForLifecycleTest(gate)
 	xl := gate.reserve(2)
 	small := gate.reserve(3)
 	xlAcquired := make(chan func(), 1)
@@ -66,7 +66,7 @@ func TestAdmissionIsFIFO(t *testing.T) {
 	if order[0] != xl || order[1] != small {
 		t.Fatal("waiters lost claim order")
 	}
-	clearDiskFloor(gate)
+	unblockLifecycleTest(gate)
 	awaitAcquired(t, xlAcquired)()
 	awaitAcquired(t, smallAcquired)()
 }
@@ -128,7 +128,7 @@ func TestAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blockOnDiskFloor(gate)
+	blockForLifecycleTest(gate)
 	head := gate.reserve(2)
 	headErr := make(chan error, 1)
 	go func() {
@@ -159,7 +159,7 @@ func TestAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
 		t.Fatal("abandoned waiter never woke")
 	}
 	releaseHolder()
-	clearDiskFloor(gate)
+	unblockLifecycleTest(gate)
 	releaseBehind := awaitAcquired(t, acquired)
 	if gate.abandon(2) {
 		t.Fatal("an abandoned reservation was abandoned twice")

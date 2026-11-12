@@ -30,9 +30,6 @@ type AdmissionObservation struct {
 	Used     int    `json:"used"`
 	// Runs repeats Used. Zero for a scoped viewer, like Used.
 	Runs int `json:"runs,omitempty"`
-	// DiskFloor reports the opt-in disk-space admission hold (#673). When
-	// non-nil and BelowFloor is true, admission is held until disk frees up.
-	DiskFloor *DiskFloorObservation `json:"disk_floor,omitempty"`
 	// BlockedBy names the run at the head of the admission queue that every
 	// later run waits behind (#1021): the first claimed run the disk floor or
 	// host pressure holds back. HeadOfQueue marks the run that is itself
@@ -49,8 +46,6 @@ type AdmissionBlocker struct {
 	RepoID int64  `json:"-"`
 	Repo   string `json:"repo"`
 	Ref    string `json:"ref"`
-	// DiskFloor names why the head waits: the data disk is below its floor.
-	DiskFloor bool `json:"disk_floor,omitempty"`
 	// Used is how many runs hold a grant. Zero for a scoped viewer.
 	Used         int       `json:"used"`
 	WaitingSince time.Time `json:"waiting_since"`
@@ -60,19 +55,9 @@ type AdmissionBlocker struct {
 // "waiting for a run slot".
 func (blocker AdmissionBlocker) Reason() string {
 	switch {
-	case blocker.DiskFloor:
-		return "waiting for disk space"
 
 	}
 	return "waiting for a run slot"
-}
-
-// DiskFloorObservation is the scheduling-visible state of the disk floor
-// admission hold (#673).
-type DiskFloorObservation struct {
-	FloorBytes int64 `json:"floor_bytes"`
-	FreeBytes  int64 `json:"free_bytes"`
-	BelowFloor bool  `json:"below_floor"`
 }
 
 // ExecutionDeadlineMessage is a fixed presentation label, never raw controller text.

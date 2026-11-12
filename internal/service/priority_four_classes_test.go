@@ -17,7 +17,7 @@ func TestFourClassesUrgencyPassesPromotionsWithoutPreemptingRunningWork(t *testi
 		t.Fatal(err)
 	}
 	defer release()
-	blockOnDiskFloor(g)
+	blockForLifecycleTest(g)
 	var low, standard, promotion, high []*admissionReservation
 	for i, name := range []model.RunPriority{"low", "standard", "promotion", "high", "low", "standard", "promotion", "high"} {
 		r := priorityWaiter(g, int64(i+2), name, time.Now(), pipeline.XL)
@@ -44,7 +44,7 @@ func TestFourClassesUrgencyPassesPromotionsWithoutPreemptingRunningWork(t *testi
 		}
 	}
 	g.mu.Unlock()
-	clearDiskFloor(g)
+	unblockLifecycleTest(g)
 	for _, r := range want {
 		if !granted(g, r) {
 			t.Fatalf("waiter %s not admitted after the floor cleared", r.priority)

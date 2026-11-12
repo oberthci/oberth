@@ -55,8 +55,6 @@ type SchedulerConfig struct {
 	MutationGate    func(context.Context) error
 	// StalledRunTimeout bounds granted runs before submission. Zero is ten minutes.
 	StalledRunTimeout time.Duration
-	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root.
-	AdmissionDiskFloorBytes int64
 	// RestoredRunsFile is oberth restore's marker (RestoredRunsFile in the
 	// data root); empty disables it.
 	RestoredRunsFile string
@@ -186,9 +184,6 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
-	if config.AdmissionDiskFloorBytes > 0 {
-		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
-	}
 	scheduler.admission.onPark = scheduler.signalQueue
 	scheduler.admission.onGrant = scheduler.signalQueue
 	if state, ok := config.Store.(admissionHoldStore); ok {
