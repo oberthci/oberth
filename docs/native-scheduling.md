@@ -117,13 +117,20 @@ terminal state and potentially through publication/cleanup. Nothing in Oberth
 limits their number. Promotion workspaces can retain an additional server
 checkout. Pinned-source exports add server data through submission.
 Git-cache locks remain solely for correctness.
+The ordinary seed Pod does not inherit the Workflow's nodeSelector, affinity
+or tolerations. It mounts and binds a ReadWriteOnce PVC on whichever node
+schedules it. On a multi-node cluster that source volume ties the run's later
+Pods to the seed's node/storage topology; authored placement excluding that
+node stays Pending. This additional placement effect is part of the source
+delivery deviation, not a native placement guarantee. The separate authenticated
+execution target keeps its existing seed placement unchanged.
 
 With N active runs and Argo parallelism P, all N prepare and submit; P bounds
 neither server copies nor PVCs nor the source-seed Pods. Up to N seed Pods and N
 volumes can be created concurrently. Seed Pods run before their Workflow exists
 and outside Argo parallelism. A seed Pod that cannot start within the existing
-three-minute source-delivery wait fails preparation, without creating the
-Workflow. There is no automatic infrastructure retry. A manual retry attempts source
+source preparation waits while a seed Pod is Pending, without creating the
+Workflow. Cancellation or supersession stops it and cleans its Pod and PVC. There is no automatic infrastructure retry. A manual retry attempts source
 delivery again; YAML retryStrategy cannot cover a failure before Workflow Create.
 Custody-bound execution targets retain their uncertainty/cleanup proof before
 retrying. Cancellation, supersession and publication can affect retention.
