@@ -52,6 +52,13 @@ type Policy struct {
 // are exactly the parts a pipeline needs. Every rejection below names a
 // concrete way to reach a credential, a host, or another tenant's identity.
 func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
+	if err := pipeline.ValidateRunnerImagePrefixes(policy.RunnerImagePrefixes); err != nil {
+		return fmt.Errorf("argoworkflow: %w", err)
+	}
+	if err := policy.Capability.Validate(); err != nil {
+		return err
+	}
+
 	defer func() {
 		if resultErr != nil {
 			resultErr = &AdmissionError{Cause: resultErr}
@@ -59,12 +66,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	}()
 	if workflow == nil {
 		return errors.New("argoworkflow: no Workflow to admit")
-	}
-	if err := pipeline.ValidateRunnerImagePrefixes(policy.RunnerImagePrefixes); err != nil {
-		return fmt.Errorf("argoworkflow: %w", err)
-	}
-	if err := policy.Capability.Validate(); err != nil {
-		return err
 	}
 	if err := RefuseRetiredWorkflow(workflow); err != nil {
 		return err

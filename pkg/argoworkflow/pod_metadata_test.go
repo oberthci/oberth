@@ -1,6 +1,7 @@
 package argoworkflow
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -74,5 +75,14 @@ func TestAuthorPodAnnotationBehaviorSwitchesRefused(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestInvalidOperatorPolicyIsNotADocumentRefusal(t *testing.T) {
+	wf := decodeAdmissible(t, nil)
+	err := Admit(wf, Policy{RunnerImagePrefixes: []string{"INVALID PREFIX"}})
+	var refusal *AdmissionError
+	if err == nil || errors.As(err, &refusal) {
+		t.Fatal("operator policy blamed on document", err)
 	}
 }

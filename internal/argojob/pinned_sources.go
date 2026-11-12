@@ -23,7 +23,7 @@ type PinnedSourceTree struct {
 func validatePinnedSourceDelivery(workflow *wfv1.Workflow, request Request) error {
 	declared, err := argoworkflow.PinnedSources(workflow)
 	if err != nil {
-		return err
+		return &argoworkflow.AdmissionError{Cause: err}
 	}
 	actual := make([]pipeline.PinnedSource, 0, len(request.PinnedSources))
 	for _, tree := range request.PinnedSources {
@@ -48,7 +48,7 @@ func validatePinnedSourceDelivery(workflow *wfv1.Workflow, request Request) erro
 				}
 			}, 0)
 			if conflict {
-				return errors.New("argojob: template defaults shadow a pinned source path")
+				return &argoworkflow.AdmissionError{Cause: errors.New("argojob: template defaults shadow a pinned source path")}
 			}
 		}
 	}
@@ -63,7 +63,7 @@ func validatePinnedSourceDelivery(workflow *wfv1.Workflow, request Request) erro
 			}
 		}, 0)
 		if conflict {
-			return fmt.Errorf("argojob: template %s shadows a pinned source path", template.Name)
+			return &argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: template %s shadows a pinned source path", template.Name)}
 		}
 	}
 	return nil

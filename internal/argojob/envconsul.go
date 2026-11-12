@@ -65,17 +65,17 @@ func admitEnvconsulSecretPaths(workflow *wfv1.Workflow, declaredPaths []string, 
 			return
 		}
 		if len(declaredPaths) == 0 {
-			problems = append(problems, fmt.Errorf(
+			problems = append(problems, &argoworkflow.AdmissionError{Cause: fmt.Errorf(
 				"argojob: template %q invokes envconsul with credential configuration "+
 					"but the workflow declares no %s annotation",
-				template.Name, argoworkflow.SecretPathsAnnotation))
+				template.Name, argoworkflow.SecretPathsAnnotation)})
 			return
 		}
 		for _, secret := range secrets {
 			if _, ok := allowed[secret]; !ok {
-				problems = append(problems, fmt.Errorf(
+				problems = append(problems, &argoworkflow.AdmissionError{Cause: fmt.Errorf(
 					"argojob: template %q passes -secret %q, which is not covered by the workflow's %s annotation",
-					template.Name, secret, argoworkflow.SecretPathsAnnotation))
+					template.Name, secret, argoworkflow.SecretPathsAnnotation)})
 			}
 		}
 		for _, config := range configs {
@@ -94,7 +94,7 @@ func admitEnvconsulSecretPaths(workflow *wfv1.Workflow, declaredPaths []string, 
 func admitEnvconsulConfigFile(templateName, configArg string, allowed map[string]string, sourceDir string) []error {
 	relative, err := sourceRelativePath(configArg)
 	if err != nil {
-		return []error{fmt.Errorf("argojob: template %q -config %q: %w", templateName, configArg, err)}
+		return []error{&argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: template %q -config %q: %w", templateName, configArg, err)}}
 	}
 	if strings.TrimSpace(sourceDir) == "" {
 		return []error{fmt.Errorf(
@@ -107,15 +107,15 @@ func admitEnvconsulConfigFile(templateName, configArg string, allowed map[string
 	}
 	fetched, err := envconsulSecretPaths(content)
 	if err != nil {
-		return []error{fmt.Errorf("argojob: template %q -config %q is not admissible envconsul configuration: %w",
-			templateName, configArg, err)}
+		return []error{&argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: template %q -config %q is not admissible envconsul configuration: %w",
+			templateName, configArg, err)}}
 	}
 	var problems []error
 	for _, fetchedPath := range fetched {
 		if _, ok := allowed[fetchedPath]; !ok {
-			problems = append(problems, fmt.Errorf(
+			problems = append(problems, &argoworkflow.AdmissionError{Cause: fmt.Errorf(
 				"argojob: template %q -config %q fetches %q, which is not covered by the workflow's %s annotation",
-				templateName, configArg, fetchedPath, argoworkflow.SecretPathsAnnotation))
+				templateName, configArg, fetchedPath, argoworkflow.SecretPathsAnnotation)})
 		}
 	}
 	return problems
@@ -166,14 +166,14 @@ func readBoundedWorkspaceFile(sourceDir, relative string) ([]byte, error) {
 		return nil, fmt.Errorf("stat it in the run workspace: %w", err)
 	}
 	if !info.Mode().IsRegular() || info.Size() > pipeline.MaxSourceBytes {
-		return nil, errors.New("it must be one bounded regular file")
+		return nil, &argoworkflow.AdmissionError{Cause: errors.New("it must be one bounded regular file")}
 	}
 	content, err := io.ReadAll(io.LimitReader(file, pipeline.MaxSourceBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read it from the run workspace: %w", err)
 	}
 	if len(content) > pipeline.MaxSourceBytes {
-		return nil, errors.New("it exceeds the source-size limit")
+		return nil, &argoworkflow.AdmissionError{Cause: errors.New("it exceeds the source-size limit")}
 	}
 	return content, nil
 }

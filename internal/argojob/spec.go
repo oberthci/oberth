@@ -643,11 +643,6 @@ type Request struct {
 // request.SourceDir, because those files — not the document — decide what a
 // legacy-chain step fetches.
 func Build(config Config, request Request) (result *wfv1.Workflow, resultErr error) {
-	defer func() {
-		if resultErr != nil {
-			resultErr = &argoworkflow.AdmissionError{Cause: resultErr}
-		}
-	}()
 	config.applyDefaults()
 	if err := config.ExecutionPlacement.selectRequest(config, request); err != nil {
 		return nil, err
@@ -695,7 +690,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		}
 	}
 	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
-		return nil, err
+		return nil, &argoworkflow.AdmissionError{Cause: err}
 	} else if mirrorOnly && strings.TrimSpace(config.GoProxyURL) == "" {
 		return nil, fmt.Errorf("argojob: %s: mirror-only requires a configured Go module proxy", argoworkflow.GoProxyAnnotation)
 	}
@@ -717,13 +712,13 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 	declaredPaths, err := argoworkflow.DeclaredSecretPaths(workflow)
 	if err != nil {
-		return nil, err
+		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
 	if request.ApprovedSecrets == nil {
 		return nil, errors.New("argojob: ApprovedSecrets must be non-nil; the caller must load the approval table before calling Build")
 	}
 	if err := authorizeWithApprovalTable(declaredPaths, request); err != nil {
-		return nil, err
+		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
 
 	// A credentialed pipeline is one that declares secret-store paths it will
@@ -792,7 +787,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	// deduplicateRetries would silently drop one branch's results. Reusing
 	// PlannedSteps ensures the two layers share the same normalization.
 	if _, err := argoworkflow.PlannedSteps(workflow); err != nil {
-		return nil, err
+		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
 	// A credentialed run without Vault coordinates would proceed through the
 	// entire build and die at the first envconsul login — a worse signal than
@@ -820,7 +815,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	// A wrapper invocation in a workflow with no declared paths is refused: it
 	// would run as the pipeline SA with no token and fail at the vault login.
 	if err := admitSecretstoreExecPaths(workflow, declaredPaths, request.StepGrants); err != nil {
-		return nil, err
+		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
 	// Admission gate for the legacy envconsul chain: every secret path its
 	// repository-authored configuration would fetch — `secret {}` stanzas in

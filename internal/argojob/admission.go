@@ -15,7 +15,7 @@ import (
 // resource ceilings, identities or admission receipts.
 func ValidateDocument(workflow *wfv1.Workflow, trigger pipeline.Trigger) error {
 	if workflow == nil {
-		return errors.New("argojob: no Workflow to validate")
+		return &argoworkflow.AdmissionError{Cause: errors.New("argojob: no Workflow to validate")}
 	}
 	return normalizeAndValidateDocument(workflow.DeepCopy(), trigger)
 }
@@ -26,7 +26,10 @@ func normalizeAndValidateDocument(workflow *wfv1.Workflow, trigger pipeline.Trig
 	argoworkflow.InheritTokenOptOut(workflow)
 	normalizeContainerSetMounts(workflow)
 	if err := validateTemplateIsolation(workflow, trigger); err != nil {
-		return err
+		return &argoworkflow.AdmissionError{Cause: err}
 	}
-	return trivyGuard(workflow)
+	if err := trivyGuard(workflow); err != nil {
+		return &argoworkflow.AdmissionError{Cause: err}
+	}
+	return nil
 }

@@ -143,14 +143,14 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 		return nil, err
 	}
 	if _, declared := wf.Annotations["oberth.ci/release-wif-policy-sha256"]; declared {
-		return nil, errors.New("argojob: release WIF policy provenance is assigned by Oberth")
+		return nil, &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF policy provenance is assigned by Oberth")}
 	}
 	if _, declared := wf.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]; declared {
-		return nil, errors.New("argojob: release WIF must be declared on named Pod leaves, not the Workflow")
+		return nil, &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF must be declared on named Pod leaves, not the Workflow")}
 	}
 	if d := wf.Spec.TemplateDefaults; d != nil {
 		if _, declared := d.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]; declared {
-			return nil, errors.New("argojob: release WIF must be declared on named Pod leaves, not templateDefaults")
+			return nil, &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF must be declared on named Pod leaves, not templateDefaults")}
 		}
 	}
 	var leaves []*wfv1.Template
@@ -187,14 +187,14 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 	checkVolumes := func(volumes []corev1.Volume) {
 		for _, v := range volumes {
 			if v.Name == releaseWIFVolume {
-				failure = errors.New("argojob: release WIF volume is server-owned")
+				failure = &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF volume is server-owned")}
 			}
 		}
 	}
 	checkVolumes(wf.Spec.Volumes)
 	for _, claim := range wf.Spec.VolumeClaimTemplates {
 		if claim.Name == releaseWIFVolume {
-			failure = errors.New("argojob: release WIF volume cannot be an authored claim")
+			failure = &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF volume cannot be an authored claim")}
 		}
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {
@@ -202,7 +202,7 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 		templateContainers(t, func(c *corev1.Container) {
 			for _, m := range c.VolumeMounts {
 				if m.Name == releaseWIFVolume || path.Clean(m.MountPath) == releaseWIFPath || strings.HasPrefix(path.Clean(m.MountPath), releaseWIFPath+"/") {
-					failure = errors.New("argojob: release WIF mounts are server-owned")
+					failure = &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF mounts are server-owned")}
 				}
 			}
 		})
@@ -215,9 +215,12 @@ func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool,
 	// Check authored opt-outs before ForceIdentity disables ambient tokens on
 	// ordinary pipeline identities. An approved WIF projection is independent.
 	if tokenDisabled(t) || (wf.Spec.AutomountServiceAccountToken != nil && !*wf.Spec.AutomountServiceAccountToken) {
-		return fmt.Errorf("argojob: release WIF template %q explicitly disables its service-account token", t.Name)
+		return &argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: release WIF template %q explicitly disables its service-account token", t.Name)}
 	}
-	if request.Trigger != pipeline.TriggerRelease || config.ReleaseWIF == nil || config.ReleaseWIF.Namespace != config.Namespace {
+	if request.Trigger != pipeline.TriggerRelease {
+		return &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF requires an enabled administrator capability and a release trigger")}
+	}
+	if config.ReleaseWIF == nil || config.ReleaseWIF.Namespace != config.Namespace {
 		return errors.New("argojob: release WIF requires an enabled administrator capability and a release trigger")
 	}
 	key := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo)
@@ -240,11 +243,14 @@ func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool,
 	if grant.StepServiceAccounts[t.Name] != "" {
 		identityMatches = config.releaseWIFStepRouteMatches(key, t.Name, request)
 	} // Exact dedicated policy needs no secret-derived repository identity.
-	if !ok || !identityMatches || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
+	if !identityMatches {
 		return fmt.Errorf("argojob: release WIF capability is not approved for %q template %q role %q", key, t.Name, role)
 	}
+	if !ok || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
+		return &argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: release WIF capability is not approved for %q template %q role %q", key, t.Name, role)}
+	}
 	if !topLevel || (t.Container == nil && t.Script == nil) || t.ContainerSet != nil || wf.Spec.TemplateDefaults != nil || len(t.Inputs.Artifacts) > 0 || len(t.Outputs.Artifacts) > 0 || wf.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" {
-		return fmt.Errorf("argojob: release WIF template %q must be a named container/script leaf without defaults, artifact plugins, or nonroot mode", t.Name)
+		return &argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: release WIF template %q must be a named container/script leaf without defaults, artifact plugins, or nonroot mode", t.Name)}
 	}
 	return nil
 }

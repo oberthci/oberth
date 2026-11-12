@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type validationFailureJobs struct {
@@ -106,6 +108,73 @@ spec:
 			replay, err := f.scheduler.EnqueueCI(t.Context(), request)
 			if err != nil || !replay.Duplicate || replay.ID != run.ID {
 				t.Fatal("validation changed accepted event binding", replay, err)
+			}
+		})
+	}
+}
+
+func TestRealBuildErrorsKeepOperatorConfigurationOutOfValidationHints(t *testing.T) {
+	const source = `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    container:
+      image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      command: [/bin/true]
+`
+	for _, kind := range []string{"document", "configuration", "vault-address", "ci-role", "mirror", "identity"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newControlFixture(t)
+			config := argojob.Config{Namespace: "pipeline", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor", VaultAddress: "https://vault.example.test:8200", VaultCISecretsRole: "ci", VaultCredentialedRole: "release"}
+			request := argojob.Request{RunID: "run", RepositoryID: f.repo.ID, Name: "workflow", Repo: "oberth", UpstreamOrg: "acme", SHA: strings.Repeat("a", 40), Ref: "main", Trigger: pipeline.TriggerCI, Source: []byte(source), ApprovedSecrets: map[string]bool{}}
+			switch kind {
+			case "document":
+				request.Source = []byte(strings.Replace(source, "spec:", "spec:\n  hostNetwork: true", 1))
+			case "configuration":
+				config.Namespace = "NOT VALID"
+			case "mirror":
+				request.Source = []byte(strings.Replace(source, "spec:", "metadata:\n  annotations:\n    oberth.ci/goproxy: mirror-only\nspec:", 1))
+			case "identity":
+				config.ExecutorServiceAccount = ""
+			default:
+				request.Source = []byte(strings.Replace(source, "spec:", "metadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\nspec:", 1))
+				request.ApprovedSecrets["oberth/upstream/acme/oberth/test-secret"] = true
+				if kind == "vault-address" {
+					config.VaultAddress = ""
+					config.VaultCredentialedRole = ""
+				} else {
+					config.VaultCISecretsRole = ""
+				}
+			}
+			_, failure := argojob.Build(config, request)
+			if failure == nil {
+				t.Fatal("Build did not fail", kind)
+			}
+			accepted, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: kind, Repository: f.repo, Branch: "main", SHA: request.SHA, Actor: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := f.store.ClaimNextRun(t.Context())
+			if err != nil || run.ID != accepted.ID {
+				t.Fatal(run, err)
+			}
+			if err = f.scheduler.finishInfrastructureFailure(t.Context(), run, f.repo, fmt.Errorf("create Job: %w", failure)); err != nil {
+				t.Fatal(err)
+			}
+			ended, err := f.store.Run(t.Context(), run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reason := presentationRun(ended).DisplayReason
+			hint := runRetryHint(ended, nil)
+			if kind == "document" {
+				if ended.Phase != "job" || !strings.HasPrefix(reason, validationRefusalPrefix) || hint == nil || hint.Class != model.RetryCode {
+					t.Fatal("document rule lost refusal classification", ended, hint)
+				}
+			} else if ended.Phase != "infrastructure" || strings.Contains(reason, "validation refused") || (hint != nil && hint.Class == model.RetryCode) {
+				t.Fatal("operator configuration blamed on YAML", ended, hint)
 			}
 		})
 	}
