@@ -62,7 +62,7 @@ func TestNativePlacementNeverBypassesSecurityDenials(t *testing.T) {
 			w.Spec.PodMetadata = &wfv1.Metadata{Labels: map[string]string{"oberth.ci/run": "other-run"}}
 		}},
 		{"pod-ownership-annotation", func(w *wfv1.Workflow) {
-			w.Spec.PodMetadata = &wfv1.Metadata{Annotations: map[string]string{"oberth.ci/identity": "other-run"}}
+			w.Spec.PodMetadata = &wfv1.Metadata{Annotations: map[string]string{"oberth.ci/spec-identity": "other-run"}}
 		}},
 		{"owner-reference", func(w *wfv1.Workflow) {
 			w.OwnerReferences = []metav1.OwnerReference{{Name: "another", Kind: "Workflow", APIVersion: "argoproj.io/v1alpha1", UID: "another"}}

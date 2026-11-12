@@ -617,13 +617,10 @@ containing CI and real workload qualification remain separately required.
   provenance and diagnostic metadata. They do not create a serving CPU/memory
   packing budget. Existing demand receipts remain evidence; read paths do not
   recompute historical records from newer git declarations.
-- Numeric per-container resource ceilings are administered independently using
-  `oberth resource grant/get/revoke` or `resource_grant`, `resource_grant_get`,
-  `resource_revoke`. Grants contain separate requests/limits quantity maps.
-  Migration v49 copies historical size-grant ceilings and provenance, including
-  revocations; later size changes do not overwrite a numeric resource grant.
-  Every fresh submission and release preflight enforces that ceiling; lookup
-  failure refuses submission. Resource history never rewrites authored values.
+- Native resources and placement are preserved as authored. Oberth has no
+  compute admission, numeric grants or resource resizing. See
+  [native scheduling](docs/native-scheduling.md).
+
 - The server-owned workflow parameter `oberth-trigger`
   (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
   every document that declares or mentions it, so `when:` guards can skip
@@ -1012,9 +1009,7 @@ containing CI and real workload qualification remain separately required.
   `access_dismiss`,
   admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
-  `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
-  and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_hold`/`admission_release` (#1099), `queue_cap_config`, `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
+  `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
@@ -3291,7 +3286,7 @@ repository identity, runs, logs, artifacts, receipts, grants, issues and audit
 history. It refuses queued/running work, pending promotions/publications,
 unfinished cancellation cleanup and pending Git receive recovery. New runs and
 promotions are refused with `repository archived`, as are new `workflow_capability_grant`,
-`size_grant`, `promote_grant` and `access_allow` grants; existing grants stay
+`promote_grant` and `access_allow` grants; existing grants stay
 readable and revocable. Schedules skip archived
 repositories before reading Git. Git refreshes/probes fail closed, and the
 qualified cache is removed under receive/refresh locks. Retry archive if cache
@@ -3458,7 +3453,7 @@ Historical observe/enforce, avg60 and max-defer settings remain accepted and are
 ignored by serving admission. Existing/adopted work continues. Missing or invalid
 PSI retains the established fail-open behavior and reports its absence; the
 workflow ceiling and configured disk floor still apply. Qualify the host scope
-and actual thresholds separately. See [host pressure](docs/io-pressure-admission.md).
+and actual thresholds separately. See [host pressure](docs/native-scheduling.md).
 
 A currently observed nonzero init-container termination always refuses restart-cut
 classification, including when main is still Waiting/PodInitializing. This guard
@@ -3506,33 +3501,11 @@ Confirmed writer failures receive no second 90s grace. Hard errors,
 startup recovery, liveness, write integrity and admission gates remain enforced.
 See [recovery, history and readiness semantics](docs/rca-run-recovery.md).
 
-### Runtime admission capacity
+### Native run waiting
 
-Gone since v0.20.0 with the run ceiling: `--max-concurrent-jobs`,
-`--max-concurrent-jobs-file`, `admission.runtimeCapacity`, the
-`<fullname>-admission` ConfigMap, `admission_capacity_config` and
-`oberth admission capacity`. A runtime override stored by an older server
-stays in the database without effect, and startup logs a warning naming it.
-How many Workflows run at once is the Argo controller's parallelism; see
-[where limits live](docs/where-limits-live.md).
-
-### Administrative admission hold
-
-`admission_hold` (MCP), `POST /api/admission/hold` and `oberth admission hold`
-require an unscoped admin and a reason. Allow classes are tag, release and
-promotion (default tag+release; empty allows none); a run matching any class
-remains eligible under ordinary resource constraints. The hold preserves queue
-sequence, priority/FIFO order and existing grants. It skips held claims before
-preparation, group and VM ordering so permitted work can reach admission.
-Hold settings and audit commit atomically, outside the gate mutex; new grants
-are fenced during the bounded write. Restart reloads the original absolute
-expiry. Default duration is two hours, hard cap twelve; expiry is evaluated at
-admission and reported as inactive, with normal idle dispatch waking within
-fifteen seconds. `system_status.admission.hold` shows settings and deadline;
-scoped status omits installation configuration. Existing queued reason text
-reports the hold; no status or UI layout is added. The hold applies to the
-Kubernetes-decides workflow gate, without restoring weight-based admission. See
-[admission hold](docs/admission-hold.md).
+Argo and Kubernetes own waiting. Pause the controller at zero replicas or use
+`argo suspend`; parallelism zero is unlimited. See
+[native scheduling](docs/native-scheduling.md).
 
 ### Evicted controller replacement and visible admission holds (#1214)
 

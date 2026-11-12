@@ -1,123 +1,18 @@
-# Execution priority and fairness
+# Native Workflow priority
 
-Waiting admission uses four classes, in this order:
+Declare Argo `spec.priority` in repository YAML. Argo uses it in its Workflow
+queue; Pod priority classes remain outside repository authority. Oberth adds
+neither run-kind priority nor a release mutex to a user Workflow.
 
-| Class | Intended work | Authority |
-| --- | --- | --- |
-| `low` | Deliberately deferred or background builds | A submission may defer itself; changing an existing run requires an unscoped admin |
-| `standard` | Ordinary builds, schedules and backlog work | Default |
-| `promotion` | Ordinary promotion CI and eligible tag/release delivery | Server classification, or an unscoped admin / unexpired grant for an explicit request |
-| `high` | Explicitly authorized urgent work | Unscoped admin, or an unexpired grant permitting `high` |
-
-Durable claims and in-memory admission order `high > promotion > standard > low`.
-Within a class, repositories with fewer active runs go first, then least recent
-service and FIFO. Running or granted work retains its reservation. Priority does
-not bypass CPU capacity, administrator holds, the disk floor, bounded PSI
-deferral, cleanup or publication guards. Dispatch prepares at most one checkout
-at a time and looks through up to 8 prepared waiters for priority work.
-
-An ordinary promotion receives `promotion`, never automatic `high`. The oldest
-waiting server-classified tag/release per repository also receives `promotion`
-when its stored ref kind is `tag` and it has the release flag or tag/release
-trigger. Claimed but unadmitted tags count as waiting. Later tags remain
-`standard`; admitting or terminating the oldest releases its boost for the next.
-Administrator RC globs classify matching branches as `promotion`. Defaults have
-no RC globs. A branch/ref spelling, release flag, pipeline annotation, trigger
-spelling or promotion operation never supplies authority for `high`.
-
-After 60 minutes, ordinary `standard` work joins `promotion` at its original FIFO
-position, with reason `aged: standard run waited at least 60 minutes`. It never
-ages into `high`. Low work does not age. Every explicit admin override pins its
-class, including a lowered `standard` or `promotion`; admission/end freezes the
-aging clock. Aged work can therefore precede newer delivery work in the shared
-promotion FIFO. Sustained explicitly urgent high work can still delay it.
-
-## Requests and administration
-
-`git push -o oberth.priority=high -o oberth.priority_reason='urgent repair'`
-requests an execution class. MCP `promote`, `run_rerun`, `run_retry`,
-`schedule_trigger` and `sync` accept the same optional `priority` and
-`priority_reason` fields. All four canonical names are accepted. An unscoped
-admin may request promotion/high directly; other identities require a matching,
-unexpired `priority_grant {identity,max_class,expires}`. `max_class` is
-`promotion` or `high`. A promotion-only grant cannot request high.
-
-Authority is resolved in the insertion transaction from the authenticated actor
-and exact SSH key fingerprint. An identity alias or scoped-admin key cannot
-inherit unscoped admin authority. Low and standard submission requests need no
-urgency grant. Low explicitly defers a new submission; a standard request leaves
-any natural promotion/tag/RC classification intact. An explicit accepted high
-request takes precedence over automatic delivery classification. Refused or
-invalid requests leave the natural class intact and report `priority_refusal`.
-A repository schedule may declare any class, but automatic execution requests as
-`oberth:scheduler` and still needs its own grant for promotion/high.
-
-`sync` publishes an existing branch result and can only raise its waiting build's
-priority. It cannot lower an existing run or modify one already admitted. Use
-unscoped-admin `run_priority` for explicit lowering:
-
-```sh
-oberth mcp call run_priority '{"id":"01234567","priority":"promotion","reason":"Ordinary delivery can wait behind urgent work"}'
+```yaml
+spec:
+  priority: 100
+  synchronization:
+    mutexes:
+      - name: repository-release-finalize
 ```
 
-That tool accepts a full ID or unique 8+ hex prefix, any of the four classes and
-a printable 1–512 byte reason. It sets and pins the class, including lowering
-high to promotion, standard or low. The service holds the admission boundary;
-admitted or terminal runs refuse changes. The atomic `run.priority` audit records
-actor, previous class, selected class and reason. Overrides survive restart and
-automatic refire. Local updates refresh waiters immediately; external changes
-and aging are polled within 15 seconds, with refresh deferred on DB contention.
-
-`queue_priority_config` remains an unscoped-admin, audited replacement of at
-most 16 case-sensitive RC globs. `*` and `?` match slash; `[]` disables RC
-classification. `queue_priority_get` returns them and `starvation_minutes: 60`.
-These globs confer only promotion class, regardless of the spelling they match.
-
-## Tags, resources and supersession
-
-Automatic tag priority remains provisional until exact checkout resolves size.
-No size-grant record defaults to enabled within L. An oversized tag or an
-unavailable size-limit lookup loses its automatic promotion class, retaining an
-explicit admin override or accepted nonstandard request, otherwise using
-standard order. The existing reason explains the fallback. This advisory lookup
-never fails release execution; the tag retains its reviewed execution size.
-`size_revoke` durably disables automatic tag priority even on a never-granted
-repository. `size_grant` re-enables it within the selected maximum. Explicit
-urgency, promotions and aging are independent of that opt-out.
-
-Serving admission packs whole-run CPU requests against allocatable CPU minus
-headroom, then applies the disk floor and bounded PSI valve. Argo parallelism
-may further limit running Workflows ([where limits live](where-limits-live.md)).
-Argo receives low=-1, standard=0, promotion=1 and high=2, including standard work
-that aged into promotion before admission. Releases have at least priority 1.
-Argo orders postponed Workflows and native lock waiters by this priority and
-creation time. Repository YAML cannot set it; Pod priority is unchanged. See
-[CPU admission](cpu-admission.md).
-
-A new branch-head push supersedes queued, not-started runs at older SHAs in the
-same repository/ref/schedule lane, regardless of priority. The most recent
-explicit admin override carries to the replacement with its actor and reason;
-the replacement earns a fresh FIFO place. Tags, promotions and pending
-publications remain protected. Running work retains the rules below.
-
-Accepted nonstandard requests, admin overrides and automatic RC/tag/promotion
-work retain protection outside that queued new-head case. Historical automatic-protection rows do
-not become urgency grants. Requests cancel nothing unless an authorized push
-explicitly selects `oberth.supersede=true`; replacing protected work requires its
-requester or an unscoped admin. Same-branch/schedule-entry, cancellation, pending
-publication and promotion guards remain. A forced ordinary schedule only
-supersedes unprotected work; force does not confer priority authority.
-
-Restart requeue, trusted preflight recovery and eligible infrastructure retry
-retain explicit priority, reasons, original wait and admission FIFO alongside
-newer siblings. A manual retry earns its normal new queue place. Replay retains
-its accepted authority/decision; revoking or expiring a grant affects future
-requests, not an already accepted run.
-
-## Stored classes
-
-Requests take exactly `low`, `standard`, `promotion` or `high`; `normal` and
-`highest` are refused. Rows an earlier server stored as `normal` or `highest`
-(overrides, accepted requests, grants) read as `standard` and `high`.
-Automatic historical requests with `requested=''` are protection evidence
-only, never explicit high authority.
+Use a shared native mutex around the release finalization that must be serial.
+Oberth's own `.oberth/release.yaml` declares its release priority and mutexes in
+Git. Publication custody and branch-delete/supersede cancellation remain Oberth
+lifecycle controls. See [native scheduling](native-scheduling.md).

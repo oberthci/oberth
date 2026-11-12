@@ -84,10 +84,6 @@ repo remove
 repo unarchive
 repo verify
 repos
-resource
-resource get
-resource grant
-resource revoke
 restore
 run
 run cancel
@@ -117,10 +113,6 @@ secretstore sync
 secretstore verify
 serve
 setup
-size
-size get
-size grant
-size revoke
 status
 unseal
 upgrade

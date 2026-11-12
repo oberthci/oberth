@@ -1,16 +1,8 @@
 {
   "entries": {
-    "flag:admission-stall-timeout": {
-      "doc_anchor": "docs/cpu-admission.md#ordering-and-bounded-waits",
-      "test_ref": "internal/argojob/admission_deadline_test.go TestAdmissionDeadlineMissingWaiterDoesNotChargePriorCapacityWait"
-    },
     "value:warning": {
       "doc_anchor": "docs/host-preparation.md",
       "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
-    },
-    "value:hardCpu": {
-      "doc_anchor": "docs/io-pressure-admission.md",
-      "test_ref": "cmd/oberth/pressure_flags_test.go TestServePressureHardValveDefault50AndValidation"
     },
     "value:memory": {
       "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
@@ -23,34 +15,6 @@
     "value:resources": {
       "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
       "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
-    },
-    "value:cpu_capacity": {
-      "doc_anchor": "docs/cpu-admission.md#ordering-and-bounded-waits",
-      "test_ref": "internal/service/admission_cpu_test.go TestAdmissionCPUBoundedBackfillProtectsLargeWaiter"
-    },
-    "flag:admission-cpu-headroom-percent": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUAllocatableHeadroomAndStepCap"
-    },
-    "flag:step-cpu-request-percent": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "internal/argojob/scheduling_requests_test.go TestSchedulingCPUCapPreservesBurstAndCountsHelpers"
-    },
-    "flag:admission-pressure-defer-seconds": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "internal/service/admission_cpu_test.go TestHardPressureDefaultDeferralIsBounded"
-    },
-    "value:cpuHeadroomPercent": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUAllocatableHeadroomAndStepCap"
-    },
-    "value:stepCPURequestPercent": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "internal/argojob/scheduling_requests_test.go TestSchedulingCPUCapPreservesBurstAndCountsHelpers"
-    },
-    "value:deferSeconds": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "internal/service/admission_cpu_test.go TestHardPressureDefaultDeferralIsBounded"
     },
     "value:host_swap": {
       "doc_anchor": "docs/host-preparation.md#swap-or-zram",
@@ -164,10 +128,6 @@
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
     },
-    "flag:argo-sync-limit": {
-      "doc_anchor": "docs/where-limits-live.md#shared-step-limits",
-      "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
-    },
     "annotation:oberth.ci/concurrency-group": {
       "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
       "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
@@ -201,12 +161,12 @@
       "test_ref": "internal/argojob/fragment_test.go TestBuildRefusesRemovedExclusiveAnnotationInFragments"
     },
     "annotation:oberth.ci/trigger": {
-      "doc_anchor": "docs/assisted-continuation.md#capacity-supersession-and-bounds",
-      "test_ref": "internal/argojob/assist_hold_ops_test.go TestEnforceAssistHoldsFindsPodsLabelledByBuild"
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
     "annotation:oberth.ci/run": {
-      "doc_anchor": "docs/assisted-continuation.md#capacity-supersession-and-bounds",
-      "test_ref": "internal/argojob/assist_hold_ops_test.go TestEnforceAssistHoldsFindsPodsLabelledByBuild"
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
     "value:agentEvents": {
       "doc_anchor": "docs/agent-events.md#values",
@@ -356,10 +316,6 @@
       "doc_anchor": "docs/mcp-setup.md#purging-retained-evidence",
       "test_ref": "internal/installer/upgrade_defaults_test.go TestUpgradeKeepsTheRenderedLogBudget"
     },
-    "value:diskFloorBytes": {
-      "doc_anchor": "docs/where-limits-live.md#where-limits-live",
-      "test_ref": "hack/test-chart.sh retention and disk floor defaults"
-    },
     "value:enabled": {
       "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
       "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
@@ -407,10 +363,6 @@
     "env:XDG_CONFIG_HOME": {
       "doc_anchor": "docs/remote-cli.md#configuration",
       "test_ref": "internal/client/connection_test.go TestResolveConnectionReadsTheClientFiles"
-    },
-    "flag:max": {
-      "doc_anchor": "docs/cli-reference.md#oberth-size-grant",
-      "test_ref": "cmd/oberth/size_grant_test.go TestSizeGrantCLIReadsAndValidates"
     },
     "flag:secrets-file": {
       "doc_anchor": "README.md#without-a-terminal-scripts-and-ai-agents",
@@ -752,21 +704,193 @@
       "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
       "test_ref": "internal/app/status_probes_test.go TestStatusProbeLifecycleAndTimestamps"
     },
-    "flag:admission-cpu-enabled": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUOffSkipsNodeRead"
+    "value:app.kubernetes.io/name": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
-    "value:cpuEnabled": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUOffSkipsNodeRead"
+    "value:oberth.ci/engine": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/repo": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/sha": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/run": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/trigger": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/tier": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/role": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/component": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:oberth.ci/workflow": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:workflows.argoproj.io/workflow": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:workflows.argoproj.io/completed": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:workflows.argoproj.io/on-exit": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "value:workflows.argoproj.io/controller-instanceid": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/run-id": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/ref": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/spec-identity": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/declared-secret-paths": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/sources": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/fragments": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/workflow-capability": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/helper-storage": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/verified-controller-profile": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/execution-placement": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/execution-target": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/release-wif-policy-sha256": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/release-wif-adc": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/step-usage-memory-policy": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/step-usage-memory-warning": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/assist": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/assist-hold": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/executor-identity-retry-at": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:workflows.argoproj.io/pod-name-format": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:app.kubernetes.io/name": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/engine": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/repo": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/sha": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/tier": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/role": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/component": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:oberth.ci/workflow": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:workflows.argoproj.io/workflow": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:workflows.argoproj.io/completed": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:workflows.argoproj.io/on-exit": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+    },
+    "annotation:workflows.argoproj.io/controller-instanceid": {
+      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
+      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
     "annotation:oberth.ci/cpu-requests": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "internal/app/admission_requests_test.go TestCPUHistorySizingPrecedesAdmissionAndIsFrozenForSubmission"
+      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
+      "test_ref": "internal/argojob/native_requests_test.go TestNativeSubmissionLeavesUndeclaredResourcesAndParallelismAlone"
     },
-    "value:cpu_reason": {
-      "doc_anchor": "docs/cpu-admission.md#defaults",
-      "test_ref": "internal/service/admission_live_test.go TestCapacityHeldPoolRefreshUnblocksWithoutRestart"
+    "annotation:oberth.ci/request-defaults": {
+      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
+      "test_ref": "internal/argojob/native_requests_test.go TestNativeSubmissionLeavesUndeclaredResourcesAndParallelismAlone"
     }
   }
 }

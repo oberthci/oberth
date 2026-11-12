@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// admissionGate tracks submission lifecycle and the remaining temporary holds.
+// admissionGate tracks submission lifecycle and the remaining explicit holds.
 type admissionGate struct {
 	adminHold    model.AdmissionHold
 	holdUpdating bool

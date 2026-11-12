@@ -24,12 +24,8 @@ identity to retain boot IDs for owned running step Pods. It requires no node
 watch, node proxy, kubelet endpoint or write permission. Missing permissions
 or a missing pre-reboot observation leave the failure unclassified as a reboot.
 
-CPU admission also reads node allocatable resources, refreshing each minute.
-Pinned placement uses `get` on its selected node and never sizes from other
-nodes or the server cluster. Unpinned cluster sizing needs `list nodes`.
-If that read is denied or no eligible node exists, only that target's CPU
-admission is held with a reason; server startup and other pools continue.
-`admission.cpuEnabled: false` disables these CPU reads and their admission gate.
+There are no CPU capacity reads, pools or admission credits. Node reads above
+serve identity/placement proof, not resource fitting.
 
 `config.ExecutionPlacement` must use the closed
 `oberth.execution-placement/branch-v2` form. It retains the version-one cluster,

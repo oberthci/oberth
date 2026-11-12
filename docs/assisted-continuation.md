@@ -338,7 +338,7 @@ duration (`90s`, `1m30s`). The chart schema refuses anything else.
   before the run-level infrastructure retry sees it, and a step that ran out
   of time is never given a second budget plus the hold allowance.
 - **Workflow deadline**: extended by two hold TTLs per assisted run.
-- **Template locks, Argo parallelism, admission hold**: unchanged; a
+- **Template locks and Argo parallelism**: unchanged; a
   held run holds its native Argo lock and its parallelism slot for the whole
   hold.
 - **Adoption after restart**: the Workflow carries everything the hold tools

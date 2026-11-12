@@ -387,7 +387,6 @@ one with a non-admin token is still answered with the server's refusal.
 | `artifact_get` | One artifact's contents by run ID and name, optionally filtered |
 | `wait` | Long-poll until a SHA or exact run ID reaches a terminal state |
 | `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
-| `queue_cap_config` | Unscoped admin only: set the branch queue cap with `max_not_started` (integer, 0 disables; off by default). Defer branch run creation when queued and waiting runs reach the cap; drain deferred receives in arrival order after capacity opens. Accepted deferred pushes stay in Oberth's Git cache and durable receive journal; automatic upstream publication requires successful CI. Tags/releases, promotions and schedules bypass the cap. Audited; setting and backlog survive restart. `system_status.queue_cap` reports `max_not_started`, `not_started`, `deferred` and `reason` |
 | `release_wif_list` | Unscoped admin only: read the boot (Helm/flag) release WIF repository map, runtime overrides, the effective map used by release preflight and tag admission, configured role names and any stored grant left inactive. Re-applies the stored overrides to admission. Public data only |
 | `release_wif_grant` | Unscoped admin only: grant or replace one registered repository's release WIF entry (`service_account_name`, `templates` leaf -> configured role) with a required `reason`. Roles, namespace and dedicated step identities stay Helm configuration. Validated against the boot map and applied without restart; audited |
 | `release_wif_revoke` | Unscoped admin only: revoke a repository's release WIF entry at runtime, including a Helm entry or one for a retired, unregistered `upstream/org/repo`. Audited, `reason` required |
@@ -427,20 +426,12 @@ one with a non-admin token is still answered with the server's refusal.
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
 | `access_revoke` | Revoke a step's access to a secret path (admin-only) |
-| `resource_grant` | Set per-container numeric `requests` and `limits` ceilings for CPU and memory (Kubernetes quantity strings); optional ephemeral-storage defaults to 16Gi; admin-only, audited |
-| `resource_revoke` | Return numeric ceilings to requests/limits of 4 CPU, 8Gi memory, 16Gi ephemeral-storage; admin-only, audited |
-| `resource_grant_get` | Read the numeric resource ceiling and grant/revocation provenance |
-| `size_grant` | Size grant, `L` or `XL` (admin-only, audited). Sizes do not affect admission; the grant re-enables the oldest waiting tag's automatic priority boost |
-| `size_revoke` | Disable a repository's automatic tag priority, even if never granted (admin-only, audited) |
-| `size_grant_get` | Read the size grant (`max_size`) and its state: `never_granted`, `granted`, or `revoked` (revoked disables automatic tag priority) |
 | `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
 | `queue_priority_get` | Read RC patterns and the 60-minute threshold after which a standard run ages into promotion; unscoped admin |
 | `priority_grant` | Allow `identity` to request priority up to `max_class` (`promotion` or `high`) until RFC3339 `expires`; unscoped admin, audited |
 | `priority_grant_list` | List priority grants and expiry; unscoped admin |
 | `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
 | `run_priority` | Set a waiting run using exact `id`, `priority` (`low`, `standard`, `promotion` or `high`) and `reason`; unscoped admin, audited |
-| `admission_hold` | Admin-only [admission hold](admission-hold.md) with allowed classes and bounded expiry; read through system_status admission.hold. |
-| `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix
@@ -536,8 +527,8 @@ oldest eligible evidence when either its age or the global storage budget is
 exceeded. Active runs, protected evidence, and the newest terminal runs per ref
 can keep storage above the budget. Manual purges keep the same evidence
 protections but may remove the newest terminal run. The separate
-`admission.diskFloorBytes` value controls the free-space admission floor
-(1 GiB by default since v0.21.0; `0` disables it).
+See [native scheduling](native-scheduling.md) for run waiting and operator controls.
+
 
 When an evidence class has an enabled age or budget policy, sweeps also reclaim
 orphaned files with no run row, recording the removal in the audit trail.

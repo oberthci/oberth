@@ -23,7 +23,7 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 	}
 }
 
-// diskValve temporarily holds grants for lifecycle tests until disk admission is removed.
+// diskValve holds grants for lifecycle tests.
 func (fixture *groupFixture) diskValve(t *testing.T) func() {
 	t.Helper()
 	blockOnDiskFloor(fixture.scheduler.admission)

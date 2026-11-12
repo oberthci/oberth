@@ -55,4 +55,4 @@ usable. Platform protection and a representative coverage window precede any
 later request policy or whole-run vector admission. See
 [sampler coverage and limits](step-resource-usage.md),
 [platform protection](platform-protection.md) and
-[PSI observation/enforcement](io-pressure-admission.md).
+[PSI observation/enforcement](native-scheduling.md).

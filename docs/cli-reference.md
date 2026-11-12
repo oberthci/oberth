@@ -434,7 +434,7 @@ Flags:
   -argo-namespace-parallelism int
         Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value) (default -1)
   -argo-parallelism int
-        Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value, none on a fresh install) (default -1)
+        Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2) (default -1)
   -argo-sync-limit value
         semaphore limit key=N in the ConfigMap oberth-sync-limits, rendered by the argo-workflows release (repeatable; the set given replaces the previous one; see docs/where-limits-live.md)
   -argo-values-reviewed sha256:DIGEST
@@ -1203,55 +1203,6 @@ Usage: oberth repos [flags]
         server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
 ```
 
-## oberth resource
-
-```text
-Usage: oberth resource <grant|get|revoke> [flags]
-Use oberth resource <command> --help for command flags.
-```
-
-## oberth resource get
-
-```text
-Usage: oberth resource get [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
-## oberth resource grant
-
-```text
-Usage: oberth resource grant [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-  -limits-cpu string
-        administrator ceiling as a Kubernetes quantity
-  -limits-ephemeral-storage string
-        administrator ceiling as a Kubernetes quantity (default "16Gi")
-  -limits-memory string
-        administrator ceiling as a Kubernetes quantity
-  -requests-cpu string
-        administrator ceiling as a Kubernetes quantity
-  -requests-ephemeral-storage string
-        administrator ceiling as a Kubernetes quantity (default "16Gi")
-  -requests-memory string
-        administrator ceiling as a Kubernetes quantity
-```
-
-## oberth resource revoke
-
-```text
-Usage: oberth resource revoke [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
 ## oberth restore
 
 ```text
@@ -1673,20 +1624,8 @@ Flags:
         one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain
   -accept-witness-genesis string
         one-shot acknowledgment: exact current audit chain head as <auditID>:<sha256hex>; marks it as the witness genesis so external witnessing starts there, explicitly trusting all prior local history (enables Rekor on an existing deployment)
-  -admission-cpu-enabled
-        enable CPU admission and measured request sizing (default true)
-  -admission-cpu-headroom-percent int
-        allocatable CPU reserved for platform and host work (1-90 percent) (default 20)
   -admission-disk-floor-bytes int
         when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
-  -admission-pressure-defer-seconds int
-        maximum PSI deferral before one otherwise fitting workflow may start (1-3600 seconds) (default 300)
-  -admission-pressure-enabled
-        hold new workflow grants at the hard host CPU/IO PSI limits (default true)
-  -admission-pressure-hard-cpu float
-        hard host CPU some PSI avg10 percentage for new workflow grants (default 50)
-  -admission-pressure-hard-io float
-        hard host IO some PSI avg10 percentage for new workflow grants (default 40)
   -admission-stall-timeout duration
         workflow startup or Insufficient-CPU Pod wait bound; native Argo synchronization waits are exempt (default 10m0s)
   -admission-step-startup-allowance-max-seconds int
@@ -1901,8 +1840,6 @@ Flags:
         SSH host private key (default "/etc/oberth/ssh/ssh_host_key")
   -ssh-listen string
         SSH listen address (default ":2222")
-  -step-cpu-request-percent int
-        maximum step container CPU request as percent of node allocatable CPU (1-100); limits remain unchanged (default 25)
   -tls-cert string
         TLS certificate (default "/etc/oberth/tls/tls.crt")
   -tls-key string
@@ -1935,45 +1872,6 @@ Flags:
         local server image for development
   -plain
         no TUI, sequential prompts (auto-selected for non-TTY, TERM=dumb, NO_COLOR)
-```
-
-## oberth size
-
-```text
-Usage: oberth size <grant|get|revoke> [flags]
-Use oberth size <command> --help for command flags.
-```
-
-## oberth size get
-
-```text
-Usage: oberth size get [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
-## oberth size grant
-
-```text
-Usage: oberth size grant [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-  -max string
-        size grant maximum, L or XL; sizes do not affect admission, any grant enables automatic tag priority
-```
-
-## oberth size revoke
-
-```text
-Usage: oberth size revoke [flags]
-
-Flags:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
 ```
 
 ## oberth status

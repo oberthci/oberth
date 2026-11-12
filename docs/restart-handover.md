@@ -166,7 +166,7 @@ the database closes.
 `status`, `logs`, `system_status`, `run_get`, `run_logs`, `run_list`,
 `artifacts`, `artifact_get`, `promote_status`,
 `promotion_list`, `promote_grant_list`, `repo_list`, `issue_get`,
-`issue_get_many`, `issue_list`, `access_list`, `size_grant_get`, `uplink_list`, `audit_list` and
+`issue_get_many`, `issue_list`, `access_list`, `uplink_list`, `audit_list` and
 `schedule_list`, plus protocol initialization, ping and tool listing. A test
 proves none of them is behind the server's audit mutation gate. Authenticated
 JSON GETs used by CLI status/run views also reconnect. Retries preserve the

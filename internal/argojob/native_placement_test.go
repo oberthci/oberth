@@ -242,3 +242,19 @@ podAntiAffinity:
 	nativeEqual(t, tolerations, submitted.Spec.Tolerations)
 	nativeEqual(t, tolerations, submitted.Spec.Templates[0].Tolerations)
 }
+
+func TestNativeMetadataDescribesOnlyExistingLabels(t *testing.T) {
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
+	wf, err := Build(testConfig(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeEqual(t, map[string]string{
+		"app.kubernetes.io/name": "oberth-run", "oberth.ci/engine": "argo", "oberth.ci/repo": "oberth",
+		"oberth.ci/run": request.RunID, "oberth.ci/sha": testSHA, "oberth.ci/trigger": "ci", "oberth.ci/tier": "ci",
+	}, wf.Labels)
+	nativeEqual(t, map[string]string{"oberth.ci/run": request.RunID, "oberth.ci/trigger": "ci", "oberth.ci/tier": "ci"}, wf.Spec.PodMetadata.Labels)
+	if wf.Annotations[runIDAnnotation] != request.RunID || wf.Annotations[refAnnotation] != request.Ref || wf.Annotations[identityAnnotation] == "" || wf.Annotations[PodNameVersionAnnotation] != "v2" {
+		t.Fatal("documented metadata binding missing", wf.Annotations)
+	}
+}
