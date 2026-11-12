@@ -21,6 +21,15 @@ INSERT INTO runs(id,repo_id,ref_kind,ref,sha,actor,release,credentialed,trigger,
  CASE WHEN n.reason='ref deleted' OR n.archived THEN n.created_at ELSE NULL END
  FROM native_receives n JOIN receive_events e ON e.id=n.event_id ORDER BY n.rowid;
 UPDATE runs SET admission_sequence=queue_sequence WHERE id IN (SELECT run_id FROM native_receives);
+-- Match normal enqueue's immutable issue-work registration. Append after existing
+-- branch/promotion work, in receipt materialization order, before removing IDs.
+INSERT INTO ci_issue_work(repo_id,branch,origin,run_id,actor,created_at)
+ SELECT r.repo_id,r.ref,'branch',r.id,r.actor,r.created_at
+ FROM native_receives n JOIN runs r ON r.id=n.run_id
+ JOIN repositories p ON p.id=r.repo_id
+ WHERE r.ref_kind='branch' AND r.trigger NOT IN ('promotion','plan','apply')
+ AND (r.trigger='schedule' OR r.ref=p.default_branch)
+ ORDER BY n.rowid;
 -- Apply runtime supersession within each branch/schedule lane, including
 -- older already-queued work. Running Workflows and pending publication custody
 -- are not altered by this upgrade. Every receipt still maps to its own run.
