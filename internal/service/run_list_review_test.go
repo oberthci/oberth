@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,40 +102,49 @@ func TestRunListsObserveOnlyBeforeAnyStepStart(t *testing.T) {
 			}
 			service := f.api(t)
 			calls := map[string]int{}
+			var callsMu sync.Mutex
 			service.schedulingObserver = schedulingObserverFunc(func(_ context.Context, run model.Run) (*model.ExecutionObservation, error) {
+				callsMu.Lock()
 				calls[run.ID]++
+				callsMu.Unlock()
 				return &model.ExecutionObservation{State: "observed", Pods: []model.SchedulingReason{{Phase: "Pending", Reason: "Unschedulable", Message: "pod pending: too many pods; waiting for a pod slot"}}}, nil
 			})
 			for poll := 1; poll <= 2; poll++ {
-				value, err := service.Runs(t.Context(), api.Actor{Identity: "owner"}, api.RunFilter{View: view})
-				if err != nil {
-					t.Fatal(err)
-				}
-				var rows []model.Run
-				switch value := value.(type) {
-				case []model.Run:
-					rows = value
-				}
+				rows := pollDiagnosticList(t, service, api.Actor{Identity: "owner"}, api.RunFilter{View: view}, func(rows []model.Run) bool {
+					for _, run := range rows {
+						if run.ID == runs[0].ID {
+							return run.DisplayReason == "pod pending: too many pods; waiting for a pod slot"
+						}
+					}
+					return false
+				})
 				if len(rows) != len(runs) {
 					t.Fatalf("list has %d rows", len(rows))
 				}
-				if len(calls) != 1 || calls[runs[0].ID] != poll {
-					t.Fatalf("poll %d observed executing/unknown rows: %v", poll, calls)
+				callsMu.Lock()
+				if len(calls) != 1 || calls[runs[0].ID] != 1 {
+					t.Errorf("executing/unknown rows observed or cache missed: %v", calls)
 				}
-				for _, run := range rows {
-					if run.ID == runs[0].ID && run.DisplayReason != "pod pending: too many pods; waiting for a pod slot" {
-						t.Fatal(run.DisplayReason)
-					}
-				}
+				callsMu.Unlock()
 			}
 			event.Status, event.StartedAt = runprogress.StepRunning, &now
 			if err := f.logs.AppendStepProgress(runs[0].ID, event); err != nil {
 				t.Fatal(err)
 			}
+			service.listDiagnostics.mu.Lock()
+			for _, element := range service.listDiagnostics.entries {
+				entry := element.Value.(listDiagnosticEntry)
+				entry.checkedAt = time.Now().Add(-time.Minute)
+				element.Value = entry
+			}
+			service.listDiagnostics.mu.Unlock()
 			if _, err := service.Runs(t.Context(), api.Actor{Identity: "owner"}, api.RunFilter{View: view}); err != nil {
 				t.Fatal(err)
 			}
-			if calls[runs[0].ID] != 2 {
+			drainListDiagnostics(t, service)
+			callsMu.Lock()
+			defer callsMu.Unlock()
+			if calls[runs[0].ID] != 1 {
 				t.Fatal("polling continued after first step start", calls)
 			}
 		})

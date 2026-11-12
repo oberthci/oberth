@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/oberthci/oberth/internal/testdb"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,10 +34,7 @@ func TestPromotionConfirmationMigrationPreservesHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Reconstruct the previous schema without modifying any historical audit row.
-	if _, err = s.db.Exec(`DROP TRIGGER promotions_confirmation_guard; ALTER TABLE promotions DROP COLUMN observed_target_sha;`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE id=?`, "20261112094524-promotion-forge-confirmation-edaf1e2c27e6e0e3d0d942490834bbb2"); err != nil {
+	if _, err = s.db.Exec(testdb.PostPromotionConfirmationDowngrade); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.migrate(t.Context(), nil); err != nil {

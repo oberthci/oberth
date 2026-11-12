@@ -36,9 +36,9 @@ func TestPipelineNetworkPolicyStatus(t *testing.T) {
 					var value any
 					var err error
 					if scoped {
-						value, err = health.ScopedStatus(t.Context(), api.Actor{Scope: []string{"visible"}})
+						value, err = sampleHealth(health, t.Context()).ScopedStatus(t.Context(), api.Actor{Scope: []string{"visible"}})
 					} else {
-						value, err = health.Status(t.Context())
+						value, err = sampledStatus(health, t.Context())
 					}
 					if err != nil {
 						t.Fatal(err)
@@ -78,9 +78,9 @@ func TestPipelineNetworkPolicyStatus(t *testing.T) {
 				for _, scoped := range []bool{false, true} {
 					var value any
 					if scoped {
-						value, _ = health.ScopedStatus(t.Context(), api.Actor{})
+						value, _ = sampleHealth(health, t.Context()).ScopedStatus(t.Context(), api.Actor{})
 					} else {
-						value, _ = health.Status(t.Context())
+						value, _ = sampledStatus(health, t.Context())
 					}
 					status := value.(HealthStatus)
 					if status.ClusterDetail != tc.detail || status.Cluster != "unavailable" || status.Database != "unavailable" {

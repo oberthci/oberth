@@ -273,7 +273,7 @@ DELETE FROM schema_migrations WHERE id='20261111190000-client-certificates';
 
 // PostPromotionConfirmationDowngrade reconstructs historical fixtures without
 // claiming a forge observation that the old server never made.
-const PostPromotionConfirmationDowngrade = `
+const PostPromotionConfirmationDowngrade = PostAPIReadIndexesDowngrade + `
 DROP TRIGGER IF EXISTS promotions_confirmation_guard;
 ALTER TABLE promotions DROP COLUMN observed_target_sha;
 DELETE FROM schema_migrations WHERE id='20261112094524-promotion-forge-confirmation-edaf1e2c27e6e0e3d0d942490834bbb2';
@@ -293,4 +293,14 @@ DELETE FROM schema_migrations WHERE id='20261111200000-canonical-priorities';
 const PostUplinkInvitesDowngrade = `
 DROP TABLE IF EXISTS uplink_invites;
 DELETE FROM schema_migrations WHERE id='20261111202000-uplink-invites';
+`
+
+// PostAPIReadIndexesDowngrade removes indexes and their receipt only from
+// disposable fixtures before replaying historical schemas.
+const PostAPIReadIndexesDowngrade = `
+DROP INDEX IF EXISTS runs_counts_idx;
+DROP INDEX IF EXISTS runs_active_ref_idx;
+DROP INDEX IF EXISTS runs_terminal_end_idx;
+DROP INDEX IF EXISTS audit_actions_type_idx;
+DELETE FROM schema_migrations WHERE id='20261112095139-api-read-indexes-5088d2686292709cb56a6d94bddb707b';
 `

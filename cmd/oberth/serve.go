@@ -919,6 +919,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	health.Store = database
 	health.Audit = anchors.Ready
 	health.VCSCache = &app.VCSSnapshot{}
+	health.ClusterCache = &app.ClusterSnapshot{}
 	health.Configured = upstreamReadinessProbe(options)
 	health.VCS = func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
@@ -997,29 +998,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			return probeClient.SealStatus(ctx)
 		}
 		health.SecretStoreCache = &app.SecretStoreProbeSnapshot{}
-		// Periodic secret-store prober with transition-based logging (#259).
-		// Ticks every 60s; logs only on state transitions (ready/sealed/failing),
-		// never on steady state. Exits cleanly on server context cancellation.
-		const secretStoreProbeInterval = 60 * time.Second
-		observer := &app.SecretStoreObserver{
-			Log:     logger.Printf,
-			Address: options.secretStoreAddress,
-		}
-		probeHealth := health
-		stopProbe := startServerTask(ctx, func(probeCtx context.Context) {
-			ticker := time.NewTicker(secretStoreProbeInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-probeCtx.Done():
-					return
-				case <-ticker.C:
-					result := probeHealth.RefreshSecretStore(probeCtx)
-					observer.Observe(result)
-				}
-			}
-		})
-		defer stopProbe()
 	}
 	externallyAnchored := tsaClient != nil || rekorWitness != nil
 	health.AuditMode = "local"
@@ -1083,6 +1061,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	// path) declarations for `access_list --pending`. Issue #623, finding 4.
 	argoJobs.SetDeclarationRecorder(database)
 	health.Storage = retention.Status
+	stopStatusProbes := startServerTask(ctx, health.WatchStatusProbes)
+	defer stopStatusProbes()
 	schedules := app.NewSchedules(app.SchedulesConfig{
 		Repositories: database.ListRepositories,
 		Git:          git,

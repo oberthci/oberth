@@ -675,6 +675,18 @@
     "value:observed_target_sha": {
       "doc_anchor": "docs/mcp-setup.md#promotion-forge-confirmation",
       "test_ref": "internal/service/promotion_confirmation_test.go TestPromotionConfirmsForgeBeforePassing"
+    },
+    "value:status.upstream_info[].checked_at": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "internal/app/status_probes_test.go TestStatusProbeLifecycleAndTimestamps"
+    },
+    "value:status.cluster_checked_at": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "internal/app/status_probes_test.go TestStatusProbeLifecycleAndTimestamps"
+    },
+    "value:status.secret_store.checked_at": {
+      "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
+      "test_ref": "internal/app/status_probes_test.go TestStatusProbeLifecycleAndTimestamps"
     }
   }
 }

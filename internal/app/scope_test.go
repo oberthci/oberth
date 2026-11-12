@@ -37,7 +37,7 @@ func TestScopedStatusCountsOnlyTheScope(t *testing.T) {
 		},
 		AuditChain: func(context.Context) (AuditChainStatus, error) { return AuditChainStatus{}, nil },
 	}
-	value, err := health.ScopedStatus(context.Background(), api.Actor{Identity: "laptop@work", Scope: []string{"github"}})
+	value, err := sampleHealth(health, context.Background()).ScopedStatus(context.Background(), api.Actor{Identity: "laptop@work", Scope: []string{"github"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestScopedStatusCountsOnlyTheScope(t *testing.T) {
 		t.Fatalf("scoped status leaks the other upstream: %s", encoded)
 	}
 	// The unscoped view is unchanged: both upstreams, the codeberg outage.
-	full, err := health.Status(context.Background())
+	full, err := sampledStatus(health, context.Background())
 	if err != nil || full.(HealthStatus).Upstreams != 2 || full.(HealthStatus).Repositories != 3 || full.(HealthStatus).VCS == "ready" {
 		t.Fatalf("unscoped status = %#v, %v", full, err)
 	}

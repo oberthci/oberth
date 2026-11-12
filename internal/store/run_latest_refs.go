@@ -51,7 +51,17 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 		return nil, err
 	}
 	restriction, args := runRestriction(filter)
-	params := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, args...)
+	// Emit only supplied scope predicates: optional OR predicates force a full
+	// covering-index scan even for a single repository or exact ref.
+	params := append([]any{}, args...)
+	if filter.RepoID != 0 {
+		restriction += " AND repo_id=?"
+		params = append(params, filter.RepoID)
+	}
+	if filter.Ref != "" {
+		restriction += " AND ref=?"
+		params = append(params, filter.Ref)
+	}
 	params = append(params, statusArgs...)
 	params = append(params, beforeID, MaxActiveRuns, beforeID, beforeTime, beforeTime, beforeID, pageLimit(filter.Limit))
 	// Group using a narrow covering index: only sequences/counts are scanned,
@@ -97,12 +107,12 @@ func latestRefQuery(restriction, priorityOrder string, statusSQL ...string) stri
 		filtered = `, filtered_heads AS (SELECT heads.* FROM heads JOIN runs ON runs.queue_sequence=heads.head_sequence WHERE 1=1` + statusSQL[0] + `)`
 		heads = "filtered_heads"
 	}
-	return `WITH heads AS (
+	return `WITH heads AS MATERIALIZED (
  SELECT MAX(queue_sequence) AS head_sequence, id AS head_id, COUNT(*)-1 AS earlier_attempts, started_at AS head_started_at,
   ` + runEndTimeSQL + ` AS end_time,
   CASE WHEN ` + queuedRunSQL + ` THEN 0 WHEN status='running' THEN 1 ELSE 2 END AS list_group
  FROM runs INDEXED BY runs_latest_ref_idx
- WHERE (?=0 OR repo_id=?) AND (?='' OR ref=?)` + restriction + `
+ WHERE 1=1` + restriction + `
  GROUP BY repo_id,ref_kind,ref
 )` + filtered + `, page AS (
  SELECT * FROM (SELECT * FROM ` + heads + ` WHERE list_group<2 AND ?='' ORDER BY head_sequence DESC LIMIT ?)

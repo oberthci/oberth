@@ -33,17 +33,10 @@ func TestQueuedDemandVisibleWithinScopeAndCached(t *testing.T) {
 	control.resourceDeclarations = reader
 	for _, actor := range []api.Actor{{Identity: "owner"}, {Identity: "scoped", Scope: []string{"codeberg"}}} {
 		for _, view := range []string{""} {
-			value, err := control.Runs(t.Context(), actor, api.RunFilter{Ref: queued.Ref, View: view})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var run model.Run
-			switch rows := value.(type) {
-			case []model.Run:
-				run = rows[0]
-			default:
-				t.Fatalf("%T", value)
-			}
+			rows := pollDiagnosticList(t, control, actor, api.RunFilter{Ref: queued.Ref, View: view}, func(rows []model.Run) bool {
+				return len(rows) == 1 && rows[0].Scheduling != nil && rows[0].Scheduling.Requests != nil
+			})
+			run := rows[0]
 			want := "needs 9.9 CPU, 16 GiB · next in line"
 			if actor.Scoped() {
 				want = "needs 9.9 CPU, 16 GiB · in line"
