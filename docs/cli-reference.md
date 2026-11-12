@@ -54,8 +54,8 @@ Flags:
 ## oberth admin
 
 ```text
-Usage: oberth admin read-file <public-identity-path> [fallback-path]
-Read allowed public identity files inside the Oberth pod.
+Usage: oberth admin <read-file|readiness>
+Read allowed public identity files or cached readiness inside the Oberth pod.
 ```
 
 ## oberth admin read-file
@@ -63,6 +63,13 @@ Read allowed public identity files inside the Oberth pod.
 ```text
 Usage: oberth admin read-file <public-identity-path> [fallback-path]
 Read allowed public identity files inside the Oberth pod.
+```
+
+## oberth admin readiness
+
+```text
+Usage: oberth admin readiness
+Print cached readiness as JSON with a safe reason code. A not-ready state is a successful diagnostic read.
 ```
 
 ## oberth admission

@@ -263,6 +263,14 @@ auditAnchor:
   # startup behavior unchanged.
   acceptWitnessGenesis: ""
 
+# Advertised host/ports for clients outside the cluster, including forwarded
+# host ports. Empty values use Service discovery. Install persists explicit
+# --client-* choices here; verify reads the Service annotations they render.
+clientEndpoint:
+  host: ""
+  sshPort: ""
+  httpsPort: ""
+
 service:
   # LoadBalancer is the default so a stock k3s exposes both ports on the node
   # address through svclb with no extra step. On kind/orbstack, where no

@@ -239,6 +239,7 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	replicas := int32(1)
 	kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}})
 	forgeAuthorized := true
+	readinessJSON := `{"status":"not ready","code":"no_upstream"}`
 	deps := InstallDeps{LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return kube, &rest.Config{Host: "https://127.0.0.1:6443", TLSClientConfig: rest.TLSClientConfig{CAData: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})}}, "selected", nil
 	}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
@@ -255,6 +256,9 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 		if strings.Contains(command, "admin read-file") {
 			return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), nil
 		}
+		if strings.Contains(command, "admin readiness") {
+			return []byte(readinessJSON), nil
+		}
 		return nil, errors.New("unexpected command")
 	}}
 	cfg := Config{ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port}
@@ -262,6 +266,56 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	digest := sha256.Sum256(server.Certificate().Raw)
 	if !result.OK || result.CAPin != hex.EncodeToString(digest[:]) || result.ServerURL != server.URL || result.MCPURL != server.URL+"/mcp" || result.Context != "selected" {
 		t.Fatalf("public verification failed: checks=%v", result.Checks)
+	}
+	service, err := kube.CoreV1().Services(DefaultNamespace).Get(t.Context(), "oberth", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.Annotations = map[string]string{clientHostAnnotation: "127.0.0.1", clientSSHPortAnnotation: port, clientHTTPSPortAnnotation: port}
+	if _, err := kube.CoreV1().Services(DefaultNamespace).Update(t.Context(), service, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if persisted := VerifyInstall(t.Context(), Config{}, deps); !persisted.OK || persisted.ServerURL != server.URL || persisted.GitURL != result.GitURL {
+		t.Fatalf("verify lost persisted endpoints: %+v", persisted.Checks)
+	}
+	deployment, err := kube.AppsV1().Deployments(DefaultNamespace).Get(t.Context(), "oberth", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment.Status.ReadyReplicas = 0
+	if _, err := kube.AppsV1().Deployments(DefaultNamespace).UpdateStatus(t.Context(), deployment, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range []string{"no_upstream", "database_error", "ssh_identity", "unavailable"} {
+		readinessJSON = `{"status":"not ready","code":"` + reason + `"}`
+		if reason == "unavailable" {
+			readinessJSON = `{"status":"not ready","code":"private dependency details"}`
+		}
+		// Invalid DNS/ports would fail if verify ignored deployment readiness.
+		blocked := VerifyInstall(t.Context(), Config{ClientHost: "override.invalid", ClientSSHPort: "32022", ClientHTTPSPort: "32443"}, deps)
+		if blocked.ServerURL != "https://override.invalid:32443" || blocked.GitURL != "ssh://git@override.invalid:32022" {
+			t.Fatal("explicit flags did not override stored endpoints")
+		}
+		seen := 0
+		for _, check := range blocked.Checks {
+			switch check.Code {
+			case "deployment_ready", "https_tls", "ssh_reachable":
+				seen++
+				if check.OK || check.Reason != reason {
+					t.Fatalf("lost readiness cause: %+v", check)
+				}
+				if check.Code != "deployment_ready" && check.Remedy != "blocked by: deployment not ready ("+reason+")" {
+					t.Fatalf("misleading dependent remedy: %+v", check)
+				}
+			}
+		}
+		if seen != 3 {
+			t.Fatal("missing readiness or blocked connectivity check")
+		}
+	}
+	deployment.Status.ReadyReplicas = 1
+	if _, err := kube.AppsV1().Deployments(DefaultNamespace).UpdateStatus(t.Context(), deployment, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
 	}
 	forgeAuthorized = false
 	if VerifyInstall(context.Background(), cfg, deps).OK {

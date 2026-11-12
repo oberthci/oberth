@@ -167,6 +167,50 @@ func TestFirstAdminCSRDoesNotMintBearer(t *testing.T) {
 	}
 }
 
+func TestDryRunPreservesExistingAdminOutputs(t *testing.T) {
+	public, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshKey, err := ssh.NewPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	csrPath := filepath.Join(dir, "client.csr")
+	keyPath := filepath.Join(dir, "id.pub")
+	secretsPath := filepath.Join(dir, "secrets")
+	for path, raw := range map[string][]byte{
+		csrPath:          pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr}),
+		keyPath:          ssh.MarshalAuthorizedKey(sshKey),
+		csrPath + ".crt": []byte("existing public certificate"),
+		secretsPath:      []byte("existing credential store"),
+	} {
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := Config{DryRun: true, InstallSecretStore: true, AdminCSRPath: csrPath, AdminSSHPublicKeyPath: keyPath, SecretsFile: secretsPath, ResumeSecretsFile: filepath.Join(dir, "unread-resume-input")}
+	err = Execute(t.Context(), cfg, noClusterInstallDeps(t, false))
+	if err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
+		t.Fatalf("dry run refused existing outputs or read recovery credentials: %v", err)
+	}
+	for path, want := range map[string]string{csrPath + ".crt": "existing public certificate", secretsPath: "existing credential store"} {
+		if string(mustRead(t, path)) != want {
+			t.Fatal("dry run changed an existing output")
+		}
+	}
+	cfg.DryRun = false
+	cfg.ResumeSecretsFile = ""
+	if err := Execute(t.Context(), cfg, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "admin certificate output already exists") {
+		t.Fatalf("real install failed to protect existing certificate: %v", err)
+	}
+}
+
 func TestExplicitBearerSetupClearsClientCertificate(t *testing.T) {
 	for _, implementation := range append([]string{"go"}, trustShells()...) {
 		t.Run(implementation, func(t *testing.T) {

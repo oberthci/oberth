@@ -187,12 +187,17 @@ func (health Health) Ready(ctx context.Context) error {
 		gateErr = health.ReadyGate(ctx)
 	}
 	if health.Readiness != nil {
-		return health.observeReadiness(gateErr)
+		err := health.observeReadiness(gateErr)
+		if gateErr != nil {
+			return model.ReadinessFailure("startup_recovery", err)
+		}
+		return model.ReadinessFailure(publicReadinessReason(err), err)
 	}
 	if gateErr != nil {
-		return gateErr
+		return model.ReadinessFailure("startup_recovery", gateErr)
 	}
-	return health.probeReady(ctx)
+	err := health.probeReady(ctx)
+	return model.ReadinessFailure(publicReadinessReason(err), err)
 }
 
 func (health Health) probeReady(ctx context.Context) error {

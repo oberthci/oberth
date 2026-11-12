@@ -3,6 +3,11 @@ kind: Service
 metadata:
   name: {{ include "oberth.fullname" . }}
   namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- $endpoint := .Values.clientEndpoint | default dict }}
+    oberth.ci/client-host: {{ $endpoint.host | default "" | quote }}
+    oberth.ci/client-ssh-port: {{ $endpoint.sshPort | default "" | quote }}
+    oberth.ci/client-https-port: {{ $endpoint.httpsPort | default "" | quote }}
   labels:
     {{- include "oberth.labels" . | nindent 4 }}
 spec:

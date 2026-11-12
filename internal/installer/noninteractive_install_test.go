@@ -157,7 +157,7 @@ func TestInstallReservesTheSecretsFileFirst(t *testing.T) {
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("a secrets file without credentials was kept: %v", statErr)
 	}
-	// A dry run checks the path the same way and creates nothing.
+	// A dry run reviews without reserving or inspecting output paths.
 	dry := Config{InstallSecretStore: true, SecretsFile: path, DryRun: true}
 	if err := Execute(context.Background(), dry, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
 		t.Fatalf("dry run with a usable path: %v", err)
@@ -166,11 +166,15 @@ func TestInstallReservesTheSecretsFileFirst(t *testing.T) {
 		t.Fatalf("a dry run created the secrets file: %v", statErr)
 	}
 	dry.SecretsFile = filepath.Join(dir, "missing", "secrets.txt")
-	if err := Execute(context.Background(), dry, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "--secrets-file directory") {
+	if err := Execute(context.Background(), dry, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
 		t.Fatalf("dry run with an unusable path: %v", err)
 	}
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	dry.SecretsFile = path
+	if err := Execute(context.Background(), dry, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
+		t.Fatalf("dry run with existing output: %v", err)
 	}
 	err = Execute(context.Background(), Config{InstallSecretStore: true, SecretsFile: path}, noClusterInstallDeps(t, false))
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
