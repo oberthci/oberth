@@ -19,6 +19,36 @@
     "compatibility"
   ],
   "properties": {
+    "statusProbes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upstreamIntervalSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600,
+          "default": 60
+        },
+        "clusterIntervalSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600,
+          "default": 60
+        },
+        "secretStoreIntervalSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600,
+          "default": 60
+        },
+        "upstreamFailureThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        }
+      }
+    },
     "clientEndpoint": {
       "type": "object",
       "additionalProperties": false,

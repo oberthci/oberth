@@ -376,3 +376,24 @@ and Argo. `TestBuildPreservesTheDocumentDeadline` keeps authored deadlines;
 `TestExecutionDisplayNamesTheSynchronizationLock` cover authored locks and
 curated native reason lines. Server startup allowances, automatic infrastructure
 retries and the pipeline-wide release mutex are absent.
+
+Background status probes: `TestUpstreamFailureThresholdAndBackoff` checks exact
+retry boundaries, retained check times, three consecutive failures and recovery;
+`TestUpstreamSharingKeepsCredentialAndEndpointBoundaries` covers organization
+sharing and distinct host/port spellings, usernames, credentials, local paths and
+IPv6 zones. `TestUpstreamSharingPreservesHostPinDecisions` performs real SSH
+handshakes with different pins for host case and zero-prefixed ports in the same
+file, preserves acceptance/rejection in both orders, and shares identical
+spellings across organizations.
+Concurrent/cancellation tests keep one in-flight sample and retain evidence on
+shutdown. `TestStatusProbeFlagsAndChart` checks binary defaults, chart wiring and
+schema/flag validation. `TestStatusProbeIdentityUsesResolvedCredentialsAndPins`
+checks projected-key fallback and rotation. The receive-adapter integration test
+runs readiness, mirror refresh, promotion delivery and real tag pushes with an
+unavailable diagnostic; dashboard behavior preserves escaped errors/check times.
+
+Startup promotion recovery: `TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion`
+creates a real interrupted promotion and a later delivered promotion, repeats
+startup recovery without new retries or failure logs, and checks the typed
+admission refusal for a delivery racing recovery. Existing grant, failed-step,
+manual-cancel and removed-uplink recovery cases remain enforced.

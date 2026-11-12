@@ -1750,6 +1750,14 @@ Flags:
         SSH host private key (default "/etc/oberth/ssh/ssh_host_key")
   -ssh-listen string
         SSH listen address (default ":2222")
+  -status-cluster-probe-interval duration
+        background Kubernetes diagnostic interval (10s-1h) (default 1m0s)
+  -status-secretstore-probe-interval duration
+        background secret-store login diagnostic interval (10s-1h) (default 1m0s)
+  -status-upstream-failure-threshold int
+        consecutive upstream probe failures before reporting unavailable (1-10) (default 3)
+  -status-upstream-probe-interval duration
+        background upstream authentication interval (10s-1h; failures back off) (default 1m0s)
   -tls-cert string
         TLS certificate (default "/etc/oberth/tls/tls.crt")
   -tls-key string

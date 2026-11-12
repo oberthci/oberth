@@ -24,6 +24,10 @@ type promotionRetryAdmission struct {
 	autoAttempt int
 }
 
+// ErrPromotionAlreadyDelivered distinguishes a completed tuple from failures
+// that need operator attention when an automatic retry races another delivery.
+var ErrPromotionAlreadyDelivered = errors.New("store: promotion tuple already delivered")
+
 func validatePromotionRetrySpec(spec model.PromotionSpec) error {
 	switch {
 	case spec.RetryOf == "" && spec.RetryMode == "":
@@ -76,7 +80,7 @@ WHERE repo_id = ? AND lower(source_sha) = lower(?) AND target_ref = ? AND train_
 ORDER BY sequence DESC LIMIT 1`, original.RepoID, original.SourceSHA, original.TargetRef, promotionTrainKey(original.Train)).Scan(&blockerID, &blockerStatus)
 	switch {
 	case err == nil && blockerStatus == string(model.PromotionPassed):
-		return promotionRetryAdmission{}, fmt.Errorf("%w: promotion %s already delivered %s to %s", ErrInvalidState, blockerID, original.SourceSHA, original.TargetRef)
+		return promotionRetryAdmission{}, fmt.Errorf("%w: %w: promotion %s already delivered %s to %s", ErrInvalidState, ErrPromotionAlreadyDelivered, blockerID, original.SourceSHA, original.TargetRef)
 	case err == nil:
 		return promotionRetryAdmission{}, fmt.Errorf("%w: promotion %s of %s to %s is still pending", ErrInvalidState, blockerID, original.SourceSHA, original.TargetRef)
 	case !errors.Is(err, sql.ErrNoRows):

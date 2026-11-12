@@ -207,6 +207,29 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Even the strictest diagnostic threshold must not gate readiness, mirror
+	// refresh, promotion transport or the real receive-pack requests below.
+	health := Health{Store: db, Configured: func(context.Context, []model.Upstream) error { return nil },
+		VCSCache: &VCSSnapshot{}, StatusProbes: StatusProbeConfig{FailureThreshold: 1},
+		VCS: func(context.Context, model.Upstream) error { return errors.New("diagnostic handshake timeout") }}
+	health.probeVCS(ctx, []model.Upstream{upstream})
+	value, err := health.Status(ctx)
+	if err != nil || value.(HealthStatus).VCS != "unavailable" {
+		t.Fatal("probe did not fail", value, err)
+	}
+	if err := health.Ready(ctx); err != nil {
+		t.Fatal("diagnostic outage removed readiness", err)
+	}
+	if _, err := cache.Ensure(ctx, "github/org/repo"); err != nil {
+		t.Fatal("diagnostic outage refused mirror refresh", err)
+	}
+	plan, err := cache.PreparePromotion(ctx, "github/org/repo", git(work, "rev-parse", "HEAD"), "promoted", t.TempDir())
+	if err != nil {
+		t.Fatal("diagnostic outage refused promotion preparation", err)
+	}
+	if err := cache.PushPromotion(ctx, "github/org/repo", "promoted", plan.MergedSHA); err != nil {
+		t.Fatal("diagnostic outage refused promotion delivery", err)
+	}
 	logs, err := runlog.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

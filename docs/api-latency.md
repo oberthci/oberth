@@ -8,15 +8,45 @@ or refresh an expired observation. Before the first sample, diagnostics report
 `secret_store.checked_at` are UTC completion timestamps; a retained result keeps
 its original time, including during an outage or a blocked refresh.
 
-Upstream and cluster sampling starts immediately and ticks every ten seconds;
-OpenBao ticks every thirty seconds. Upstream SSH concurrency is four, with a
-five-second per-upstream and fifteen-second aggregate deadline. Cluster discovery
-has a five-second deadline; OpenBao login and seal classification share ten
-seconds. Samplers are canceled and joined before the database closes. Archived
-repositories retain their archive behavior, and an upstream configuration/key
-change invalidates its cached observation. Scope filtering still withholds other
-upstreams, global admission budgets, audit details and secret-store configuration.
-These diagnostics do not authorize mutations or change admission/readiness gates.
+Upstream, Kubernetes and OpenBao diagnostics start immediately and wait sixty
+seconds between sampling cycles by default. Configure `statusProbes` in Helm:
+`upstreamIntervalSeconds`, `clusterIntervalSeconds` and
+`secretStoreIntervalSeconds` (10–3600 seconds), and `upstreamFailureThreshold`
+(1–10, default 3). The corresponding serve flags are
+`--status-upstream-probe-interval`, `--status-cluster-probe-interval`,
+`--status-secretstore-probe-interval` (Go durations, 10s–1h), and
+`--status-upstream-failure-threshold`.
+
+SSH authentication is shared across upstream organizations with the same host,
+port, SSH username, resolved private-key contents and host pins. Local paths,
+different identities and case-sensitive IPv6 interface scopes remain distinct.
+Key projection, shared-key fallback and pin rotation are bound to the exact
+credentials sampled; changed bindings start a fresh observation. Removing or
+archiving an upstream removes its retry history.
+
+Each endpoint independently backs off after failures: twice the interval, then
+four times, capped at five minutes (rounded down to whole cycles), or the base
+interval when longer. Retry due times are measured from sample completion and
+checked on background cycles, so slow samples can defer a due attempt; there
+are no catch-up connection bursts. A single failure never changes a previously
+healthy endpoint to `unavailable`; three consecutive failures do by default.
+Success resets the streak and interval. Before any successful observation, an
+endpoint with fewer than the threshold failures reports `checking`; an
+unsampled endpoint remains `unavailable` with no timestamp. Per-upstream
+`last_error`, `consecutive_failures` and `checked_at` expose failures even while
+the retained state is `ready`, and timestamps do not advance during backoff.
+The dashboard shows the last error and check time beside the diagnostic state.
+
+SSH concurrency remains four, with a five-second per-endpoint and fifteen-second
+aggregate deadline. Cluster discovery has a five-second deadline; OpenBao login
+and seal classification share ten seconds. All samplers are canceled and joined
+before the database closes. These diagnostic states do not authorize mutations:
+readiness requires process recovery, storage and durable SSH configuration;
+push acceptance, mirroring and promotion use their actual transport and policy
+checks independently. An unavailable diagnostic never refuses those operations.
+Actual transport, credentials, audit or policy failures still can. Scope
+filtering withholds other upstreams, global admission budgets, audit details and
+secret-store configuration. Archived-only upstreams are not probed.
 
 Run-list execution observations refresh in background workers on every read,
 as soon as submission preparation starts. Before the Workflow exists, the

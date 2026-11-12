@@ -253,6 +253,9 @@ func (service *API) retryAutomaticPromotion(ctx context.Context, failed model.Pr
 		}
 	}
 	cancel()
+	if errors.Is(err, store.ErrPromotionAlreadyDelivered) {
+		return
+	}
 	log.Printf("oberth: automatic retry of promotion %s failed: %v", failed.ID, err)
 }
 

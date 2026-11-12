@@ -103,6 +103,7 @@ type serveOptions struct {
 	runLogLimitBytes      int64
 	retentionInterval     time.Duration
 	retentionKeepNewest   int
+	statusProbes app.StatusProbeConfig
 
 	assist                  argojob.AssistConfig
 	agentEvents             service.AgentEventPolicy
@@ -202,6 +203,7 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
 	options := serveOptions{}
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	registerStatusProbeFlags(flags, &options.statusProbes)
 	flags.DurationVar(&options.issueStaleAfter, "issue-stale-after", service.DefaultIssueStaleAfter, "open issue stale window since last update")
 	flags.DurationVar(&options.issueActiveStaleAfter, "issue-active-stale-after", service.DefaultIssueActiveStaleAfter, "active issue stale window since last update (no longer than issue-stale-after)")
 	flags.DurationVar(&options.uplinkTokenPolicy.DefaultTTL, "uplink-token-default-ttl", model.DefaultUplinkTokenTTL, "default lifetime for new uplink bearer tokens (90 days)")
@@ -345,6 +347,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if err := options.uplinkTokenPolicy.Validate(); err != nil {
 		return serveOptions{}, err
+	}
+	if err := options.statusProbes.Validate(); err != nil {
+		return serveOptions{}, fmt.Errorf("serve: %w", err)
 	}
 	if err := validateServeOptions(options); err != nil {
 		return serveOptions{}, err
@@ -865,38 +870,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	health.VCSCache = &app.VCSSnapshot{}
 	health.ClusterCache = &app.ClusterSnapshot{}
 	health.Configured = upstreamReadinessProbe(options)
-	health.VCS = func(ctx context.Context, upstream model.Upstream) error {
-		if upstream.Kind == "local" {
-			info, err := os.Stat(upstream.BaseURL)
-			if err != nil {
-				return err
-			}
-			if !info.IsDir() {
-				return errors.New("local upstream is not a directory")
-			}
-			return nil
-		}
-		// Per-upstream key: the OpenBao bundle materializes each dedicated
-		// key as a file beside the shared one. Fall back to the shared key
-		// while the kubelet has not yet projected a freshly added data key.
-		keyPath := options.upstreamKey
-		if upstream.KeyName != "" && app.ValidUpstreamKeyName(upstream.KeyName) {
-			perUpstreamKey := filepath.Join(filepath.Dir(options.upstreamKey), upstream.KeyName)
-			if _, statErr := os.Stat(perUpstreamKey); statErr == nil {
-				keyPath = perUpstreamKey
-			}
-		}
-		privateKey, err := readBoundedFile(keyPath, 1<<20)
-		if err != nil {
-			return fmt.Errorf("read upstream identity: %w", err)
-		}
-		knownHostsData, err := readBoundedFile(options.knownHosts, 1<<20)
-		if err != nil {
-			return fmt.Errorf("read upstream host pins: %w", err)
-		}
-		// Asserts endpoint reachability + pinned host key + accepted identity.
-		return app.ProbeSSHAuthentication(ctx, upstream.BaseURL, privateKey, knownHostsData)
-	}
+	configureStatusProbes(&health, options)
 	health.Cluster = func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err

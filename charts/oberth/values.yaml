@@ -35,6 +35,13 @@ uplinkTokens:
   defaultTTL: 2160h # 90 days
   maxTTL: 8760h # 365-day hard ceiling; may be lowered
 
+# Background diagnostics only; these never authorize Git or release operations.
+statusProbes:
+  upstreamIntervalSeconds: 60 # 10-3600; shared SSH endpoints back off on failure
+  clusterIntervalSeconds: 60 # 10-3600
+  secretStoreIntervalSeconds: 60 # 10-3600
+  upstreamFailureThreshold: 3 # 1-10 consecutive failures before unavailable
+
 replicaCount: 1
 # Argo controller.parallelism controls the number of concurrent pipeline Workflows.
 # Agent-assisted CI continuation (retry hold). Off by default. When enabled,
