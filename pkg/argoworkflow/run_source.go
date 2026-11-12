@@ -47,7 +47,6 @@ func (s RunSourceSummary) Valid() bool {
 // one exact, policy-admitted resolution even if the source tag subsequently moves.
 type DemandReceipt struct {
 	capability bool
-	cpuPolicy  *CPURequestPolicy
 	pods       *wfv1.Workflow
 	summary    RunSourceSummary
 	fragments  map[FragmentKey]Fragment

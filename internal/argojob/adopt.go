@@ -132,8 +132,7 @@ func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 		body, err := json.Marshal(struct {
 			Spec                            wfv1.WorkflowSpec
 			PodDemand, Fallback, Capability string
-			CPURequests                     string `json:"cpu_requests,omitempty"`
-		}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation], binding, workflow.Annotations[cpuRequestsAnnotation]})
+		}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation], binding})
 		if err != nil {
 			return "", err
 		}
@@ -141,11 +140,10 @@ func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 		return hex.EncodeToString(digest[:]), nil
 	}
 	body, err := json.Marshal(struct {
-		Spec        wfv1.WorkflowSpec `json:"spec"`
-		PodDemand   string            `json:"pod_demand,omitempty"`
-		Fallback    string            `json:"resource_fallback,omitempty"`
-		CPURequests string            `json:"cpu_requests,omitempty"`
-	}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation], workflow.Annotations[cpuRequestsAnnotation]})
+		Spec      wfv1.WorkflowSpec `json:"spec"`
+		PodDemand string            `json:"pod_demand,omitempty"`
+		Fallback  string            `json:"resource_fallback,omitempty"`
+	}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation]})
 	if err != nil {
 		return "", fmt.Errorf("argojob: encode adopted Workflow spec: %w", err)
 	}

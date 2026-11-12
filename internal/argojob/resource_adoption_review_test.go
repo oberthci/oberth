@@ -24,7 +24,6 @@ func TestReviewCPUResourceOnlyWorkflowRemainsAdoptable(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := testConfig()
-	c.StepCPURequestMaxMilli = 3000
 	wf, err := Build(c, request)
 	if err != nil {
 		t.Fatal(err)

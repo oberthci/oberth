@@ -846,15 +846,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		demand, _ := receipt.WorkflowPodDemand()
 		requests = queuePodRequests(demand)
 	}
-	if sizing, ok := scheduler.jobs.(interface {
-		AdmissionRequests(context.Context, WorkflowRequest) (*argoworkflow.PodRequests, error)
-	}); ok {
-		requests, err = sizing.AdmissionRequests(ctx, jobRequest)
-		if err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("size workflow requests: %w", err))
-		}
-	}
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Requests: requests,
 		RefKind: run.RefKind, SHA: run.SHA, PriorityLookupFailed: priorityErr != nil,

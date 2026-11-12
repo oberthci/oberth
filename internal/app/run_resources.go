@@ -150,7 +150,6 @@ func (jobs *ArgoJobs) queuedCPU(ctx context.Context, request service.WorkflowReq
 	if err != nil {
 		return nil, err
 	}
-	policy := jobs.cpuPolicy(ctx, request.Run, config, resolved.Workflow())
-	demand, _ := argojob.SchedulingDemand(resolved.Workflow(), policy)
+	demand, _ := argoworkflow.DeclaredCapabilityPeak(resolved.Workflow())
 	return demand, nil
 }

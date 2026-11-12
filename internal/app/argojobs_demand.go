@@ -65,7 +65,7 @@ func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service
 			policy.Capability = capability
 		}
 	}
-	return jobs.cpuSizedReceipt(ctx, request.Run, resolved, policy)
+	return resolved.Receipt(policy)
 }
 
 // Restore the server-owned submission binding, never a fresh source analysis.
