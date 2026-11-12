@@ -95,7 +95,8 @@ Usage instrumentation wraps eligible steps with the server-delivered native
 executable. Its server-owned Pod patch adds `kubernetes.io/arch` matching that
 binary, after Argo resolves the authored Workflow/template placement. The
 original fields are preserved, but the constructed Pod has this extra selector;
-a conflicting authored architecture can remain Pending. This violates the
+instrumentation is skipped when authored selectors or node affinity name a
+different architecture; it never replaces those authored constraints. This violates the
 no-placement-injection model and remains a second explicit deviation.
 
 The release publishes Linux amd64 and arm64 executables, but each server image
@@ -128,9 +129,10 @@ execution target keeps its existing seed placement unchanged.
 With N active runs and Argo parallelism P, all N prepare and submit; P bounds
 neither server copies nor PVCs nor the source-seed Pods. Up to N seed Pods and N
 volumes can be created concurrently. Seed Pods run before their Workflow exists
-and outside Argo parallelism. A seed Pod that cannot start within the existing
-source preparation waits while a seed Pod is Pending, without creating the
-Workflow. Cancellation or supersession stops it and cleans its Pod and PVC. There is no automatic infrastructure retry. A manual retry attempts source
+and outside Argo parallelism. Source preparation waits while a seed Pod is
+Pending, without creating the Workflow. Cancellation or supersession stops it
+and cleans its Pod and PVC. There is no automatic infrastructure retry. A
+manual retry attempts source
 delivery again; YAML retryStrategy cannot cover a failure before Workflow Create.
 Custody-bound execution targets retain their uncertainty/cleanup proof before
 retrying. Cancellation, supersession and publication can affect retention.

@@ -19,6 +19,7 @@ import (
 )
 
 type nativePlacement struct {
+	PodSpecPatch string              `json:"podSpecPatch,omitempty"`
 	Affinity     *corev1.Affinity    `json:"affinity,omitempty"`
 	NodeSelector map[string]string   `json:"nodeSelector,omitempty"`
 	Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
@@ -122,7 +123,7 @@ func TestNativeOfficialPlacementExamplesReachWorkflowAPIUnchanged(t *testing.T) 
 			t.Run(filepath.Base(path)+"/"+site, func(t *testing.T) {
 				wf := nativeWorkflow(t)
 				n := int64(137)
-				before := nativePlacement{Affinity: pod.Affinity, NodeSelector: pod.NodeSelector, Tolerations: pod.Tolerations, Parallelism: &n}
+				before := nativePlacement{Affinity: pod.Affinity, NodeSelector: pod.NodeSelector, Tolerations: pod.Tolerations, Parallelism: &n, PodSpecPatch: nativePatchPlacement(t, wf.Spec.PodSpecPatch)}
 				if site == "workflow" {
 					wf.Spec.Affinity = before.Affinity
 					wf.Spec.NodeSelector = before.NodeSelector
@@ -135,10 +136,10 @@ func TestNativeOfficialPlacementExamplesReachWorkflowAPIUnchanged(t *testing.T) 
 					wf.Spec.Templates[0].Parallelism = before.Parallelism
 				}
 				submitted := nativeSubmit(t, wf)
-				after := nativePlacement{Affinity: submitted.Spec.Affinity, NodeSelector: submitted.Spec.NodeSelector, Tolerations: submitted.Spec.Tolerations, Parallelism: submitted.Spec.Parallelism}
+				after := nativePlacement{Affinity: submitted.Spec.Affinity, NodeSelector: submitted.Spec.NodeSelector, Tolerations: submitted.Spec.Tolerations, Parallelism: submitted.Spec.Parallelism, PodSpecPatch: nativePatchPlacement(t, submitted.Spec.PodSpecPatch)}
 				if site == "template" {
 					tmpl := submitted.Spec.Templates[0]
-					after = nativePlacement{Affinity: tmpl.Affinity, NodeSelector: tmpl.NodeSelector, Tolerations: tmpl.Tolerations, Parallelism: tmpl.Parallelism}
+					after = nativePlacement{Affinity: tmpl.Affinity, NodeSelector: tmpl.NodeSelector, Tolerations: tmpl.Tolerations, Parallelism: tmpl.Parallelism, PodSpecPatch: nativePatchPlacement(t, tmpl.PodSpecPatch)}
 				}
 				nativeEqual(t, before, after)
 			})
@@ -257,4 +258,23 @@ func TestNativeMetadataDescribesOnlyExistingLabels(t *testing.T) {
 	if wf.Annotations[runIDAnnotation] != request.RunID || wf.Annotations[refAnnotation] != request.Ref || wf.Annotations[identityAnnotation] == "" || wf.Annotations[PodNameVersionAnnotation] != "v2" {
 		t.Fatal("documented metadata binding missing", wf.Annotations)
 	}
+}
+
+// Security patches add executor isolation independently of scheduling. Compare
+// the patch's complete placement projection as well as the authored fields, so
+// an injected selector cannot hide behind preserved Workflow/template fields.
+func nativePatchPlacement(t *testing.T, patch string) string {
+	t.Helper()
+	var pod corev1.PodSpec
+	if patch != "" {
+		if err := json.Unmarshal([]byte(patch), &pod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selected := corev1.PodSpec{NodeSelector: pod.NodeSelector, Affinity: pod.Affinity, Tolerations: pod.Tolerations, NodeName: pod.NodeName, SchedulerName: pod.SchedulerName, PriorityClassName: pod.PriorityClassName, Priority: pod.Priority, PreemptionPolicy: pod.PreemptionPolicy}
+	encoded, err := json.Marshal(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
 }

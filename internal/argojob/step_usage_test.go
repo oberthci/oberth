@@ -226,11 +226,11 @@ func TestStepUsageWrapsExplicitCommandsAfterCredentialAdmission(t *testing.T) {
 	script := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "script", Script: &wfv1.ScriptTemplate{Container: corev1.Container{Command: []string{"sh"}, Args: []string{"-e"}}, Source: "echo yes"}}, {Name: "opaque", Container: &corev1.Container{Image: "busybox"}}}}}
 	script.Spec.Templates[0].Script.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("256Mi")}
 	injectStepUsageMounts(script, request)
-	script.Spec.Templates[0].NodeSelector = map[string]string{corev1.LabelArchStable: "other", "pool": "build"}
+	script.Spec.Templates[0].NodeSelector = map[string]string{corev1.LabelArchStable: runtime.GOARCH, "pool": "build"}
 	if err := wrapStepUsage(script, false); err != nil {
 		t.Fatal(err)
 	}
-	if got := script.Spec.Templates[0].NodeSelector; got[corev1.LabelArchStable] != "other" || got["pool"] != "build" || len(script.Spec.Templates[1].NodeSelector) != 0 {
+	if got := script.Spec.Templates[0].NodeSelector; got[corev1.LabelArchStable] != runtime.GOARCH || got["pool"] != "build" || len(script.Spec.Templates[1].NodeSelector) != 0 {
 		t.Fatalf("architecture constraint: %+v", script.Spec.Templates)
 	}
 	if !slices.Equal(script.Spec.Templates[0].Script.Command, []string{usageBinPath, usageCommand, "--", "sh"}) || !slices.Equal(script.Spec.Templates[0].Script.Args, []string{"-e"}) || len(script.Spec.Templates[1].Container.Command) != 0 {
@@ -316,7 +316,14 @@ func TestStepUsageArchPatchPreservesSchedulingInheritance(t *testing.T) {
 		}
 		before := corev1.PodSpec{NodeSelector: inherited}
 		got := applyCredentialWaitPatch(t, before, leaf.PodSpecPatch)
-		if got.NodeSelector["pool"] != inherited["pool"] || got.NodeSelector["zone"] != inherited["zone"] || got.NodeSelector["disk"] != "ssd" || got.NodeSelector[corev1.LabelArchStable] != runtime.GOARCH || got.TerminationGracePeriodSeconds == nil || *got.TerminationGracePeriodSeconds != 7 {
+		expectedArch := runtime.GOARCH
+		if authored, ok := inherited[corev1.LabelArchStable]; ok && authored != runtime.GOARCH {
+			expectedArch = authored
+			if !slices.Equal(leaf.Container.Command, []string{"sh"}) {
+				t.Fatal("incompatible architecture was wrapped")
+			}
+		}
+		if got.NodeSelector["pool"] != inherited["pool"] || got.NodeSelector["zone"] != inherited["zone"] || got.NodeSelector["disk"] != "ssd" || got.NodeSelector[corev1.LabelArchStable] != expectedArch || got.TerminationGracePeriodSeconds == nil || *got.TerminationGracePeriodSeconds != 7 {
 			t.Fatalf("scheduling constraints lost: %+v", got)
 		}
 	}

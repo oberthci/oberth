@@ -54,7 +54,7 @@ func injectStepUsageMounts(wf *wfv1.Workflow, request Request) {
 	}
 	// Warnings are server-owned, including on leaves that are not measured.
 	walkTemplates(wf, func(t *wfv1.Template) { delete(t.Metadata.Annotations, usageMemoryWarningAnnotation) })
-	if request.omitStepUsage {
+	if request.omitStepUsage || !usageArchitectureCompatible(wf) {
 		return
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {
@@ -90,6 +90,9 @@ func injectStepUsageMounts(wf *wfv1.Workflow, request Request) {
 // Wrap last: credential-chain and executor-token admission inspect the original
 // command. This transformation adds no credentials and changes no security context.
 func wrapStepUsage(wf *wfv1.Workflow, legacy bool) error {
+	if !usageArchitectureCompatible(wf) {
+		return nil
+	}
 	var failure error
 	walkTemplates(wf, func(t *wfv1.Template) {
 		c := usageContainer(t)
