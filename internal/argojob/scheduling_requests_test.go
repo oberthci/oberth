@@ -27,7 +27,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	demand, err := SchedulingDemand(wf, 3000)
+	demand, err := SchedulingDemand(wf, argoworkflow.CPURequestPolicy{MaxMilli: 3000})
 	if err != nil || demand.CPUMilli != 3050 {
 		t.Fatalf("demand=%+v err=%v", demand, err)
 	}

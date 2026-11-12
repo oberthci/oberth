@@ -187,6 +187,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
+		if err := recoverCPURequestPolicy(existing, &request); err != nil {
+			return "", err
+		}
 		if err := recoverHelperStorage(existing, &request); err != nil {
 			return "", err
 		}

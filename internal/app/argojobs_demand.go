@@ -19,6 +19,9 @@ func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service
 		}
 		return child.PipelineDemandReceipt(ctx, request)
 	}
+	if request.Run.RepoID == 0 {
+		request.Run.RepoID = request.Repository.ID
+	}
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return nil, jobs.noRunPipelineError(err, request)
@@ -60,11 +63,9 @@ func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service
 				return nil, fmt.Errorf("app: workflow capability belongs to a different execution namespace")
 			}
 			policy.Capability = capability
-			receipt, err := resolved.Receipt(policy)
-			return receipt, err
 		}
 	}
-	return resolved.Receipt(policy)
+	return jobs.cpuSizedReceipt(ctx, request.Run, resolved, policy)
 }
 
 // Restore the server-owned submission binding, never a fresh source analysis.

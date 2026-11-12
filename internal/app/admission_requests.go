@@ -21,7 +21,11 @@ func (jobs *ArgoJobs) AdmissionRequests(ctx context.Context, request service.Wor
 	if request.DemandReceipt == nil {
 		return nil, nil
 	}
-	d, err := argojob.SchedulingDemand(request.DemandReceipt.Workflow(), jobs.config.StepCPURequestMaxMilli)
+	policy := request.DemandReceipt.CPURequestPolicy()
+	if policy == nil {
+		policy = &argoworkflow.CPURequestPolicy{MaxMilli: jobs.config.StepCPURequestMaxMilli}
+	}
+	d, err := argojob.SchedulingDemand(request.DemandReceipt.Workflow(), *policy)
 	if err != nil || d == nil {
 		return nil, err
 	}

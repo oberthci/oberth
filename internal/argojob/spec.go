@@ -600,6 +600,7 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
+	recoveredCPU  *argoworkflow.CPURequestPolicy
 	nonrootProof  *nonrootProof
 	PinnedSources []PinnedSourceTree
 
@@ -877,7 +878,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	// Admission and receipt verification inspect the immutable authored graph.
 	// Default only afterwards, before any server-owned helper is injected.
 	applyRequestDefaultsPolicy(workflow, request.omitRequestDefaults, request.legacyHelperRequestDefaults)
-	capCPURequests(workflow, config.StepCPURequestMaxMilli)
+	applySchedulingCPU(workflow, request.cpuRequestPolicy(config))
 	if request.ResourceCeiling != nil {
 		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
 			return nil, err
