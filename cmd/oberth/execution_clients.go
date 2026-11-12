@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 
-	"github.com/oberthci/oberth/internal/app"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/oberthci/oberth/internal/app"
 )
 
 func schedulingClients(_ context.Context, config *rest.Config, options *serveOptions) (kubernetes.Interface, []app.ExecutionTarget, error) {

@@ -782,13 +782,10 @@ func TestRetentionCallerCancellationIsNotRetried(t *testing.T) {
 	}
 }
 
-// The historical floor remains observable even when evidence policies are
-// disabled. The sweeper reports the floor; admission enforces the hold without
-// turning it into an evidence-purge target.
+// Free-space observation remains available without evidence retention policies.
 func TestRetentionReportsFreeSpaceWithEvidencePoliciesDisabled(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/floor", "push", true)
-	const floor int64 = 1 << 62
 	if err := f.retention.Sweep(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -798,7 +795,7 @@ func TestRetentionReportsFreeSpaceWithEvidencePoliciesDisabled(t *testing.T) {
 	}
 	status := value.(RetentionStatus)
 	if status.FreeBytes <= 0 || status.LastSweep.IsZero() || status.LastError != "" {
-		t.Fatalf("disk floor observation lost: %+v", status)
+		t.Fatalf("free-space observation lost: %+v", status)
 	}
 	f.retained(t, run.ID, true)
 	body, err := json.Marshal(status)
@@ -809,7 +806,7 @@ func TestRetentionReportsFreeSpaceWithEvidencePoliciesDisabled(t *testing.T) {
 	if err := json.Unmarshal(body, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if string(fields["disk_floor_bytes"]) != fmt.Sprint(floor) || string(fields["below_floor"]) != "true" {
-		t.Fatalf("status lost disk floor fields: %s", body)
+	if fields["disk_floor_bytes"] != nil || fields["below_floor"] != nil {
+		t.Fatalf("status exposes retired disk floor fields: %s", body)
 	}
 }

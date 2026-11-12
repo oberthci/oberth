@@ -107,6 +107,9 @@ func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 		if kind == "tag" && !result.Run.Release {
 			line = fmt.Sprintf("tag accepted · CI run %s queued (%s)", shortRunID(result.Run.ID), target)
 		}
+		if result.Duplicate {
+			line += " · replay of an already-recorded push"
+		}
 		if count := result.SupersededCount; count > 0 {
 			plural := ""
 			if count != 1 {

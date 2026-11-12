@@ -12,11 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 func TestSyncLimitsUpgradeRemovesKeptObjectAndPreservesOtherObjects(t *testing.T) {

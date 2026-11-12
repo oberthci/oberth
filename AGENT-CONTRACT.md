@@ -636,45 +636,11 @@ containing CI and real workload qualification remain separately required.
   overlap another declares a native Argo mutex or semaphore. The
   `concurrency_groups` tool, `oberth admission groups` and
   `system_status.admission.groups` are gone; the `runs.concurrency_group`,
-  `runs.concurrency_limit` columns and `concurrency_group_declarations` stay in
-  the schema, unread and unwritten. Concurrency-group membership no longer
+  `runs.concurrency_limit` historical columns remain unread; the orphaned declaration table is dropped. Concurrency-group membership no longer
   restricts cancellation.
-- Every scheduling and placement setting is a Helm value rendered into a serve
-  flag, with chart-default equal to binary-default:
-  `admission.pressure.{enabled,hardCpu,hardIo}`,
-  `admission.diskFloorBytes`, `releases.serialize`
-  (`--serialize-releases`, off),
-  `admission.stallTimeout` (`--admission-stall-timeout`, 10m),
-  `admission.stepStartupAllowance`, `autoRetryInfrastructureBudget`,
-  `assist.{enabled,holdTTL,maxConcurrentHolds,execTimeout,execOutputBytes,patchMaxBytes,patchMaxFiles}`
-  (`--assist-*`, default off, 20m, 2, 1m, 64Ki, 1Mi, 64),
-  `argo.workflowTimeout`, `argo.defaultWorkflowTimeout`
-  (`--argo-default-workflow-timeout`, 30m), `argo.repoWorkflowTimeouts`
-  (`--argo-repo-workflow-timeout`), `argo.executionPlacementConfigMap`,
-  `argo.executionTargetConfigMap` (+ optional
-  `argo.executionTargetCredentialsSecret`, `--argo-execution-target-config`),
-  and `schedules.{minInterval,maxEntries}` (`--schedule-min-interval` 15m,
-  `--schedule-max-entries` 8). Queue priority classes and patterns stay runtime
-  admin state (`queue_priority_config`); the 60-minute standard-run aging is a
-  fixed rule.
-- Native Argo `synchronization` is passed through as written at workflow and
-  template level: semaphores by `configMapKeyRef`, mutexes by name, no
-  refusal, no scoping, no allowlist. Limits are operator-owned keys of the
-  ConfigMap `oberth-sync-limits` in the pipeline namespace, rendered by the
-  argo-workflows release (`oberth install --argo-sync-limit`) since v0.20.0;
-  `argoSync`, `maxConcurrentJobs` and `admission.runtimeCapacity` are removed
-  chart values that the schema and `oberth upgrade` refuse, and the chart refuses to
-  upgrade while the live ConfigMap still belongs to its release without
-  `helm.sh/resource-policy: keep`. The Argo controller queues waiters
-  (priority, then creation) and re-reads the ConfigMap. A Workflow or step Pending behind a
-  lock is exempt from `admission.stallTimeout`, and the pre-start watchdog
-  does not count a workflow-level lock wait. The existing reason line reads
-  `waiting for lock <key> (a of b free)` with the key admitted only under the
-  controller's lock-key grammar. `releases.serialize` adds the workflow-level
-  mutex `oberth-release` to every release run by trigger, merged with the
-  document's own synchronization. A held retry keeps its template lock. The
-  removed `oberth.ci/exclusive` annotation is refused at admission. No status,
-  label or layout is added. See [native synchronization](docs/native-synchronization.md).
+- Workflow resources, placement, parallelism, synchronization, priority, deadlines and retries are authored in repository YAML. Oberth configures only Argo global parallelism; it does not inject release locks or priority, manage semaphore ConfigMaps, or apply CPU/pressure/disk/hold/startup gates. Requests and deadlines are optional.
+- Assisted lifecycle settings (`assist.*`), cron entry settings (`schedules.*`), and security execution-target/profile configuration remain operator-owned. Assisted holds retain their explicit deadline extension and keep their Argo slot and locks.
+- Semaphore limits are operator-owned in `oberth-sync-limits` in the pipeline namespace. The fixed name and same-namespace restriction protect ConfigMap data from disclosure through Argo errors. The installer removes the retired managed object on upgrade; operators recreate required keys. Named mutexes and native Argo priority pass unchanged; no release mutex is reserved or injected.
 - Server-owned helper operations (secret-store delivery, trusted plan
   capture/acknowledge/deliver/load) are exec'd through the same
   `go -C /work/src/.oberth run .` invocation with explicit flags; the SDK's
@@ -996,7 +962,7 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 96 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 81 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
   assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (any uplink whose scope covers the run's repository, or an admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since`, `events_wait` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
@@ -1009,7 +975,7 @@ containing CI and real workload qualification remain separately required.
   `access_dismiss`,
   admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
-  `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
+  `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),

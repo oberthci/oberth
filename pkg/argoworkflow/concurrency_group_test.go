@@ -14,10 +14,16 @@ func groupedDocument(annotations string) string {
 // Removed annotations are refused with what replaced them, never ignored.
 func TestAdmitRefusesRemovedAnnotations(t *testing.T) {
 	for name, want := range map[string]string{
-		"oberth.ci/concurrency-group": "native Argo mutex or semaphore",
-		"oberth.ci/concurrency-limit": "native Argo mutex or semaphore",
-		"oberth.ci/size":              "resources block",
-		"oberth.ci/size-by-trigger":   "resources block",
+		"oberth.ci/concurrency-group":            "native Argo mutex or semaphore",
+		"oberth.ci/concurrency-limit":            "native Argo mutex or semaphore",
+		"oberth.ci/size":                         "resources block",
+		"oberth.ci/size-by-trigger":              "resources block",
+		"oberth.ci/cpu-requests":                 "Workflow YAML",
+		"oberth.ci/request-defaults":             "Workflow YAML",
+		"oberth.ci/declared-pod-demand":          "Workflow YAML",
+		"oberth.ci/resource-admission-fallback":  "Workflow YAML",
+		"oberth.ci/step-deadline-seconds":        "Workflow YAML",
+		"oberth.ci/step-start-allowance-seconds": "Workflow YAML",
 	} {
 		workflow, err := Decode([]byte(groupedDocument("    " + name + ": \"2\"\n")))
 		if err != nil {

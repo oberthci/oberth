@@ -57,7 +57,7 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 		if summary {
 			expectedRepo = "codeberg/acme/oberth"
 		}
-		if row[repo] != expectedRepo || row[ref] != old.Ref || row[sha] != old.SHA || row[position] != float64(1) || row["superseded"] != true {
+		if row[repo] != expectedRepo || row[ref] != old.Ref || row[sha] != old.SHA || row[position] != nil || row["superseded"] != true {
 			t.Errorf("missing run context: %#v", row)
 		}
 		for _, retired := range []string{"size", "declared_resources"} {
@@ -80,9 +80,9 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 			if len(rows) != 2 {
 				t.Fatalf("run count=%d, want 2", len(rows))
 			}
-			oldIndex, newIndex := 0, 1
+			oldIndex, newIndex := 1, 0
 			oldRow, newRow := rows[oldIndex].(map[string]any), rows[newIndex].(map[string]any)
-			if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID || newRow["QueuePosition"] != float64(2) {
+			if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID || newRow["QueuePosition"] != float64(1) {
 				t.Fatalf("unexpected %s queue order: %#v", view, rows)
 			}
 			assert(t, oldRow, false)
@@ -119,9 +119,9 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 				if len(rows) != 2 {
 					t.Fatalf("run count=%d, want 2", len(rows))
 				}
-				oldIndex, newIndex := 0, 1
+				oldIndex, newIndex := 1, 0
 				oldRow, newRow := rows[oldIndex].(map[string]any), rows[newIndex].(map[string]any)
-				if oldRow["id"] != old.ID || newRow["id"] != newer.ID || newRow["queue_position"] != float64(2) || oldRow["ID"] != nil {
+				if oldRow["id"] != old.ID || newRow["id"] != newer.ID || newRow["queue_position"] != float64(1) || oldRow["ID"] != nil {
 					t.Fatalf("unexpected %s queue order: %#v", path, rows)
 				}
 				assertNames(t, oldRow, true, false)
@@ -144,8 +144,8 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 		}
 		for _, id := range []string{old.ID, newer.ID} {
 			run, err := f.store.Run(ctx, id)
-			if err != nil || !run.Status.Active() {
-				t.Fatalf("read cancelled run: %+v %v", run, err)
+			if err != nil || (id == old.ID && run.Status != model.RunInterrupted) || (id == newer.ID && run.Status != model.RunQueued) {
+				t.Fatalf("read mutated run: %+v %v", run, err)
 			}
 		}
 	})
@@ -157,9 +157,6 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claimed, err := f.store.ClaimNextRun(t.Context()); err != nil || claimed.ID != old.ID {
-		t.Fatalf("claim context fixture: %+v %v", claimed, err)
-	}
 	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("b", 40), Actor: "reader", Trigger: "push"}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,12 +167,6 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 			t.Fatal(err)
 		}
 		rows := runContextJSON(t, value)["runs"].([]any)
-		if view == "history" {
-			if len(rows) != 0 {
-				t.Fatalf("history includes active rows: %#v", rows)
-			}
-			continue
-		}
 		if len(rows) != 1 {
 			t.Fatalf("filtered scoped rows: %#v", rows)
 		}
@@ -203,7 +194,7 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 
 func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 	f := newControlFixture(t)
-	// Claimed priority-selected work stays active beside a newer run in the same lane.
+	// A newer ordinary push supersedes the older run in the same lane.
 	reader := f.api(t)
 	// A nonmatching run remains ahead globally even when the filter hides it.
 	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/other", SHA: strings.Repeat("c", 40), Actor: "reader", Trigger: "push"}); err != nil {
@@ -236,7 +227,7 @@ func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 		{"?superseded=true", 200, 1},
 		{"?superseded=true&repo=" + f.repo.Name + "&ref=feature/context", 200, 1},
 		{"?superseded=true&ref=other", 200, 0},
-		{"?superseded=true&view=history", 200, 0},
+		{"?superseded=true&view=history", 200, 1},
 		{"?superseded=true&latest_per_ref=1", 200, 0},
 		{"?superseded=false", 200, 3},
 		{"?superseded=1", 400, 0},
@@ -263,7 +254,7 @@ func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 			if len(rows) != tc.count {
 				t.Fatalf("filtered rows: %s", response.Body)
 			}
-			if tc.count == 1 && (rows[0]["id"] != runs[0].ID || rows[0]["superseded"] != true || rows[0]["queue_position"] != float64(2)) {
+			if tc.count == 1 && (rows[0]["id"] != runs[0].ID || rows[0]["superseded"] != true || rows[0]["queue_position"] != nil) {
 				t.Fatalf("wrong filtered context: %#v", rows[0])
 			}
 		})

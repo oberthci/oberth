@@ -11,10 +11,6 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-type stalledGrantJobs struct{ *fakeJobs }
-
-func (j stalledGrantJobs) AwaitAdmission(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
-
 type admissionExpiredFailure struct{}
 
 func (*admissionExpiredFailure) Error() string {

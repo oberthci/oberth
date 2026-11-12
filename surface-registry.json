@@ -6,15 +6,15 @@
     },
     "value:memory": {
       "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
-      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseUpstreamPodDefaults"
     },
     "value:requests": {
       "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
-      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseUpstreamPodDefaults"
     },
     "value:resources": {
       "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
-      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseUpstreamPodDefaults"
     },
     "value:host_swap": {
       "doc_anchor": "docs/host-preparation.md#swap-or-zram",
@@ -70,7 +70,7 @@
     },
     "value:priorityClassName": {
       "doc_anchor": "docs/platform-protection.md#platform-protection",
-      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseUpstreamPodDefaults"
     },
     "flag:argo-controller-profile-configmap": {
       "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
@@ -124,10 +124,6 @@
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
     },
-    "flag:argo-namespace-parallelism": {
-      "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
-      "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
-    },
     "annotation:oberth.ci/concurrency-group": {
       "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
       "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
@@ -141,10 +137,6 @@
       "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
     },
     "value:serialize": {
-      "doc_anchor": "docs/native-synchronization.md#serialized-releases",
-      "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
-    },
-    "flag:serialize-releases": {
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",
       "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
     },
@@ -427,14 +419,6 @@
     "flag:anonymize": {
       "doc_anchor": "docs/measured-requests.md#resource-history-and-reviewed-declarations-1216-stage-a",
       "test_ref": "cmd/oberth/run_resources_test.go TestRunResourcesAnonymize"
-    },
-    "flag:auto-retry-infrastructure-budget": {
-      "doc_anchor": "docs/infrastructure-retries.md#administration",
-      "test_ref": "cmd/oberth/infra_retry_test.go TestInfrastructureRetryBudgetSetting"
-    },
-    "value:autoRetryInfrastructureBudget": {
-      "doc_anchor": "docs/infrastructure-retries.md#administration",
-      "test_ref": "cmd/oberth/infra_retry_test.go TestChartInfrastructureRetryBudget"
     },
     "flag:answers": {
       "doc_anchor": "docs/install-answers.md",
@@ -886,11 +870,27 @@
     },
     "annotation:oberth.ci/cpu-requests": {
       "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "internal/argojob/native_requests_test.go TestNativeSubmissionLeavesUndeclaredResourcesAndParallelismAlone"
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
     },
     "annotation:oberth.ci/request-defaults": {
       "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "internal/argojob/native_requests_test.go TestNativeSubmissionLeavesUndeclaredResourcesAndParallelismAlone"
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
+    "annotation:oberth.ci/declared-pod-demand": {
+      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
+    "annotation:oberth.ci/resource-admission-fallback": {
+      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
+    "annotation:oberth.ci/step-deadline-seconds": {
+      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
+    "annotation:oberth.ci/step-start-allowance-seconds": {
+      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
     }
   }
 }

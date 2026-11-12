@@ -11,13 +11,6 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-func evictionResult(name string, at time.Time) JobResult {
-	return JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: "Evicted: The node was low on resource: ephemeral-storage.",
-		Steps:               []model.StepResult{{Stage: "ci", Step: "install-helm", Status: model.StepFailed, DeclaredSize: "M", StartedAt: &at, FinishedAt: &at}},
-		TerminalObservation: &model.RunTerminalObservation{Version: 1, WorkflowName: name, Nodes: 2, Steps: []model.RunObservedStep{{Stage: "ci", Step: "install-helm", Status: model.StepFailed, Started: true, Evicted: true, StartedAt: &at, FinishedAt: &at}}},
-	}
-}
-
 func TestDeterministicAdmissionRefusalsDoNotAutoRetry(t *testing.T) {
 	for name, cause := range map[string]error{
 		"configuration": &argoworkflow.AdmissionError{Cause: fmt.Errorf("invalid workflow configuration")},
@@ -52,12 +45,3 @@ func TestEvictionDisplayReason(t *testing.T) {
 
 	}
 }
-
-// Mirrors the controller's pre-create wrapper: false is not proof of a
-// deterministic refusal, and the underlying error must remain inspectable.
-type preparationRetryFailure struct{ cause error }
-
-func (e *preparationRetryFailure) Error() string             { return e.cause.Error() }
-func (e *preparationRetryFailure) Unwrap() error             { return e.cause }
-func (*preparationRetryFailure) InfrastructureFailure() bool { return false }
-func (*preparationRetryFailure) BeforeWorkflowCreate() bool  { return true }

@@ -127,8 +127,8 @@ INSERT INTO priority_grants(identity,max_class,expires,granted_by) VALUES('opera
 					t.Fatalf("token changed: %+v %v", token, err)
 				}
 				var grants int
-				if err = s.db.QueryRow(`SELECT count(*) FROM priority_grants WHERE identity='operator'`).Scan(&grants); err != nil || grants != 1 {
-					t.Fatalf("priority grant changed: %d %v", grants, err)
+				if err = s.db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name='priority_grants'`).Scan(&grants); err != nil || grants != 0 {
+					t.Fatalf("retired priority table remains: %d %v", grants, err)
 				}
 				afterAudit, err := s.VerifyAuditChain(t.Context())
 				if err != nil || !reflect.DeepEqual(beforeAudit, afterAudit) {

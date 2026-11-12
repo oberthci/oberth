@@ -228,18 +228,8 @@ await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').includes('live output'), 'an execution display label must not stop durable-running log refresh');
 console.log('live log dashboard checks passed');
 
-// Host pressure is a scheduling hold, distinct from running-work failures.
-// The server computes the reason once; the dashboard shows display_reason.
-assert.equal(run(`queueReason({display_reason:'host IO pressure (42%)',scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',avg60:42.25}}}})`), 'host IO pressure (42%)');
-assert.equal(run(`queueReason({display_reason:'host CPU pressure (75%), behind org/app/main',scheduling:{state:'waiting',admission:{state:'waiting',blocked_by:{pressure:{resource:'cpu',avg60:75},size:'M'}}}})`), 'host CPU pressure (75%), behind org/app/main');
-assert.equal(run(`pressureStatusCard(null)`), '', 'scoped status omits host PSI');
-assert.ok(run(`pressureStatusCard({available:false})`).includes('admission fails open'));
-assert.ok(run(`pressureStatusCard({available:true,holding:true,resource:'io',sample:{io:{full_avg60:40},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('deferring new grants'));
-assert.equal(run(`queueReason({display_reason:'host IO pressure',scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'host IO pressure');
-
-// RCA run-list vocabulary is additive: raw failure/cancellation states survive.
-assert.equal(run(`displayRunStatus({status:'failed',auto_retried_by:'retry'})`), 'infra-retried');
-assert.equal(run(`statusKind('infra-retried')`), 'warn');
+// Run-list vocabulary is additive: raw failure/cancellation states survive.
+assert.equal(run(`displayRunStatus({status:'failed'})`), 'failed');
 assert.equal(run(`displayRunStatus({status:'interrupted',superseded_by:'new'})`), 'superseded');
 assert.equal(run(`displayRunStatus({status:'interrupted'})`), 'cancelled');
 // The list always shows branch/tag heads, with history only on run detail.
@@ -290,12 +280,7 @@ await run('awaitResult');
 assert.equal(run(`state.attempts.size`), 0);
 console.log('run-list grouping and detail-history checks passed');
 
-assert.equal(run(`summaryLines({run:{id:'original',status:'failed',auto_retried_by:'retry',display_reason:'infra error, retried as retry'},steps:[]}).some(line => line.startsWith('[queued]'))`), false);
-
-assert.equal(run(`admissionStatusCard(undefined)`), '');
-const admissionCard = run(`admissionStatusCard({runs:3,used:3})`);
-for (const text of ['3 admitted', 'Argo controller parallelism']) assert.ok(admissionCard.includes(text), text);
-assert.ok(!admissionCard.includes('run slots'));
+assert.equal(run(`summaryLines({run:{id:'original',status:'failed',display_reason:'infrastructure error'},steps:[]}).some(line => line.startsWith('[queued]'))`), false);
 
 // Controller-profile holds must be visible and refresh without delaying logs.
 assert.equal(run(`controllerProfileStatusCard(null)`), '');
@@ -333,20 +318,3 @@ run('statusRefreshPromise=ensureStatus();');
 await run('statusRefreshPromise');
 assert.equal(run('profileStatusCalls'), 3, 'status failures retain the 30s retry backoff');
 run('api=capacityStatusSavedAPI;');
-
-// The shared regression ships in both topic bundles and runs once both UI
-// features are present in the assembled tree.
-if (run(`typeof capacityStatusCard === 'function' && typeof controllerProfileStatusCard === 'function'`)) {
-  await import('./test-runtime-controller-combined.mjs');
-}
-assert.ok(run(`pressureStatusCard({mode:'observe',available:true,threshold_exceeded:true,holding:false,resource:'io',sample:{io:{full_avg60:72},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('observation only'));
-assert.ok(!run(`pressureStatusCard({mode:'observe',available:true,threshold_exceeded:true,holding:false,resource:'io'})`).includes('deferring new grants'));
-
-// Avg10 host admission reports both signals and preserves scoped redaction.
-assert.equal(run(`queueReason({display_reason:'host CPU and IO pressure (CPU 45%, IO 31%)',scheduling:{state:'waiting',admission:{pressure:{resource:'cpu+io',avg10_gate:true,cpu_avg10:45.25,io_avg10:30.5}}}})`), 'host CPU and IO pressure (CPU 45%, IO 31%)');
-assert.equal(run(`queueReason({scheduling:{state:'waiting',message:'Waiting in the weighted resource admission queue.',admission:{pressure:{resource:'cpu+io',redacted:true}}}})`), '', 'long observations stay in detail when no server reason was presented');
-const avg10Card=run(`pressureStatusCard({cpu_some_avg10:40,available:true,holding:true,resource:'cpu',sample:{cpu:{some_avg10:60},io:{some_avg10:12}}})`);
-assert.ok(avg10Card.includes('CPU some 60.0%') && avg10Card.includes('IO some 12.0%') && avg10Card.includes('(avg10)'));
-assert.ok(run(`pressureStatusCard({available:false})`).includes('budget-only admission'));
-
-assert.equal(run(`queueReason({display_reason:'host CPU pressure (CPU 60%, IO 0%)',scheduling:{state:'waiting',admission:{pressure:{resource:'cpu',avg10_gate:true,cpu_avg10:60}}}})`), 'host CPU pressure (CPU 60%, IO 0%)');

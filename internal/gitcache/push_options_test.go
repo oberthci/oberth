@@ -53,7 +53,7 @@ func TestAssistPushOptionsSurviveReceiveAndReplay(t *testing.T) {
 func TestRetiredSchedulingPushOptionsRefuseReceive(t *testing.T) {
 	for _, option := range []string{"oberth.priority=high", "oberth.priority_reason=repair", "oberth.supersede=true"} {
 		got := parsePushOptions([]string{option})
-		if got.err == nil || !strings.Contains(got.err.Error(), "removed in v0.22.0") {
+		if got.err == nil || !strings.Contains(got.err.Error(), "not supported") {
 			t.Fatalf("%s: %+v", option, got)
 		}
 	}

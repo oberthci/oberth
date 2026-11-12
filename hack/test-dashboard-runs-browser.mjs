@@ -31,7 +31,7 @@ const oldest = makeRun('oldest');
 const scheduled = makeRun('scheduled-running', {status:'running', trigger:'schedule', schedule_entry:'nightly', finished_at:null, display_reason:'schedule: nightly'});
 const scheduledQueued = makeRun('scheduled-queued', {status:'queued', trigger:'schedule', schedule_entry:'daily', started_at:null, finished_at:null, display_reason:'awaiting scheduler'});
 const nightlyFailed = makeRun('nightly-failed', {status:'failed', trigger:'schedule', schedule_entry:'nightly', error:'nightly failed before a newer successful push'});
-const retried = makeRun('retry-failed', {ref:'feature', status:'failed', auto_retried_by:'head-retry'});
+const retried = makeRun('retry-failed', {ref:'feature', status:'failed'});
 const active = [scheduled, scheduledQueued, heads[3], heads[4]];
 const flat = [...heads, older, superseded, oldest, nightlyFailed, retried, scheduled, scheduledQueued];
 const repos = [{id:1, name:'oberth', upstream_id:1}, {id:2, name:'example', upstream_id:1}, {id:3, name:'work-laptop-identities', upstream_id:1}];
@@ -155,7 +155,7 @@ try {
       await page.evaluate(()=>route(true));
       assert.ok((await page.locator('.runs-footer').textContent()).includes('all active runs included'));
     }
-    for (const [filter, id] of [['failed','nightly-failed'],['superseded','old-superseded'],['infra-retried','retry-failed'],['running','scheduled-running']]) {
+    for (const [filter, id] of [['failed','nightly-failed'],['superseded','old-superseded'],['failed','retry-failed'],['running','scheduled-running']]) {
       const start = requests.length;
       await page.locator(`[data-status-filter="${filter}"]`).click();
       await page.locator(`.runs-table > [data-run-id="${id}"]`).waitFor();

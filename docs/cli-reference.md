@@ -72,30 +72,6 @@ Usage: oberth admin readiness
 Print cached readiness as JSON with a safe reason code. A not-ready state is a successful diagnostic read.
 ```
 
-## oberth admission
-
-```text
-Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
-       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-```
-
-## oberth admission hold
-
-```text
-Usage: oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-Default allow: tag,release. Default duration: 2h; maximum: 12h. --allow '' holds all new admission.
-```
-
-## oberth admission release
-
-```text
-Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
-       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-```
-
 ## oberth artifacts
 
 ```text
@@ -431,12 +407,8 @@ Flags:
         install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)
   -argo-namespace string
         namespace pipelines execute in; must differ from --namespace (default: oberth-argo)
-  -argo-namespace-parallelism int
-        Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value) (default -1)
   -argo-parallelism int
         Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2) (default -1)
-  -argo-sync-limit value
-        semaphore limit key=N in the ConfigMap oberth-sync-limits, rendered by the argo-workflows release (repeatable; the set given replaces the previous one; see docs/where-limits-live.md)
   -argo-values-reviewed sha256:DIGEST
         keep stored argo-workflows values the nonroot profile does not know: sha256:DIGEST of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)
   -argo-vault-address string
@@ -1624,16 +1596,6 @@ Flags:
         one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain
   -accept-witness-genesis string
         one-shot acknowledgment: exact current audit chain head as <auditID>:<sha256hex>; marks it as the witness genesis so external witnessing starts there, explicitly trusting all prior local history (enables Rekor on an existing deployment)
-  -admission-disk-floor-bytes int
-        when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
-  -admission-stall-timeout duration
-        workflow startup or Insufficient-CPU Pod wait bound; native Argo synchronization waits are exempt (default 10m0s)
-  -admission-step-startup-allowance-max-seconds int
-        largest step start-up allowance in seconds (0-3600); 0 disables the allowance (default 600)
-  -admission-step-startup-allowance-min-seconds int
-        smallest step start-up allowance in seconds (0-3600, at most the maximum) (default 120)
-  -admission-step-startup-allowance-percent int
-        Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499) (default 50)
   -agent-events-heartbeat duration
         keepalive interval of MCP streams (1s-5m) (default 20s)
   -agent-events-interval duration
@@ -1656,8 +1618,6 @@ Flags:
         pin the nonroot profile ConfigMap (oberth-argo-nr-<digest>); empty follows the canonical profile the controller names in --configmap
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
-  -argo-default-workflow-timeout duration
-        deadline of a Workflow that declares no activeDeadlineSeconds, capped by --argo-workflow-timeout (default 30m0s)
   -argo-execution-placement-config string
         absolute path to administrator-owned isolated execution placement JSON
   -argo-execution-target-config string
@@ -1694,8 +1654,6 @@ Flags:
         absolute path to administrator-owned release tag pattern -> workflow file JSON
   -argo-release-wif-config string
         absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)
-  -argo-repo-workflow-timeout value
-        administrator repository deadline cap: upstream/org/repo=30m (repeatable)
   -argo-resource-sampler-config string
         administrator-owned kubelet sampler JSON config; disabled when empty
   -argo-source-storage-class string
@@ -1708,8 +1666,6 @@ Flags:
         OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)
   -argo-vault-credentialed-role string
         OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace
-  -argo-workflow-timeout duration
-        ceiling on a Workflow's own activeDeadlineSeconds (default 12h0m0s)
   -argo-workflow-ttl int
         finished Workflow retention in seconds (default 3600)
   -artifact-retention duration
@@ -1758,8 +1714,6 @@ Flags:
         optional PEM file containing pinned TSA trust roots
   -audit-tsa-url string
         RFC 3161 timestamp authority HTTPS URL (empty disables external timestamps)
-  -auto-retry-infrastructure-budget int
-        automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most 5) (default 2)
   -ci-cache-root string
         CI host cache root (default "/var/cache/oberth/ci")
   -data string
@@ -1832,8 +1786,6 @@ Flags:
         OpenBao transit key for trusted Plan artifacts
   -secretstore-transit-mount string
         OpenBao transit mount for trusted Plan artifacts (enables trusted Plan/Apply with --secretstore-transit-key)
-  -serialize-releases
-        give every release run the native Argo workflow-level mutex oberth-release, so no two releases of any repository run at once (Helm releases.serialize)
   -source-allowlist string
         JSON map of consumer upstream/org/repository to allowed pinned source repositories; empty denies all (default "{}")
   -ssh-host-key string

@@ -83,10 +83,8 @@ const (
 // command that failed on its own did so with another code, before the
 // budget. Only the latter is retried and held. A command that happens to
 // exit 137, 143 or 255 itself, or one that outlives its budget during the
-// kubelet's check interval, is not held: conservative, and it keeps #1499
-// start-up classification and the run-level infrastructure retry exactly as
-// for an unassisted run, as is a genuine failure after a long Pending phase
-// that pushed the duration past the budget.
+// kubelet's check interval, is not held: conservative, as is a genuine failure after a long Pending phase
+// that pushed the duration past the authored budget.
 func assistCommandFailure(budget int64) string {
 	// Argo prefixes main's kubelet termination reason before its message.
 	// Unknown/other terminations must settle for run-level classification,

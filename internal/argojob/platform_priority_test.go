@@ -8,9 +8,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Pipeline Pods use the non-preempting lower tier. The only
-// Workflow queue priority is the trigger-based ReleasePriority on release
-// runs (Argo's postponed queue and lock grants, never Pod scheduling).
+// Ordinary source without a priority class receives no server priority override.
 func assertOrdinaryWorkflowPriority(t *testing.T, workflow *wfv1.Workflow) {
 	t.Helper()
 	if workflow.Spec.PodPriorityClassName != "" {
@@ -32,12 +30,5 @@ func assertOrdinaryWorkflowPriority(t *testing.T, workflow *wfv1.Workflow) {
 			t.Fatalf("CI template %s received a priority override", template.Name)
 		}
 		assertPatch(template.PodSpecPatch)
-	}
-}
-
-func assertPipelinePodPriority(t *testing.T, pod *corev1.Pod) {
-	t.Helper()
-	if pod.Spec.PriorityClassName != "" || (pod.Spec.Priority != nil && *pod.Spec.Priority != 0) {
-		t.Fatalf("pipeline Pod received a preempting or control-plane priority: %s", pod.Name)
 	}
 }

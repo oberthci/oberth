@@ -143,12 +143,12 @@ func resourceUsageCommand(command []string) []string {
 // document that carries one is refused, naming what replaced it, instead of
 // running as if it took effect.
 var removedAnnotations = map[string]string{
-	"oberth.ci/cpu-requests":                 "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/request-defaults":             "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/declared-pod-demand":          "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/resource-admission-fallback":  "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/step-start-allowance-seconds": "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/step-deadline-seconds":        "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/cpu-requests":                 "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/request-defaults":             "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/declared-pod-demand":          "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/resource-admission-fallback":  "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/step-start-allowance-seconds": "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/step-deadline-seconds":        "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
 
 	"oberth.ci/size":              "Kubernetes places each Pod by its authored resources block; delete the annotation",
 	"oberth.ci/size-by-trigger":   "Kubernetes places each Pod by its authored resources block; delete the annotation",

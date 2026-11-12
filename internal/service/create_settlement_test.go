@@ -194,7 +194,7 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 				t.Fatal(finished, err)
 			}
 			counts, err := f.store.CountRuns(t.Context())
-			if err != nil || counts.Total != 2 {
+			if err != nil || counts.Total != 4 {
 				t.Fatal("cleanup created an automatic attempt", counts, err)
 			}
 

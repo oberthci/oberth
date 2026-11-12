@@ -80,14 +80,3 @@ await run('renderRuns(state.routeSeq)');
 const repoReads = requested.filter(path => path.startsWith('/api/repos'));
 assert.deepEqual(repoReads, ['/api/repos?view=summary'], 'the runs page reads the summary view at most once per slow poll');
 console.log('Runs page repository polling passed');
-
-// The admission hold is shown whole.
-const reason = 'release qualification for the storage migration; do not admit branch work until the backup is verified';
-const card = run(`admissionStatusCard({runs: 1, hold: {on: true, reason: ${JSON.stringify(reason)}, actor: 'operator', allow: ['tag']}})`);
-assert.match(card, /held by admin/);
-assert.ok(card.includes(reason.replaceAll("'", '&#39;')), 'the whole hold reason is on the admission card');
-assert.match(card, /by operator/);
-assert.match(run(`admissionHoldBanner({hold: {on: true, reason: 'r'}})`), /Queue held by admin/);
-assert.equal(run(`admissionHoldBanner({hold: {on: false, reason: 'r'}})`), '');
-assert.match(run(`admissionStatusCard({runs: 2})`), /2 admitted/);
-console.log('Admission hold passed');

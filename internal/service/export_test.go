@@ -77,10 +77,6 @@ func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *s
 	return fixture.persistSteps(ctx, runID, steps, index)
 }
 
-type fakeClock struct{ now time.Time }
-
-func (clock *fakeClock) Now() time.Time { return clock.now }
-
 func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, want model.RunStatus) model.Run {
 	t.Helper()
 	deadline := time.Now().Add(testStartTimeout(15 * time.Second))

@@ -370,7 +370,7 @@ one with a non-admin token is still answered with the server's refusal.
 | `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, admission context, superseded status, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained timing |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
-| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Protected priority runs can be cancelled only by their requester or an unscoped admin; the existing run-cancel policy still applies. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
+| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run (`id`): step, pod, attempt, `held_since`, kubelet `deadline`, `patch_capable`, `released`; plus the run's assist record and the `assist.*` policy. Read-only. See [assisted continuation](assisted-continuation.md) |
 | `run_hold_exec` | Run one bounded argv (no shell) inside a held step's main container (`id`, `argv`, optional `step`, `stdin`, `timeout_s`). Any uplink whose scope covers the run's repository, or admin; bounded by `assist.execTimeout`/`execOutputBytes`; serialized per run; recorded and audited (`run.assist.exec`) before the command runs, which marks the run assisted |
 | `run_hold_patch` | Apply a unified `diff` to the held step's writable `/work/src` through the server's Pod helper (`id`, `diff`, optional `step`): exact context, clean relative paths only, no renames/binaries/`.git`/symlinks, bounded by `assist.patchMaxBytes`/`patchMaxFiles`; the diff's sha256 is recorded and audited as `run.assist.patch` before it is applied, which marks the run assisted |
@@ -426,12 +426,6 @@ one with a non-admin token is still answered with the server's refusal.
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
 | `access_revoke` | Revoke a step's access to a secret path (admin-only) |
-| `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
-| `queue_priority_get` | Read RC patterns and the 60-minute threshold after which a standard run ages into promotion; unscoped admin |
-| `priority_grant` | Allow `identity` to request priority up to `max_class` (`promotion` or `high`) until RFC3339 `expires`; unscoped admin, audited |
-| `priority_grant_list` | List priority grants and expiry; unscoped admin |
-| `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
-| `run_priority` | Set a waiting run using exact `id`, `priority` (`low`, `standard`, `promotion` or `high`) and `reason`; unscoped admin, audited |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix
@@ -535,7 +529,7 @@ orphaned files with no run row, recording the removal in the audit trail.
 Disabled policies preserve orphaned files too.
 
 `system_status` reports storage usage and free space cached by the last sweep,
-the disk floor, and the last sweep time/error. It does not rescan evidence trees.
+and the last sweep time/error. It does not rescan evidence trees.
 
 ### Filtering log output
 
@@ -696,12 +690,6 @@ when an observer is unavailable.
 - `queue_position` is global accepted order across unclaimed and claimed but
   unadmitted runs, computed before repository/ref filters. Publication
   gates can let later runs execute first; it is not an ETA.
-- `admission` reports the run's place in the gate: `preparing`,
-  `waiting`, or `admitted`, with the same global queue `position` and the
-  number of admitted runs as `used`. Scoped uplinks see no global position or
-  used. A submitted Workflow the Argo controller postponed for its
-  parallelism shows `execution.message` `Waiting for an Argo workflow slot
-  (controller parallelism).` ([where limits live](where-limits-live.md)).
 - `execution` reports observed Workflow phase, up to 16 node phase/message
   summaries and 16 Pod phase/reason summaries. It can identify unscheduled Pods,
   insufficient CPU/memory, unbound claims, image pull waits, startup, and known
@@ -732,9 +720,8 @@ schedule entry, as in enqueue supersession. Named schedules are independent of
 ordinary branch pushes and of other schedule entries. Legacy unnamed schedules
 share the ordinary branch lane. Tags and promotion attempts never qualify and
 cannot supersede branch work. A newer terminal run does not qualify.
-The signal is independent of priority, SHA equality, admission order and page
-boundaries. Priority-protected runs and runs with pending publications can
-still match. This is a live read observation, distinct from durable
+The signal is independent of SHA equality, accepted order and page
+boundaries. Runs with pending publications can still match. This is a live read observation, distinct from durable
 `SupersededBy` cancellation history; it does not compare with an upstream branch
 head or guarantee that a matching run is safe to cancel.
 
@@ -744,12 +731,12 @@ false leaves the list unfiltered. Filtering happens before the page limit,
 while queue positions retain their global rank. To inspect only active work,
 use `view:"active"`; results can include running work as well as queued work.
 Review each matching run and explicitly call the admin `run_cancel` tool with
-its ID and a reason. Listing never cancels work; existing priority/protection
+its ID and a reason. Listing never cancels work; existing publication-custody
 and cancellation authorization checks still apply.
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
-list has three groups: the queue in scheduler claim order (highest effective
-priority first, including aged promotion work, then FIFO within each class); running runs, most recently started first; then terminal runs, most
+list has three groups: accepted work awaiting submission in FIFO order;
+running runs, most recently started first; then terminal runs, most
 recently finished first, with passed and failed interleaved by finish time.
 The first page carries every queued and running run; the page limit counts
 only terminal rows, so no limit or page ever drops a queued or running run or
@@ -762,27 +749,19 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
   sequence paging via `before`/`next_before`/`next_cursor`.
 - `active` is deprecated; it still returns every queued, waiting and running
   run in one unpaged list (at most 500): started runs (oldest start first), then
-  all runs that have not started, claimed or unclaimed, in one queue. Effective
-  priority comes first, then ascending admission sequence and queue sequence
-  (FIFO), matching the scheduler's claim order. Each run that has not started carries
-  `Scheduling` with its state, message, queue or admission position and
-  `used`, so a run blocking the head of the queue says so.
+  all runs that have not started, claimed or unclaimed, in acceptance order.
+  Each run that has not started carries `Scheduling` with its state, message
+  and unscoped submission position. Argo determines the execution order.
 
 Every run response includes `display_status` and `display_reason`, while
 durable `Status` stays unchanged. `display_status` is exactly one of
 `queued`, `running`, `passed`, `failed`, `superseded` and
-`cancelled`; everything finer is the reason line. Every run that has not
-started is `queued`: durable queued, or claimed before admission (raw
-`Status` `waiting`). Its `display_reason` names what it waits for in plain
-words (`next in line`, `waiting for 9.9 CPU, 16 GiB`,
-`waiting for 1 CPU, 512 MiB · host IO pressure`, `10 runs already running (limit 10)`,
-`group deploy busy`, `starting`);
-`Scheduling.state` and `Scheduling.message` keep the raw observation.
-Admission records `started_at`, so an admitted run, including a trusted
-preflight before Workflow submission, displays `running`; an uncertain
-Workflow create or an exceeded deadline is its reason, not a status. Passed rows show `closes #N` or `refs #N` only from Git-parsed commit trailers,
-optionally followed by `schedule <entry>`. This display is independent of the
-repository policy authorizing closure; it cannot close issues by itself.
+`cancelled`; everything finer is the reason line. Accepted work awaiting submission and Workflows Pending in Argo display
+`queued`; running Workflows display `running`. The reason names native
+waiting, for example `waiting for an Argo workflow slot`, `pod pending:
+Insufficient cpu`, or a native synchronization lock. `Scheduling.state` and
+`Scheduling.message` retain curated read-only observation. Authored Workflow
+and template deadlines apply; Oberth adds no startup timer or watchdog.
 Terminal runs display
 `passed` (including published releases), `failed` (a deadline or memory
 kill is the reason), `superseded` with the superseding SHA,
@@ -1064,63 +1043,6 @@ remain masked. A resource outside the uplink's scope still answers like a
 missing resource, without revealing its existence. An HTTP authentication
 failure is separate from an authenticated tool refusal.
 
-### Queue priority administration
-
-The four execution classes are `low < standard < promotion < high`. Ordinary
-builds default to standard. Promotion CI and eligible oldest tag/releases use
-promotion; admin RC globs also select promotion. After 60 minutes standard work
-joins promotion at its original FIFO position. No automatic path creates high.
-High requires explicit unscoped-admin or unexpired high-grant authority. A
-promotion-only grant cannot authorize high. Already admitted/running work is
-never preempted, and all pressure/resource/group/hold/publication guards remain.
-
-`run_priority` sets a waiting run to any of the four names, with a full ID or
-unique 8+ hexadecimal prefix and a 1–512 byte reason. It supports explicit
-lowering and pins the class against aging. Unscoped admin only; actor, previous
-class, selected class and reason are audited atomically. Restart and automatic
-refire preserve the override, reason and admission place. Manual retries receive
-a new place. Local updates refresh waiting reservations; external updates poll
-within 15 seconds without blocking on SQLite contention.
-
-`queue_priority_config {"rc_patterns":["rc/*","release/*"]}` replaces the
-installation's at-most-16 case-sensitive globs; `*`/`?` match slash, `[]` disables.
-`queue_priority_get` returns globs and `starvation_minutes:60`. Patterns grant
-promotion classification only. Pipeline declarations cannot set queue urgency.
-
-Optional `priority`/`priority_reason` appear on promote, rerun, retry, sync and
-schedule_trigger, and in authenticated push options such as
-`-o oberth.priority=high`. Low/standard requests need no urgency grant;
-promotion/high require an unscoped admin or an unexpired `priority_grant`
-(`max_class: promotion|high`). Push checks the exact key, not an identity alias.
-Repository schedule defaults use the same names; automatic cron requests as
-`oberth:scheduler` and still needs its own grant. Invalid/refused requests retain
-the natural class and explain `priority_refusal`. Sync only raises its existing
-waiting build; lowering requires run_priority. Accepted nonstandard priority and
-automatic protection survive ordinary supersession; explicit replacement still
-requires requester/admin authority and all existing branch/publication checks.
-
-Tag automatic priority remains conditional on oldest waiting tag, size maximum
-and size_revoke. Losing that boost retains an admin override or accepted request,
-otherwise standard. Priority preserves FIFO within each class, the enabled
-hard PSI valve and the configured disk floor; Argo parallelism then admits
-submitted Workflows in creation order.
-Serving admission has no measured backfill or resource head reservations.
-
-Run fields `priority_class`, `priority_reason`, `priority_requested_by`,
-`priority_refusal` and queue position report the effective class and provenance.
-The existing detail badge uses these four canonical names. List/history rows
-continue using only the server's bounded display_reason; no new status or layout
-is added. Standard has no priority prefix; explicit nonstandard classes and aging
-use the existing reason line. Automatic promotion/tag urgency is implied by ref.
-
-Requests take only the four canonical names; `normal` and `highest` are
-refused. Stored rows an earlier server wrote as normal/highest read as
-standard/high. Automatic historical rows
-with requested='' remain protection evidence, never high authorization.
-The new timestamp migration preserves raw stored priority/audit evidence and all
-shipped migration semantics. See [execution priority](release-priority.md) for
-upgrade mapping, rollback and detailed authority/fairness rules.
-
 ## API names and conditional issue updates
 
 See [HTTP/MCP compatibility](api-compatibility.md) for snake_case fields, the
@@ -1129,7 +1051,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **96 tools**, including administrator-only
+The current MCP surface has **81 tools**, including administrator-only
 `publication_abandon`; a non-admin token's `tools/list` omits the
 administrator-only ones.
 

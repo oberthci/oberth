@@ -13,7 +13,6 @@ import (
 // retaining a second security or execution policy in the production binary.
 func TestRetiredProductionSurface(t *testing.T) {
 	cases := map[string][]string{
-		"internal/service/admission.go":         {"newWeightedAdmissionForJobs", "reserve", "reserveInOrder", "acquire"},
 		"internal/service/api.go":               {"waitRun"},
 		"internal/service/create_settlement.go": {"recordCreateAdmission", "pendingCreateCount"},
 		"internal/service/promotion_retry.go":   {"waitBackground"},
@@ -59,7 +58,7 @@ func TestRetiredProductionSurface(t *testing.T) {
 }
 
 func TestRetiredFilesAbsent(t *testing.T) {
-	for _, path := range []string{"pkg/argoworkflow/nonblocking.go", "internal/integration/testdata/gitssh/main.go"} {
+	for _, path := range []string{"internal/service/admission.go", "pkg/argoworkflow/nonblocking.go", "internal/integration/testdata/gitssh/main.go"} {
 		if _, err := os.Stat(filepath.Join("..", "..", path)); !os.IsNotExist(err) {
 			t.Errorf("retired file %s must be absent (stat: %v)", path, err)
 		}

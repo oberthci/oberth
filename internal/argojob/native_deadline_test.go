@@ -10,10 +10,11 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	wffake "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/fake"
-	"github.com/oberthci/oberth/pkg/pipeline"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
+
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestNativeMissingDeadlineRemainsMissing(t *testing.T) {

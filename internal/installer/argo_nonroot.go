@@ -66,19 +66,6 @@ func effectiveNonrootProfile(cfg Config, stored map[string]any) (argoworkflow.No
 	return argoworkflow.NewNonrootProfile(parallelism, 0)
 }
 
-// nonrootProfile is the profile ArgoHelmArgs renders: the one the Argo
-// phase computed, or one from the requested limits alone (dry-run plans).
-func (cfg Config) nonrootProfile() argoworkflow.NonrootProfile {
-	if cfg.argoProfile != nil {
-		return *cfg.argoProfile
-	}
-	profile, err := effectiveNonrootProfile(cfg, nil)
-	if err != nil {
-		return baseNonrootProfile()
-	}
-	return profile
-}
-
 // nonrootProfileObjects is the profile's extraObjects list: the immutable
 // controller ConfigMap. The limits ConfigMap (argo_limits.go) shares the
 // list, so every writer of extraObjects starts from this.

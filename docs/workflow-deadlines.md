@@ -19,4 +19,5 @@ to an unverified Pod and does not expire an ordinary unscheduled workload.
 
 The source-seed Pod still has its existing three-minute preparation wait before
 the Workflow exists; see [source delivery](native-scheduling.md#source-delivery-and-load).
-A seed failure is preparation failure and can qualify for infrastructure retry.
+A seed failure is preparation failure; use manual run_retry after cleanup settles.
+Argo retryStrategy cannot retry preparation before the Workflow exists.

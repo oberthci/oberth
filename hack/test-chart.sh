@@ -587,10 +587,11 @@ render >"$manifest"
 
 # Run limits live in Argo: the chart renders no limits ConfigMap,
 # no runtime-capacity ConfigMap and no run-ceiling flag.
-# releases.serialize renders the one flag only when set.
 sync_manifest=$(mktemp)
-render --set releases.serialize=true >"$sync_manifest"
-grep -q -- '--serialize-releases=true' "$sync_manifest"
+if render --set releases.serialize=true >"$sync_manifest" 2>&1; then
+  echo 'removed release serialization accepted' >&2
+  exit 1
+fi
 render >"$sync_manifest"
 if grep -q 'oberth-sync-limits\|--serialize-releases\|max-concurrent-jobs\|runtime-capacity' "$sync_manifest"; then
   exit 1

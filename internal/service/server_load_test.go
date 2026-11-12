@@ -22,7 +22,7 @@ import (
 
 // TestMCPUnderQueueLoad runs the real scheduler, SQLite event recorder and HTTPS
 // MCP handler. Only Git and the execution backend are fakes: ten Workflows stay
-// in Wait and an administrator hold keeps 64 ordinary runs queued. Each of eight
+// in Wait and 64 ordinary runs have not yet been dispatched. Each of eight
 // subscribers follows a full retained log while events arrive at 10/s; run_list
 // is requested at 20/s; every tenth request closes its TLS connection.
 // -server-load-duration extends the measured phase; -server-load-profile saves a
@@ -174,6 +174,12 @@ func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 	for range 10 {
 		run, err := f.store.ClaimNextRun(t.Context())
 		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.SetRunWorkflowName(t.Context(), run.ID, "oberth-"+run.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.MarkRunAdmitted(t.Context(), run.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := f.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {

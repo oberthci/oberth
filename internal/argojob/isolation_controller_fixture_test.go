@@ -92,13 +92,14 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			historicalSchedulingInput(t, current, true)
 			if !reflect.DeepEqual(current, &input) {
 				t.Fatal("Build output changed; rerun actual controller capture before updating proof")
 			}
 			var before, submitted corev1.Pod
 			fixture(shape+"-before-patch.json", &before)
 			fixture(shape+"-submitted.json", &submitted)
-			assertPipelinePodPriority(t, &submitted)
+			assertHistoricalPipelinePriority(t, &submitted)
 			if before.Spec.NodeSelector["pool"] != "ci" || submitted.Spec.NodeSelector["pool"] != "ci" {
 				t.Fatal("Argo workflowDefaults nodeSelector was replaced")
 			}

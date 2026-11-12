@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const retiredSyncLimitsName = "oberth-sync-limits"
@@ -80,7 +81,7 @@ func deleteRetiredSyncLimits(ctx context.Context, cfg Config, deps Deps, ns stri
 	if oberthNS == "" {
 		oberthNS = "oberth"
 	}
-	if !((owner == "argo-workflows" && ownerNS == ns) || (owner == "oberth" && ownerNS == oberthNS)) {
+	if (owner != "argo-workflows" || ownerNS != ns) && (owner != "oberth" || ownerNS != oberthNS) {
 		return nil
 	}
 	err = cms.Delete(ctx, cm.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &cm.UID, ResourceVersion: &cm.ResourceVersion}})

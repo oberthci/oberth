@@ -45,6 +45,12 @@ execution target must still prove its exact approved namespace/node/controller
 placement and rejects conflicting source placement; granted device resources
 still require a bounded aggregate device authorization proof. Neither is a
 CPU/memory capacity scheduler. Ordinary Workflows do not use either exception.
+A further executable-delivery constraint remains in read-only usage instrumentation:
+when it wraps a step with the server-delivered native binary, its server-owned
+Pod patch pins `kubernetes.io/arch` to that binary's architecture. The authored
+Workflow/template selectors are preserved, but the constructed Pod inherits
+this extra selector; conflicting authored architecture can remain Pending.
+This is a retained runtime requirement, not a capacity or queue decision.
 Server-owned executor/identity helpers have their own requests; these do not
 rewrite the author's container resources. Opted-in assisted holds retain their
 private scratch resources, retry/hold behavior and hold-lifetime deadlines.

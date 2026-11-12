@@ -142,13 +142,11 @@ row), and `promote_status` on the failed promotion names the retry in
 `oberth runs`, `oberth runs --active` and `oberth run` use one pre-start
 label, `queued`, for every run that has not started (durable queued, or
 claimed before admission), with the server's `display_reason` naming what it
-waits for: `next in line`, `waiting for CPU budget (12.5 of 40 CPU free)`,
-`host IO pressure (42%)`, `waiting for admission`; a submitted run the Argo
-controller postponed reads `waiting for an Argo workflow slot (controller
-parallelism)`. Admission records the start, so an admitted run is
-`running` from the grant on. The default list puts the whole queue first, with the
-run admitted next at its top (effective priority, then FIFO), then running runs newest start first, then
-terminal runs newest finish first. A trusted
+waits for: `waiting for an Argo workflow slot (controller parallelism)`,
+`pod pending: Insufficient cpu`, or a native synchronization lock.
+Pending Workflows are queued; running Workflows are running. The default list
+keeps queued rows above running and terminal rows; the CLI uses accepted FIFO
+order within work awaiting submission. A trusted
 preflight is `running`. A replaced interrupted run displays `superseded`;
 explicit cancellation and interruption without a successor display `cancelled`.
 The reason identifies the successor, actor or retry action. `--json` keeps the underlying `Status` field and adds

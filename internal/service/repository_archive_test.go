@@ -166,7 +166,6 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 	}
 	sha := strings.Repeat("b", 40)
 	grants := []struct{ tool, args string }{
-		{"resource_grant", `{"repo":"oberth","requests":{"cpu":"1","memory":"1Gi"},"limits":{"cpu":"2","memory":"2Gi"}}`},
 		{"promote_grant", `{"repo":"oberth","sha":"` + sha + `","branch":"main","expires":"1h"}`},
 		{"access_allow", `{"repo":"oberth","step":"publish","secret":"registry"}`},
 	}

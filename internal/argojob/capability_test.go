@@ -115,11 +115,10 @@ func TestCapabilityBuildRequiresOperatorGrantWithoutGlobalNumericReservation(t *
 	if _, err := Build(testConfig(), r); err != nil {
 		t.Fatal("authorized device requests incorrectly required a global numeric reservation", err)
 	}
-	// Independent operator capability proofs still require complete bounded
-	// declarations; removing host packing cannot relax device authorization.
+	// CPU/memory declarations are optional; device authorization remains bounded.
 	r = requestWithCapability(t, strings.Replace(source, "cpu: '1', memory: 128Mi, ", "", 1), operatorCapability())
-	if _, err := Build(testConfig(), r); err == nil {
-		t.Fatal("incomplete operator capability proof was accepted")
+	if _, err := Build(testConfig(), r); err != nil {
+		t.Fatal("optional CPU/memory declarations were required", err)
 	}
 }
 

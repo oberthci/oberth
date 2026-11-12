@@ -310,7 +310,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 	t.Parallel()
 	source := string(staticAssets["app.js"].body)
 	for _, want := range []string{
-		`const runFilters = ["all", "queued", "running", "passed", "failed", "infra-retried", "superseded", "cancelled"]`,
+		`const runFilters = ["all", "queued", "running", "passed", "failed", "superseded", "cancelled"]`,
 		`const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter`,
 		`return statusOK && (!state.releaseOnly || run.release)`,
 		`data-kind-filter="release"`, `state.releaseOnly = !state.releaseOnly`,

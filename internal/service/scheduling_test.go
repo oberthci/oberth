@@ -300,7 +300,11 @@ func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			run := model.Run{ID: "run", Status: model.RunRunning, DisplayStatus: model.DisplayRunning}
 			applyExecutionDisplay(&run, &model.RunScheduling{State: "observed", Execution: execution})
-			if run.DisplayReason != "waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free)" || run.DisplayStatus != model.DisplayRunning {
+			wantStatus := model.DisplayRunning
+			if execution.Phase == "Pending" {
+				wantStatus = model.DisplayQueued
+			}
+			if run.DisplayReason != "waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free)" || run.DisplayStatus != wantStatus {
 				t.Fatalf("display = %q / %q", run.DisplayStatus, run.DisplayReason)
 			}
 		})

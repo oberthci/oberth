@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -19,7 +20,7 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func TestStartupDeadlineNoScheduledWorkload(t *testing.T) {
+func TestPendingWorkloadHasNoServerStartupDeadline(t *testing.T) {
 	for _, scenario := range []string{"no pods", "identity holder", "foreign scheduled pod", "restart"} {
 		t.Run(scenario, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -61,11 +62,8 @@ func TestStartupDeadlineNoScheduledWorkload(t *testing.T) {
 					t.Fatal(hashErr)
 				}
 				_, err = controller.WaitResumed(ctx, wf.Name, "run", io.Discard, nil, 0, Adoption{UID: wf.UID, Identity: wf.Annotations[identityAnnotation], SpecSHA256: digest})
-				want := 10 * time.Minute
-				if scenario == "restart" {
-					want = 0
-				}
-				if err == nil || !strings.Contains(err.Error(), "no scheduled pod or progress") || time.Since(begin) != want {
+				want := 15 * time.Minute
+				if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != want {
 					t.Fatalf("startup deadline: elapsed=%s want=%s, error=%v", time.Since(begin), want, err)
 				}
 				for _, action := range kube.Actions() {
@@ -187,7 +185,7 @@ func TestStartupDeadlinePodObservationRecoversOrExpires(t *testing.T) {
 	}
 }
 
-func TestStartupDeadlineMissedWaiterAndLateStep(t *testing.T) {
+func TestUnstartedWaiterHasNoServerStartupDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		controller, wf, pod, _ := executorRetryFixture(t)
 		begin := time.Now()
@@ -206,8 +204,8 @@ func TestStartupDeadlineMissedWaiterAndLateStep(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 		defer cancel()
 		_, err := controller.Wait(ctx, wf.Name, "identity-run", io.Discard)
-		if err == nil || !strings.Contains(err.Error(), "executor identity readiness not observed") || time.Since(begin) != 10*time.Minute {
-			t.Fatalf("late Pod escaped deadline after earlier progress: %s %v", time.Since(begin), err)
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != 15*time.Minute {
+			t.Fatalf("unstarted waiter was terminated by a server startup deadline: %s %v", time.Since(begin), err)
 		}
 	})
 }

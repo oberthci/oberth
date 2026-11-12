@@ -7,16 +7,13 @@ const intervals = [];
 const sandbox = vm.createContext({URLSearchParams, console, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(fn,ms){intervals.push({fn,ms});return intervals.length},clearInterval(){}});
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
-const admissionCard = run(`admissionStatusCard({runs:2,used:2})`);
-assert.match(admissionCard, /2 admitted/, 'admission card must show admitted runs');
-assert.doesNotMatch(admissionCard, /ceiling|run slots/, 'Oberth has no run ceiling since v0.20.0');
 run(`
   let html='', requests=[], listNext='', flatPaging=false;
   replaceApp=value=>{html=value};
   const makeRun=(ID,extra={})=>{
     const row={id:ID,repo_id:1,ref:'main',ref_kind:'branch',status:'passed',started_at:'2026-11-01T10:00:00Z',finished_at:'2026-11-01T10:01:00Z',...extra};
     if(['running','queued'].includes(row.status)) {
-      row.priority_class ??= 'standard'; row.priority_reason ??= 'ordinary run';
+
       row.display_reason ??= '';
     }
     return row;
@@ -26,7 +23,7 @@ run(`
   const queued=makeRun('publication-queued',{status:'queued',ref:'other',started_at:null,finished_at:null});
   const failed=makeRun('nightly-failed',{status:'failed',trigger:'schedule',schedule_entry:'nightly'});
   const superseded=makeRun('superseded-old',{status:'interrupted',superseded_by:head.id});
-  const retried=makeRun('retried-old',{ref:'feature',status:'failed',auto_retried_by:'retry-head'});
+  const retried=makeRun('retried-old',{ref:'feature',status:'failed'});
   state.status={upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};state.statusLoadedAt=Date.now();
   api=async path=>{
     requests.push(path);
@@ -62,7 +59,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F1'
 }
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2') {
   run(`changeRunRepo('all');`);
-  for(const [status,id] of [['failed','nightly-failed'],['superseded','superseded-old'],['infra-retried','retried-old']]) {
+  for(const [status,id] of [['failed','nightly-failed'],['superseded','superseded-old'],['failed','retried-old']]) {
     run(`state.filter=${JSON.stringify(status)};requests=[];`);
     await run('renderRuns(0)');
     assert.ok(ids().includes(id),`F2: ${status} must find a non-head run, including another schedule lane`);
@@ -71,7 +68,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2'
   run(`state.filter='passed';flatPaging=true;listNext='opaque-flat-cursor';`);
   await run('renderRuns(0)');
   assert.equal(run('state.runNext'),'opaque-flat-cursor','flat paging counts dated rows, not its extra queued rows');
-  console.log('F2 passed: failed nightly, superseded and infra-retried filters; flat-list queue pagination');
+  console.log('F2 passed: failed nightly, superseded and failed attempt filters; flat-list queue pagination');
 }
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3') {
   // Queued runs accepted before several runs started and finished must never
@@ -84,14 +81,14 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
       makeRun('passed-newest',{ref:'r1',started_at:f3Time(0),finished_at:f3Time(50)}),
       makeRun('passed-older',{ref:'r2',started_at:f3Time(5),finished_at:f3Time(40)}),
       makeRun('queued-normal-late',{ref:'r3',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(20),queue_position:3}),
-      makeRun('queued-high-next',{ref:'r4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(21),queue_position:1,priority_class:'high'}),
+      makeRun('queued-high-next',{ref:'r4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(21),queue_position:1}),
       makeRun('failed-middle',{ref:'r5',status:'failed',started_at:f3Time(10),finished_at:f3Time(45)}),
       makeRun('running-early',{ref:'r6',status:'running',started_at:f3Time(30),finished_at:null}),
     ];
     const f3Active=[
       makeRun('running-late-hidden',{ref:'r7',status:'running',started_at:f3Time(35),finished_at:null}),
       makeRun('waiting-hidden',{ref:'r9',status:'running',started_at:null,finished_at:null,queued_at:f3Time(23),queue_position:4,display_status:'queued'}),
-      makeRun('queued-high-second-hidden',{ref:'r8',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22),queue_position:2,priority_class:'high'}),
+      makeRun('queued-high-second-hidden',{ref:'r8',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22),queue_position:2}),
     ];
     api=async path=>{
       if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
@@ -106,13 +103,13 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     'F3: queue in reverse claim order by position, then running newest start first, then finished newest finish first');
   assert.ok(!run('runPageFull(f3Page)'), 'F3: queued and running rows never count toward the terminal page limit');
   // A scoped viewer sees no queue positions: the active view's order (the
-  // server's admission order) decides, never the queue time, so an older
+  // server's submission order) decides, never the queue time, so an older
   // normal run sits above a newer high run that is admitted next.
   run(`
     const f3Scoped=[
       makeRun('scoped-passed',{ref:'s1',started_at:f3Time(0),finished_at:f3Time(50)}),
       makeRun('scoped-normal-old',{ref:'s2',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(20)}),
-      makeRun('scoped-high-new',{ref:'s3',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25),priority_class:'high'}),
+      makeRun('scoped-high-new',{ref:'s3',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25)}),
     ];
     const f3ScopedHidden=makeRun('scoped-normal-hidden',{ref:'s4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22)});
     api=async path=>{
@@ -128,15 +125,15 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     'F3: without positions the queue reverses the active view order, not queue time');
   run(`api=async path=>{ if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}]; if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('limit')==='1')return []; return {body:f3Scoped,next:''}; };`);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
-    'F3: without positions or an active view reverse priority and reverse server FIFO within each class');
+  assert.deepEqual(ids(), ['scoped-high-new','scoped-normal-old','scoped-passed'],
+    'F3: without positions or an active view reverse server FIFO');
   // A claimed normal run (raw running, not started) listed by the active
   // view after an unclaimed high run stays behind it: the scoped queue is
   // the server's claim order, never "claimed first".
   run(`
     const f3Claimed=[
-      makeRun('scoped-claimed-normal',{ref:'s5',status:'running',started_at:null,finished_at:null,queued_at:f3Time(20),display_status:'queued',display_reason:'waiting for CPU budget (2 of 8 CPU free)'}),
-      makeRun('scoped-high-unclaimed',{ref:'s6',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25),priority_class:'high',display_status:'queued',display_reason:'next in line'}),
+      makeRun('scoped-claimed-normal',{ref:'s5',status:'running',started_at:null,finished_at:null,queued_at:f3Time(20),display_status:'queued',display_reason:'waiting for an Argo workflow slot'}),
+      makeRun('scoped-high-unclaimed',{ref:'s6',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(25),display_status:'queued',display_reason:'next in line'}),
       makeRun('scoped-started',{ref:'s7',status:'running',started_at:f3Time(30),finished_at:null,display_status:'running'}),
     ];
     api=async path=>{
@@ -149,7 +146,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   `);
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-claimed-normal','scoped-high-unclaimed','scoped-started'],
-    'F3: a claimed normal run sits above the unclaimed high run the gate admits first; both are queued rows');
+    'F3: a claimed normal run sits above the unclaimed newer run; both are queued rows');
   assert.ok(!/waiting<\/span>/.test(run('html')), 'F3: the claimed run is a queued pill, not waiting');
   run('api=apiFixture;');
   console.log('F3 passed: queued runs never render below running or finished runs');
@@ -255,21 +252,19 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5B
 
 // The shared row renderer serves /runs and run history; detail badges stay separate.
 run(`state.repos=[{id:1,name:'ours'}];`);
-const badgeRow = run(`runRow({id:'labels',repo_id:1,ref:'v1',ref_kind:'tag',status:'passed',release:true,trigger:'schedule',schedule_entry:'nightly',priority_class:'high',priority_reason:'urgent',concurrency_group:'deploy',scheduling:{admission:{group:'deploy'}}})`);
+const badgeRow = run(`runRow({id:'labels',repo_id:1,ref:'v1',ref_kind:'tag',status:'passed',release:true,trigger:'schedule',schedule_entry:'nightly',priority_reason:'urgent',concurrency_group:'deploy',scheduling:{admission:{group:'deploy'}}})`);
 assert.ok(badgeRow.includes('<div class="repo-name">ours</div>'));
 assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history rows have no inline badges');
 assert.ok(!badgeRow.includes('priority highest') && !badgeRow.includes('urgent'),'priority metadata stays in detail');
-assert.ok(run(`prioritySummary({priority_class:'high',priority_reason:'urgent',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',queue_position:2})`).includes('requested by operator<unsafe>'));
-assert.ok(run(`runRow({id:'priority',repo_id:1,ref:'main',status:'queued',priority_class:'high',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',queue_position:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
+assert.ok(run(`runRow({id:'priority',repo_id:1,ref:'main',status:'queued',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',queue_position:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
 assert.equal(run(`runMessageCell({status:'passed',release:true})`),'');
 assert.equal(run(`runMessageCell({status:'passed',trigger:'schedule',schedule_entry:'nightly<unsafe>',display_reason:'schedule nightly<unsafe>'})`),'schedule nightly&lt;unsafe&gt;');
-assert.equal(run(`runMessageCell({status:'passed',priority_class:'high',concurrency_group:'deploy'})`),'');
+assert.equal(run(`runMessageCell({status:'passed',concurrency_group:'deploy'})`),'');
 for(const extra of [`display_reason:'existing reason'`, `error:'existing reason'`, `failed_step:'test'`, `reason:'existing reason'`]) {
   assert.equal(run(`runMessageCell({status:'failed',release:true,trigger:'schedule',schedule_entry:'nightly',${extra}})`), extra.startsWith('display_reason')?'existing reason':'');
 }
 assert.equal(run(`runMessageCell({status:'queued',release:true,trigger:'schedule',schedule_entry:'nightly',display_reason:'waiting for an Argo workflow slot (controller parallelism)',scheduling:{state:'waiting'}})`),'waiting for an Argo workflow slot (controller parallelism)');
 assert.equal(run(`runMessageCell({status:'queued',scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'','detail observation does not become a row message');
-assert.ok(run(`releaseBadge({release:true,priority_class:'high',priority_reason:'urgent'})`).includes('high priority'),'detail priority and reason remain available');
 console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');
 
 // One grey queued status for every run that has not started. The raw wire
@@ -278,8 +273,8 @@ console.log('R4B passed: label-free rows, empty-message fallbacks, existing reas
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1') {
   const pills = html => [...html.matchAll(/<span class="pill ([a-z]+)"><span class="dot [a-z]+"><\/span>([^<]*)<\/span>/g)].map(m => [m[1], m[2]]);
   const notStarted = [
-    {id:'claimed', status:'running', started_at:null, display_status:'queued', display_reason:'waiting for CPU budget (12.5 of 40 CPU free)', scheduling:{state:'waiting', admission:{state:'waiting'}}},
-    {id:'wire-waiting', status:'waiting', started_at:null, display_status:'queued', display_reason:'host IO pressure (42%)', scheduling:{state:'waiting'}},
+    {id:'claimed', status:'running', started_at:null, display_status:'queued', display_reason:'waiting for an Argo workflow slot', scheduling:{state:'waiting', admission:{state:'waiting'}}},
+    {id:'wire-waiting', status:'waiting', started_at:null, display_status:'queued', display_reason:'pod pending: Insufficient cpu', scheduling:{state:'waiting'}},
     {id:'admitted', status:'running', started_at:null, display_status:'queued', display_reason:'admitted, starting the workflow', scheduling:{state:'waiting', admission:{state:'admitted'}}},
     {id:'preflight', status:'running', started_at:null, display_status:'queued', display_reason:'KVM preflight running', scheduling:{state:'preflight'}},
     {id:'durable', status:'queued', started_at:null, display_status:'queued', display_reason:'next in line', scheduling:{state:'queued', queue_position:1}},
@@ -291,8 +286,8 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1'
   assert.ok(!/waiting<\/span>/.test(table) && !table.includes('>admitted<') && !table.includes('>preflight<'), 'V1: no second not-started status');
   for (const row of notStarted) if (row.display_reason) assert.ok(table.includes(row.display_reason), 'V1: the reason line shows ' + row.display_reason);
   for (const row of notStarted) assert.equal(run(`runListGroup(notStarted.find(r => r.id === '${row.id}'))`), 0, 'V1: ' + row.id + ' sorts in the queue group');
-  // The vocabulary is seven statuses; each has a known kind and label.
-  for (const status of ['queued', 'running', 'passed', 'failed', 'infra-retried', 'superseded', 'cancelled']) {
+  // The vocabulary is six statuses; each has a known kind and label.
+  for (const status of ['queued', 'running', 'passed', 'failed', 'superseded', 'cancelled']) {
     assert.notEqual(run(`statusKind('${status}')`), 'unknown', 'V1: ' + status + ' has a kind');
   }
   for (const gone of ['waiting', 'infra-pending', 'deadline-exceeded', 'interrupted']) {
@@ -332,32 +327,11 @@ for (const latest of [false, true]) {
     assert.equal(new URL(run('claimListPath'),'https://example.test').searchParams.has('latest_per_ref'), latest, 'exercise both flat and latest-per-ref requests');
   }
 }
-console.log('Queued groups reverse scheduler priority and FIFO in flat, latest-per-ref and scoped views');
-
-// A scoped poll can receive a newer priority bump in the heads while the
-// active request fails and retains its older queue order. Cached order must
-// never put a normal row between two priority rows.
-run(`{
-  changeRunRepo('all'); state.filter='all';
-  const high=makeRun('cache-high',{ref:'cache/high',status:'queued',started_at:null,finished_at:null,priority_class:'promotion'});
-  const normal=makeRun('cache-normal',{ref:'cache/normal',status:'queued',started_at:null,finished_at:null});
-  const bumped=makeRun('cache-bumped',{ref:'cache/bumped',status:'queued',started_at:null,finished_at:null,priority_class:'high',priority_reason:'operator bump'});
-  state.activeRuns=[high,normal,{...bumped,priority_class:'standard'}];
-  state.activeRunsRepo='all'; state.activeRunsComplete=true;
-  api=async path=>{
-    if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
-    if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}};
-    if(/[?&]limit=1(&|$)/.test(path))throw Object.assign(new Error('offline'),{status:503});
-    return {body:[bumped,normal],next:''};
-  };
-}`);
-await run('renderRuns(state.routeSeq)');
-assert.deepEqual(ids(), ['cache-normal','cache-high','cache-bumped'], 'a stale scoped active order must not interleave effective priority classes');
-console.log('Priority classes remain grouped when the scoped active request fails after a priority change');
+console.log('Queued groups reverse submission order in flat, latest-per-ref and scoped views');
 
 // Server messages are the entire row message, including empty messages.
-for (const status of ['queued','running','passed','failed','cancelled','superseded','infra-retried']) {
- sandbox.contractRun={id:'contract',repo_id:1,ref:'main',status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_class:'high',priority_reason:'hidden priority',scheduling:{message:'hidden observation'}};
+for (const status of ['queued','running','passed','failed','cancelled','superseded']) {
+ sandbox.contractRun={id:'contract',repo_id:1,ref:'main',status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_reason:'hidden priority',scheduling:{message:'hidden observation'}};
  assert.equal(run('rowMessage(contractRun)'),`message ${status}`);
  sandbox.contractRun.display_reason='';
  assert.equal(run('rowMessage(contractRun)'),'');
@@ -406,7 +380,7 @@ try {
  const queuedDate=new Date(sandbox.queuedTimeRun.queued_at);
  assert.ok(queuedCell.includes(queuedDate.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})), 'the displayed time comes from QueuedAt');
 } finally { Date.now = savedNow }
-for (const status of ['running','passed','failed','cancelled','superseded','infra-retried']) {
+for (const status of ['running','passed','failed','cancelled','superseded']) {
  sandbox.timeRun={display_status:status,started_at:clockNow.toISOString(),finished_at:status==='running'?null:new Date(clockNow.getTime()+62000).toISOString()};
  assert.match(run('whenCell(timeRun)'),/started at \d\d:\d\d/);
  sandbox.timeRun.started_at=yesterday.toISOString();
@@ -414,7 +388,7 @@ for (const status of ['running','passed','failed','cancelled','superseded','infr
  if (['cancelled','superseded'].includes(status)) assert.match(run('whenCell(timeRun)'),/^<span><\/span>/);
 }
 assert.match(run(`runRow({id:'escaped',repo_id:1,ref:'<script>',sha:'sha"<unsafe>',actor:'actor"<unsafe>',display_status:'failed',display_reason:'reason"<unsafe>'})`),/reason&quot;&lt;unsafe&gt;/);
-console.log('Run-list contract passed: seven states, today/older start lines, live timer and escaping');
+console.log('Run-list contract passed: six states, today/older start lines, live timer and escaping');
 
 assert.equal(run(`runMessageCell({display_status:'passed',display_reason:'closes #1415, #1416 · schedule nightly'})`),'closes #1415, #1416 · schedule nightly');
 assert.equal(run(`runMessageCell({display_status:'passed',issue_trailers:[{issue:1,close:true}]})`),'','the client never fabricates a trailer message');
@@ -423,15 +397,6 @@ const olderStart = new Date(clockNow.getFullYear(),clockNow.getMonth(),clockNow.
 sandbox.olderStart=olderStart;
 assert.ok(run(`whenCell({display_status:'failed',started_at:olderStart,finished_at:olderStart})`).includes(`started at ${run('shortStamp(olderStart)')}</span>`));
 assert.doesNotMatch(run(`whenCell({display_status:'failed',started_at:olderStart,finished_at:olderStart})`).replace(/ title="[^"]*"/g,''),/AM|PM|12:50:00/);
-
-// Four canonical classes reverse server FIFO, including views without positions.
-run('state.activeRuns=[]');
-assert.deepEqual(JSON.parse(run(`JSON.stringify(orderRuns([
- ...['low','standard','promotion','high','low','standard','promotion','high'].map((priority,index)=>makeRun(priority+'-'+index,{status:'queued',started_at:null,finished_at:null,queue_position:0,priority_class:priority}))
-]).map(row=>row.id))`)), ['low-4','low-0','standard-5','standard-1','promotion-6','promotion-2','high-7','high-3']);
-assert.equal(run(`prioritySummary({priority_class:'standard'})`), 'priority standard');
-assert.equal(run(`prioritySummary({priority_class:'high'})`), 'priority high');
-console.log('Four canonical priority classes and legacy response aliases pass');
 
 // Detail polling explicitly selects the compact dashboard representation.
 run(`
@@ -485,21 +450,14 @@ for (const filter of ['all','queued']) {
   assert.deepEqual(ids(),expected,`owner layout in ${filter} view`);
   const rows=[...run('html').matchAll(/<div class="trow" data-run-id="([^"]+)"[^>]*>([\s\S]*?)(?=<div class="trow"|$)/g)];
   const row=id=>rows.find(match=>match[1]===id)[2];
-  assert.match(row('owner-low'),/>low priority<.*needs 2 CPU, 4 GiB · position 4/);
+  assert.match(row('owner-low'),/needs 2 CPU, 4 GiB · position 4/);
   assert.doesNotMatch(row('owner-standard'),/priority|class="v4b/,'standard has no priority label');
   assert.match(row('owner-standard'),/needs 2 CPU, 4 GiB · position 3/);
-  assert.match(row('owner-high'),/>high priority<.*needs 2 CPU, 4 GiB · position 2/);
-  assert.match(row('owner-next'),/>high priority<.*needs 2 CPU, 4 GiB · next in line/);
+  assert.match(row('owner-high'),/needs 2 CPU, 4 GiB · position 2/);
+  assert.match(row('owner-next'),/needs 2 CPU, 4 GiB · next in line/);
   assert.equal(run('JSON.stringify(ownerRows)'),run('ownerWire'),'rendering never reverses or rewrites the API response');
 }
-assert.match(run(`runRow({...ownerQueue[0],priority_class:'promotion'})`),/>priority promotion</);
-for(const priority of ['standard',undefined]) {
-  sandbox.labelPriority=priority;
-  assert.doesNotMatch(run(`runRow({...ownerQueue[0],priority_class:labelPriority})`),/class="v4b|standard priority|priority standard/);
-}
-assert.match(run(`runRow({...ownerQueue[0],priority_class:'high'})`),/>high priority</);
-assert.match(run(`runRow({...ownerQueue[0],priority_reason:'operator <unsafe>'})`),/title="operator &lt;unsafe&gt;"/);
-console.log('Owner layout passed: reversed queue, next at bottom, unchanged running/history order and wire data, and only named nonstandard priorities');
+console.log('Owner layout passed: reversed submission queue and unchanged running/history/wire order');
 // #1508: /repos shows a subtle, muted non-default branch count, only when non-zero.
 run(`
   state.showArchived=false;

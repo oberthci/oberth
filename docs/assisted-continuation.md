@@ -50,9 +50,9 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   137 && asInt(lastRetry.exitCode) != 143 && asInt(lastRetry.exitCode) != 255
   && (lastRetry.message startsWith 'main: Error (exit code ')
   && asFloat(lastRetry.duration) <
-  <floored step budget>`. Only a command that failed on its own is retried:
+  <authored step budget>`. Only a command that failed on its own is retried:
   it exited nonzero, not by SIGKILL or SIGTERM, and its attempt finished
-  before the step's floored budget (the node duration is the main container's
+  before the step's authored budget (the node duration is the main container's
   termination time minus the node's creation, so a Pod the kubelet stopped at
   `activeDeadlineSeconds` always shows at least the budget; a long Pending
   phase inflates it too, so a genuine failure after a long pend may not be
@@ -60,14 +60,12 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   deadline kill is recorded by Argo v4.0.8 with the forwarded signal's exit
   code (143, or 137 after the grace period), never `-1`, which is why the exit
   code alone is not enough; an eviction or executor error has no exit code
-  (`-1`). None of them is retried, so attempt 1 is classified exactly as
-  before (#1499 start-up deadlines included) and the run-level infrastructure
-  retry is unchanged. Unknown/other kubelet termination reasons and exit 255
+  (`-1`). None of them is retried by the hold strategy. Unknown/other kubelet termination reasons and exit 255
   settle without a hold, so the server can check retained node boot evidence.
   A command that exits 137, 143 or 255 by itself, or that
   outlives its budget during the kubelet's check interval, is conservatively
-  not held either. The budget is the leaf's own floored deadline, else the
-  floored `templateDefaults.activeDeadlineSeconds` Argo merges into every
+  not held either. The budget is the leaf's own authored deadline, else the
+  authored `templateDefaults.activeDeadlineSeconds` Argo merges into every
   leaf (`mergedTemplateDefaultsInto`), else the workflow budget. A leaf with
   its own `retryStrategy` keeps it and is not held;
 - a server-owned conditional `podSpecPatch`, an Argo expression template
@@ -82,7 +80,7 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   patch every step already gets.
   `<held>` additionally sets `ARGO_DEBUG_PAUSE_BEFORE=true` and
   `OBERTH_ASSIST_HOLD=1` on `main`, sets the Pod `activeDeadlineSeconds` to
-  the step's #1499-floored budget plus two `assist.holdTTL` (the longest a
+  the step's authored budget plus two `assist.holdTTL` (the longest a
   worked hold may stay parked, see *Capacity, supersession and bounds*) so
   the kubelet bounds the whole attempt (hold and the command after release)
   while the server abandons an unreleased hold, makes the `/work/src` mount writable, makes the shared
@@ -109,9 +107,7 @@ template locks. If nobody acts before `holdTTL`, the server's hold sweep (the sc
 settlement tick) abandons the Pod, the retry is exhausted and the run fails
 as it would have, recorded as a server abandon (see *Capacity, supersession
 and bounds*); the kubelet deadline (budget plus two TTLs) is the backstop if
-the server is down, and such a kubelet kill is not recorded. That deadline is not the recorded floored step deadline,
-so #1499 never classifies a timed-out hold as a start-up failure, and a
-retained failed step is not automatically retried as a separate run.
+the server is down, and such a kubelet kill is not recorded. A retained failed step is not automatically retried as a separate run.
 
 ## Opting in
 
@@ -328,14 +324,9 @@ duration (`90s`, `1m30s`). The chart schema refuses anything else.
 
 ## Interaction with other policies
 
-- **#1499 start-up allowance**: attempt 1 keeps its floored deadline and the
-  recorded annotations; the held attempt's deadline differs from the recorded
-  floor, so its expiry is the step's own failure, never a start-up
-  infrastructure attempt. The injected `retryStrategy` never retries a
-  deadline kill (signal exit code, or a duration at or above the floored
-  budget), so a start-up failure does not get a second in-workflow attempt
-  before the run-level infrastructure retry sees it, and a step that ran out
-  of time is never given a second budget plus the hold allowance.
+- **Native deadlines**: the hold strategy does not retry a deadline kill or
+  infrastructure error. Workload startup allowance and run-level infrastructure
+  retry no longer exist; an authored leaf retryStrategy takes precedence.
 - **Workflow deadline**: extended by two hold TTLs per assisted run.
 - **Template locks and Argo parallelism**: unchanged; a
   held run holds its native Argo lock and its parallelism slot for the whole

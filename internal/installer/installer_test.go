@@ -1120,9 +1120,6 @@ func TestOpenBaoHelmArgsDevMode(t *testing.T) {
 		// Oberth never uses the agent injector; keep the unused privileged
 		// webhook out of both install modes.
 		"--set", "injector.enabled=false",
-		"--set-string", "server.priorityClassName=oberth-oberth-control-plane",
-		"--set-string", "server.resources.requests.cpu=100m",
-		"--set-string", "server.resources.requests.memory=128Mi",
 		"--set", "global.tlsDisable=true",
 		"--set", "server.dev.enabled=true",
 		"--version", "0.6.0",
@@ -1144,9 +1141,6 @@ func TestOpenBaoHelmArgsProductionMode(t *testing.T) {
 		"upgrade", "--install", "openbao", "openbao/openbao",
 		"-n", "openbao", "--create-namespace",
 		"--set", "injector.enabled=false",
-		"--set-string", "server.priorityClassName=oberth-oberth-control-plane",
-		"--set-string", "server.resources.requests.cpu=100m",
-		"--set-string", "server.resources.requests.memory=128Mi",
 		"--set", "global.tlsDisable=false",
 		// dev pinned false so --reuse-values cannot resurrect a previous
 		// dev-mode install's flag through an --upgrade mode switch.
@@ -2645,6 +2639,8 @@ func TestInstallOpenBaoUpgradesWhenPinnedChartNewer(t *testing.T) {
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"openbao","namespace":"openbao","status":"deployed","chart":"openbao-0.28.5"}]`), nil
+			case "get":
+				return []byte(`{}`), nil
 			case "upgrade":
 				upgradeRan = true
 			}
@@ -2674,6 +2670,8 @@ func TestInstallOpenBaoSkipsWhenPinnedChartInstalled(t *testing.T) {
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"openbao","namespace":"openbao","status":"deployed","chart":"openbao-0.28.6"}]`), nil
+			case "get":
+				return []byte(`{}`), nil
 			case "upgrade":
 				t.Error("up-to-date OpenBao must not run helm upgrade")
 			}
@@ -3178,8 +3176,8 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 					if err != nil || class.Value != 1000000 {
 						t.Fatalf("dependency ran before priority bootstrap: %v", err)
 					}
-					if !slices.Contains(args, "controller.priorityClassName=oberth-oberth-control-plane") {
-						t.Fatal("controller lost its bootstrap class")
+					if slices.Contains(args, "controller.priorityClassName=oberth-oberth-control-plane") {
+						t.Fatal("controller retained the retired bootstrap class")
 					}
 				}
 			case "list":

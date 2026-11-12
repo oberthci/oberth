@@ -359,6 +359,12 @@ DELETE FROM schema_migrations WHERE id='20261112192937-remove-queue-priority-104
 `
 
 // PostNativeStartupDowngrade removes only the startup-cleanup migration receipt in historical fixtures.
-const PostNativeStartupDowngrade = `
+const PostNativeStartupDowngrade = PostNativeHeadWaitDowngrade + `
 DELETE FROM schema_migrations WHERE id='20261112194221-retire-startup-cleanup-reason-3cbdb8308f00d05de0af9950db4bcae9';
+`
+
+// PostNativeHeadWaitDowngrade recreates retired state only in historical fixtures.
+const PostNativeHeadWaitDowngrade = `
+CREATE TABLE IF NOT EXISTS admission_head_waits (repo_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,ref_kind TEXT NOT NULL CHECK(ref_kind IN ('branch','tag')),ref TEXT NOT NULL,sha TEXT NOT NULL,since INTEGER NOT NULL,PRIMARY KEY(repo_id,ref_kind,ref,sha));
+DELETE FROM schema_migrations WHERE id='20261112200858-remove-head-wait-state-5f391577728baf3aa3d319f69af46253';
 `

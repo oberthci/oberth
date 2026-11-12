@@ -347,6 +347,8 @@ func TestInstallOpenBaoMigratesExistingHTTPListenerBeforeReturning(t *testing.T)
 		},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
+			case "get":
+				return []byte(`{}`), nil
 			case "list":
 				return []byte(`[{"name":"openbao","namespace":"openbao","status":"deployed","chart":"openbao-0.29.0"}]`), nil
 			case "show":

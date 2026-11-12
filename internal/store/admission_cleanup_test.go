@@ -6,7 +6,7 @@ import (
 )
 
 func TestAdmissionDeadlineCleanupReasonSurvivesRestartAndRearm(t *testing.T) {
-	for _, reason := range []string{"Executor identity readiness deadline exceeded after one issuance retry; cleanup pending", "Resource admission expired: no scheduled pod or progress; cleanup pending"} {
+	for _, reason := range []string{"Executor identity readiness deadline exceeded after one issuance retry; cleanup pending"} {
 		t.Run(reason, func(t *testing.T) {
 			now := time.Now()
 			s := testStore(t, &now)

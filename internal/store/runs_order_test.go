@@ -86,7 +86,7 @@ func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 	finish(alpha, model.RunPassed)
 
 	// The queue follows scheduler claim order: high FIFO, then normal FIFO.
-	wantQueue := []string{queuedHighFirst.ID, queuedHighSecond.ID, queuedNormalFirst.ID, queuedNormalSecond.ID}
+	wantQueue := []string{queuedNormalFirst.ID, queuedHighFirst.ID, queuedNormalSecond.ID, queuedHighSecond.ID}
 	wantRunning := []string{runningLate.ID, runningEarly.ID}
 	wantTerminal := []string{alpha.ID, gamma.ID, beta.ID}
 	for _, latest := range []bool{false, true} {

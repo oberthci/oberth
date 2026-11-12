@@ -18,7 +18,7 @@ func TestCanonicalPriorityMigrationPreservesRowsAndRejectsAliases(t *testing.T) 
 	}
 	// Reconstruct the three pre-migration tables without changing the run or audit receipts.
 	for _, table := range []string{"run_priority_overrides", "priority_grants", "run_priority_requests"} {
-		if _, err := s.db.ExecContext(ctx, "DROP TABLE "+table); err != nil {
+		if _, err := s.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -63,7 +63,7 @@ func parsePushOptions(options []string) (parsed pushOptions) {
 		name, value, _ := strings.Cut(option, "=")
 		switch {
 		case name == "oberth.priority" || name == "oberth.priority_reason" || name == "oberth.supersede":
-			parsed.err = fmt.Errorf("push option %s was removed in v0.22.0; author Argo priority in Workflow YAML; branch pushes supersede older work", name)
+			parsed.err = fmt.Errorf("push option %s is not supported; author Argo priority in Workflow YAML; branch pushes supersede older work", name)
 		case option == "oberth.assist=1" || option == "oberth.assist=true":
 			parsed.assist = true
 		case option == "oberth.assist=0" || option == "oberth.assist=false":

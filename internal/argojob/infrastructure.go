@@ -29,8 +29,7 @@ var containerStorageMessage = regexp.MustCompile(`^Container ([a-z0-9-]+) exceed
 // that enforced the step's own declared budget, or returns "". Such a step
 // exceeded what it declared: a rerun fails the same way, so it is a step
 // resource failure, not infrastructure. Otherwise the eviction stays
-// infrastructure and gets at most one auto-retry, which is rebuilt under the
-// current policy.
+// infrastructure; retry is the author's native Argo policy or a manual run action.
 //
 // A container eviction qualifies when the named container is one of the step's
 // own containers with a declared limit (stepStorageLimits); the kubelet only
@@ -151,7 +150,7 @@ func (completion *Completion) classifyInfrastructure() {
 			continue
 		}
 		// A separate test failure must still open a CI-red issue and must not
-		// become eligible for infrastructure retry.
+		// be classified as a transient infrastructure-only failure.
 		if step.AttemptAmbiguous || step.InfrastructureReason == "" {
 			if failedStep == "" {
 				failedStage, failedStep = step.Stage, step.Step

@@ -56,6 +56,8 @@ func TestFreshArgoInstallSetsDefaultParallelism(t *testing.T) {
 					return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil
 				}
 				return []byte(`[]`), nil
+			case "get":
+				return []byte(`{}`), nil
 			case "upgrade":
 				install = slices.Clone(args)
 			}

@@ -150,10 +150,11 @@ func TestNonrootArgoRejectsCustomReuse(t *testing.T) {
 }
 
 func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
-	body, err := os.ReadFile("../../deploy/platform-protection/argo-workflows-values.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
+	body := []byte(`controller:
+  priorityClassName: oberth-oberth-control-plane
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+`)
 	var overlay map[string]any
 	if err := yaml.Unmarshal(body, &overlay); err != nil {
 		t.Fatal(err)

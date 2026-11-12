@@ -518,12 +518,9 @@ function runListGroup(run) {
   return displayRunStatus(run) === "queued" || !run.started_at ? 0 : 1;
 }
 function isTerminalRun(run) { return ["passed", "failed", "interrupted"].includes(run.status); }
-/* A scoped viewer sees no queue positions. The active view then supplies
-   the queue order: it lists waiting runs in the server's admission order, so
-   its index is the same claim order. Without either, the
-   server's own FIFO order stands within each effective class. A failed
-   active fetch can leave an older class order cached, so current priority
-   always leads the position tie-break; the queue is never sorted by time. */
+/* The active view supplies acceptance order when scoped rows omit global
+   submission positions. The table presents its queue in reverse order and
+   keeps queued work above running and terminal rows. */
 function orderRuns(runs) {
   const queued = runs.filter(run => runListGroup(run) === 0);
   const positioned = queued.length > 0 && queued.every(run => run.queue_position > 0 || run.scheduling?.queue_position > 0);
@@ -590,7 +587,6 @@ function repoCounts(runs) {
   return counts;
 }
 /* ---------- one run list: the queue, running, then finished ---------- */
-function admissionOf(run) { return run.scheduling?.admission || null; }
 function queueReason(run) { return run.display_reason || ""; }
 function queueDetail(run) { return run.scheduling?.message || runMessage(run); }
 function rowMessage(run) { return run.display_reason || ""; }
@@ -726,7 +722,6 @@ async function renderRuns(seq) {
   <section class="screen">
     <h1 class="sr-only">Runs</h1>
     ${admissionPausedBanner(state.status?.controller_profile)}
-    ${admissionHoldBanner(state.status?.admission)}
     <div class="runs-layout">
         <div class="toolbar runs-toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
@@ -1027,22 +1022,19 @@ function summaryLines(detail) {
   else if (kind === "fail") lines.push(`[fail] failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${run.failed_step || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
   else if (kind === "run") lines.push(`[running] running in phase ${run.phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
   else if (status === "queued") {
-    const scheduling = detail.scheduling || {}, admission = scheduling.admission || {};
+    const scheduling = detail.scheduling || {};
     lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
     if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
-    if (admission.position) lines.push(`queue position ${admission.position}`);
+    if (scheduling.queue_position) lines.push(`submission position ${scheduling.queue_position}`);
   }
-  else if (kind === "warn") lines.push(`[infra error, retried] ${runMessage(run)}`);
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);
   const execution = detail.scheduling?.execution;
   if (execution) {
     if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.scheduling.message}`);
     const deadline = execution.deadline;
-    if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: ${deadline.clock === "preflight_admitted_at" ? "Preflight admission" : "Workflow start"}`);
+    if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: Workflow start`);
     else if (deadline) lines.push(`[deadline] ${deadline.budget_seconds}s budget · Workflow start not observed`);
-    const serverDeadline = execution.server_deadline;
-    if (serverDeadline?.expires_at) lines.push(`[server watchdog] ${serverDeadline.expires_at} · ${serverDeadline.remaining_seconds ?? "unknown"}s remaining · clock: ${serverDeadline.clock === "workflow_started_at" ? "Workflow start" : "Workflow creation"}`);
     if (execution.reconciliation_lag_seconds != null) lines.push(`[execution] observed ${execution.phase} · finalization lag ${execution.reconciliation_lag_seconds}s`);
   }
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
@@ -1611,34 +1603,6 @@ function svcCard(name, value, sub, mood) {
   const cls = mood || (value === "ready" ? "ok" : "bad");
   return `<div class="svc ${cls}"><div class="svc-name"><span class="led ${cls === "ok" ? "ok" : cls === "warn" ? "" : "bad"}"></span>${esc(name)}</div><div class="svc-val">${esc(value)}</div>${sub ? `<div class="svc-sub">${sub}</div>` : ""}</div>`;
 }
-function pressureStatusCard(pressure) {
-  if (!pressure) return "";
-  const sample = pressure.sample;
-  const detail = pressure.cpu_some_avg10 && sample ? `CPU some ${Number(sample.cpu.some_avg10).toFixed(1)}% · IO some ${Number(sample.io.some_avg10).toFixed(1)}% (avg10)` : sample ? `IO full ${Number(sample.io.full_avg60).toFixed(1)}% · CPU some ${Number(sample.cpu.some_avg60).toFixed(1)}% · memory full ${Number(sample.memory.full_avg60).toFixed(1)}% (avg60)` : "PSI unavailable; budget-only admission (admission fails open)";
-  const observing = pressure.mode === "observe";
-  const value = observing ? "observation only" : pressure.holding ? `deferring new grants (${pressure.resource})` : pressure.available ? "no pressure hold" : "unavailable";
-  const policy = observing ? " · PSI does not defer grants; other admission gates still apply" : "";
-  return svcCard("host pressure", value, detail + policy, pressure.holding || pressure.threshold_exceeded || !pressure.available ? "warn" : "ok");
-}
-/* Run limits live in Argo (docs/where-limits-live.md): the card shows how
-   many runs Oberth admitted, never a ceiling of its own. */
-function admissionStatusCard(admission) {
-  if (!admission) return "";
-  const hold = admission.hold?.on ? admission.hold : null;
-  if (hold) return svcCard("admission", `held by admin · ${admission.runs ?? 0} admitted`, esc(admissionHoldText(hold)), "warn");
-  return svcCard("admission", `${admission.runs ?? 0} admitted`, "run limits: Argo controller parallelism and native synchronization", "ok");
-}
-/* The whole administrator hold: reason, who, until when, what may pass. */
-function admissionHoldText(hold) {
-  const allowed = (hold.allow || []).length ? hold.allow.join(", ") : "nothing";
-  const until = hold.expires_at ? ` until ${fmtTime(hold.expires_at)}` : "";
-  return `${hold.reason || "no reason recorded"} · by ${hold.actor || "an admin"}${until} · allowed: ${allowed}`;
-}
-function admissionHoldBanner(admission) {
-  const hold = admission?.hold;
-  if (!hold?.on) return "";
-  return `<div role="status" class="svc warn"><strong>Queue held by admin</strong><div>${esc(admissionHoldText(hold))}</div></div>`;
-}
 function controllerProfileStatusCard(profile) {
  if (!profile) return "";
  const paused = profile.admission_paused ?? profile.state !== "verified";
@@ -1677,8 +1641,6 @@ async function renderStatus(seq) {
       ${svcCard("audit anchor", s.audit || "unavailable", chain && chain.detail ? esc(chain.detail) : s.audit_mode === "local" ? "local hash chain — external anchoring off" : "")}
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
-      ${pressureStatusCard(s.admission?.pressure)}
-      ${admissionStatusCard(s.admission)}
       ${controllerProfileStatusCard(s.controller_profile)}
     </div>
     ${uplinkExpiryWarnings(uplinks)}

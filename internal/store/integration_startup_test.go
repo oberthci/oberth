@@ -84,10 +84,10 @@ VALUES('operator', 'high', 999999999999999999, 'admin');`)
 			if version != latestMigrationVersion {
 				t.Fatalf("version=%d, want %d", version, latestMigrationVersion)
 			}
-			if err := s.db.QueryRow(`SELECT count(*) FROM priority_grants WHERE identity='operator'`).Scan(&grants); err != nil || grants != 1 {
-				t.Fatalf("priority grant not preserved: %d %v", grants, err)
+			if err := s.db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name='priority_grants'`).Scan(&grants); err != nil || grants != 0 {
+				t.Fatalf("retired priority table remains: %d %v", grants, err)
 			}
-			for _, query := range []string{`SELECT expires_at FROM token_credentials`, `SELECT revision FROM issues`, `SELECT * FROM run_priority_requests`} {
+			for _, query := range []string{`SELECT expires_at FROM token_credentials`, `SELECT revision FROM issues`} {
 				rows, err := s.db.Query(query)
 				if err != nil {
 					t.Fatal(err)

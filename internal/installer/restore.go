@@ -34,10 +34,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/yaml"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/store"
-	"golang.org/x/mod/semver"
 )
 
 // RestoreConfig selects the archive, its key, and the target installation.
@@ -163,8 +164,7 @@ type restoreArchive struct {
 	// Contents counts what the archived database holds.
 	Contents store.ContentSummary
 	// RestoredHeadID and RestoredHeadSHA256 are the audit head of the
-	// database the server starts on: the manifest's, or one action past it
-	// when the restore placed an admission hold.
+	// database the server starts on, after any recorded restoration action.
 	RestoredHeadID     int64
 	RestoredHeadSHA256 string
 }

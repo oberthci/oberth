@@ -705,13 +705,13 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_list":            {"before", "held", "latest", "limit", "own", "ref", "ref_glob", "repo", "status", "superseded", "view"},
 		"run_resources":       {"burn", "format", "id", "include_failed", "last", "ref", "repo", "step"},
 		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "tail"},
-		"run_retry":           {"id", "priority", "priority_reason"},
+		"run_retry":           {"id"},
 		"run_cancel":          {"force", "id", "reason"},
 		"run_purge":           {"id", "reason", "what"},
 		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "step", "tail"},
 		"wait":                {"id", "repo", "sha", "timeout_s", "trigger"},
-		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
-		"promote":             {"branch", "priority", "priority_reason", "prune_source", "repo", "sha", "skip_conflicting", "sources", "tag_after"},
+		"sync":                {"branch", "repo", "sha"},
+		"promote":             {"branch", "prune_source", "repo", "sha", "skip_conflicting", "sources", "tag_after"},
 		"run_wait":            {"id", "timeout_s", "until"},
 		"events_since":        {"after_id", "kinds", "limit", "own", "refs_glob", "repos"},
 		"events_wait":         {"after_id", "kinds", "limit", "own", "refs_glob", "repos", "run_ids", "timeout_s"},
@@ -857,7 +857,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 96
+	const documented = 81
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -937,7 +937,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"uplink_invite", "uplink_cert", "client_renew", "uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss",
 		"access_list", "access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
-		"release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority",
+		"release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "branch_delete_many", "branch_deletion_list", "branch_deletion_resolve", "ref_delete_many", "receive_outbox", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list", "run_wait", "events_subscribe", "events_since", "events_wait", "sync_status",
 	}

@@ -80,7 +80,7 @@ func TestNativeSchedulingUpgradeMaterializesReceivesAndPreservesReplay(t *testin
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"admission_holds", "queue_priority_patterns", "run_priority_overrides", "run_priority_requests", "priority_grants", "queue_cap", "deferred_branch_receives", "size_grants", "resource_ceilings", "admission_capacity_override", "concurrency_group_declarations", "runs_repo_active_idx", "runs_repo_started_idx"} {
+	for _, name := range []string{"admission_head_waits", "admission_holds", "queue_priority_patterns", "run_priority_overrides", "run_priority_requests", "priority_grants", "queue_cap", "deferred_branch_receives", "size_grants", "resource_ceilings", "admission_capacity_override", "concurrency_group_declarations", "runs_repo_active_idx", "runs_repo_started_idx"} {
 		var n int
 		if err = s.db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE name=?`, name).Scan(&n); err != nil || n != 0 {
 			t.Fatal("retired schema", name, n, err)

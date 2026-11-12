@@ -274,7 +274,6 @@ number of unmerged branches are recorded in the batch audit.
 | `infrastructure` | `git_transport` | `run_rerun` (retries only the publication); while Oberth's automatic retry runs, `publication` shows `attempt`, `max_attempts` (5) and `next_retry_at` |
 | `infrastructure` | `eviction`, `executor_identity`, `startup_deadline`, `infrastructure` | `run_retry` |
 | `infrastructure` | `image_pull`, `deadline_artifact` (a deadline reported below 90% of the step budget), `interrupted` | `run_rerun` |
-| `infrastructure` | `auto_retried` | none; follow `auto_retried_by` |
 | `code` | `step_failed`, `deadline`, `oom`, `resource_limit`, `upstream_rejected` | fix the code, the git resources or the upstream |
 | `unknown` | `unknown` | read `run_get` and `run_logs` |
 

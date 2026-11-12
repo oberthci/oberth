@@ -98,6 +98,7 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			historicalSchedulingInput(t, current, true)
 			if !reflect.DeepEqual(current, &input) {
 				t.Fatal("Build changed: recapture actual controller proof")
 			}
@@ -106,7 +107,7 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				var before, submitted corev1.Pod
 				decode(t, name+"-before-patch.json", &before)
 				decode(t, name+"-submitted.json", &submitted)
-				assertPipelinePodPriority(t, &submitted)
+				assertHistoricalPipelinePriority(t, &submitted)
 				assertWIFPodIsolation(t, shape, submitted.Spec)
 				if shape == "wif-only-step" && submitted.Spec.ServiceAccountName != "release-step-main" {
 					t.Fatal("Argo lost pinned step identity")

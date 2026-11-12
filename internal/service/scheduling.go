@@ -5,9 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/utils/clock"
+
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"k8s.io/utils/clock"
 )
 
 type SchedulingObserver interface {
@@ -25,7 +26,7 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 			}
 		}
 	}
-	run = s.runAdmissionContext(ctx, run, true)
+	run = s.runAdmissionContext(ctx, run, force && run.QueuePosition == 0)
 	c := s.schedulingClock()
 	observed := c.Now().UTC()
 	result = &model.RunScheduling{ObservedAt: observed, State: "preparing", Message: "Preparing Workflow submission.", QueuePosition: run.QueuePosition}
@@ -57,6 +58,10 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 		result.State = "waiting"
 		result.Message = "Waiting for Workflow submission."
 		return result, "starting"
+	}
+	if run.Phase == "preflight" {
+		result.State, result.Message = "preflight", "Running trusted preflight."
+		return result, ""
 	}
 	if s.schedulingObserver == nil {
 		result.State = "unavailable"
