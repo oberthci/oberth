@@ -415,7 +415,6 @@ func (health Health) ScopedStatus(ctx context.Context, actor api.Actor) (any, er
 	return status, nil
 }
 
-
 // boundedDetail keeps diagnostic strings on the status view single-line and
 // short enough for a dashboard cell.
 func boundedDetail(detail string) string {

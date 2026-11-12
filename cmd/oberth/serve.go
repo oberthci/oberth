@@ -103,7 +103,7 @@ type serveOptions struct {
 	runLogLimitBytes      int64
 	retentionInterval     time.Duration
 	retentionKeepNewest   int
-	statusProbes app.StatusProbeConfig
+	statusProbes          app.StatusProbeConfig
 
 	assist                  argojob.AssistConfig
 	agentEvents             service.AgentEventPolicy
