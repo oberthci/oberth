@@ -12,6 +12,8 @@ import (
 	"github.com/oberthci/oberth/internal/pushretry"
 )
 
+const validationRefusalPrefix = "validation refused: "
+
 // The wire reason is one bounded line; Error and Reason retain detail evidence.
 func displayFailureText(message string) string {
 	text := strings.Join(strings.Fields(message), " ")

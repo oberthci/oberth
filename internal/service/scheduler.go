@@ -1600,7 +1600,15 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 	if errors.As(failure, &cause) {
 		result.FailureCause = displayFailureText(cause.RunFailureCause())
 	}
-	_, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
+	var refusal *argoworkflow.AdmissionError
+	if errors.As(failure, &refusal) {
+		// Deterministic source validation is a document failure, including
+		// receipt validation before Create. Keep the complete rule, not the
+		// infrastructure wrapper, and use the existing job failure phase.
+		result.Phase, result.Error = "job", refusal.Error()
+		result.FailureCause = displayFailureText(validationRefusalPrefix + refusal.Error())
+	}
+	_, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: result.Phase, Error: result.Error, FailureCause: result.FailureCause})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil

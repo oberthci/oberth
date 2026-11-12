@@ -38,6 +38,9 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 	code := func(cause, action, detail string) *model.RetryHint {
 		return &model.RetryHint{Class: model.RetryCode, Cause: cause, Action: action, Detail: detail}
 	}
+	if run.Status == model.RunFailed && run.Phase == "job" && strings.HasPrefix(run.FailureCause, validationRefusalPrefix) {
+		return code("validation", "fix the Workflow YAML and push a new commit", boundedText(run.Error, 200))
+	}
 	message := run.Error
 	lower := strings.ToLower(message)
 	if pushretry.PublicationFailure(message) || run.Phase == "publishing" {
