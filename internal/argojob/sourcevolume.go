@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -125,9 +126,11 @@ type SourceVolume struct {
 
 // SourceSeeder populates a per-run source claim in the pipeline namespace.
 type SourceSeeder struct {
-	client kubernetes.Interface
-	exec   ExecStreamer
-	config Config
+	observationsMu sync.Mutex
+	observations   map[string]sourceSeedIdentity
+	client         kubernetes.Interface
+	exec           ExecStreamer
+	config         Config
 }
 
 // ExecStreamer runs a command in a container and streams stdin to it. It is the
@@ -262,7 +265,9 @@ func (seeder *SourceSeeder) fill(
 	if err != nil {
 		return err
 	}
+	stopObserving := seeder.observeCreatedSeed(created, requests...)
 	defer func() {
+		stopObserving()
 		// Best effort: the Pod is disposable, and leaving one behind must not
 		// fail a run that otherwise seeded correctly.
 		options := *metav1.NewDeleteOptions(0)

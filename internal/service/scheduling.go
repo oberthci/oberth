@@ -99,6 +99,10 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		run.DisplayStatus = model.DisplayQueued
 		run.DisplayReason = queuedDisplayReason(scheduling)
 	}
+	if strings.HasPrefix(scheduling.Execution.Reason, "SourceSeed") {
+		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(scheduling.Execution.Message))
+		return
+	}
 	if scheduling.Execution.Reason == "Suspended" {
 		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(scheduling.Execution.Message))
 		return

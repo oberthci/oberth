@@ -19,7 +19,9 @@ upstreams, global admission budgets, audit details and secret-store configuratio
 These diagnostics do not authorize mutations or change admission/readiness gates.
 
 Run-list execution observations refresh in background workers on every read,
-as soon as successful Workflow submission is recorded. They do not wait for
+as soon as submission preparation starts. Before the Workflow exists, the
+source seeder exposes only the identity-bound seed Pod’s curated Pending reason;
+Argo observations take over once the Workflow exists. They do not wait for
 local step history and continue after steps start, so native suspension remains
 visible. At most four refreshes run at once, each with a two-second budget, with
 512 retained entries and a bounded FIFO of at most 512 pending keys. Concurrent

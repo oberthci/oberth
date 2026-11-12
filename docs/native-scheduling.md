@@ -166,7 +166,12 @@ With N active runs and Argo parallelism P, all N prepare and submit; P bounds
 neither server copies nor PVCs nor the source-seed Pods. Up to N seed Pods and N
 volumes can be created concurrently. Seed Pods run before their Workflow exists
 and outside Argo parallelism. Source preparation waits while a seed Pod is
-Pending, without creating the Workflow. Cancellation or supersession stops it
+Pending, without creating the Workflow. A deleted seed Pod, or one that ends
+Failed/Succeeded before preparation, fails this run with a source-seed reason
+and cleans its claim; it does not leave a permanent Running run. Image pull
+back-off and an unbound claim keep waiting without an Oberth expiry. Run
+reasons describe the exact seed Pod’s curated Kubernetes wait before a
+Workflow exists. Cancellation or supersession stops it
 and cleans its Pod and PVC. There is no automatic infrastructure retry. A
 manual retry attempts source
 delivery again; YAML retryStrategy cannot cover a failure before Workflow Create.

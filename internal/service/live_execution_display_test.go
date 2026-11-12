@@ -120,3 +120,45 @@ func TestRunListNativeObservationHasOnePageBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestSeedPendingReasonPrecedesArgoStateOnAllReadSurfaces(t *testing.T) {
+	for _, scoped := range []bool{false, true} {
+		t.Run(fmt.Sprint(scoped), func(t *testing.T) {
+			f := newControlFixture(t)
+			run := submittedDisplayRun(t, f, "source-preparation")
+			s := f.api(t)
+			const message = "source seed pod pending: ImagePullBackOff"
+			s.schedulingObserver = schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
+				return &model.ExecutionObservation{State: "observed", Phase: "Pending", Reason: "SourceSeedPending", Message: message, Pods: []model.SchedulingReason{{Phase: "Pending", Reason: "ImagePullBackOff", Message: "pod pending: container is waiting to start"}}}, nil
+			})
+			actor := api.Actor{Identity: "owner"}
+			if scoped {
+				actor.Scope = []string{"codeberg"}
+			}
+			listed, err := s.Runs(t.Context(), actor, api.RunFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := listed.([]model.Run)
+			if len(rows) != 1 || rows[0].DisplayStatus != model.DisplayQueued || rows[0].DisplayReason != message {
+				t.Fatal("list waited for nonexistent Argo Workflow", rows)
+			}
+			value, err := s.Run(t.Context(), actor, run.ID)
+			if err != nil || value.(RunDetailResponse).Run.DisplayReason != message {
+				t.Fatal("run detail hid source reason", value, err)
+			}
+			scopedAPI, err := s.forActor(t.Context(), actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := scopedAPI.status(t.Context(), f.repo.Name, run.SHA, "")
+			if err != nil || status.Run.DisplayReason != message {
+				t.Fatal("status hid source reason", status, err)
+			}
+			kept, err := f.store.Run(t.Context(), run.ID)
+			if err != nil || kept.Status != model.RunRunning || kept.Error != "" {
+				t.Fatal("observation changed lifecycle", kept, err)
+			}
+		})
+	}
+}

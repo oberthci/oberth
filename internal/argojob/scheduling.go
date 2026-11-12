@@ -27,6 +27,12 @@ const maxSchedulingItems = 16
 func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID, sha string) (*model.ExecutionObservation, error) {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		if controller.seeder != nil {
+			observation, seedErr := controller.seeder.observeScheduling(ctx, name, runID, sha)
+			if seedErr != nil || observation != nil {
+				return observation, seedErr
+			}
+		}
 		return &model.ExecutionObservation{State: "not_observed", Message: "No Workflow was observed; startup or scheduling cause is unknown."}, nil
 	}
 	if err != nil {
