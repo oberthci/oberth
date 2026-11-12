@@ -38,7 +38,7 @@ func TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion(t *testing.T) {
 	if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.store.MarkRunAdmitted(t.Context(), original.RunID); err != nil {
+	if _, err = f.store.MarkRunSubmissionStarted(t.Context(), original.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.store.RecoverOwnerState(t.Context()); err != nil {
@@ -74,7 +74,7 @@ func TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion(t *testing.T) {
 	if prepared, pushed := git.counts(); prepared != 2 || pushed != 1 {
 		t.Fatal("startup repeated delivered work", prepared, pushed)
 	}
-	// Exercise the admission race directly: delivery can happen after startup
+	// Exercise the retry transaction race directly: delivery can happen after startup
 	// eligibility was read. The transaction's typed refusal must stay quiet.
 	original, err = f.store.Promotion(t.Context(), id)
 	if err != nil {
