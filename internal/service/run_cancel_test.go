@@ -159,20 +159,21 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 }
 
 // A running run's Workflow is deleted; its owner settles without recording a
-// result over the cancel, and its weight passes on only once the Workflow is
+// result over the cancel, and the next Workflow starts only once the first is
 // gone.
 func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	fixture := newGroupFixture(t, 1)
 	fixture.engine.declare("busy", "", pipeline.M)
 	fixture.engine.declare("heavy", "", pipeline.XL)
 	running := fixture.branch(t, fixture.exampleService, "busy", "a")
-	next := fixture.branch(t, fixture.exampleService, "heavy", "b")
 	fixture.start(t)
 	if created := fixture.awaitCreated(t, 1); !created[running.ID] {
 		t.Fatalf("created %v; want the running run", created)
 	}
-	// The scheduler may already have claimed next (running, phase waiting);
-	// what the running run retains is its Workflow, so assert that.
+	// Establish the first Workflow before enqueueing its successor: source
+	// preparation can finish out of order for two prequeued runs. The fake
+	// native Workflow ceiling keeps the successor queued until cancellation.
+	next := fixture.branch(t, fixture.exampleService, "heavy", "b")
 	if queued, err := fixture.store.Run(t.Context(), next.ID); err != nil || queued.Status.Terminal() || queued.StartedAt != nil || fixture.engine.wasCreated(next.ID) {
 		t.Fatalf("workflow ceiling did not retain the queued run: %+v %v", queued, err)
 	}
