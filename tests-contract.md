@@ -457,3 +457,8 @@ and verifies both Oberth NodePort mappings and explicit host ports.
 `TestPluginKindRecognizesSelectedClusterMappings` pins Docker inspection to
 the selected kind cluster and avoids printing a replacement remedy when its
 mappings are already present.
+
+`TestPluginPrerequisitesOnlyPrintMissingToolCommands` runs the wrapper under
+sh, bash and zsh when available: missing tools only print exact commands/links,
+including with affirmative stdin. Brew is never invoked. The installation
+option is rejected; existing prerequisites let validation succeed.

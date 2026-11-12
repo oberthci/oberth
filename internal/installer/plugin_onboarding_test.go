@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -165,6 +167,58 @@ func TestPluginKindRecognizesSelectedClusterMappings(t *testing.T) {
 	result, err := ProbeClientPorts(t.Context(), plan, Config{}, deps)
 	if err != nil || result.KindRemedy != nil || !result.HTTPS.Published || !result.SSH.Published || result.HTTPS.Port != "32443" {
 		t.Fatalf("%+v %v", result, err)
+	}
+}
+
+func TestPluginPrerequisitesOnlyPrintMissingToolCommands(t *testing.T) {
+	for _, shell := range []string{"/bin/sh", "/bin/bash", "/bin/zsh"} {
+		if _, err := os.Stat(shell); err != nil {
+			continue
+		}
+		for _, platform := range []string{"Darwin", "Linux"} {
+			for _, tools := range []string{"", "kubectl", "helm", "kubectl helm"} {
+				t.Run(filepath.Base(shell)+"/"+platform+"/"+tools, func(t *testing.T) {
+					root := t.TempDir()
+					bin := filepath.Join(root, "bin")
+					if err := os.Mkdir(bin, 0700); err != nil {
+						t.Fatal(err)
+					}
+					write := func(name, body string) {
+						t.Helper()
+						if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body), 0700); err != nil {
+							t.Fatal(err)
+						}
+					}
+					write("uname", "printf '%s\\n' '"+platform+"'\n")
+					write("brew", "printf called > \"$HOME/brew-calls\"\nexit 91\n")
+					for _, tool := range strings.Fields(tools) {
+						write(tool, "exit 0\n")
+					}
+					command := exec.CommandContext(t.Context(), shell, pluginPath(t, "scripts", "install"), "prerequisites")
+					command.Env = []string{"HOME=" + root, "PATH=" + bin}
+					command.Stdin = strings.NewReader("yes\nyes\n")
+					output, err := command.CombinedOutput()
+					if (err == nil) != (tools == "kubectl helm") {
+						t.Fatalf("%v %s", err, output)
+					}
+					if _, err := os.Stat(filepath.Join(root, "brew-calls")); !os.IsNotExist(err) {
+						t.Fatal("prerequisite validation ran brew", err)
+					}
+					for tool, formula := range map[string]string{"kubectl": "kubernetes-cli", "helm": "helm"} {
+						missing := !strings.Contains(tools, tool)
+						if strings.Contains(string(output), "Install "+tool+" first") != missing {
+							t.Fatal(string(output))
+						}
+						if strings.Contains(string(output), "brew install "+formula) != (missing && platform == "Darwin") {
+							t.Fatal(string(output))
+						}
+					}
+					if strings.Contains(string(output), "Type yes") || strings.Contains(string(output), "offer to run") {
+						t.Fatal("validation offered to install dependencies", string(output))
+					}
+				})
+			}
+		}
 	}
 }
 

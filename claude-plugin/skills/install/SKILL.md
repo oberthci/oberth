@@ -24,8 +24,10 @@ Arguments given to the command: `$ARGUMENTS`
 ## Steps
 
 1. **Prerequisites.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" prerequisites`.
-   Missing Helm or kubectl stops the flow with installation links. Never install
-   either tool yourself.
+   Missing Helm or kubectl prints installation links and, on macOS, the exact
+   Homebrew commands. Show those commands and stop. The operator installs the
+   dependencies outside Oberth; neither this skill nor the wrapper runs brew,
+   even after a yes. Recheck prerequisites only after the operator finishes.
 2. **The CLI.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/fetch-oberth"` (or pass an
    explicit release version). It uses the plugin's pinned release key, OpenSSL
    and SHA-256 to verify before installing into `~/.local/bin`. It needs no

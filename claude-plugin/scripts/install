@@ -3,12 +3,23 @@
 set -eu
 command=${1:-}
 [ "$#" -gt 0 ] && shift
+if [ "$command" = prerequisites ] && [ "$#" -ne 0 ]; then
+ printf 'Usage: scripts/install prerequisites\n' >&2
+ exit 1
+fi
+missing=false
 for tool in kubectl helm; do
- if ! command -v "$tool" >/dev/null 2>&1; then
-  printf 'Install %s first (kubectl: https://kubernetes.io/docs/tasks/tools/; Helm: https://helm.sh/docs/intro/install/).\n' "$tool" >&2
-  exit 1
+ if command -v "$tool" >/dev/null 2>&1; then
+  continue
  fi
+ printf 'Install %s first (kubectl: https://kubernetes.io/docs/tasks/tools/; Helm: https://helm.sh/docs/intro/install/).\n' "$tool" >&2
+ if [ "$(uname -s 2>/dev/null || :)" = Darwin ]; then
+  case "$tool" in kubectl) formula=kubernetes-cli ;; helm) formula=helm ;; esac
+  printf 'Homebrew command (run it yourself): brew install %s\n' "$formula" >&2
+ fi
+ missing=true
 done
+[ "$missing" = false ] || exit 1
 [ "$command" != prerequisites ] || exit 0
 cli=$HOME/.local/bin/oberth
 [ -x "$cli" ] || { printf 'Run the plugin scripts/fetch-oberth first.\n' >&2; exit 1; }

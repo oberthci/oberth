@@ -119,3 +119,12 @@ as an install target. These loopback mappings support clients on this Mac.
 The printed command targets a new `oberth-kind.kubeconfig` and refuses an
 existing file or symlink. Use that file and `kind-oberth-onboarding` explicitly
 for the next plan/install; choose unused names instead of replacing files.
+
+### Prerequisite hints on macOS
+
+`scripts/install prerequisites` reports every missing kubectl/Helm tool and
+prints the exact `brew install kubernetes-cli` and/or `brew install helm`
+command on macOS, alongside the installation links. It then stops. The operator
+runs dependency installation outside Oberth. Validation never invokes brew,
+reads consent to install tools, or changes settings. Existing tools are not
+reinstalled. Linux retains the installation links.
