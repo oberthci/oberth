@@ -1,13 +1,13 @@
 package store
 
 import (
-	"github.com/oberthci/oberth/internal/testdb"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 func TestPromotionConfirmationMigrationPreservesHistory(t *testing.T) {
