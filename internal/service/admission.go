@@ -16,9 +16,10 @@ import (
 // must fit before any Pod is submitted. Native Argo locks still govern shared
 // step resources, and the disk floor, PSI valve and administrator hold apply.
 type admissionGate struct {
-	adminHold    model.AdmissionHold
-	holdUpdating bool
-	mu           sync.Mutex
+	adminHold       model.AdmissionHold
+	holdUpdating    bool
+	lastHoldRefresh time.Time
+	mu              sync.Mutex
 	// now is the gate's clock; nil is time.Now.
 	now             func() time.Time
 	priorityChanges map[string]bool
@@ -46,9 +47,15 @@ type admissionGate struct {
 
 type admissionReservation struct {
 	// requests is the effective peak Pod request reservation.
-	requests *argoworkflow.PodRequests
-	gate     *admissionGate
-	sequence int64
+	requests             *argoworkflow.PodRequests
+	cpu                  argoworkflow.CPUAdmission
+	poolKnown            bool
+	unknownAdopted       bool
+	heldSince            time.Time
+	assistRequested      bool
+	capacityBlockedSince time.Time
+	gate                 *admissionGate
+	sequence             int64
 	// order retains restart FIFO position; sequence stays the unique run key.
 	order int64
 
@@ -104,6 +111,7 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its identity.
 type admissionRequest struct {
+	CPU                  argoworkflow.CPUAdmission
 	Requests             *argoworkflow.PodRequests
 	RunID                string
 	RepoID               int64
@@ -133,6 +141,7 @@ func (gate *admissionGate) reservePriorityRun(sequence, order int64, run model.R
 	reservation := &admissionReservation{gate: gate, sequence: sequence, order: order, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
 	reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
 	reservation.refKind, reservation.sha = run.RefKind, run.SHA
+	reservation.assistRequested = run.AssistRequested
 	reservation.pressureRelease, reservation.pressurePromotion = run.Release, run.Trigger == "promotion"
 	reservation.priority, reservation.priorityReason, reservation.queuedAt = run.Priority, run.PriorityReason, run.QueuedAt
 	reservation.priorityOverride, reservation.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
@@ -186,7 +195,8 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		}
 		return nil, context.Canceled
 	}
-	reservation.requests = request.Requests.Clone()
+	reservation.cpu, reservation.poolKnown = request.CPU, true
+	reservation.requests = clampAdmissionRequests(request.Requests, request.CPU.Milli)
 	if request.RunID != "" {
 		reservation.runID = request.RunID
 	}
@@ -308,9 +318,8 @@ func (reservation *admissionReservation) retain() {
 }
 
 // grantLocked chooses by priority and repository fair share, then reserves
-// whole-run CPU. The first eligible candidate that cannot fit holds its place;
-// smaller jobs cannot continuously backfill ahead of it. Administrator-held
-// candidates are skipped.
+// whole-run CPU. Alternating drain and backfill windows bound queue obstruction
+// while allowing large reservations to accumulate capacity.
 func (gate *admissionGate) grantLocked() {
 	if gate.holdUpdating {
 		return
@@ -322,8 +331,13 @@ func (gate *admissionGate) grantLocked() {
 	gate.pressure.refresh(now)
 	gate.sortWaitersLocked()
 	gate.preparePressureWaitsLocked(now)
+	drainPools := map[string]bool{}
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
+		if drainPools[gate.pool(reservation).Pool] {
+			index++
+			continue
+		}
 		if gate.adminHeldLocked(reservation) {
 			index++
 			continue
@@ -333,8 +347,24 @@ func (gate *admissionGate) grantLocked() {
 			return
 		}
 		if !gate.canGrantLocked(reservation) {
-			return
+			if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
+				return
+			}
+			if reservation.capacityBlockedSince.IsZero() {
+				reservation.capacityBlockedSince = now
+			}
+			// Alternate a drain window with bounded backfill. New small work cannot
+			// perpetually refill the pool ahead of a large aged reservation.
+			if now.Sub(reservation.capacityBlockedSince)%(2*time.Minute) < time.Minute {
+				// A capacity hold in one cluster never blocks another cluster.
+				drainPools[gate.pool(reservation).Pool] = true
+				index++
+				continue
+			}
+			index++
+			continue
 		}
+		reservation.capacityBlockedSince = time.Time{}
 		// Stop at the first otherwise eligible candidate. A pressure timeout
 		// never bypasses priority or the disk floor.
 		if gate.deferPressureLocked(reservation, now) {
@@ -367,7 +397,7 @@ func (gate *admissionGate) grantLocked() {
 }
 
 // spareSlotForClaim bounds preparation to one checkout at a time and, with
-// CPU packing, up to 64 prepared waiters. This lookahead makes room for newly
+// CPU packing, up to 8 prepared waiters. This lookahead makes room for newly
 // queued priority work while a standard candidate waits for CPU.
 func (gate *admissionGate) spareSlotForClaim() bool {
 	gate.mu.Lock()
@@ -383,7 +413,7 @@ func (gate *admissionGate) spareSlotForClaim() bool {
 				return false
 			}
 		}
-		return len(gate.waiters)-gate.parkedLocked() < 64
+		return len(gate.waiters)-gate.parkedLocked() < 8
 	}
 	return len(gate.waiters)-gate.parkedLocked() == 0
 }
@@ -400,27 +430,52 @@ func (gate *admissionGate) canGrantLocked(reservation *admissionReservation) boo
 	return gate.cpuFitsLocked(reservation) && (gate.diskFloor == nil || gate.diskFloor.freeAboveFloor())
 }
 
-func (gate *admissionGate) cpuFitsLocked(reservation *admissionReservation) bool {
-	if gate.cpuMilli > 0 {
-		if reservation.requests == nil || reservation.requests.CPUMilli <= 0 {
-			return false
-		}
-		remaining := gate.cpuMilli
-		for _, r := range gate.reservations {
-			if !r.granted || r.released {
-				continue
-			}
-			// Unknown restored demand consumes the entire pool until cleanup.
-			if r.requests == nil || r.requests.CPUMilli <= 0 {
-				return false
-			}
-			remaining -= r.requests.CPUMilli
-		}
-		if reservation.requests.CPUMilli > remaining {
-			return false
-		}
+func (gate *admissionGate) pool(r *admissionReservation) argoworkflow.CPUAdmission {
+	if r.poolKnown {
+		return r.cpu
 	}
-	return true
+	return argoworkflow.CPUAdmission{Milli: gate.cpuMilli}
+}
+func (gate *admissionGate) samePool(a, b *admissionReservation) bool {
+	return gate.pool(a).Pool == gate.pool(b).Pool
+}
+
+func clampAdmissionRequests(requests *argoworkflow.PodRequests, budget int64) *argoworkflow.PodRequests {
+	requests = requests.Clone()
+	if budget <= 0 {
+		return requests
+	}
+	if requests == nil {
+		requests = &argoworkflow.PodRequests{}
+	}
+	if requests.CPUMilli <= 0 || requests.CPUMilli > budget {
+		requests.CPUMilli = budget
+	}
+	return requests
+}
+
+func (gate *admissionGate) cpuFitsLocked(reservation *admissionReservation) bool {
+	pool := gate.pool(reservation)
+	if pool.Milli <= 0 {
+		return true
+	}
+	remaining := pool.Milli
+	now := gate.clock()
+	for _, r := range gate.reservations {
+		if !r.granted || r.released || !gate.samePool(reservation, r) {
+			continue
+		}
+		// Unknown restored demand and parked assistance get a bounded credit lease.
+		// Kubernetes still enforces Pod placement; resource ownership is retained.
+		if r.unknownAdopted && now.Sub(r.grantedAt) >= time.Minute {
+			continue
+		}
+		if !r.heldSince.IsZero() && now.Sub(r.heldSince) >= time.Minute {
+			continue
+		}
+		remaining -= clampAdmissionRequests(r.requests, pool.Milli).CPUMilli
+	}
+	return clampAdmissionRequests(reservation.requests, pool.Milli).CPUMilli <= remaining
 }
 
 func (gate *admissionGate) releaseLocked(reservation *admissionReservation) {

@@ -1,6 +1,6 @@
 # Where limits live
 
-Since v0.21.9 Oberth packs whole-run CPU reservations before submission.
+Since v0.21.10 Oberth packs whole-run CPU reservations before submission.
 Argo owns workflow parallelism and native locks; Kubernetes places each Pod.
 See [CPU admission](cpu-admission.md) for the capacity defaults and overrides.
 

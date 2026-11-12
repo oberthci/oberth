@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/measured"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
@@ -129,15 +130,30 @@ func (jobs *ArgoJobs) resourceRunSource(ctx context.Context, request service.Wor
 	return resolved, nil
 }
 
-// RunPodDemand shares the capability graph accounting, including resource helper
-// pods. It exposes scheduling requests only and never chooses an execution target.
+// RunPodDemand shows effective CPU requests without binding a queued run.
 func (jobs *ArgoJobs) RunPodDemand(ctx context.Context, request service.WorkflowRequest) (*argoworkflow.PodDemand, error) {
 	if jobs.routes != nil {
-		return jobs.routes.local.RunPodDemand(ctx, request)
+		config := jobs.routes.local.config
+		repo := model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
+		for _, target := range jobs.routes.definitions {
+			expected, _, ref, _, _, _, _ := target.Config.ExecutionPlacement.Identity()
+			if request.Run.RefKind == model.RefBranch && repo == expected && request.Run.Ref == ref {
+				config = target.Config
+			}
+		}
+		return jobs.routes.local.queuedCPU(ctx, request, config)
 	}
+	return jobs.queuedCPU(ctx, request, jobs.config)
+}
+func (jobs *ArgoJobs) queuedCPU(ctx context.Context, request service.WorkflowRequest, config argojob.Config) (*argoworkflow.PodDemand, error) {
 	resolved, err := jobs.resourceRunSource(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	return argoworkflow.DeclaredCapabilityPeak(resolved.Workflow())
+	policy := jobs.cpuPolicy(ctx, request.Run, config, resolved.Workflow())
+	demand, _ := argojob.SchedulingDemand(resolved.Workflow(), policy)
+	if demand != nil && config.CPUAdmission.Milli > 0 {
+		demand.CPUMilli = min(demand.CPUMilli, config.CPUAdmission.Milli)
+	}
+	return demand, nil
 }

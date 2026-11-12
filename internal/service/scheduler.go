@@ -491,17 +491,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if sizing, ok := scheduler.jobs.(interface {
-			AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error)
-		}); ok {
-			demand, err := sizing.AdoptedPodDemand(run)
-			if err != nil {
-				return err
-			}
-			scheduler.admission.mu.Lock()
-			reservation.requests = queuePodRequests(demand)
-			scheduler.admission.mu.Unlock()
-		}
+		scheduler.sizeAdoptedReservation(workerCtx, run, reservation)
 		adopted = append(adopted, adoptedRun{run: run, reservation: reservation})
 		return nil
 	}); err != nil {
@@ -648,9 +638,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			}(run, reservation)
 		}
 		// Claim higher work before letting a refreshed/aged waiter grant.
-		scheduler.admission.mu.Lock()
-		scheduler.admission.grantLocked()
-		scheduler.admission.mu.Unlock()
+		scheduler.refreshAdmission(dispatchCtx)
 		if scheduler.onDispatchIdle != nil {
 			scheduler.onDispatchIdle()
 		}
@@ -903,13 +891,16 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("size workflow requests: %w", err))
 		}
 	}
-	if scheduler.admission.cpuMilli > 0 && (requests == nil || requests.CPUMilli <= 0 || requests.CPUMilli > scheduler.admission.cpuMilli) {
+	pool, err := scheduler.admissionCPU(ctx, jobRequest)
+	if err != nil {
 		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("workflow CPU requests are unknown or exceed allocatable CPU minus headroom; bound workflow parallelism or reduce requests"))
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
+
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Requests: requests,
 		RefKind: run.RefKind, SHA: run.SHA, PriorityLookupFailed: priorityErr != nil,
+		CPU: pool,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already

@@ -14,7 +14,7 @@ Within a class, repositories with fewer active runs go first, then least recent
 service and FIFO. Running or granted work retains its reservation. Priority does
 not bypass CPU capacity, administrator holds, the disk floor, bounded PSI
 deferral, cleanup or publication guards. Dispatch prepares at most one checkout
-at a time and looks through up to 64 prepared waiters for priority work.
+at a time and looks through up to 8 prepared waiters for priority work.
 
 An ordinary promotion receives `promotion`, never automatic `high`. The oldest
 waiting server-classified tag/release per repository also receives `promotion`

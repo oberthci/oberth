@@ -1,0 +1,18 @@
+suite: CPU admission switch
+templates:
+  - templates/deployment.yaml
+set:
+  image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+tests:
+  - it: enables CPU admission by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --admission-cpu-enabled=true
+  - it: preserves an explicit off switch
+    set:
+      admission.cpuEnabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --admission-cpu-enabled=false

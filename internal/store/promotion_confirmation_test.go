@@ -37,6 +37,7 @@ func TestPromotionConfirmationMigrationPreservesHistory(t *testing.T) {
 	if _, err = s.db.Exec(testdb.PostPromotionConfirmationDowngrade); err != nil {
 		t.Fatal(err)
 	}
+
 	if err = s.migrate(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}

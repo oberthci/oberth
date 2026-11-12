@@ -147,11 +147,8 @@ func stampSchedulingDemand(workflow *wfv1.Workflow, config Config, request Reque
 	delete(workflow.Annotations, cpuRequestsAnnotation)
 	demand := request.PodDemand
 	if (policy.MaxMilli > 0 || len(policy.Templates) > 0) && request.DemandReceipt != nil {
-		var err error
-		demand, err = SchedulingDemand(request.DemandReceipt.Workflow(), policy)
-		if err != nil {
-			return err
-		}
+		// Unsupported graph shapes reserve the whole admission pool; they remain valid Argo workflows.
+		demand, _ = SchedulingDemand(request.DemandReceipt.Workflow(), policy)
 		body, _ := json.Marshal(policy)
 		workflow.Annotations[cpuRequestsAnnotation] = string(body)
 	}

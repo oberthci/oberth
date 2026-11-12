@@ -42,10 +42,10 @@ spec:
 	for _, parallel := range []bool{true, false} {
 		t.Run(map[bool]string{true: "parallel", false: "serial"}[parallel], func(t *testing.T) {
 			document := source
-			cpu, memory := int64(9900), int64(16<<30)
+			cpu, memory := int64(10000), int64(16<<30)
 			if !parallel {
 				document = strings.Replace(document, "  entrypoint: root", "  entrypoint: root\n  parallelism: 1", 1)
-				cpu, memory = 5000, 8<<30
+				cpu, memory = 5050, 8<<30
 			}
 			blobs := &resourceBlobStub{source: []byte(document)}
 			jobs := &ArgoJobs{resourceBlobs: blobs}
@@ -54,10 +54,22 @@ spec:
 			if err != nil || demand == nil || demand.CPUMilli != cpu || demand.MemoryBytes != memory || blobs.sha != request.Run.TestedSHA {
 				t.Fatalf("demand=%+v err=%v SHA=%s", demand, err, blobs.sha)
 			}
-			// Missing requests remain unknown, not limits or fabricated zero figures.
+			jobs.config.StepCPURequestMaxMilli = 3000
+			jobs.config.CPUAdmission.Milli = 4000
+			capped, err := jobs.RunPodDemand(t.Context(), request)
+			want := int64(4000)
+			if !parallel {
+				want = 3050
+			}
+			if err != nil || capped == nil || capped.CPUMilli != want {
+				t.Fatalf("uncapped queue demand: %+v %v", capped, err)
+			}
+			jobs.config.StepCPURequestMaxMilli = 0
+			jobs.config.CPUAdmission.Milli = 0
+			// The preview uses the same request defaults as submission.
 			blobs.source = []byte(strings.ReplaceAll(document, "requests: {cpu: 5, memory: 8Gi}", "requests: {cpu: 5}"))
 			demand, err = jobs.RunPodDemand(t.Context(), request)
-			if err != nil || demand != nil {
+			if err != nil || demand == nil || demand.CPUMilli != cpu {
 				t.Fatalf("missing requests: %+v %v", demand, err)
 			}
 		})

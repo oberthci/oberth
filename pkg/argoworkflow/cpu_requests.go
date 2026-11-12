@@ -33,3 +33,9 @@ func (r *DemandReceipt) CPURequestPolicy() *CPURequestPolicy {
 	p := r.cpuPolicy.Clone()
 	return &p
 }
+
+// CPUAdmission is an operator snapshot of one execution cluster capacity.
+type CPUAdmission struct {
+	Pool  string
+	Milli int64
+}

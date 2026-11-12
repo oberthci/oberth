@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/argojob"
@@ -98,5 +99,31 @@ func TestCPUHistorySizingPrecedesAdmissionAndIsFrozenForSubmission(t *testing.T)
 	}
 	if a.calls != 1 {
 		t.Fatalf("history was reread after reservation: %d", a.calls)
+	}
+}
+
+func TestCPUAdmissionDisabledSkipsHistorySizing(t *testing.T) {
+	a := &sizingAuditor{}
+	jobs := &ArgoJobs{auditor: a}
+	policy := jobs.cpuPolicy(t.Context(), model.Run{}, argojob.Config{CPUAdmissionDisabled: true}, nil)
+	if a.calls != 0 || policy.MaxMilli != 0 || len(policy.Templates) != 0 {
+		t.Fatal("off switch retained measured overrides", policy, a.calls)
+	}
+}
+
+func TestCPUHistoryRetiredTemplatesCannotInvalidateCurrentPolicy(t *testing.T) {
+	a := &sizingAuditor{}
+	start := time.Unix(1000, 0)
+	end := start.Add(100 * time.Second)
+	for template := range 300 {
+		for run := range 5 {
+			a.rows = append(a.rows, model.StepResourceUsage{RunID: fmt.Sprint(run), TemplateName: fmt.Sprintf("template-%d", template), ContainerName: "main", Terminal: true, ExitCode: ptr.To(int32(0)), CPUTimeNS: ptr.To(int64(time.Second)), CPUTimeAt: end, ContainerStartedAt: start, ContainerFinishedAt: end, CPUCoverage: model.MetricCoverage{Count: 4, FirstAt: start, LastAt: end}})
+		}
+	}
+	jobs := &ArgoJobs{auditor: a}
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "template-1"}}}}
+	policy := jobs.cpuPolicy(t.Context(), model.Run{RepoID: 1}, argojob.Config{StepCPURequestMaxMilli: 3000}, wf)
+	if !policy.Valid() || len(policy.Templates) != 1 || policy.Templates["template-1"] != 50 {
+		t.Fatal("history invalidated policy", policy)
 	}
 }

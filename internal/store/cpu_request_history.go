@@ -30,7 +30,7 @@ func (s *Store) CPURequestHistory(ctx context.Context, repoID int64, class strin
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []model.StepResourceUsage
 	for rows.Next() {
 		var raw string

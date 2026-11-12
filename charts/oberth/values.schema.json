@@ -182,6 +182,7 @@
             "maxSeconds": {"type": "integer", "minimum": 0, "maximum": 3600}
           }
         },
+        "cpuEnabled": {"type": "boolean"},
         "cpuHeadroomPercent": {"type": "integer", "minimum": 1, "maximum": 90},
         "stepCPURequestPercent": {"type": "integer", "minimum": 1, "maximum": 100},
         "pressure": {

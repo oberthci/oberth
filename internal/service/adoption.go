@@ -67,12 +67,17 @@ func (gate *admissionGate) adopt(run model.Run) (*admissionReservation, error) {
 		}
 		return previous, nil
 	}
-	now := time.Now().UTC()
+	now := gate.clock().UTC()
+	started := now
+	if run.StartedAt != nil {
+		started = *run.StartedAt
+	}
 	reservation := &admissionReservation{
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
 		prepared: true, granted: true, submitted: true,
-		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
+		assistRequested: run.AssistRequested, unknownAdopted: true,
+		claimedAt: now, preparedAt: now, grantedAt: started, ready: make(chan struct{}),
 	}
 	close(reservation.ready)
 	gate.reservations[run.QueueSequence] = reservation

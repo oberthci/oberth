@@ -27,7 +27,7 @@ func (jobs *ArgoJobs) AdmissionRequests(ctx context.Context, request service.Wor
 	}
 	d, err := argojob.SchedulingDemand(request.DemandReceipt.Workflow(), *policy)
 	if err != nil || d == nil {
-		return nil, err
+		return nil, nil
 	}
 	return &argoworkflow.PodRequests{CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}, nil
 }
@@ -36,4 +36,25 @@ func (jobs *ArgoJobs) AdmissionRequests(ctx context.Context, request service.Wor
 func workflowPriority(run model.Run) model.RunPriority {
 	priority, _ := run.EffectivePriority(time.Now())
 	return priority
+}
+
+func (jobs *ArgoJobs) AdmissionCPU(ctx context.Context, request service.WorkflowRequest) (argoworkflow.CPUAdmission, error) {
+	if jobs.routes != nil {
+		child, err := jobs.routes.forRequest(ctx, request)
+		if err != nil {
+			return argoworkflow.CPUAdmission{}, err
+		}
+		return child.config.CPUAdmission, nil
+	}
+	return jobs.config.CPUAdmission, nil
+}
+func (jobs *ArgoJobs) AdoptedAdmissionCPU(ctx context.Context, run model.Run) (argoworkflow.CPUAdmission, error) {
+	if jobs.routes != nil {
+		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
+		if err != nil {
+			return argoworkflow.CPUAdmission{}, err
+		}
+		return child.config.CPUAdmission, nil
+	}
+	return jobs.config.CPUAdmission, nil
 }

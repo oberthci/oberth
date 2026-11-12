@@ -440,6 +440,7 @@ func TestServeOptionsWitnessGenesisValidation(t *testing.T) {
 
 func minimalValidServeOptions() serveOptions {
 	options := serveOptions{
+		admissionCPUEnabled:         true,
 		admissionCPUHeadroomPercent: 20,
 		stepCPURequestPercent:       25,
 

@@ -170,6 +170,7 @@ branches:
 # minus headroom. Native Argo synchronization still controls shared resources.
 # See docs/cpu-admission.md.
 admission:
+  cpuEnabled: true
   cpuHeadroomPercent: 20
   stepCPURequestPercent: 25
   pressure:

@@ -1673,6 +1673,8 @@ Flags:
         one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain
   -accept-witness-genesis string
         one-shot acknowledgment: exact current audit chain head as <auditID>:<sha256hex>; marks it as the witness genesis so external witnessing starts there, explicitly trusting all prior local history (enables Rekor on an existing deployment)
+  -admission-cpu-enabled
+        enable CPU admission and measured request sizing (default true)
   -admission-cpu-headroom-percent int
         allocatable CPU reserved for platform and host work (1-90 percent) (default 20)
   -admission-disk-floor-bytes int

@@ -97,3 +97,54 @@ func TestServerClassesReachArgoPriority(t *testing.T) {
 		t.Fatal("release lost priority")
 	}
 }
+
+func TestSchedulingUnknownGraphsRemainSubmittable(t *testing.T) {
+	base := `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: root
+  templates:
+  - name: root
+    dag:
+      tasks:
+      - name: work
+        template: work
+  - name: work
+    container:
+      image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      command: [/bin/true]
+      resources:
+        requests: {cpu: 1, memory: 256Mi}
+        limits: {cpu: 4, memory: 1Gi}
+`
+	shapes := map[string]string{
+		"exit":      strings.Replace(base, "  entrypoint: root", "  entrypoint: root\n  onExit: work", 1),
+		"hook":      strings.Replace(base, "        template: work", "        template: work\n        hooks:\n          exit: {template: work}", 1),
+		"withParam": strings.Replace(base, "        template: work", "        template: work\n        withParam: '{{workflow.parameters.items}}'", 1),
+	}
+	shapes["step-hook"] = strings.Replace(base, "    dag:\n      tasks:\n      - name: work\n        template: work", "    steps:\n    - - name: work\n        template: work\n        hooks:\n          exit: {template: work}", 1)
+	for name, source := range shapes {
+		t.Run(name, func(t *testing.T) {
+			request := testRequest(pipeline.TriggerCI, source)
+			request.RunTrigger = argoworkflow.RunTriggerBranch
+			request.PipelineFile = ".oberth/build.yaml"
+			resolved, err := argoworkflow.ResolveRunSource(request.Source, nil, argoworkflow.RunSourceBinding{RunID: request.RunID, RepositoryID: request.RepositoryID, SHA: request.SHA, File: request.PipelineFile, Trigger: request.RunTrigger})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.DemandReceipt, err = resolved.Receipt(argoworkflow.Policy{ServerDeadline: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := testConfig()
+			config.StepCPURequestMaxMilli = 3000
+			wf, err := Build(config, request)
+			if err != nil {
+				t.Fatalf("valid graph rejected: %v", err)
+			}
+			if demand, err := readPodDemand(wf); err != nil || demand != nil {
+				t.Fatalf("unknown demand should restore conservatively: %+v %v", demand, err)
+			}
+		})
+	}
+}

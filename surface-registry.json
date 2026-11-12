@@ -8,10 +8,22 @@
       "doc_anchor": "docs/host-preparation.md",
       "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
     },
-    "value:hardCpu": {"doc_anchor": "docs/io-pressure-admission.md", "test_ref": "cmd/oberth/pressure_flags_test.go TestServePressureHardValveDefaultsAndValidation"},
-    "value:memory": {"doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress", "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"},
-    "value:requests": {"doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress", "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"},
-    "value:resources": {"doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress", "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"},
+    "value:hardCpu": {
+      "doc_anchor": "docs/io-pressure-admission.md",
+      "test_ref": "cmd/oberth/pressure_flags_test.go TestServePressureHardValveDefaultsAndValidation"
+    },
+    "value:memory": {
+      "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+    },
+    "value:requests": {
+      "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+    },
+    "value:resources": {
+      "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
+      "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseSharedControlPlanePriority"
+    },
     "value:cpu_capacity": {
       "doc_anchor": "docs/cpu-admission.md#ordering-and-bounded-waits",
       "test_ref": "internal/service/admission_cpu_test.go TestAdmissionCPUDoesNotBackfillPastLargeWaiter"
@@ -739,6 +751,18 @@
     "value:status.secret_store.checked_at": {
       "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
       "test_ref": "internal/app/status_probes_test.go TestStatusProbeLifecycleAndTimestamps"
+    },
+    "flag:admission-cpu-enabled": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUOffSkipsNodeRead"
+    },
+    "value:cpuEnabled": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "cmd/oberth/scheduling_cpu_test.go TestSchedulingCPUOffSkipsNodeRead"
+    },
+    "annotation:oberth.ci/cpu-requests": {
+      "doc_anchor": "docs/cpu-admission.md#defaults",
+      "test_ref": "internal/app/admission_requests_test.go TestCPUHistorySizingPrecedesAdmissionAndIsFrozenForSubmission"
     }
   }
 }

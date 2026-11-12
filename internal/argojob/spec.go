@@ -72,7 +72,9 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
-	StepCPURequestMaxMilli int64 `json:"-"`
+	CPUAdmission           argoworkflow.CPUAdmission `json:"-"`
+	CPUAdmissionDisabled   bool                      `json:"-"`
+	StepCPURequestMaxMilli int64                     `json:"-"`
 	// Custody journals remote effects; it is not serialized operator authority.
 	Custody TargetCustody `json:"-"`
 	// ExecutionPlacement selects an immutable isolated administrator profile.

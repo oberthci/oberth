@@ -2,8 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/measured"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -18,8 +22,11 @@ func (jobs *ArgoJobs) cpuSizedReceipt(ctx context.Context, run model.Run, source
 	if err != nil {
 		return nil, err
 	}
-	cpu := argoworkflow.CPURequestPolicy{MaxMilli: jobs.config.StepCPURequestMaxMilli}
-	if history, ok := jobs.auditor.(cpuRequestHistory); ok {
+	return receipt.WithCPURequestPolicy(jobs.cpuPolicy(ctx, run, jobs.config, source.Workflow())), nil
+}
+func (jobs *ArgoJobs) cpuPolicy(ctx context.Context, run model.Run, config argojob.Config, workflow *wfv1.Workflow) argoworkflow.CPURequestPolicy {
+	cpu := argoworkflow.CPURequestPolicy{MaxMilli: config.StepCPURequestMaxMilli}
+	if history, ok := jobs.auditor.(cpuRequestHistory); ok && !config.CPUAdmissionDisabled {
 		class := "branch"
 		if run.Release {
 			class = "release"
@@ -33,5 +40,21 @@ func (jobs *ArgoJobs) cpuSizedReceipt(ctx context.Context, run model.Run, source
 			cpu.Templates = measured.CPURequestPercentile(values)
 		}
 	}
-	return receipt.WithCPURequestPolicy(cpu), nil
+	// Retired template names cannot grow a new workflow's frozen binding.
+	allowed := map[string]bool{}
+	if workflow != nil {
+		for _, template := range workflow.Spec.Templates {
+			allowed[template.Name] = true
+		}
+	}
+	for template := range cpu.Templates {
+		if !allowed[template] {
+			delete(cpu.Templates, template)
+		}
+	}
+	body, _ := json.Marshal(cpu)
+	if !cpu.Valid() || len(body) > 32<<10 {
+		cpu.Templates = nil
+	}
+	return cpu
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -163,4 +164,121 @@ func TestAdmissionCPUDoesNotPreparePastDiskFloor(t *testing.T) {
 		t.Fatal("CPU lookahead bypassed the checkout disk floor")
 	}
 	r.cancel()
+}
+
+func TestAdmissionCPUClampsUnknownAndWideFanout(t *testing.T) {
+	for _, requests := range []*argoworkflow.PodRequests{nil, {CPUMilli: 10500}} {
+		g := newAdmissionGate()
+		g.cpuMilli = 9600
+		r := g.reserve(1)
+		release, err := r.acquireRequest(t.Context(), admissionRequest{Requests: requests, CPU: argoworkflow.CPUAdmission{Milli: 9600}})
+		if err != nil || !r.granted || r.requests.CPUMilli != 9600 {
+			t.Fatalf("reservation=%+v err=%v", r, err)
+		}
+		release()
+	}
+}
+func TestAdmissionCPUAgedBackfillAndIndependentPools(t *testing.T) {
+	now := time.Now()
+	g := newAdmissionGate()
+	g.cpuMilli = 5000
+	g.now = func() time.Time { return now }
+	holder := g.reserve(1)
+	holder.prepared = true
+	holder.requests = &argoworkflow.PodRequests{CPUMilli: 3000}
+	g.mu.Lock()
+	g.grantLocked()
+	g.mu.Unlock()
+	large := g.reserve(2)
+	large.prepared = true
+	large.requests = &argoworkflow.PodRequests{CPUMilli: 4000}
+	small := g.reserve(3)
+	small.prepared = true
+	small.requests = &argoworkflow.PodRequests{CPUMilli: 1000}
+	remote := g.reserve(4)
+	remote.prepared = true
+	remote.poolKnown = true
+	remote.cpu = argoworkflow.CPUAdmission{Pool: "remote", Milli: 1000}
+	remote.requests = &argoworkflow.PodRequests{CPUMilli: 1000}
+	g.mu.Lock()
+	g.grantLocked()
+	g.mu.Unlock()
+	if large.granted || small.granted || !remote.granted {
+		t.Fatal("drain window or independent cluster violated")
+	}
+	now = now.Add(time.Minute)
+	g.mu.Lock()
+	g.grantLocked()
+	g.mu.Unlock()
+	if !small.granted || large.granted {
+		t.Fatal("aged head prevented backfill")
+	}
+	small.release()
+	now = now.Add(time.Minute)
+	next := g.reserve(5)
+	next.prepared = true
+	next.requests = &argoworkflow.PodRequests{CPUMilli: 1000}
+	g.mu.Lock()
+	g.grantLocked()
+	g.mu.Unlock()
+	if next.granted {
+		t.Fatal("continuous backfill defeated drain window")
+	}
+	holder.release()
+	if !large.granted {
+		t.Fatal("large run starved")
+	}
+}
+func TestAdmissionCPUUnknownAdoptionAndAssistedHoldHaveBoundedLeases(t *testing.T) {
+	for _, assisted := range []bool{false, true} {
+		now := time.Now()
+		g := newAdmissionGate()
+		g.cpuMilli = 5000
+		g.now = func() time.Time { return now }
+		holder, err := g.adopt(model.Run{ID: "adopted", QueueSequence: 1, StartedAt: &now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if assisted {
+			holder.unknownAdopted = false
+			holder.requests = &argoworkflow.PodRequests{CPUMilli: 5000}
+			holder.heldSince = now
+		}
+		waiter := g.reserve(2)
+		waiter.prepared = true
+		waiter.requests = &argoworkflow.PodRequests{CPUMilli: 5000}
+		g.mu.Lock()
+		g.grantLocked()
+		g.mu.Unlock()
+		if waiter.granted {
+			t.Fatal("lease skipped")
+		}
+		now = now.Add(time.Minute)
+		g.mu.Lock()
+		g.grantLocked()
+		g.mu.Unlock()
+		if !waiter.granted || holder.released {
+			t.Fatal("expired lease blocked or discarded resource ownership")
+		}
+	}
+}
+
+type failedAdoptedSizer struct{ JobController }
+
+func (failedAdoptedSizer) AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error) {
+	return nil, errors.New("unavailable demand binding")
+}
+func TestAdoptedDemandErrorDegradesToUnknownReservation(t *testing.T) {
+	g := newAdmissionGate()
+	g.cpuMilli = 9600
+	run := model.Run{ID: "restored", QueueSequence: 1}
+	r, err := g.adopt(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Scheduler{jobs: failedAdoptedSizer{}, admission: g}
+	s.sizeAdoptedReservation(t.Context(), run, r)
+	if !r.unknownAdopted || r.requests.CPUMilli != 9600 {
+		t.Fatalf("demand read failure did not degrade to whole pool: %+v", r)
+	}
 }

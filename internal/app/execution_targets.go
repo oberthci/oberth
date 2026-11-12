@@ -87,6 +87,7 @@ func WithExecutionTargets(local *ArgoJobs, database *store.Store, definitions []
 			return nil, errors.New("app: duplicate execution target")
 		}
 		// Snapshot all public settings; caller-owned maps cannot mutate policy.
+		runtime := definition.Config
 		body, err := json.Marshal(definition.Config)
 		if err != nil {
 			return nil, err
@@ -94,6 +95,9 @@ func WithExecutionTargets(local *ArgoJobs, database *store.Store, definitions []
 		if err = json.Unmarshal(body, &definition.Config); err != nil {
 			return nil, err
 		}
+		definition.Config.CPUAdmission = runtime.CPUAdmission
+		definition.Config.CPUAdmissionDisabled = runtime.CPUAdmissionDisabled
+		definition.Config.StepCPURequestMaxMilli = runtime.StepCPURequestMaxMilli
 		definition.Config, err = argojob.DefaultedConfig(definition.Config)
 		if err != nil {
 			return nil, err
@@ -286,6 +290,9 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	if child, ok := r.children[b.RunID]; ok {
 		return child, nil
 	}
+	snapshot.Config.CPUAdmission = definition.Config.CPUAdmission
+	snapshot.Config.CPUAdmissionDisabled = definition.Config.CPUAdmissionDisabled
+	snapshot.Config.StepCPURequestMaxMilli = definition.Config.StepCPURequestMaxMilli
 	journal := &targetJournal{store: r.store, binding: b}
 	clients, err := argojob.NewTargetClients(definition.Workflows(b.Namespace), definition.Kubernetes, journal, snapshot.Config)
 	if err != nil {
