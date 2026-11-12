@@ -237,7 +237,7 @@ func newGroupFixture(t *testing.T, _ int) *groupFixture {
 	control, err := NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Logs: logs, Auditor: database,
-		Signals: signals, MaximumWait: testTimeout(50 * time.Millisecond), Admission: scheduler,
+		Signals: signals, MaximumWait: testTimeout(50 * time.Millisecond),
 		PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"), RunCancels: database,
 	})
 	if err != nil {

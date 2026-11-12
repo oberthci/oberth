@@ -61,31 +61,6 @@ func TestRunListMessageContract(t *testing.T) {
 	}
 }
 
-func TestRunListQueuedResourcesAndQualifier(t *testing.T) {
-	admission := &model.AdmissionObservation{State: "waiting", BlockedBy: &model.AdmissionBlocker{Repo: "wrapper", Ref: "main"}}
-	got := queuedDisplayReason(&model.RunScheduling{State: "waiting", Admission: admission}, nil)
-	if want := "needs 9.9 CPU, 16 GiB · host IO busy"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestRunListWaitQualifierPrivacyAndClipping(t *testing.T) {
-	a := &model.AdmissionObservation{BlockedBy: &model.AdmissionBlocker{}}
-	if got := waitingReason(a); got != "in line" {
-		t.Fatal(got)
-	}
-	a.BlockedBy = &model.AdmissionBlocker{Repo: strings.Repeat("界", 80), Ref: "main"}
-	message := waitingReason(a)
-	if len([]rune(message)) != 60 || !strings.HasSuffix(message, "…") {
-		t.Fatal(message)
-	}
-	run := model.Run{Status: model.RunQueued, DisplayStatus: model.DisplayQueued, Priority: model.PriorityHigh, PriorityReason: "admin bump: release"}
-	applyQueuedDisplay(&run, &model.RunScheduling{State: "queued", QueuePosition: 2}, "")
-	if run.DisplayReason != "position 2" {
-		t.Fatal(run.DisplayReason)
-	}
-}
-
 func TestRunListPendingPodMessage(t *testing.T) {
 	now := time.Now()
 	run := presentationRun(model.Run{Status: model.RunRunning, StartedAt: &now})

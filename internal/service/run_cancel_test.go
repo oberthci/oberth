@@ -124,20 +124,18 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 // a cancelled reservation, and the cancelled run never creates a Workflow.
 func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	lift := fixture.diskValve(t)
+	lift := fixture.pausePreparation(t)
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
 	fixture.start(t)
-	fixture.awaitAdmission(t, head, "held by host pressure", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting"
-	})
+	fixture.awaitPreparing(t, head)
 	fixture.assertNothingCreated(t)
 
 	response := mustRunCancel(t, fixture.control, cancelAdmin, map[string]any{"id": head.ID, "reason": "wrong size"})
 	if response.PreviousState != "waiting" || response.Warning != "" {
 		t.Fatalf("waiting cancel response = %#v", response)
 	}
-	if snapshot := fixture.scheduler.AdmissionSnapshot(head.QueueSequence); snapshot != nil {
+	if snapshot := fixture.scheduler.ownerForTest(head.QueueSequence); snapshot != nil {
 		t.Fatalf("cancelled head still holds a reservation: %#v", snapshot)
 	}
 	cancelled := fixture.awaitTerminal(t, head.ID)

@@ -159,7 +159,7 @@ func TestMCPUnderQueueLoad(t *testing.T) {
 func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 	t.Helper()
 	f := newGroupFixture(t, 10)
-	service, err := NewAPI(APIConfig{Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store, Enqueues: f.scheduler, Logs: f.control.logs, Auditor: f.store, Signals: f.scheduler.signals, Admission: f.scheduler, AgentEvents: f.store, MaximumWait: 2 * time.Second})
+	service, err := NewAPI(APIConfig{Runs: f.store, History: f.store, Repositories: f.store, Issues: f.store, Promotions: f.store, PromotionRuns: f.store, Enqueues: f.scheduler, Logs: f.control.logs, Auditor: f.store, Signals: f.scheduler.signals, AgentEvents: f.store, MaximumWait: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,10 +171,14 @@ func queueLoadFixture(t *testing.T) (*groupFixture, *API) {
 	for index := range 10 {
 		f.branch(t, f.terraform, fmt.Sprintf("feature/running-%d", index), "a")
 	}
-	f.start(t)
-	f.awaitCreated(t, 10)
-	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "operator", model.AdmissionHoldRequest{On: true, Reason: "load test", Duration: time.Hour}); err != nil {
-		t.Fatal(err)
+	for range 10 {
+		run, err := f.store.ClaimNextRun(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for index := range 64 {
 		f.branch(t, f.terraform, fmt.Sprintf("feature/pending-%d", index), "b")

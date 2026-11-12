@@ -63,7 +63,7 @@ func TestStartupDeadlineFailsAndReleasesOnlyAfterCleanup(t *testing.T) {
 			}
 			scheduler := fixture.scheduler(t, jobs)
 			jobs.onDelete = func() {
-				if got := scheduler.AdmissionSnapshot(run.QueueSequence); got == nil || got.State != "admitted" {
+				if got := scheduler.ownerForTest(run.QueueSequence); got == nil || got.State != "granted" {
 					t.Fatalf("reservation released before cleanup: %+v", got)
 				}
 			}
@@ -72,7 +72,7 @@ func TestStartupDeadlineFailsAndReleasesOnlyAfterCleanup(t *testing.T) {
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			view := scheduler.AdmissionSnapshot(run.QueueSequence)
+			view := scheduler.ownerForTest(run.QueueSequence)
 			if deleteFails {
 				if err == nil || stored.Status != model.RunRunning || view == nil || view.State != "admitted" {
 					t.Fatalf("unsafe release without cleanup: %+v %+v %v", stored, view, err)

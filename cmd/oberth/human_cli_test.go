@@ -5,9 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/oberthci/oberth/internal/model"
 )
 
 // A verb in the run-ID position is refused locally with the accepted forms,
@@ -43,28 +40,6 @@ func TestUsageErrorIsNotDoubled(t *testing.T) {
 	}
 }
 
-func TestStatusShowsTheWholeAdmissionHold(t *testing.T) {
-	reason := "release qualification for the storage migration; do not admit branch work until the backup is verified"
-	configure(t, remoteServer(t, `{"database":"ok","admission":{"hold":{"on":true,"reason":"`+reason+`","actor":"operator","allow":["tag","release"],"expires_at":"2026-11-04T12:00:00.123456789Z"},"used":0,"runs":0,"reservations":[]}}`))
-	var out bytes.Buffer
-	if err := runRemoteStatus(t.Context(), nil, &out); err != nil {
-		t.Fatal(err)
-	}
-	expiry := "2026-11-04T12:00:00Z" // the hold's expires_at, to the second
-	want := "admission:     held by admin operator until " + expiry + ": " + reason + " (allowed: tag, release)"
-	if !strings.Contains(out.String(), want) {
-		t.Fatalf("status omits the hold:\n%s", out.String())
-	}
-	configure(t, remoteServer(t, `{"database":"ok","admission":{"hold":{"on":false,"reason":"old"}}}`))
-	out.Reset()
-	if err := runRemoteStatus(t.Context(), nil, &out); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(out.String(), "admission:") {
-		t.Fatalf("an expired hold is shown:\n%s", out.String())
-	}
-}
-
 // Off the pod an in-pod command says where to run it instead of printing
 // SQLite's "unable to open database file".
 func TestInPodCommandOffPodNamesWhereToRunIt(t *testing.T) {
@@ -84,16 +59,5 @@ func TestInPodCommandOffPodNamesWhereToRunIt(t *testing.T) {
 	}
 	if err := withInPodHint([]string{"runs"}, errors.New("other")); err.Error() != "other" {
 		t.Fatalf("other errors changed: %v", err)
-	}
-}
-
-func TestAdmissionShowsTheWholeHold(t *testing.T) {
-	var out bytes.Buffer
-	state := &model.AdmissionState{Hold: &model.AdmissionHold{On: true, Reason: strings.Repeat("r", 120), Actor: "operator"}}
-	if err := renderAdmission(&out, state, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "hold: held by admin operator: "+strings.Repeat("r", 120)+" (allowed: nothing)") {
-		t.Fatalf("admission omits the hold:\n%s", out.String())
 	}
 }

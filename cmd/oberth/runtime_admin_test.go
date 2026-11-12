@@ -28,13 +28,6 @@ func TestRuntimeAdminCLIForwardsAuditedTools(t *testing.T) {
 			t.Fatalf("%v = %s, %v", test.args, output.String(), err)
 		}
 	}
-	// The removed subcommands name their replacement instead of calling a tool.
-	for _, args := range [][]string{{"capacity", "4", "--reason", "x"}, {"groups"}} {
-		err := runAdmission(t.Context(), args, &strings.Builder{})
-		if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "v0.20.0") {
-			t.Fatal(args, err)
-		}
-	}
 	for _, args := range [][]string{
 		{}, {"drop"}, {"list", "repo"}, {"grant", "repo", "--reason", "x", "--template", "a=b"},
 		{"grant", "repo", "--reason", "x", "--service-account", "sa", "--template", "a"},

@@ -400,10 +400,10 @@ func (s *Store) claimNextRun(ctx context.Context, id string) (model.Run, error) 
 UPDATE runs
 SET status = 'running', phase = 'waiting', updated_at = ?
 WHERE queue_sequence = (
-    SELECT queue_sequence FROM runs WHERE (?='' OR id=?) AND `+claimableRunSQL+` AND `+automaticRetryReadySQL(fromUnixNano(now))+` AND `+admissionHoldAllowedSQL+`
+    SELECT queue_sequence FROM runs WHERE (?='' OR id=?) AND `+claimableRunSQL+` AND `+automaticRetryReadySQL(fromUnixNano(now))+`
     ORDER BY `+priorityOrderSQL(fromUnixNano(now))+` LIMIT 1
 )
-RETURNING `+runColumns, now, id, id, now))
+RETURNING `+runColumns, now, id, id))
 	if err != nil {
 		return model.Run{}, translateNotFound("queued run", err)
 	}

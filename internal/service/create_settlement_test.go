@@ -163,7 +163,7 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 					t.Fatal(err)
 				}
 				waitForFixtureRunStatus(t, f, other.ID, model.RunFailed)
-				state := f.scheduler.AdmissionState()
+				state := f.scheduler.submissionStateForTest()
 				found := false
 				for _, grant := range state.Reservations {
 					if grant.RunID == pending.ID {
@@ -207,7 +207,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			f := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "infrastructure"})
 			jobs := &pendingCreateJobs{fakeJobs: f.jobs}
 			f.scheduler.jobs = jobs
-			f.scheduler.admission = newAdmissionGate()
+			f.scheduler.submissions = newSubmissionRegistry()
 			var runs []model.Run
 			for i := range 2 {
 				queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: fmt.Sprintf("restart-%d", i), Repository: f.repo, Branch: fmt.Sprintf("feature/restart-%d", i), SHA: strings.Repeat("c", 40), Actor: "pusher"})
@@ -273,7 +273,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			if jobs.adoptCalls.Load() != wantAdopts {
 				t.Fatalf("unacknowledged recovery bypassed adoption: %d", jobs.adoptCalls.Load())
 			}
-			state := f.scheduler.AdmissionState()
+			state := f.scheduler.submissionStateForTest()
 			if state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
 				t.Fatalf("restart did not restore exact pending contracts: %+v", state)
 			}
@@ -467,7 +467,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !run.Preempted() || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.AdmissionState().Runs != 0 {
+			if !run.Preempted() || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {
 				t.Fatalf("settled preemption lost state or still pending: %+v", run)
 			}
 		})

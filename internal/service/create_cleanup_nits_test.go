@@ -129,7 +129,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	}
 	// An existing ungranted reservation makes both normal and quarantine
 	// adoption refuse. This used to return without registering the run.
-	conflict := scheduler.admission.reserveRun(run)
+	conflict := scheduler.submissions.trackRun(run)
 	scheduler.registerCreateCleanup(run, nil, false)
 	if scheduler.pendingCreateCount() != 1 {
 		t.Fatal("failed restore dropped its run")
@@ -168,7 +168,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunFailed || scheduler.pendingCreateCount() != 0 || scheduler.AdmissionState().Runs != 0 {
+	if current.Status != model.RunFailed || scheduler.pendingCreateCount() != 0 || scheduler.submissionStateForTest().Runs != 0 {
 		t.Fatalf("restored run did not settle/release: %+v", current)
 	}
 	if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); !os.IsNotExist(err) {
@@ -189,7 +189,7 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 		go func() { defer workers.Done(); scheduler.registerCreateCleanup(run, nil, false) }()
 	}
 	workers.Wait()
-	state := scheduler.AdmissionState()
+	state := scheduler.submissionStateForTest()
 	if scheduler.pendingCreateCount() != 1 || state.Runs != 1 {
 		t.Fatalf("concurrent registration duplicated admission: %+v", state)
 	}

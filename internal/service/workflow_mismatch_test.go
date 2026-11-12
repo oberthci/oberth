@@ -76,7 +76,7 @@ func TestWorkflowSpecMismatchStaysRunLocalUntilCleanup(t *testing.T) {
 	if err != nil || !strings.Contains(current.Error, "Workflow spec mismatch") || !strings.Contains(current.Error, "cleanup confirmed") {
 		t.Fatalf("settlement lost the named failure: %+v %v", current, err)
 	}
-	if f.scheduler.AdmissionState().Runs != 0 {
+	if f.scheduler.submissionStateForTest().Runs != 0 {
 		t.Fatal("confirmed cleanup retained capacity")
 	}
 	if pending, err := f.store.PendingRunCancellations(t.Context()); err != nil || len(pending) != 0 {
@@ -129,7 +129,7 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeAutomaticRetry(t *testing.
 	if err != nil || original.Status != model.RunRunning || original.AutoRetriedBy != "" || retries.Load() != 0 {
 		t.Fatalf("uncertain cleanup authorized a retry: %+v retries=%d err=%v", original, retries.Load(), err)
 	}
-	state := f.scheduler.AdmissionState()
+	state := f.scheduler.submissionStateForTest()
 	if state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != source.ID {
 		t.Fatalf("original cleanup lost its sole reservation: %+v", state)
 	}
@@ -151,7 +151,7 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeAutomaticRetry(t *testing.
 	if err != nil || original.Status != model.RunFailed || original.AutoRetriedBy != retry.Run.ID || retry.Run.AutoRetryOf != source.ID || !strings.Contains(original.Error, "cleanup confirmed") {
 		t.Fatalf("retry lost original cleanup verdict or lineage: original=%+v retry=%+v err=%v", original, retry.Run, err)
 	}
-	state = f.scheduler.AdmissionState()
+	state = f.scheduler.submissionStateForTest()
 	if state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != retry.Run.ID {
 		t.Fatalf("original reservation survived instead of only the retry: %+v", state)
 	}
@@ -167,7 +167,7 @@ func TestWorkflowMismatchCleanupReleasesOriginalBeforeAutomaticRetry(t *testing.
 	case <-time.After(testStartTimeout(5 * time.Second)):
 		t.Fatal("scheduler did not join after retry completion")
 	}
-	state = f.scheduler.AdmissionState()
+	state = f.scheduler.submissionStateForTest()
 	if state.Runs != 0 || len(state.Reservations) != 0 || f.scheduler.pendingCreateCount() != 0 || retries.Load() != 1 {
 		t.Fatalf("completed retry retained capacity or repeated: state=%+v retries=%d", state, retries.Load())
 	}

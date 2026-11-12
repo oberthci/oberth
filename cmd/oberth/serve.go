@@ -948,8 +948,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	go func(snapshot app.Health) { defer close(readinessDone); snapshot.WatchReadiness(readinessCtx) }(health)
 	defer func() { stopReadiness(); <-readinessDone }()
 	health.Version = version
-	health.AdmissionBlocker = scheduler.AdmissionBlocker
-	health.Admission = scheduler.AdmissionState
 	health.DatabaseRetries = scheduler.DatabaseRetries
 	health.ControllerProfile = argoJobs.ControllerProfileStatus
 	health.ExecutionTargetProfiles = argoJobs.ExecutionTargetProfiles
@@ -1099,8 +1097,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		ClientCertificates:   &service.ClientCertIssuer{Authority: clientAuthority, Store: database, ServerCAPin: servedCAPin(served)},
 		UplinkLifecycle:      database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
-		SchedulingObserver: argoJobs, Admission: scheduler,
-		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,
+		SchedulingObserver: argoJobs,
+		Runs:               database, History: database, RunRetries: database, Repositories: database, Issues: database,
 		IssueStaleAfter: options.issueStaleAfter, IssueActiveStaleAfter: options.issueActiveStaleAfter,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
 		Refs: git, Logs: logs, Artifacts: artifactStore, Auditor: database, Health: health, Signals: signals,

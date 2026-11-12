@@ -28,7 +28,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +37,7 @@ import (
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/store"
+	"golang.org/x/mod/semver"
 )
 
 // RestoreConfig selects the archive, its key, and the target installation.
@@ -376,6 +376,9 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	target.ClusterUID = clusterUID(ctx, deps)
 
 	if parts.History {
+		if cfg.InterruptQueued && (target.ChartVersion == "" || semver.Compare(canonicalChartVersion(target.ChartVersion), "v0.21.0-0") < 0) {
+			target.Notes = append(target.Notes, "The target predates restored-run protection: queued or running backup work may execute again. Scale the target server to zero and inspect restored work before resuming it.")
+		}
 		if target.RestoredRunning, err = restoredRunningRuns(ctx, archive, cfg.InterruptQueued); err != nil {
 			return target, openBaoExec{}, err
 		}
@@ -516,10 +519,6 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		}
 	}
 	if parts.History {
-		var err error
-		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
-			return err
-		}
 		// A stopped server's schema is known only once the restore pod
 		// starts; swapDatabase rehearses the migration then.
 		if target.Schema > 0 {
@@ -1116,61 +1115,3 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 // errRestoredDatabaseInPlace marks a swap failure that happened after the
 // restored database was already in place.
 var errRestoredDatabaseInPlace = errors.New("the restored database is in place but its final check failed")
-
-// rollbackHoldReason is the reason line of the hold a rollback restore places.
-const rollbackHoldReason = "restored by oberth upgrade --rollback: check the queued runs, then release this hold"
-
-// rollbackHoldDuration is the longest hold the store accepts.
-const rollbackHoldDuration = 12 * time.Hour
-
-// placeRollbackHold holds admission in the restored database before any
-// server opens it, when a rollback restores queued or waiting runs onto a
-// release older than v0.21.0: such a server does not read the restored-runs
-// marker and would dispatch that work again (and requeue a running run whose
-// Workflow is gone), although it may already have run on the version the
-// rollback undid. An admission hold is honoured by every release since
-// v0.17.85. A hold the backup already had is replaced by this stricter one.
-// The file changes, so its hashes are taken again for the swap.
-func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreArchive, target restoreTarget, w io.Writer) (restoreArchive, error) {
-	if !cfg.InterruptQueued {
-		return archive, nil
-	}
-	if version := canonicalChartVersion(target.ChartVersion); version != "" && semver.Compare(version, "v0.21.0-0") >= 0 {
-		// The server reads the restored-runs marker and cancels that work.
-		return archive, nil
-	}
-	compat := archive.Manifest.Compatibility
-	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}}
-	placed, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
-	hold, previous := placed.Hold, placed.Previous
-	switch {
-	case errors.Is(err, store.ErrNoAdmissionHold):
-		_, _ = fmt.Fprintf(w, "WARNING: the backup predates the admission hold; release %s may dispatch the backup's queued runs again: check its queue once it starts.\n",
-			displayVersion(target.ChartVersion))
-		return archive, nil
-	case err != nil:
-		return archive, fmt.Errorf("hold admission in the restored database: %w", err)
-	case !placed.Placed:
-		return archive, nil
-	}
-	archive.RestoredHeadID, archive.RestoredHeadSHA256 = placed.AuditHead.ID, hex.EncodeToString(placed.AuditHead.SHA256)
-	if archive.Database.MainSHA256, err = fileSHA256(archive.Database.Main); err != nil {
-		return archive, err
-	}
-	archive.Database.WAL, archive.Database.WALSHA256 = "", ""
-	if info, err := os.Stat(archive.Database.Main + "-wal"); err == nil && info.Size() > 0 {
-		archive.Database.WAL = archive.Database.Main + "-wal"
-		if archive.Database.WALSHA256, err = fileSHA256(archive.Database.WAL); err != nil {
-			return archive, err
-		}
-	}
-	_, _ = fmt.Fprintf(w, "  ✓ admission held in the restored database until %s: release %s does not read the restored-runs marker and would dispatch the backup's queued runs again\n"+
-		"    Check them (oberth runs), cancel what already ran, then release the hold:\n"+
-		"        oberth admission hold off --reason \"restored runs checked\"\n",
-		hold.ExpiresAt.Format(time.RFC3339), displayVersion(target.ChartVersion))
-	if previous.On {
-		_, _ = fmt.Fprintf(w, "    It replaces the hold the backup had (%q, allowing [%s], until %s)\n",
-			previous.Reason, strings.Join(previous.Allow, ","), previous.ExpiresAt.Format(time.RFC3339))
-	}
-	return archive, nil
-}

@@ -209,7 +209,7 @@ func automaticRetryReadySQL(now time.Time) string {
 const claimableRunSQL = `status='queued' AND NOT EXISTS (SELECT 1 FROM run_cancellations WHERE run_cancellations.run_id=runs.id AND completed_at IS NULL) AND NOT EXISTS (SELECT 1 FROM publications AS publication WHERE publication.status='pending' AND publication.repo_id=runs.repo_id AND publication.ref_kind=runs.ref_kind AND publication.ref=runs.ref)`
 
 func (s *Store) NextQueuedRun(ctx context.Context) (model.Run, error) {
-	return scanRun(s.reader().QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE `+claimableRunSQL+` AND `+automaticRetryReadySQL(s.now())+` AND `+admissionHoldAllowedSQL+` ORDER BY `+priorityOrderSQL(s.now())+` LIMIT 1`, unixNano(s.now())))
+	return scanRun(s.reader().QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE `+claimableRunSQL+` AND `+automaticRetryReadySQL(s.now())+` ORDER BY `+priorityOrderSQL(s.now())+` LIMIT 1`))
 }
 
 // inheritQueuePriorityTx preserves the same work item's wait and explicit bump

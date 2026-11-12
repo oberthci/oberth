@@ -77,8 +77,7 @@ type Scheduler struct {
 	signals            *Signals
 	workspaces         *workspaceLifecycle
 	workspaceRoot      string
-	admission          *admissionGate
-	holdMu             sync.Mutex
+	submissions        *submissionRegistry
 	priorityMu         sync.Mutex // serialize durable priority refresh snapshots
 	maxRunLogBytes     int64
 	stalledRunTimeout  time.Duration
@@ -177,24 +176,13 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		releaseJobs: config.ReleaseJobs,
 		auditor:     config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, restoredRunsFile: config.RestoredRunsFile,
-		admission:      newAdmissionGate(),
+		submissions:    newSubmissionRegistry(),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate, stalledRunTimeout: config.StalledRunTimeout,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
-	scheduler.admission.onPark = scheduler.signalQueue
-	scheduler.admission.onGrant = scheduler.signalQueue
-	if state, ok := config.Store.(admissionHoldStore); ok {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		hold, err := state.AdmissionHold(ctx)
-		cancel()
-		if err != nil {
-			return nil, fmt.Errorf("load admission hold: %w", err)
-		}
-		scheduler.admission.adminHold = hold
-	}
 	return scheduler, nil
 }
 
@@ -409,7 +397,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err := scheduler.database().CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
 		}
-		scheduler.admission.releaseDeletedRun(cancellation.RunID)
+		scheduler.submissions.releaseDeletedRun(cancellation.RunID)
 		scheduler.pruneDeferredPodJournal(ctx, cancellation.RunID)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		cleanupErr := scheduler.workspaces.cleanupRunDeferred(cleanupCtx, cancellation.RunID)
@@ -431,7 +419,7 @@ func (scheduler *Scheduler) abandonAdmissions(ctx context.Context, cancellations
 		if err != nil || !run.Status.Terminal() {
 			continue
 		}
-		scheduler.admission.abandon(run.QueueSequence)
+		scheduler.submissions.abandon(run.QueueSequence)
 	}
 }
 
@@ -466,7 +454,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 	}()
 	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run) error {
-		reservation, err := scheduler.admission.adopt(run)
+		reservation, err := scheduler.submissions.adopt(run)
 		if err != nil {
 			return err
 		}
@@ -537,7 +525,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		cancellationDelay = min(2*cancellationDelay, cancellationRetryMaximum)
 		return nil
 	}
-	priorityPoll := time.NewTicker(priorityPollInterval)
+	priorityPoll := time.NewTicker(submissionPollInterval)
 	defer priorityPoll.Stop()
 	ticks := priorityPoll.C
 	if scheduler.dispatchTicks != nil {
@@ -545,15 +533,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	for {
 		scheduler.dispatchProgress.Beat()
-		priorityErr := scheduler.refreshPriorities(dispatchCtx)
-		if priorityErr != nil && !store.IsTransientLockError(priorityErr) {
-			join()
-			if ctx.Err() != nil {
-				return nil
-			}
-			return priorityErr
-		}
-		for priorityErr == nil {
+		for {
 			scheduler.dispatchProgress.Beat()
 			run, err := scheduler.claimDispatchRun(dispatchCtx, active)
 			if store.IsTransientLockError(err) {
@@ -569,10 +549,10 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 				return fmt.Errorf("claim priority run: %w", err)
 			}
-			reservation := scheduler.admission.reserveRun(run)
+			reservation := scheduler.submissions.trackRun(run)
 			active++
 			workers.Add(1)
-			go func(run model.Run, reservation *admissionReservation) {
+			go func(run model.Run, reservation *submissionOwner) {
 				defer workers.Done()
 				err := scheduler.executeAndCleanupReservedWithGate(workerCtx, run, scheduler.awaitMutation, reservation)
 				select {
@@ -581,10 +561,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 			}(run, reservation)
 		}
-		// Claim higher work before letting a refreshed/aged waiter grant.
-		scheduler.admission.mu.Lock()
-		scheduler.admission.grantLocked()
-		scheduler.admission.mu.Unlock()
 		if scheduler.onDispatchIdle != nil {
 			scheduler.onDispatchIdle()
 		}
@@ -657,7 +633,7 @@ func (scheduler *Scheduler) executeAndCleanup(ctx context.Context, run model.Run
 }
 
 func (scheduler *Scheduler) executeAndCleanupWithGate(ctx context.Context, run model.Run, require mutationRequirement) error {
-	reservation := scheduler.admission.reserveRun(run)
+	reservation := scheduler.submissions.trackRun(run)
 	return scheduler.executeAndCleanupReservedWithGate(ctx, run, require, reservation)
 }
 
@@ -665,7 +641,7 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 	ctx context.Context,
 	run model.Run,
 	require mutationRequirement,
-	reservation *admissionReservation,
+	reservation *submissionOwner,
 ) error {
 	defer reservation.cancel()
 	finishEvidence := scheduler.beginEvidenceExecution(run.ID)
@@ -713,7 +689,7 @@ func (scheduler *Scheduler) recoverOwnedWorkspaces(ctx context.Context) error {
 	return nil
 }
 
-func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require mutationRequirement, reservation *admissionReservation) error {
+func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner) error {
 	if err := require(ctx); err != nil {
 		return err
 	}
@@ -812,11 +788,8 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	jobRequest.DemandReceipt = receipt
 	scheduler.admissionRequested(ctx, run.ID)
-	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref,
-		RefKind: run.RefKind, SHA: run.SHA,
-	})
-	if errors.Is(err, errAdmissionAbandoned) {
+	releaseAdmission, err := reservation.beginSubmission(ctx)
+	if errors.Is(err, errSubmissionWithdrawn) {
 		// Superseded or cancelled while waiting: the reservation is already
 		// gone, so settle the cancellation like the pre-admission check does.
 		_ = logFile.Close()
@@ -831,21 +804,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return err
 	}
 	defer releaseAdmission()
-	if reservation.wasDelayed() {
-		current, err = scheduler.database().Run(ctx, run.ID)
-		if err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("verify run before admission: %w", err))
-		}
-		if current.Preempted() {
-			_ = logFile.Close()
-			if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-				return scheduler.deferRefusedDeletions(ctx, run.ID, err)
-			}
-			scheduler.signals.NotifyRun(run.ID)
-			return nil
-		}
-	}
 	if err := require(ctx); err != nil {
 		_ = logFile.Close()
 		return err
@@ -1013,7 +971,7 @@ type runObservation struct {
 
 // observeRun shares step persistence, publication and issue projection between
 // newly submitted and adopted Workflows.
-func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repository model.Repository, require mutationRequirement, reservation *admissionReservation, observation runObservation) error {
+func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repository model.Repository, require mutationRequirement, reservation *submissionOwner, observation runObservation) error {
 	logFile := observation.file
 	workflowName := run.WorkflowName
 	if observation.request != nil {

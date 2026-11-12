@@ -352,34 +352,6 @@ func (s *deadlineFaultStore) NextQueuedRun(ctx context.Context) (model.Run, erro
 	}
 	return s.Store.NextQueuedRun(ctx)
 }
-func TestDatabaseDeadlinePriorityReadsConverge(t *testing.T) {
-	testDatabasePriorityReadsConverge(t, context.DeadlineExceeded)
-}
-func TestDatabaseDeadlineBusyPriorityReadsConverge(t *testing.T) {
-	testDatabasePriorityReadsConverge(t, deadlineBusyError(5))
-}
-func testDatabasePriorityReadsConverge(t *testing.T, failure error) {
-	for _, operation := range []string{"RunsByIDs"} {
-		t.Run(operation, func(t *testing.T) {
-			fixture := newRecoveryFixture(t)
-			scheduler, fault := faultScheduler(t, fixture, &recoveryJobs{}, operation, failure)
-			// One prepared waiter makes both durable priority reads relevant. It owns
-			// no Workflow and no grant; cancellation removes it at the end of the test.
-			reservation := scheduler.admission.reserveRun(model.Run{ID: "priority-waiter", QueueSequence: 1, RepoID: fixture.repo.ID})
-			scheduler.admission.mu.Lock()
-			reservation.prepared = true
-			scheduler.admission.waiters = append(scheduler.admission.waiters, reservation)
-			scheduler.admission.mu.Unlock()
-			defer reservation.cancel()
-			ctx := deadlineScope(t.Context(), scheduler)
-			var err error
-			err = scheduler.refreshPriorities(ctx)
-			if err != nil || fault.count(operation) != 3 || scheduler.DatabaseRetries() != 2 {
-				t.Fatal("priority guard failed", err, fault.count(operation), scheduler.DatabaseRetries())
-			}
-		})
-	}
-}
 
 func TestDatabaseDeadlineWaitingDoesNotTripLiveness(t *testing.T) {
 	scheduler := &Scheduler{}

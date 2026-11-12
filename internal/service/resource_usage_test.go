@@ -80,11 +80,6 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	helper.MemoryPeakBytes = &large
 	reader.values = append(reader.values, helper)
 	f.service.resources = reader
-	gate := newAdmissionGate()
-	gate.reserve(1)
-	observer := &Scheduler{admission: gate}
-	f.service.admission = observer
-	before, _ := json.Marshal(observer.AdmissionState())
 	beforeSteps, err := f.store.StepResults(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -112,9 +107,8 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	if len(decoded.Steps) != 1 || len(decoded.Steps[0].MeasuredUsage) != 2 || len(decoded.Steps[0].MeasuredSizeComparison) != 1 || decoded.Steps[0].MeasuredSizeComparison[0].Observations != 1 || *decoded.Steps[0].MeasuredSizeComparison[0].MemoryPeakBytes.Max != peak {
 		t.Fatalf("run_get helper entered main size comparison: %s", body)
 	}
-	after, _ := json.Marshal(observer.AdmissionState())
 	afterSteps, err := f.store.StepResults(t.Context(), run.ID)
-	if err != nil || string(before) != string(after) || !reflect.DeepEqual(beforeSteps, afterSteps) || *reader.values[0].MemoryPeakBytes != peak {
+	if err != nil || !reflect.DeepEqual(beforeSteps, afterSteps) || *reader.values[0].MemoryPeakBytes != peak {
 		t.Fatal("read-only report changed admission, authored class or telemetry", err)
 	}
 }

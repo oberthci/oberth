@@ -14,12 +14,6 @@ import (
 	"github.com/oberthci/oberth/internal/storetest"
 )
 
-type runContextAdmission struct{}
-
-func (runContextAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "waiting"}
-}
-
 func runContextJSON(t *testing.T, value any) map[string]any {
 	t.Helper()
 	body, err := json.Marshal(value)
@@ -52,7 +46,6 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := f.api(t)
-	reader.admission = runContextAdmission{}
 	reader.schedulingObserver = schedulingObserverFunc(func(_ context.Context, _ model.Run) (*model.ExecutionObservation, error) {
 		t.Fatal("context read polled execution")
 		return nil, nil

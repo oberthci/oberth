@@ -97,7 +97,7 @@ func TestListDiagnosticsSeparateScopesAndRetainObservationAge(t *testing.T) {
 	run := model.Run{ID: "run", UpdatedAt: fake.Now()}
 	observed := fake.Now()
 	load := func(context.Context) listDiagnosticValue {
-		return listDiagnosticValue{scheduling: &model.RunScheduling{ObservedAt: observed, Admission: &model.AdmissionObservation{Used: 99}}}
+		return listDiagnosticValue{scheduling: &model.RunScheduling{ObservedAt: observed, Message: "Native waiting."}}
 	}
 	s.listDiagnostic(run, "startup", load)
 	drainListDiagnostics(t, s)

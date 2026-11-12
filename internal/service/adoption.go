@@ -15,7 +15,7 @@ import (
 
 type adoptedRun struct {
 	run         model.Run
-	reservation *admissionReservation
+	reservation *submissionOwner
 }
 
 // Workflow adoption keeps the durable run classification; the engine checks
@@ -54,38 +54,25 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 }
 
 // adopt restores the grant of work already running.
-func (gate *admissionGate) adopt(run model.Run) (*admissionReservation, error) {
+func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 	order := run.AdmissionSequence
 	if order <= 0 {
 		order = run.QueueSequence
 	}
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
-	if previous, ok := gate.reservations[run.QueueSequence]; ok {
+	if previous, ok := gate.owners[run.QueueSequence]; ok {
 		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.repoID != run.RepoID {
 			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
 	}
-	now := gate.clock().UTC()
-	started := now
-	if run.StartedAt != nil {
-		started = *run.StartedAt
-	}
-	reservation := &admissionReservation{
-		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
-		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
-		prepared: true, granted: true, submitted: true,
-
-		claimedAt: now, preparedAt: now, grantedAt: started, ready: make(chan struct{}),
-	}
-	close(reservation.ready)
-	gate.reservations[run.QueueSequence] = reservation
-	gate.runs++
+	reservation := &submissionOwner{gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, ref: run.Ref, refKind: run.RefKind, sha: run.SHA, prepared: true, granted: true, submitted: true}
+	gate.owners[run.QueueSequence] = reservation
 	return reservation, nil
 }
 
-func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *admissionReservation) error {
+func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner) error {
 	defer reservation.cancel()
 	if err := require(ctx); err != nil {
 		reservation.retain()
@@ -96,9 +83,9 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		reservation.retain()
 		return err
 	}
-	scheduler.admission.mu.Lock()
+	scheduler.submissions.mu.Lock()
 	reservation.repo = repository.Name
-	scheduler.admission.mu.Unlock()
+	scheduler.submissions.mu.Unlock()
 	current, err := scheduler.database().Run(ctx, run.ID)
 	if err != nil {
 		reservation.retain()

@@ -33,7 +33,7 @@ func TestAdmissionLimitsGrantedBeforeSubmissionDeadlineReleasesReservation(t *te
 	if run.Status != model.RunFailed || !strings.Contains(run.Error, "controller profile verification unavailable for") || strings.Contains(run.Error, "no scheduled pod") || len(f.jobs.createdCI) != 0 {
 		t.Fatalf("stalled grant was not settled: %+v", run)
 	}
-	state := f.scheduler.AdmissionState()
+	state := f.scheduler.submissionStateForTest()
 	if state.Runs != 0 || len(state.Reservations) != 0 {
 		t.Fatalf("stalled grant leaked resources: %+v", state)
 	}
@@ -72,7 +72,7 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	if err != nil || run.Error != store.ExecutorIdentityPendingMessage || !isPendingCreate(run) {
 		t.Fatalf("deadline cleanup cause was lost: %+v %v", run, err)
 	}
-	if state := f.scheduler.AdmissionState(); state.Runs != 1 {
+	if state := f.scheduler.submissionStateForTest(); state.Runs != 1 {
 		t.Fatal("capacity released while workflow may live", state)
 	}
 	f.scheduler.settleOneCreate(t.Context())
@@ -85,7 +85,7 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	if err != nil || run.Status != model.RunFailed || !strings.Contains(run.Error, "executor identity readiness deadline") {
 		t.Fatalf("cleanup failed to settle deadline: %+v %v", run, err)
 	}
-	if state := f.scheduler.AdmissionState(); state.Runs != 0 || f.scheduler.pendingCreateCount() != 1 {
+	if state := f.scheduler.submissionStateForTest(); state.Runs != 0 || f.scheduler.pendingCreateCount() != 1 {
 		t.Fatalf("scratch cleanup retained physical capacity: %+v", state)
 	}
 	f.scheduler.workspaces.remove = remove
@@ -93,30 +93,6 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	f.scheduler.settleOneCreate(t.Context())
 	if f.scheduler.pendingCreateCount() != 0 {
 		t.Fatal("scratch cleanup did not eventually settle")
-	}
-}
-
-// Oberth has no run ceiling: an unclaimed queued run never reads "N of M
-// runs running", and a scoped viewer sees no shared run count.
-func TestAdmissionLimitsUnclaimedQueueReportsNoRunCeilingWithoutLeakingScope(t *testing.T) {
-	g := newAdmissionGate()
-	var releases []func()
-	defer func() {
-		for _, release := range releases {
-			release()
-		}
-	}()
-	for i := int64(1); i <= 10; i++ {
-		releases = append(releases, acquireRequestWithinBudget(t, g.reserve(i), admissionRequest{}))
-	}
-	api := &API{admission: &Scheduler{admission: g}}
-	run := model.Run{ID: "queued", RepoID: 1, Status: model.RunQueued}
-	for _, scope := range []*repoScope{nil, {repos: map[int64]model.Repository{1: {ID: 1}}}} {
-		api.scope = scope
-		observed, reason := api.observeScheduling(t.Context(), run, nil, true)
-		if strings.Contains(observed.Message, "runs running") || strings.Contains(observed.Message, "10") || strings.Contains(reason, "10") {
-			t.Fatal("queued row reports a run ceiling", observed.Message, reason)
-		}
 	}
 }
 

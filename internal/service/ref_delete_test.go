@@ -28,7 +28,7 @@ func deleteFixtureBranch(t *testing.T, f *groupFixture, repository model.Reposit
 	}
 }
 
-func TestRefDeletionStopsRunningAndAssistedWorkflowsAndReleasesCPU(t *testing.T) {
+func TestRefDeletionStopsRunningAndAssistedWorkflows(t *testing.T) {
 	for _, assist := range []bool{false, true} {
 		t.Run(map[bool]string{false: "running", true: "assisted"}[assist], func(t *testing.T) {
 			f := newGroupFixture(t, 0)
@@ -40,15 +40,11 @@ func TestRefDeletionStopsRunningAndAssistedWorkflowsAndReleasesCPU(t *testing.T)
 			}
 			other := f.branch(t, f.exampleService, "feature/other", "b")
 			f.start(t)
-			if made := f.awaitCreated(t, 1); !made[busy.ID] {
+			if made := f.awaitCreated(t, 2); !made[busy.ID] || !made[other.ID] {
 				t.Fatal("wrong run admitted", made)
 			}
 			submitted := f.awaitRunStarted(t, busy.ID)
-			f.awaitAdmission(t, other, "waiting for CPU", func(o *model.AdmissionObservation) bool { return o != nil && o.State == "waiting" })
 			deleteFixtureBranch(t, f, f.exampleService, busy.Ref)
-			if made := f.awaitCreated(t, 1); !made[other.ID] {
-				t.Fatal("CPU credit not released after deletion", made)
-			}
 			f.awaitNoPendingCancellations(t)
 			stopped := f.awaitTerminal(t, busy.ID)
 			if !stopped.Cancelled() || stopped.Reason != "ref deleted" {
@@ -61,7 +57,7 @@ func TestRefDeletionStopsRunningAndAssistedWorkflowsAndReleasesCPU(t *testing.T)
 			f.engine.mu.Lock()
 			deleted := slices.Contains(f.engine.deleted, submitted.WorkflowName)
 			f.engine.mu.Unlock()
-			if !deleted || f.scheduler.AdmissionSnapshot(busy.QueueSequence) != nil {
+			if !deleted || f.scheduler.ownerForTest(busy.QueueSequence) != nil {
 				t.Fatal("workflow or CPU reservation retained after cleanup")
 			}
 			if current := f.run(t, other.ID); current.Preempted() {
@@ -79,12 +75,12 @@ func TestRefDeletionCancelsQueuedAndAdmissionHeldRuns(t *testing.T) {
 	for _, claimed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "queued", true: "admission-held"}[claimed], func(t *testing.T) {
 			f := newGroupFixture(t, 0)
-			lift := f.diskValve(t)
+			lift := f.pausePreparation(t)
 			old := f.branch(t, f.exampleService, "feature/deleted", "a")
 			other := f.branch(t, f.terraform, "feature/other", "b")
 			if claimed {
 				f.start(t)
-				f.awaitAdmission(t, old, "admission hold", func(o *model.AdmissionObservation) bool { return o != nil && o.State == "waiting" })
+				f.awaitPreparing(t, old)
 			}
 			deleteFixtureBranch(t, f, f.exampleService, old.Ref)
 			if !claimed {

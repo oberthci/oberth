@@ -314,7 +314,7 @@ DELETE FROM schema_migrations WHERE id='20261112182311-remove-run-fair-share-63d
 `
 
 // PostNativeControlsDowngrade recreates removed historical fixture tables, never production compatibility policy.
-const PostNativeControlsDowngrade = `
+const PostNativeControlsDowngrade = PostNativeHoldDowngrade + `
 CREATE TABLE IF NOT EXISTS size_grants (
  repo_id INTEGER PRIMARY KEY REFERENCES repositories(id),max_size TEXT NOT NULL,
  granted_by TEXT NOT NULL,granted_at INTEGER NOT NULL,revoked_by TEXT NOT NULL DEFAULT '',revoked_at INTEGER
@@ -336,4 +336,15 @@ CREATE TABLE IF NOT EXISTS concurrency_group_declarations (
 );
 CREATE INDEX IF NOT EXISTS concurrency_group_declarations_name ON concurrency_group_declarations(group_name);
 DELETE FROM schema_migrations WHERE id='20261112182825-remove-admission-controls-1819885d447894c83b86b9f6aabfb9b1';
+`
+
+// PostNativeHoldDowngrade restores the empty hold table in disposable historical fixtures.
+const PostNativeHoldDowngrade = `
+CREATE TABLE IF NOT EXISTS admission_holds (
+ singleton INTEGER PRIMARY KEY,on_hold INTEGER NOT NULL DEFAULT 0,reason TEXT NOT NULL DEFAULT '',actor TEXT NOT NULL DEFAULT '',
+ allow_tag INTEGER NOT NULL DEFAULT 1,allow_release INTEGER NOT NULL DEFAULT 1,allow_promotion INTEGER NOT NULL DEFAULT 0,
+ expires_at INTEGER NOT NULL DEFAULT 0,changed_at INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO admission_holds(singleton) VALUES(1);
+DELETE FROM schema_migrations WHERE id='20261112191324-remove-admin-hold-81c738135e3f7c3e6e8eadcd1eb51ea4';
 `

@@ -70,17 +70,6 @@ func main() {
 		runs(ctx, path)
 		return
 	}
-	if os.Args[1] == "hold-on" || os.Args[1] == "hold-off" {
-		hold(ctx, path, os.Args[1] == "hold-on", 12*time.Hour)
-		return
-	}
-	// hold-on-<duration>, e.g. hold-on-5m: a hold that lapses by itself.
-	if rest, ok := strings.CutPrefix(os.Args[1], "hold-on-"); ok {
-		duration, err := time.ParseDuration(rest)
-		must(err)
-		hold(ctx, path, true, duration)
-		return
-	}
 	if os.Args[1] == "refill" {
 		refill(ctx, path)
 		return
@@ -291,18 +280,4 @@ func runs(ctx context.Context, path string) {
 	var version int
 	must(db.QueryRowContext(ctx, "SELECT max(version) FROM schema_migrations").Scan(&version))
 	must(json.NewEncoder(os.Stdout).Encode(map[string]int{"schema": version}))
-}
-
-// hold sets or clears the administrator admission hold (no class allowed),
-// so seeded runs stay queued until a rehearsal step releases them.
-func hold(ctx context.Context, path string, on bool, duration time.Duration) {
-	s, err := store.OpenAdminClient(ctx, path, store.Options{})
-	must(err)
-	defer func() { must(s.Close()) }()
-	request := model.AdmissionHoldRequest{On: on, Reason: "upgrade rehearsal"}
-	if on {
-		request.Allow, request.Duration = []string{}, duration
-	}
-	_, err = s.SetAdmissionHold(ctx, "upgrade-fixture", request)
-	must(err)
 }

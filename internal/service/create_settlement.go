@@ -29,7 +29,7 @@ type createAdmission struct {
 type pendingCreate struct {
 	runID       string
 	reason      string
-	grant       *admissionReservation
+	grant       *submissionOwner
 	persisted   bool
 	confirmed   bool
 	next, since time.Time
@@ -107,15 +107,15 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	return saved, nil
 }
 
-// restoreCreateGrant only restores local admission accounting.
-func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionReservation) (*admissionReservation, error) {
+// restoreCreateOwner only restores local admission accounting.
+func (scheduler *Scheduler) restoreCreateOwner(run model.Run, grant *submissionOwner) (*submissionOwner, error) {
 	if grant == nil {
-		scheduler.admission.mu.Lock()
-		existing := scheduler.admission.reservations[run.QueueSequence]
+		scheduler.submissions.mu.Lock()
+		existing := scheduler.submissions.owners[run.QueueSequence]
 		if existing != nil && existing.runID == run.ID && existing.granted {
 			grant = existing
 		}
-		scheduler.admission.mu.Unlock()
+		scheduler.submissions.mu.Unlock()
 	}
 	if grant == nil {
 		if _, err := scheduler.readCreateAdmission(run); err != nil {
@@ -124,21 +124,21 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true", run.ID)
 		}
 		var err error
-		grant, err = scheduler.admission.adopt(run)
+		grant, err = scheduler.submissions.adopt(run)
 		if err != nil {
 			return nil, err
 		}
 	}
-	scheduler.admission.mu.Lock()
+	scheduler.submissions.mu.Lock()
 	grant.retained = true
 	grant.submitted = false
-	scheduler.admission.mu.Unlock()
+	scheduler.submissions.mu.Unlock()
 	return grant, nil
 }
 
 // registerCreateCleanup never waits for Kubernetes, including on startup,
 // push and cancellation paths. Failed local restores are owned by the background task.
-func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissionReservation, persisted bool) {
+func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *submissionOwner, persisted bool) {
 	// Serialize local restoration and registration so concurrent wake/cancel
 	// callers cannot repeat its admission side effects.
 	scheduler.createMu.Lock()
@@ -146,7 +146,7 @@ func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissio
 	if _, exists := scheduler.createPending[run.ID]; exists {
 		return
 	}
-	restored, err := scheduler.restoreCreateGrant(run, grant)
+	restored, err := scheduler.restoreCreateOwner(run, grant)
 	if err != nil {
 		log.Printf("WARN: create_cleanup run=%q restore_conflict=true deferred=true", run.ID)
 	}
@@ -238,10 +238,10 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	if done {
 		delete(scheduler.createPending, pending.runID)
 		scheduler.createMu.Unlock()
-		scheduler.admission.mu.Lock()
+		scheduler.submissions.mu.Lock()
 		pending.grant.retained = false
-		scheduler.admission.releaseLocked(pending.grant)
-		scheduler.admission.mu.Unlock()
+		scheduler.submissions.releaseLocked(pending.grant)
+		scheduler.submissions.mu.Unlock()
 		scheduler.signalQueue()
 		return
 	}
@@ -277,7 +277,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		pending.persisted = true
 	}
 	if pending.grant == nil {
-		grant, err := scheduler.restoreCreateGrant(run, nil)
+		grant, err := scheduler.restoreCreateOwner(run, nil)
 		if err != nil {
 			return false, err
 		}
@@ -365,7 +365,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 
 // The shared background owner retains capacity during uncertain create/delete
 // outcomes; API outages must not turn this run's cleanup into a component exit.
-func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *admissionReservation, failures ...error) {
+func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *submissionOwner, failures ...error) {
 	grant.retain()
 	reason := ""
 	for _, failure := range failures {

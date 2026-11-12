@@ -7,64 +7,21 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// queuedDisplayReason combines this run's pod requests with exactly one blocker.
-// Unknown figures are omitted; global counts and other repos are already scoped.
-func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.AdmissionBlocker) string {
+// queuedDisplayReason uses only native waiting and the submission lifecycle.
+func queuedDisplayReason(scheduling *model.RunScheduling) string {
 	if scheduling == nil {
 		return "in line"
 	}
-	reason := queuePositionReason(scheduling.QueuePosition)
+	if scheduling.Execution != nil && scheduling.Execution.Message != "" {
+		return displayFailureText(scheduling.Execution.Message)
+	}
 	switch scheduling.State {
 	case "infra-pending":
 		return "workflow create uncertain, cleanup pending"
-	case "preparing":
+	case "preparing", "startup":
 		return "starting"
-	case "preflight":
-		return "retired execution preflight"
-	case "waiting":
-		if scheduling.Admission != nil {
-			if scheduling.Admission.State == "admitted" {
-				return "starting"
-			}
-			reason = waitingReason(scheduling.Admission)
-		}
-	default:
-		if qualifier := queueBlockerReason(blocker); qualifier != "" {
-			reason = qualifier
-		}
-	}
-	return reason
-}
-
-func queuePositionReason(position int64) string {
-	if position == 1 {
-		return "next in line"
-	}
-	if position > 1 {
-		return fmt.Sprintf("position %d", position)
 	}
 	return "in line"
-}
-
-func waitingReason(a *model.AdmissionObservation) (reason string) {
-	defer func() { reason = displayFailureText(reason) }()
-	blocker := a.BlockedBy
-	if !a.HeadOfQueue {
-		if reason := queueBlockerReason(blocker); reason != "" {
-			return reason
-		}
-	}
-	if a.HeadOfQueue {
-		return "next in line"
-	}
-	return queuePositionReason(int64(a.Position))
-}
-
-func queueBlockerReason(blocker *model.AdmissionBlocker) string {
-	if blocker != nil && blocker.Repo != "" && blocker.Ref != "" {
-		return displayFailureText("behind " + blocker.Repo + "/" + blocker.Ref)
-	}
-	return ""
 }
 
 // bytesText renders bytes in the largest binary unit with one decimal.
@@ -92,7 +49,7 @@ func applyQueuedDisplay(run *model.Run, scheduling *model.RunScheduling, reason 
 		return
 	}
 	if reason == "" {
-		reason = queuedDisplayReason(scheduling, nil)
+		reason = queuedDisplayReason(scheduling)
 	}
 	run.DisplayReason = reason
 }

@@ -123,7 +123,7 @@ func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
 			if err := file.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reservation, err := scheduler.admission.adopt(run)
+			reservation, err := scheduler.submissions.adopt(run)
 			if err != nil {
 				t.Fatal(err)
 			}

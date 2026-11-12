@@ -11,24 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
-
-// reserve records FIFO claim order before exact-SHA checkout and static
-// parsing can finish out of order.
-func (gate *admissionGate) reserve(sequence int64) *admissionReservation {
-	return gate.reserveInOrder(sequence, sequence)
-}
-
-func (gate *admissionGate) reserveInOrder(sequence, order int64) *admissionReservation {
-	return gate.reservePriorityRun(sequence, order, model.Run{})
-}
-
-// acquire admits an ungrouped run. The historical size tier is accepted for
-// fixture brevity and has no effect: the gate counts runs.
-func (reservation *admissionReservation) acquire(ctx context.Context, _ pipeline.Size) (func(), error) {
-	return reservation.acquireRequest(ctx, admissionRequest{})
-}
 
 func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (WaitResponse, error) {
 	prepared, err := service.prepareWaitRun(ctx, repositoryName, selector, trigger, requestedSeconds, actor)
@@ -97,43 +80,6 @@ func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *s
 type fakeClock struct{ now time.Time }
 
 func (clock *fakeClock) Now() time.Time { return clock.now }
-
-// pending starts an acquire that may wait and returns its reservation.
-func pending(t *testing.T, gate *admissionGate, sequence int64, request admissionRequest) *admissionReservation {
-	t.Helper()
-	return pendingPriority(t, gate, sequence, model.PriorityStandard, request)
-}
-
-func pendingPriority(t *testing.T, gate *admissionGate, sequence int64, priority model.RunPriority, request admissionRequest) *admissionReservation {
-	t.Helper()
-	reservation := gate.reserveRun(model.Run{ID: request.RunID, QueueSequence: sequence, Priority: priority, QueuedAt: gate.clock()})
-	go func() { _, _ = reservation.acquireRequest(context.Background(), request) }()
-	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
-	for {
-		gate.mu.Lock()
-		settled := reservation.prepared || reservation.granted
-		gate.mu.Unlock()
-		if settled {
-			return reservation
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("reservation %d never prepared", sequence)
-		}
-		time.Sleep(testTimeout(time.Millisecond))
-	}
-}
-
-func granted(gate *admissionGate, reservation *admissionReservation) bool {
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	return reservation.granted
-}
-
-func kick(gate *admissionGate) {
-	gate.mu.Lock()
-	gate.grantLocked()
-	gate.mu.Unlock()
-}
 
 func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, want model.RunStatus) model.Run {
 	t.Helper()

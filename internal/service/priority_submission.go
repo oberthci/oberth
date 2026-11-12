@@ -76,23 +76,13 @@ func (scheduler *Scheduler) RequestRunPriority(ctx context.Context, actor, id st
 	}
 	scheduler.priorityMu.Lock()
 	defer scheduler.priorityMu.Unlock()
-	g := scheduler.admission
+	g := scheduler.submissions
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	for _, r := range g.reservations {
+	for _, r := range g.owners {
 		if r.runID == id && r.granted {
 			return state.RequestRunPriority(ctx, actor, id, request, true)
 		}
 	}
-	run, err := state.RequestRunPriority(ctx, actor, id, request, false)
-	if err != nil {
-		return run, err
-	}
-	for _, r := range g.waiters {
-		if r.runID == id {
-			r.priority, r.priorityReason = run.Priority, run.PriorityReason
-		}
-	}
-	g.sortWaitersLocked()
-	return run, nil
+	return state.RequestRunPriority(ctx, actor, id, request, false)
 }

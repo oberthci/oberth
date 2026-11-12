@@ -165,10 +165,10 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				if current.Status != model.RunRunning || current.SupersededBy != "" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
 					t.Fatalf("adopted run = %#v", current)
 				}
-				scheduler.admission.mu.Lock()
-				runs := scheduler.admission.runs
-				order := scheduler.admission.reservations[run.QueueSequence].order
-				scheduler.admission.mu.Unlock()
+				scheduler.submissions.mu.Lock()
+				runs := len(scheduler.submissions.owners)
+				order := scheduler.submissions.owners[run.QueueSequence].order
+				scheduler.submissions.mu.Unlock()
 				if order != run.AdmissionSequence {
 					t.Fatalf("adopted admission order = %d, want persisted %d", order, run.AdmissionSequence)
 				}
@@ -198,9 +198,9 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if jobs.created != 0 || len(jobs.deleted) != 0 || len(jobs.adopted) != 1 || jobs.retained != int64(len("[test/unit] before restart\n")) || len(jobs.resumed) != 1 {
 				t.Fatalf("adoption did not preserve intent/logs: %#v", jobs)
 			}
-			scheduler.admission.mu.Lock()
-			runs := scheduler.admission.runs
-			scheduler.admission.mu.Unlock()
+			scheduler.submissions.mu.Lock()
+			runs := len(scheduler.submissions.owners)
+			scheduler.submissions.mu.Unlock()
 			if runs != 0 {
 				t.Fatalf("admission leaked: %d", runs)
 			}
@@ -273,7 +273,7 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 // Adoption is idempotent and counts every adopted run; a new run is
 // granted beside adopted ones (Argo parallelism bounds the Workflows).
 func TestAdoptedAdmissionIsIdempotent(t *testing.T) {
-	gate := newAdmissionGate()
+	gate := newSubmissionRegistry()
 	run := model.Run{ID: "active", QueueSequence: 11, AdmissionSequence: 2, RepoID: 1}
 	first, err := gate.adopt(run)
 	if err != nil {
@@ -293,21 +293,21 @@ func TestAdoptedAdmissionIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate.runs != 2 {
-		t.Fatalf("adopted runs = %d", gate.runs)
+	if len(gate.owners) != 2 {
+		t.Fatalf("adopted runs = %d", len(gate.owners))
 	}
-	waiting := gate.reserveRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1})
+	waiting := gate.trackRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1})
 	ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(time.Second))
 	defer cancel()
-	release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1})
+	release, err := waiting.beginSubmission(ctx)
 	if err != nil {
 		t.Fatalf("new work waited behind adopted runs: %v", err)
 	}
 	release()
 	other.release()
 	first.release()
-	if gate.runs != 0 {
-		t.Fatalf("admission leaked: %d", gate.runs)
+	if len(gate.owners) != 0 {
+		t.Fatalf("admission leaked: %d", len(gate.owners))
 	}
 }
 
@@ -319,7 +319,7 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 			fixture.setWorkflowName(t, run.ID, "oberth-preempted")
 			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("Workflow deleted"), waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
 			scheduler := fixture.scheduler(t, jobs)
-			reservation, err := scheduler.admission.adopt(run)
+			reservation, err := scheduler.submissions.adopt(run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -360,9 +360,9 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 			if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
 				t.Fatalf("pending cancellation = %#v %v", pending, err)
 			}
-			scheduler.admission.mu.Lock()
-			runs := scheduler.admission.runs
-			scheduler.admission.mu.Unlock()
+			scheduler.submissions.mu.Lock()
+			runs := len(scheduler.submissions.owners)
+			scheduler.submissions.mu.Unlock()
 			if runs != 0 {
 				t.Fatalf("cancelled adoption retained admission: %d", runs)
 			}
@@ -458,7 +458,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	fixture.setWorkflowName(t, run.ID, "oberth-delete-failure")
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{deleteErr: errors.New("API unavailable")}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run)
+	reservation, err := scheduler.submissions.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,10 +474,10 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID {
 		t.Fatalf("refused deletion lost its obligation: %+v %v", pending, err)
 	}
-	scheduler.admission.mu.Lock()
-	runs, held := scheduler.admission.runs, scheduler.admission.reservations[run.QueueSequence]
-	scheduler.admission.mu.Unlock()
-	if scheduler.AdmissionState().Runs == 0 || runs != 1 || held != reservation || !reservation.retained {
+	scheduler.submissions.mu.Lock()
+	runs, held := len(scheduler.submissions.owners), scheduler.submissions.owners[run.QueueSequence]
+	scheduler.submissions.mu.Unlock()
+	if scheduler.submissionStateForTest().Runs == 0 || runs != 1 || held != reservation || !reservation.retained {
 		t.Fatalf("live Workflow lost admission: %d held=%p", runs, held)
 	}
 	// The retry pass that completes the obligation releases the slot once.
@@ -486,9 +486,9 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 		t.Fatal(err)
 	}
 	reservation.cancel() // A late owner cancel must not release it twice.
-	scheduler.admission.mu.Lock()
-	runs, held = scheduler.admission.runs, scheduler.admission.reservations[run.QueueSequence]
-	scheduler.admission.mu.Unlock()
+	scheduler.submissions.mu.Lock()
+	runs, held = len(scheduler.submissions.owners), scheduler.submissions.owners[run.QueueSequence]
+	scheduler.submissions.mu.Unlock()
 	if runs != 0 || held != nil || !reservation.released || reservation.retained {
 		t.Fatalf("completed deletion did not release the slot exactly once: runs=%d held=%p %+v", runs, held, reservation)
 	}
@@ -528,9 +528,9 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	if len(jobs.deleted) != 2 || jobs.deleted[0] != "oberth-blip" {
 		t.Fatalf("unobservable Workflows were not deleted before failing: %v", jobs.deleted)
 	}
-	scheduler.admission.mu.Lock()
-	runs := scheduler.admission.runs
-	scheduler.admission.mu.Unlock()
+	scheduler.submissions.mu.Lock()
+	runs := len(scheduler.submissions.owners)
+	scheduler.submissions.mu.Unlock()
 	if runs != 0 {
 		t.Fatalf("failed adoption retained admission: %d", runs)
 	}
@@ -546,7 +546,7 @@ func TestAdoptedTerminalObservationErrorKeepsRealResult(t *testing.T) {
 		waitErr: errors.New("step test/unit breached the aggregate run log budget"),
 	}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run)
+	reservation, err := scheduler.submissions.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,12 +588,12 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 			scheduler := fixture.scheduler(t, jobs)
 			if test.holdOther {
 				// Another run already holds this run's admission key.
-				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence, AdmissionSequence: run.AdmissionSequence, RepoID: run.RepoID}); err != nil {
+				if _, err := scheduler.submissions.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence, AdmissionSequence: run.AdmissionSequence, RepoID: run.RepoID}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run) error {
-				_, err := scheduler.admission.adopt(run)
+				_, err := scheduler.submissions.adopt(run)
 				return err
 			})
 			if err == nil || errors.Is(err, ErrAdoptionRefused) != test.refused {
@@ -670,9 +670,9 @@ func TestAdoptedPreemptedObservationDeleteRefusalKeepsSchedulerAlive(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		scheduler.admission.mu.Lock()
-		runs := scheduler.admission.runs
-		scheduler.admission.mu.Unlock()
+		scheduler.submissions.mu.Lock()
+		runs := len(scheduler.submissions.owners)
+		scheduler.submissions.mu.Unlock()
 		if len(pending) == 0 && runs == 0 {
 			break
 		}
@@ -684,9 +684,9 @@ func TestAdoptedPreemptedObservationDeleteRefusalKeepsSchedulerAlive(t *testing.
 	if jobs.calls.Load() < 3 {
 		t.Fatalf("deletion was not retried after refusals: calls=%d", jobs.calls.Load())
 	}
-	scheduler.admission.mu.Lock()
-	runs := scheduler.admission.runs
-	scheduler.admission.mu.Unlock()
+	scheduler.submissions.mu.Lock()
+	runs := len(scheduler.submissions.owners)
+	scheduler.submissions.mu.Unlock()
 	if runs != 0 {
 		t.Fatalf("slot not released exactly once: %d", runs)
 	}

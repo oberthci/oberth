@@ -15,49 +15,7 @@ type RunScheduling struct {
 	State         string                `json:"state"`
 	Message       string                `json:"message"`
 	QueuePosition int64                 `json:"queue_position,omitempty"`
-	Admission     *AdmissionObservation `json:"admission,omitempty"`
 	Execution     *ExecutionObservation `json:"execution,omitempty"`
-}
-
-// AdmissionObservation is one run's place in the CPU admission gate. Used
-// and Runs count granted reservations. Argo parallelism may further bound
-// running Workflows, and Kubernetes places each Pod.
-type AdmissionObservation struct {
-	// Requests is the run's effective peak Pod request reservation.
-
-	State    string `json:"state"`
-	Position int    `json:"position,omitempty"`
-	Used     int    `json:"used"`
-	// Runs repeats Used. Zero for a scoped viewer, like Used.
-	Runs int `json:"runs,omitempty"`
-	// BlockedBy names the run at the head of the admission queue that every
-	// later run waits behind (#1021): the first claimed run the disk floor or
-	// host pressure holds back. HeadOfQueue marks the run that is itself
-	// that run; BlockedBy then describes it. Nil when nothing blocks the
-	// queue.
-	BlockedBy   *AdmissionBlocker `json:"blocked_by,omitempty"`
-	HeadOfQueue bool              `json:"head_of_queue,omitempty"`
-}
-
-// AdmissionBlocker is the claimed run at the head of the admission queue that
-// cannot be granted yet, which holds back every run claimed after it.
-type AdmissionBlocker struct {
-	RunID  string `json:"run_id"`
-	RepoID int64  `json:"-"`
-	Repo   string `json:"repo"`
-	Ref    string `json:"ref"`
-	// Used is how many runs hold a grant. Zero for a scoped viewer.
-	Used         int       `json:"used"`
-	WaitingSince time.Time `json:"waiting_since"`
-}
-
-// Reason is the parenthesized why of a blocked admission, e.g.
-// "waiting for a run slot".
-func (blocker AdmissionBlocker) Reason() string {
-	switch {
-
-	}
-	return "waiting for a run slot"
 }
 
 // ExecutionDeadlineMessage is a fixed presentation label, never raw controller text.
@@ -115,43 +73,6 @@ type SchedulingReason struct {
 	Phase   string `json:"phase"`
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
-}
-
-// AdmissionState is the whole in-memory admission gate as data (#1099):
-// every reservation it holds. It is an ephemeral observation of one server
-// process, never durable evidence. Used and Runs count runs holding a grant.
-type AdmissionState struct {
-	Hold         *AdmissionHold         `json:"hold,omitempty"`
-	Used         int                    `json:"used"`
-	Runs         int                    `json:"runs"`
-	Reservations []AdmissionReservation `json:"reservations"`
-	Blocker      *AdmissionBlocker      `json:"blocker,omitempty"`
-}
-
-// AdmissionReservation is one claimed run's place in the gate. State is
-// preparing (checkout and static reads still running), waiting (held by
-// the administrator hold, the disk floor or host pressure), granted, or retained
-// (granted, and kept held after its owner stopped on an error that may have
-// left its Workflow running).
-type AdmissionReservation struct {
-	RunID    string    `json:"run_id"`
-	RepoID   int64     `json:"-"`
-	Repo     string    `json:"repo,omitempty"`
-	Ref      string    `json:"ref,omitempty"`
-	Workflow string    `json:"workflow,omitempty"`
-	State    string    `json:"state"`
-	Position int       `json:"position,omitempty"`
-	Since    time.Time `json:"since"`
-}
-
-// AdmissionRelease reports an operator release of one reservation (#1099).
-type AdmissionRelease struct {
-	RunID    string `json:"run_id"`
-	State    string `json:"state"`
-	Workflow string `json:"workflow,omitempty"`
-	Verified bool   `json:"verified"`
-	Forced   bool   `json:"forced,omitempty"`
-	Warning  string `json:"warning,omitempty"`
 }
 
 // IsExecutionDeadlineReason recognizes fixed controller vocabulary, not exit signals.

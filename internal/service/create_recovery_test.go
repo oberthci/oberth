@@ -72,7 +72,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				if run.ID != holder.ID {
 					t.Fatal("parked placeholder adopted")
 				}
-				_, err := scheduler.admission.adopt(run)
+				_, err := scheduler.submissions.adopt(run)
 				return err
 			}); err != nil {
 				t.Fatal("parked group-mate blocked startup", err)
@@ -94,7 +94,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 			if err := scheduler.completePendingCancellations(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			state := scheduler.AdmissionState()
+			state := scheduler.submissionStateForTest()
 			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != holder.ID || jobs.settleCalls != 0 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
@@ -118,11 +118,11 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 				}
 			}
 			var resumed model.Run
-			var grant *admissionReservation
+			var grant *submissionOwner
 			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(found model.Run) error {
 				resumed = found
 				var err error
-				grant, err = scheduler.admission.adopt(found)
+				grant, err = scheduler.submissions.adopt(found)
 				return err
 			}); err != nil {
 				t.Fatal(err)
@@ -202,7 +202,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			state := scheduler.AdmissionState()
+			state := scheduler.submissionStateForTest()
 			if contract == "none" {
 				if current.Status != model.RunQueued || current.SupersededBy != "" || state.Runs != 0 || scheduler.pendingCreateCount() != 0 {
 					t.Fatalf("no-contract run quarantined or failed: %+v state=%+v", current, state)

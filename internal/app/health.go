@@ -76,9 +76,7 @@ type Health struct {
 	SecretStoreSealed func(context.Context) (bool, error)
 	// AdmissionBlocker optionally reports the run blocking the admission
 	// queue head (#1021).
-	AdmissionBlocker func() *model.AdmissionBlocker
 	// Admission optionally reports the whole admission gate (#1099).
-	Admission       func() *model.AdmissionState
 	DatabaseRetries func() uint64
 	// SchemaVersion is the database schema version the running binary last
 	// applied, reported on the status view and the version command so the
@@ -167,11 +165,9 @@ type HealthStatus struct {
 	// AdmissionBlocker names the run at the head of the admission queue that
 	// every later run waits behind, e.g. an XL run waiting for a full drain
 	// (#1021). Unscoped status only.
-	AdmissionBlocker *model.AdmissionBlocker `json:"admission_blocker,omitempty"`
 	// Admission is the admission gate as data (#1099): every reservation,
 	// including retained ones, and every concurrency group in use. A scoped
 	// view keeps only its repositories' entries and omits the shared budget.
-	Admission *model.AdmissionState `json:"admission,omitempty"`
 }
 
 // Ready gates the readiness probe. Like a vault before initialization, a
@@ -337,9 +333,6 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		}
 		status.SecretStore = &storeCopy
 	}
-	if health.AdmissionBlocker != nil {
-		status.AdmissionBlocker = health.AdmissionBlocker()
-	}
 	if reader, ok := health.Store.(interface {
 		LastBackup(context.Context) (*model.BackupStatus, error)
 	}); ok {
@@ -359,9 +352,6 @@ func (health Health) Status(ctx context.Context) (any, error) {
 		if expiry, err := reader.AdminTokenExpiry(ctx); err == nil {
 			status.AdminTokens = expiry
 		}
-	}
-	if health.Admission != nil {
-		status.Admission = health.Admission()
 	}
 	return status, nil
 }
@@ -424,39 +414,7 @@ func (health Health) ScopedStatus(ctx context.Context, actor api.Actor) (any, er
 			status.SSHIdentity = fingerprint
 		}
 	}
-	if health.Admission != nil && upstreamErr == nil && repositoryErr == nil {
-		status.Admission = scopedAdmission(health.Admission(), upstreams, repositories, actor)
-	}
 	return status, nil
-}
-
-// scopedAdmission keeps only the reservations and groups of repositories the
-// actor's upstreams own, and withholds the shared budget and its use (#073):
-// a full pool of invisible work must not show.
-func scopedAdmission(state *model.AdmissionState, upstreams []model.Upstream, repositories []model.Repository, actor api.Actor) *model.AdmissionState {
-	if state == nil {
-		return nil
-	}
-	visibleUpstreams := map[int64]bool{}
-	for _, upstream := range upstreams {
-		if actor.SeesUpstream(upstream.Name) {
-			visibleUpstreams[upstream.ID] = true
-		}
-	}
-	visible := map[int64]bool{}
-	for _, repository := range repositories {
-		if visibleUpstreams[repository.UpstreamID] {
-			visible[repository.ID] = true
-		}
-	}
-	scoped := &model.AdmissionState{Reservations: []model.AdmissionReservation{}}
-	for _, reservation := range state.Reservations {
-		if visible[reservation.RepoID] {
-			reservation.Position = 0
-			scoped.Reservations = append(scoped.Reservations, reservation)
-		}
-	}
-	return scoped
 }
 
 const (

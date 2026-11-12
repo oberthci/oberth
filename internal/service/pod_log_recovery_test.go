@@ -165,7 +165,7 @@ func TestSchedulerPodJournalFailureDegradesWithoutStrandingRun(t *testing.T) {
 					}
 
 				}
-				reservation, err := scheduler.admission.adopt(run)
+				reservation, err := scheduler.submissions.adopt(run)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -234,7 +234,7 @@ func TestSchedulerActiveOwnerRetainsPodJournalForRestart(t *testing.T) {
 	}
 	jobs := &journalRecoveryJobs{t: t, block: true, entered: make(chan struct{})}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run)
+	reservation, err := scheduler.submissions.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	}
 	_ = j.Close()
 	_ = f.Close()
-	reservation, err := scheduler.admission.adopt(run)
+	reservation, err := scheduler.submissions.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}

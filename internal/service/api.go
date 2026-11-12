@@ -67,7 +67,6 @@ type APIConfig struct {
 	DeclarationDismissal      DeclarationDismissal
 	IssueLifecycle            IssueLifecycle
 	SchedulingObserver        SchedulingObserver
-	Admission                 AdmissionObserver
 	Runs                      RunResolver
 	History                   RunHistory
 	RunRetries                RunRetryStore
@@ -150,7 +149,6 @@ type API struct {
 	declarationDismissal      DeclarationDismissal
 	issueLifecycle            IssueLifecycle
 	schedulingObserver        SchedulingObserver
-	admission                 AdmissionObserver
 	runs                      RunResolver
 	history                   RunHistory
 	runRetries                RunRetryStore
@@ -271,8 +269,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		releasePreflight:   config.ReleasePreflight,
 		clientCertificates: config.ClientCertificates,
 		uplinkLifecycle:    config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
-		issueLifecycle:     config.IssueLifecycle,
-		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
+		issueLifecycle:  config.IssueLifecycle,
 		listDiagnostics: &listDiagnosticCache{},
 		branchCounts:    &branchCountCache{},
 		resources:       config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
@@ -418,8 +415,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
-	case "admission_hold":
-		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).
 	case "uplink_invite":
 		return service.uplinkInviteTool(ctx, actor, raw)
@@ -450,18 +445,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.releaseWIFTool(ctx, actor, name, raw)
 	case "queue_priority_config", "queue_priority_get", "run_priority":
 		return service.queuePriorityTool(ctx, actor, name, raw)
-	case "admission_release":
-		if err := requireUnscoped(actor, name); err != nil {
-			return nil, err
-		}
-		var arguments struct {
-			RunID string `json:"id"`
-			Force bool   `json:"force"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		return service.releaseAdmission(ctx, actor, arguments.RunID, arguments.Force)
 	case "audit_list":
 		return service.auditList(ctx, actor, raw)
 	case "schedule_list":
@@ -1750,7 +1733,7 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	visible.DisplayStatus = model.DisplayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
 	if visible.DisplayStatus == model.DisplayQueued {
-		visible.DisplayReason = queuedDisplayReason(nil, nil)
+		visible.DisplayReason = queuedDisplayReason(nil)
 	}
 	if visible.DisplayStatus == model.DisplayInfraRetried {
 		visible.DisplayReason = "retried as " + shortRunID(run.AutoRetriedBy)
@@ -1864,7 +1847,6 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 	})
 	if !ok {
 		plain := *service
-		plain.admission = nil
 		for i := range runs {
 			runs[i] = service.runAdmissionContext(ctx, plain.presentationRun(ctx, runs[i]), false)
 		}
@@ -1893,7 +1875,6 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 }
 
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
-	run = service.withAdmissionPriority(run)
 	visible := presentationRunAt(run, service.schedulingClock().Now())
 	if service.scope != nil && strings.HasPrefix(visible.Reason, "branch run deferred:") {
 		visible.Reason = parkPolicyDisplayReason(run, "branch run deferred: waiting for queue capacity")
@@ -3147,7 +3128,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke",
 
-		"admission_release", "admission_hold", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
+		"release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive", "branch_delete_many", "branch_deletion_resolve", "ref_delete_many", "receive_outbox",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",
