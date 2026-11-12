@@ -76,8 +76,8 @@ func (gate *admissionGate) adminHeldLocked(r *admissionReservation) bool {
 	if gate.holdUpdating {
 		return true
 	}
-	run := model.Run{RefKind: r.refKind, Release: r.pressureRelease}
-	if r.pressurePromotion {
+	run := model.Run{RefKind: r.refKind, Release: r.releaseRun}
+	if r.promotionRun {
 		run.Trigger = "promotion"
 	}
 	return gate.adminHold.Blocks(run, gate.clock())

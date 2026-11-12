@@ -57,7 +57,6 @@ type SchedulerConfig struct {
 	StalledRunTimeout time.Duration
 	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root.
 	AdmissionDiskFloorBytes int64
-	AdmissionPressure       AdmissionPressureConfig
 	// RestoredRunsFile is oberth restore's marker (RestoredRunsFile in the
 	// data root); empty disables it.
 	RestoredRunsFile string
@@ -148,13 +147,6 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.StalledRunTimeout == 0 {
 		config.StalledRunTimeout = 10 * time.Minute
 	}
-	config.AdmissionPressure.HardOnly = true
-	if !config.AdmissionPressure.Enabled {
-		config.AdmissionPressure.IOFullAvg60Max, config.AdmissionPressure.CPUSomeAvg60Max, config.AdmissionPressure.MaxDefer = 0, 0, 0
-	}
-	if err := config.AdmissionPressure.Validate(); err != nil {
-		return nil, fmt.Errorf("admission pressure: %w", err)
-	}
 	if config.Store == nil || config.Git == nil || config.Logs == nil || config.Jobs == nil || config.Auditor == nil {
 		return nil, errors.New("service: scheduler store, Git, logs, jobs, and auditor are required")
 	}
@@ -194,7 +186,6 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
-	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	if config.AdmissionDiskFloorBytes > 0 {
 		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
 	}

@@ -31,7 +31,7 @@ func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.Admissi
 			reason = waitingReason(scheduling.Admission)
 		}
 	default:
-		if qualifier := queueBlockerReason(nil, blocker); qualifier != "" {
+		if qualifier := queueBlockerReason(blocker); qualifier != "" {
 			reason = qualifier
 		}
 	}
@@ -68,15 +68,8 @@ func withQueueRequestsWhole(requests *argoworkflow.PodRequests, reason string) s
 func waitingReason(a *model.AdmissionObservation) (reason string) {
 	defer func() { reason = displayFailureText(reason) }()
 	blocker := a.BlockedBy
-	pressure := a.Pressure
-	if pressure == nil && blocker != nil {
-		pressure = blocker.Pressure
-	}
-	if reason := queuePressureReason(pressure); reason != "" {
-		return reason
-	}
 	if !a.HeadOfQueue {
-		if reason := queueBlockerReason(nil, blocker); reason != "" {
+		if reason := queueBlockerReason(blocker); reason != "" {
 			return reason
 		}
 	}
@@ -89,26 +82,7 @@ func waitingReason(a *model.AdmissionObservation) (reason string) {
 	return queuePositionReason(int64(a.Position))
 }
 
-func queuePressureReason(pressure *model.PressureDeferral) string {
-	if pressure == nil {
-		return ""
-	}
-	switch pressure.Resource {
-	case "io", "cpu+io":
-		return "host IO busy"
-	case "cpu":
-		return "host CPU busy"
-	}
-	return ""
-}
-
-func queueBlockerReason(pressure *model.PressureDeferral, blocker *model.AdmissionBlocker) string {
-	if pressure == nil && blocker != nil {
-		pressure = blocker.Pressure
-	}
-	if reason := queuePressureReason(pressure); reason != "" {
-		return reason
-	}
+func queueBlockerReason(blocker *model.AdmissionBlocker) string {
 	if blocker != nil && blocker.Repo != "" && blocker.Ref != "" {
 		return displayFailureText("behind " + blocker.Repo + "/" + blocker.Ref)
 	}

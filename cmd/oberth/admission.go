@@ -115,13 +115,6 @@ func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Tim
 			return err
 		}
 	}
-	if p := state.Pressure; p != nil {
-		if p.Fallback != "" {
-			_, _ = fmt.Fprintln(output, p.Fallback)
-		} else if p.Sample != nil {
-			_, _ = fmt.Fprintf(output, "pressure some avg10: cpu %.1f%%, io %.1f%%; holding=%t gate=%s\n", p.Sample.CPU.SomeAvg10, p.Sample.IO.SomeAvg10, p.Holding, dash(p.Resource))
-		}
-	}
 	if state.Blocker != nil {
 		line := fmt.Sprintf("queue head: %s/%s (%s)", state.Blocker.Repo, state.Blocker.Ref, state.Blocker.Reason())
 		if _, err := fmt.Fprintln(output, line); err != nil {

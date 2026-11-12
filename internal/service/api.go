@@ -147,7 +147,6 @@ type API struct {
 	resourceCoverages         ResourceCoverageReader
 	runResources              RunResourceReader
 	resourceDeclarations      ResourceDeclarationReader
-	redactPressure            bool
 	resources                 ResourceUsageReader
 	promotionProgress         *sync.Map
 	releasePreflight          ReleasePreflighter
@@ -386,7 +385,6 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	}
 	ctx = model.WithAuthMethod(ctx, actor.AuthMethod)
 	copy := *service
-	copy.redactPressure = true
 	service = &copy
 	if name == "run_logs" || name == "logs" {
 		ctx = withRunLogCaller(ctx, actor)

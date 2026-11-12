@@ -50,7 +50,7 @@ func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Conte
 	if cache == nil {
 		return listDiagnosticValue{}
 	}
-	scope := fmt.Sprint(s.redactPressure)
+	scope := ""
 	if s.scope != nil {
 		scope += fmt.Sprint(s.scope.repoIDs)
 	}

@@ -323,7 +323,7 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			f.awaitCreated(t, 1)
 			// Host pressure keeps the ordinary run waiting in the gate, so the
 			// priority refresh and lookahead read the store.
-			lift := f.pressureValve(t)
+			lift := f.diskValve(t)
 			waiting := f.branch(t, f.terraform, "waiting", "b")
 			f.awaitAdmission(t, waiting, "pressure-held run", func(snapshot *model.AdmissionObservation) bool {
 				return snapshot != nil && snapshot.State == "waiting"

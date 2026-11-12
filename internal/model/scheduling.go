@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -30,10 +29,9 @@ type AdmissionObservation struct {
 	// Requests is the run's effective peak Pod request reservation.
 	Requests *argoworkflow.PodRequests `json:"requests,omitempty"`
 
-	Pressure *PressureDeferral `json:"pressure,omitempty"`
-	State    string            `json:"state"`
-	Position int               `json:"position,omitempty"`
-	Used     int               `json:"used"`
+	State    string `json:"state"`
+	Position int    `json:"position,omitempty"`
+	Used     int    `json:"used"`
 	// Runs repeats Used. Zero for a scoped viewer, like Used.
 	Runs int `json:"runs,omitempty"`
 	// DiskFloor reports the opt-in disk-space admission hold (#673). When
@@ -51,11 +49,10 @@ type AdmissionObservation struct {
 // AdmissionBlocker is the claimed run at the head of the admission queue that
 // cannot be granted yet, which holds back every run claimed after it.
 type AdmissionBlocker struct {
-	Pressure *PressureDeferral `json:"pressure,omitempty"`
-	RunID    string            `json:"run_id"`
-	RepoID   int64             `json:"-"`
-	Repo     string            `json:"repo"`
-	Ref      string            `json:"ref"`
+	RunID  string `json:"run_id"`
+	RepoID int64  `json:"-"`
+	Repo   string `json:"repo"`
+	Ref    string `json:"ref"`
 	// DiskFloor names why the head waits: the data disk is below its floor.
 	DiskFloor bool `json:"disk_floor,omitempty"`
 	// Used is how many runs hold a grant. Zero for a scoped viewer.
@@ -69,17 +66,7 @@ func (blocker AdmissionBlocker) Reason() string {
 	switch {
 	case blocker.DiskFloor:
 		return "waiting for disk space"
-	case blocker.Pressure != nil:
-		switch blocker.Pressure.Resource {
-		case "io":
-			return "host IO pressure"
-		case "cpu":
-			return "host CPU pressure"
-		case "cpu+io":
-			return "host CPU and IO pressure"
-		default:
-			return "waiting for host pressure to settle"
-		}
+
 	}
 	return "waiting for a run slot"
 }
@@ -154,7 +141,6 @@ type SchedulingReason struct {
 // process, never durable evidence. Used and Runs count runs holding a grant.
 type AdmissionState struct {
 	Hold         *AdmissionHold         `json:"hold,omitempty"`
-	Pressure     *AdmissionPressure     `json:"pressure,omitempty"`
 	Used         int                    `json:"used"`
 	Runs         int                    `json:"runs"`
 	Reservations []AdmissionReservation `json:"reservations"`
@@ -167,15 +153,14 @@ type AdmissionState struct {
 // (granted, and kept held after its owner stopped on an error that may have
 // left its Workflow running).
 type AdmissionReservation struct {
-	Pressure *PressureDeferral `json:"pressure,omitempty"`
-	RunID    string            `json:"run_id"`
-	RepoID   int64             `json:"-"`
-	Repo     string            `json:"repo,omitempty"`
-	Ref      string            `json:"ref,omitempty"`
-	Workflow string            `json:"workflow,omitempty"`
-	State    string            `json:"state"`
-	Position int               `json:"position,omitempty"`
-	Since    time.Time         `json:"since"`
+	RunID    string    `json:"run_id"`
+	RepoID   int64     `json:"-"`
+	Repo     string    `json:"repo,omitempty"`
+	Ref      string    `json:"ref,omitempty"`
+	Workflow string    `json:"workflow,omitempty"`
+	State    string    `json:"state"`
+	Position int       `json:"position,omitempty"`
+	Since    time.Time `json:"since"`
 }
 
 // AdmissionRelease reports an operator release of one reservation (#1099).
@@ -205,66 +190,4 @@ func IsExecutionDeadlineReason(message string) bool {
 	default:
 		return strings.HasPrefix(message, ExecutionDeadlineMessage+" Step ") && IsResourceFailureMessage(message)
 	}
-}
-
-// Pressure values are host-wide PSI percentages over ten and sixty seconds.
-// CPU full is undefined at host scope and is reported as zero.
-type PressureResource struct {
-	SomeAvg10 float64 `json:"some_avg10"`
-	FullAvg10 float64 `json:"full_avg10"`
-	SomeAvg60 float64 `json:"some_avg60"`
-	FullAvg60 float64 `json:"full_avg60"`
-}
-type PressureSample struct {
-	IO     PressureResource `json:"io"`
-	CPU    PressureResource `json:"cpu"`
-	Memory PressureResource `json:"memory"`
-}
-type AdmissionPressure struct {
-	CPUSomeAvg10      float64         `json:"cpu_some_avg10,omitempty"`
-	IOSomeAvg10       float64         `json:"io_some_avg10,omitempty"`
-	HardCPU           float64         `json:"hard_cpu,omitempty"`
-	HardIO            float64         `json:"hard_io,omitempty"`
-	MaxWaitSeconds    int64           `json:"max_wait_seconds,omitempty"`
-	Fallback          string          `json:"fallback,omitempty"`
-	Mode              string          `json:"mode"`
-	ThresholdExceeded bool            `json:"threshold_exceeded"`
-	Enabled           bool            `json:"enabled"`
-	Available         bool            `json:"available"`
-	ObservedAt        time.Time       `json:"observed_at,omitzero"`
-	Sample            *PressureSample `json:"sample,omitempty"`
-	IOFullAvg60Max    float64         `json:"io_full_avg60_max"`
-	CPUSomeAvg60Max   float64         `json:"cpu_some_avg60_max"`
-	Hysteresis        float64         `json:"hysteresis"`
-	MaxDeferSeconds   int64           `json:"max_defer_seconds"`
-	Holding           bool            `json:"holding"`
-	Resource          string          `json:"resource,omitempty"`
-	Deferred          int             `json:"deferred"`
-}
-type PressureDeferral struct {
-	Avg10Gate       bool      `json:"avg10_gate,omitempty"`
-	CPUAvg10        float64   `json:"cpu_avg10,omitempty"`
-	IOAvg10         float64   `json:"io_avg10,omitempty"`
-	Redacted        bool      `json:"redacted,omitempty"`
-	Resource        string    `json:"resource"`
-	Avg60           float64   `json:"avg60,omitempty"`
-	Since           time.Time `json:"since,omitzero"`
-	MaxDeferSeconds int64     `json:"max_defer_seconds,omitempty"`
-}
-
-// Public preserves an actionable cause without host-wide numeric telemetry.
-func (p *PressureDeferral) Public() *PressureDeferral {
-	if p == nil {
-		return nil
-	}
-	return &PressureDeferral{Resource: p.Resource, Redacted: true}
-}
-func (p *PressureDeferral) Reason() string {
-	if p.Redacted {
-		return "deferred: host " + p.Resource + " pressure"
-	}
-	if p.Avg10Gate {
-		return fmt.Sprintf("deferred: %s pressure gate (host PSI some avg10: cpu %.1f%%, io %.1f%%)", p.Resource, p.CPUAvg10, p.IOAvg10)
-	}
-	return fmt.Sprintf("deferred: %s pressure %.1f%%", p.Resource, p.Avg60)
 }

@@ -23,8 +23,8 @@ func TestSchedulingMessagesUsePlainWords(t *testing.T) {
 			{State: "preparing"},
 			{State: "admitted"},
 			{State: "waiting"},
-			{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, Pressure: &model.PressureDeferral{Resource: "cpu"}},
-			{State: "waiting", Pressure: &model.PressureDeferral{Resource: "io"}},
+			{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}},
+			{State: "waiting"},
 			{State: "waiting", DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 512 << 20}},
 			{State: "waiting"},
 			{State: "waiting", BlockedBy: &model.AdmissionBlocker{Repo: "org/repo", Ref: "main"}},
@@ -65,28 +65,6 @@ func assertPlainScheduling(t *testing.T, message string) {
 	for _, word := range []string{"capacity", "admission", "declared", "effective"} {
 		if strings.Contains(strings.ToLower(message), word) {
 			t.Errorf("scheduling message contains %s: %q", word, message)
-		}
-	}
-}
-
-type structuredQueuePressure struct{ message queuedAdmissionMessage }
-
-func (s structuredQueuePressure) AdmissionSnapshot(int64) *model.AdmissionObservation { return nil }
-func (s structuredQueuePressure) QueuedAdmissionMessage() queuedAdmissionMessage      { return s.message }
-
-func TestScopedQueueUsesStructuredPressureFlag(t *testing.T) {
-	for _, tc := range []struct {
-		text     string
-		pressure bool
-		want     string
-	}{
-		{"host busy (different wording)", true, "host busy (different wording)"},
-		{"host CPU busy", false, "in line"},
-	} {
-		control := &API{scope: &repoScope{}, admission: structuredQueuePressure{queuedAdmissionMessage{Text: tc.text, Pressure: tc.pressure}}}
-		_, reason := control.observeScheduling(t.Context(), model.Run{Status: model.RunQueued}, nil, false)
-		if reason != tc.want {
-			t.Fatalf("text determined scope visibility: %q", reason)
 		}
 	}
 }

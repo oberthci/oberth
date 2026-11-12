@@ -64,7 +64,7 @@ func TestRunListMessageContract(t *testing.T) {
 }
 
 func TestRunListQueuedResourcesAndQualifier(t *testing.T) {
-	admission := &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, Pressure: &model.PressureDeferral{Resource: "io"}, BlockedBy: &model.AdmissionBlocker{Repo: "wrapper", Ref: "main"}}
+	admission := &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, BlockedBy: &model.AdmissionBlocker{Repo: "wrapper", Ref: "main"}}
 	got := queuedDisplayReason(&model.RunScheduling{State: "waiting", Admission: admission}, nil)
 	if want := "needs 9.9 CPU, 16 GiB · host IO busy"; got != want {
 		t.Fatalf("got %q, want %q", got, want)

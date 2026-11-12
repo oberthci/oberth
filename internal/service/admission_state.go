@@ -32,8 +32,7 @@ func (gate *admissionGate) reservationStateLocked(reservation *admissionReservat
 func (gate *admissionGate) reservationViewLocked(reservation *admissionReservation) model.AdmissionReservation {
 	view := model.AdmissionReservation{
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
-		Pressure: gate.pressureWaitLocked(reservation),
-		State:    gate.reservationStateLocked(reservation),
+		State: gate.reservationStateLocked(reservation),
 	}
 	if reservation.repo != "" && reservation.runID != "" {
 		if name, err := deterministicWorkflowName(reservation.repo, reservation.runID); err == nil {
@@ -66,7 +65,6 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 	hold := gate.adminHold.Snapshot(gate.clock())
 	state := &model.AdmissionState{
 		Hold:         &hold,
-		Pressure:     gate.pressureStateLocked(),
 		Used:         gate.runs,
 		Runs:         gate.runs,
 		Reservations: []model.AdmissionReservation{},

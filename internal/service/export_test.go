@@ -94,10 +94,6 @@ func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *s
 	return fixture.persistSteps(ctx, runID, steps, index)
 }
 
-func readPressureDirectory(root string) (model.PressureSample, error) {
-	return readPressureSources(root, true)
-}
-
 type fakeClock struct{ now time.Time }
 
 func (clock *fakeClock) Now() time.Time { return clock.now }

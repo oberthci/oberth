@@ -468,7 +468,6 @@ func minimalValidServeOptions() serveOptions {
 		secretStoreAuthMount:    secretstore.DefaultAuthMountPath,
 		secretStoreKVPath:       secretstore.DefaultKVPath,
 	}
-	options.admissionPressure.MaxWaitSeconds = 300
 	return options
 }
 

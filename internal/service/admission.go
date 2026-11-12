@@ -35,7 +35,6 @@ type admissionGate struct {
 	// and below the configured floor, no new runs are admitted until disk
 	// frees up.
 	diskFloor *diskFloorCheck
-	pressure  *pressureCheck
 }
 
 type admissionReservation struct {
@@ -59,14 +58,12 @@ type admissionReservation struct {
 	runID                string
 	// repoID, repo and ref identify the run when it blocks the queue head
 	// (#1021); preparedAt is when it started waiting for a slot.
-	repoID            int64
-	repo              string
-	ref               string
-	preparedAt        time.Time
-	pressureRelease   bool
-	pressurePromotion bool
-	pressureSince     time.Time
-	pressureDeferred  bool
+	repoID       int64
+	repo         string
+	ref          string
+	preparedAt   time.Time
+	releaseRun   bool
+	promotionRun bool
 	// claimedAt and grantedAt date the reservation's other states for the
 	// admission view (#1099).
 	claimedAt time.Time
@@ -127,7 +124,7 @@ func (gate *admissionGate) reservePriorityRun(sequence, order int64, run model.R
 	reservation := &admissionReservation{gate: gate, sequence: sequence, order: order, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
 	reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
 	reservation.refKind, reservation.sha = run.RefKind, run.SHA
-	reservation.pressureRelease, reservation.pressurePromotion = run.Release, run.Trigger == "promotion"
+	reservation.releaseRun, reservation.promotionRun = run.Release, run.Trigger == "promotion"
 	reservation.priority, reservation.priorityReason, reservation.queuedAt = run.Priority, run.PriorityReason, run.QueuedAt
 	reservation.priorityOverride, reservation.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 	reservation.priorityAccepted, reservation.priorityAcceptedReason = run.PriorityAccepted, run.PriorityAcceptedReason
@@ -307,12 +304,7 @@ func (gate *admissionGate) grantLocked() {
 		return
 	}
 	now := gate.clock()
-	if gate.pressure != nil {
-		gate.pressure.starvationGranted = false
-	}
-	gate.pressure.refresh(now)
 	gate.sortWaitersLocked()
-	gate.preparePressureWaitsLocked(now)
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
 		if gate.adminHeldLocked(reservation) {
@@ -330,12 +322,6 @@ func (gate *admissionGate) grantLocked() {
 			index++
 			continue
 		}
-		// Pressure holds preserve priority within the execution pool. Other
-		// pools keep their own pressure timeout and may still grant.
-		if gate.deferPressureLocked(reservation, now) {
-			index++
-			continue
-		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
 		reservation.grantedAt = now.UTC()
@@ -346,14 +332,7 @@ func (gate *admissionGate) grantLocked() {
 		if gate.onGrant != nil {
 			gate.onGrant()
 		}
-		if gate.pressure != nil && gate.pressure.config.Enabled {
-			gate.pressure.lastGrant = gate.clock()
-			// Refresh the hold even when no waiter remains, so the next pass
-			// and cached status both observe the settle window.
-			now = gate.clock()
-			gate.pressure.refresh(now)
-			gate.preparePressureWaitsLocked(now)
-		}
+
 	}
 }
 
@@ -425,7 +404,6 @@ func (gate *admissionGate) blockerLocked(reservation *admissionReservation) *mod
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Used:         gate.runs,
 		WaitingSince: reservation.preparedAt,
-		Pressure:     gate.pressureWaitLocked(reservation),
 	}
 	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		blocker.DiskFloor = true
@@ -471,7 +449,6 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 			break
 		}
 	}
-	result.Pressure = gate.pressureWaitLocked(reservation)
 	if reservation.prepared {
 		if head := gate.headBlockerLocked(); head == reservation {
 			result.HeadOfQueue = true
@@ -484,26 +461,6 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		result.DiskFloor = gate.diskFloor.observation()
 	}
 	return result
-}
-
-type queuedAdmissionMessage struct {
-	Text     string
-	Pressure bool
-}
-
-// QueuedAdmissionMessage is the reason an unclaimed queued run is not being
-// claimed: host pressure, a server-wide fact.
-func (scheduler *Scheduler) QueuedAdmissionMessage() queuedAdmissionMessage {
-	if scheduler == nil || scheduler.admission == nil {
-		return queuedAdmissionMessage{}
-	}
-	gate := scheduler.admission
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	if p := gate.pressureStateLocked(); p != nil && p.Holding {
-		return queuedAdmissionMessage{Text: queuePressureReason(&model.PressureDeferral{Resource: p.Resource}), Pressure: true}
-	}
-	return queuedAdmissionMessage{}
 }
 
 // Re-sort on every admission pass because aging changes effective class.

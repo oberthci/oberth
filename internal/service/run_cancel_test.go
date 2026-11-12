@@ -124,7 +124,7 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 // a cancelled reservation, and the cancelled run never creates a Workflow.
 func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	lift := fixture.pressureValve(t)
+	lift := fixture.diskValve(t)
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
 	fixture.start(t)

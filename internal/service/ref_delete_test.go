@@ -79,7 +79,7 @@ func TestRefDeletionCancelsQueuedAndAdmissionHeldRuns(t *testing.T) {
 	for _, claimed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "queued", true: "admission-held"}[claimed], func(t *testing.T) {
 			f := newGroupFixture(t, 0)
-			lift := f.pressureValve(t)
+			lift := f.diskValve(t)
 			old := f.branch(t, f.exampleService, "feature/deleted", "a")
 			other := f.branch(t, f.terraform, "feature/other", "b")
 			if claimed {

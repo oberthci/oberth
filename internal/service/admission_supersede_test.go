@@ -1,7 +1,6 @@
 package service
 
 import (
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,34 +23,11 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 	}
 }
 
-// pressureValve holds every new grant on the host pressure valve until the
-// returned release lifts it. Unlike the administrator hold or the disk floor
-// it lets the scheduler claim a run, so the run waits in the gate with a
-// reservation.
-func (fixture *groupFixture) pressureValve(t *testing.T) (release func()) {
+// diskValve temporarily holds grants for lifecycle tests until disk admission is removed.
+func (fixture *groupFixture) diskValve(t *testing.T) func() {
 	t.Helper()
-	high := &atomic.Bool{}
-	high.Store(true)
-	config := DefaultAdmissionPressureConfig()
-	config.HardOnly = true
-	config.Logf = func(string, ...any) {}
-	config.Source = func() (model.PressureSample, error) {
-		if high.Load() {
-			return model.PressureSample{CPU: model.PressureResource{SomeAvg10: 99}, IO: model.PressureResource{SomeAvg10: 99}}, nil
-		}
-		return model.PressureSample{}, nil
-	}
-	gate := fixture.scheduler.admission
-	gate.mu.Lock()
-	gate.pressure = newPressureCheck(config)
-	gate.mu.Unlock()
-	return func() {
-		high.Store(false)
-		gate.mu.Lock()
-		gate.grantLocked()
-		gate.mu.Unlock()
-		fixture.scheduler.signalQueue()
-	}
+	blockOnDiskFloor(fixture.scheduler.admission)
+	return func() { clearDiskFloor(fixture.scheduler.admission); fixture.scheduler.signalQueue() }
 }
 
 // A waiting run that a newer push supersedes must withdraw its reservation
@@ -59,7 +35,7 @@ func (fixture *groupFixture) pressureValve(t *testing.T) (release func()) {
 // of are admitted as soon as nothing else holds them, without a restart.
 func TestSupersedingAWaitingRunReleasesItsReservationWithoutDrain(t *testing.T) {
 	fixture := newGroupFixture(t, 0)
-	lift := fixture.pressureValve(t)
+	lift := fixture.diskValve(t)
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	other := fixture.branch(t, fixture.exampleService, "small", "d")
 	fixture.start(t)

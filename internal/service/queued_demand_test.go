@@ -72,8 +72,6 @@ func TestQueueMessageHasRequestsAndOneBlocker(t *testing.T) {
 		position    int64
 		want        string
 	}{
-		{name: "CPU pressure", observation: model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "cpu"}, Runs: 6}, want: "host CPU busy"},
-		{name: "IO pressure", observation: model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "io"}}, want: "host IO busy"},
 		{name: "behind", observation: model.AdmissionObservation{BlockedBy: &model.AdmissionBlocker{Repo: "org/repo", Ref: "main"}}, want: "behind org/repo/main"},
 		{name: "head", observation: model.AdmissionObservation{HeadOfQueue: true}, want: "next in line"},
 		{name: "position", observation: model.AdmissionObservation{Position: 3}, want: "position 3"},
@@ -133,7 +131,7 @@ func TestWorkflowOnlyReservationReportsBoundPodRequests(t *testing.T) {
 type queueDemandAdmission struct{}
 
 func (queueDemandAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30, Pods: 2}, Runs: 6, Pressure: &model.PressureDeferral{Resource: "cpu"}, BlockedBy: &model.AdmissionBlocker{RepoID: 999, Repo: "secret", Ref: "private"}}
+	return &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30, Pods: 2}, Runs: 6, BlockedBy: &model.AdmissionBlocker{RepoID: 999, Repo: "secret", Ref: "private"}}
 }
 
 func TestScopedWaitingRequestsUseBoundReceiptWithoutGlobalCounts(t *testing.T) {

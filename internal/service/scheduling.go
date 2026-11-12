@@ -127,12 +127,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
-		if observer, ok := service.admission.(interface{ QueuedAdmissionMessage() queuedAdmissionMessage }); ok {
-			if message := observer.QueuedAdmissionMessage(); message.Text != "" && (service.scope == nil || message.Pressure) {
-				result.Message = message.Text
-				return result, message.Text
-			}
-		}
 		result.Message = "Awaiting scheduler claim; queue position follows priority then FIFO, not an execution estimate."
 		if observer, ok := service.admission.(admissionBlockerObserver); ok {
 			if blocker = service.visibleBlocker(observer.AdmissionBlocker()); blocker != nil {
@@ -156,19 +150,12 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			// invisible work must not show (#073).
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Runs, admission.DiskFloor = 0, 0, 0, nil
-			admission.Pressure = admission.Pressure.Public()
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
 			} else {
 				admission.BlockedBy = nil
 			}
 			result.Admission = &admission
-		}
-		if result.Admission != nil && service.redactPressure {
-			copy := *result.Admission
-			copy.Pressure = copy.Pressure.Public()
-			copy.BlockedBy = service.visibleBlocker(copy.BlockedBy)
-			result.Admission = &copy
 		}
 
 		if result.Admission != nil {
@@ -179,11 +166,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result, reason
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
-				if result.Admission.Pressure != nil {
-					// This repository's grant is the blocker, independent of
-					// shared weight or other repositories' visibility.
-					return result, reason
-				}
 				if service.scope != nil {
 					// A scoped wait says only that the run is in line,
 					// unless the blocking run is itself in scope.
@@ -234,11 +216,6 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+
 			"Runs wait until free bytes exceed the configured floor.",
 			admission.DiskFloor.FreeBytes, admission.DiskFloor.FloorBytes)
-	case admission.Pressure != nil:
-		if admission.Pressure.Redacted || admission.Pressure.Avg10Gate {
-			return admission.Pressure.Reason()
-		}
-		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
 		return fmt.Sprintf("At the head of the run queue (%s); every later run waits behind it.",
 			admission.BlockedBy.Reason())
@@ -262,7 +239,7 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	if blocker == nil {
 		return nil
 	}
-	if service.scope == nil && !service.redactPressure {
+	if service.scope == nil {
 		return blocker
 	}
 	if service.scope != nil && !service.scope.seesRepo(blocker.RepoID) {
@@ -272,7 +249,6 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	if service.scope != nil {
 		scoped.Used = 0
 	}
-	scoped.Pressure = scoped.Pressure.Public()
 	return &scoped
 }
 

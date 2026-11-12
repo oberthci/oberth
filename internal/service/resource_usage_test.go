@@ -80,10 +80,9 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	helper.MemoryPeakBytes = &large
 	reader.values = append(reader.values, helper)
 	f.service.resources = reader
-	pressure := pressureTestGate()
-	pressure.sample.IO.FullAvg60 = 72
-	pressure.prepare(1, model.PriorityStandard, "", "M")
-	observer := &Scheduler{admission: pressure.gate}
+	gate := newAdmissionGate()
+	gate.reserve(1)
+	observer := &Scheduler{admission: gate}
 	f.service.admission = observer
 	before, _ := json.Marshal(observer.AdmissionState())
 	beforeSteps, err := f.store.StepResults(t.Context(), run.ID)

@@ -105,7 +105,6 @@ type serveOptions struct {
 	retentionKeepNewest     int
 	autoRetryBudget         int
 	admissionDiskFloorBytes int64
-	admissionPressure       service.AdmissionPressureConfig
 	admissionStallTimeout   time.Duration
 	stepStartupAllowance    argojob.StepStartupAllowance
 	serializeReleases       bool
@@ -243,11 +242,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 
 	flags.IntVar(&options.autoRetryBudget, "auto-retry-infrastructure-budget", model.DefaultInfrastructureAutoRetryBudget, fmt.Sprintf("automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most %d)", model.MaxInfrastructureAutoRetryBudget))
 	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup or Insufficient-CPU Pod wait bound; native Argo synchronization waits are exempt")
-	defaults := service.DefaultAdmissionPressureConfig()
-	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
-	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard host CPU some PSI avg10 percentage for new workflow grants")
-	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-defer-seconds", defaults.MaxWaitSeconds, "maximum PSI deferral before one otherwise fitting workflow may start (1-3600 seconds)")
-	flags.Float64Var(&options.admissionPressure.HardIO, "admission-pressure-hard-io", defaults.HardIO, "hard host IO some PSI avg10 percentage for new workflow grants")
 
 	flags.Int64Var(&options.stepStartupAllowance.FactorPercent, "admission-step-startup-allowance-percent", argojob.DefaultStepStartupAllowance.FactorPercent, "Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499)")
 	flags.Int64Var(&options.stepStartupAllowance.MinSeconds, "admission-step-startup-allowance-min-seconds", argojob.DefaultStepStartupAllowance.MinSeconds, "smallest step start-up allowance in seconds (0-3600, at most the maximum)")
@@ -379,13 +373,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := validateServeOptions(options); err != nil {
 		return serveOptions{}, err
 	}
-	options.admissionPressure.HardOnly = true
-	if !options.admissionPressure.Enabled {
-		options.admissionPressure.IOFullAvg60Max, options.admissionPressure.CPUSomeAvg60Max = 0, 0
-	}
-	if err := options.admissionPressure.Validate(); err != nil {
-		return serveOptions{}, fmt.Errorf("serve: --admission-pressure: %w", err)
-	}
 	if options.admissionStallTimeout <= 0 {
 		return serveOptions{}, errors.New("serve: --admission-stall-timeout must be positive")
 	}
@@ -435,9 +422,6 @@ func validateAgentEventOptions(options serveOptions) error {
 }
 
 func validateServeOptions(options serveOptions) error {
-	if options.admissionPressure.MaxWaitSeconds < 1 || options.admissionPressure.MaxWaitSeconds > 3600 {
-		return errors.New("admission pressure defer seconds must be 1-3600")
-	}
 
 	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
 		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
@@ -895,7 +879,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MaxRunLogBytes:          options.runLogLimitBytes,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
-		AdmissionPressure:       options.admissionPressure,
 		StalledRunTimeout:       options.admissionStallTimeout,
 		RestoredRunsFile:        filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})
@@ -1192,7 +1175,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			served.writeMetrics(w)
 			database.WriteTokenUseMetrics(w)
 			writeHealthMetrics(w, health)
-			scheduler.WritePressureMetrics(w)
 			argoJobs.WriteResourceMetrics(w)
 		}),
 		api.WithMaximumToolWait(service.DefaultMaximumWait), api.WithAgentEventStreams(options.agentEventStreams, options.agentEventBacklog), api.WithMCPHeartbeat(options.mcpHeartbeat),
