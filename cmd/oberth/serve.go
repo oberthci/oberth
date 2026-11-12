@@ -25,8 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/argoworkflow"
-
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -77,14 +75,6 @@ func (values *stringList) Set(value string) error {
 }
 
 type serveOptions struct {
-	admissionCPUEnabled         bool
-	admissionCPUHeadroomPercent int64
-	stepCPURequestPercent       int64
-	admissionCPUMilli           int64
-	admissionCPUPool            string
-	cpuCapacity                 argoworkflow.CPUCapacitySource
-	stepCPURequestMaxMilli      int64
-
 	issueStaleAfter         time.Duration
 	issueActiveStaleAfter   time.Duration
 	uplinkTokenPolicy       model.UplinkTokenPolicy
@@ -253,9 +243,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 
 	flags.IntVar(&options.autoRetryBudget, "auto-retry-infrastructure-budget", model.DefaultInfrastructureAutoRetryBudget, fmt.Sprintf("automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most %d)", model.MaxInfrastructureAutoRetryBudget))
 	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup or Insufficient-CPU Pod wait bound; native Argo synchronization waits are exempt")
-	flags.BoolVar(&options.admissionCPUEnabled, "admission-cpu-enabled", true, "enable CPU admission and measured request sizing")
-	flags.Int64Var(&options.admissionCPUHeadroomPercent, "admission-cpu-headroom-percent", 20, "allocatable CPU reserved for platform and host work (1-90 percent)")
-	flags.Int64Var(&options.stepCPURequestPercent, "step-cpu-request-percent", 25, "maximum step container CPU request as percent of node allocatable CPU (1-100); limits remain unchanged")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
 	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard host CPU some PSI avg10 percentage for new workflow grants")
@@ -448,9 +435,6 @@ func validateAgentEventOptions(options serveOptions) error {
 }
 
 func validateServeOptions(options serveOptions) error {
-	if options.admissionCPUHeadroomPercent < 1 || options.admissionCPUHeadroomPercent > 90 || options.stepCPURequestPercent < 1 || options.stepCPURequestPercent > 100 {
-		return errors.New("admission CPU headroom must be 1-90 percent and step CPU request percent must be 1-100")
-	}
 	if options.admissionPressure.MaxWaitSeconds < 1 || options.admissionPressure.MaxWaitSeconds > 3600 {
 		return errors.New("admission pressure defer seconds must be 1-3600")
 	}
@@ -912,8 +896,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 		AdmissionPressure:       options.admissionPressure,
-		AdmissionCPUMilli:       options.admissionCPUMilli,
-		AdmissionCPUPool:        options.admissionCPUPool,
 		StalledRunTimeout:       options.admissionStallTimeout,
 		RestoredRunsFile:        filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})

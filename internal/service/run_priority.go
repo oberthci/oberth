@@ -214,48 +214,6 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 	return nil
 }
 
-// priorityDispatchAvailable admits at most one extra waiting claim per higher
-// class, so a queue of ordinary claims cannot hide a release behind the
-// dispatch ceiling. Granted work still owns its full budget/run permits.
-func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, _ int) (bool, error) {
-	reader, ok := scheduler.store.(interface {
-		NextQueuedRun(context.Context) (model.Run, error)
-	})
-	if !ok {
-		return false, nil
-	}
-	gate := scheduler.admission
-	gate.mu.Lock()
-	hasWaiters := len(gate.waiters) > 0
-	gate.mu.Unlock()
-	if !hasWaiters {
-		return false, nil
-	}
-	next, err := retryDatabase(ctx, "NextQueuedRun", reader.NextQueuedRun)
-	if queueEmpty(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	p, _ := next.EffectivePriority(gate.clock())
-	candidate := &admissionReservation{gate: gate, sequence: next.QueueSequence, order: next.AdmissionSequence, priority: next.Priority, queuedAt: next.QueuedAt}
-	lower := false
-	for _, r := range gate.waiters {
-		if gate.adminHeldLocked(r) {
-			continue
-		}
-		rp := r.effectivePriority(gate.clock())
-		if rp.Rank() > p.Rank() || (rp.Rank() == p.Rank() && !admissionBefore(candidate, r)) {
-			return false, nil
-		}
-		lower = true
-	}
-	return lower, nil
-}
-
 func (r *admissionReservation) effectivePriority(now time.Time) model.RunPriority {
 	run := r.priorityRun()
 	p, _ := run.EffectivePriority(now)

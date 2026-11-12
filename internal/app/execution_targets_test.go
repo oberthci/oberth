@@ -694,31 +694,3 @@ var (
 	_ service.JobCreateSettler    = (*ArgoJobs)(nil)
 	_ service.PipelineDemandSizer = (*ArgoJobs)(nil)
 )
-
-func TestExecutionTargetCPUUsesOwnRuntimeCapacityAfterRestore(t *testing.T) {
-	f := newTargetRouteFixture(t)
-	f.local.config.CPUAdmission = argoworkflow.CPUAdmission{Pool: "server", Milli: 9600}
-	f.local.config.StepCPURequestMaxMilli = 3000
-	f.definition.Config.CPUAdmission = argoworkflow.CPUAdmission{Pool: "remote", Milli: 3200}
-	f.definition.Config.StepCPURequestMaxMilli = 1000
-	jobs, err := WithExecutionTargets(f.local, f.db, []ExecutionTarget{f.definition})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool, err := jobs.AdmissionCPU(t.Context(), f.request)
-	if err != nil || pool.Pool != "remote" || pool.Milli != 3200 {
-		t.Fatalf("remote sized from server: %+v %v", pool, err)
-	}
-	child, err := jobs.routes.forRequest(t.Context(), f.request)
-	if err != nil || child.config.StepCPURequestMaxMilli != 1000 {
-		t.Fatalf("remote runtime sizing lost: %v", err)
-	}
-	restarted, err := WithExecutionTargets(f.local, f.db, []ExecutionTarget{f.definition})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool, err = restarted.AdoptedAdmissionCPU(t.Context(), f.request.Run)
-	if err != nil || pool.Pool != "remote" || pool.Milli != 3200 {
-		t.Fatalf("restored remote sized from server: %+v %v", pool, err)
-	}
-}

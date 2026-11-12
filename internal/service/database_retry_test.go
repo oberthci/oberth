@@ -359,7 +359,7 @@ func TestDatabaseDeadlineBusyPriorityReadsConverge(t *testing.T) {
 	testDatabasePriorityReadsConverge(t, deadlineBusyError(5))
 }
 func testDatabasePriorityReadsConverge(t *testing.T, failure error) {
-	for _, operation := range []string{"RunsByIDs", "NextQueuedRun"} {
+	for _, operation := range []string{"RunsByIDs"} {
 		t.Run(operation, func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			scheduler, fault := faultScheduler(t, fixture, &recoveryJobs{}, operation, failure)
@@ -373,11 +373,7 @@ func testDatabasePriorityReadsConverge(t *testing.T, failure error) {
 			defer reservation.cancel()
 			ctx := deadlineScope(t.Context(), scheduler)
 			var err error
-			if operation == "RunsByIDs" {
-				err = scheduler.refreshPriorities(ctx)
-			} else {
-				_, err = scheduler.priorityDispatchAvailable(ctx, 0)
-			}
+			err = scheduler.refreshPriorities(ctx)
 			if err != nil || fault.count(operation) != 3 || scheduler.DatabaseRetries() != 2 {
 				t.Fatal("priority guard failed", err, fault.count(operation), scheduler.DatabaseRetries())
 			}

@@ -26,14 +26,8 @@ func (jobs *ArgoJobs) cpuSizedReceipt(ctx context.Context, run model.Run, source
 }
 func (jobs *ArgoJobs) cpuPolicy(ctx context.Context, run model.Run, config argojob.Config, workflow *wfv1.Workflow) argoworkflow.CPURequestPolicy {
 	cap := config.StepCPURequestMaxMilli
-	if config.CPUCapacity != nil {
-		cap = config.CurrentCPU(ctx).StepMaxMilli
-	}
-	if config.CPUAdmissionDisabled {
-		cap = 0
-	}
 	cpu := argoworkflow.CPURequestPolicy{MaxMilli: cap}
-	if history, ok := jobs.auditor.(cpuRequestHistory); ok && !config.CPUAdmissionDisabled {
+	if history, ok := jobs.auditor.(cpuRequestHistory); ok {
 		class := "branch"
 		if run.Release {
 			class = "release"
@@ -57,21 +51,6 @@ func (jobs *ArgoJobs) cpuPolicy(ctx context.Context, run model.Run, config argoj
 	for template := range cpu.Templates {
 		if !allowed[template] {
 			delete(cpu.Templates, template)
-		}
-	}
-	// Cap otherwise-unlimited static fan-out at the number of largest Pods
-	// the pool can fit. Freeze this with the request sizing decision.
-	pool := config.CurrentCPU(ctx)
-	if workflow != nil && workflow.Spec.Parallelism == nil && pool.Milli > 0 {
-		total, _ := argojob.SchedulingDemand(workflow, cpu)
-		if total != nil && total.CPUMilli > pool.Milli {
-			single := workflow.DeepCopy()
-			one := int64(1)
-			single.Spec.Parallelism = &one
-			largest, _ := argojob.SchedulingDemand(single, cpu)
-			if largest != nil && largest.CPUMilli > 0 {
-				cpu.Parallelism = min(int64(256), max(int64(1), pool.Milli/largest.CPUMilli))
-			}
 		}
 	}
 	body, _ := json.Marshal(cpu)

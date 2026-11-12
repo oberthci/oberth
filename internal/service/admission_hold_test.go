@@ -129,9 +129,6 @@ func TestAdmissionHoldDispatchAndGroupBypass(t *testing.T) {
 		gate.mu.Unlock()
 		held = append(held, r)
 	}
-	if !f.scheduler.dispatchSlotAvailable(len(held)) {
-		t.Fatal("held claims consumed dispatch ceiling")
-	}
 	tag := gate.reserveRun(model.Run{ID: "tag", QueueSequence: 7, RefKind: model.RefTag})
 	gate.mu.Lock()
 	tag.prepared = true

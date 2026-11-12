@@ -1,4 +1,4 @@
-# Node CPU capacity and boot IDs are read for admission and owned Pod identity.
+# Node boot IDs are read for owned Pod identity.
 # No node proxy, write or kubelet API permission accompanies these observations.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -9,7 +9,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["get", "list"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

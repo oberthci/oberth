@@ -54,18 +54,6 @@ spec:
 			if err != nil || demand == nil || demand.CPUMilli != cpu || demand.MemoryBytes != memory || blobs.sha != request.Run.TestedSHA {
 				t.Fatalf("demand=%+v err=%v SHA=%s", demand, err, blobs.sha)
 			}
-			jobs.config.StepCPURequestMaxMilli = 3000
-			jobs.config.CPUAdmission.Milli = 4000
-			capped, err := jobs.RunPodDemand(t.Context(), request)
-			want := int64(3050)
-			if !parallel {
-				want = 3050
-			}
-			if err != nil || capped == nil || capped.CPUMilli != want {
-				t.Fatalf("uncapped queue demand: %+v %v", capped, err)
-			}
-			jobs.config.StepCPURequestMaxMilli = 0
-			jobs.config.CPUAdmission.Milli = 0
 			// The preview uses the same request defaults as submission.
 			blobs.source = []byte(strings.ReplaceAll(document, "requests: {cpu: 5, memory: 8Gi}", "requests: {cpu: 5}"))
 			demand, err = jobs.RunPodDemand(t.Context(), request)

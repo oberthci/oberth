@@ -276,7 +276,7 @@ func (gate *admissionGate) deferPressureLocked(r *admissionReservation, now time
 			p.deferrals++
 		}
 		window := time.Duration(p.config.MaxWaitSeconds) * time.Second
-		pool := gate.pool(r).Pool
+		pool := ""
 		last := p.lastHardGrants[pool]
 		if now.Sub(r.pressureSince) >= window && (last.IsZero() || now.Sub(last) >= window) {
 			if p.lastHardGrants == nil {

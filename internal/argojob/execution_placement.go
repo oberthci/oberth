@@ -150,21 +150,6 @@ func (p *ExecutionPlacement) Identity() (repository string, repositoryID int64, 
 	return d.Repository, d.RepositoryID, d.Ref, d.SHA, d.Normal.RunID, d.Normal.Workflow, p.digest
 }
 
-// CPUNodeName is the operator-pinned execution node, when placement is fixed.
-func (p *ExecutionPlacement) CPUNodeName() string {
-	if p == nil {
-		return ""
-	}
-	return p.document.NodeName
-}
-
-func (p *ExecutionPlacement) CPUTolerations() []corev1.Toleration {
-	if p == nil {
-		return nil
-	}
-	return p.nativeTolerations()
-}
-
 func (p *ExecutionPlacement) BranchOnly() bool {
 	return p != nil && p.document.Schema == branchPlacementSchema
 }

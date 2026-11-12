@@ -179,24 +179,11 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	if _, err := f.store.BumpRunPriority(ctx, "admin", tag.ID, model.PriorityHigh, "urgent tag"); err != nil {
 		t.Fatal(err)
 	}
-	if scheduler.dispatchSlotAvailable(2) {
-		t.Fatal("ordinary dispatch claimed past a waiting run")
-	}
-	// Without a run ceiling the priority lookahead allows one extra claim
-	// per class above low: three claims in flight.
-	if available, err := scheduler.priorityDispatchAvailable(ctx, 2); err != nil || !available {
-		t.Fatalf("release hidden behind dispatch ceiling: %v %v", available, err)
-	}
 	r, err := f.store.ClaimNextRun(ctx)
 	if err != nil || r.ID != tag.ID {
 		t.Fatal(err)
 	}
 	tagReservation := g.reserveRun(r)
-	// The next release cannot pile up another same-class claim.
-	enqueue("v2", model.RefTag)
-	if available, err := scheduler.priorityDispatchAvailable(ctx, 3); err != nil || available {
-		t.Fatalf("unbounded priority claims: %v %v", available, err)
-	}
 	g.mu.Lock()
 	tagReservation.prepared = true
 	g.mu.Unlock()

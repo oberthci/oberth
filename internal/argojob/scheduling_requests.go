@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,18 +114,6 @@ func (request Request) cpuRequestPolicy(config Config) argoworkflow.CPURequestPo
 	if p := request.DemandReceipt.CPURequestPolicy(); p != nil {
 		policy = *p
 	}
-	if config.CPUAdmissionDisabled {
-		return argoworkflow.CPURequestPolicy{}
-	}
-	// A pool may have been unavailable during preparation. Resolve its node
-	// cap before first submission; a later smaller cap can only lower demand.
-	// Recovery above retains the exact policy already submitted.
-	if config.CPUCapacity != nil {
-		current := config.CurrentCPU(context.Background()).StepMaxMilli
-		if current > 0 && (policy.MaxMilli == 0 || current < policy.MaxMilli) {
-			policy.MaxMilli = current
-		}
-	}
 	return policy
 }
 
@@ -201,15 +188,4 @@ func stampSchedulingDemand(workflow *wfv1.Workflow, config Config, request Reque
 	}
 	stampPodDemand(workflow, demand)
 	return stampResourceFallback(workflow, request.ResourceFallback)
-}
-
-// CurrentCPU reads a cached observation; operator clients refresh independently.
-func (config Config) CurrentCPU(ctx context.Context) argoworkflow.CPUAdmission {
-	if config.CPUAdmissionDisabled {
-		return argoworkflow.CPUAdmission{Pool: config.CPUAdmission.Pool}.Canonical()
-	}
-	if config.CPUCapacity != nil {
-		return config.CPUCapacity(ctx).Canonical()
-	}
-	return config.CPUAdmission.Canonical()
 }

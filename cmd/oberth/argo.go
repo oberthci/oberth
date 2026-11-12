@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/argoworkflow"
-
 	wfclientset "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/kubernetes"
@@ -85,10 +83,6 @@ func buildArgoEngine(
 	}
 	stepStartupAllowance := options.stepStartupAllowance
 	config := argojob.Config{
-		StepCPURequestMaxMilli:     options.stepCPURequestMaxMilli,
-		CPUCapacity:                options.cpuCapacity,
-		CPUAdmissionDisabled:       !options.admissionCPUEnabled,
-		CPUAdmission:               argoworkflow.CPUAdmission{Pool: options.admissionCPUPool, Milli: options.admissionCPUMilli},
 		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
 		MaxRunLogBytes:             options.runLogLimitBytes,
@@ -282,10 +276,6 @@ func validateArgoServeOptions(options serveOptions) error {
 		return err
 	}
 	return argojob.Config{
-		StepCPURequestMaxMilli:     options.stepCPURequestMaxMilli,
-		CPUCapacity:                options.cpuCapacity,
-		CPUAdmissionDisabled:       !options.admissionCPUEnabled,
-		CPUAdmission:               argoworkflow.CPUAdmission{Pool: options.admissionCPUPool, Milli: options.admissionCPUMilli},
 		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
 		MaxRunLogBytes:             options.runLogLimitBytes,

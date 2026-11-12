@@ -162,9 +162,6 @@ func TestWorkflowAdmissionDiskFloorHoldAndGrant(t *testing.T) {
 				t.Fatalf("grant count changed while held: %d", runs)
 			}
 			if !tc.allow {
-				if gate.spareSlotForClaim() {
-					t.Fatal("a second claim passed the run waiting below the floor")
-				}
 				observation := (&Scheduler{admission: gate}).AdmissionSnapshot(1)
 				if observation == nil || observation.State != "waiting" || observation.DiskFloor == nil || !observation.DiskFloor.BelowFloor || !strings.HasPrefix(waitingReason(observation), "waiting for disk space (") {
 					t.Fatalf("existing disk-space reason lost: %+v", observation)

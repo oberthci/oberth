@@ -55,9 +55,6 @@ type SchedulerConfig struct {
 	MutationGate    func(context.Context) error
 	// StalledRunTimeout bounds granted runs before submission. Zero is ten minutes.
 	StalledRunTimeout time.Duration
-	// AdmissionCPUMilli is allocatable CPU minus administrator headroom.
-	AdmissionCPUMilli int64
-	AdmissionCPUPool  string
 	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root.
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
@@ -197,9 +194,6 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
-	// Reserve complete CPU envelopes before handing Workflows to Argo.
-	scheduler.admission.cpuMilli = config.AdmissionCPUMilli
-	scheduler.admission.cpuPool = config.AdmissionCPUPool
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	if config.AdmissionDiskFloorBytes > 0 {
 		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
@@ -493,7 +487,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		scheduler.initializeAdoptedCPU(workerCtx, run, reservation)
 		adopted = append(adopted, adoptedRun{run: run, reservation: reservation})
 		return nil
 	}); err != nil {
@@ -517,8 +510,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	dispatchCtx := withDispatchProgress(workerCtx, &scheduler.dispatchProgress)
 	workers.Add(1)
 	go func() { defer workers.Done(); scheduler.sweepWorkspaces(workerCtx) }()
-	workers.Add(1)
-	go func() { defer workers.Done(); scheduler.runAdmissionRefresh(workerCtx) }()
 	scheduler.startupRecovered.Store(true)
 	defer scheduler.startupRecovered.Store(false)
 	if scheduler.onStartupRecovered != nil {
@@ -602,7 +593,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				}
 				return fmt.Errorf("claim priority run: %w", err)
 			}
-			reservation := scheduler.reserveAdmission(dispatchCtx, run)
+			reservation := scheduler.admission.reserveRun(run)
 			active++
 			workers.Add(1)
 			go func(run model.Run, reservation *admissionReservation) {
@@ -615,7 +606,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			}(run, reservation)
 		}
 		// Claim higher work before letting a refreshed/aged waiter grant.
-		scheduler.refreshAdmission(dispatchCtx)
+		scheduler.admission.mu.Lock()
+		scheduler.admission.grantLocked()
+		scheduler.admission.mu.Unlock()
 		if scheduler.onDispatchIdle != nil {
 			scheduler.onDispatchIdle()
 		}
@@ -670,12 +663,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 }
 
-// dispatchSlotAvailable bounds checkout preparation while allowing priority
-// lookahead past capacity-held work. Administrator-held claims do not count.
-func (scheduler *Scheduler) dispatchSlotAvailable(int) bool {
-	return scheduler.admission.spareSlotForClaim()
-}
-
 // ProcessNext is a deterministic single-run entrypoint for recovery tools and
 // focused tests. The long-running server normally uses Run.
 func (scheduler *Scheduler) ProcessNext(ctx context.Context) error {
@@ -697,7 +684,7 @@ func (scheduler *Scheduler) executeAndCleanup(ctx context.Context, run model.Run
 }
 
 func (scheduler *Scheduler) executeAndCleanupWithGate(ctx context.Context, run model.Run, require mutationRequirement) error {
-	reservation := scheduler.reserveAdmission(ctx, run)
+	reservation := scheduler.admission.reserveRun(run)
 	return scheduler.executeAndCleanupReservedWithGate(ctx, run, require, reservation)
 }
 
@@ -868,16 +855,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("size workflow requests: %w", err))
 		}
 	}
-	pool, err := scheduler.admissionCPU(ctx, jobRequest)
-	if err != nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-	}
-
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Requests: requests,
 		RefKind: run.RefKind, SHA: run.SHA, PriorityLookupFailed: priorityErr != nil,
-		CPU: pool,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already

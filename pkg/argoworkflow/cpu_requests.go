@@ -1,7 +1,6 @@
 package argoworkflow
 
 import (
-	"context"
 	"maps"
 )
 
@@ -39,25 +38,4 @@ func (r *DemandReceipt) CPURequestPolicy() *CPURequestPolicy {
 	}
 	p := r.cpuPolicy.Clone()
 	return &p
-}
-
-// CPUAdmission is an operator snapshot of one execution cluster capacity.
-type CPUAdmission struct {
-	Pool         string
-	Milli        int64
-	NodeMilli    int64
-	StepMaxMilli int64
-	HoldReason   string
-}
-
-const LocalCPUPool = "local"
-
-// CPUCapacitySource returns the latest operator-owned capacity observation.
-type CPUCapacitySource func(context.Context) CPUAdmission
-
-func (p CPUAdmission) Canonical() CPUAdmission {
-	if p.Pool == "" {
-		p.Pool = LocalCPUPool
-	}
-	return p
 }

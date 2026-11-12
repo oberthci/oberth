@@ -32,7 +32,6 @@ func TestRefDeletionStopsRunningAndAssistedWorkflowsAndReleasesCPU(t *testing.T)
 	for _, assist := range []bool{false, true} {
 		t.Run(map[bool]string{false: "running", true: "assisted"}[assist], func(t *testing.T) {
 			f := newGroupFixture(t, 0)
-			f.scheduler.admission.cpuMilli = 2000
 			f.engine.declareCPU("feature/deleted", 2000)
 			f.engine.declareCPU("feature/other", 2000)
 			busy, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "busy", Repository: f.exampleService, Branch: "feature/deleted", SHA: strings.Repeat("a", 40), Actor: "agent@host", Assist: assist})

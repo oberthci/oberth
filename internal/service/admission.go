@@ -11,29 +11,19 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// admissionGate reserves whole-workflow CPU requests until execution is gone.
-// Priority and repository fair share choose the next candidate; a whole request
-// must fit before any Pod is submitted. Native Argo locks still govern shared
-// step resources, and the disk floor, PSI valve and administrator hold apply.
+// admissionGate tracks submission lifecycle and the remaining temporary holds.
 type admissionGate struct {
-	adminHold      model.AdmissionHold
-	holdUpdating   bool
-	lastCPURefresh int64
-	mu             sync.Mutex
+	adminHold    model.AdmissionHold
+	holdUpdating bool
+	mu           sync.Mutex
 	// now is the gate's clock; nil is time.Now.
 	now             func() time.Time
 	priorityChanges map[string]bool
 	// runs counts reservations holding a grant: runs whose Workflow Oberth
 	// submitted or is about to submit.
-	cpuMilli      int64
-	cpuPool       string
-	pools         map[string]argoworkflow.CPUAdmission
-	drains        map[string]cpuDrain
-	lastRepo      map[int64]int64
-	grantSequence int64
-	runs          int
-	waiters       []*admissionReservation
-	reservations  map[int64]*admissionReservation
+	runs         int
+	waiters      []*admissionReservation
+	reservations map[int64]*admissionReservation
 	// onPark, when set, is called under the lock (it must not block) after a
 	// reservation is prepared while some prepared reservation is parked by
 	// the administrator hold, so the dispatch loop can claim past it.
@@ -49,20 +39,10 @@ type admissionGate struct {
 }
 
 type admissionReservation struct {
-	sizingPending  bool
-	liveReadFailed bool
-	trackLive      bool
-	cpuUncertain   bool
 	// requests is the effective peak Pod request reservation.
-	requests        *argoworkflow.PodRequests
-	cpu             argoworkflow.CPUAdmission
-	poolKnown       bool
-	unknownAdopted  bool
-	heldSince       time.Time
-	assistRequested bool
-	liveRequests    *argoworkflow.PodRequests
-	gate            *admissionGate
-	sequence        int64
+	requests *argoworkflow.PodRequests
+	gate     *admissionGate
+	sequence int64
 	// order retains restart FIFO position; sequence stays the unique run key.
 	order int64
 
@@ -118,7 +98,6 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its identity.
 type admissionRequest struct {
-	CPU                  argoworkflow.CPUAdmission
 	Requests             *argoworkflow.PodRequests
 	RunID                string
 	RepoID               int64
@@ -148,7 +127,6 @@ func (gate *admissionGate) reservePriorityRun(sequence, order int64, run model.R
 	reservation := &admissionReservation{gate: gate, sequence: sequence, order: order, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
 	reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
 	reservation.refKind, reservation.sha = run.RefKind, run.SHA
-	reservation.assistRequested = run.AssistRequested
 	reservation.pressureRelease, reservation.pressurePromotion = run.Release, run.Trigger == "promotion"
 	reservation.priority, reservation.priorityReason, reservation.queuedAt = run.Priority, run.PriorityReason, run.QueuedAt
 	reservation.priorityOverride, reservation.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
@@ -202,8 +180,6 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		}
 		return nil, context.Canceled
 	}
-	reservation.cpu, reservation.poolKnown = request.CPU.Canonical(), true
-	reservation.cpuUncertain = false
 	reservation.requests = request.Requests.Clone()
 	if request.RunID != "" {
 		reservation.runID = request.RunID
@@ -221,7 +197,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	granted := reservation.granted
 	reservation.delayed = !granted
 	// Preparing may leave this run parked by the administrator hold.
-	if gate.onPark != nil && (gate.parkedLocked() > 0 || gate.cpuEnabledLocked()) {
+	if gate.onPark != nil && gate.parkedLocked() > 0 {
 		gate.onPark()
 	}
 	gate.mu.Unlock()
@@ -325,9 +301,7 @@ func (reservation *admissionReservation) retain() {
 	}
 }
 
-// grantLocked chooses by priority and repository fair share, then reserves
-// whole-run CPU. A bounded backfill window lets attainable large reservations
-// accumulate capacity while held and retained work keeps backfill open.
+// grantLocked applies the remaining explicit holds without bounding preparation.
 func (gate *admissionGate) grantLocked() {
 	if gate.holdUpdating {
 		return
@@ -339,21 +313,13 @@ func (gate *admissionGate) grantLocked() {
 	gate.pressure.refresh(now)
 	gate.sortWaitersLocked()
 	gate.preparePressureWaitsLocked(now)
-	gate.refreshDrainsLocked(now)
-	blockedPools := map[string]bool{}
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
-		if blockedPools[gate.pool(reservation).Pool] || gate.drainingBehindLocked(reservation, now) {
-			index++
-			continue
-		}
 		if gate.adminHeldLocked(reservation) {
 			index++
 			continue
 		}
 		if !reservation.prepared || gate.priorityChanges[reservation.runID] {
-			// Preparation blocks only its own execution pool.
-			blockedPools[gate.pool(reservation).Pool] = true
 			index++
 			continue
 		}
@@ -361,28 +327,18 @@ func (gate *admissionGate) grantLocked() {
 			if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 				return
 			}
-			gate.blockedCPUHeadLocked(reservation, now)
 			index++
 			continue
 		}
 		// Pressure holds preserve priority within the execution pool. Other
 		// pools keep their own pressure timeout and may still grant.
 		if gate.deferPressureLocked(reservation, now) {
-			blockedPools[gate.pool(reservation).Pool] = true
 			index++
 			continue
 		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
-		if drain, ok := gate.drains[gate.pool(reservation).Pool]; ok && drain.head == reservation {
-			delete(gate.drains, gate.pool(reservation).Pool)
-		}
 		reservation.grantedAt = now.UTC()
-		if gate.lastRepo == nil {
-			gate.lastRepo = make(map[int64]int64)
-		}
-		gate.grantSequence++
-		gate.lastRepo[reservation.repoID] = gate.grantSequence
 		gate.runs++
 		gate.sortWaitersLocked()
 		index = 0
@@ -401,50 +357,6 @@ func (gate *admissionGate) grantLocked() {
 	}
 }
 
-// spareSlotForClaim reports whether any known pool has room for preparation.
-func (gate *admissionGate) spareSlotForClaim() bool {
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	pools := map[string]bool{gate.defaultPool().Pool: true}
-	for pool := range gate.pools {
-		pools[pool] = true
-	}
-	for _, r := range gate.waiters {
-		pools[gate.pool(r).Pool] = true
-	}
-	for pool := range pools {
-		if gate.claimSlotLocked(pool, nil) {
-			return true
-		}
-	}
-	return false
-}
-
-// Each pool permits one checkout and eight prepared waiters. Full lookahead
-// still admits strictly higher priority work, once per higher class.
-func (gate *admissionGate) claimSlotLocked(pool string, candidate *model.Run) bool {
-	count := 0
-	higher := candidate != nil
-	for _, r := range gate.waiters {
-		if gate.pool(r).Pool != pool || gate.adminHeldLocked(r) {
-			continue
-		}
-		if !r.prepared {
-			return false
-		}
-		count++
-		if candidate != nil {
-			priority, _ := candidate.EffectivePriority(gate.clock())
-			higher = higher && priority.Rank() > r.effectivePriority(gate.clock()).Rank()
-		}
-	}
-	limit := 1
-	if gate.cpuEnabledLocked() && (gate.diskFloor == nil || gate.diskFloor.freeAboveFloor()) {
-		limit = 8
-	}
-	return count < limit || (limit == 8 && higher)
-}
-
 // canGrantLocked checks non-pressure admission constraints.
 func (gate *admissionGate) canGrantLocked(reservation *admissionReservation) bool {
 	if gate.adminHeldLocked(reservation) {
@@ -454,84 +366,7 @@ func (gate *admissionGate) canGrantLocked(reservation *admissionReservation) boo
 	// configured floor, hold all new admissions until disk frees up. The
 	// check uses a cached statfs result (sub-microsecond syscall, 5 s TTL)
 	// so calling it under the lock is safe.
-	return gate.cpuFitsLocked(reservation) && (gate.diskFloor == nil || gate.diskFloor.freeAboveFloor())
-}
-
-func (gate *admissionGate) cpuEnabledLocked() bool {
-	if gate.cpuMilli > 0 {
-		return true
-	}
-	for _, p := range gate.pools {
-		if p.Milli > 0 || p.HoldReason != "" {
-			return true
-		}
-	}
-	for _, r := range gate.reservations {
-		if r.cpu.Milli > 0 || r.cpu.HoldReason != "" {
-			return true
-		}
-	}
-	return false
-}
-func (gate *admissionGate) defaultPool() argoworkflow.CPUAdmission {
-	return argoworkflow.CPUAdmission{Pool: gate.cpuPool, Milli: gate.cpuMilli}.Canonical()
-}
-func (gate *admissionGate) pool(r *admissionReservation) argoworkflow.CPUAdmission {
-	p := r.cpu
-	if !r.poolKnown {
-		p = gate.defaultPool()
-	}
-	p = p.Canonical()
-	if current, ok := gate.pools[p.Pool]; ok {
-		return current
-	}
-	return p
-}
-
-func (gate *admissionGate) samePool(a, b *admissionReservation) bool {
-	return gate.pool(a).Pool == gate.pool(b).Pool
-}
-
-func clampAdmissionRequests(requests *argoworkflow.PodRequests, budget int64) *argoworkflow.PodRequests {
-	requests = requests.Clone()
-	if budget <= 0 {
-		return requests
-	}
-	if requests == nil {
-		requests = &argoworkflow.PodRequests{}
-	}
-	if requests.CPUMilli <= 0 || requests.CPUMilli > budget {
-		requests.CPUMilli = budget
-	}
-	return requests
-}
-
-func (gate *admissionGate) credit(r *admissionReservation, pool argoworkflow.CPUAdmission) int64 {
-	if r.liveRequests != nil {
-		return r.liveRequests.CPUMilli
-	}
-	requests := clampAdmissionRequests(r.requests, pool.Milli)
-	if requests == nil {
-		return pool.Milli
-	}
-	return requests.CPUMilli
-}
-func (gate *admissionGate) cpuFitsLocked(reservation *admissionReservation) bool {
-	pool := gate.pool(reservation)
-	if pool.HoldReason != "" {
-		return false
-	}
-	if pool.Milli <= 0 {
-		return true
-	}
-	remaining := pool.Milli
-	for _, r := range gate.reservations {
-		if !r.granted || r.released || !r.cpuUncertain && !gate.samePool(reservation, r) {
-			continue
-		}
-		remaining -= gate.credit(r, pool)
-	}
-	return gate.credit(reservation, pool) <= remaining
+	return (gate.diskFloor == nil || gate.diskFloor.freeAboveFloor())
 }
 
 func (gate *admissionGate) releaseLocked(reservation *admissionReservation) {
@@ -589,8 +424,6 @@ func (gate *admissionGate) blockerLocked(reservation *admissionReservation) *mod
 	blocker := &model.AdmissionBlocker{
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Used:         gate.runs,
-		CPUCapacity:  !gate.cpuFitsLocked(reservation),
-		CPUReason:    gate.pool(reservation).HoldReason,
 		WaitingSince: reservation.preparedAt,
 		Pressure:     gate.pressureWaitLocked(reservation),
 	}
@@ -623,10 +456,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	requests := clampAdmissionRequests(reservation.requests, gate.pool(reservation).Milli)
-	if reservation.liveRequests != nil {
-		requests = reservation.liveRequests.Clone()
-	}
+	requests := reservation.requests.Clone()
 	result := &model.AdmissionObservation{Requests: requests, State: "preparing", Used: gate.runs, Runs: gate.runs}
 	if reservation.prepared {
 		result.State = "waiting"
@@ -681,24 +511,6 @@ func (gate *admissionGate) sortWaitersLocked() {
 	now := gate.clock()
 	sort.SliceStable(gate.waiters, func(i, j int) bool {
 		a, b := gate.waiters[i], gate.waiters[j]
-		if gate.cpuEnabledLocked() && a.effectivePriority(now) == b.effectivePriority(now) && a.repoID != b.repoID {
-			active := func(repo int64) int {
-				n := 0
-				for _, r := range gate.reservations {
-					if r.repoID == repo && r.granted && !r.released {
-						n++
-					}
-				}
-				return n
-			}
-			ac, bc := active(a.repoID), active(b.repoID)
-			if ac != bc {
-				return ac < bc
-			}
-			if gate.lastRepo[a.repoID] != gate.lastRepo[b.repoID] {
-				return gate.lastRepo[a.repoID] < gate.lastRepo[b.repoID]
-			}
-		}
 		return admissionBeforeAt(a, b, now)
 	})
 }
