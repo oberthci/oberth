@@ -19,7 +19,6 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type adoptingJobs struct {
@@ -34,11 +33,11 @@ type adoptingJobs struct {
 	retained       int64
 }
 
-func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
+func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (bool, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.adopted = append(jobs.adopted, run.ID)
-	return pipeline.L, jobs.found, jobs.adoptErr
+	return jobs.found, jobs.adoptErr
 }
 
 func (*adoptingJobs) WorkflowNamespace() string { return "oberth-argo" }
@@ -216,7 +215,7 @@ func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
 		fixture.setWorkflowName(t, run.ID, "oberth-missing")
 		jobs := &adoptingJobs{adoptErr: readErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 		scheduler := fixture.scheduler(t, jobs)
-		err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("absent Workflow adopted") })
+		err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("absent Workflow adopted") })
 		current, lookupErr := fixture.store.Run(context.Background(), run.ID)
 		if lookupErr != nil {
 			t.Fatal(lookupErr)
@@ -436,7 +435,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		// A legacy engine exposes no adoption capability. Release runs
 		// reset behind cleanup; promotion work uses its separate retry path.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
-		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("out-of-scope adoption") }); err != nil {
+		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("out-of-scope adoption") }); err != nil {
 			t.Fatal(err)
 		}
 		current, err := fixture.store.Run(context.Background(), run.ID)
@@ -593,7 +592,7 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run, size pipeline.Size) error {
+			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run) error {
 				_, err := scheduler.admission.adopt(run)
 				return err
 			})

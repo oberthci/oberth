@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
@@ -53,11 +52,6 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		if err != nil {
 			result.Problems = append(result.Problems, err.Error())
 		}
-	}
-	if request.ResourceCeiling != nil {
-		add(argoworkflow.ValidateResourceRequirementsWithCapability(wf, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability))
-	} else if request.ResourceMaximum != "" {
-		add(argoworkflow.ValidateResourceCeilingWithCapability(wf, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability))
 	}
 	top := map[*wfv1.Template]bool{}
 	for i := range wf.Spec.Templates {

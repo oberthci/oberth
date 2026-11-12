@@ -19,7 +19,6 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 var (
@@ -230,14 +229,6 @@ type SecretAccessStore interface {
 	PendingGrantDeclarations(ctx context.Context, repo string) ([]store.PendingGrantDeclaration, error)
 }
 
-// SizeGrantStore reads and changes a repository's audited maximum admission
-// size (#1021).
-type SizeGrantStore interface {
-	SizeGrant(context.Context, int64) (store.SizeGrant, error)
-	MaxRunSize(context.Context, int64) (pipeline.Size, error)
-	SetSizeGrant(context.Context, int64, string, pipeline.Size) (store.SizeGrant, error)
-}
-
 type WorkflowCapabilityStore interface {
 	WorkflowCapabilityGrant(context.Context, int64) (store.WorkflowCapabilityGrant, error)
 	SetWorkflowCapabilityGrant(context.Context, int64, string, *argoworkflow.Capability) (store.WorkflowCapabilityGrant, error)
@@ -369,12 +360,10 @@ type LogStore interface {
 }
 
 type WorkflowRequest struct {
-	DemandReceipt    *argoworkflow.DemandReceipt
-	ResourceFallback model.ResourceAdmissionFallback
-	PodDemand        *argoworkflow.PodDemand
-	WorkflowName     string `json:"WorkflowName"`
-	Run              model.Run
-	Repository       model.Repository
+	DemandReceipt *argoworkflow.DemandReceipt
+	WorkflowName  string `json:"WorkflowName"`
+	Run           model.Run
+	Repository    model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
 	// resolved by the scheduler for all credentialed runs. Used to
 	// construct canonical per-repo identity keys.
@@ -388,7 +377,6 @@ type WorkflowRequest struct {
 	// PipelineFile identifies the document under read-only release preflight.
 	PipelineFile string
 	SourceDir    string
-	Size         pipeline.Size
 	// Exclusive is the sorted exclusive-class set admission granted (#1499),
 	// read from the fragment-resolved graph. Build refuses a Workflow whose
 	// resolved classes differ.
@@ -448,7 +436,7 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 // On error it returns a nonzero result only if the exact Workflow was terminal.
 // WorkflowNamespace names where the engine's Workflows live, for operator messages.
 type JobAdopter interface {
-	Adopt(context.Context, model.Run) (pipeline.Size, bool, error)
+	Adopt(context.Context, model.Run) (bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
 	WorkflowNamespace() string
 }
@@ -462,12 +450,6 @@ type JobCreateSettler interface {
 
 type ReleaseJobController interface {
 	CreateRelease(context.Context, WorkflowRequest) error
-}
-
-// PipelineSizer statically reads the immutable checked-out pipeline without
-// evaluating repository code in the server process.
-type PipelineSizer interface {
-	PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error)
 }
 
 // PipelinePlanner enumerates the steps the immutable checked-out pipeline

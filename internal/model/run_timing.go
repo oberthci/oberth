@@ -40,15 +40,14 @@ type AdmissionTiming struct {
 // Tasks contain admitted expanded identities and dependency names, never
 // commands, arguments, conditions, environment or Kubernetes object dumps.
 type WorkflowTiming struct {
-	Resources        *ResourceCoverage `json:"resources,omitempty"`
-	RunID            string            `json:"run_id"`
-	Namespace        string            `json:"namespace"`
-	Name             string            `json:"name"`
-	UID              string            `json:"uid"`
-	SpecIdentity     string            `json:"spec_identity"`
-	CreatedAt        time.Time         `json:"created_at"`
-	Tasks            []TimingTask      `json:"tasks"`
-	GraphUnavailable string            `json:"graph_unavailable,omitempty"`
+	RunID            string       `json:"run_id"`
+	Namespace        string       `json:"namespace"`
+	Name             string       `json:"name"`
+	UID              string       `json:"uid"`
+	SpecIdentity     string       `json:"spec_identity"`
+	CreatedAt        time.Time    `json:"created_at"`
+	Tasks            []TimingTask `json:"tasks"`
+	GraphUnavailable string       `json:"graph_unavailable,omitempty"`
 }
 
 type TimingTask struct {
@@ -97,9 +96,6 @@ var timingIdentity = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var timingName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$`)
 
 func (value WorkflowTiming) Validate() error {
-	if value.Resources != nil && !value.Resources.Valid() {
-		return errors.New("invalid resource declaration coverage")
-	}
 	if !diagnosticRun.MatchString(value.RunID) || !timingName.MatchString(value.Namespace) || !timingName.MatchString(value.Name) || !diagnosticUID.MatchString(value.UID) || !timingIdentity.MatchString(value.SpecIdentity) || value.CreatedAt.IsZero() || len(value.Tasks) > MaxTimingTasks {
 		return errors.New("invalid Workflow timing binding")
 	}

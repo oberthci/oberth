@@ -117,7 +117,7 @@ func TestRefDeletionReplayCannotCancelRecreatedBranchAtSameSHA(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	event, spec := capReceive(repo.ID, "old", "branch")
+	event, spec := nativeReceive(repo.ID, "old", "branch")
 	event.Ref = "feature/recreated"
 	spec.Ref = event.Ref
 	old, err := s.EnqueueReceiveEvent(t.Context(), event, spec)
@@ -145,57 +145,6 @@ func TestRefDeletionReplayCannotCancelRecreatedBranchAtSameSHA(t *testing.T) {
 	before, err := s.Run(t.Context(), old.ID)
 	if err != nil || !before.Cancelled() {
 		t.Fatalf("old run survived: %+v %v", before, err)
-	}
-}
-
-func TestRefDeletionCancelsDeferredReceiptsWithoutBlockingNewPush(t *testing.T) {
-	now := time.Now()
-	s := testStore(t, &now)
-	repo := createRepo(t, s)
-	first, firstSpec := capReceive(repo.ID, "occupant", "branch")
-	if _, err := s.EnqueueReceiveEvent(t.Context(), first, firstSpec); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.SetQueueCap(t.Context(), "admin", 1); err != nil {
-		t.Fatal(err)
-	}
-	event, spec := capReceive(repo.ID, "deferred", "branch")
-	if result, err := s.EnqueueReceiveEvent(t.Context(), event, spec); err != nil || result.ID != "" {
-		t.Fatalf("deferral: %+v %v", result, err)
-	}
-	deletion := branchDeleteEvent(repo.ID, "delete", event.Ref)
-	if _, err := s.RecordReceiveEvent(t.Context(), deletion); err != nil {
-		t.Fatal(err)
-	}
-	cap, err := s.QueueCap(t.Context())
-	if err != nil || cap.Deferred != 0 {
-		t.Fatalf("cancelled receive still holds queue: %+v %v", cap, err)
-	}
-	reason, err := s.DeferredBranchReason(t.Context(), repo.ID, event.Ref, event.CommitSHA)
-	if err != nil || reason != "" {
-		t.Fatalf("cancelled receipt still looks deferred: %q %v", reason, err)
-	}
-	replay, err := s.EnqueueReceiveEvent(t.Context(), event, spec)
-	if err != nil || !replay.Duplicate || replay.ID != "" || replay.DeferredReason != "ref deleted" {
-		t.Fatalf("cancelled deferral replay: %+v %v", replay, err)
-	}
-	if _, err = s.SetQueueCap(t.Context(), "admin", 0); err != nil {
-		t.Fatal(err)
-	}
-	if drained, err := s.DrainDeferredBranch(t.Context()); err != nil || drained.ID != "" {
-		t.Fatalf("drained deleted ref: %+v %v", drained, err)
-	}
-	event.ID = "recreated"
-	newer, err := s.EnqueueReceiveEvent(t.Context(), event, spec)
-	if err != nil || newer.ID == "" {
-		t.Fatalf("cancelled backlog blocked recreation: %+v %v", newer, err)
-	}
-	if _, err = s.RecordReceiveEvent(t.Context(), deletion); err != nil {
-		t.Fatal(err)
-	}
-	run, err := s.Run(t.Context(), newer.ID)
-	if err != nil || !run.Status.Active() {
-		t.Fatalf("delete replay cancelled recreation: %+v %v", run, err)
 	}
 }
 
@@ -244,4 +193,10 @@ func TestRefDeletionLeavesPendingPublicationOwnerUntouched(t *testing.T) {
 	if err != nil || current.Status != model.RunRunning || current.Phase != "publishing" {
 		t.Fatalf("pending publication owner cancelled: %+v %v", current, err)
 	}
+}
+
+func nativeReceive(repo int64, id, trigger string) (model.ReceiveEventSpec, model.RunSpec) {
+	sha := strings.Repeat("a", 40)
+	e := model.ReceiveEventSpec{ID: id, Actor: "dev", RepoID: repo, RefKind: model.RefBranch, Ref: "feature/" + id, ObjectSHA: sha, CommitSHA: sha, Outcome: "queued"}
+	return e, model.RunSpec{RepoID: repo, Actor: e.Actor, RefKind: e.RefKind, Ref: e.Ref, SHA: sha, TestedSHA: sha, Trigger: trigger}
 }

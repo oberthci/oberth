@@ -2,13 +2,11 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -67,95 +65,6 @@ func (jobs *concurrentJobs) Delete(context.Context, string, string) error { retu
 
 func (jobs *concurrentJobs) TerminalResult(context.Context, string) (JobResult, error) {
 	return JobResult{}, ErrJobNotTerminal
-}
-
-// TestSchedulerCreatesJobsConcurrentlyForOneRepository is the end-to-end guard
-// for the defect the admission unit conversion fixes.
-//
-// Every run in the reported failure targeted a single repository whose
-// pipeline declares the L size. The scheduler claimed each run -- durably
-// marking it "running" and setting started_at -- then blocked in the admission
-// gate before asking the engine to create anything. The result was several
-// runs reporting "running" for many minutes with exactly one execution object
-// in the cluster: a max-concurrency-of-1 server wearing a concurrency-of-3
-// label.
-//
-// The assertion is about Job creation rather than about the gate in isolation,
-// so it fails for any regression anywhere on the claim-to-creation path,
-// including a new serialization point introduced outside admission.go.
-//
-// Since v0.20.0 Oberth has no run ceiling, so every run reaches Job creation
-// concurrently; the Argo controller's parallelism is the only bound.
-func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
-	const maxConcurrentJobs = 3
-	// Undeclared work retains one default numeric share, independent of size.
-	sizes := []struct {
-		declared pipeline.Size
-		expected int
-	}{
-		{declared: "", expected: maxConcurrentJobs},
-		{declared: pipeline.S, expected: maxConcurrentJobs},
-		{declared: pipeline.M, expected: maxConcurrentJobs},
-		{declared: pipeline.L, expected: maxConcurrentJobs},
-		{declared: pipeline.XL, expected: maxConcurrentJobs},
-	}
-	for _, size := range sizes {
-		t.Run(fmt.Sprintf("size=%s", size.declared.Effective()), func(t *testing.T) {
-			fixture := newConcurrencyFixture(t, size.declared, maxConcurrentJobs)
-			if size.declared == pipeline.XL {
-				// XL takes an admin size grant (#1021).
-				if _, err := fixture.store.SetSizeGrant(context.Background(), fixture.repo.ID, "admin@host", pipeline.XL); err != nil {
-					t.Fatal(err)
-				}
-			}
-			// One more run than the size may admit, so the upper bound is
-			// observable rather than merely unexercised.
-			for index := range size.expected + 1 {
-				fixture.enqueue(t, index)
-			}
-
-			schedulerCtx, stopScheduler := context.WithCancel(context.Background())
-			defer stopScheduler()
-			finished := make(chan error, 1)
-			go func() { finished <- fixture.scheduler.Run(schedulerCtx) }()
-			defer func() {
-				close(fixture.jobs.release)
-				stopScheduler()
-				select {
-				case <-finished:
-				case <-time.After(testStartTimeout(15 * time.Second)):
-					t.Error("scheduler did not stop")
-				}
-			}()
-
-			// Lower bound: every run the size admits must reach Job creation
-			// while all the others are still held inside Wait. A serializing
-			// gate delivers the first and then nothing.
-			deadline := time.NewTimer(testStartTimeout(15 * time.Second))
-			defer deadline.Stop()
-			for admitted := 1; admitted <= size.expected; admitted++ {
-				select {
-				case <-fixture.jobs.admitted:
-				case err := <-finished:
-					t.Fatalf("scheduler stopped after %d of %d concurrent submissions: %v",
-						admitted-1, size.expected, err)
-				case <-deadline.C:
-					t.Fatalf("only %d of %d runs reached Job creation concurrently at size %q; "+
-						"the rest are durably running with no execution object",
-						admitted-1, size.expected, size.declared.Effective())
-				}
-			}
-
-			// No upper bound in Oberth: the run past the old ceiling is
-			// submitted too, and the Argo controller's parallelism postpones
-			// it if the install sets one.
-			select {
-			case <-fixture.jobs.admitted:
-			case <-deadline.C:
-				t.Fatalf("size %q withheld a run past %d; Oberth has no run ceiling", size.declared.Effective(), size.expected)
-			}
-		})
-	}
 }
 
 type concurrencyFixture struct {

@@ -78,3 +78,5 @@ DELETE FROM schema_migrations WHERE version>=48;
 `
 
 const executionRetirementDowngradeSQL = resourceCeilingDowngradeSQL + executionRetirementTriggersDowngradeSQL
+
+const resourceCeilingDowngradeSQL = testdb.PostV49Downgrade + `DROP TABLE IF EXISTS resource_ceilings; DELETE FROM schema_migrations WHERE version>=49;`

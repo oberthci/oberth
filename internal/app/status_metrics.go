@@ -62,15 +62,6 @@ func (health Health) WriteStatusMetrics(ctx context.Context, w io.Writer) {
 		return
 	}
 	if reader, ok := health.Store.(interface {
-		QueueCap(context.Context) (model.QueueCapStatus, error)
-	}); ok {
-		if queue, err := reader.QueueCap(ctx); err == nil {
-			gauge("oberth_queue_not_started", "runs queued or waiting for admission", float64(queue.NotStarted))
-			gauge("oberth_queue_max_not_started", "configured bound on not-started runs (0 is unbounded)", float64(queue.MaxNotStarted))
-			gauge("oberth_queue_deferred", "pushes deferred by the not-started bound", float64(queue.Deferred))
-		}
-	}
-	if reader, ok := health.Store.(interface {
 		LastBackup(context.Context) (*model.BackupStatus, error)
 	}); ok {
 		if backup, err := reader.LastBackup(ctx); err == nil && backup != nil {

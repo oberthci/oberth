@@ -22,8 +22,7 @@ func TestAPILatencyQueries(t *testing.T) {
 			_, err := s.ListRecentRuns(ctx, model.RunListFilter{LatestPerRef: true, Limit: 100})
 			return err
 		},
-		"queue_cap": func() error { _, err := s.QueueCap(ctx); return err },
-		"counts":    func() error { _, err := s.CountRuns(ctx); return err },
+		"counts": func() error { _, err := s.CountRuns(ctx); return err },
 	} {
 		start := time.Now()
 		if err := call(); err != nil {

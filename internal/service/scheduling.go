@@ -46,33 +46,18 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			return nil, ""
 		}
 	}
-	demandContext := ctx
 	clock := service.schedulingClock()
 	observed := clock.Now().UTC()
 	result = &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
 	var blocker *model.AdmissionBlocker
 	policyWaiting := run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason))
-	held := false
 	defer func() {
 		if model.DisplayRunStatus(run) == model.DisplayQueued {
-			if result.Admission != nil {
-				result.Requests = result.Admission.Requests.Clone()
-			}
-			if result.Requests == nil {
-				result.Requests = service.queuedRequests(demandContext, run)
-			}
-			switch {
-			case reason == "":
+			if reason == "" {
 				reason = queuedDisplayReason(result, blocker)
-			case held:
-				// The admin's hold reason is shown whole: it is the only
-				// place a held run says why, and it is already bounded.
-				reason = withQueueRequestsWhole(result.Requests, reason)
-			default:
-				reason = withQueueRequests(result.Requests, reason)
 			}
 			if policyWaiting {
-				reason = withQueueRequests(result.Requests, "waiting for upstream policy")
+				reason = "waiting for upstream policy"
 			}
 		}
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
@@ -120,7 +105,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		}
 	}
 	if hold, onHold := service.admissionHoldForRun(run); onHold {
-		held = true
 		result.State = "queued"
 		result.Message = hold.ShortMessage()
 		return result, hold.ShortMessage()

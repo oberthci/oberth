@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -15,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -24,10 +22,7 @@ import (
 // Resource size comes from that submission, never from the current default branch.
 type Adoption struct {
 	Sources     string
-	Fallback    model.ResourceAdmissionFallback
-	Pods        argoworkflow.PodDemand
 	RestartedAt time.Time
-	Size        pipeline.Size
 	UID         types.UID
 	Identity    string
 	SpecSHA256  string
@@ -98,31 +93,15 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 			}
 		}
 	}
-	size, err := argoworkflow.DeclaredSizeFor(workflow, request.RunTrigger)
-	if err != nil {
-		return Adoption{}, err
+	if !request.RunTrigger.Valid() {
+		return Adoption{}, fmt.Errorf("invalid run trigger %q", request.RunTrigger)
 	}
 
 	specHash, err := adoptionSpecHash(workflow)
 	if err != nil {
 		return Adoption{}, err
 	}
-	pods, err := readPodDemand(workflow)
-	if err != nil {
-		// Admission metadata is advisory. Keep the immutable spec binding and
-		// recover scheduling credits from owned live Pods instead.
-		log.Printf("Workflow %s: CPU demand binding unreadable; using live Pod requests: %v", workflow.Name, err)
-		pods = nil
-	}
-	var peak argoworkflow.PodDemand
-	if pods != nil {
-		peak = *pods
-	}
-	fallback, err := readResourceFallback(workflow)
-	if err != nil {
-		return Adoption{}, err
-	}
-	return Adoption{Sources: workflow.Annotations[argoworkflow.SourcesAnnotation], Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	return Adoption{Sources: workflow.Annotations[argoworkflow.SourcesAnnotation], RestartedAt: controller.restartedAt, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay
@@ -130,9 +109,9 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 	if binding := workflow.Annotations[capabilityAnnotation]; binding != "" {
 		body, err := json.Marshal(struct {
-			Spec                            wfv1.WorkflowSpec
-			PodDemand, Fallback, Capability string
-		}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation], binding})
+			Spec       wfv1.WorkflowSpec
+			Capability string
+		}{workflow.Spec, binding})
 		if err != nil {
 			return "", err
 		}
@@ -140,10 +119,8 @@ func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 		return hex.EncodeToString(digest[:]), nil
 	}
 	body, err := json.Marshal(struct {
-		Spec      wfv1.WorkflowSpec `json:"spec"`
-		PodDemand string            `json:"pod_demand,omitempty"`
-		Fallback  string            `json:"resource_fallback,omitempty"`
-	}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation]})
+		Spec wfv1.WorkflowSpec `json:"spec"`
+	}{workflow.Spec})
 	if err != nil {
 		return "", fmt.Errorf("argojob: encode adopted Workflow spec: %w", err)
 	}

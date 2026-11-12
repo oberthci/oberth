@@ -42,19 +42,19 @@ func (controller *adoptingArgoControl) WaitResumed(_ context.Context, name, runI
 }
 
 func TestArgoJobsAdoptRestoresIntentAndResumesWait(t *testing.T) {
-	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity"}}
+	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "spec-identity"}}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
 	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature/adopt", SHA: "pushed-sha", TestedSHA: "tested-sha", Trigger: "branch"}
 	for range 2 {
-		size, found, err := jobs.Adopt(context.Background(), run)
-		if err != nil || !found || size != pipeline.L {
-			t.Fatalf("adopt = %s %v %v", size, found, err)
+		found, err := jobs.Adopt(context.Background(), run)
+		if err != nil || !found {
+			t.Fatalf("adopt = %v %v", found, err)
 		}
 	}
 	if controller.request.SHA != "tested-sha" || controller.request.RunTrigger != argoworkflow.RunTriggerBranch || controller.request.Trigger != pipeline.TriggerCI {
 		t.Fatalf("adopt request = %#v", controller.request)
 	}
-	if _, _, err := jobs.Adopt(context.Background(), model.Run{ID: "foreign", WorkflowName: run.WorkflowName, Trigger: "branch"}); err == nil {
+	if _, err := jobs.Adopt(context.Background(), model.Run{ID: "foreign", WorkflowName: run.WorkflowName, Trigger: "branch"}); err == nil {
 		t.Fatal("foreign intent replaced adopted run")
 	}
 	controller.request = argojob.AdoptionRequest{Name: run.WorkflowName, RunID: run.ID}
@@ -69,18 +69,18 @@ func TestArgoJobsAdoptRestoresIntentAndResumesWait(t *testing.T) {
 
 func TestArgoJobsAdoptAbsentWorkflowDoesNotCreateIntent(t *testing.T) {
 	jobs := &ArgoJobs{controller: &adoptingArgoControl{}, intents: map[string]argoIntent{}}
-	if _, found, err := jobs.Adopt(context.Background(), model.Run{ID: "run", WorkflowName: "missing", Trigger: "branch"}); err != nil || found || len(jobs.intents) != 0 {
+	if found, err := jobs.Adopt(context.Background(), model.Run{ID: "run", WorkflowName: "missing", Trigger: "branch"}); err != nil || found || len(jobs.intents) != 0 {
 		t.Fatalf("missing adoption = %v %v %v", found, err, jobs.intents)
 	}
 }
 
 func TestArgoJobsAdoptedTerminalObservationErrorStillCollectsArtifacts(t *testing.T) {
 	budget := errors.New("step test/unit breached the aggregate run log budget")
-	controller := &adoptingArgoControl{found: true, waitErr: budget, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity"}}
+	controller := &adoptingArgoControl{found: true, waitErr: budget, binding: argojob.Adoption{UID: "workflow-uid", Identity: "spec-identity"}}
 	collector, artifacts := &fakeCollector{body: []byte("archive")}, &fakeArtifactStore{}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}, collector: collector, artifacts: artifacts, artifactLimit: 1 << 20}
 	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature/adopt", SHA: "sha", Trigger: "branch"}
-	if _, _, err := jobs.Adopt(context.Background(), run); err != nil {
+	if _, err := jobs.Adopt(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
 	result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard, nil, 0)
@@ -102,7 +102,7 @@ func TestArgoJobsAdoptMarksRefusalButNotReadFailure(t *testing.T) {
 		{errors.New("argojob: read Workflow for adoption: connection refused"), false},
 	} {
 		jobs := &ArgoJobs{controller: &adoptingArgoControl{adoptErr: test.err}, intents: map[string]argoIntent{}}
-		_, found, err := jobs.Adopt(context.Background(), run)
+		found, err := jobs.Adopt(context.Background(), run)
 		if err == nil || found || errors.Is(err, service.ErrAdoptionRefused) != test.refused || len(jobs.intents) != 0 {
 			t.Fatalf("adopt(%v) = %v %v intents=%v", test.err, found, err, jobs.intents)
 		}
@@ -112,7 +112,7 @@ func TestArgoJobsAdoptMarksRefusalButNotReadFailure(t *testing.T) {
 func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		t.Run(kind, func(t *testing.T) {
-			controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity", SpecSHA256: "exact-admitted-spec"}}
+			controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "spec-identity", SpecSHA256: "exact-admitted-spec"}}
 			jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
 			run := model.Run{ID: "run-" + kind, WorkflowName: "workflow-" + kind, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "annotated-tag-object", TestedSHA: "peeled-reviewed-commit", Trigger: kind, Release: true, Credentialed: true}
 			expectedTier := pipeline.TriggerRelease
@@ -124,8 +124,8 @@ func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 				expectedTier = pipeline.TriggerCI
 				expectedKind = argoworkflow.RunTriggerPromotion
 			}
-			size, found, err := jobs.Adopt(context.Background(), run)
-			if err != nil || !found || size != pipeline.L || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref {
+			found, err := jobs.Adopt(context.Background(), run)
+			if err != nil || !found || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref {
 				t.Fatalf("adoption binding changed: %+v %v", controller.request, err)
 			}
 			result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard, nil, 0)
@@ -140,7 +140,7 @@ func TestTagAdoptionDoesNotInferReleaseCapability(t *testing.T) {
 	controller := &adoptingArgoControl{found: true}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
 	run := model.Run{ID: "ordinary-tag", WorkflowName: "ordinary-tag-job", RefKind: model.RefTag, Ref: "deploy-1", Trigger: "tag"}
-	if _, found, err := jobs.Adopt(context.Background(), run); err != nil || !found || controller.request.Trigger != pipeline.TriggerCI || controller.request.RunTrigger != argoworkflow.RunTriggerTag {
+	if found, err := jobs.Adopt(context.Background(), run); err != nil || !found || controller.request.Trigger != pipeline.TriggerCI || controller.request.RunTrigger != argoworkflow.RunTriggerTag {
 		t.Fatal("ordinary tag did not retain CI authority")
 	}
 }
@@ -149,7 +149,7 @@ func TestScheduleEntryAdoptionUsesDurableRunIdentity(t *testing.T) {
 	controller := &adoptingArgoControl{found: true}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
 	run := model.Run{ID: "scheduled-run", WorkflowName: "scheduled-workflow", RefKind: model.RefBranch, Ref: "main", SHA: "original-commit", Trigger: "schedule", ScheduleEntry: "nightly"}
-	if _, found, err := jobs.Adopt(context.Background(), run); err != nil || !found || controller.request.ScheduleEntry != "nightly" || controller.request.RunTrigger != argoworkflow.RunTriggerSchedule {
+	if found, err := jobs.Adopt(context.Background(), run); err != nil || !found || controller.request.ScheduleEntry != "nightly" || controller.request.RunTrigger != argoworkflow.RunTriggerSchedule {
 		t.Fatalf("adoption lost durable identity: %+v %v", controller.request, err)
 	}
 }

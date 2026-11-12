@@ -14,20 +14,16 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const createObservationWindow = time.Minute
 const createSettlementAttemptBudget = 15 * time.Second
 const pendingCreateMessage = "Workflow create outcome uncertain; cleanup pending"
 
-// createAdmission binds a pending Workflow create to its run. Size is the
-// run's historical tier, written for older readers of the file; the gate
-// counts runs and reads nothing else from it.
+// createAdmission binds an uncertain Workflow create to its immutable run identity.
 type createAdmission struct {
 	RunID, WorkflowName, SHA string
 	RepoID                   int64
-	Size                     pipeline.Size
 }
 
 type pendingCreate struct {
@@ -65,7 +61,7 @@ func (scheduler *Scheduler) recordWorkflowCreateBinding(run model.Run, name stri
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(createAdmission{RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID, Size: pipeline.M})
+	body, err := json.Marshal(createAdmission{RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID})
 	if err != nil {
 		return err
 	}
@@ -105,7 +101,7 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 		return createAdmission{}, err
 	}
 	var saved createAdmission
-	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.WorkflowName != run.WorkflowName || saved.RepoID != run.RepoID || saved.SHA != run.SHA || !saved.Size.Valid() || saved.Size != saved.Size.Effective() {
+	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.WorkflowName != run.WorkflowName || saved.RepoID != run.RepoID || saved.SHA != run.SHA {
 		return createAdmission{}, errors.New("service: pending create admission binding mismatch")
 	}
 	return saved, nil

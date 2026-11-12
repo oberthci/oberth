@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // admissionGate tracks submission lifecycle and the remaining temporary holds.
@@ -39,7 +38,6 @@ type admissionGate struct {
 
 type admissionReservation struct {
 	// requests is the effective peak Pod request reservation.
-	requests *argoworkflow.PodRequests
 	gate     *admissionGate
 	sequence int64
 	// order retains restart FIFO position; sequence stays the unique run key.
@@ -95,7 +93,6 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its identity.
 type admissionRequest struct {
-	Requests             *argoworkflow.PodRequests
 	RunID                string
 	RepoID               int64
 	Repo                 string
@@ -177,7 +174,6 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		}
 		return nil, context.Canceled
 	}
-	reservation.requests = request.Requests.Clone()
 	if request.RunID != "" {
 		reservation.runID = request.RunID
 	}
@@ -434,8 +430,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	requests := reservation.requests.Clone()
-	result := &model.AdmissionObservation{Requests: requests, State: "preparing", Used: gate.runs, Runs: gate.runs}
+	result := &model.AdmissionObservation{State: "preparing", Used: gate.runs, Runs: gate.runs}
 	if reservation.prepared {
 		result.State = "waiting"
 	}

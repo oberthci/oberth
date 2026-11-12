@@ -107,15 +107,6 @@ func (s *Store) RecordWorkflowTiming(ctx context.Context, value model.WorkflowTi
 		var old model.WorkflowTiming
 		if json.Unmarshal([]byte(existing.String), &old) == nil {
 			legacy := value
-			if old.Resources == nil {
-				legacy.Resources = nil
-			} else if old.Resources.PodDemand == nil && value.Resources != nil {
-				// An older observer did not retain concurrency. Accept the same
-				// observation without filling in or changing immutable history.
-				coverage := *value.Resources
-				coverage.PodDemand = nil
-				legacy.Resources = &coverage
-			}
 			previous, _ := json.Marshal(old)
 			candidate, _ := json.Marshal(legacy)
 			if string(previous) == string(candidate) {

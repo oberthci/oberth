@@ -14,7 +14,6 @@ import (
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/internal/argojob"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
@@ -42,7 +41,7 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			request := f.request
-			if _, err := jobs.PipelineSize(ctx, request); err != nil {
+			if _, err := jobs.PipelineDemandReceipt(ctx, request); err != nil {
 				t.Fatal(err)
 			}
 			request.DemandReceipt, err = jobs.PipelineDemandReceipt(ctx, request)
@@ -130,8 +129,8 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 				t.Fatal(namespace, err)
 			}
 			if owner != "running" {
-				if size, found, err := jobs.Adopt(ctx, request.Run); err != nil || !found || size != pipeline.M {
-					t.Fatal("expired recovery", size, found, err)
+				if found, err := jobs.Adopt(ctx, request.Run); err != nil || !found {
+					t.Fatal("expired recovery", found, err)
 				}
 			}
 			if owns, err := jobs.Owns(ctx, request.WorkflowName); err != nil || !owns {

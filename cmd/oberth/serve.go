@@ -885,7 +885,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	warnRetiredCapacityOverride(ctx, logger, database)
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
 	writerProgress := &liveness.Heartbeat{}
 	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
@@ -1112,9 +1111,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		SecretAccess:           database,
 		WorkflowCapabilities:   database,
-		SizeGrants:             database,
 		QueuePriorities:        database,
-		QueueCap:               database,
 		ReleaseWIFOverrides:    database,
 		ReleaseWIF:             releaseWIF,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
@@ -2290,22 +2287,6 @@ func configuredHealth(options serveOptions, hostKey []byte) app.Health {
 		health.SSHHostKey = signer.PublicKey()
 	}
 	return health
-}
-
-// warnRetiredCapacityOverride logs a run ceiling an older server stored with
-// admission_capacity_config. Since v0.20.0 it has no effect; the Argo
-// controller's parallelism bounds running Workflows.
-func warnRetiredCapacityOverride(ctx context.Context, logger *log.Logger, reader interface {
-	AdmissionCapacityOverride(context.Context) (*model.AdmissionCapacityOverride, error)
-}) {
-	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	override, err := reader.AdmissionCapacityOverride(readCtx)
-	if err != nil || override == nil || override.MaxConcurrentJobs <= 0 {
-		return
-	}
-	logger.Printf("WARN: the runtime run ceiling %d (set by %s) has no effect since v0.20.0; set the Argo controller parallelism instead (docs/where-limits-live.md)",
-		override.MaxConcurrentJobs, override.Actor)
 }
 
 // writeHealthMetrics exports the readiness sampler and the operator status

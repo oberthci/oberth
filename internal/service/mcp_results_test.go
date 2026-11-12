@@ -112,7 +112,6 @@ func TestMCPRefusalReasonsAndScope(t *testing.T) {
 	})
 	t.Run("out of scope equals missing", func(t *testing.T) {
 		scope := newScopeFixture(t)
-		scope.service.sizeGrants = scope.store
 		scope.service.git = f.git
 		scope.service.promotionRuns = scope.store
 		scope.service.enqueues = f.scheduler

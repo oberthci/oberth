@@ -92,18 +92,3 @@ func TestReleaseWIFOverrideGrantRevokeResetAudited(t *testing.T) {
 		}
 	}
 }
-
-func TestAdmissionCapacityOverrideReadsARetiredRow(t *testing.T) {
-	now := time.Now()
-	s := testStore(t, &now)
-	ctx := t.Context()
-	if got, err := s.AdmissionCapacityOverride(ctx); err != nil || got != nil {
-		t.Fatalf("fresh override = %+v %v", got, err)
-	}
-	if _, err := s.db.Exec(`INSERT INTO admission_capacity_override(singleton,max_concurrent_jobs,reason,actor,updated_at) VALUES(1,4,'host overload','admin',1)`); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.AdmissionCapacityOverride(ctx); err != nil || got == nil || got.MaxConcurrentJobs != 4 || got.Actor != "admin" {
-		t.Fatalf("stored override = %+v %v", got, err)
-	}
-}

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const listDiagnosticLimit = 512
@@ -21,7 +20,6 @@ type listDiagnosticKey struct {
 }
 type listDiagnosticValue struct {
 	scheduling *model.RunScheduling
-	requests   *argoworkflow.PodRequests
 }
 type listDiagnosticEntry struct {
 	key       listDiagnosticKey
@@ -67,7 +65,6 @@ func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Conte
 			copy.AgeSeconds = max(0, int64(now.Sub(copy.ObservedAt)/time.Second))
 			result.scheduling = &copy
 		}
-		result.requests = result.requests.Clone()
 		cache.recent.MoveToFront(element)
 		if now.Sub(entry.checkedAt) < listDiagnosticTTL {
 			return result
@@ -111,7 +108,7 @@ func (s *API) refreshListDiagnostics() {
 		cache.queue[0] = listDiagnosticTask{}
 		cache.queue = cache.queue[1:]
 		cache.mu.Unlock()
-		ctx, cancel := context.WithTimeout(s.lifetime, queueDemandReadBudget)
+		ctx, cancel := context.WithTimeout(s.lifetime, 2*time.Second)
 		value := task.load(ctx)
 		cancel()
 		cache.mu.Lock()

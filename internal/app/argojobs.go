@@ -257,35 +257,6 @@ func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.Workflo
 	return jobs.create(ctx, request, pipeline.TriggerRelease)
 }
 
-// PipelineSize is the size recorded with the run: M for every run of a
-// readable document, since size annotations are removed.
-func (jobs *ArgoJobs) PipelineSize(ctx context.Context, request service.WorkflowRequest) (pipeline.Size, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forRequest(ctx, request)
-		if err != nil {
-			return "", err
-		}
-		return child.PipelineSize(ctx, request)
-	}
-	source, err := jobs.readRunSource(request)
-	if err != nil {
-		return "", jobs.noRunPipelineError(err, request)
-	}
-	workflow, err := argoworkflow.Decode(source)
-	if err != nil {
-		return "", fmt.Errorf("app: read repository resource contract: %w", err)
-	}
-	kind, err := runKind(request.Run)
-	if err != nil {
-		return "", err
-	}
-	size, err := argoworkflow.DeclaredSizeFor(workflow, kind)
-	if err != nil {
-		return "", fmt.Errorf("app: read repository resource contract: %w", err)
-	}
-	return size, nil
-}
-
 // PlannedSteps enumerates the run's declared step list from the checked-out
 // document, without evaluating anything and without a second trust surface:
 // the same Decode the submission path uses, then a read-only walk of the
@@ -480,13 +451,11 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		}
 	}
 	submission := argojob.Request{
-		Priority:         workflowPriority(request.Run),
-		BranchAuthority:  branchAuthority,
-		PodDemand:        request.PodDemand,
-		ResourceFallback: request.ResourceFallback,
-		DemandReceipt:    request.DemandReceipt,
-		PipelineFile:     pipelineFile,
-		RunID:            request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName,
+		Priority:        workflowPriority(request.Run),
+		BranchAuthority: branchAuthority,
+		DemandReceipt:   request.DemandReceipt,
+		PipelineFile:    pipelineFile,
+		RunID:           request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, ScheduleEntry: request.Run.ScheduleEntry, Source: source,
 		Assist:    request.Run.AssistRequested,
@@ -518,9 +487,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		if err != nil {
 			return err
 		}
-	}
-	if err := jobs.bindResourceMaximum(ctx, &submission); err != nil {
-		return err
 	}
 	// Snapshot the identity store once for both Builds of this admission
 	// (audit and controller), so the audit record and the pod spec agree
@@ -621,9 +587,7 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 	}
 	automount := workflow.Spec.AutomountServiceAccountToken != nil && *workflow.Spec.AutomountServiceAccountToken
 	details := map[string]any{
-		"resource_maximum": submission.ResourceMaximum,
-		"resource_ceiling": submission.ResourceCeiling,
-		"repo":             request.Repository.Name, "upstream_org": request.UpstreamOrg,
+		"repo": request.Repository.Name, "upstream_org": request.UpstreamOrg,
 		"ref": request.Run.Ref,
 		// "sha" is the commit the Workflow actually executes (submission.SHA,
 		// derived from TestedSHA). "object_sha" preserves the original pushed
@@ -745,31 +709,31 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Wo
 
 // Adopt rebuilds the intent from the durable run and the existing Workflow.
 // It never seeds sources, submits work, or re-evaluates repository commands.
-func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, bool, error) {
+func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
 		if err != nil {
-			return "", false, err
+			return false, err
 		}
-		size, found, err := child.Adopt(ctx, run)
+		found, err := child.Adopt(ctx, run)
 		if err == nil && !found && child.targetBinding != nil {
-			return "", false, argojob.ErrTargetUncertain
+			return false, argojob.ErrTargetUncertain
 		}
-		return size, found, err
+		return found, err
 	}
 	controller, ok := jobs.controller.(interface {
 		Adopt(context.Context, argojob.AdoptionRequest) (argojob.Adoption, bool, error)
 	})
 	if !ok {
-		return "", false, errors.New("app: controller cannot adopt Workflows")
+		return false, errors.New("app: controller cannot adopt Workflows")
 	}
 	trigger, err := runTrigger(run)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	kind, err := runKind(run)
 	if err != nil {
-		return "", false, err
+		return false, err
 	}
 	sha := run.TestedSHA
 	if sha == "" {
@@ -780,21 +744,21 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 		Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
-		return "", false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)
+		return false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)
 	}
 	if err != nil || !found {
-		return "", found, err
+		return found, err
 	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	if current, exists := jobs.intents[run.WorkflowName]; exists {
 		if current.runID != run.ID || current.cancelled || current.adoption == nil || !reflect.DeepEqual(*current.adoption, binding) {
-			return "", false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
+			return false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
 		}
-		return binding.Size, true, nil
+		return true, nil
 	}
 	jobs.intents[run.WorkflowName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding, sources: run.SourceBindings}
-	return binding.Size, true, nil
+	return true, nil
 }
 
 // WorkflowNamespace names the namespace the engine's Workflows live in.
@@ -1235,7 +1199,6 @@ var (
 	_ service.JobCreateSettler           = (*ArgoJobs)(nil)
 	_ service.JobAdopter                 = (*ArgoJobs)(nil)
 	_ service.ReleaseJobController       = (*ArgoJobs)(nil)
-	_ service.PipelineSizer              = (*ArgoJobs)(nil)
 	_ service.PipelinePlanner            = (*ArgoJobs)(nil)
 	_ service.PipelineCredentialDetector = (*ArgoJobs)(nil)
 	_                                    = time.Second

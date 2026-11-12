@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Production ArgoJobs supports both interfaces. A settler-only fixture cannot
@@ -20,11 +19,11 @@ type createRecoveryJobs struct {
 	settleCalls int
 }
 
-func (j *createRecoveryJobs) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
+func (j *createRecoveryJobs) Adopt(_ context.Context, run model.Run) (bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.adopted = append(j.adopted, run.ID)
-	return pipeline.S, j.present[run.ID], nil
+	return j.present[run.ID], nil
 }
 func (j *createRecoveryJobs) SettleCreate(context.Context, string, string, time.Time) (bool, error) {
 	j.settleCalls++
@@ -68,7 +67,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				t.Fatal("fixture has a create contract", err)
 			}
 			adopted := 0
-			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(run model.Run, size pipeline.Size) error {
+			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(run model.Run) error {
 				adopted++
 				if run.ID != holder.ID {
 					t.Fatal("parked placeholder adopted")
@@ -120,7 +119,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			}
 			var resumed model.Run
 			var grant *admissionReservation
-			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(found model.Run, size pipeline.Size) error {
+			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(found model.Run) error {
 				resumed = found
 				var err error
 				grant, err = scheduler.admission.adopt(found)
@@ -193,7 +192,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 					}
 				}
 			}
-			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { t.Fatal("absent Workflow adopted"); return nil }); err != nil {
+			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(model.Run) error { t.Fatal("absent Workflow adopted"); return nil }); err != nil {
 				t.Fatal(err)
 			}
 			if len(jobs.adopted) != 1 || jobs.adopted[0] != run.ID || jobs.settleCalls != 0 {

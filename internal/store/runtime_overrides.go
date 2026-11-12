@@ -166,26 +166,3 @@ func (s *Store) changeReleaseWIFOverride(ctx context.Context, actor string, spec
 	}
 	return result, nil
 }
-
-// AdmissionCapacityOverride returns the runtime ceiling a v0.19 or older
-// server stored, or nil. Since v0.20.0 nothing applies or sets it; the server
-// reads it once at startup to warn that it no longer has an effect.
-func (s *Store) AdmissionCapacityOverride(ctx context.Context) (*model.AdmissionCapacityOverride, error) {
-	return admissionCapacityOverride(ctx, s.reader())
-}
-
-func admissionCapacityOverride(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}) (*model.AdmissionCapacityOverride, error) {
-	var value model.AdmissionCapacityOverride
-	var updated int64
-	err := q.QueryRowContext(ctx, `SELECT max_concurrent_jobs,reason,actor,updated_at FROM admission_capacity_override WHERE singleton=1`).Scan(&value.MaxConcurrentJobs, &value.Reason, &value.Actor, &updated)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read admission capacity override: %w", err)
-	}
-	value.UpdatedAt = fromUnixNano(updated)
-	return &value, nil
-}

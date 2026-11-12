@@ -484,7 +484,7 @@ var mcpReconnectableTools = map[string]bool{
 	"run_get": true, "run_logs": true, "run_resources": true, "run_list": true, "artifacts": true, "artifact_get": true,
 	"promote_status": true, "promotion_list": true, "promote_grant_list": true,
 	"repo_usage": true, "repo_list": true, "issue_get": true, "issue_get_many": true, "issue_list": true,
-	"access_list": true, "size_grant_get": true, "resource_grant_get": true,
+	"access_list": true,
 	"uplink_list": true, "audit_list": true, "schedule_list": true, "release_wif_list": true,
 }
 

@@ -2,12 +2,10 @@ package argojob
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -96,7 +94,7 @@ func TestCapabilityBuildBindsOperatorIdentityAndRefusesEscapes(t *testing.T) {
 	secret := "oberth/upstream/acme/oberth/test-secret"
 	r = requestWithCapability(t, strings.Replace(operatorResourceDocument, "example.com/tier: L", "example.com/tier: L\n    oberth.ci/secret-paths: "+secret, 1), c)
 	r.ApprovedSecrets[secret] = true
-	if _, err = Build(testConfig(), r); err == nil {
+	if _, err := Build(testConfig(), r); err == nil {
 		t.Fatal("operator authority combined with secret access")
 	}
 	ordinary, err := Build(testConfig(), requestWithCapability(t, greedyDocument, c))
@@ -110,49 +108,18 @@ func TestCapabilityBuildRequiresOperatorGrantWithoutGlobalNumericReservation(t *
           requests: {cpu: '1', memory: 128Mi, devices.example.test/worker: '1'}
           limits: {memory: 128Mi, devices.example.test/worker: '1'}
 `
-	parsed, err := argoworkflow.Decode([]byte(source))
-	if err != nil {
-		t.Fatal(err)
-	}
-	demand, err := argoworkflow.DeclaredPodPeak(parsed)
-	if err != nil || demand == nil {
-		t.Fatalf("peak: %+v %v", demand, err)
-	}
 	r := requestWithCapability(t, source, operatorCapability())
-	r.ResourceMaximum = "L"
-	r.PodDemand = demand
-	if _, err = Build(testConfig(), r); err != nil {
+	if _, err := Build(testConfig(), r); err != nil {
 		t.Fatalf("reserved extended resources: %v", err)
 	}
-	r.PodDemand = nil
-	if _, err = Build(testConfig(), r); err != nil {
+	if _, err := Build(testConfig(), r); err != nil {
 		t.Fatal("authorized device requests incorrectly required a global numeric reservation", err)
 	}
 	// Independent operator capability proofs still require complete bounded
 	// declarations; removing host packing cannot relax device authorization.
 	r = requestWithCapability(t, strings.Replace(source, "cpu: '1', memory: 128Mi, ", "", 1), operatorCapability())
-	if _, err = Build(testConfig(), r); err == nil {
+	if _, err := Build(testConfig(), r); err == nil {
 		t.Fatal("incomplete operator capability proof was accepted")
-	}
-}
-
-func TestCapabilityDemandBindingRetainsAllGrantedDimensions(t *testing.T) {
-	demand := &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1, ExtendedResources: map[string]int64{}}
-	for i := range 32 {
-		demand.ExtendedResources[fmt.Sprintf("devices.example.test/worker-%d", i)] = 1
-	}
-	wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
-	stampPodDemand(wf, demand)
-	restored, err := readPodDemand(wf)
-	if err != nil || restored == nil || !restored.Equal(*demand) {
-		t.Fatalf("valid operator dimensions lost during recovery: %+v %v", restored, err)
-	}
-	for _, invalid := range []map[string]int64{{"unqualified": 1}, {"kubernetes.io/worker": 1}} {
-		demand.ExtendedResources = invalid
-		stampPodDemand(wf, demand)
-		if restored, err := readPodDemand(wf); err != nil || restored != nil {
-			t.Fatal("invalid derived resource demand was persisted", restored, err)
-		}
 	}
 }
 

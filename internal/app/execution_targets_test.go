@@ -38,7 +38,6 @@ import (
 	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The JSON fixture contains synthetic public controller/admission identities
@@ -388,7 +387,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	f := newTargetRouteFixture(t)
 	ctx := t.Context()
 	request := f.request
-	if size, err := f.jobs.PipelineSize(ctx, request); err != nil || size != pipeline.M {
+	if size, err := f.jobs.PipelineDemandReceipt(ctx, request); err != nil {
 		t.Fatal(size, err)
 	}
 	if steps, err := f.jobs.PlannedSteps(ctx, request); err != nil || len(steps) != 1 {
@@ -442,18 +441,13 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if size, found, err := restarted.Adopt(ctx, run); err != nil || !found || size != pipeline.M {
-		t.Fatal(size, found, err)
+	if found, err := restarted.Adopt(ctx, run); err != nil || !found {
+		t.Fatal(found, err)
 	}
 	if namespace, err := restarted.WorkflowNamespaceForRun(ctx, run); err != nil || namespace != f.definition.Config.Namespace {
 		t.Fatal(namespace, err)
 	}
-	if _, err := restarted.AdoptedPodDemand(t.Context(), run); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := restarted.AdoptedResourceFallback(run); err != nil {
-		t.Fatal(err)
-	}
+
 	f.remote.object.Status.Phase = wfv1.WorkflowSucceeded
 	start, end := metav1.NewTime(time.Now().Add(-2*time.Second)), metav1.NewTime(time.Now())
 	f.remote.object.Status.Nodes = wfv1.Nodes{
@@ -483,7 +477,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if logs != 1 || !strings.Contains(output.String(), "remote native log") {
 		t.Fatal("retained native log path lost", logs, output.String())
 	}
-	if _, found, err := restarted.Adopt(ctx, run); err != nil || !found {
+	if found, err := restarted.Adopt(ctx, run); err != nil || !found {
 		t.Fatal(found, err)
 	}
 	steps := argojob.StepResults(f.remote.object)
@@ -519,7 +513,7 @@ func TestExecutionTargetMissingChangedTransportAndPolicyRefuseBeforeEffects(t *t
 					t.Fatal(err)
 				}
 			default:
-				if _, err := f.jobs.PipelineSize(ctx, f.request); err != nil {
+				if _, err := f.jobs.PipelineDemandReceipt(ctx, f.request); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -559,7 +553,7 @@ func TestExecutionTargetMissingChangedTransportAndPolicyRefuseBeforeEffects(t *t
 func TestExecutionTargetRetainsAuthenticFragmentBytesAcrossRestart(t *testing.T) {
 	f := newTargetRouteFragmentsFixture(t, true)
 	ctx := t.Context()
-	if _, err := f.jobs.PipelineSize(ctx, f.request); err != nil {
+	if _, err := f.jobs.PipelineDemandReceipt(ctx, f.request); err != nil {
 		t.Fatal(err)
 	}
 	// A moved tag in the current loader cannot replace the retained raw source.
@@ -663,7 +657,7 @@ func TestExecutionTargetGitOutageDoesNotSerializeLocalAdmission(t *testing.T) {
 	f.policy.wait = release
 	f.policy.entered = make(chan struct{}, 1)
 	remoteDone := make(chan error, 1)
-	go func() { _, err := f.jobs.PipelineSize(ctx, f.request); remoteDone <- err }()
+	go func() { _, err := f.jobs.PipelineDemandReceipt(ctx, f.request); remoteDone <- err }()
 	select {
 	case <-f.policy.entered:
 	case <-time.After(5 * time.Second):

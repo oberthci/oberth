@@ -309,6 +309,31 @@ DELETE FROM schema_migrations WHERE id='20261112095139-api-read-indexes-5088d268
 `
 
 // PostNativeSchedulingDowngrade removes new removal receipts in disposable historical fixtures.
-const PostNativeSchedulingDowngrade = `
+const PostNativeSchedulingDowngrade = PostNativeControlsDowngrade + `
 DELETE FROM schema_migrations WHERE id='20261112182311-remove-run-fair-share-63db0cad7aad5e31cfcb60e26f63f922';
+`
+
+// PostNativeControlsDowngrade recreates removed historical fixture tables, never production compatibility policy.
+const PostNativeControlsDowngrade = `
+CREATE TABLE IF NOT EXISTS size_grants (
+ repo_id INTEGER PRIMARY KEY REFERENCES repositories(id),max_size TEXT NOT NULL,
+ granted_by TEXT NOT NULL,granted_at INTEGER NOT NULL,revoked_by TEXT NOT NULL DEFAULT '',revoked_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS resource_ceilings (
+ repo_id INTEGER PRIMARY KEY REFERENCES repositories(id),resources_json TEXT NOT NULL,
+ granted_by TEXT NOT NULL,granted_at INTEGER NOT NULL,revoked_by TEXT NOT NULL DEFAULT '',revoked_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS queue_cap (singleton INTEGER PRIMARY KEY,max_not_started INTEGER NOT NULL DEFAULT 0);
+INSERT OR IGNORE INTO queue_cap(singleton,max_not_started) VALUES(1,0);
+CREATE TABLE IF NOT EXISTS deferred_branch_receives (
+ sequence INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT NOT NULL UNIQUE REFERENCES receive_events(id),run_spec TEXT NOT NULL,reason TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS admission_capacity_override (
+ singleton INTEGER PRIMARY KEY,max_concurrent_jobs INTEGER NOT NULL,reason TEXT NOT NULL,actor TEXT NOT NULL,updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS concurrency_group_declarations (
+ repo_id INTEGER NOT NULL REFERENCES repositories(id),release INTEGER NOT NULL,group_name TEXT NOT NULL,group_limit INTEGER NOT NULL,PRIMARY KEY(repo_id,release)
+);
+CREATE INDEX IF NOT EXISTS concurrency_group_declarations_name ON concurrency_group_declarations(group_name);
+DELETE FROM schema_migrations WHERE id='20261112182825-remove-admission-controls-1819885d447894c83b86b9f6aabfb9b1';
 `

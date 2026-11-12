@@ -49,68 +49,6 @@ func TestNoPipelineError_OtherError(t *testing.T) {
 	}
 }
 
-func TestPipelineSize_MissingFile(t *testing.T) {
-	dir := t.TempDir()
-	// Empty directory — no .oberth/build.yaml exists.
-
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	_, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/heads/main"},
-		Repository: model.Repository{Name: "terraform"},
-		SourceDir:  dir,
-	})
-	if err == nil {
-		t.Fatal("PipelineSize should fail when pipeline file is missing")
-	}
-
-	want := `repository "terraform" has no pipeline configuration (.oberth/build.yaml); run "oberth init" in the repository to generate one`
-	if err.Error() != want {
-		t.Fatalf("PipelineSize error:\n  got:  %s\n  want: %s", err, want)
-	}
-}
-
-func TestPipelineSize_ValidFile(t *testing.T) {
-	dir := t.TempDir()
-	oberthDir := filepath.Join(dir, ".oberth")
-	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Minimal valid Argo Workflow with size annotation.
-	workflow := `apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  annotations:
-    example.com/tier: M
-spec:
-  entrypoint: main
-  templates:
-    - name: main
-      steps:
-        - - name: test
-            template: echo
-    - name: echo
-      container:
-        image: alpine:3.20
-        command: ["echo", "ok"]
-`
-	if err := os.WriteFile(filepath.Join(oberthDir, "build.yaml"), []byte(workflow), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	size, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/heads/main"},
-		Repository: model.Repository{Name: "terraform"},
-		SourceDir:  dir,
-	})
-	if err != nil {
-		t.Fatalf("PipelineSize should succeed with valid file: %v", err)
-	}
-	if size != pipeline.M {
-		t.Fatalf("expected size M, got %s", size)
-	}
-}
-
 // TestAuditSubmissionRecordsExecutedCommitNotTagObject verifies that when
 // Run.SHA (tag object) differs from Run.TestedSHA (peeled commit), the audit
 // record attributes execution to the commit that was actually checked out,

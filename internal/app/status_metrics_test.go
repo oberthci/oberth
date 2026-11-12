@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-type metricsHealthStore struct{ capHealthStore }
+type metricsHealthStore struct{ fakeHealthStore }
 
 func (metricsHealthStore) LastBackup(context.Context) (*model.BackupStatus, error) {
 	return &model.BackupStatus{At: "2026-11-10T03:00:00.5Z"}, nil
@@ -40,12 +40,8 @@ func TestWriteStatusMetricsExportsOperatorGauges(t *testing.T) {
 		"oberth_data_free_bytes 5000\n",
 		"oberth_data_below_disk_floor 0\n",
 		fmt.Sprintf("oberth_audit_anchor_timestamp_seconds %d\n", time.Date(2026, 11, 10, 4, 0, 0, 0, time.UTC).Unix()),
-		"oberth_queue_not_started 4\n",
-		"oberth_queue_max_not_started 3\n",
-		"oberth_queue_deferred 2\n",
 		fmt.Sprintf("oberth_last_backup_timestamp_seconds %d\n", time.Date(2026, 11, 10, 3, 0, 0, 0, time.UTC).Unix()),
 		fmt.Sprintf("oberth_admin_token_earliest_expiry_seconds %d\n", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).Unix()),
-		"# TYPE oberth_queue_not_started gauge\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in\n%s", want, out.String())

@@ -98,11 +98,7 @@ func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event mod
 			return model.EnqueueRunResult{}, fmt.Errorf("read duplicate receive run: %w", err)
 		}
 		if runID == "" {
-			var reason string
-			if err := tx.QueryRowContext(ctx, `SELECT reason FROM deferred_branch_receives WHERE event_id=?`, event.ID).Scan(&reason); err != nil {
-				return model.EnqueueRunResult{}, fmt.Errorf("read deferred receive: %w", err)
-			}
-			return model.EnqueueRunResult{Duplicate: true, DeferredReason: reason}, nil
+			return model.EnqueueRunResult{Duplicate: true}, nil
 		}
 		run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, runID))
 		if err != nil {
@@ -113,11 +109,6 @@ func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event mod
 			return model.EnqueueRunResult{}, fmt.Errorf("count duplicate receive supersessions: %w", err)
 		}
 		return model.EnqueueRunResult{Run: run, Duplicate: true, SupersededCount: supersededCount}, nil
-	}
-	if reason, err := s.deferBranchTx(ctx, tx, event, validatedRun); err != nil {
-		return model.EnqueueRunResult{}, err
-	} else if reason != "" {
-		return model.EnqueueRunResult{DeferredReason: reason}, nil
 	}
 	runID, err := randomID()
 	if err != nil {

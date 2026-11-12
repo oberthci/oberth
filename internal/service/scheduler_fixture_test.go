@@ -245,11 +245,6 @@ func newGroupFixture(t *testing.T, _ int) *groupFixture {
 	}
 	// These fixtures exercise admission mechanics with XL runs; XL takes a
 	// size grant since #1021.
-	for _, repository := range []model.Repository{terraform, exampleService} {
-		if _, err := database.SetSizeGrant(ctx, repository.ID, "admin@host", pipeline.XL); err != nil {
-			t.Fatal(err)
-		}
-	}
 	return &groupFixture{store: database, terraform: terraform, exampleService: exampleService, engine: engine, scheduler: scheduler, control: control, git: git}
 }
 

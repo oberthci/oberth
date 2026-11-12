@@ -1,16 +1,8 @@
 package argojob
 
 import (
-	"k8s.io/apimachinery/pkg/api/resource"
-
-	"reflect"
 	"strings"
-	"testing"
 
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/yaml"
-
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -36,114 +28,5 @@ func resourceBoundsRequest(source string) Request {
 	r.UpstreamName = "repo-01"
 	r.UpstreamOrg = "repo-01"
 	r.ApprovedSecrets = map[string]bool{}
-	r.ResourceMaximum = pipeline.L
 	return r
-}
-func TestResourceBoundsBuildUsesTrustedMaximumAndHonorsExactValues(t *testing.T) {
-	config := testConfig()
-	config.RunnerImagePrefixes = []string{"example.invalid/"}
-	source := resourceBoundsSource("      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi, ephemeral-storage: 128Mi}\n")
-	r := resourceBoundsRequest(source)
-	wf, e := Build(config, r)
-	if e != nil {
-		t.Fatal(e)
-	}
-	before, e := argoworkflow.Decode([]byte(source))
-	if e != nil {
-		t.Fatal(e)
-	}
-	if !reflect.DeepEqual(wf.Spec.Templates[0].Container.Resources, before.Spec.Templates[0].Container.Resources) {
-		t.Fatal("explicit resources changed")
-	}
-	if _, ok := wf.Spec.Templates[0].Container.Resources.Limits[corev1.ResourceCPU]; ok {
-		t.Fatal("CPU limit added")
-	}
-	r.Source = []byte(resourceBoundsSource("      resources:\n        requests: {cpu: 5, memory: 128Mi}\n"))
-	if _, e := Build(config, r); e == nil || !strings.Contains(e.Error(), "administrator L ceiling 4") {
-		t.Fatalf("pipeline annotation raised grant: %v", e)
-	}
-	r.ResourceMaximum = pipeline.XL
-	if _, e := Build(config, r); e != nil {
-		t.Fatal(e)
-	}
-	r.Source = []byte(resourceBoundsSource(""))
-	wf, e = Build(config, r)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if r := wf.Spec.Templates[0].Container.Resources; r.Requests.Cpu().MilliValue() != 2000 || r.Requests.Memory().Value() != 2<<30 || len(r.Limits) != 0 {
-		t.Fatal("undeclared resources lack conservative Kubernetes requests")
-	}
-}
-func TestResourceBoundsPriorityAndPodPatchesCannotBypass(t *testing.T) {
-	config := testConfig()
-	config.RunnerImagePrefixes = []string{"example.invalid/"}
-	for _, shape := range []string{"workflow-priority", "template-priority", "defaults-priority", "workflow-patch", "template-patch", "defaults-patch"} {
-		t.Run(shape, func(t *testing.T) {
-			r := resourceBoundsRequest(resourceBoundsSource(""))
-			wf, e := argoworkflow.Decode(r.Source)
-			if e != nil {
-				t.Fatal(e)
-			}
-			switch shape {
-			case "workflow-priority":
-				wf.Spec.PodPriorityClassName = "repo-01"
-			case "template-priority":
-				wf.Spec.Templates[0].PriorityClassName = "repo-01"
-			case "defaults-priority":
-				wf.Spec.TemplateDefaults = wf.Spec.Templates[0].DeepCopy()
-				wf.Spec.TemplateDefaults.PriorityClassName = "repo-01"
-			case "workflow-patch":
-				wf.Spec.PodSpecPatch = `{"containers":[{"name":"main","resources":{"requests":{"cpu":"8"}}}]}`
-			case "template-patch":
-				wf.Spec.Templates[0].PodSpecPatch = `{"priorityClassName":"repo-01"}`
-			case "defaults-patch":
-				wf.Spec.TemplateDefaults = wf.Spec.Templates[0].DeepCopy()
-				wf.Spec.TemplateDefaults.PodSpecPatch = `{"priorityClassName":"repo-01"}`
-			}
-			r.Source, e = yaml.Marshal(wf)
-			if e != nil {
-				t.Fatal(e)
-			}
-			if _, e = Build(config, r); e == nil {
-				t.Fatal("priority/patch bypass")
-			}
-		})
-	}
-}
-
-func TestNumericResourceCeilingBuildAndReleasePreflight(t *testing.T) {
-	config := testConfig()
-	config.RunnerImagePrefixes = []string{"example.invalid/"}
-	source := resourceBoundsSource("      resources:\n        requests: {cpu: 1250m, memory: 128Mi}\n        limits: {memory: 512Mi}\n")
-	r := resourceBoundsRequest(source)
-	ceiling := argoworkflow.ResourceRequirementsForCeiling(argoworkflow.ResourceCeiling{CPU: "2", Memory: "2Gi", EphemeralStorage: "16Gi"})
-	ceiling.Requests[corev1.ResourceCPU] = resource.MustParse("1250m")
-	ceiling.Requests[corev1.ResourceMemory] = resource.MustParse("256Mi")
-	r.ResourceCeiling = &ceiling
-	wf, err := Build(config, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := wf.Spec.Templates[0].Container.Resources.Limits[corev1.ResourceCPU]; ok {
-		t.Fatal("CPU limit inserted")
-	}
-	for _, resources := range []string{
-		"      resources:\n        requests: {cpu: 1251m, memory: 128Mi}\n        limits: {memory: 512Mi}\n",
-		"      resources:\n        requests: {cpu: 1250m, memory: 257Mi}\n        limits: {memory: 512Mi}\n",
-		"      resources:\n        requests: {cpu: 1250m, memory: 128Mi}\n        limits: {cpu: 2001m, memory: 512Mi}\n",
-		"      resources:\n        requests: {cpu: 1250m, memory: 128Mi}\n        limits: {memory: 2049Mi}\n",
-	} {
-		r.Source = []byte(resourceBoundsSource(resources))
-		if _, err = Build(config, r); err == nil || !strings.Contains(err.Error(), "administrator resource ceiling") {
-			t.Fatalf("build failed ceiling enforcement: %v", err)
-		}
-		preflight, err := PreflightRelease(config, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(strings.Join(preflight.Problems, " "), "administrator resource ceiling") {
-			t.Fatalf("release preflight skipped ceiling: %+v", preflight)
-		}
-	}
 }

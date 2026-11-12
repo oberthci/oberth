@@ -3,8 +3,6 @@ package model
 import (
 	"strings"
 	"time"
-
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // RunScheduling is an ephemeral read-only observation, never execution evidence.
@@ -12,14 +10,13 @@ import (
 // claim order: publication gates may let later runs start first.
 type RunScheduling struct {
 	// Requests is this run's peak pod requests, independent of admission budgets.
-	Requests      *argoworkflow.PodRequests `json:"requests,omitempty"`
-	ObservedAt    time.Time                 `json:"observed_at"`
-	AgeSeconds    int64                     `json:"age_seconds"`
-	State         string                    `json:"state"`
-	Message       string                    `json:"message"`
-	QueuePosition int64                     `json:"queue_position,omitempty"`
-	Admission     *AdmissionObservation     `json:"admission,omitempty"`
-	Execution     *ExecutionObservation     `json:"execution,omitempty"`
+	ObservedAt    time.Time             `json:"observed_at"`
+	AgeSeconds    int64                 `json:"age_seconds"`
+	State         string                `json:"state"`
+	Message       string                `json:"message"`
+	QueuePosition int64                 `json:"queue_position,omitempty"`
+	Admission     *AdmissionObservation `json:"admission,omitempty"`
+	Execution     *ExecutionObservation `json:"execution,omitempty"`
 }
 
 // AdmissionObservation is one run's place in the CPU admission gate. Used
@@ -27,7 +24,6 @@ type RunScheduling struct {
 // running Workflows, and Kubernetes places each Pod.
 type AdmissionObservation struct {
 	// Requests is the run's effective peak Pod request reservation.
-	Requests *argoworkflow.PodRequests `json:"requests,omitempty"`
 
 	State    string `json:"state"`
 	Position int    `json:"position,omitempty"`

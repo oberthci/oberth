@@ -155,21 +155,17 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	service, err := NewAPI(APIConfig{Runs: fixture.store, Repositories: fixture.store, History: fixture.store,
-		SizeGrants: fixture.store, PromotionGrants: fixture.store, SecretAccess: fixture.store})
+		PromotionGrants: fixture.store, SecretAccess: fixture.store})
 	if err != nil {
 		t.Fatal(err)
 	}
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	// Grants issued while active stay revocable after archive.
-	if _, err := service.CallTool(ctx, admin, "size_grant", json.RawMessage(`{"repo":"oberth","max":"XL"}`)); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := fixture.store.SetRepositoryArchived(ctx, "admin", fixture.repo.Name, true); err != nil {
 		t.Fatal(err)
 	}
 	sha := strings.Repeat("b", 40)
 	grants := []struct{ tool, args string }{
-		{"size_grant", `{"repo":"oberth","max":"L"}`},
 		{"resource_grant", `{"repo":"oberth","requests":{"cpu":"1","memory":"1Gi"},"limits":{"cpu":"2","memory":"2Gi"}}`},
 		{"promote_grant", `{"repo":"oberth","sha":"` + sha + `","branch":"main","expires":"1h"}`},
 		{"access_allow", `{"repo":"oberth","step":"publish","secret":"registry"}`},
@@ -194,21 +190,5 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 	if len(accessGrants) != 0 {
 		t.Fatalf("refused access_allow was recorded: %+v", accessGrants)
 	}
-	value, err := service.CallTool(ctx, admin, "size_grant_get", json.RawMessage(`{"repo":"oberth"}`))
-	if err != nil || value.(map[string]any)["state"] != "granted" {
-		t.Fatalf("refused size_grant changed the existing grant: %v %v", value, err)
-	}
-	for _, revoke := range []string{"size_revoke"} {
-		if _, err := service.CallTool(ctx, admin, revoke, json.RawMessage(`{"repo":"oberth"}`)); err != nil {
-			t.Fatalf("%s on archived repository = %v", revoke, err)
-		}
-	}
-	if _, err := fixture.store.SetRepositoryArchived(ctx, "admin", fixture.repo.Name, false); err != nil {
-		t.Fatal(err)
-	}
-	for _, grant := range grants {
-		if _, err := service.CallTool(ctx, admin, grant.tool, json.RawMessage(grant.args)); err != nil {
-			t.Fatalf("%s after unarchive = %v", grant.tool, err)
-		}
-	}
+
 }

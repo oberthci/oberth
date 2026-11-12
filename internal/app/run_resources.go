@@ -7,7 +7,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/measured"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
@@ -128,28 +127,4 @@ func (jobs *ArgoJobs) resourceRunSource(ctx context.Context, request service.Wor
 		return nil, e
 	}
 	return resolved, nil
-}
-
-// RunPodDemand shows effective CPU requests without binding a queued run.
-func (jobs *ArgoJobs) RunPodDemand(ctx context.Context, request service.WorkflowRequest) (*argoworkflow.PodDemand, error) {
-	if jobs.routes != nil {
-		config := jobs.routes.local.config
-		repo := model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
-		for _, target := range jobs.routes.definitions {
-			expected, _, ref, _, _, _, _ := target.Config.ExecutionPlacement.Identity()
-			if request.Run.RefKind == model.RefBranch && repo == expected && request.Run.Ref == ref {
-				config = target.Config
-			}
-		}
-		return jobs.routes.local.queuedCPU(ctx, request, config)
-	}
-	return jobs.queuedCPU(ctx, request, jobs.config)
-}
-func (jobs *ArgoJobs) queuedCPU(ctx context.Context, request service.WorkflowRequest, config argojob.Config) (*argoworkflow.PodDemand, error) {
-	resolved, err := jobs.resourceRunSource(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	demand, _ := argoworkflow.DeclaredCapabilityPeak(resolved.Workflow())
-	return demand, nil
 }

@@ -358,9 +358,6 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
-	if _, err := f.store.SizeGrant(ctx, f.repo.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("fixture unexpectedly has a size grant: %v", err)
-	}
 	for _, trigger := range []string{"branch", "tag", "release"} {
 		branch, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "priority-branch-" + trigger, Repository: f.repo, Branch: "release/" + trigger, SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: trigger})
 		if trigger == "tag" {

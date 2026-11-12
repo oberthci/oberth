@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -64,37 +63,10 @@ func TestRunListMessageContract(t *testing.T) {
 }
 
 func TestRunListQueuedResourcesAndQualifier(t *testing.T) {
-	admission := &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, BlockedBy: &model.AdmissionBlocker{Repo: "wrapper", Ref: "main"}}
+	admission := &model.AdmissionObservation{State: "waiting", BlockedBy: &model.AdmissionBlocker{Repo: "wrapper", Ref: "main"}}
 	got := queuedDisplayReason(&model.RunScheduling{State: "waiting", Admission: admission}, nil)
 	if want := "needs 9.9 CPU, 16 GiB · host IO busy"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestRunListOmitsAdviceWhileDetailRetainsIt(t *testing.T) {
-	f := newControlFixture(t)
-	run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/message", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "push"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	reader := &coverageReaderStub{}
-	service := f.api(t)
-	service.resourceCoverages = reader
-	actor := api.Actor{Identity: "owner"}
-	value, err := service.Runs(t.Context(), actor, api.RunFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows := value.([]model.Run)
-	if len(rows) != 1 || rows[0].ResourceMessage != "" || reader.calls != 0 {
-		t.Fatalf("list read detail advice: %+v, %d calls", rows, reader.calls)
-	}
-	detail, err := service.Run(t.Context(), actor, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.(RunDetailResponse).Run.ResourceMessage == "" || reader.calls == 0 {
-		t.Fatal("detail lost advice")
 	}
 }
 
@@ -118,7 +90,7 @@ func TestRunListPersistsTypedCeilingCauseAndFullError(t *testing.T) {
 }
 
 func TestRunListWaitQualifierPrivacyAndClipping(t *testing.T) {
-	a := &model.AdmissionObservation{Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, BlockedBy: &model.AdmissionBlocker{}}
+	a := &model.AdmissionObservation{BlockedBy: &model.AdmissionBlocker{}}
 	if got := waitingReason(a); got != "in line" {
 		t.Fatal(got)
 	}

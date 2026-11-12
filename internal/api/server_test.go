@@ -937,7 +937,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"uplink_invite", "uplink_cert", "client_renew", "uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss",
 		"access_list", "access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
-		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_cap_config", "release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_hold", "admission_release",
+		"release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_hold", "admission_release",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "branch_delete_many", "branch_deletion_list", "branch_deletion_resolve", "ref_delete_many", "receive_outbox", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list", "run_wait", "events_subscribe", "events_since", "events_wait", "sync_status",
 	}

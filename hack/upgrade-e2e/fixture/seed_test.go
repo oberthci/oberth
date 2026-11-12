@@ -37,9 +37,9 @@ func TestSeedPriorityRunsHaveRunnablePipelines(t *testing.T) {
 		if r.Status != model.RunQueued {
 			continue
 		}
-		file, trigger := "build.yaml", argoworkflow.RunTriggerBranch
+		file := "build.yaml"
 		if r.Release {
-			file, trigger = "release.yaml", argoworkflow.RunTriggerTag
+			file = "release.yaml"
 		}
 		// Decode the same document and resource contract the scheduler reads.
 		// This fixture is also compiled against earlier published releases.
@@ -50,10 +50,6 @@ func TestSeedPriorityRunsHaveRunnablePipelines(t *testing.T) {
 		workflow, err := argoworkflow.Decode(source)
 		if err != nil {
 			t.Fatal(err)
-		}
-		size, err := argoworkflow.DeclaredSizeFor(workflow, trigger)
-		if err != nil || string(size) != "M" {
-			t.Fatalf("%s pipeline size=%q err=%v", r.Priority, size, err)
 		}
 		if len(workflow.Spec.Templates) != 1 {
 			t.Fatalf("%s templates=%d, want one runnable entrypoint", r.Priority, len(workflow.Spec.Templates))

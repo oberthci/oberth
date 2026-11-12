@@ -333,7 +333,7 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 		if err != nil {
 			return err
 		}
-		capsule := map[string]any{"workflow": workflow, "resource_maximum": submission.ResourceMaximum, "resource_ceiling": submission.ResourceCeiling, "pod_demand": submission.PodDemand, "resource_fallback": submission.ResourceFallback, "capability": submission.Capability, "identities": submission.Identities, "source_digest": b.SourceDigest, "graph_digest": b.GraphDigest, "fragment_lock_digest": b.FragmentLockDigest, "policy_digest": b.PolicyDigest}
+		capsule := map[string]any{"workflow": workflow, "capability": submission.Capability, "identities": submission.Identities, "source_digest": b.SourceDigest, "graph_digest": b.GraphDigest, "fragment_lock_digest": b.FragmentLockDigest, "policy_digest": b.PolicyDigest}
 		if submission.DemandReceipt != nil {
 			capsule["demand_receipt"] = submission.DemandReceipt.Summary()
 		}

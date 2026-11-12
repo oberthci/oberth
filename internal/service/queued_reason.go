@@ -2,11 +2,9 @@ package service
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // queuedDisplayReason combines this run's pod requests with exactly one blocker.
@@ -35,11 +33,7 @@ func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.Admissi
 			reason = qualifier
 		}
 	}
-	requests := scheduling.Requests
-	if requests == nil && scheduling.Admission != nil {
-		requests = scheduling.Admission.Requests
-	}
-	return withQueueRequests(requests, reason)
+	return reason
 }
 
 func queuePositionReason(position int64) string {
@@ -50,19 +44,6 @@ func queuePositionReason(position int64) string {
 		return fmt.Sprintf("position %d", position)
 	}
 	return "in line"
-}
-
-func withQueueRequests(requests *argoworkflow.PodRequests, reason string) string {
-	return withQueueRequestsWhole(requests, displayFailureText(reason))
-}
-
-// withQueueRequestsWhole prefixes the requests without shortening reason.
-func withQueueRequestsWhole(requests *argoworkflow.PodRequests, reason string) string {
-	reason = strings.Join(strings.Fields(reason), " ")
-	if requests == nil {
-		return reason
-	}
-	return fmt.Sprintf("needs %s CPU, %s · %s", cpuText(requests.CPUMilli), bytesText(requests.MemoryBytes), reason)
 }
 
 func waitingReason(a *model.AdmissionObservation) (reason string) {
@@ -87,11 +68,6 @@ func queueBlockerReason(blocker *model.AdmissionBlocker) string {
 		return displayFailureText("behind " + blocker.Repo + "/" + blocker.Ref)
 	}
 	return ""
-}
-
-// cpuText renders millicores as cores: 12500 -> "12.5", 40000 -> "40".
-func cpuText(milli int64) string {
-	return strings.TrimSuffix(strings.TrimRight(strconv.FormatFloat(float64(milli)/1000, 'f', 1, 64), "0"), ".")
 }
 
 // bytesText renders bytes in the largest binary unit with one decimal.

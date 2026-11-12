@@ -58,6 +58,8 @@ const rcPatternSQL = `(SELECT pattern FROM queue_priority_patterns WHERE ref_kin
 const legacyBasePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN ` + overridePrioritySQL + ` WHEN ` + requestedPrioritySQL + ` IS NOT NULL THEN ` + requestedPrioritySQL + ` WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'high' ELSE 'normal' END`
 const legacyPriorityReasonSQL = `CASE WHEN trigger='promotion' THEN 'promotion run' WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + requestedPrioritySQL + ` IS NOT NULL THEN 'submission priority: ' || (SELECT reason FROM run_priority_requests WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END ELSE 'ordinary run' END`
 
+const liveAutomaticTagPrioritySQL = `(` + priorityTagReleaseSQL + ` AND ` + oldestWaitingTagSQL + `)`
+
 // The legacy expressions above are frozen inputs to shipped migration 39.
 // Live projections read only the four stored priority classes.
 const currentOverridePrioritySQL = `(SELECT priority FROM run_priority_overrides WHERE run_id=id)`
@@ -67,17 +69,17 @@ const basePrioritySQL = `CASE
  WHEN ` + currentOverridePrioritySQL + ` IS NOT NULL THEN ` + currentOverridePrioritySQL + `
  WHEN ` + currentRequestedPrioritySQL + `='low' THEN 'low'
  WHEN ` + currentRequestedPrioritySQL + `='high' THEN 'high'
- WHEN trigger='promotion' OR ` + automaticTagPrioritySQL + ` THEN 'promotion'
+ WHEN trigger='promotion' OR ` + liveAutomaticTagPrioritySQL + ` THEN 'promotion'
  WHEN ` + currentRequestedPrioritySQL + `='promotion' OR ` + rcPatternSQL + ` IS NOT NULL THEN 'promotion'
  ELSE 'standard' END`
 const priorityReasonSQL = `CASE
  WHEN ` + currentOverridePrioritySQL + ` IS NOT NULL THEN CASE WHEN ` + currentOverridePrioritySQL + `='high' THEN 'admin bump: ' ELSE 'admin priority: ' END || (SELECT reason FROM run_priority_overrides WHERE run_id=id)
  WHEN ` + currentRequestedPrioritySQL + ` IN ('low','high') THEN 'submission priority: ' || ` + currentRequestedPriorityReasonSQL + `
  WHEN trigger='promotion' THEN 'promotion run'
- WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `'
+ WHEN ` + liveAutomaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `'
  WHEN ` + currentRequestedPrioritySQL + `='promotion' THEN 'submission priority: ' || ` + currentRequestedPriorityReasonSQL + `
  WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + `
- WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END
+ WHEN ` + priorityTagReleaseSQL + ` THEN 'tag/release waiting behind an earlier tag of this repository'
  ELSE 'ordinary run' END`
 
 // Match model.Run.EffectivePriority exactly. Standard work may join promotion

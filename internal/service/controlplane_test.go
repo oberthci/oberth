@@ -1383,7 +1383,7 @@ func TestSchedulerDoesNotUseStaticSizeForWorkflowAdmission(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.jobs.createdCI) != 1 || fixture.jobs.createdCI[0].Run.ID != enqueued.ID || fixture.jobs.createdCI[0].Size != pipeline.M {
+	if len(fixture.jobs.createdCI) != 1 || fixture.jobs.createdCI[0].Run.ID != enqueued.ID {
 		t.Fatalf("created requests = %#v", fixture.jobs.createdCI)
 	}
 }

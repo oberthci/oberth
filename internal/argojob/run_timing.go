@@ -12,7 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type TimingRecorder interface {
@@ -44,23 +43,6 @@ func (controller *Controller) retainWorkflowTiming(ctx context.Context, workflow
 		return
 	}
 	value := model.WorkflowTiming{RunID: runID, Namespace: workflow.Namespace, Name: workflow.Name, UID: string(workflow.UID), SpecIdentity: identity, CreatedAt: workflow.CreationTimestamp.Time, Tasks: []model.TimingTask{}}
-	if coverage := argoworkflow.ResourceCoverage(workflow); coverage != nil {
-		value.Resources = &model.ResourceCoverage{Declared: coverage.Declared, Undeclared: coverage.Undeclared}
-	}
-	// Retain the sealed admission count, never re-size an already running
-	// workflow using a newer analyzer or changed source.
-	if demand, err := readPodDemand(workflow); err == nil && demand != nil {
-		if value.Resources == nil {
-			value.Resources = &model.ResourceCoverage{Unknown: true}
-		}
-		value.Resources.PodDemand = demand
-	}
-	if fallback, err := readResourceFallback(workflow); err == nil && fallback != "" {
-		if value.Resources == nil {
-			value.Resources = &model.ResourceCoverage{Unknown: true}
-		}
-		value.Resources.Fallback = fallback
-	}
 	var err error
 	value.Tasks, err = timingGraph(workflow)
 	if err != nil {

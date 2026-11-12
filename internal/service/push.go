@@ -380,9 +380,6 @@ func (ingestor *PushIngestor) ensureRepository(ctx context.Context, name string)
 }
 
 func pushRunResult(repository model.Repository, enqueued model.EnqueueRunResult) PushResult {
-	if enqueued.DeferredReason != "" {
-		return PushResult{Repository: repository, Duplicate: enqueued.Duplicate, Reason: enqueued.DeferredReason}
-	}
 	run := presentationRun(enqueued.Run)
 	return PushResult{Repository: repository, Run: &run, Cancellations: enqueued.Cancellations, SupersededCount: enqueued.SupersededCount, Duplicate: enqueued.Duplicate}
 }

@@ -264,9 +264,6 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 	if err == nil && result.Enqueued.ID != "" {
 		err = scheduler.AcceptEnqueue(ctx, result.Enqueued)
 	}
-	if err == nil && result.Enqueued.DeferredReason != "" {
-		scheduler.signalQueue()
-	}
 	return result, err
 }
 
@@ -473,7 +470,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			run.reservation.cancel()
 		}
 	}()
-	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, _ pipeline.Size) error {
+	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run) error {
 		reservation, err := scheduler.admission.adopt(run)
 		if err != nil {
 			return err
@@ -553,13 +550,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	for {
 		scheduler.dispatchProgress.Beat()
-		if err := scheduler.drainDeferredBranches(dispatchCtx, scheduler.awaitDispatchMutation); err != nil {
-			join()
-			if ctx.Err() != nil {
-				return nil
-			}
-			return err
-		}
 		priorityErr := scheduler.refreshPriorities(dispatchCtx)
 		if priorityErr != nil && !store.IsTransientLockError(priorityErr) {
 			join()
@@ -658,9 +648,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // focused tests. The long-running server normally uses Run.
 func (scheduler *Scheduler) ProcessNext(ctx context.Context) error {
 	if err := scheduler.requireMutation(ctx); err != nil {
-		return err
-	}
-	if err := scheduler.drainDeferredBranches(ctx, scheduler.requireMutation); err != nil {
 		return err
 	}
 	run, err := scheduler.database().ClaimNextRun(ctx)
@@ -823,8 +810,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	jobRequest := WorkflowRequest{WorkflowName: workflowName, Run: run, Repository: repository, SourceDir: sourceDir, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org()}
 	// Priority is advisory: an unavailable policy read withholds the boost,
 	// never the release's execution or publication.
-	_, priorityErr := scheduler.releasePriorityMaximum(ctx, run)
-	jobRequest.Size = pipeline.M // Historical wire metadata; it has no admission effect.
 	receipt, err := scheduler.pipelineDemandReceipt(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
@@ -832,14 +817,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	jobRequest.DemandReceipt = receipt
 	scheduler.admissionRequested(ctx, run.ID)
-	var requests *argoworkflow.PodRequests
-	if receipt != nil {
-		demand, _ := receipt.WorkflowPodDemand()
-		requests = queuePodRequests(demand)
-	}
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Requests: requests,
-		RefKind: run.RefKind, SHA: run.SHA, PriorityLookupFailed: priorityErr != nil,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref,
+		RefKind: run.RefKind, SHA: run.SHA,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already
@@ -1696,9 +1676,8 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 		result.FailureCause = displayFailureText(cause.RunFailureCause())
 	}
 	var admission *argoworkflow.AdmissionError
-	var ceiling *argoworkflow.ResourceCeilingError
 	retry := 0
-	if !errors.As(failure, &admission) && !errors.As(failure, &ceiling) {
+	if !errors.As(failure, &admission) {
 		retry = scheduler.infrastructureAutoRetry(run, result)
 	}
 	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryBudget: retry, Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
@@ -1730,7 +1709,7 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 // Absent Workflows and other run kinds keep their existing fallback. This
 // must run before completePendingCancellationsWithGate,
 // which would delete the K8s Jobs before their terminal state can be read.
-func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, require mutationRequirement, adopt func(model.Run, pipeline.Size) error) error {
+func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, require mutationRequirement, adopt func(model.Run) error) error {
 	if err := require(ctx); err != nil {
 		return err
 	}
@@ -1765,7 +1744,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		}
 		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
 			{
-				size, found, err := adopter.Adopt(ctx, run)
+				found, err := adopter.Adopt(ctx, run)
 				if errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired) {
 					if err := scheduler.failRetiredRun(ctx, run, require); err != nil {
 						return err
@@ -1779,7 +1758,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 					if adopt == nil {
 						return errors.New("service: adoption requires a worker dispatcher")
 					}
-					if err := adopt(run, size); err != nil {
+					if err := adopt(run); err != nil {
 						return adoptionFailure(adopter, run, err)
 					}
 					continue
@@ -1968,12 +1947,6 @@ func (scheduler *Scheduler) requireMutation(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", errMutationBlocked, err)
 	}
 	return nil
-}
-
-// RunSizeLimiter reports a repository's release priority policy record
-// (#1021); its size value is historical and no longer limits admission.
-type RunSizeLimiter interface {
-	MaxRunSize(context.Context, int64) (pipeline.Size, error)
 }
 
 // pipelineCredentialed reports whether the run's pipeline declares secret-store

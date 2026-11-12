@@ -58,7 +58,6 @@ type APIConfig struct {
 	IssueStaleAfter           time.Duration
 	IssueActiveStaleAfter     time.Duration
 	WorkflowCapabilities      WorkflowCapabilityStore
-	ResourceCoverages         ResourceCoverageReader
 	RunResources              RunResourceReader
 	ResourceDeclarations      ResourceDeclarationReader
 	Resources                 ResourceUsageReader
@@ -89,9 +88,7 @@ type APIConfig struct {
 	PromotionWorkspaceRoot    string
 	RemoveWorkspace           func(string) error
 	SecretAccess              SecretAccessStore
-	SizeGrants                SizeGrantStore
 	QueuePriorities           QueuePriorityStore
-	QueueCap                  QueueCapStore
 	ReleaseWIFOverrides       ReleaseWIFOverrideStore
 	ReleaseWIF                ReleaseWIFPolicy
 	SecretStoreVerifier       SecretStoreVerifier
@@ -137,14 +134,12 @@ type API struct {
 	deletionQueued            func()
 	receiveOutbox             ReceiveOutbox
 	receiveHandler            gitcache.ReceiveHandler
-	queueDemands              *queueDemandCache
 	listDiagnostics           *listDiagnosticCache
 	branchCounts              *branchCountCache
 	issueStaleAfter           time.Duration
 	issueActiveStaleAfter     time.Duration
 	issueObservedAt           time.Time
 	workflowCapabilities      WorkflowCapabilityStore
-	resourceCoverages         ResourceCoverageReader
 	runResources              RunResourceReader
 	resourceDeclarations      ResourceDeclarationReader
 	resources                 ResourceUsageReader
@@ -177,13 +172,10 @@ type API struct {
 	promotionWorkspaceRoot    string
 	workspaces                *workspaceLifecycle
 	secretAccess              SecretAccessStore
-	sizeGrants                SizeGrantStore
 	queuePriorities           QueuePriorityStore
-	queueCap                  QueueCapStore
 	releaseWIFOverrides       ReleaseWIFOverrideStore
 	releaseWIF                ReleaseWIFPolicy
 	releaseWIFMu              *sync.Mutex
-	deferredBranches          deferredBranchReader
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
 	repositoryArchiver        RepositoryArchiver
@@ -230,9 +222,6 @@ func NewAPI(config APIConfig) (*API, error) {
 		return nil, fmt.Errorf("%w: issue stale windows must be positive and active must not exceed general", ErrInvalidInput)
 	}
 
-	if config.ResourceCoverages == nil {
-		config.ResourceCoverages, _ = config.History.(ResourceCoverageReader)
-	}
 	if config.RunResources == nil {
 		config.RunResources, _ = config.History.(RunResourceReader)
 	}
@@ -276,10 +265,6 @@ func NewAPI(config APIConfig) (*API, error) {
 		promotionGrantMaxLifetime = promotionGrantHardCeiling
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
-	if config.QueueCap == nil {
-		config.QueueCap, _ = config.Runs.(QueueCapStore)
-	}
-	deferredBranches, _ := config.Runs.(deferredBranchReader)
 	created := &API{
 		branchPrune: config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
 		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
@@ -288,21 +273,16 @@ func NewAPI(config APIConfig) (*API, error) {
 		uplinkLifecycle:    config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
-		queueDemands:      &queueDemandCache{},
-		listDiagnostics:   &listDiagnosticCache{},
-		branchCounts:      &branchCountCache{},
-		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
-		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
+		listDiagnostics: &listDiagnosticCache{},
+		branchCounts:    &branchCountCache{},
+		resources:       config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		tags: config.Tags, enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
 		workflowCapabilities: config.WorkflowCapabilities,
-		sizeGrants:           config.SizeGrants,
 		queuePriorities:      config.QueuePriorities,
-		queueCap:             config.QueueCap,
-		deferredBranches:     deferredBranches,
 		secretStoreVerifier:  config.SecretStoreVerifier,
 		repositoryArchiver:   config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
@@ -466,8 +446,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	case "priority_grant", "priority_grant_list", "priority_grant_revoke":
 		return service.priorityGrantTool(ctx, actor, name, raw)
-	case "queue_cap_config":
-		return service.queueCapConfig(ctx, actor, raw)
 	case "release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset":
 		return service.releaseWIFTool(ctx, actor, name, raw)
 	case "queue_priority_config", "queue_priority_get", "run_priority":
@@ -970,29 +948,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		return service.workflowCapabilityTool(ctx, actor, name, arguments.Repo, nil)
 
-	case "resource_grant", "resource_revoke", "resource_grant_get":
-		var arguments struct {
-			Repo     string            `json:"repo"`
-			Requests map[string]string `json:"requests"`
-			Limits   map[string]string `json:"limits"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		resources, err := store.ParseResourceCeiling(arguments.Requests, arguments.Limits)
-		if err != nil && name == "resource_grant" {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
-		}
-		return service.resourceGrantTool(ctx, actor, name, arguments.Repo, resources)
-	case "size_grant", "size_revoke", "size_grant_get":
-		var arguments struct {
-			Repo string `json:"repo"`
-			Max  string `json:"max"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		return service.sizeGrantTool(ctx, actor, name, arguments.Repo, arguments.Max)
 	case "access_allow":
 		var arguments struct {
 			Repo   string `json:"repo"`
@@ -1719,10 +1674,6 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 		if err != nil {
 			return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
 		}
-		deferred, err := service.branchWithoutRun(ctx, repository, selector, sha)
-		if err != nil || deferred.Status == "queued" {
-			return deferred, err
-		}
 		run, runErr := service.runs.ResolveRun(ctx, repository.ID, sha)
 		if runErr == nil && sameOID(run.SHA, sha) {
 			return service.statusFromRun(ctx, repository, run, selector, actor)
@@ -1730,7 +1681,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 		if runErr != nil && !errors.Is(runErr, store.ErrNotFound) {
 			return StatusResponse{}, runErr
 		}
-		return service.branchWithoutRun(ctx, repository, selector, sha)
+		return noRunBranchStatus(repository, selector, sha), nil
 	}
 	repositories, err := service.runs.ListRepositories(ctx)
 	if err != nil {
@@ -1753,10 +1704,6 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	if matched.ID == 0 {
 		return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
 	}
-	deferred, err := service.branchWithoutRun(ctx, matched, selector, matchedSHA)
-	if err != nil || deferred.Status == "queued" {
-		return deferred, err
-	}
 	run, runErr := service.runs.ResolveRun(ctx, matched.ID, matchedSHA)
 	if runErr == nil && sameOID(run.SHA, matchedSHA) {
 		return service.statusFromRun(ctx, matched, run, selector, actor)
@@ -1764,7 +1711,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	if runErr != nil && !errors.Is(runErr, store.ErrNotFound) {
 		return StatusResponse{}, runErr
 	}
-	return service.branchWithoutRun(ctx, matched, selector, matchedSHA)
+	return noRunBranchStatus(matched, selector, matchedSHA), nil
 }
 
 // statusFromRun builds a full StatusResponse from an already-resolved
@@ -1893,7 +1840,6 @@ func runDisplayReason(run model.Run) string {
 func (service *API) presentationRun(ctx context.Context, run model.Run) (result model.Run) {
 	defer func() {
 		visible := []model.Run{result}
-		service.applyResourceMessages(ctx, visible)
 		result = visible[0]
 	}()
 	if run.SupersededBy == "" || service.history == nil {
@@ -1918,7 +1864,6 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 	})
 	if !ok {
 		plain := *service
-		plain.resourceCoverages = nil
 		plain.admission = nil
 		for i := range runs {
 			runs[i] = service.runAdmissionContext(ctx, plain.presentationRun(ctx, runs[i]), false)
@@ -3201,8 +3146,8 @@ func MutatingTool(name string) bool {
 	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke",
-		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
-		"admission_release", "admission_hold", "queue_cap_config", "admission_capacity_config", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
+
+		"admission_release", "admission_hold", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive", "branch_delete_many", "branch_deletion_resolve", "ref_delete_many", "receive_outbox",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",
@@ -3715,4 +3660,8 @@ func decodeTool(raw json.RawMessage, value any) error {
 		return fmt.Errorf("%w: tool arguments must contain one JSON object", ErrInvalidInput)
 	}
 	return nil
+}
+
+func noRunBranchStatus(repo model.Repository, ref, sha string) StatusResponse {
+	return StatusResponse{Repository: repo, Repo: repo.Name, Ref: ref, SHA: sha, Status: "no-runs", Stages: map[string]string{}}
 }

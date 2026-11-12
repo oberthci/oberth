@@ -49,7 +49,7 @@ func TestAdoptionBindsDurableRunAndSubmittedResources(t *testing.T) {
 			controller := &Controller{workflows: &staticWorkflowClient{workflow: candidate}, config: Config{Namespace: wf.Namespace}}
 			binding, found, err := controller.Adopt(context.Background(), request)
 			if test.name == "valid" {
-				if err != nil || !found || binding.Size != pipeline.M || binding.UID != wf.UID || binding.Identity != wf.Annotations[identityAnnotation] {
+				if err != nil || !found || binding.UID != wf.UID || binding.Identity != wf.Annotations[identityAnnotation] {
 					t.Fatalf("adoption = %#v, %v, %v", binding, found, err)
 				}
 			} else if err == nil || !errors.Is(err, ErrAdoptionRefused) {
@@ -175,7 +175,7 @@ func TestAdoptionAcceptsActualServerBuiltWorkflow(t *testing.T) {
 	workflow.UID = "server-assigned-uid"
 	controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: testConfig()}
 	binding, found, err := controller.Adopt(context.Background(), AdoptionRequest{Name: request.Name, RunID: request.RunID, Ref: request.Ref, SHA: request.SHA, Trigger: request.Trigger, RunTrigger: argoworkflow.RunTriggerBranch})
-	if err != nil || !found || binding.Size != pipeline.M {
+	if err != nil || !found {
 		t.Fatalf("built Workflow adoption = %#v %v %v", binding, found, err)
 	}
 }

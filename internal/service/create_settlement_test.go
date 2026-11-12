@@ -13,7 +13,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type pendingCreateJobs struct {
@@ -32,9 +31,9 @@ func (j *pendingCreateJobs) CreateWorkflow(ctx context.Context, req WorkflowRequ
 	}
 	return j.fakeJobs.CreateWorkflow(ctx, req)
 }
-func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (pipeline.Size, bool, error) {
+func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (bool, error) {
 	j.adoptCalls.Add(1)
-	return pipeline.M, false, nil
+	return false, nil
 }
 func (*pendingCreateJobs) WorkflowNamespace() string { return "test-argo" }
 func (j *pendingCreateJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
@@ -315,7 +314,7 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 	// The snapshot survives ordinary workspace removal and cannot be supplied by repo files.
 	run, _ := f.store.Run(t.Context(), source.ID)
 	saved, err := f.scheduler.readCreateAdmission(run)
-	if err != nil || saved.Size != pipeline.M {
+	if err != nil {
 		t.Fatalf("durable contract missing: %+v %v", saved, err)
 	}
 	_ = os.RemoveAll(f.scheduler.workspaceRoot + "/" + source.ID)

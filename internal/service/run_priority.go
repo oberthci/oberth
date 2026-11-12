@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // QueuePriorityStore is an installation-wide admin capability. It is not
@@ -188,23 +186,10 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Read grant state outside the gate as well. An unavailable release
-	// policy drops automatic urgency but must never fail a release or abort refresh.
-	lookupFailed := make(map[int64]bool)
-	seen := make(map[int64]bool)
-	for _, run := range runs {
-		if seen[run.RepoID] || run.RefKind != model.RefTag {
-			continue
-		}
-		seen[run.RepoID] = true
-		_, err := scheduler.releasePriorityMaximum(ctx, run)
-		lookupFailed[run.RepoID] = err != nil
-	}
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	for _, r := range gate.waiters {
 		if run, ok := runs[r.runID]; ok {
-			r.priorityLookupFailed = lookupFailed[run.RepoID]
 			r.priority, r.priorityReason = run.Priority, run.PriorityReason
 			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 			r.priorityAccepted, r.priorityAcceptedReason = run.PriorityAccepted, run.PriorityAcceptedReason
@@ -241,20 +226,6 @@ func (r *admissionReservation) priorityRun() model.Run {
 		}
 	}
 	return run
-}
-
-// releasePriorityMaximum is advisory: callers drop automatic urgency on error,
-// never fail the run. Log the cause without depending on an audit DB write.
-func (scheduler *Scheduler) releasePriorityMaximum(ctx context.Context, run model.Run) (pipeline.Size, error) {
-	if limiter, ok := scheduler.store.(RunSizeLimiter); ok && run.RefKind == model.RefTag {
-		maximum, err := limiter.MaxRunSize(ctx, run.RepoID)
-		if err != nil {
-			log.Printf("WARN: release priority withheld run=%s repo_id=%d reason=size_limit_unavailable error=%v", run.ID, run.RepoID, err)
-			return "", fmt.Errorf("read release priority size limit: %w", err)
-		}
-		return maximum, nil
-	}
-	return store.DefaultMaxRunSize, nil
 }
 
 // AdmissionPriority reports the gate's exact-checkout priority for run_get and

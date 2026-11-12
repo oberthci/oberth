@@ -7,7 +7,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type schedulingLanguageObserver struct{ observation *model.AdmissionObservation }
@@ -23,7 +22,7 @@ func TestSchedulingMessagesUsePlainWords(t *testing.T) {
 			{State: "preparing"},
 			{State: "admitted"},
 			{State: "waiting"},
-			{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}},
+			{State: "waiting"},
 			{State: "waiting"},
 			{State: "waiting", DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 512 << 20}},
 			{State: "waiting"},

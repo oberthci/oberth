@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func decodeAdmissible(t *testing.T, annotations map[string]string) *wfv1.Workflow {
@@ -17,18 +15,6 @@ func decodeAdmissible(t *testing.T, annotations map[string]string) *wfv1.Workflo
 	}
 	workflow.Annotations = annotations
 	return workflow
-}
-
-// Every run records size M; an invalid trigger is still refused.
-func TestDeclaredSizeForIsM(t *testing.T) {
-	for _, trigger := range RunTriggers() {
-		if got, err := DeclaredSizeFor(decodeAdmissible(t, nil), trigger); err != nil || got != pipeline.M {
-			t.Fatalf("%s = %s, %v", trigger, got, err)
-		}
-	}
-	if _, err := DeclaredSizeFor(decodeAdmissible(t, nil), RunTrigger("push")); err == nil {
-		t.Fatal("invalid trigger accepted")
-	}
 }
 
 const triggerGuardedDocument = `

@@ -73,7 +73,7 @@ func TestWorkflowCapabilityLoadedForSizingAndSubmission(t *testing.T) {
 func TestWorkflowCapabilityRecoveryUsesDurableRepository(t *testing.T) {
 	controller := &adoptingArgoControl{found: true}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
-	if _, _, err := jobs.Adopt(t.Context(), model.Run{ID: "run", RepoID: 7, WorkflowName: "workflow", Trigger: "branch"}); err != nil {
+	if _, err := jobs.Adopt(t.Context(), model.Run{ID: "run", RepoID: 7, WorkflowName: "workflow", Trigger: "branch"}); err != nil {
 		t.Fatal(err)
 	}
 	if controller.request.RepositoryID != 7 {

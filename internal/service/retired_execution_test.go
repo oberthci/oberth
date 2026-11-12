@@ -11,7 +11,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestRetiredWorkflowFailsRunWithoutStoppingOwner(t *testing.T) {
@@ -20,7 +19,7 @@ func TestRetiredWorkflowFailsRunWithoutStoppingOwner(t *testing.T) {
 	f.setWorkflowName(t, run.ID, "retired-workflow")
 	jobs := &adoptingJobs{adoptErr: fmt.Errorf("%w: %w", ErrAdoptionRefused, argoworkflow.ErrWorkflowCapabilityRequired)}
 	s := f.scheduler(t, jobs)
-	if err := s.reconcileStrandedRunsWithGate(t.Context(), s.requireMutation, func(model.Run, pipeline.Size) error { t.Fatal("retired workload adopted"); return nil }); err != nil {
+	if err := s.reconcileStrandedRunsWithGate(t.Context(), s.requireMutation, func(model.Run) error { t.Fatal("retired workload adopted"); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	got, err := f.store.Run(t.Context(), run.ID)

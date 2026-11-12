@@ -62,15 +62,6 @@ const (
 	TriggerParameter = "oberth-trigger"
 )
 
-// DeclaredSizeFor returns the size recorded with a run of this trigger. Size
-// annotations are removed, so every run records M.
-func DeclaredSizeFor(_ *wfv1.Workflow, trigger RunTrigger) (pipeline.Size, error) {
-	if !trigger.Valid() {
-		return "", fmt.Errorf("argoworkflow: run trigger %q is invalid", trigger)
-	}
-	return pipeline.M, nil
-}
-
 // admitTriggerParameter refuses a document-declared oberth-trigger parameter
 // that is anything but a plain default from the closed vocabulary. The server
 // replaces the value either way; refusing other shapes keeps a reader of the

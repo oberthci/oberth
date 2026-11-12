@@ -171,7 +171,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	fixture.service, err = NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
-		SecretAccess: database, SizeGrants: database, WorkflowCapabilities: database, PromotionGrants: database, RepositoryRemover: database,
+		SecretAccess: database, WorkflowCapabilities: database, PromotionGrants: database, RepositoryRemover: database,
 		Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database, AgentEvents: database,
 		MaximumWait: testTimeout(50 * time.Millisecond), PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
@@ -438,9 +438,7 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"promotion_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"promote_grant_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
-		{"size_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"workflow_capability_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
-		{"resource_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo, "pending": true}, map[string]any{"repo": missingRepo, "pending": true}},
 	}
 	for _, pair := range pairs {
@@ -691,10 +689,8 @@ var toolScopeBehaviour = map[string]string{
 	"repo_usage":    "lookup",
 	"run_resources": "lookup",
 
-	"size_grant_get":     "lookup",
-	"resource_grant_get": "lookup",
-	"system_status":      "filtered",
-	"sync":               "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
+	"system_status": "filtered",
+	"sync":          "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
 	"run_cancel":    "mutation",
 	"run_hold_list": "lookup",
 	"run_hold_exec": "mutation", "run_hold_patch": "mutation", "run_continue": "mutation", "run_hold_abandon": "mutation",
@@ -704,7 +700,6 @@ var toolScopeBehaviour = map[string]string{
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
 
-	"size_grant": "mutation", "size_revoke": "mutation", "resource_grant": "mutation", "resource_revoke": "mutation",
 	"priority_grant": "refused", "priority_grant_list": "refused", "priority_grant_revoke": "refused",
 	"workflow_capability_grant": "mutation", "workflow_capability_revoke": "mutation", "workflow_capability_get": "lookup",
 	"queue_cap_config": "refused", "release_wif_list": "refused", "release_wif_grant": "refused", "release_wif_revoke": "refused", "release_wif_reset": "refused",

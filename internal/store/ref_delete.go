@@ -27,11 +27,5 @@ func cancelDeletedBranchTx(ctx context.Context, tx *sql.Tx, repoID int64, ref st
  WHERE `+deletedBranchRuns, refDeletedReason, refDeletedReason, now, now, repoID, ref); err != nil {
 		return fmt.Errorf("cancel deleted ref runs: %w", err)
 	}
-	// Retain deferred receipts for idempotent replay, but never drain them into
-	// new runs after their ref was deleted. New receives get their own receipt.
-	if _, err := tx.ExecContext(ctx, `UPDATE deferred_branch_receives SET reason=? WHERE event_id IN (
- SELECT id FROM receive_events WHERE repo_id=? AND ref_kind='branch' AND ref=? AND run_id='')`, refDeletedReason, repoID, ref); err != nil {
-		return fmt.Errorf("cancel deleted ref backlog: %w", err)
-	}
 	return nil
 }

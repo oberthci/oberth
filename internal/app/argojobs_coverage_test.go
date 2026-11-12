@@ -1053,48 +1053,6 @@ func TestNoPipelineError_UnknownTrigger(t *testing.T) {
 // PipelineSize edge cases
 // ---------------------------------------------------------------------------
 
-func TestPipelineSize_ReleaseFile(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	oberthDir := filepath.Join(dir, ".oberth")
-	if err := os.MkdirAll(oberthDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	workflow := `apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-metadata:
-  annotations:
-    example.com/tier: L
-spec:
-  entrypoint: main
-  templates:
-    - name: main
-      steps:
-        - - name: publish
-            template: echo
-    - name: echo
-      container:
-        image: alpine:3.20
-        command: ["echo", "release"]
-`
-	if err := os.WriteFile(filepath.Join(oberthDir, "release.yaml"), []byte(workflow), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	size, err := jobs.PipelineSize(context.Background(), service.WorkflowRequest{
-		Run:        model.Run{Ref: "refs/tags/v1.0.0", Release: true},
-		Repository: model.Repository{Name: "test-repo"},
-		SourceDir:  dir,
-	})
-	if err != nil {
-		t.Fatalf("PipelineSize: %v", err)
-	}
-	if size != pipeline.M {
-		t.Fatalf("size = %s, want M", size)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // readArgoSource edge cases
 // ---------------------------------------------------------------------------

@@ -606,13 +606,6 @@ type Request struct {
 	BranchAuthority *workflowpolicy.BranchAuthority `json:"-"`
 	Capability      *argoworkflow.Capability
 	DemandReceipt   *argoworkflow.DemandReceipt
-	// ResourceMaximum supports legacy reconstruction and callers without numeric grants.
-	ResourceMaximum pipeline.Size
-	// ResourceCeiling is the fresh server-owned repository grant snapshot.
-	// Workflow annotations and usage history cannot select or raise it.
-	ResourceCeiling  *corev1.ResourceRequirements
-	ResourceFallback model.ResourceAdmissionFallback
-	PodDemand        *argoworkflow.PodDemand
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
 	// Only recovery of an already-submitted workflow can omit current defaults.
@@ -776,26 +769,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.Capability != nil && request.RepositoryID <= 0 {
 		return nil, errors.New("argojob: workflow capability requires a durable repository binding")
 	}
-	delete(workflow.Annotations, podDemandAnnotation)
-	delete(workflow.Annotations, resourceFallbackAnnotation)
-	if request.PodDemand != nil {
-		peak, e := argoworkflow.DeclaredPodPeak(workflow)
-		if request.Capability != nil {
-			peak, e = argoworkflow.DeclaredCapabilityPeak(workflow)
-		}
-		if e != nil || peak == nil || !peak.Equal(*request.PodDemand) {
-			return nil, errors.New("argojob: declared resource graph changed after reservation")
-		}
-	}
-	if request.ResourceCeiling != nil {
-		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
-			return nil, err
-		}
-	} else if request.ResourceMaximum != "" {
-		if err := argoworkflow.ValidateResourceCeilingWithCapability(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
-			return nil, err
-		}
-	}
 	fragmentLock := resolved.Lock()
 	wifLeaves, err := authorizeReleaseWIF(workflow, config, request)
 	if err != nil {
@@ -870,17 +843,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		identity,
 	); err != nil {
 		return nil, err
-	}
-	// Admission and receipt verification inspect the immutable authored graph.
-	// Default only afterwards, before any server-owned helper is injected.
-	if request.ResourceCeiling != nil {
-		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
-			return nil, err
-		}
-	} else if request.ResourceMaximum != "" {
-		if err := argoworkflow.ValidateResourceCeilingWithCapability(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
-			return nil, err
-		}
 	}
 	// Reject duplicate normalized (burn, step) keys before the Workflow is
 	// created. The planner's PlannedSteps performs the same check for `oberth
@@ -1006,10 +968,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 	if err := injectAssistHolds(workflow, config.Assist); err != nil {
-		return nil, err
-	}
-	stampPodDemand(workflow, request.PodDemand)
-	if err := stampResourceFallback(workflow, request.ResourceFallback); err != nil {
 		return nil, err
 	}
 

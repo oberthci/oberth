@@ -11,12 +11,9 @@ import (
 )
 
 // Cancelled receipts remain replayable without hiding a recreated branch.
-func TestReviewDeletedDeferredReceiptMustNotHideRecreatedRun(t *testing.T) {
+func TestDeletedReceiveReplayMustNotHideRecreatedRun(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
-	if _, err := f.store.SetQueueCap(ctx, "admin", 1); err != nil {
-		t.Fatal(err)
-	}
 	occupant, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "occupant", Repository: f.repo, Branch: "feature/occupant", SHA: strings.Repeat("b", 40), Actor: "dev"})
 	if err != nil {
 		t.Fatal(err)
@@ -29,14 +26,11 @@ func TestReviewDeletedDeferredReceiptMustNotHideRecreatedRun(t *testing.T) {
 	}
 	push := BranchPush{EventID: "deferred", Repository: f.repo.Name, Branch: "feature/recreated", NewOID: sha, Actor: "dev"}
 	deferred, err := ingestor.Branch(ctx, push)
-	if err != nil || deferred.Run != nil || !strings.Contains(deferred.Reason, "deferred") {
+	if err != nil || deferred.Run == nil {
 		t.Fatalf("defer: %+v %v", deferred, err)
 	}
 	_, err = ingestor.Branch(ctx, BranchPush{EventID: "delete", Repository: f.repo.Name, Branch: push.Branch, OldOID: sha, NewOID: strings.Repeat("0", 40), Actor: "dev"})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = f.store.SetQueueCap(ctx, "admin", 0); err != nil {
 		t.Fatal(err)
 	}
 	push.EventID = "re-push"
@@ -52,10 +46,6 @@ func TestReviewDeletedDeferredReceiptMustNotHideRecreatedRun(t *testing.T) {
 	}
 	checkStatus := func(stage, expectedStatus string) {
 		t.Helper()
-		cap, err := f.store.QueueCap(ctx)
-		if err != nil || cap.Deferred != 0 {
-			t.Fatalf("active backlog: %+v %v", cap, err)
-		}
 		resolved, err := f.store.ResolveRun(ctx, f.repo.ID, sha)
 		if err != nil || resolved.ID != fresh.Run.ID {
 			t.Fatalf("actual run missing: %+v %v", resolved, err)
@@ -66,7 +56,7 @@ func TestReviewDeletedDeferredReceiptMustNotHideRecreatedRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			shown := value.(StatusResponse)
-			t.Logf("%s actor=%s actual_run=%s actual_status=%s cap_deferred=%d shown_run=%q shown_status=%s shown_reason=%q", stage, actor.Identity, resolved.ID, resolved.Status, cap.Deferred, shown.RunID, shown.Status, shown.DisplayReason)
+			t.Logf("%s actor=%s actual_run=%s actual_status=%s shown_run=%q shown_status=%s shown_reason=%q", stage, actor.Identity, resolved.ID, resolved.Status, shown.RunID, shown.Status, shown.DisplayReason)
 			if shown.RunID != fresh.Run.ID || shown.Status != expectedStatus {
 				t.Errorf("%s: cancelled deferred receipt hides new run for %s", stage, actor.Identity)
 			}
@@ -85,7 +75,7 @@ func TestReviewDeletedDeferredReceiptMustNotHideRecreatedRun(t *testing.T) {
 	checkStatus("new run passed", "delivered")
 	push.EventID = "deferred"
 	replay, err := ingestor.Branch(ctx, push)
-	if err != nil || !replay.Duplicate || replay.Run != nil || replay.Reason != "ref deleted" {
+	if err != nil || !replay.Duplicate || replay.Run == nil || replay.Run.ID != deferred.Run.ID || replay.Run.Status != model.RunInterrupted {
 		t.Fatalf("cancelled receipt lost replay identity: %+v %v", replay, err)
 	}
 	checkStatus("after old receive replay", "delivered")

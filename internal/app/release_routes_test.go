@@ -33,8 +33,8 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	writePipeline(t, dir, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "example.com/tier: M", "example.com/tier: XL"))
 	jobs := &ArgoJobs{config: argojob.Config{ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}}
 	request := service.WorkflowRequest{SourceDir: dir, UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{Release: true, RefKind: model.RefTag, Ref: "deploy-1"}}
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
-		t.Fatalf("routed size=%s err=%v", size, err)
+	if size, err := jobs.PipelineDemandReceipt(t.Context(), request); err != nil {
+		t.Fatalf("routed size=%v err=%v", size, err)
 	}
 	if plan, err := jobs.PlannedSteps(t.Context(), request); err != nil || len(plan) != 1 || plan[0].Step != "deploy" {
 		t.Fatalf("plan=%+v err=%v", plan, err)
@@ -46,15 +46,15 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 		t.Fatalf("credentialed=%v err=%v", credentialed, err)
 	}
 	request.Run.Ref = "v1"
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
-		t.Fatalf("default release changed: %s %v", size, err)
+	if size, err := jobs.PipelineDemandReceipt(t.Context(), request); err != nil {
+		t.Fatalf("default release changed: %v %v", size, err)
 	}
 	request.Run.Release = false
 	request.Run.Trigger = "branch"
 	request.Run.Ref = "deploy-1"
 	request.Run.RefKind = model.RefBranch
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
-		t.Fatalf("branch read release route: %s %v", size, err)
+	if size, err := jobs.PipelineDemandReceipt(t.Context(), request); err != nil {
+		t.Fatalf("branch read release route: %v %v", size, err)
 	}
 	request.Run.Release = true
 	request.Run.Ref = "deploy-1"
@@ -63,7 +63,7 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, ".oberth", "deploy.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := jobs.PipelineSize(t.Context(), request); err == nil || !strings.Contains(err.Error(), ".oberth/deploy.yaml") {
+	if _, err := jobs.PipelineDemandReceipt(t.Context(), request); err == nil || !strings.Contains(err.Error(), ".oberth/deploy.yaml") {
 		t.Fatalf("missing route silently fell back: %v", err)
 	}
 }
@@ -281,8 +281,8 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 			t.Fatalf("unexpected durable tag: %+v", run)
 		}
 		request := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: "github", UpstreamOrg: "org", SourceDir: work, WorkflowName: "push-" + tc.tag}
-		if size, err := jobs.PipelineSize(ctx, request); err != nil || size != tc.size {
-			t.Fatalf("%s size=%s err=%v", tc.tag, size, err)
+		if size, err := jobs.PipelineDemandReceipt(ctx, request); err != nil || size == nil {
+			t.Fatalf("%v size=%v err=%v", tc.tag, size, err)
 		}
 		if tc.release {
 			err = jobs.CreateRelease(ctx, request)
@@ -296,7 +296,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 			t.Fatalf("wrong submission: %+v", control.request)
 		}
 		request.Run.RefKind = model.RefBranch
-		if _, err := jobs.PipelineSize(ctx, request); tc.release && err == nil {
+		if _, err := jobs.PipelineDemandReceipt(ctx, request); tc.release && err == nil {
 			t.Fatal("branch kind accepted for release routing")
 		}
 	}

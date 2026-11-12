@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestStartupAdoptsNonReleaseTagWorkflow(t *testing.T) {
@@ -27,7 +26,7 @@ func TestStartupAdoptsNonReleaseTagWorkflow(t *testing.T) {
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 	scheduler := fixture.scheduler(t, jobs)
 	adopted := ""
-	err = scheduler.reconcileStrandedRunsWithGate(t.Context(), func(context.Context) error { return nil }, func(current model.Run, _ pipeline.Size) error { adopted = current.ID; return nil })
+	err = scheduler.reconcileStrandedRunsWithGate(t.Context(), func(context.Context) error { return nil }, func(current model.Run) error { adopted = current.ID; return nil })
 	if err != nil || adopted != run.ID || len(jobs.deleted) != 0 {
 		t.Fatalf("tag was not adopted: id=%s deletes=%v err=%v", adopted, jobs.deleted, err)
 	}

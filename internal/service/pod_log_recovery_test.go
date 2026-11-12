@@ -15,7 +15,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type journalRecoveryJobs struct {
@@ -30,8 +29,8 @@ type journalRecoveryJobs struct {
 	observed       bool
 }
 
-func (*journalRecoveryJobs) Adopt(context.Context, model.Run) (pipeline.Size, bool, error) {
-	return pipeline.M, true, nil
+func (*journalRecoveryJobs) Adopt(context.Context, model.Run) (bool, error) {
+	return true, nil
 }
 func (*journalRecoveryJobs) WorkflowNamespace() string { return "oberth-argo" }
 func (j *journalRecoveryJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {

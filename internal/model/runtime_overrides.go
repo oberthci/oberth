@@ -32,16 +32,6 @@ type ReleaseWIFOverrideSpec struct {
 	Effective         json.RawMessage
 }
 
-// AdmissionCapacityOverride is the runtime run ceiling a v0.19 or older
-// server stored. Since v0.20.0 it has no effect: Argo parallelism bounds
-// running Workflows.
-type AdmissionCapacityOverride struct {
-	MaxConcurrentJobs int       `json:"max_concurrent_jobs"`
-	Reason            string    `json:"reason"`
-	Actor             string    `json:"actor"`
-	UpdatedAt         time.Time `json:"updated_at"`
-}
-
 // ReleaseWIFOverrideStatus reports a stored grant the server could not apply.
 type ReleaseWIFOverrideStatus struct {
 	Repo  string `json:"repo"`

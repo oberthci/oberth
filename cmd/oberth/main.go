@@ -81,7 +81,7 @@ func cliFailureExitCode(err error) int {
 	return 1
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, unseal, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, client, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, unseal, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, admission, release-wif, secretstore, mcp, client, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -148,8 +148,6 @@ Commands:
   status        Show server status
   uplink        Manage uplink identities
   access        Manage secret access grants
-  resource      Manage repository CPU/memory request and limit ceilings
-  size          Manage automatic tag priority (size grants; sizes do not affect admission)
   admission     Show the server's admission reservations, release a stale one, or set runtime capacity
   release-wif   Grant, revoke or reset runtime release WIF repository capabilities
   secretstore   Verify and inspect the secret store
@@ -213,10 +211,6 @@ Commands:
 		return runUplink(ctx, arguments[1:], input, output)
 	case "access":
 		return runAccess(ctx, arguments[1:], output)
-	case "resource":
-		return runResourceGrant(ctx, arguments[1:], output)
-	case "size":
-		return runSizeGrant(ctx, arguments[1:], output)
 	case "admission":
 		return runAdmission(ctx, arguments[1:], output)
 	case "release-wif":

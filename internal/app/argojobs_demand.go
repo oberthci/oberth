@@ -3,9 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -66,45 +64,4 @@ func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service
 		}
 	}
 	return resolved.Receipt(policy)
-}
-
-// Restore the server-owned submission binding, never a fresh source analysis.
-func (jobs *ArgoJobs) AdoptedPodDemand(ctx context.Context, run model.Run) (*argoworkflow.PodDemand, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
-		if err != nil {
-			return nil, err
-		}
-		return child.AdoptedPodDemand(ctx, run)
-	}
-	jobs.mu.Lock()
-	defer jobs.mu.Unlock()
-	intent, ok := jobs.intents[run.WorkflowName]
-	if !ok || intent.runID != run.ID || intent.adoption == nil {
-		return nil, fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
-	}
-	if !intent.adoption.Pods.Valid() {
-		return nil, nil
-	}
-	d := intent.adoption.Pods
-	return &d, nil
-}
-
-func (jobs *ArgoJobs) AdoptedResourceFallback(run model.Run) (model.ResourceAdmissionFallback, error) {
-	if jobs.routes != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
-		if err != nil {
-			return "", err
-		}
-		return child.AdoptedResourceFallback(run)
-	}
-	jobs.mu.Lock()
-	defer jobs.mu.Unlock()
-	intent, ok := jobs.intents[run.WorkflowName]
-	if !ok || intent.runID != run.ID || intent.adoption == nil {
-		return "", fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
-	}
-	return intent.adoption.Fallback, nil
 }
