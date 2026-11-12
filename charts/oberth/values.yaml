@@ -427,13 +427,8 @@ argo:
   # that specific step. Wildcard grants keep the per-repo identity.
   perStepIdentities: []
 
-  # Ceiling on a document's own activeDeadlineSeconds, and how long a finished  workflowTTL: 3600
-  # Deadline of a document that declares no spec.activeDeadlineSeconds, still
-  # capped by workflowTimeout and repoWorkflowTimeouts.
-  defaultWorkflowTimeout: 30m
-  # Per-repository deadline caps below workflowTimeout, keyed by
-  # upstream/org/repo, e.g. {"codeberg/example/app": "45m"}.
-  repoWorkflowTimeouts: {}
+  # Finished Workflow retention, independent of authored execution deadlines.
+  workflowTTL: 3600
 
   # Storage class for the per-run source volume the server creates in this
   # namespace. A Pod may only mount claims in its own namespace, so a pipeline

@@ -129,7 +129,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		result.TargetVersion = DefaultArgoChartVersion
 	}
 
-	if !exists && cfg.ArgoParallelism == nil && cfg.ArgoNamespaceParallelism == nil {
+	if !exists && cfg.ArgoParallelism == nil {
 		// A fresh controller gets a run ceiling sized to the cluster instead of
 		// none: on a single node a push storm otherwise starts every run at
 		// once. An explicit --argo-parallelism (0 is no limit) always wins.
@@ -149,6 +149,11 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 			_, _ = fmt.Fprintln(deps.Output, "The argo-workflows release runs the nonroot controller profile; the limits go into its profile ConfigMap.")
 		}
 	}
+	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "argo-workflows", ns, "controller", exists)
+	if err != nil {
+		return result, err
+	}
+	defer cleanupDependency()
 	profileFile, profile, cleanup, err := prepareNonrootArgoValues(ctx, cfg, deps, exists, result.InstalledVersion)
 	if err != nil {
 		return result, err
@@ -160,7 +165,12 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		return result, err
 	}
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
-	if (profileFile != "" || argoLimitsRequested(cfg) || retiredValues) && action == actionSkip {
+	if (profileFile != "" || argoLimitsRequested(cfg) || retiredValues || dependencyChanged) && action == actionSkip {
+		if canonicalChartVersion(result.InstalledVersion) == "" {
+			return result, errors.New("cannot reconcile existing Argo values without a known installed chart version")
+		}
+		cfg.ArgoChartVersion = result.InstalledVersion
+		result.TargetVersion = result.InstalledVersion
 		action = actionUpgrade
 	}
 	switch action {
@@ -179,7 +189,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		_, _ = fmt.Fprintln(deps.Output, "Installing Argo Workflows...")
 	}
 
-	args := ArgoHelmArgs(cfg)
+	args := withDependencyValues(ArgoHelmArgs(cfg), dependencyFile)
 	if profileFile != "" {
 		args = append(args, "--values", profileFile)
 	}
@@ -219,9 +229,6 @@ func ArgoHelmArgs(cfg Config) []string {
 		"-n", ns, "--create-namespace",
 		"--set", "singleNamespace=true",
 		"--set", "server.enabled=false",
-		"--set-string", "controller.priorityClassName=" + controlPlanePriority(cfg),
-		"--set-string", "controller.resources.requests.cpu=100m",
-		"--set-string", "controller.resources.requests.memory=128Mi",
 		"--set", "createAggregateRoles=false",
 		"--set", "controller.clusterWorkflowTemplates.enabled=false",
 		"--set", "workflow.serviceAccount.create=false",

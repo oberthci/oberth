@@ -159,8 +159,7 @@ type Config struct {
 	// ArgoParallelism and ArgoNamespaceParallelism set the managed Argo
 	// controller's workflow limits (controller.parallelism and
 	// controller.namespaceParallelism); nil keeps the release's value.
-	ArgoParallelism          *int
-	ArgoNamespaceParallelism *int
+	ArgoParallelism *int
 
 	// argoProfile is the nonroot controller profile the Argo phase rendered
 	// (#1517): the built-in config plus the effective controller limits.
@@ -1249,8 +1248,13 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		result.CACertPEM = caPEM
 	}
 
+	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "openbao", ns, "server", exists)
+	if err != nil {
+		return result, err
+	}
+	defer cleanupDependency()
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
-	if action == actionSkip && requiresTLSMigration {
+	if action == actionSkip && (requiresTLSMigration || dependencyChanged) {
 		// Listener TLS is a values-only reconciliation. Pin that reconciliation
 		// to the installed chart so an older installer cannot downgrade a newer
 		// OpenBao release while hardening its transport.
@@ -1280,7 +1284,7 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		_, _ = fmt.Fprintln(deps.Output, "Installing OpenBao...")
 	}
 
-	if _, err := deps.RunHelm(ctx, OpenBaoHelmArgs(cfg)); err != nil {
+	if _, err := deps.RunHelm(ctx, withDependencyValues(OpenBaoHelmArgs(cfg), dependencyFile)); err != nil {
 		return result, fmt.Errorf("helm install OpenBao: %w", err)
 	}
 	if requiresTLSMigration {
@@ -1321,9 +1325,6 @@ func OpenBaoHelmArgs(cfg Config) []string {
 		// blocks any second OpenBao release on the same cluster. Off in both
 		// modes.
 		"--set", "injector.enabled=false",
-		"--set-string", "server.priorityClassName=" + controlPlanePriority(cfg),
-		"--set-string", "server.resources.requests.cpu=100m",
-		"--set-string", "server.resources.requests.memory=128Mi",
 	}
 	if cfg.InstallSecretStoreDev {
 		args = append(args,
@@ -2257,7 +2258,7 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 	if pipelineNamespace == "" {
 		pipelineNamespace = DefaultArgoNamespace
 	}
-	_, _ = fmt.Fprintf(w, "\n     Before dependency Pods, establish Helm-owned scheduling classes %s (value %d, PreemptLowerPriority) and %s (value %d, Never).\n\n", controlPlanePriority(cfg), podpriority.ControlPlaneValue, podpriority.PipelineClass(pipelineNamespace), podpriority.PipelineValue)
+	_, _ = fmt.Fprintf(w, "\n     Establish Helm-owned classes for the Oberth server and helper Pods %s (value %d, PreemptLowerPriority) and %s (value %d, Never).\n\n", controlPlanePriority(cfg), podpriority.ControlPlaneValue, podpriority.PipelineClass(pipelineNamespace), podpriority.PipelineValue)
 	openbaoAddr := ""
 	var rekor RekorResult
 	if cfg.wantsSecretStore() {

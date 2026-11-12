@@ -59,14 +59,11 @@ func storedParallelism(values map[string]any, key string) int {
 // effectiveNonrootProfile is the profile for this run's limits: a requested
 // flag wins, otherwise the stored release value, otherwise none.
 func effectiveNonrootProfile(cfg Config, stored map[string]any) (argoworkflow.NonrootProfile, error) {
-	parallelism, namespaced := storedParallelism(stored, "parallelism"), storedParallelism(stored, "namespaceParallelism")
+	parallelism := storedParallelism(stored, "parallelism")
 	if cfg.ArgoParallelism != nil {
 		parallelism = *cfg.ArgoParallelism
 	}
-	if cfg.ArgoNamespaceParallelism != nil {
-		namespaced = *cfg.ArgoNamespaceParallelism
-	}
-	return argoworkflow.NewNonrootProfile(parallelism, namespaced)
+	return argoworkflow.NewNonrootProfile(parallelism, 0)
 }
 
 // nonrootProfile is the profile ArgoHelmArgs renders: the one the Argo

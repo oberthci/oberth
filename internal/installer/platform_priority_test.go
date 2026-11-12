@@ -102,11 +102,11 @@ func TestPriorityBootstrapRefusesConflictsAndReadFailures(t *testing.T) {
 	}
 }
 
-func renderDependencyPriority(t *testing.T, cfg Config, chart string, installerArgs []string, kind, expected string) {
+func renderDependencyPods(t *testing.T, cfg Config, chart string, installerArgs []string, kind, expected string) {
 	t.Helper()
 	args := []string{"template", "dependency", chart}
 	for i := 0; i+1 < len(installerArgs); i++ {
-		if slices.Contains([]string{"--set", "--set-string", "--set-json"}, installerArgs[i]) {
+		if slices.Contains([]string{"--set", "--set-string", "--set-json", "--values"}, installerArgs[i]) {
 			args = append(args, installerArgs[i], installerArgs[i+1])
 			i++
 		}
@@ -130,8 +130,8 @@ func renderDependencyPriority(t *testing.T, cfg Config, chart string, installerA
 		if object.Kind == kind {
 			found = true
 			for _, c := range object.Spec.Template.Spec.Containers {
-				if c.Resources.Requests.Cpu().MilliValue() != 100 || c.Resources.Requests.Memory().Value() != 128<<20 {
-					t.Fatalf("%s lacks dependency CPU/memory reservations: %+v", kind, c.Resources)
+				if len(c.Resources.Requests) != 0 {
+					t.Fatalf("%s retains managed requests: %+v", kind, c.Resources)
 				}
 			}
 			if object.Spec.Template.Spec.PriorityClassName != expected {
@@ -144,13 +144,13 @@ func renderDependencyPriority(t *testing.T, cfg Config, chart string, installerA
 	}
 }
 
-func TestManagedDependenciesUseSharedControlPlanePriority(t *testing.T) {
+func TestManagedDependenciesUseUpstreamPodDefaults(t *testing.T) {
 	for _, namespace := range []string{"", "control-a"} {
 		cfg := Config{Namespace: namespace, InstallSecretStoreDev: true}
-		class := controlPlanePriority(cfg)
-		renderDependencyPriority(t, cfg, "testdata/argo-workflows-1.0.24.tgz", ArgoHelmArgs(cfg), "Deployment", class)
-		renderDependencyPriority(t, cfg, "testdata/openbao-0.28.6.tgz", OpenBaoHelmArgs(cfg), "StatefulSet", class)
+		class := ""
+		renderDependencyPods(t, cfg, "testdata/argo-workflows-1.0.24.tgz", ArgoHelmArgs(cfg), "Deployment", class)
+		renderDependencyPods(t, cfg, "testdata/openbao-0.28.6.tgz", OpenBaoHelmArgs(cfg), "StatefulSet", class)
 		cfg.InstallSecretStoreDev = false
-		renderDependencyPriority(t, cfg, "testdata/openbao-0.28.6.tgz", OpenBaoHelmArgs(cfg), "StatefulSet", class)
+		renderDependencyPods(t, cfg, "testdata/openbao-0.28.6.tgz", OpenBaoHelmArgs(cfg), "StatefulSet", class)
 	}
 }

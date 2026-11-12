@@ -12,16 +12,16 @@ import (
 )
 
 type installFlagOptions struct {
-	answersPath              *string
-	yes                      *bool
-	verify                   *bool
-	plan                     *bool
-	jsonOutput               *bool
-	timeout                  *time.Duration
-	argoParallelism          *int
-	argoNamespaceParallelism *int
-	alsoUpstreams            stringList
-	credentialedSecretPaths  stringList
+	answersPath     *string
+	yes             *bool
+	verify          *bool
+	plan            *bool
+	jsonOutput      *bool
+	timeout         *time.Duration
+	argoParallelism *int
+
+	alsoUpstreams           stringList
+	credentialedSecretPaths stringList
 
 	tlsExtraDNSNames  stringList
 	tlsExtraIPs       stringList
@@ -136,8 +136,6 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	options.argoParallelism = flags.Int("argo-parallelism", -1,
 		"Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; "+
 			"the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2)")
-	options.argoNamespaceParallelism = flags.Int("argo-namespace-parallelism", -1,
-		"Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value)")
 	flags.Var(&options.credentialedSecretPaths, "credentialed-secret-path",
 		"full KV data path approved in the secret-access table (repeatable, exactly the string "+
 			"`oberth access allow` records, e.g. oberth/data/release/cosign-secret); synced into the "+
@@ -222,8 +220,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		switch f.Name {
 		case "argo-parallelism":
 			cfg.ArgoParallelism = options.argoParallelism
-		case "argo-namespace-parallelism":
-			cfg.ArgoNamespaceParallelism = options.argoNamespaceParallelism
 		}
 	})
 

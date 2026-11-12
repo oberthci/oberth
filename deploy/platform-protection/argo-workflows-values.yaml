@@ -1,8 +1,0 @@
-# The installer sets this priority automatically. For a separately managed
-# release, use the class rendered by the Oberth chart in the chosen namespace.
-controller:
-  priorityClassName: oberth-oberth-control-plane
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi

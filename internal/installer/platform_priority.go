@@ -22,9 +22,8 @@ func controlPlanePriority(cfg Config) string {
 	return podpriority.ControlPlaneClass(namespace, "oberth")
 }
 
-// Dependencies install before the Oberth Deployment. Establish their classes
-// first with the final Helm ownership, so the Oberth chart adopts them rather
-// than waiting for Pods that admission rejected for a missing PriorityClass.
+// Establish the server and helper classes with final Helm ownership so the
+// Oberth chart adopts them during installation. Dependencies use upstream defaults.
 func ensurePlatformPriorities(ctx context.Context, cfg Config, deps Deps) error {
 	if deps.KubeClient == nil {
 		return errors.New("priority bootstrap requires Kubernetes access")
