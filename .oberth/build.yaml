@@ -73,7 +73,6 @@ metadata:
   annotations:
     oberth.ci/nonroot-templates: test-static-git-runtime
 spec:
-  priority: 0
   entrypoint: ci
   # Bound repository-local fan-out to three Pods; native resource trial required.
   parallelism: 3

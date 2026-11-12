@@ -150,4 +150,6 @@ bootstrap-node-inputs. The release-test-rest leaf mounts that claim read-only an
 verifies its private executable before running dashboard JavaScript tests.
 The artifact publisher has no Node tooling or site deployment authority.
 
-Scheduling is authored in these Workflows: CI has `spec.priority: 0`; release has `spec.priority: 1` and the Workflow mutex `oberth-release`. The chart-index and finalization mutexes still protect their specific mutations. Oberth does not inject priority or release locks.
+Run `hack/check-bootstrap-admission.sh` to check every `.oberth/*.yaml` against
+the exact v0.21.10 decoder and admission from `e5421125`. It reports all joined
+refusals across both Workflows and leaves working trees untouched.
