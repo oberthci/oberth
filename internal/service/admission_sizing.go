@@ -49,7 +49,7 @@ func (s *Scheduler) readLiveRequests(ctx context.Context, run model.Run) *argowo
 		if err == nil {
 			return requests
 		}
-		log.Printf("run %s: live CPU requests unavailable; reserving whole pool: %v", run.ID, err)
+		log.Printf("run %s: live CPU requests unavailable: %v", run.ID, err)
 	}
 	return nil
 }
@@ -76,6 +76,9 @@ func (s *Scheduler) sizeAdoptedReservation(ctx context.Context, run model.Run, r
 	}
 	s.admission.mu.Lock()
 	defer s.admission.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
 	r.sizingPending = false
 	r.cpu, r.poolKnown = pool, known
 	r.cpuUncertain = !known
@@ -152,9 +155,14 @@ func (s *Scheduler) refreshCPUReservations(ctx context.Context) {
 func (s *Scheduler) refreshReservationCPU(ctx context.Context, r *admissionReservation) {
 	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	run, err := s.database().Run(readCtx, r.runID)
+	s.admission.mu.Lock()
+	runID := r.runID
+	s.admission.mu.Unlock()
+	run, err := s.database().Run(readCtx, runID)
 	if err != nil {
-		s.clearLiveCPU(r)
+		if ctx.Err() == nil {
+			s.clearLiveCPU(r)
+		}
 		return
 	}
 	pool, known := s.reservationCPU(readCtx, run)
@@ -170,7 +178,9 @@ func (s *Scheduler) refreshReservationCPU(ctx context.Context, r *admissionReser
 				return err
 			})
 			if err != nil {
-				s.clearLiveCPU(r)
+				if ctx.Err() == nil {
+					s.clearLiveCPU(r)
+				}
 				return
 			}
 			for _, hold := range holds {
@@ -190,6 +200,9 @@ func (s *Scheduler) refreshReservationCPU(ctx context.Context, r *admissionReser
 	}
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
 	r.cpu, r.poolKnown = pool, known
 	r.cpuUncertain = !known
 	r.heldSince = since
@@ -231,6 +244,9 @@ func (s *Scheduler) reserveAdmission(ctx context.Context, run model.Run) *admiss
 // Keep the dispatcher live even when many owned Workflows cannot be read.
 // Rotate by reservation sequence so each survivor eventually gets a refresh.
 func (s *Scheduler) refreshLiveReservations(ctx context.Context, candidates []*admissionReservation) {
+	// Observations are read-only. They must retain their caller's deadlines,
+	// rather than borrowing an owner's detached mutation/finalization retries.
+	ctx = context.WithValue(ctx, databaseRetryKey{}, (*databaseRetryScope)(nil))
 	gate := s.admission
 	gate.mu.Lock()
 	after := gate.lastCPURefresh
@@ -257,11 +273,11 @@ func (s *Scheduler) refreshLiveReservations(ctx context.Context, candidates []*a
 					continue
 				}
 				gate.mu.Lock()
-				pending := r.sizingPending
+				pending, runID := r.sizingPending, r.runID
 				gate.mu.Unlock()
 				if pending {
 					readCtx, stop := context.WithTimeout(refreshCtx, 2*time.Second)
-					run, err := s.database().Run(readCtx, r.runID)
+					run, err := s.database().Run(readCtx, runID)
 					if err == nil {
 						s.sizeAdoptedReservation(readCtx, run, r)
 					}
@@ -287,12 +303,19 @@ func (s *Scheduler) refreshLiveReservations(ctx context.Context, candidates []*a
 	close(tasks)
 	workers.Wait()
 	close(completed)
-	last := -1
+	finished := make([]bool, len(candidates))
 	for index := range completed {
-		last = max(last, index)
+		finished[index] = true
 	}
-	// A request cut short by the cycle deadline gets a full per-run budget on
-	// the next pass, rather than always occupying the final partial slot.
+	last := -1
+	for index, done := range finished {
+		if !done {
+			break
+		}
+		last = index
+	}
+	// Advance only over the completed prefix. A later fast observation cannot
+	// move the cursor past an earlier read cut short by the cycle deadline.
 	if last >= 0 {
 		gate.mu.Lock()
 		gate.lastCPURefresh = candidates[last].sequence
