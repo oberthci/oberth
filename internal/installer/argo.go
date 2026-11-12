@@ -149,7 +149,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 			_, _ = fmt.Fprintln(deps.Output, "The argo-workflows release runs the nonroot controller profile; the limits go into its profile ConfigMap.")
 		}
 	}
-	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "argo-workflows", ns, "controller", exists)
+	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "argo-workflows", ns, "controller", controlPlanePriority(cfg), exists)
 	if err != nil {
 		return result, err
 	}

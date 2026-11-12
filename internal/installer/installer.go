@@ -1248,7 +1248,7 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		result.CACertPEM = caPEM
 	}
 
-	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "openbao", ns, "server", exists)
+	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "openbao", ns, "server", controlPlanePriority(cfg), exists)
 	if err != nil {
 		return result, err
 	}

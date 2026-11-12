@@ -21,7 +21,7 @@ func TestDependencyUpgradeDropsManagedSchedulingAndKeepsOperatorValues(t *testin
 			}
 			raw, _ := json.Marshal(stored)
 			deps := Deps{RunHelm: func(context.Context, []string) ([]byte, error) { return raw, nil }}
-			file, changed, cleanup, err := dependencySchedulingValues(t.Context(), deps, test.release, "pipelines", test.component, true)
+			file, changed, cleanup, err := dependencySchedulingValues(t.Context(), deps, test.release, "pipelines", test.component, controlPlanePriority(Config{}), true)
 			defer cleanup()
 			if err != nil || !changed {
 				t.Fatal(changed, err)
@@ -98,6 +98,59 @@ func TestDependencyUpgradeActuallyReconcilesStoredScheduling(t *testing.T) {
 			}
 			if err != nil || !applied {
 				t.Fatal("stored scheduling not removed", applied, err)
+			}
+		})
+	}
+}
+
+func TestDependencySchedulingPreservesOperatorOverrides(t *testing.T) {
+	for _, component := range []string{"controller", "server"} {
+		t.Run(component, func(t *testing.T) {
+			class := controlPlanePriority(Config{Namespace: "custom-control"})
+			for _, test := range []struct {
+				name, priority, cpu, memory string
+				changed                     bool
+			}{
+				{"operator", "operator-class", "250m", "512Mi", false},
+				{"managed", class, "100m", "128Mi", true},
+				{"mixed", class, "250m", "128Mi", true},
+				{"other-install", "oberth-other-control-plane", "0.1", "134217728", false},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					values := map[string]any{component: map[string]any{"priorityClassName": test.priority, "resources": map[string]any{"requests": map[string]any{"cpu": test.cpu, "memory": test.memory}, "limits": map[string]any{"memory": "2Gi"}}}}
+					raw, _ := json.Marshal(values)
+					deps := Deps{RunHelm: func(context.Context, []string) ([]byte, error) { return raw, nil }}
+					path, changed, cleanup, err := dependencySchedulingValues(t.Context(), deps, "dependency", "namespace", component, class, true)
+					defer cleanup()
+					if err != nil || changed != test.changed {
+						t.Fatal(changed, err)
+					}
+					if !changed {
+						if path != "" {
+							t.Fatal("operator values triggered a reset")
+						}
+						return
+					}
+					body, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var got map[string]any
+					if err = json.Unmarshal(body, &got); err != nil {
+						t.Fatal(err)
+					}
+					part := got[component].(map[string]any)
+					if _, present := part["priorityClassName"]; present {
+						t.Fatal("managed class retained")
+					}
+					resources := part["resources"].(map[string]any)
+					if resources["limits"].(map[string]any)["memory"] != "2Gi" {
+						t.Fatal("operator limit changed")
+					}
+					if test.name == "mixed" && resources["requests"].(map[string]any)["cpu"] != "250m" {
+						t.Fatal("operator CPU request changed")
+					}
+				})
 			}
 		})
 	}
