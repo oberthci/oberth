@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -193,4 +194,23 @@ type missingWorkflowClient struct{ WorkflowClient }
 
 func (missingWorkflowClient) Get(_ context.Context, name string, _ metav1.GetOptions) (*wfv1.Workflow, error) {
 	return nil, apierrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}, name)
+}
+
+// v0.21.10 policy metadata is historical execution evidence, never a policy input for the new owner.
+func TestAdoptionIgnoresRetiredSchedulingAnnotations(t *testing.T) {
+	wf, request := adoptionWorkflow()
+	for _, key := range []string{"oberth.ci/cpu-requests", "oberth.ci/request-defaults", "oberth.ci/declared-pod-demand", "oberth.ci/resource-admission-fallback"} {
+		wf.Annotations[key] = "historical"
+	}
+	wf.Spec.PodPriorityClassName = "oberth-pipeline"
+	wf.Spec.Templates[0].Metadata.Annotations = map[string]string{"oberth.ci/step-deadline-seconds": "60", "oberth.ci/step-start-allowance-seconds": "120"}
+	before := wf.DeepCopy()
+	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace}}
+	binding, found, err := controller.Adopt(t.Context(), request)
+	if err != nil || !found || !binding.matches(wf) {
+		t.Fatal(binding, found, err)
+	}
+	if !reflect.DeepEqual(before, wf) {
+		t.Fatal("adoption rewrote a running Workflow")
+	}
 }

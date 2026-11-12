@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,43 +12,26 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// PodDemand contains CPU requests and memory reservations, never observed usage. Each
-// dimension is an independent upper bound; its peak need not occur together.
+// PodDemand is the bounded aggregate device-capability proof, not a scheduling budget.
 type PodDemand struct {
-	// DeclaredTotal sums static pod invocations before dependency/parallelism
-	// reductions. Nil means the total is unknown; it never sizes admission.
-	DeclaredTotal     *PodRequests       `json:"declared_total,omitempty"`
-	ExtendedResources map[string]int64   `json:"extended_resources,omitempty"`
-	CPUMilli          int64              `json:"cpu_milli"`
-	MemoryBytes       int64              `json:"memory_bytes"`
-	Pods              int64              `json:"pods"`
-	Assumptions       PodPeakAssumptions `json:"assumptions,omitempty"`
-}
+	ExtendedResources map[string]int64 `json:"extended_resources,omitempty"`
 
-// Equal compares the capacity contract; optional diagnostic totals do not
-// change historical reservation equality or permit a different peak.
-func (d PodDemand) Equal(other PodDemand) bool {
-	return d.CPUMilli == other.CPUMilli && d.MemoryBytes == other.MemoryBytes && d.Pods == other.Pods && d.Assumptions == other.Assumptions && maps.Equal(d.ExtendedResources, other.ExtendedResources)
+	Pods        int64              `json:"pods"`
+	Assumptions PodPeakAssumptions `json:"assumptions,omitempty"`
 }
 
 func (d PodDemand) Valid() bool {
 	if ValidateExtendedResourceLimits(d.ExtendedResources) != nil {
 		return false
 	}
-	return validPodTotal(d.DeclaredTotal) && d.Assumptions.Valid() && d.CPUMilli > 0 && d.CPUMilli <= 1_000_000_000 && d.MemoryBytes > 0 && d.MemoryBytes <= 1<<60 && d.Pods > 0 && d.Pods <= 256
+	return d.Assumptions.Valid() && d.Pods > 0 && d.Pods <= 256
 }
 
 const maxPodGraphWork = 4096
 
 var errPodGraph = errors.New("declared resource graph cannot be bounded; use static calls or positive workflow parallelism")
-var errPodUndeclared = errors.New("pod has undeclared CPU/memory requests")
-
-// ErrMemoryUnbounded refuses numeric admission for request-only containers.
-// A reservation is not a runtime bound; never infer or insert a missing limit.
-var ErrMemoryUnbounded = errors.New("pod lacks a positive declared memory limit")
 
 type podGraph struct {
-	uncapped     bool // diagnostic static total; still subject to graph work bounds
 	resourcePods bool
 	parallelism  int64
 	limited      bool
@@ -77,42 +59,6 @@ func (g *podGraph) node(d PodDemand) (int, error) {
 
 func containerDemand(c, defaults *corev1.Container) (PodDemand, error) {
 	d := PodDemand{Pods: 1}
-	for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
-		q, ok := c.Resources.Requests[name]
-		if !ok && defaults != nil {
-			q, ok = defaults.Resources.Requests[name]
-		}
-		// Missing requests already select size admission. Report that cause
-		// before testing whether a fully requested container has a limit.
-		if !ok || q.Sign() <= 0 {
-			return PodDemand{}, errPodUndeclared
-		}
-		if name == corev1.ResourceMemory {
-			limit, set := c.Resources.Limits[name]
-			if !set && defaults != nil {
-				limit, set = defaults.Resources.Limits[name]
-			}
-			if !set || limit.Sign() <= 0 {
-				return PodDemand{}, ErrMemoryUnbounded
-			}
-			if limit.CmpInt64(1<<40) > 0 {
-				return PodDemand{}, errPodGraph
-			}
-			// Requests are reviewed scheduling demand. Limits remain runtime
-			// ceilings; admission holds separate administrator-owned headroom.
-		}
-		if name == corev1.ResourceCPU {
-			if q.CmpInt64(1000) > 0 {
-				return PodDemand{}, errPodGraph
-			}
-			d.CPUMilli = q.MilliValue()
-		} else {
-			if q.CmpInt64(1<<40) > 0 {
-				return PodDemand{}, errPodGraph
-			}
-			d.MemoryBytes = q.Value()
-		}
-	}
 	var err error
 	d.ExtendedResources, err = containerExtendedDemand(c, defaults)
 	if err != nil {
@@ -125,7 +71,7 @@ func containerDemand(c, defaults *corev1.Container) (PodDemand, error) {
 }
 
 func addPodDemand(a, b PodDemand) PodDemand {
-	return PodDemand{ExtendedResources: sumExtended(a.ExtendedResources, b.ExtendedResources), CPUMilli: a.CPUMilli + b.CPUMilli, MemoryBytes: a.MemoryBytes + b.MemoryBytes, Pods: max(a.Pods, b.Pods)}
+	return PodDemand{ExtendedResources: sumExtended(a.ExtendedResources, b.ExtendedResources), Pods: max(a.Pods, b.Pods)}
 }
 
 type podContainer struct {
@@ -233,12 +179,8 @@ func templatePodDemand(t, defaults *wfv1.Template, resourcePods bool) (PodDemand
 		}
 	}
 	d.ExtendedResources = maxExtended(sumExtended(sumExtended(d.ExtendedResources, sidecars.ExtendedResources), restartable.ExtendedResources), init.ExtendedResources)
-	d.CPUMilli = max(d.CPUMilli+sidecars.CPUMilli+restartable.CPUMilli, init.CPUMilli)
-	d.MemoryBytes = max(d.MemoryBytes+sidecars.MemoryBytes+restartable.MemoryBytes, init.MemoryBytes)
+
 	d.Pods = 1
-	if d.CPUMilli > 1_000_000 || d.MemoryBytes > 1<<40 {
-		return PodDemand{}, errPodGraph
-	}
 	return d, nil
 }
 
@@ -267,7 +209,7 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 		limit = g.defaults.Parallelism
 	}
 	var localLimit int64
-	if !g.uncapped && limit != nil && *limit > 0 && *limit <= 256 {
+	if limit != nil && *limit > 0 && *limit <= 256 {
 		localLimit = *limit
 		g.limited = true
 	}
@@ -352,9 +294,8 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 		// Template parallelism limits direct child invocations, not all pods
 		// recursively. Each child keeps its full independently bounded demand.
 		d.ExtendedResources = limitExtendedPeak(d.ExtendedResources, children, int(localLimit))
-		cpu, memory, pods := demandVectors(children)
-		d.CPUMilli = min(d.CPUMilli, largestPodRequests(cpu, int(localLimit)))
-		d.MemoryBytes = min(d.MemoryBytes, largestPodRequests(memory, int(localLimit)))
+		pods := podCounts(children)
+
 		d.Pods = min(d.Pods, largestPodRequests(pods, int(localLimit)))
 		g.edges = g.edges[:start+1]
 		g.edges[start] = nil
@@ -364,13 +305,6 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 	}
 	return start, end, nil
 }
-
-// DeclaredPodPeak returns nil for incomplete requests and ErrMemoryUnbounded
-// for a missing effective memory limit. Workflow and template parallelism bound
-// fan-out at their respective scopes. Unsupported graphs require a workflow
-// bound and reserve the largest possible pod per slot. Mutable item counts and
-// conditions earn no reductions beyond their enforced concurrency bounds.
-func DeclaredPodPeak(wf *wfv1.Workflow) (*PodDemand, error) { return declaredPodPeak(wf, false) }
 
 // DeclaredCapabilityPeak includes resource executors as bounded helper pods;
 // their opaque objects are constrained separately by operator namespace quota.
@@ -382,12 +316,8 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 	if wf != nil && wf.Spec.TemplateDefaults != nil && wf.Spec.TemplateDefaults.Daemon != nil && *wf.Spec.TemplateDefaults.Daemon {
 		return nil, errPodGraph
 	}
-	c := ResourceCoverage(wf)
-	if c == nil {
+	if wf == nil {
 		return nil, errPodGraph
-	}
-	if c.Undeclared != 0 || (c.Declared == 0 && !resourcePods) {
-		return nil, nil
 	}
 	var parallelism int64
 	if p := wf.Spec.Parallelism; p != nil && *p > 0 && *p <= 256 {
@@ -399,12 +329,6 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 		g.templates[t.Name] = t
 	}
 	err := g.expandWorkflow(wf)
-	if errors.Is(err, errPodUndeclared) {
-		return nil, nil
-	}
-	if errors.Is(err, ErrMemoryUnbounded) {
-		return nil, err
-	}
 	// Sequences require an effective parallelism limit for bounded analysis.
 	if err != nil || g.sequence && !g.limited && parallelism == 0 {
 		return boundedPodPeak(wf, resourcePods)
@@ -417,15 +341,12 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 		// Use actual leaf weights, never a collapsed nested template envelope,
 		// for the workflow-wide pod cap.
 		d.ExtendedResources = limitExtendedPeak(d.ExtendedResources, g.leaves, int(parallelism))
-		cpu, memory, _ := demandVectors(g.leaves)
-		d.CPUMilli = min(d.CPUMilli, largestPodRequests(cpu, int(parallelism)))
-		d.MemoryBytes = min(d.MemoryBytes, largestPodRequests(memory, int(parallelism)))
+
 		d.Pods = parallelism
 	}
-	d.DeclaredTotal = declaredPodTotal(wf, resourcePods)
 	d.Assumptions = g.assumptions
-	emptyExecutor := resourcePods && d.Pods > 0 && d.CPUMilli == 0 && d.MemoryBytes == 0
-	if !d.Valid() && !emptyExecutor {
+
+	if !d.Valid() {
 		return nil, errPodGraph
 	}
 	return &d, nil
@@ -458,14 +379,13 @@ func (g *podGraph) peak(first, end int) (PodDemand, error) {
 			return PodDemand{}, errPodGraph
 		}
 	}
-	cpu, memory, pods := demandVectors(g.demands[first:end])
-	return PodDemand{ExtendedResources: peakExtended(reach, g.demands[first:end]), CPUMilli: maxWeightedAntichain(reach, cpu), MemoryBytes: maxWeightedAntichain(reach, memory), Pods: maxWeightedAntichain(reach, pods)}, nil
+	pods := podCounts(g.demands[first:end])
+	return PodDemand{ExtendedResources: peakExtended(reach, g.demands[first:end]), Pods: maxWeightedAntichain(reach, pods)}, nil
 }
 
-func demandVectors(demands []PodDemand) (cpu, memory, pods []int64) {
+func podCounts(demands []PodDemand) (pods []int64) {
 	for _, d := range demands {
-		cpu = append(cpu, d.CPUMilli)
-		memory = append(memory, d.MemoryBytes)
+
 		pods = append(pods, d.Pods)
 	}
 	return
@@ -511,8 +431,7 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 				return err
 			}
 			maximum.ExtendedResources = maxExtended(maximum.ExtendedResources, d.ExtendedResources)
-			maximum.CPUMilli = max(maximum.CPUMilli, d.CPUMilli)
-			maximum.MemoryBytes = max(maximum.MemoryBytes, d.MemoryBytes)
+
 		}
 		tasks := []wfv1.DAGTask{}
 		if t.DAG != nil {
@@ -546,15 +465,13 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 		}
 		return nil
 	}
-	if err := scan(templates[wf.Spec.Entrypoint], 0); errors.Is(err, errPodUndeclared) {
-		return nil, nil
-	} else if err != nil {
+	if err := scan(templates[wf.Spec.Entrypoint], 0); err != nil {
 		return nil, err
 	}
 	if err := scanHooks(wf.Spec.OnExit, wf.Spec.Hooks, templates, scan, 0); err != nil {
 		return nil, err
 	}
-	d := PodDemand{ExtendedResources: scaleExtended(maximum.ExtendedResources, *p), CPUMilli: maximum.CPUMilli * *p, MemoryBytes: maximum.MemoryBytes * *p, Pods: *p, Assumptions: PodPeakGraph}
+	d := PodDemand{ExtendedResources: scaleExtended(maximum.ExtendedResources, *p), Pods: *p, Assumptions: PodPeakGraph}
 	if !d.Valid() {
 		return nil, fmt.Errorf("%w: requests exceed graph bounds", errPodGraph)
 	}

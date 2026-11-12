@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	wfclientset "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned"
 	"k8s.io/apimachinery/pkg/util/httpstream"
@@ -77,11 +76,6 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
-	repoTimeouts, err := parseRepoWorkflowTimeouts(options.argoRepoWorkflowTimeouts)
-	if err != nil {
-		return nil, err
-	}
-	stepStartupAllowance := options.stepStartupAllowance
 	config := argojob.Config{
 		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
@@ -111,15 +105,11 @@ func buildArgoEngine(
 		// the same two roots the chart already creates and owns through its
 		// prepare-caches init container; the Argo engine is what finally reads
 		// them, so a branch build stops recompiling its toolchain every push.
-		CICacheRoot:            options.ciCacheRoot,
-		ReleaseCacheRoot:       options.releaseCacheRoot,
-		WorkflowTimeout:        options.argoWorkflowTimeout,
-		DefaultWorkflowTimeout: options.argoDefaultWorkflowTimeout,
-		StepStartupAllowance:   &stepStartupAllowance,
-		Assist:                 options.assist,
+		CICacheRoot:      options.ciCacheRoot,
+		ReleaseCacheRoot: options.releaseCacheRoot,
 
-		StalledRunTimeout:      options.admissionStallTimeout,
-		PerRepoWorkflowTimeout: repoTimeouts,
+		Assist: options.assist,
+
 		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.
 		TTLSeconds:          int32(options.argoWorkflowTTL),
 		PerRepoIdentities:   perRepoIdentities,
@@ -202,14 +192,11 @@ func validateArgoServeOptions(options serveOptions) error {
 		}
 		return nil
 	}
-	if _, err := parseRepoWorkflowTimeouts(options.argoRepoWorkflowTimeouts); err != nil {
-		return err
-	}
 	if options.argoNamespace == options.namespace {
 		return errors.New("serve: --argo-namespace must differ from --namespace; pipeline identities must not share a namespace with the server")
 	}
-	if options.argoWorkflowTimeout < time.Second || options.argoWorkflowTimeout%time.Second != 0 || options.argoWorkflowTTL <= 0 || options.argoWorkflowTTL > 1<<31-1 {
-		return errors.New("serve: --argo-workflow-timeout and --argo-workflow-ttl must be positive")
+	if options.argoWorkflowTTL <= 0 || options.argoWorkflowTTL > 1<<31-1 {
+		return errors.New("serve: --argo-workflow-ttl must be positive")
 	}
 	if options.argoVaultCredentialedRole != "" && options.argoVaultAddress == "" {
 		return errors.New("serve: --argo-vault-credentialed-role needs --argo-vault-address")
@@ -502,27 +489,4 @@ func buildPerStepIdentities(ctx context.Context, db perRepoStore) (map[string]ar
 	}
 
 	return result, nil
-}
-
-func parseRepoWorkflowTimeouts(values []string) (map[string]time.Duration, error) {
-	caps := make(map[string]time.Duration, len(values))
-	for _, value := range values {
-		repo, raw, ok := strings.Cut(value, "=")
-		parts := strings.Split(repo, "/")
-		duration, err := time.ParseDuration(raw)
-		valid := ok && len(parts) == 3 && err == nil && duration >= time.Second && duration%time.Second == 0
-		for _, part := range parts {
-			if strings.TrimSpace(part) != part || part == "" || part == "." || part == ".." {
-				valid = false
-			}
-		}
-		if !valid {
-			return nil, fmt.Errorf("serve: invalid --argo-repo-workflow-timeout %q; expected upstream/org/repo=30m in whole positive seconds", value)
-		}
-		if _, duplicate := caps[repo]; duplicate {
-			return nil, fmt.Errorf("serve: duplicate repository deadline cap %q", repo)
-		}
-		caps[repo] = duration
-	}
-	return caps, nil
 }

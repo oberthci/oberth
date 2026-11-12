@@ -59,14 +59,14 @@ type ExecutionObservation struct {
 	FinishedAt               *time.Time         `json:"finished_at,omitempty"`
 	ReconciliationLagSeconds *int64             `json:"reconciliation_lag_seconds,omitempty"`
 	Deadline                 *ExecutionDeadline `json:"deadline,omitempty"`
-	ServerDeadline           *ExecutionDeadline `json:"server_deadline,omitempty"`
-	Reason                   string             `json:"reason,omitempty"`
-	State                    string             `json:"state"`
-	Phase                    string             `json:"phase,omitempty"`
-	Message                  string             `json:"message"`
-	Nodes                    []SchedulingReason `json:"nodes,omitempty"`
-	Pods                     []SchedulingReason `json:"pods,omitempty"`
-	Truncated                bool               `json:"truncated,omitempty"`
+
+	Reason    string             `json:"reason,omitempty"`
+	State     string             `json:"state"`
+	Phase     string             `json:"phase,omitempty"`
+	Message   string             `json:"message"`
+	Nodes     []SchedulingReason `json:"nodes,omitempty"`
+	Pods      []SchedulingReason `json:"pods,omitempty"`
+	Truncated bool               `json:"truncated,omitempty"`
 }
 
 type SchedulingReason struct {

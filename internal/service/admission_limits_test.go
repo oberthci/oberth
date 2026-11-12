@@ -15,37 +15,13 @@ type stalledGrantJobs struct{ *fakeJobs }
 
 func (j stalledGrantJobs) AwaitAdmission(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
 
-func TestAdmissionLimitsGrantedBeforeSubmissionDeadlineReleasesReservation(t *testing.T) {
-	f := newControlFixture(t)
-	f.scheduler.jobs = stalledGrantJobs{f.jobs}
-	f.scheduler.stalledRunTimeout = 20 * time.Millisecond
-	queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "stalled-grant", Repository: f.repo, Branch: "stalled-grant", SHA: strings.Repeat("a", 40), Actor: "agent"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = f.scheduler.ProcessNext(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	run, err := f.store.Run(t.Context(), queued.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.Status != model.RunFailed || !strings.Contains(run.Error, "controller profile verification unavailable for") || strings.Contains(run.Error, "no scheduled pod") || len(f.jobs.createdCI) != 0 {
-		t.Fatalf("stalled grant was not settled: %+v", run)
-	}
-	state := f.scheduler.submissionStateForTest()
-	if state.Runs != 0 || len(state.Reservations) != 0 {
-		t.Fatalf("stalled grant leaked resources: %+v", state)
-	}
-}
-
 type admissionExpiredFailure struct{}
 
 func (*admissionExpiredFailure) Error() string {
 	return "executor identity readiness deadline exceeded after one issuance retry"
 }
 func (*admissionExpiredFailure) InfrastructureFailure() bool   { return true }
-func (*admissionExpiredFailure) AdmissionExpiryReason() string { return "identity" }
+func (*admissionExpiredFailure) ExecutorIdentityExpired() bool { return true }
 
 type expiredCleanupJobs struct{ *pendingCreateJobs }
 
@@ -97,7 +73,7 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 }
 
 func TestAdmissionLimitsPendingCleanupShowsDeadlineReason(t *testing.T) {
-	for _, reason := range []string{store.ExecutorIdentityPendingMessage, store.AdmissionStalledPendingMessage} {
+	for _, reason := range []string{store.ExecutorIdentityPendingMessage} {
 		run := model.Run{ID: "pending", Status: model.RunRunning, Phase: "infrastructure-pending", Error: reason}
 		got, _ := new(API).observeScheduling(t.Context(), run, nil, true)
 		if got.State != "infra-pending" || got.Message != "workflow startup timed out; cleanup pending" || run.Error != reason {

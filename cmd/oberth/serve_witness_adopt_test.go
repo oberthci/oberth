@@ -463,10 +463,10 @@ func minimalValidServeOptions() serveOptions {
 		argoCredentialedAccount: "oberth-argo-credentialed",
 		argoCISecretsAccount:    "oberth-argo-ci-secrets",
 		argoExecutorAccount:     "oberth-argo-executor",
-		argoWorkflowTimeout:     12 * time.Hour,
-		argoWorkflowTTL:         3600,
-		secretStoreAuthMount:    secretstore.DefaultAuthMountPath,
-		secretStoreKVPath:       secretstore.DefaultKVPath,
+
+		argoWorkflowTTL:      3600,
+		secretStoreAuthMount: secretstore.DefaultAuthMountPath,
+		secretStoreKVPath:    secretstore.DefaultKVPath,
 	}
 	return options
 }

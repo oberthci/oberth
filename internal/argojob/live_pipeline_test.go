@@ -53,7 +53,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	cluster.ensureServiceAccounts(t, ctx)
 
 	config := cluster.config()
-	config.WorkflowTimeout = deadline
+
 	// The repository's own images, exactly as .oberth/build.yaml declares them.
 	config.RunnerImagePrefixes = []string{"golang:", "aquasec/trivy:"}
 

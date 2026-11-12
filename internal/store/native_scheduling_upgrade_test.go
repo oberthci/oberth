@@ -39,6 +39,9 @@ func TestNativeSchedulingUpgradeMaterializesReceivesAndPreservesReplay(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.db.ExecContext(ctx, `UPDATE runs SET phase='infrastructure-pending',error='Resource admission expired: no scheduled pod or progress; cleanup pending' WHERE id=?`, running.ID); err != nil {
+		t.Fatal(err)
+	}
 	saved := map[string]model.RunSpec{}
 	events := map[string]model.ReceiveEventSpec{}
 	for _, id := range []string{"active", "deleted"} {
@@ -84,7 +87,7 @@ func TestNativeSchedulingUpgradeMaterializesReceivesAndPreservesReplay(t *testin
 		}
 	}
 	live, err := s.Run(ctx, running.ID)
-	if err != nil || live.Status != model.RunRunning {
+	if err != nil || live.Status != model.RunRunning || live.Error != "Workflow create outcome uncertain; cleanup pending" {
 		t.Fatal("running run changed", live, err)
 	}
 	pending, err := s.Run(ctx, queued.ID)

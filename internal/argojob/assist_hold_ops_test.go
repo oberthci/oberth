@@ -405,7 +405,7 @@ func TestEnforceAssistHoldsTTLExtendsOnActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	ttlSeconds := int64(assistConfig().Assist.Effective().HoldTTL / time.Second)
-	budget := DefaultStepStartupAllowance.Floored(600)
+	budget := int64(600)
 	if got := templateNamed(t, built, "test").Metadata.Annotations[AssistHoldAnnotation]; got != strconv.FormatInt(budget+AssistHoldMaxAgeFactor*ttlSeconds, 10) {
 		t.Fatalf("held Pod deadline = %s, want budget %d + %d TTLs of %ds", got, budget, AssistHoldMaxAgeFactor, ttlSeconds)
 	}

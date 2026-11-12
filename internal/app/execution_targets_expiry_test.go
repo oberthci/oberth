@@ -117,7 +117,7 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 				// A later policy must not replace the original executor configuration.
-				f.definition.Config.WorkflowTimeout = time.Hour
+
 			}
 			if owner != "running" {
 				jobs, err = WithExecutionTargets(f.local, f.db, []ExecutionTarget{f.definition})

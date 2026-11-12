@@ -431,7 +431,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	}
 	// Restart with different mutable executor settings. The retained config wins.
 	changed := f.definition
-	changed.Config.WorkflowTimeout = time.Hour
+
 	changed.Config.RunnerImagePrefixes = []string{"unrelated:"}
 	restarted, err := WithExecutionTargets(f.local, f.db, []ExecutionTarget{changed})
 	if err != nil {

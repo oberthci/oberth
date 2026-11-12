@@ -87,8 +87,8 @@ func (cluster liveCluster) config() Config {
 		CISecretsServiceAccount:    "oberth-argo-ci-secrets",
 		ExecutorServiceAccount:     "oberth-argo-executor",
 		RunnerImagePrefixes:        []string{"golang:", "alpine:", "busybox:"},
-		WorkflowTimeout:            10 * time.Minute,
-		TTLSeconds:                 120,
+
+		TTLSeconds: 120,
 	}
 }
 

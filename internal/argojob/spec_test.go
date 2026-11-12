@@ -9,7 +9,6 @@ import (
 	"encoding/pem"
 	"strings"
 	"testing"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -49,7 +48,6 @@ func testConfig() Config {
 		VaultCredentialedRole:      testVaultCredentialedRole,
 		VaultCISecretsRole:         testVaultCISecretsRole,
 		VaultCACertPEM:             testVaultAnchorPEM,
-		WorkflowTimeout:            2 * time.Hour,
 	}
 }
 
@@ -220,16 +218,16 @@ func TestBuildWorkspacePATH(t *testing.T) {
 	}
 }
 
-func TestBuildCapsTheDocumentDeadline(t *testing.T) {
+func TestBuildPreservesTheDocumentDeadline(t *testing.T) {
 	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if built.Spec.ActiveDeadlineSeconds == nil || *built.Spec.ActiveDeadlineSeconds != int64(2*time.Hour/time.Second) {
-		t.Fatalf("deadline = %v, want the administrator ceiling", built.Spec.ActiveDeadlineSeconds)
+	if built.Spec.ActiveDeadlineSeconds == nil || *built.Spec.ActiveDeadlineSeconds != int64(999999) {
+		t.Fatalf("deadline = %v, want authored deadline", built.Spec.ActiveDeadlineSeconds)
 	}
 
-	// A document asking for less than the ceiling keeps its own value.
+	// A shorter authored deadline keeps its value too.
 	modest := strings.Replace(greedyDocument, "activeDeadlineSeconds: 999999", "activeDeadlineSeconds: 300", 1)
 	built, err = Build(testConfig(), testRequest(pipeline.TriggerCI, modest))
 	if err != nil {

@@ -961,28 +961,9 @@
           "minLength": 1,
           "description": "Positive Kubernetes quantity for per-Pod emissary scratch on nonroot leaves. Defaults to 1Gi; the server validates the quantity at startup."
         },
-        "workflowTimeout": {
-          "type": "string"
-        },
         "workflowTTL": {
           "type": "integer",
           "minimum": 1
-        },
-        "defaultWorkflowTimeout": {
-          "type": "string",
-          "description": "Deadline of a document without its own spec.activeDeadlineSeconds, capped by workflowTimeout; whole positive seconds.",
-          "pattern": "^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
-        },
-        "repoWorkflowTimeouts": {
-          "type": "object",
-          "description": "Per-repository workflow deadline caps keyed by upstream/org/repo.",
-          "propertyNames": {
-            "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$"
-          },
-          "additionalProperties": {
-            "type": "string",
-            "pattern": "^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$"
-          }
         },
         "vault": {
           "type": "object",

@@ -199,7 +199,6 @@ func TestLiveReleaseCredentialsMaterialiseFromTheRealStore(t *testing.T) {
 	config := cluster.config()
 	config.VaultAddress, config.VaultCredentialedRole, config.VaultCACertPEM = address, role, caPEM
 	config.RunnerImagePrefixes = []string{"golang:", "aquasec/trivy:"}
-	config.WorkflowTimeout = 15 * time.Minute
 
 	controller, err := NewController(cluster.workflows, cluster.kube, config)
 	if err != nil {

@@ -98,8 +98,7 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
 
 The Workflow gets `oberth.ci/assist: <hold TTL seconds>` and its
 `activeDeadlineSeconds` grows by two hold TTLs, so a parked step is not cut
-short by the run's own budget; the executor token lifetime and the server
-watchdog follow the Workflow deadline. Both annotations are server-owned:
+short by an authored run budget. No server watchdog is applied. The executor token lifetime follows the authored Workflow deadline when supplied. Both annotations are server-owned:
 template-metadata admission refuses `oberth.ci/assist-hold` from
 repositories and `Build` deletes an authored `oberth.ci/assist`.
 

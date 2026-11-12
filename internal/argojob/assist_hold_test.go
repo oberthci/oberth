@@ -135,7 +135,7 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 	// Argo's workflow/common constants are not imported by the server; the
 	// expression variables are the documented retry-local names.
 	test := templateNamed(t, wf, "test")
-	floored := DefaultStepStartupAllowance.Floored(600)
+	floored := int64(600)
 	if want := strconv.FormatInt(floored+2*1200, 10); test.Metadata.Annotations[AssistHoldAnnotation] != want {
 		t.Fatalf("test hold deadline = %q, want the floored step budget %d + 2x1200 (a worked hold may age to two TTLs)", test.Metadata.Annotations[AssistHoldAnnotation], floored)
 	}
@@ -275,7 +275,7 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	floored := DefaultStepStartupAllowance.Floored(600)
+	floored := int64(600)
 	resolve := func(retries, exitCode, duration string) *corev1.PodSpec {
 		t.Helper()
 		params := map[string]any{"retries": retries, "lastRetry.exitCode": exitCode, "lastRetry.status": "Failed", "lastRetry.duration": duration, "lastRetry.message": ""}
@@ -295,7 +295,7 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 		if err := json.Unmarshal([]byte(resolved.PodSpecPatch), &patch); err != nil {
 			t.Fatalf("resolved patch is not a PodSpec: %v: %s", err, resolved.PodSpecPatch)
 		}
-		deadline := DefaultStepStartupAllowance.Floored(600)
+		deadline := int64(600)
 		pod := corev1.PodSpec{ActiveDeadlineSeconds: &deadline, Containers: []corev1.Container{*test.Container, {Name: "wait"}}}
 		pod.Containers[0].Name = mainContainerName
 		podJSON, _ := json.Marshal(pod)
@@ -331,7 +331,7 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	if env := containerEnv(mainOf(first)); env[assistPauseEnv] != "" || env[AssistHoldEnv] != "" {
 		t.Fatalf("attempt 1 is paused: %v", env)
 	}
-	if got := *first.ActiveDeadlineSeconds; got != DefaultStepStartupAllowance.Floored(600) {
+	if got := *first.ActiveDeadlineSeconds; got != 600 {
 		t.Fatalf("attempt 1 deadline = %d, want the floored step deadline", got)
 	}
 	if readOnly, ok := mountReadOnly(mainOf(first), SourceMountPath); !ok || !readOnly {
@@ -365,8 +365,8 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	if env["GOCACHE"] != AssistScratchCachePath+"/gobuild" || env["GOMODCACHE"] != AssistScratchCachePath+"/gomod" || env["OBERTH_CACHE_DIR"] != AssistScratchCachePath {
 		t.Fatalf("held attempt still writes the shared cache: GOCACHE=%q GOMODCACHE=%q OBERTH_CACHE_DIR=%q", env["GOCACHE"], env["GOMODCACHE"], env["OBERTH_CACHE_DIR"])
 	}
-	if got := *held.ActiveDeadlineSeconds; got != DefaultStepStartupAllowance.Floored(600)+2*1200 {
-		t.Fatalf("held attempt deadline = %d, want 600 floored (%d) + 2x1200", got, DefaultStepStartupAllowance.Floored(600))
+	if got := *held.ActiveDeadlineSeconds; got != 600+2*1200 {
+		t.Fatalf("held attempt deadline = %d, want 600 floored (%d) + 2x1200", got, 600)
 	}
 	if readOnly, ok := mountReadOnly(main, SourceMountPath); !ok || readOnly {
 		t.Fatal("held attempt source mount is not writable")
@@ -411,7 +411,7 @@ func TestAssistRetryRefusesDeadlineKills(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 	expression := templateNamed(t, wf, "test").RetryStrategy.Expression
-	floored := DefaultStepStartupAllowance.Floored(600)
+	floored := int64(600)
 	retries := func(exitCode, duration string) bool {
 		t.Helper()
 		scope := map[string]any{"retries": "0", "lastRetry.exitCode": exitCode, "lastRetry.status": "Failed", "lastRetry.duration": duration, "lastRetry.message": "main: Error (exit code " + exitCode + ")"}
@@ -460,7 +460,7 @@ func TestBuildAssistBoundsInheritedTemplateDefaultsDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	inherited := DefaultStepStartupAllowance.Floored(900)
+	inherited := int64(900)
 	if got := wf.Spec.TemplateDefaults.ActiveDeadlineSeconds.String(); got != strconv.FormatInt(inherited, 10) {
 		t.Fatalf("templateDefaults deadline = %s, want the floored %d", got, inherited)
 	}
@@ -476,7 +476,7 @@ func TestBuildAssistBoundsInheritedTemplateDefaultsDeadline(t *testing.T) {
 	}
 	// The leaf's own deadline still wins over the default.
 	test := templateNamed(t, wf, "test")
-	if own := DefaultStepStartupAllowance.Floored(600); test.RetryStrategy.Expression != assistRetryExpression(own) {
+	if own := int64(600); test.RetryStrategy.Expression != assistRetryExpression(own) {
 		t.Fatalf("test retry expression = %q, want its own budget %d", test.RetryStrategy.Expression, own)
 	}
 

@@ -426,25 +426,6 @@ func (controller *Controller) WaitResumed(ctx context.Context, name, runID strin
 }
 
 func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (result Completion, retErr error) {
-	parent := ctx
-	ctx, cancelWatchdog := context.WithCancelCause(ctx)
-	watchdogFailure := fmt.Errorf("%s Server watchdog expired: %w", model.ExecutionDeadlineMessage, context.DeadlineExceeded)
-	// Arm only after reading the submitted bound. A failed first read must not
-	// substitute the default timeout for a longer declared deadline.
-	var watchdog *time.Timer
-	defer func() {
-		if watchdog != nil {
-			watchdog.Stop()
-		}
-		if errors.Is(context.Cause(ctx), watchdogFailure) {
-			cleanup, stop := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
-			defer stop()
-			retErr = errors.Join(watchdogFailure, controller.Cancel(cleanup, name, runID))
-		}
-		cancelWatchdog(nil)
-	}()
-	var boundDeadline time.Time
-	observingSince := time.Now()
 	session := controller.resourceSession(ctx, runID)
 	defer session.finish()
 	if retained < 0 {
@@ -472,7 +453,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	defer ticker.Stop()
 	var budgetBreachErr error
 	delivered := map[types.UID]bool{}
-	var admissionWatch admissionProgress
+	var admissionWatch executorIdentityProgress
 	var readFailingSince time.Time
 	timed := map[string]bool{}
 	boundTiming := false
@@ -507,29 +488,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if binding.UID != "" && !binding.matches(workflow) {
 			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
 		}
-		if !workflow.Status.Phase.Completed() {
-			budget := watchdogBudget(controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds))
-			expires := watchdogOriginSince(workflow, observingSince).Add(budget)
-			remaining := time.Until(expires)
-			if remaining <= 0 {
-				cancelWatchdog(watchdogFailure)
-				return Completion{}, watchdogFailure
-			}
-			// Rebind when Argo first records its start, including after adoption.
-			// Ordinary polling must not extend either clock.
-			if !expires.Equal(boundDeadline) {
-				if watchdog == nil {
-					watchdog = time.AfterFunc(remaining, func() { cancelWatchdog(watchdogFailure) })
-				} else {
-					watchdog.Reset(remaining)
-				}
-				boundDeadline = expires
-			}
-		} else if watchdog != nil {
-			// Once Argo has finished, log and diagnostic collection must not
-			// turn its observed result into a watchdog deletion.
-			watchdog.Stop()
-		}
 		// Observe already-created Pods before identity delivery can block on a
 		// later Pod: early step output must not wait behind that setup RPC.
 		if live != nil {
@@ -539,15 +497,15 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if !workflow.Status.Phase.Completed() {
 			controller.observeRunningNodeBoots(ctx, workflow)
 		}
-		if err := controller.checkAdmissionProgress(ctx, workflow, &admissionWatch, delivered); err != nil {
+		if err := controller.checkExecutorIdentityProgress(ctx, workflow, &admissionWatch, delivered); err != nil {
 			return completionFor(workflow), err
 		}
 		// Bound reads and identity transport even when no waiter observation exists.
-		deliveryCtx, stopDelivery := context.WithTimeout(ctx, admissionObservationTimeout)
+		deliveryCtx, stopDelivery := context.WithTimeout(ctx, identityObservationTimeout)
 		identityReadUnavailable := false
 		deliveryErr := controller.deliverExecutorTokensObserved(deliveryCtx, workflow, delivered, func() { identityReadUnavailable = true })
 		if deliveryCtx.Err() != nil && ctx.Err() == nil {
-			deliveryErr = &admissionProgressError{reason: "Kubernetes executor identity observation unavailable for 2m", identity: true}
+			deliveryErr = &executorIdentityProgressError{reason: "Kubernetes executor identity observation unavailable for 2m"}
 		}
 		stopDelivery()
 		if deliveryErr == nil {

@@ -53,8 +53,7 @@ type SchedulerConfig struct {
 	RemoveWorkspace func(string) error
 	MaxRunLogBytes  int64
 	MutationGate    func(context.Context) error
-	// StalledRunTimeout bounds granted runs before submission. Zero is ten minutes.
-	StalledRunTimeout time.Duration
+
 	// RestoredRunsFile is oberth restore's marker (RestoredRunsFile in the
 	// data root); empty disables it.
 	RestoredRunsFile string
@@ -79,8 +78,8 @@ type Scheduler struct {
 	workspaceRoot      string
 	submissions        *submissionRegistry
 
-	maxRunLogBytes     int64
-	stalledRunTimeout  time.Duration
+	maxRunLogBytes int64
+
 	mutationGate       func(context.Context) error
 	wake               chan struct{}
 	publicationWake    chan struct{}
@@ -138,12 +137,7 @@ func (scheduler *Scheduler) retryMovedPromotion(ctx context.Context, finalizatio
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
-	if config.StalledRunTimeout < 0 {
-		return nil, errors.New("service: admission stall timeout must be nonnegative")
-	}
-	if config.StalledRunTimeout == 0 {
-		config.StalledRunTimeout = 10 * time.Minute
-	}
+
 	if config.Store == nil || config.Git == nil || config.Logs == nil || config.Jobs == nil || config.Auditor == nil {
 		return nil, errors.New("service: scheduler store, Git, logs, jobs, and auditor are required")
 	}
@@ -177,7 +171,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		auditor:     config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, restoredRunsFile: config.RestoredRunsFile,
 		submissions:    newSubmissionRegistry(),
-		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate, stalledRunTimeout: config.StalledRunTimeout,
+		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
@@ -806,14 +800,8 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return err
 	}
-	admissionCtx, stopAdmission := context.WithTimeout(ctx, scheduler.stalledRunTimeout)
-	err = scheduler.awaitAdmission(admissionCtx, jobRequest)
-	stopAdmission()
-	if err != nil {
+	if err := scheduler.awaitAdmission(ctx, jobRequest); err != nil {
 		_ = logFile.Close()
-		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("controller profile verification unavailable for %s before workflow submission", scheduler.stalledRunTimeout))
-		}
 		return err
 	}
 	current, err = scheduler.database().MarkRunAdmitted(ctx, run.ID)
@@ -1170,7 +1158,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			deleteErr := scheduler.jobs.Delete(deleteCtx, workflowName, run.ID)
 			cancelDelete()
 			if deleteErr != nil {
-				var expired interface{ AdmissionExpiryReason() string }
+				var expired interface{ ExecutorIdentityExpired() bool }
 				var unsettled interface{ AmbiguousCreate() bool }
 				if errors.As(waitErr, &expired) || (errors.As(deleteErr, &unsettled) && unsettled.AmbiguousCreate()) {
 					if _, ok := scheduler.jobs.(JobCreateSettler); ok {

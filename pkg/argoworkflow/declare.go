@@ -143,8 +143,15 @@ func resourceUsageCommand(command []string) []string {
 // document that carries one is refused, naming what replaced it, instead of
 // running as if it took effect.
 var removedAnnotations = map[string]string{
-	"oberth.ci/size":              "admission counts runs and Kubernetes places each Pod by its resources block; delete the annotation",
-	"oberth.ci/size-by-trigger":   "admission counts runs and Kubernetes places each Pod by its resources block; delete the annotation",
+	"oberth.ci/cpu-requests":                 "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/request-defaults":             "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/declared-pod-demand":          "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/resource-admission-fallback":  "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/step-start-allowance-seconds": "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
+	"oberth.ci/step-deadline-seconds":        "removed in v0.22.0; resources, parallelism and deadlines are authored directly in Workflow YAML",
+
+	"oberth.ci/size":              "Kubernetes places each Pod by its authored resources block; delete the annotation",
+	"oberth.ci/size-by-trigger":   "Kubernetes places each Pod by its authored resources block; delete the annotation",
 	"oberth.ci/concurrency-group": "declare a native Argo mutex or semaphore (spec.synchronization) instead",
 	"oberth.ci/concurrency-limit": "declare a native Argo mutex or semaphore (spec.synchronization) instead",
 	"oberth.ci/exclusive":         "declare a native Argo semaphore (template synchronization, configMapKeyRef oberth-sync-limits) instead",

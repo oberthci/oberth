@@ -352,16 +352,6 @@ spec:
             - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
             - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
-            - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
-            - {{ printf "--argo-default-workflow-timeout=%s" (.Values.argo.defaultWorkflowTimeout | default "30m") | quote }}
-            {{- $repoWorkflowTimeouts := .Values.argo.repoWorkflowTimeouts | default dict }}
-            {{- range $repo := keys $repoWorkflowTimeouts | sortAlpha }}
-            - {{ printf "--argo-repo-workflow-timeout=%s=%s" $repo (get $repoWorkflowTimeouts $repo) | quote }}
-            {{- end }}
-            {{- if (.Values.argo.resourceSampler).enabled }}
-            - --argo-resource-sampler-config=/etc/oberth/resource-sampler/config.json
-            {{- end }}
-            - --argo-executor-scratch-size-limit={{ .Values.argo.executorScratchSizeLimit | default "1Gi" }}
             - --argo-workflow-ttl={{ int64 .Values.argo.workflowTTL }}
             {{- if .Values.argo.sourceStorageClass }}
             - --argo-source-storage-class={{ .Values.argo.sourceStorageClass }}

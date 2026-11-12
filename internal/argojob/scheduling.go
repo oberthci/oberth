@@ -48,7 +48,7 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 	}
 	now := time.Now().UTC()
 	observeWorkflowDeadline(workflow, result, now)
-	observeServerDeadline(workflow, result, controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds), now)
+
 	// Sort only a bounded sample using insertion, avoiding an allocation for every
 	// node in a large Workflow. No node name is returned: expanded names can carry
 	// user-supplied parameter values.
@@ -100,7 +100,7 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		}
 		reason := podSchedulingReason(pod)
 		result.Pods = append(result.Pods, reason)
-		if reason.Reason == "Unschedulable" && waitingForKubernetesCapacity(&pod) {
+		if reason.Reason == "Unschedulable" && podCapacityPending(&pod) {
 			result.Message = reason.Message
 		}
 		if reason.Reason == "DeadlineExceeded" && deadlineNodes[pod.Annotations["workflows.argoproj.io/node-id"]] {

@@ -43,7 +43,7 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 	if isPendingCreate(run) {
 		result.State = "infra-pending"
 		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending."
-		if run.Error == store.ExecutorIdentityPendingMessage || run.Error == store.AdmissionStalledPendingMessage {
+		if run.Error == store.ExecutorIdentityPendingMessage {
 			result.Message = "workflow startup timed out; cleanup pending"
 		}
 		return result, "workflow create uncertain, cleanup pending"
@@ -52,6 +52,11 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 		result.State = "queued"
 		result.Message = "Accepted; preparing Workflow submission."
 		return result, "in line"
+	}
+	if run.ClaimedUnstarted() {
+		result.State = "waiting"
+		result.Message = "Waiting for Workflow submission."
+		return result, "starting"
 	}
 	if s.schedulingObserver == nil {
 		result.State = "unavailable"

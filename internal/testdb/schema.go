@@ -350,10 +350,15 @@ DELETE FROM schema_migrations WHERE id='20261112191324-remove-admin-hold-81c7381
 `
 
 // PostNativePriorityDowngrade recreates empty priority tables only for old-schema fixtures.
-const PostNativePriorityDowngrade = `
+const PostNativePriorityDowngrade = PostNativeStartupDowngrade + `
 CREATE TABLE IF NOT EXISTS queue_priority_patterns (pattern TEXT PRIMARY KEY) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS run_priority_overrides (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,priority TEXT NOT NULL,reason TEXT NOT NULL,actor TEXT NOT NULL,updated_at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS run_priority_requests (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,requested TEXT NOT NULL,accepted TEXT NOT NULL,reason TEXT NOT NULL,actor TEXT NOT NULL,refusal TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS priority_grants (identity TEXT PRIMARY KEY,max_class TEXT NOT NULL,expires INTEGER NOT NULL,granted_by TEXT NOT NULL) WITHOUT ROWID;
 DELETE FROM schema_migrations WHERE id='20261112192937-remove-queue-priority-104b8d495586e655eeee52d3b76aaa30';
+`
+
+// PostNativeStartupDowngrade removes only the startup-cleanup migration receipt in historical fixtures.
+const PostNativeStartupDowngrade = `
+DELETE FROM schema_migrations WHERE id='20261112194221-retire-startup-cleanup-reason-3cbdb8308f00d05de0af9950db4bcae9';
 `

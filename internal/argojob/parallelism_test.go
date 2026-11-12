@@ -32,22 +32,17 @@ func TestAdmissionDeadlineLeavesParallelismPostponementToArgo(t *testing.T) {
 	if !postponedByParallelism(wf) {
 		t.Fatal("controller postponement not recognized")
 	}
-	watch := admissionProgress{}
+	watch := executorIdentityProgress{}
 	for _, at := range []time.Time{now, now.Add(2 * time.Hour)} {
-		if err := watch.check(wf, nil, nil, at, 10*time.Minute); err != nil {
+		if err := watch.check(wf, nil, nil, at); err != nil {
 			t.Fatal("parallelism postponement failed the workflow", err)
 		}
 	}
-	if origin, _ := watchdogOrigin(wf); !origin.IsZero() {
-		t.Fatalf("pre-start watchdog counts a postponement from %v", origin)
-	}
-	if since := watchdogOriginSince(wf, now.Add(-time.Hour)); time.Since(since) > time.Minute {
-		t.Fatalf("live watchdog not re-armed while postponed: %v", since)
-	}
 	wf.Status.Message = ""
-	if err := watch.check(wf, nil, nil, now.Add(2*time.Hour+10*time.Minute), 10*time.Minute); err == nil {
-		t.Fatal("startup stall after admission escaped the deadline")
+	if err := watch.check(wf, nil, nil, now.Add(24*time.Hour)); err != nil {
+		t.Fatal("native wait expired", err)
 	}
+
 }
 
 // Only the exact controller text, on an unstarted Pending Workflow, is a

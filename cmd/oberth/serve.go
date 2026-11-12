@@ -104,8 +104,6 @@ type serveOptions struct {
 	retentionInterval     time.Duration
 	retentionKeepNewest   int
 	autoRetryBudget       int
-	admissionStallTimeout time.Duration
-	stepStartupAllowance  argojob.StepStartupAllowance
 
 	assist                  argojob.AssistConfig
 	agentEvents             service.AgentEventPolicy
@@ -146,11 +144,9 @@ type serveOptions struct {
 	argoExecutionTargetConfig    string
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
-	argoWorkflowTimeout          time.Duration
-	argoDefaultWorkflowTimeout   time.Duration
-	argoRepoWorkflowTimeouts     []string
-	argoWorkflowTTL              int
-	argoResourceSamplerConfig    string
+
+	argoWorkflowTTL           int
+	argoResourceSamplerConfig string
 	// argoSourceStorageClass names the class for the per-run source claim the
 	// server creates in the pipeline namespace. Empty selects the cluster
 	// default, which is what a single-node install wants.
@@ -240,11 +236,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 
 	flags.IntVar(&options.autoRetryBudget, "auto-retry-infrastructure-budget", model.DefaultInfrastructureAutoRetryBudget, fmt.Sprintf("automatic retries per lineage of an eligible branch infrastructure failure, at its original queue position (0 disables, at most %d)", model.MaxInfrastructureAutoRetryBudget))
-	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup or Insufficient-CPU Pod wait bound; native Argo synchronization waits are exempt")
-
-	flags.Int64Var(&options.stepStartupAllowance.FactorPercent, "admission-step-startup-allowance-percent", argojob.DefaultStepStartupAllowance.FactorPercent, "Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499)")
-	flags.Int64Var(&options.stepStartupAllowance.MinSeconds, "admission-step-startup-allowance-min-seconds", argojob.DefaultStepStartupAllowance.MinSeconds, "smallest step start-up allowance in seconds (0-3600, at most the maximum)")
-	flags.Int64Var(&options.stepStartupAllowance.MaxSeconds, "admission-step-startup-allowance-max-seconds", argojob.DefaultStepStartupAllowance.MaxSeconds, "largest step start-up allowance in seconds (0-3600); 0 disables the allowance")
 
 	flags.BoolVar(&options.assist.Enabled, "assist-enabled", false, "allow agent-assisted continuation: opted-in credential-free branch CI steps park a failed retry for run_hold_* instead of failing (Helm assist.enabled)")
 	flags.DurationVar(&options.assist.HoldTTL, "assist-hold-ttl", argojob.DefaultAssistHoldTTL, "how long an idle assist hold waits for its agent before the server abandons it; a hold with an agent action ages from its last action, at most 2x this TTL; the held Pod deadline is the step budget plus 2x this TTL (whole seconds, at most 4h)")
@@ -308,12 +299,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoGoProxyNamespace.RepositoryPrefix, "argo-goproxy-repository-prefix", "", "Repository-name prefix within the configured owner")
 	flags.StringVar(&options.argoGoProxyNamespace.Upstream, "argo-goproxy-upstream", "", "Exact upstream owning private module repositories")
 	flags.StringVar(&options.argoGoProxyNamespace.Organization, "argo-goproxy-organization", "", "Exact organization owning private module repositories")
-	flags.Func("argo-repo-workflow-timeout", "administrator repository deadline cap: upstream/org/repo=30m (repeatable)", func(value string) error {
-		options.argoRepoWorkflowTimeouts = append(options.argoRepoWorkflowTimeouts, value)
-		return nil
-	})
-	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
-	flags.DurationVar(&options.argoDefaultWorkflowTimeout, "argo-default-workflow-timeout", argojob.DefaultExecutionTimeout, "deadline of a Workflow that declares no activeDeadlineSeconds, capped by --argo-workflow-timeout")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
@@ -371,12 +356,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := validateServeOptions(options); err != nil {
 		return serveOptions{}, err
 	}
-	if options.admissionStallTimeout <= 0 {
-		return serveOptions{}, errors.New("serve: --admission-stall-timeout must be positive")
-	}
-	if err := options.stepStartupAllowance.Validate(); err != nil {
-		return serveOptions{}, fmt.Errorf("serve: --admission-step-startup-allowance: %w", err)
-	}
 	if err := options.assist.Validate(); err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --assist: %w", err)
 	}
@@ -385,9 +364,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if err := validateAgentEventOptions(options); err != nil {
 		return serveOptions{}, err
-	}
-	if options.argoDefaultWorkflowTimeout < time.Second || options.argoDefaultWorkflowTimeout%time.Second != 0 {
-		return serveOptions{}, errors.New("serve: --argo-default-workflow-timeout must use whole positive seconds")
 	}
 	return options, nil
 }
@@ -874,10 +850,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		DisableInfrastructureAutoRetry: options.autoRetryBudget == 0, InfrastructureAutoRetryBudget: options.autoRetryBudget,
-		MaxRunLogBytes:    options.runLogLimitBytes,
-		MutationGate:      anchors.AllowMutation,
-		StalledRunTimeout: options.admissionStallTimeout,
-		RestoredRunsFile:  filepath.Join(options.dataRoot, service.RestoredRunsFile),
+		MaxRunLogBytes: options.runLogLimitBytes,
+		MutationGate:   anchors.AllowMutation,
+
+		RestoredRunsFile: filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})
 	if err != nil {
 		return err

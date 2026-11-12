@@ -427,10 +427,7 @@ argo:
   # that specific step. Wildcard grants keep the per-repo identity.
   perStepIdentities: []
 
-  # Ceiling on a document's own activeDeadlineSeconds, and how long a finished
-  # Workflow object is retained.
-  workflowTimeout: 12h
-  workflowTTL: 3600
+  # Ceiling on a document's own activeDeadlineSeconds, and how long a finished  workflowTTL: 3600
   # Deadline of a document that declares no spec.activeDeadlineSeconds, still
   # capped by workflowTimeout and repoWorkflowTimeouts.
   defaultWorkflowTimeout: 30m

@@ -230,7 +230,7 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 		}
 		// Bound tokens die with the workflow-owned identity Pod. The deadline covers the workflow,
 		// including queue/startup slack, without needing a long-lived token Secret.
-		seconds := int64(controller.config.WorkflowTimeout/time.Second) + 600
+		seconds := int64((12*time.Hour)/time.Second) + 600
 		if wf.Spec.ActiveDeadlineSeconds != nil {
 			seconds = *wf.Spec.ActiveDeadlineSeconds + 600
 		}

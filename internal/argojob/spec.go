@@ -54,8 +54,7 @@ const (
 	triggerLabel = "oberth.ci/trigger"
 	runLabel     = "oberth.ci/run"
 
-	defaultWorkflowTimeout = 12 * time.Hour
-	defaultTTLSeconds      = int32(3600)
+	defaultTTLSeconds = int32(3600)
 
 	// defaultSourceVolumeSize bounds one run's checkout. It is a source tree,
 	// not a build output directory: the pipeline's own volumes hold artifacts.
@@ -221,27 +220,9 @@ type Config struct {
 	// before the sweep collects it. Zero selects one hour.
 	OrphanClaimGrace time.Duration
 
-	// WorkflowTimeout caps the document's own spec.activeDeadlineSeconds.
-	WorkflowTimeout time.Duration
-
-	// DefaultWorkflowTimeout is the deadline of a document that declares none,
-	// still capped by WorkflowTimeout. Zero selects DefaultExecutionTimeout.
-	DefaultWorkflowTimeout time.Duration
-
-	// StepStartupAllowance widens literal step deadlines by bounded Pod
-	// start-up time (#1499). Nil selects DefaultStepStartupAllowance.
-	StepStartupAllowance *StepStartupAllowance
-
 	// Assist is the agent-assisted continuation policy (Helm assist.*).
 	// Disabled by default; see assist_hold.go.
 	Assist AssistConfig
-
-	// StalledRunTimeout bounds an admitted workflow without a scheduled pod or progress.
-	// Zero selects ten minutes.
-	StalledRunTimeout time.Duration
-
-	// PerRepoWorkflowTimeout holds administrator caps keyed by upstream/org/repo.
-	PerRepoWorkflowTimeout map[string]time.Duration
 
 	// TTLSeconds is how long a finished Workflow object is retained.
 	TTLSeconds int32
@@ -289,12 +270,7 @@ type Config struct {
 }
 
 func (config *Config) applyDefaults() {
-	if config.WorkflowTimeout <= 0 {
-		config.WorkflowTimeout = defaultWorkflowTimeout
-	}
-	if config.DefaultWorkflowTimeout <= 0 {
-		config.DefaultWorkflowTimeout = DefaultExecutionTimeout
-	}
+
 	if config.TTLSeconds <= 0 {
 		config.TTLSeconds = defaultTTLSeconds
 	}
@@ -307,13 +283,6 @@ func (config *Config) applyDefaults() {
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
 	}
-}
-
-func (config Config) stepStartupAllowance() StepStartupAllowance {
-	if config.StepStartupAllowance == nil {
-		return DefaultStepStartupAllowance
-	}
-	return *config.StepStartupAllowance
 }
 
 // DefaultedConfig freezes the same defaults used by the native controller.
@@ -331,25 +300,7 @@ func (config Config) Validate() error {
 	if err := config.Assist.Validate(); err != nil {
 		return err
 	}
-	if config.StalledRunTimeout < 0 {
-		return errors.New("argojob: stalled run timeout must be nonnegative")
-	}
-	if config.WorkflowTimeout > 0 && (config.WorkflowTimeout < time.Second || config.WorkflowTimeout%time.Second != 0) {
-		return errors.New("argojob: workflow timeout must use whole positive seconds")
-	}
-	if config.DefaultWorkflowTimeout > 0 && (config.DefaultWorkflowTimeout < time.Second || config.DefaultWorkflowTimeout%time.Second != 0) {
-		return errors.New("argojob: default workflow timeout must use whole positive seconds")
-	}
-	if config.StepStartupAllowance != nil {
-		if err := config.StepStartupAllowance.Validate(); err != nil {
-			return err
-		}
-	}
-	for repo, cap := range config.PerRepoWorkflowTimeout {
-		if len(strings.Split(repo, "/")) != 3 || cap < time.Second || cap%time.Second != 0 {
-			return fmt.Errorf("argojob: repository deadline cap %q must name upstream/org/repo and whole positive seconds", repo)
-		}
-	}
+
 	if config.ExecutorScratchSizeLimit != "" {
 		quantity, err := resource.ParseQuantity(config.ExecutorScratchSizeLimit)
 		if err != nil || quantity.Sign() <= 0 || quantity.Cmp(resource.MustParse("1Pi")) > 0 {
@@ -889,9 +840,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
 	}
-	applyExecutionDeadline(workflow, config, canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo))
 	applyServerBounds(workflow, config)
-	applyStepDeadlineFloor(workflow, config.stepStartupAllowance())
 	if err := markAssistHolds(workflow, config, request, credentialed); err != nil {
 		return nil, err
 	}
@@ -1250,11 +1199,6 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 // applyServerBounds caps the document's own deadline and pins retention. A
 // document can ask for less than the administrator ceiling but never more.
 func applyServerBounds(workflow *wfv1.Workflow, config Config) {
-	ceiling := int64(config.WorkflowTimeout / time.Second)
-	if workflow.Spec.ActiveDeadlineSeconds == nil || *workflow.Spec.ActiveDeadlineSeconds > ceiling {
-		bounded := ceiling
-		workflow.Spec.ActiveDeadlineSeconds = &bounded
-	}
 	ttl := config.TTLSeconds
 	// Keep Workflow-owned Pods through settling, diagnostics and the shared
 	// two-minute final drain, even if the configured TTL is shorter.

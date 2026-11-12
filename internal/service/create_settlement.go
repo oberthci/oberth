@@ -332,8 +332,6 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			message = "Workflow spec mismatch; cleanup confirmed absence"
 		case store.ExecutorIdentityPendingMessage:
 			message = "executor identity readiness deadline exceeded after one issuance retry; cleanup confirmed absence"
-		case store.AdmissionStalledPendingMessage:
-			message = "resource admission expired: no scheduled pod or progress; cleanup confirmed absence"
 		}
 		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
 			return false, err
@@ -369,14 +367,9 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 	grant.retain()
 	reason := ""
 	for _, failure := range failures {
-		var expired interface{ AdmissionExpiryReason() string }
+		var expired interface{ ExecutorIdentityExpired() bool }
 		if errors.As(failure, &expired) {
-			switch expired.AdmissionExpiryReason() {
-			case "identity":
-				reason = store.ExecutorIdentityPendingMessage
-			case "stalled":
-				reason = store.AdmissionStalledPendingMessage
-			}
+			reason = store.ExecutorIdentityPendingMessage
 			run.Error = reason
 		}
 		var mismatch interface{ WorkflowSpecMismatch() bool }

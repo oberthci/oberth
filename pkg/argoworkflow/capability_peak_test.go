@@ -13,6 +13,9 @@ import (
 func TestExtendedResourcePeakFollowsWorkflowConcurrency(t *testing.T) {
 	device := corev1.ResourceName("devices.example.test/worker")
 	leaf := declaredLeaf("worker", "1", "128Mi")
+	delete(leaf.Container.Resources.Requests, corev1.ResourceCPU)
+	delete(leaf.Container.Resources.Requests, corev1.ResourceMemory)
+	delete(leaf.Container.Resources.Limits, corev1.ResourceMemory)
 	leaf.Container.Resources.Requests[device] = resource.MustParse("1")
 	leaf.Container.Resources.Limits[device] = resource.MustParse("1")
 	for _, tc := range []struct {
@@ -37,7 +40,7 @@ func TestExtendedResourcePeakFollowsWorkflowConcurrency(t *testing.T) {
 			if tc.workflowLimit > 0 {
 				wf.Spec.Parallelism = ptr.To(tc.workflowLimit)
 			}
-			demand, err := DeclaredPodPeak(wf)
+			demand, err := DeclaredCapabilityPeak(wf)
 			if err != nil || demand == nil {
 				t.Fatalf("peak: %+v %v", demand, err)
 			}
