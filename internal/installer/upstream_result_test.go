@@ -45,9 +45,12 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 	for _, tc := range []struct {
 		name                        string
 		ready, existing, authorized bool
+		additionalFailure           bool
 	}{
-		{"action_needed", true, false, false}, {"real_failure", false, false, false},
-		{"verified", true, true, true}, {"existing_pending", true, true, false},
+		{"action_needed", true, false, false, false}, {"real_failure", false, false, false, false},
+		{"verified", true, true, true, false}, {"existing_pending", true, true, false, false},
+		{"additional_registration_failure", true, false, false, true},
+		{"existing_additional_registration_failure", true, true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ready := tc.ready
@@ -79,6 +82,9 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				return nil, nil
 			}}
 			cfg := Config{ForgeType: "github", ForgeOrg: "acme", ClientAccess: "none", ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port, ContextName: "selected", KubeconfigPath: "/secure/kube config", UplinkIdentity: "admin@workstation", uplinkOnboarded: true, SSHPublicKeyPath: "-"}
+			if tc.additionalFailure {
+				cfg.AlsoUpstreams = []string{"ssh://git@codeberg.org/another-org"}
+			}
 			// Kubeconfig loading is injected; the command still carries its exact file.
 			verifyCfg := cfg
 			verifyCfg.KubeconfigPath = ""
@@ -90,6 +96,14 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				pod := &fakeOberthHost{t: t, addResults: []fakeAddResult{{registers: true, out: keyLine + "\nUpstream github registered; deploy key pending.\n"}}}
 				if tc.existing {
 					pod.upstreamRows = []string{"github ssh ssh://git@github.com/acme SHA256:public"}
+				}
+				if tc.additionalFailure {
+					failure := fakeAddResult{out: "host key mismatch", err: errors.New("upstream registration failed")}
+					if tc.existing {
+						pod.addResults = []fakeAddResult{failure}
+					} else {
+						pod.addResults = append(pod.addResults, failure)
+					}
 				}
 				var discarded bytes.Buffer
 				onboard := onboardingDeps(t, pod, &discarded, strings.NewReader(""), false)
@@ -107,11 +121,12 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				tw.WriteFooter()
 				return FinishInstall(ctx, got, onboard, tw, &heldCredentials{})
 			})
-			if errors.Is(err, ErrUpstreamKeyPending) != (ready && !tc.authorized) || (err == nil) != tc.authorized {
+			wantOK := tc.authorized && !tc.additionalFailure
+			if errors.Is(err, ErrUpstreamKeyPending) != (ready && !tc.authorized && !tc.additionalFailure) || (err == nil) != wantOK {
 				t.Fatal("wrong pending/failure classification")
 			}
 			var result InstallResult
-			if json.Unmarshal(output.Bytes(), &result) != nil || result.OK != tc.authorized || result.Upstream == nil {
+			if json.Unmarshal(output.Bytes(), &result) != nil || result.OK != wantOK || result.Upstream == nil {
 				t.Fatal("invalid JSON partial result")
 			}
 			u := result.Upstream

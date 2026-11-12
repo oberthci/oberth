@@ -148,7 +148,10 @@ func TestConnectAlsoUpstreamsRegistersEachWithTheSameKey(t *testing.T) {
 	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
 	cfg := Config{AlsoUpstreams: []string{"ssh://git@codeberg.org/exampleorg", "ssh://git@github.com/oberthci", "ssh://git@codeberg.org/acme"}}
 	tw := newTableWriter(&buf, false)
-	got := connectAlsoUpstreams(context.Background(), cfg, deps, tw, []NextStepsUpstream{{Name: "github", BaseURL: "ssh://git@github.com/oberthci"}})
+	got, err := connectAlsoUpstreams(context.Background(), cfg, deps, tw, []NextStepsUpstream{{Name: "github", BaseURL: "ssh://git@github.com/oberthci"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	tw.WriteFooter()
 
 	if len(got) != 2 || got[0].Name != "codeberg" || got[1].Name != "codeberg-acme" {

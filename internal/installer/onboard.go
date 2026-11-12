@@ -123,14 +123,18 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		// set up.
 		// --also-upstream on a deployment that already has upstreams connects
 		// them with its key now (#060).
+		var additionalErr error
 		if len(cfg.AlsoUpstreams) > 0 {
-			connectAlsoUpstreams(ctx, cfg, deps, tw, existing)
+			_, additionalErr = connectAlsoUpstreams(ctx, cfg, deps, tw, existing)
 			tw.WriteFooter()
 		}
 		if err := offerClientAccessToConfiguredDeployment(ctx, cfg, deps, tw); err != nil {
 			return err
 		}
-		return waitAndAnnounceReady(ctx, cfg, deps)
+		if err := waitAndAnnounceReady(ctx, cfg, deps); err != nil {
+			return err
+		}
+		return additionalErr
 	}
 
 	if !isInteractive(deps) {
@@ -481,7 +485,8 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 
 	// --- More organizations, same upstream key (#060) ---
 	first := []NextStepsUpstream{{Name: name, BaseURL: baseURL, Connected: registered}}
-	upstreams := append(first, connectAlsoUpstreams(ctx, cfg, deps, tw, first)...)
+	additional, additionalErr := connectAlsoUpstreams(ctx, cfg, deps, tw, first)
+	upstreams := append(first, additional...)
 
 	// --- Uplink ---
 	pubKeyPath, identity, token := cfg.SSHPublicKeyPath, cfg.UplinkIdentity, cfg.adminToken
@@ -546,6 +551,9 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		}
 		result := installUpstreamResult(cfg, deps, name, baseURL, deployPubKey, false)
 		_, _ = fmt.Fprintf(w, "\n%s\n%s\nThen run:\n    %s\n", upstreamKeyRemedy(result), result.DeployPublicKey, result.NextCommand)
+		if additionalErr != nil {
+			return additionalErr
+		}
 		return ErrUpstreamKeyPending
 	}
 
@@ -557,20 +565,21 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		deps.StepProgressSink("audit genesis", "done")
 	}
 	printReadyWithNextSteps(w, cfg, deps, upstreams, sshConfigured, color)
-	return nil
+	return additionalErr
 }
 
 // connectAlsoUpstreams registers every --also-upstream organization with the
 // key the first upstream uses (#060). A forge that does not accept the key yet
-// is reported pending, not fatal: the first upstream already works, and the
-// next steps name the command that finishes it.
-func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, existing []NextStepsUpstream) []NextStepsUpstream {
+// is reported pending, not fatal. Registration failures remain install failures
+// even when the first upstream has registered and permits readiness.
+func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, existing []NextStepsUpstream) ([]NextStepsUpstream, error) {
 	used, orgs := map[string]bool{}, map[string]bool{}
 	for _, u := range existing {
 		used[u.Name] = true
 		orgs[orgFromBaseURL(u.BaseURL)] = true
 	}
 	var connected []NextStepsUpstream
+	var registrationErr error
 	for _, baseURL := range cfg.AlsoUpstreams {
 		org := orgFromBaseURL(baseURL)
 		if orgs[org] {
@@ -585,13 +594,16 @@ func connectAlsoUpstreams(ctx context.Context, cfg Config, deps Deps, tw *tableW
 		switch {
 		case err != nil:
 			status = "⚠ " + terseInstallError(err)
+			// Keep subprocess details out of JSON; the failed install check
+			// must survive discarded text output and take precedence over exit 3.
+			registrationErr = fmt.Errorf("%w: additional upstream registration failed", ErrOnboardingPartial)
 		case !ok:
 			status = "pending"
 		}
 		tw.AppendRow("Upstream", name+" · "+hostnameFromURL(baseURL)+"/"+org, status, false)
 		connected = append(connected, NextStepsUpstream{Name: name, BaseURL: baseURL, Connected: ok && err == nil})
 	}
-	return connected
+	return connected, registrationErr
 }
 
 // printAlsoUpstreamCommands names the command that connects each
