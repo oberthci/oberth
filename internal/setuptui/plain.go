@@ -278,18 +278,18 @@ func (p *plainRun) review() (bool, error) {
 		p.st.done[q.step] = false
 		return true, nil
 	}
-	if !p.st.Config.CreateKind {
-		p.say("  Checking the cluster connection…\n")
-		result := probeContext(p.st.Config.ContextName, p.st.Config.KubeconfigPath)()
-		if result.err != nil {
-			p.say("  ERROR: cluster: %v\n", result.err)
-			p.st.done[stepCluster] = false
-			return true, nil
-		}
-		result.apply(p.st)
-		dns, ips := wizardTLSNames(p.st)
-		p.say("  TLS DNS names: %v; IP addresses: %v\n", dns, ips)
+
+	p.say("  Checking the cluster connection…\n")
+	result := probeContext(p.st.Config.ContextName, p.st.Config.KubeconfigPath)()
+	if result.err != nil {
+		p.say("  ERROR: cluster: %v\n", result.err)
+		p.st.done[stepCluster] = false
+		return true, nil
 	}
+	result.apply(p.st)
+	dns, ips := wizardTLSNames(p.st)
+	p.say("  TLS DNS names: %v; IP addresses: %v\n", dns, ips)
+
 	if p.opts.AnswersOut != "" {
 		if err := installer.WriteAnswers(p.opts.AnswersOut, installConfig(p.st)); err != nil {
 			return false, err

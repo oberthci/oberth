@@ -1789,9 +1789,7 @@ func GenerateSSHConfigBlock(host, port, identityFile string) string {
 // node IP is parsed from the API server URL; loopback addresses are normalised
 // to "localhost".
 func sshHostFromServer(deps Deps) string {
-	if deps.KindClusterName != "" {
-		return "localhost"
-	}
+
 	if deps.ClientHost != "" {
 		return deps.ClientHost
 	}

@@ -72,7 +72,7 @@ config:
 func TestVerificationJSONRedactsDependencyErrors(t *testing.T) {
 	var output bytes.Buffer
 	marker := "sensitive-dependency-diagnostic"
-	deps := InstallDeps{Output: &output, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+	deps := InstallDeps{ProbeNetworkPolicy: enforcedPolicyFixture, Output: &output, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return nil, nil, "", errors.New(marker)
 	}}
 	if err := PrintVerification(context.Background(), Config{}, deps, true); err == nil {
@@ -241,7 +241,12 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}})
 	forgeAuthorized := true
 	readinessJSON := `{"status":"not ready","code":"no_upstream"}`
-	deps := InstallDeps{LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+	deps := InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
+			return []byte(`[{"name":"oberth"}]`), nil
+		}
+		return []byte(`{"networkPolicy":{"enabled":true}}`), nil
+	}, ProbeNetworkPolicy: enforcedPolicyFixture, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return kube, &rest.Config{Host: "https://127.0.0.1:6443", TLSClientConfig: rest.TLSClientConfig{CAData: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})}}, "selected", nil
 	}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 		command := strings.Join(args, " ")

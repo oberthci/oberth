@@ -49,14 +49,11 @@ func TestTLSBootstrapUsesTheGivenImageWithoutConsultingAnyChart(t *testing.T) {
 	pinned := "oberth-registry:5000/oberth@sha256:" + strings.Repeat("d", 64)
 
 	deps := Deps{
-		KindClusterName: "oberth",
 		RunHelm: func(context.Context, []string) ([]byte, error) {
 			return nil, errors.New("helm must not be consulted when --image names the image")
 		},
-		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
-			if name == "kind" && len(args) > 0 && args[0] == "get" {
-				return []byte("oberth-control-plane\n"), nil
-			}
+		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+			t.Fatal("explicit image resolution invoked a cluster manager")
 			return nil, nil
 		},
 	}

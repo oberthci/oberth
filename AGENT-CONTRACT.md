@@ -3403,3 +3403,54 @@ out-of-CI machine harness refuses pre-existing k3s configuration/drop-ins/data
 and owned units/enable paths, uses private explicit k3s paths, and exclusively
 creates units/binaries. Disposable-VM provisioning/reboot acceptance remains
 unqualified; the contract cell grants no publisher privileges or tool-pin bypass.
+
+IP-only client endpoints produce a DNS proposal with the exact hosts line or
+A/AAAA record. Load-balancer hostnames can be named by CNAME. The plugin waits
+for the user's naming change and re-probes the chosen name against the detected
+endpoint; no hosts file or DNS is edited automatically. TCP checks remain
+advisory and DNS-only CA constraints remain unchanged.
+
+Installer NetworkPolicy preflight uses live scratch-Pod traffic, not CNI names
+or controller readiness/configuration. Allowed → default-deny blocked → allowed
+after deletion is required; absent and unverified are distinct failing states.
+Only the random ownership-labelled namespace is cleaned with a UID precondition,
+under a separate bounded cleanup context even after cancellation. The pinned
+utility image and restricted, non-root, tokenless Pods are shared across CPU
+architectures. Plan/verification create these scratch resources before the
+release install Review and never mutate the operator's kubeconfig.
+
+Mac onboarding #1549: selected kubeconfig files are immutable installer inputs.
+No step changes the current context or merges/replaces operator files. The Go
+REST client disables auth-provider persistence. Printed
+kind creation remedies target a separate new file with an existence/symlink
+guard. Context loss in the reported rehearsal remains unestablished.
+
+Mac onboarding review: capability evidence does not alter a stored policy choice.
+The live check measures egress independently, with controls and explicit
+namespace/node coverage, and reports bounded convergence as unverified. Probe
+expiry reconciliation protects active/foreign namespaces. All native source
+loading is migration-free; child kubectl/Helm use a private merged copy through
+flags and environment, including setup and the add-repo proxy. Exec credential
+plugins may maintain their own caches. Existing-release policy state propagates
+to JSON maintenance verification. These extend the invariants above; normal
+cleanup includes cancellation, while hard-kill leftovers reconcile next run.
+
+Mac onboarding #1553: Kubernetes clusters and host prerequisites are supplied by
+the operator. The CLI and setup wizard do not create clusters, load kind images
+or run package managers. Missing prerequisites print commands/links and stop;
+printed kind remedies are instructions for the operator, with a separate new
+kubeconfig target. Validation and address waiting do not change settings.
+
+Mac onboarding R3 #1548: existing-release maintenance reads stored values before
+capability probing and preserves true, false or unspecified policy configuration.
+Unverified capability is information during maintenance; fresh installs and
+explicit verification remain fail-closed. Cleanup carries the observed UID,
+revalidates expiry and binds deletion to resource version; unknown or replaced
+objects stay untouched. The live scratch-resource probe is the accepted default.
+
+Mac onboarding R3 #1549: transient kubeconfig copies carry a complete ownership
+marker and inherited kernel lease in an owner-only user-cache directory. Handled
+signals include SIGQUIT. Startup reclaims recognized, unlocked copies whose age
+is known; active, unmarked, malformed and future-dated objects are preserved.
+Cleanup errors are surfaced. A surviving child or absent next startup extends
+the residual window; this is neither a hard wall-clock bound nor secure erasure.

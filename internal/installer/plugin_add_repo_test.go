@@ -277,6 +277,11 @@ func TestAddRepoWorkflowsAreNativeAndNeverCommittedOrOverwritten(t *testing.T) {
 func TestAddRepoClusterActionsKeepTheChosenContext(t *testing.T) {
 	bootstrapCredentialInventory(t)
 	f := newAddRepoFixture(t, "git@github.com:acme/project.git")
+	f.fake(t, "oberth", `[ "$1" = client ] && [ "$2" = kubectl ] || exit 2
+shift 2
+exec kubectl "$@"
+`)
+
 	f.fake(t, "kubectl", `printf '%s\n' "$@" >> "$CALL_TRACE"`)
 	if _, err := f.call(t, "prepare-upstream", "chosen", "namespace", "pod", "github", "ssh://git@github.com/acme", "project", "dedicated", "no"); err == nil {
 		t.Fatal("upstream mutation lacked consent")
@@ -463,6 +468,11 @@ func TestAddRepoHomeRelativeOtherForgeAndHostPin(t *testing.T) {
 	if out, err = f.call(t, "deploy-key", f.root, addRepoPublicKey(t), "--consent", "other"); err == nil || !strings.Contains(out, "Ask the forge administrator for the exact public-key registration page or authorized_keys location") {
 		t.Fatalf("%v %s", err, out)
 	}
+	f.fake(t, "oberth", `[ "$1" = client ] && [ "$2" = kubectl ] || exit 2
+shift 2
+exec kubectl "$@"
+`)
+
 	f.fake(t, "kubectl", `printf '%s\n' "$@" > "$CALL_TRACE"`)
 	if _, err = f.call(t, "prepare-upstream", "chosen", "namespace", "pod", "custom", "ssh://git@forge.example.test:2222/~/acme", "project", "shared", "--consent", "SHA256:approved"); err != nil {
 		t.Fatal(err)

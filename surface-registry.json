@@ -943,6 +943,42 @@
     "flag:bootstrap-credential-leak-control": {
       "doc_anchor": "hack/bootstrap-acceptance/README.md#captured-output-boundary",
       "test_ref": "internal/installer/client_cert_test.go TestFirstAdminCSRDoesNotMintBearer"
+    },
+    "flag:endpoint-address": {
+      "doc_anchor": "docs/plugin-install.md#naming-an-ip-or-load-balancer-endpoint",
+      "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginDNSRemedyWaitsForNameAndReprobes"
+    },
+    "flag:wait-load-balancer": {
+      "doc_anchor": "docs/plugin-install.md#no-reachable-node-loadbalancer-proposal",
+      "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginWaitLoadBalancerIsBoundedAndSelected"
+    },
+    "flag:wait-timeout": {
+      "doc_anchor": "docs/plugin-install.md#no-reachable-node-loadbalancer-proposal",
+      "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginWaitLoadBalancerIsBoundedAndSelected"
+    },
+    "flag:namespace": {
+      "doc_anchor": "docs/plugin-install.md#no-reachable-node-loadbalancer-proposal",
+      "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginWaitLoadBalancerIsBoundedAndSelected"
+    },
+    "label:oberth.ci/network-policy-probe": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/plugin_network_policy_test.go TestPluginNetworkPolicyLiveProbeAndCleanup"
+    },
+    "annotation:oberth.ci/probe-expires-at": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/network_policy_review_test.go TestProbeReconcilesStaleNamespacesAndProtectsActiveAndForeign"
+    },
+    "value:client kubectl": {
+      "doc_anchor": "docs/plugin-install.md#preserve-the-operators-kubeconfig",
+      "test_ref": "cmd/oberth/client_kubectl_test.go TestAddRepoKubectlUsesPrivateConfiguration"
+    },
+    "value:evidence": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/network_policy_review_test.go TestProbeEvidenceRequiresEgressControlAndConvergence"
+    },
+    "value:network_policy": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/network_policy_values_test.go TestStoredDisabledPolicySurvivesPreflightAndUpgrade"
     }
   }
 }

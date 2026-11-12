@@ -271,6 +271,8 @@ def scan(root, names, registry, deprecations):
                 for kind, pattern in (("env", ENV), ("annotation", ANNOTATION), ("flag", FLAG)):
                     for match in pattern.finditer(line):
                         key = kind + ":" + match[1]
+                        if kind == "annotation" and "label:" + match[1] in entries:
+                            key = "label:" + match[1]
                         if key not in entries:
                             add("law3-surface")
                         if kind == "env" and SEAM.search(match[1]) and not name.endswith("_test.go"):
@@ -309,7 +311,7 @@ def fingerprint(findings):
 def validate_registries(root):
     surface = json.loads((root / "surface-registry.json").read_text())
     for key, entry in surface["entries"].items():
-        if not key.startswith(("env:", "annotation:", "flag:", "value:")) or not entry.get("doc_anchor") or not entry.get("test_ref"):
+        if not key.startswith(("env:", "annotation:", "label:", "flag:", "value:")) or not entry.get("doc_anchor") or not entry.get("test_ref"):
             raise ValueError("surface requires type/name, doc_anchor and test_ref: " + key)
     records = json.loads((root / "deprecations.yaml").read_text())["deprecations"]
     seen = set()

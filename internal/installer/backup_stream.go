@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/oberthci/oberth/internal/kubeconfig"
 )
 
 // stderr is diagnostic only, never part of the binary archive. Retain just a
@@ -23,9 +25,19 @@ func (b *backupDiagnostic) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func defaultRunCommandIO(ctx context.Context, input io.Reader, output io.Writer, name string, args ...string) error {
+func defaultRunCommandIO(ctx context.Context, input io.Reader, output io.Writer, name string, args ...string) (resultErr error) {
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	if prepareErr != nil {
+		return prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
+
 	// #nosec G204 -- fixed executable and structured arguments, no shell.
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = environment
+	if lease != nil {
+		cmd.ExtraFiles = []*os.File{lease}
+	}
 	cmd.Stdin, cmd.Stdout = input, output
 	stderr := &backupDiagnostic{}
 	cmd.Stderr = stderr

@@ -46,3 +46,35 @@ func TestClientPortsUsesPublicPlanAndExplicitEndpoints(t *testing.T) {
 		t.Fatal("invalid metadata echoed or accepted")
 	}
 }
+
+func TestClientPortsNamesDetectedEndpoint(t *testing.T) {
+	old := clientPortsProbeDeps
+	t.Cleanup(func() { clientPortsProbeDeps = old })
+	clientPortsProbeDeps = func() installer.ClientPortProbeDeps {
+		return installer.ClientPortProbeDeps{LookupHost: func(_ context.Context, name string) ([]string, error) {
+			if name != "oberth.test" {
+				t.Fatal(name)
+			}
+			return []string{"192.0.2.10"}, nil
+		}}
+	}
+	plan := installer.InstallPlan{Version: 1, Identity: installer.ClusterIdentity{Context: "chosen", Nodes: []installer.NodeIdentity{{Name: "node"}}}}
+	raw, _ := json.Marshal(plan)
+	path := filepath.Join(t.TempDir(), "plan.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runClientPorts(t.Context(), []string{"--plan-file", path, "--client-host", "oberth.test", "--endpoint-address", "192.0.2.10"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	var result installer.ClientPortProbe
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil || result.DNS == nil || !result.DNS.Resolves || result.DNS.HostsLine != "192.0.2.10 oberth.test" {
+		t.Fatalf("%+v %v", result, err)
+	}
+	for _, duration := range []string{"0", "-1s", "11m"} {
+		if err := runClientPorts(t.Context(), []string{"--plan-file", path, "--wait-load-balancer", "--wait-timeout", duration}, &output); err == nil || !strings.Contains(err.Error(), "--wait-timeout") {
+			t.Fatalf("unbounded wait: %v", err)
+		}
+	}
+}

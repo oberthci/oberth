@@ -48,7 +48,6 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags.StringVar(&cfg.SecretsAgeRecipient, "secrets-age-recipient", "", "age recipient for encrypting --secrets-file; requires age on PATH")
 	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "kubeconfig file for an existing cluster")
 	flags.StringVar(&cfg.ContextName, "context", "", "kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)")
-	flags.BoolVar(&cfg.CreateKind, "create-kind", false, "create or use the local oberth kind cluster")
 	flags.StringVar(&cfg.ForgeURL, "upstream-url", "", "organization upstream base URL, e.g. ssh://git@github.com/oberthci")
 	flags.StringVar(&cfg.ForgeType, "forge", "", "upstream name (github, codeberg, or gitlab)")
 	flags.StringVar(&cfg.ForgeOrg, "organization", "", "upstream organization")

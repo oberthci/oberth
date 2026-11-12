@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"sort"
 	"strings"
@@ -13,25 +14,8 @@ import (
 // Resolve defaults before the first write. Reused values belong to the operator;
 // detection is only a default for a new release.
 func resolveInstallRerunValues(ctx context.Context, cfg *Config, deps Deps, cluster ClusterInfo) error {
-	ns := cfg.Namespace
-	if ns == "" {
-		ns = DefaultNamespace
-	}
-	if deps.RunHelm != nil {
-		_, exists, err := findHelmRelease(ctx, deps, "oberth", ns)
-		if err != nil {
-			return err
-		}
-		cfg.existingRelease = exists
-		if exists {
-			cfg.liveInstallValues, err = readHelmValuesMap(ctx, deps, ns)
-			if err != nil {
-				return err
-			}
-			if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
-				return err
-			}
-		}
+	if err := readInstallValues(ctx, cfg, deps); err != nil {
+		return err
 	}
 	if cfg.NetworkPolicy == "auto" {
 		if !cfg.existingRelease {
@@ -181,4 +165,90 @@ func explicitInstallValues(cfg Config) bool {
 		return true
 	}
 	return cfg.PushBannerURLSet || cfg.PushBannerURL != "" || cfg.AcceptWitnessGenesisSet || cfg.AcceptWitnessGenesis != "" || cfg.ServiceType != "" || cfg.NetworkPolicy == "true" || cfg.NetworkPolicy == "false" || cfg.ArgoVaultCredentialedRole != "" || cfg.ArgoVaultAddress != "" || len(cfg.ValuesFiles) > 0 || cfg.AssistEnabled
+}
+
+// Capability probing must not choose or override an existing release's values.
+func readInstallValues(ctx context.Context, cfg *Config, deps Deps) error {
+	if cfg.existingValuesRead {
+		return nil
+	}
+	ns := cfg.Namespace
+	if ns == "" {
+		ns = DefaultNamespace
+	}
+	if deps.RunHelm != nil {
+		_, exists, err := findHelmRelease(ctx, deps, "oberth", ns)
+		if err != nil {
+			return err
+		}
+		cfg.existingRelease = exists
+		if exists {
+			cfg.liveInstallValues, err = readHelmValuesMap(ctx, deps, ns)
+			if err != nil {
+				return err
+			}
+			if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
+				return err
+			}
+		}
+	}
+	cfg.existingValuesRead = true
+	return nil
+}
+
+func effectiveNetworkPolicy(cfg Config) string {
+	if cfg.NetworkPolicy != "" && cfg.NetworkPolicy != "auto" {
+		return cfg.NetworkPolicy
+	}
+	if live, ok := valueAt(cfg.liveInstallValues, "networkPolicy", "enabled").(bool); ok {
+		if live {
+			return "true"
+		}
+		return "false"
+	}
+	if cfg.existingRelease {
+		return "unspecified (preserved)"
+	}
+	return "true"
+}
+
+func installPolicyDeps(host InstallDeps, cfg Config, selected string) Deps {
+	args := []string{"--kube-context", selected}
+	if cfg.KubeconfigPath != "" {
+		args = append([]string{"--kubeconfig", cfg.KubeconfigPath}, args...)
+	}
+	return Deps{RunHelm: HelmWithKubeArgs(host.RunHelm, args), Output: host.Output}
+}
+
+// Verification describes the installed setting, regardless of desired flags.
+func resolveInstalledPolicy(ctx context.Context, cfg *Config, deps Deps) error {
+	if err := readInstallValues(ctx, cfg, deps); err != nil {
+		return err
+	}
+	if !cfg.existingRelease {
+		return errors.New("installed Helm release not found")
+	}
+	live, known := valueAt(cfg.liveInstallValues, "networkPolicy", "enabled").(bool)
+	if !known {
+		return errors.New("effective installed NetworkPolicy setting missing")
+	}
+	cfg.NetworkPolicy = "false"
+	if live {
+		cfg.NetworkPolicy = "true"
+	}
+	return nil
+}
+
+func describeStoredPolicy(w io.Writer, values map[string]any) {
+	choice := effectiveNetworkPolicy(Config{existingRelease: true, liveInstallValues: values})
+	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (stored choice; preserved)\n", choice)
+	printPolicyWarning(w, choice)
+}
+func printPolicyWarning(w io.Writer, choice string) {
+	switch choice {
+	case "false":
+		_, _ = fmt.Fprintln(w, "WARNING: pipeline NetworkPolicy is disabled by the stored configuration; pipeline egress is not isolated by the chart.")
+	case "unspecified (preserved)":
+		_, _ = fmt.Fprintln(w, "WARNING: stored NetworkPolicy choice is unspecified; maintenance preserves it. Explicit verification remains unverified until an effective boolean is available.")
+	}
 }

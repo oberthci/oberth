@@ -56,3 +56,170 @@ sha256sum -c SHA256SUMS
 
 Never substitute a public key downloaded beside the artifacts for the
 trusted source pin.
+
+### Naming an IP or load-balancer endpoint
+
+When the only endpoint is an IP or load-balancer address, pass it as
+`--endpoint-address '<detected address>'` to `scripts/install ports`. If no
+name was chosen, propose `--client-host oberth.test` (the user may choose their
+own DNS name). Show the returned `dns.hosts_line` verbatim for `/etc/hosts` on
+each client, or `dns.dns_record` for the DNS administrator. A hostname endpoint
+uses a CNAME record; IP endpoints print an A/AAAA record and a hosts line.
+Never edit these automatically. Wait for the user to configure the name, then
+rerun with the chosen `--client-host` and the same `--endpoint-address`.
+Continue when `dns.resolves_to_endpoint` is true. This checks name resolution
+separately from TCP: a fresh service need not listen yet. Keep DNS-only CA
+constraints and include the chosen name in the install Review.
+
+### No reachable node: LoadBalancer proposal
+
+The port probe offers `load_balancer.install_flags` when no planned node
+address answers its NodePorts. Missing node addresses and failed probes are
+advisory generic signals, including on managed clusters; no provider detection
+or new admission gate is used. Offer `--service-type LoadBalancer` with
+`--client-https-port 443 --client-ssh-port 2222`, or port mapping/forwarding.
+Use the operator's chosen DNS name (propose `oberth.test`) in the same Review.
+Include all flags in that Review and wait for "install" before any mutation.
+
+For LoadBalancer, start the approved install in the background, retaining its
+public output and process status. Then run the read-only address wait against
+the saved plan and the reviewed namespace:
+
+```sh
+sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<hostname approved in Review>' --client-https-port '<approved HTTPS port>' --client-ssh-port '<approved SSH port>' --service-type LoadBalancer --wait-load-balancer --wait-timeout 2m --namespace '<approved namespace>'
+```
+
+The helper waits for Service `oberth` to exist and receive an ingress address,
+with a bounded timeout (maximum 10m). It never creates a Service. Show the
+returned DNS remedy, wait for the user's DNS/hosts change, and re-probe with
+`--endpoint-address` set to that ingress address. Do not rerun the installer
+while the original process is still running. On timeout inspect that Service
+and its events, keep the install status and secrets file, then retry the wait
+or review a forwarding remedy. Do not claim success until the original install
+and subsequent verification pass. Standard LoadBalancer Service ports are 443
+and 2222; NodePorts remain 30443 and 30022.
+
+### Existing kind cluster without published ports
+
+Before install starts, show `kind_remedy.config` in full when the selected
+kind cluster has missing or unverified mappings; save it as
+`oberth-kind.yaml` and show `kind_remedy.create_command` verbatim. It maps
+container NodePorts 30022/30443 to the proposed SSH/HTTPS host ports (including
+explicit overrides), bound to 127.0.0.1. Docker inspection recognizes only the
+selected nodes' kind cluster. A reachable unrelated listener is insufficient
+proof that kind has the required mappings.
+
+The ready-to-use create command uses the new name `oberth-onboarding`; if
+that exists, choose an unused name. Do not delete or recreate the selected
+cluster automatically. The user can create a new cluster, select its context
+and repeat the plan/probe, or keep this cluster and choose port-forward.
+Print these remedies before the same install Review; kind is never refused
+as an install target. These loopback mappings support clients on this Mac.
+
+The printed command targets a new `oberth-kind.kubeconfig` and refuses an
+existing file or symlink. Use that file and `kind-oberth-onboarding` explicitly
+for the next plan/install; choose unused names instead of replacing files.
+
+### Prerequisite hints on macOS
+
+`scripts/install prerequisites` reports every missing kubectl/Helm tool and
+prints the exact `brew install kubernetes-cli` and/or `brew install helm`
+command on macOS, alongside the installation links. It then stops. The operator
+runs dependency installation outside Oberth. Validation never invokes brew,
+reads consent to install tools, or changes settings. Existing tools are not
+reinstalled. Linux retains the installation links.
+
+### Live NetworkPolicy enforcement check
+
+Plan, install preflight and verification use a bounded live egress probe, not
+controller names or CNI brands. A server and one client/control pair per Ready,
+schedulable, untainted node run in an owned scratch namespace. The control Pod
+shares its client's node and stays outside the egress-deny selector. Receiver
+ingress stays open. Each denial observation checks a working path to the same
+server before, throughout, and after the tested client request. HTTP errors, refused
+listeners, changed Pod health or failed controls are unverified. Only timeouts
+without an HTTP response are denial candidates; three observations and two
+separate deny/recover transitions are required.
+
+The public check's `evidence` states the scratch and pipeline namespaces,
+client/control nodes and server node. Existing pipeline namespace labels are
+copied except Kubernetes' immutable namespace-name label; the probe adds its
+ownership label. Namespace-name-specific exclusions, other node-pair routes,
+ingress enforcement and the installed policy's selectors/allow rules are not
+covered by this TCP default-deny capability measurement. Read that scope with
+the result; do not present it as proof of every installed isolation rule.
+The pinned utility image supports arm64/amd64. An air-gapped installation needs
+an accessible explicit `--utility-image` mirror; saved image pull secrets are
+not copied into the scratch namespace.
+
+A slow or non-converging policy is **unverified**, with the phase and observed
+elapsed time, rather than proven absence. API, image, exec, server and route
+failures are unverified too. Failed or disabled security checks refuse a fresh install or explicit
+verification; repeat after repairing the reported condition. Required rights are
+namespaces create/get/list/delete, Pods create/get, pods/exec get/create, and
+NetworkPolicies create/delete, in addition to existing cluster reads. The probe
+has a 90-second budget plus a separate 30-second cleanup budget after normal
+return or cancellation. This is not a hard-kill cleanup guarantee: the next run
+finds ownership-labelled leftovers and removes only an expired object with the
+same listed UID, rechecking its expiry and binding deletion to UID/resource
+version. Replacements, renewed lifetimes and missing/malformed expiry metadata
+are preserved and reported as unverified. Recent or active probes stay until expiry. Foreign ownership
+is reported and left untouched. Disclose these scratch writes before plan;
+Review remains the approval for installing the release.
+
+Capability is separate from configuration. Plan/install discover the existing
+release and stored values before probing. Existing-release maintenance preserves
+that choice and needs no new scratch-probe privileges: an unverified observation
+remains unverified, shown as information, and does not block maintenance. Review
+shows true, false or unspecified (preserved), with disabled/unknown warnings.
+Fresh installs and explicit `install --verify` stay fail-closed. Verification
+reads the effective installed boolean, so false is disabled and missing is
+unverified, regardless of desired flags. Automatic post-maintenance JSON checks
+retain informational probe results; they do not claim explicit security verification.
+The dedicated upgrade path preserves stored values, prints the stored choice and
+warning, and reports capability as unverified/not probed. A successful upgrade
+is not NetworkPolicy evidence. Use `install --verify --json` for the explicit
+bounded security check; rollback does not run this probe.
+
+### Preserve the operator's kubeconfig
+
+Selected kubeconfig files are read-only inputs. Native loaders disable
+client-go migration and auth-provider persistence. Every kubectl/Helm child
+(including backup, restore, unseal, upgrade and rollback) receives an owner-only
+merged file for the child command, supplied through both its argument and
+`KUBECONFIG` environment.
+The copy preserves file precedence, the selected context and source-relative
+CA, key, token-file and exec-command paths. A private child home prevents
+client-go migration from creating an ambient default configuration; normal
+Helm repository/cache/plugin directories remain available. Transient copies live in the owner-only
+`oberth/kubeconfig-sessions` directory under the platform user cache. Each has
+an owner-only marker with its creation time and a kernel lease inherited by the
+child. Copies are removed after completion/cancellation; cleanup errors are reported.
+SIGINT, SIGTERM, SIGHUP and SIGQUIT cancel the child and unwind cleanup.
+After SIGKILL or a fatal runtime crash, a surviving child keeps its lease and
+copy. After the last lease holder exits, the next ordinary CLI startup reclaims
+recognized copies whose creation time is not in the future. Active copies,
+unmarked/foreign objects and unverified lifetimes are never deleted by age alone.
+Malformed markers or cleanup failures are reported for ownership inspection.
+There is no wall-clock deletion guarantee if the child survives or the CLI never
+starts again, and this is not a secure-erase guarantee. Source bytes, modes and sibling files
+remain unchanged. Operator exec credential plugins retain their own environment
+and may maintain their own caches; they are not sandboxed by this protection.
+
+The add-repo script uses `oberth client kubectl` for the same boundary; keep the
+verified local CLI in step with the plugin. Fetch, trust and connect do not
+load or write a kubeconfig. Setup enumeration and probing use the same
+migration-free native loader.
+
+The CLI and setup wizard only target an existing operator-provided cluster and
+kubeconfig. Oberth never creates or recreates a Kubernetes cluster.
+
+Printed kind remedies use a new `oberth-kind.kubeconfig`, refuse an existing
+file or symlink, and pass it explicitly to kind. After creation, use that file
+and the corresponding context in plan/install. An ordinary operator-run
+`kind create cluster` without a separate kubeconfig can switch current-context;
+`kubectl config get-contexts` lists the contexts still retained in the selected
+files. A changed current context does not establish that another context was
+deleted. The rehearsal's original context loss remains unestablished; inspect
+retained files and commands without attributing a cause or recreating guessed
+credentials. Oberth never updates the operator's kubeconfig files.

@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -107,7 +109,6 @@ type Config struct {
 	ReissueServerCA        bool
 	KubeconfigPath         string
 	ContextName            string
-	CreateKind             bool
 	UpstreamPrivateKeyPath string
 
 	Dev        bool
@@ -210,6 +211,7 @@ type Config struct {
 	PushBannerURL           string
 	PushBannerURLSet        bool
 	AcceptWitnessGenesisSet bool
+	existingValuesRead      bool
 	existingRelease         bool
 	installValuesRequested  bool
 	liveInstallValues       map[string]any
@@ -475,8 +477,9 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
-	baoToken         string
-	baoTokenCaptured bool
+	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
+	baoToken           string
+	baoTokenCaptured   bool
 	// ClientConfigRoot overrides where this machine's CLI/MCP client files
 	// live (default ~/.config/oberth); tests point it at their own directory.
 	ClientConfigRoot func() (string, error)
@@ -506,7 +509,6 @@ type Deps struct {
 	ClientServiceType string
 	ClientHost        string
 	ContextName       string
-	KindClusterName   string
 	// PollInterval overrides the retry cadence of in-cluster status polls
 	// (OpenBao status, in-pod upstream listing) for tests; zero selects the
 	// production default of 2s.
@@ -654,9 +656,7 @@ func (cfg *Config) Validate() error {
 		if err != nil {
 			return fmt.Errorf("--client-host: %w", err)
 		}
-		if cfg.CreateKind && !isLoopbackHost(host) {
-			return fmt.Errorf("--client-host %s: a kind cluster publishes ports 30022 and 30443 on 127.0.0.1 only, so other machines cannot reach it; use localhost, or install on a k3s or other cluster whose NodePorts listen on the node's addresses", host)
-		}
+
 		cfg.ClientHost = host
 	}
 	if fp := cfg.ExpectedHostFingerprint; fp != "" {
@@ -794,11 +794,7 @@ func (cfg *Config) Validate() error {
 // publishes on 127.0.0.1 only, so a kind install advertises localhost.
 func resolveInstallClientHost(cfg *Config, deps *Deps, cluster ClusterInfo) {
 	deps.ClientHost = cfg.ClientHost
-	if deps.ClientHost != "" && cfg.CreateKind && !isLoopbackHost(deps.ClientHost) {
-		_, _ = fmt.Fprintf(deps.Output, "NOTE: kind publishes Oberth on 127.0.0.1 only; clients are told to use localhost, not %s.\n", deps.ClientHost)
-		deps.ClientHost = "localhost"
-		cfg.ClientHost = "localhost"
-	}
+
 	if warning := LocalNameWarning(deps.ClientHost); warning != "" {
 		_, _ = fmt.Fprintf(deps.Output, "NOTE: %s\n", warning)
 	}
@@ -817,9 +813,6 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	cluster, err := DetectCluster(ctx, deps)
 	if err != nil {
 		return fmt.Errorf("detect cluster: %w", err)
-	}
-	if deps.KindClusterName != "" {
-		cluster.Engine = "kind"
 	}
 
 	// Any cluster the kubeconfig reaches is a valid target; the install names
@@ -1614,29 +1607,13 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		return result, err
 	}
 	defer cleanupRelease()
-	switch {
-	case strings.TrimSpace(cfg.ChartPath) != "":
-		// A local chart resolves from disk, so there is no repository to add.
-		// --image was assumed to name an image the node already has, which
-		// cannot hold when this installer is what created the node: put it
-		// there from the local daemon if the node lacks it.
-		if err := ensureLocalImageInNode(ctx, deps, strings.TrimSpace(cfg.ImageRef)); err != nil {
-			return result, err
-		}
-	case deps.KindClusterName != "":
-		if err := prepareKindImagesForCluster(ctx, cfg, deps, deps.KindClusterName); err != nil {
-			return result, fmt.Errorf("prepare kind images: %w", err)
-		}
-	}
 
 	// Pin the server image the signed release record names when no --image
 	// was given (an explicit one was already checked against the record).
 	// --reuse-values carries the previous release's image.ref forward
 	// verbatim, so without this pin a chart upgrade deploys the old image
-	// under the new chart version (#466). Kind clusters are excluded:
-	// prepareKindImagesForCluster already loaded the chart's image into the
-	// node's containerd.
-	if strings.TrimSpace(cfg.ImageRef) == "" && cfg.verifiedImage != "" && deps.KindClusterName == "" {
+	// under the new chart version (#466).
+	if strings.TrimSpace(cfg.ImageRef) == "" && cfg.verifiedImage != "" {
 		cfg.ImageRef = cfg.verifiedImage
 	}
 
@@ -2153,7 +2130,7 @@ func PrintNextSteps(cfg Config, w io.Writer) error {
 	if cfg.KubeconfigPath != "" {
 		target += " --kubeconfig " + shellQuoteWord(cfg.KubeconfigPath)
 	}
-	if cfg.ContextName != "" && !cfg.CreateKind {
+	if cfg.ContextName != "" {
 		target += " --context " + shellQuoteWord(cfg.ContextName)
 	}
 	installed := "Oberth is installed."
@@ -2204,26 +2181,8 @@ Next steps:
 }
 
 func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
-	return printDryRunPlanWithKind(cfg, w, cluster, nil)
-}
-
-func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindConfig []byte) error {
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
 	step := 1
-
-	if len(kindConfig) > 0 {
-		_, _ = fmt.Fprintf(w, "Requested kind cluster %q (context %q).\n\n", KindClusterName, KindContextName)
-		_, _ = fmt.Fprintf(w, "  %d. Check prerequisites\n", step)
-		_, _ = fmt.Fprintln(w, "     Docker Desktop or OrbStack is installed and running (docker info)")
-		_, _ = fmt.Fprintln(w, "     kind is installed (brew install kind)")
-		_, _ = fmt.Fprintln(w, "     helm is installed (brew install helm)")
-		step++
-		_, _ = fmt.Fprintf(w, "\n  %d. Create kind cluster %q with this config\n\n", step, KindClusterName)
-		_, _ = fmt.Fprintf(w, "     cat <<'OBERTH_KIND_CONFIG' | kind create cluster --name %s --config=-\n", KindClusterName)
-		_, _ = fmt.Fprintln(w, strings.TrimSpace(string(kindConfig)))
-		_, _ = fmt.Fprintln(w, "OBERTH_KIND_CONFIG")
-		step++
-	}
 
 	releaseVerified := strings.TrimSpace(cfg.ChartPath) != ""
 	printReleaseVerification := func() {
@@ -2233,25 +2192,6 @@ func printDryRunPlanWithKind(cfg Config, w io.Writer, cluster ClusterInfo, kindC
 		releaseVerified = true
 		_, _ = fmt.Fprintf(w, "     Verify the signed release %s (release.json, chart and their signature bundles, %s) against the compiled-in release key; refuse on any mismatch\n",
 			displayVersion(cfg.ChartVersion), releaseSourceText(cfg.Release))
-	}
-	if cfg.CreateKind {
-		clusterName := KindClusterName
-		showArgs := oberthChartValuesArgs(cfg)
-		_, _ = fmt.Fprintf(w, "\n  %d. Resolve, pull, and load the chart images into kind\n", step)
-		printReleaseVerification()
-		_, _ = fmt.Fprintf(w, "     helm %s\n", strings.Join(showArgs, " "))
-		_, _ = fmt.Fprintln(w, "     # Set OBERTH_IMAGE_REF from image.ref above. Job pods pull their own")
-		_, _ = fmt.Fprintln(w, "     # repository-declared golang images at run time; only the server image loads here.")
-		_, _ = fmt.Fprintln(w, "     # The chart pins multi-arch index digests; docker cannot save a partially")
-		_, _ = fmt.Fprintln(w, "     # pulled index, so for each ref: resolve this platform's child manifest,")
-		_, _ = fmt.Fprintln(w, "     # pull and load it under a local tag, then alias the pinned digest on the")
-		_, _ = fmt.Fprintln(w, "     # kind node so digest-referencing pods resolve the loaded content.")
-		_, _ = fmt.Fprintln(w, "     docker manifest inspect \"$OBERTH_IMAGE_REF\"  # copy .manifests[] digest for linux/<arch> into OBERTH_IMAGE_CHILD_REF")
-		_, _ = fmt.Fprintln(w, "     docker pull \"$OBERTH_IMAGE_CHILD_REF\"")
-		_, _ = fmt.Fprintln(w, "     docker tag \"$OBERTH_IMAGE_CHILD_REF\" \"$OBERTH_IMAGE_LOCAL_TAG\"")
-		_, _ = fmt.Fprintf(w, "     kind load docker-image --name %s \"$OBERTH_IMAGE_LOCAL_TAG\"\n", clusterName)
-		_, _ = fmt.Fprintf(w, "     docker exec %s-control-plane ctr --namespace=k8s.io images tag --force \"$OBERTH_IMAGE_LOCAL_TAG\" \"$OBERTH_IMAGE_REF\"\n", clusterName)
-		step++
 	}
 
 	pipelineNamespace := cfg.ArgoNamespace
@@ -2411,13 +2351,22 @@ func HelmWithKubeArgs(runHelm func(ctx context.Context, args []string) ([]byte, 
 // returned (clean data for JSON/YAML callers), on failure both are included
 // for diagnostics. This prevents helm stderr warnings (e.g. kubeconfig
 // permission notices on macOS) from corrupting parseable output.
-func DefaultRunHelm(ctx context.Context, args []string) ([]byte, error) {
+func DefaultRunHelm(ctx context.Context, args []string) (result []byte, resultErr error) {
+
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command("helm", args, installerChildEnvironment())
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
 
 	// #nosec G204 -- the command is the literal helm binary; every argument is
 	// constructed by this package from validated flags (no shell, no
 	// caller-controlled command word).
 	cmd := exec.CommandContext(ctx, "helm", args...)
-	cmd.Env = installerChildEnvironment()
+	cmd.Env = environment
+	if lease != nil {
+		cmd.ExtraFiles = []*os.File{lease}
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -2450,7 +2399,7 @@ func LoadKubeConfigForContext(contextName string, output io.Writer) (kubernetes.
 // variable initialized at program start from the original $HOME, which
 // t.Setenv cannot override).
 func loadKubeConfigForContext(contextName, k3sFallbackPath string, output io.Writer) (kubernetes.Interface, *rest.Config, string, error) {
-	return loadKubeConfigWithRules(clientcmd.NewDefaultClientConfigLoadingRules(), contextName, k3sFallbackPath, output)
+	return loadKubeConfigWithRules(kubeconfig.Rules(""), contextName, k3sFallbackPath, output)
 }
 
 func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextName, k3sFallbackPath string, output io.Writer) (kubernetes.Interface, *rest.Config, string, error) {
@@ -2465,18 +2414,9 @@ func loadKubeConfigWithRules(rules *clientcmd.ClientConfigLoadingRules, contextN
 }
 
 func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string) (kubernetes.Interface, *rest.Config, string, error) {
-	overrides := &clientcmd.ConfigOverrides{}
-	if contextName != "" {
-		overrides.CurrentContext = contextName
-	}
-	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
-	rawConfig, err := config.RawConfig()
+	rawConfig, restConfig, err := kubeconfig.Client(rules, contextName)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("load kubeconfig: %w", err)
-	}
-	restConfig, err := config.ClientConfig()
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("build REST config: %w", err)
 	}
 	client, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
@@ -2496,7 +2436,7 @@ func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string
 // The selected context is pinned in Helm's arguments. KUBECONFIG keeps its
 // full file list; a root-owned k3s file is never selected implicitly.
 func ResolveHelmKubeArgs(contextName string) (helmArgs []string, target string, err error) {
-	return resolveHelmKubeArgs(clientcmd.NewDefaultClientConfigLoadingRules(), contextName, k3sKubeconfigPath)
+	return resolveHelmKubeArgs(kubeconfig.Rules(""), contextName, k3sKubeconfigPath)
 }
 
 // resolveHelmKubeArgs is the testable core of ResolveHelmKubeArgs.

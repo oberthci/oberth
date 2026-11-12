@@ -127,7 +127,6 @@ func newTestHost(t *testing.T) *testHost {
 		t.Fatal(err)
 	}
 
-	stubKindTools(t, false)
 	stubClusterProbe(t, nil)
 	previousDial := dialPort
 	dialPort = func(context.Context, string) error { return nil }
@@ -150,20 +149,6 @@ func writeKubeconfig(t *testing.T, path, current string, contexts ...string) {
 	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// stubKindTools makes kind creation available or unavailable regardless of
-// what the test host has installed.
-func stubKindTools(t *testing.T, available bool) {
-	t.Helper()
-	previous := kindLookPath
-	kindLookPath = func(name string) (string, error) {
-		if available {
-			return "/usr/bin/" + name, nil
-		}
-		return "", exec.ErrNotFound
-	}
-	t.Cleanup(func() { kindLookPath = previous })
 }
 
 // stubClusterProbe answers every cluster probe like a reachable k3s node,

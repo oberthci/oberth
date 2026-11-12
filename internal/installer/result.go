@@ -15,17 +15,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	"github.com/oberthci/oberth/internal/model"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // CheckResult is a stable public check. Diagnostics never include subprocess output.
 type CheckResult struct {
 	Warning         bool   `json:"warning,omitempty"`
+	Evidence        string `json:"evidence,omitempty"`
 	DeployPublicKey string `json:"deploy_public_key,omitempty"`
 	Code            string `json:"code"`
 	OK              bool   `json:"ok"`
@@ -34,6 +36,7 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
+	NetworkPolicy   string   `json:"network_policy"`
 	ReissueServerCA bool     `json:"reissue_server_ca"`
 	Context         string   `json:"context"`
 	Namespace       string   `json:"namespace"`
@@ -47,7 +50,7 @@ type InstallReview struct {
 }
 
 func Review(cfg Config) InstallReview {
-	return InstallReview{ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
+	return InstallReview{NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -86,13 +89,20 @@ func (r *InstallResult) check(code string, ok bool, remedy string) {
 }
 
 // PrintReview deliberately enumerates only non-secret install choices.
-func PrintReview(w io.Writer, cfg Config) {
-	_, _ = fmt.Fprintf(w, "Review install: context %q, namespace %q, pipeline namespace %q\nSecret store: production=%t dev=%t; client address=%q; admin identity=%q\nTLS DNS names: %v; IP addresses: %v\n", cfg.ContextName, cfg.Namespace, cfg.ArgoNamespace, cfg.InstallSecretStore, cfg.InstallSecretStoreDev, cfg.ClientHost, cfg.UplinkIdentity, cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
+func PrintReview(w io.Writer, cfg Config) { printReview(w, Review(cfg)) }
+func printReview(w io.Writer, review InstallReview) {
+	_, _ = fmt.Fprintf(w, "Review install: context %q, namespace %q, pipeline namespace %q\nSecret store: production=%t dev=%t; client address=%q; admin identity=%q\nTLS DNS names: %v; IP addresses: %v\n", review.Context, review.Namespace, review.ArgoNamespace, review.ProductionStore, review.DevStore, review.ClientHost, review.AdminIdentity, review.DNSNames, review.IPs)
+	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
+	printPolicyWarning(w, review.NetworkPolicy)
 }
 
 // VerifyInstall reads cluster state and verifies the advertised TLS endpoint
 // against the CA obtained over the authenticated Kubernetes connection.
 func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallResult {
+	return verifyInstall(ctx, cfg, host, false)
+}
+
+func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenance bool) InstallResult {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	host.Output = io.Discard
@@ -103,7 +113,7 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	}
 	if cfg.KubeconfigPath != "" {
 		host.LoadKubeConfig = func(name string) (kubernetes.Interface, *rest.Config, string, error) {
-			rules := clientcmd.NewDefaultClientConfigLoadingRules()
+			rules := kubeconfig.Rules("")
 			rules.ExplicitPath = cfg.KubeconfigPath
 			return loadKubeConfigWithRules(rules, name, "", io.Discard)
 		}
@@ -130,15 +140,26 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 			return host.RunCommand(ctx, input, name, args...)
 		}
 	}
-	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run}
+	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy}
 	identity := publicClusterIdentity(cfg, config, selected)
 	if !checkClusterTrust(config, identity, &r) {
 		r.Cluster = &identity
 		return r
 	}
+	if maintenance {
+		if err := readInstallValues(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil || !cfg.existingRelease {
+			r.check("installed_values", false, "Restore read access to the existing Helm release.")
+			return r
+		}
+		cfg.NetworkPolicy = "auto"
+	} else if err := resolveInstalledPolicy(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil {
+		r.check("network_policy", false, "Installed NetworkPolicy setting is unverified; restore read access to the installed Helm release values.")
+		r.Checks[len(r.Checks)-1].Reason = "unverified"
+		return r
+	}
 	preflightDeps := deps
 	preflightDeps.RunCommand = host.RunCommand
-	inspectClusterPreflight(ctx, &cfg, preflightDeps, &identity, &r)
+	inspectCluster(ctx, &cfg, preflightDeps, &identity, &r, maintenance)
 	review := Review(cfg)
 	r.Review = &review
 	r.Cluster = &identity
@@ -276,10 +297,11 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	deps.secretsSaved = func(keys []string) { values = append([]string(nil), keys...) }
 	deps.UplinkCreated = func(value string) { identity = value }
 	deps.upstreamResult = func(upstream InstallUpstream) { deps.upstream = &upstream }
+	deps.installResolved = func(resolved Config) { cfg = resolved }
 	installErr := execute(ctx, cfg, deps)
 	result := InstallResult{Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
-		result = VerifyInstall(ctx, cfg, deps)
+		result = verifyInstall(ctx, cfg, deps, cfg.existingRelease)
 	}
 	if errors.Is(installErr, errInstallPreflight) {
 		plan := PlanInstall(ctx, cfg, deps)
@@ -291,6 +313,7 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 		review := Review(cfg)
 		result.Review = &review
 	}
+	result.Context = cfg.ContextName
 	result.Upstream = deps.upstream
 	result.FirstUplink = identity
 	result.SecretsValues = values

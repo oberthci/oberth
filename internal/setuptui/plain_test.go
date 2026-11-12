@@ -17,11 +17,9 @@ import (
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
-// Plain mode asks the same questions: it lists the kubeconfig contexts and,
-// when kind and docker exist, the kind choice (#011).
-func TestPlainModeListsContextsAndKind(t *testing.T) {
+// Plain mode lists the existing kubeconfig contexts.
+func TestPlainModeListsExistingContexts(t *testing.T) {
 	newTestHost(t)
-	stubKindTools(t, true)
 	answers := strings.Join([]string{
 		"2",        // cluster: staging
 		"", "", "", // namespaces
@@ -43,11 +41,14 @@ func TestPlainModeListsContextsAndKind(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	text := out.String()
-	for _, want := range []string{"Step 1 of 8 — Cluster", "1) default", "2) staging", "Create a local kind cluster",
+	for _, want := range []string{"Step 1 of 8 — Cluster", "1) default", "2) staging",
 		"Step 4 of 8 — Forge & upstream key", "--context='staging'", "--organization='acme'", "--client-access=both"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("plain output missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "Create a local kind cluster") {
+		t.Fatal("plain setup offered cluster creation")
 	}
 }
 

@@ -61,7 +61,12 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 			}
 			kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: readyReplicas}})
 			var output bytes.Buffer
-			host := InstallDeps{Output: &output, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+			host := InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
+					return []byte(`[{"name":"oberth"}]`), nil
+				}
+				return []byte(`{"networkPolicy":{"enabled":true}}`), nil
+			}, ProbeNetworkPolicy: enforcedPolicyFixture, Output: &output, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 				return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, "selected", nil
 			}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 				command := strings.Join(args, " ")

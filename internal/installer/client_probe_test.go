@@ -27,6 +27,8 @@ func probeDocker(t *testing.T, ports string) ClientPortProbeDeps {
 				t.Fatal(args)
 			}
 			return []byte("abc123\n"), nil
+		case args[0] == "inspect" && args[2] == `{{index .Config.Labels "io.x-k8s.kind.cluster"}}`:
+			return nil, errors.New("not a kind cluster")
 		case args[0] == "inspect" && args[2] == `{{index .Config.Labels "k3d.cluster"}}`:
 			if args[3] != "k3d-example-server-0" {
 				return nil, errors.New("not this plan's node")
@@ -137,7 +139,7 @@ func TestClientPortProbeUsesRealTCPWithoutTrustingTheListener(t *testing.T) {
 	}
 	deps := DefaultClientPortProbeDeps()
 	deps.Run = nil
-	result, err := ProbeClientPorts(t.Context(), probePlan(), Config{ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port}, deps)
+	result, err := ProbeClientPorts(t.Context(), probePlan(), Config{ClientHost: "localhost", ClientHTTPSPort: port, ClientSSHPort: port}, deps)
 	if err != nil || !result.HTTPS.Reachable || !result.SSH.Reachable || result.NeedsAction || result.HTTPS.Published {
 		t.Fatalf("%+v %v", result, err)
 	}

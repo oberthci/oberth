@@ -3,14 +3,17 @@ package setuptui
 import (
 	"bytes"
 	"context"
-	"os/exec"
 	"time"
+
+	"github.com/oberthci/oberth/internal/installer"
 )
 
 // releasePresent reports whether Helm release oberth exists in namespace on
 // the saved cluster; known is false when the cluster could not be asked.
 // Tests replace it.
-var releasePresent = func(ctx context.Context, kubeconfig, kubeContext, namespace string) (present, known bool) {
+var releasePresent = defaultReleasePresent
+
+func defaultReleasePresent(ctx context.Context, kubeconfig, kubeContext, namespace string) (present, known bool) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	args := []string{"status", "oberth", "-n", namespace}
@@ -20,8 +23,7 @@ var releasePresent = func(ctx context.Context, kubeconfig, kubeContext, namespac
 	if kubeContext != "" {
 		args = append(args, "--kube-context", kubeContext)
 	}
-	// #nosec G204 -- fixed executable and structured arguments.
-	out, err := exec.CommandContext(ctx, "helm", args...).CombinedOutput()
+	out, err := installer.DefaultRunCommand(ctx, nil, "helm", args...)
 	switch {
 	case err == nil:
 		return true, true

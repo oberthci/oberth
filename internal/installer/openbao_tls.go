@@ -92,9 +92,6 @@ func resolveOberthTLSBootstrapImage(ctx context.Context, cfg Config, deps Deps) 
 	// version the published repository does not carry aborts an install
 	// halfway through.
 	if pinned := strings.TrimSpace(cfg.ImageRef); pinned != "" {
-		if err := ensureLocalImageInNode(ctx, deps, pinned); err != nil {
-			return "", err
-		}
 		return pinned, nil
 	}
 	if deps.RunHelm == nil {
@@ -105,11 +102,7 @@ func resolveOberthTLSBootstrapImage(ctx context.Context, cfg Config, deps Deps) 
 		return "", err
 	}
 	defer cleanupRelease()
-	if deps.KindClusterName != "" {
-		if err := prepareKindImagesForCluster(ctx, cfg, deps, deps.KindClusterName); err != nil {
-			return "", fmt.Errorf("prepare Oberth TLS bootstrap image for kind: %w", err)
-		}
-	}
+
 	valuesYAML, err := deps.RunHelm(ctx, oberthChartValuesArgs(cfg))
 	if err != nil {
 		return "", fmt.Errorf("read Oberth chart values for TLS bootstrap image: %w", err)

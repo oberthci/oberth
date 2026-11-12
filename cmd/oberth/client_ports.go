@@ -22,9 +22,15 @@ TCP success does not establish server readiness or TLS trust. Nothing is install
 var clientPortsProbeDeps = installer.DefaultClientPortProbeDeps
 
 func runClientPorts(ctx context.Context, arguments []string, output io.Writer) error {
-	var planFile string
+	var planFile, endpointAddress, namespace string
+	var waitLoadBalancer bool
+	var waitTimeout time.Duration
 	var cfg installer.Config
 	flags := flag.NewFlagSet("client ports", flag.ContinueOnError)
+	flags.BoolVar(&waitLoadBalancer, "wait-load-balancer", false, "after approved install starts, wait for its Service address (read-only)")
+	flags.DurationVar(&waitTimeout, "wait-timeout", 2*time.Minute, "LoadBalancer wait bound (greater than zero, at most 10m)")
+	flags.StringVar(&namespace, "namespace", "", "namespace (default: plan review namespace, then oberth)")
+	flags.StringVar(&endpointAddress, "endpoint-address", "", "detected node IP or load-balancer address to name and re-probe")
 	flags.StringVar(&planFile, "plan-file", "", "public JSON from install --plan --json")
 	flags.StringVar(&cfg.ClientHost, "client-host", "", "advertised host (default: plan review client_host)")
 	flags.StringVar(&cfg.ClientHTTPSPort, "client-https-port", "", "explicit host HTTPS port; overrides discovery")
@@ -53,9 +59,39 @@ func runClientPorts(ctx context.Context, arguments []string, output io.Writer) e
 	if json.Unmarshal(raw, &plan) != nil {
 		return errors.New("invalid public cluster plan JSON")
 	}
+	if waitTimeout <= 0 || waitTimeout > 10*time.Minute {
+		return errors.New("--wait-timeout must be greater than zero and at most 10m")
+	}
+	if waitLoadBalancer {
+		if namespace == "" {
+			namespace = plan.Review.Namespace
+		}
+		waitCtx, waitCancel := context.WithTimeout(ctx, waitTimeout)
+		address, err := installer.WaitClientLoadBalancer(waitCtx, plan, namespace)
+		waitCancel()
+		if err != nil {
+			return err
+		}
+		endpointAddress = address
+		cfg.ServiceType = "LoadBalancer"
+		if cfg.ClientHost == "" {
+			cfg.ClientHost = plan.Review.ClientHost
+			if cfg.ClientHost == "" {
+				cfg.ClientHost = "oberth.test"
+			}
+		}
+		if cfg.ClientHTTPSPort == "" {
+			cfg.ClientHTTPSPort = "443"
+		}
+		if cfg.ClientSSHPort == "" {
+			cfg.ClientSSHPort = "2222"
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	result, err := installer.ProbeClientPorts(ctx, plan, cfg, clientPortsProbeDeps())
+	deps := clientPortsProbeDeps()
+	deps.EndpointAddress = endpointAddress
+	result, err := installer.ProbeClientPorts(ctx, plan, cfg, deps)
 	if err != nil {
 		return err
 	}

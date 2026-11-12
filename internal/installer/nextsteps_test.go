@@ -48,10 +48,6 @@ func TestValidateClientHostAndAlsoUpstreams(t *testing.T) {
 	if strings.Join(cfg.AlsoUpstreams, " ") != "ssh://git@codeberg.org/acme ssh://git@gitlab.com/beta" {
 		t.Errorf("AlsoUpstreams = %q", cfg.AlsoUpstreams)
 	}
-	kind := Config{CreateKind: true, ClientHost: "192.0.2.9"}
-	if err := kind.Validate(); err == nil || !strings.Contains(err.Error(), "127.0.0.1 only") {
-		t.Errorf("a kind cluster must refuse a non-loopback client host, got %v", err)
-	}
 	if err := (&Config{AlsoUpstreams: []string{"codeberg.org"}}).Validate(); err == nil {
 		t.Error("an upstream without an organization must be refused")
 	}
@@ -67,10 +63,7 @@ func TestClientHostOverridesTheAPIServerHost(t *testing.T) {
 	if got := sshHostFromServer(deps); got != "192.0.2.5" {
 		t.Fatalf("client host = %q", got)
 	}
-	deps.KindClusterName = "oberth"
-	if got := sshHostFromServer(deps); got != "localhost" {
-		t.Fatalf("kind must stay on localhost, got %q", got)
-	}
+
 }
 
 func TestAlsoUpstreamNameAvoidsNamesAndOrganizations(t *testing.T) {

@@ -71,7 +71,7 @@ func TestFirstRunEndToEnd(t *testing.T) {
 	}
 	cfg := fake.cfgs[0]
 	if cfg.ContextName != "default" || cfg.ForgeURL != "github.com/acme" || cfg.ClientAccess != "both" ||
-		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore || cfg.CreateKind {
+		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore {
 		t.Fatalf("installer config not wired from the answers: %+v", cfg)
 	}
 	if strings.Join(cfg.TLSExtraIPs, ",") != "192.0.2.193" || strings.Join(cfg.TLSExtraDNSNames, ",") != "example-node" {
@@ -478,7 +478,7 @@ func TestQuestionValidation(t *testing.T) {
 	reject("cluster.namespaces", "oberth", "oberth", "openbao")
 	reject("cluster.namespaces", "Oberth", "a", "b")
 	reject("cluster.target", "nonexistent")
-	reject("cluster.target", clusterChoiceKind) // kind not installed
+	reject("cluster.target", "nonexistent-cluster")
 	reject("cluster.file", filepath.Join(host.home, "missing"))
 	reject("tls.names", "not_a name!")
 	reject("forge.org", "")
@@ -541,34 +541,48 @@ func TestKubeconfigFileChoice(t *testing.T) {
 	}
 }
 
-// Kind is offered only when kind and docker exist (#032), and then needs no
-// kubeconfig or probe.
-func TestKindOfferedOnlyWithTools(t *testing.T) {
+// --dry-mode stops at the review, prints the command, persists nothing.
+func TestWizardOnlyOffersExistingClusters(t *testing.T) {
 	newTestHost(t)
-	options := func() []option { return buildQuestions()[0].options(newWizardState(Options{})) }
-	for _, o := range options() {
-		if o.value == clusterChoiceKind {
-			t.Fatal("kind offered without kind and docker")
+	bin := t.TempDir()
+	for _, name := range []string{"kind", "docker"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+			t.Fatal(err)
 		}
 	}
-	stubKindTools(t, true)
-	found := false
-	for _, o := range options() {
-		found = found || o.value == clusterChoiceKind
+	t.Setenv("PATH", bin)
+	contexts, _, err := loadKubeContexts("")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !found {
-		t.Fatal("kind must be offered when kind and docker exist")
+	allowed := map[string]bool{clusterChoiceFile: true}
+	for _, context := range contexts {
+		allowed[context.name] = true
 	}
-	st := newWizardState(Options{})
-	if err := buildQuestions()[0].save(st, []string{clusterChoiceKind}); err != nil || !st.Config.CreateKind || st.contextForCommands() != installer.KindContextName {
-		t.Fatalf("kind choice: %v %+v", err, st.Config)
-	}
-	if !strings.Contains(BuildCommandLine(st), "--create-kind") || strings.Contains(BuildCommandLine(st), "--context") {
-		t.Fatalf("kind command: %s", BuildCommandLine(st))
+	for _, option := range buildQuestions()[0].options(newWizardState(Options{})) {
+		if !allowed[option.value] {
+			t.Fatal("wizard offered cluster creation", option)
+		}
 	}
 }
 
-// --dry-mode stops at the review, prints the command, persists nothing.
+func TestSavedAnswersRejectRemovedClusterCreationState(t *testing.T) {
+	newTestHost(t)
+	path, err := setupStatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version":1,"createKind":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := loadSetupState(newWizardState(Options{})); loaded || err == nil {
+		t.Fatal("removed cluster choice silently resumed", loaded, err)
+	}
+}
+
 func TestDryModeStopsAtReview(t *testing.T) {
 	newTestHost(t)
 	fake := stubInstaller(t, func(int, installer.InstallDeps) error { return nil })

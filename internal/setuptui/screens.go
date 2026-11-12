@@ -155,15 +155,13 @@ func stepSummary(st *WizardState, step stepID) string {
 	case stepCluster:
 		target := c.ContextName
 		switch {
-		case c.CreateKind:
-			target = "new kind cluster oberth (" + st.contextForCommands() + ")"
 		case c.KubeconfigPath != "":
 			target = c.ContextName + " in " + displayHome(c.KubeconfigPath)
 		}
-		if st.ClusterInfo.server != "" && !c.CreateKind {
+		if st.ClusterInfo.server != "" {
 			target += " at " + st.ClusterInfo.server
 		}
-		if st.ClusterInfo.version != "" && !c.CreateKind {
+		if st.ClusterInfo.version != "" {
 			target += " · " + st.ClusterInfo.engine + " " + st.ClusterInfo.version
 		}
 		np := map[string]string{"": "auto", "auto": "auto", "true": "strict", "false": "off"}[c.NetworkPolicy]
@@ -241,10 +239,7 @@ func (r *reviewScreen) start(w *wizard) tea.Cmd {
 		r.errMsg = fmt.Sprintf("%s: %v — Continue opens that screen.", q.step.name(), err)
 		return nil
 	}
-	if w.state.Config.CreateKind {
-		r.checked = true
-		return nil
-	}
+
 	r.checking = true
 	context, kubeconfig := w.state.Config.ContextName, w.state.Config.KubeconfigPath
 	work := probeContext(context, kubeconfig)

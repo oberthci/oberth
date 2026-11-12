@@ -433,8 +433,6 @@ Flags:
         git SSH port clients reach the server on, when it is not the Service's (default: the NodePort 30022, or the Service port); client files, SSH config and printed commands use it
   -context string
         kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)
-  -create-kind
-        create or use the local oberth kind cluster
   -credentialed-secret-path oberth access allow
         full KV data path approved in the secret-access table (repeatable, exactly the string oberth access allow records, e.g. oberth/data/release/cosign-secret); synced into the RELEASE-tier credentialed Vault policy as an exact read grant when --install-secretstore reconciles the store — the branch-tier ci-secrets policy never receives grants
   -dry-run
@@ -796,6 +794,7 @@ Commands:
   renew   renew with the current certificate and rotate the local key
   repository  bind one repository to the selected server and pinned SSH identity
   ports   probe planned client endpoints and propose published host ports
+  kubectl run kubectl with a private kubeconfig copy
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
 Use oberth client <command> --help for its flags.
@@ -837,6 +836,15 @@ would change. Restart Claude Code once afterwards.
         server MCP endpoint or base address, e.g. https://localhost:30443/mcp
 ```
 
+## oberth client kubectl
+
+```text
+Usage: oberth client kubectl [kubectl arguments]
+Run kubectl using a private copy of the selected kubeconfig for this command.
+The source kubeconfig files stay read-only. Context flags and arguments after
+-- are preserved. Exec credential plugins may maintain their own caches.
+```
+
 ## oberth client pin
 
 ```text
@@ -865,10 +873,18 @@ TCP success does not establish server readiness or TLS trust. Nothing is install
         explicit host HTTPS port; overrides discovery
   -client-ssh-port string
         explicit host SSH port; overrides discovery
+  -endpoint-address string
+        detected node IP or load-balancer address to name and re-probe
+  -namespace string
+        namespace (default: plan review namespace, then oberth)
   -plan-file string
         public JSON from install --plan --json
   -service-type string
         planned Service type: NodePort, ClusterIP or LoadBalancer (default "NodePort")
+  -wait-load-balancer
+        after approved install starts, wait for its Service address (read-only)
+  -wait-timeout duration
+        LoadBalancer wait bound (greater than zero, at most 10m) (default 2m0s)
 ```
 
 ## oberth client repository

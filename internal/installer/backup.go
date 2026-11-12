@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/kubeconfig"
+
 	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,7 +33,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/store"
@@ -165,7 +166,7 @@ func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, l
 	runIO := defaultRunCommandIO
 	if kubeconfigPath != "" {
 		host.LoadKubeConfig = func(name string) (kubernetes.Interface, *rest.Config, string, error) {
-			rules := clientcmd.NewDefaultClientConfigLoadingRules()
+			rules := kubeconfig.Rules("")
 			rules.ExplicitPath = kubeconfigPath
 			return loadKubeConfigWithRules(rules, name, "", host.Output)
 		}
@@ -262,10 +263,20 @@ func withKubeconfigArg(run CommandRunner, path string) CommandRunner {
 
 // defaultRunCommandStdout runs a host command and returns stdout alone; on
 // failure the error carries stderr for diagnosis.
-func defaultRunCommandStdout(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+func defaultRunCommandStdout(ctx context.Context, input []byte, name string, args ...string) (result []byte, resultErr error) {
+	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
+
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs on the host.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = environment
+	if lease != nil {
+		command.ExtraFiles = []*os.File{lease}
+	}
 	if len(input) > 0 {
 		command.Stdin = bytes.NewReader(input)
 	}
