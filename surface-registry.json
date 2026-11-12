@@ -1,5 +1,17 @@
 {
   "entries": {
+    "value:cpu": {
+      "doc_anchor": "docs/server-cpu.md#overrides-and-upgrades",
+      "test_ref": "cmd/oberth/chart_server_resources_test.go TestChartServerCPUReservationAndOverride"
+    },
+    "flag:server-load-duration": {
+      "doc_anchor": "docs/server-cpu.md#reproducing-the-measurement",
+      "test_ref": "internal/service/server_load_test.go TestMCPUnderQueueLoad"
+    },
+    "flag:server-load-profile": {
+      "doc_anchor": "docs/server-cpu.md#reproducing-the-measurement",
+      "test_ref": "internal/service/server_load_test.go TestMCPUnderQueueLoad"
+    },
     "annotation:oberth.ci/client-host": {
       "doc_anchor": "docs/install-verification.md#install-verification",
       "test_ref": "cmd/oberth/chart_client_endpoint_test.go TestChartPersistsAdvertisedClientEndpoint"

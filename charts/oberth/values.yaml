@@ -594,13 +594,14 @@ cache:
   ciRoot: /var/cache/oberth/ci
   releaseRoot: /var/cache/oberth/release
 
+# Reserve CPU for the control plane while allowing bursts during queue/event
+# fan-out. See docs/server-cpu.md for measurements and explicit limit overrides.
 resources:
   requests:
-    cpu: 200m
+    cpu: 500m
     memory: 256Mi
     ephemeral-storage: 256Mi
   limits:
-    cpu: "1"
     memory: 1Gi
     ephemeral-storage: 2Gi
 

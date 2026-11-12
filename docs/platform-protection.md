@@ -50,6 +50,12 @@ OpenBao uses OnDelete: updating its template protects replacement Pods and does
 not restart or unseal the current Pod. Use the normal authorized replacement and
 unseal procedure. Never put unseal keys on command arguments.
 
+## Server CPU
+
+The server requests 500m CPU and omits a CPU limit by default. The request
+reserves capacity under this PriorityClass; leaving CPU uncapped allows bursts
+without a per-container quota. See [measurements and overrides](server-cpu.md).
+
 ## Verification
 
 Render the Oberth and dependency charts and inspect each Pod template's

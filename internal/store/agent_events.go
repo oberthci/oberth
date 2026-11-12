@@ -141,11 +141,16 @@ func (s *Store) AgentEvents(ctx context.Context, filter model.AgentEventFilter) 
 	return events, rows.Err()
 }
 
+// Separate aggregates let SQLite seek the two rowid endpoints. Combining MIN
+// and MAX in one aggregate scans the entire retained log for every subscriber
+// wake/poll. Keep both seeks in one statement so they share a read snapshot.
+const agentEventBoundsQuery = `SELECT (SELECT MIN(id) FROM agent_events), (SELECT MAX(id) FROM agent_events)`
+
 // AgentEventBounds returns the oldest retained and the newest event IDs;
 // both are zero when no event was ever retained.
 func (s *Store) AgentEventBounds(ctx context.Context) (int64, int64, error) {
 	var oldest, newest sql.NullInt64
-	if err := s.reader().QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM agent_events`).Scan(&oldest, &newest); err != nil {
+	if err := s.reader().QueryRowContext(ctx, agentEventBoundsQuery).Scan(&oldest, &newest); err != nil {
 		return 0, 0, fmt.Errorf("read agent event bounds: %w", err)
 	}
 	return oldest.Int64, newest.Int64, nil

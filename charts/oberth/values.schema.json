@@ -1384,7 +1384,30 @@
           "$ref": "#/definitions/resourcePair"
         },
         "limits": {
-          "$ref": "#/definitions/resourcePair"
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "memory",
+            "ephemeral-storage"
+          ],
+          "properties": {
+            "cpu": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "description": "Optional server CPU limit. Omit or set null to allow bursts."
+            },
+            "memory": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ephemeral-storage": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },
