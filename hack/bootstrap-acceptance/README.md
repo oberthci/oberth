@@ -1,71 +1,127 @@
-# Bootstrap acceptance framework (#1533)
+# Bootstrap acceptance cell (#1533)
 
-Status: **partial, blocked**. This probe is not a release acceptance cell and
-must not be represented as a green release receipt.
+The deterministic contract cell is blocking in branch and release CI. Full
+fresh-machine acceptance remains unqualified until a disposable VM runner can
+execute the separate machine cell. Passing the contract cell is not evidence
+that installation, a held run or reboot recovery succeeded on a real machine.
 
-`probe.py` runs the verified plugin fetcher, installer plan, explicit-context
-answers installation, all-ok Verify, plugin CA pin/trust merge, and CA-only
-HTTPS MCP tools/list and system_status. It isolates HOME and Claude settings,
-keeps subprocess output private, scans it against every ceremony value and
-encoded/decoded private key material, and deletes all private artifacts on
-success or failure. It never installs Helm or kubectl. Python and ssh-keygen
-are harness tools in addition to the minimal fetcher's prerequisites.
+## Ordinary CI Pod
 
-An operator may run it against a **new disposable cluster** with a configured
-throwaway forge and an answers file selecting production OpenBao, assist,
-client host/ports and that forge. The operator must provision and verify
-pinned Helm/kubectl and the cluster first. A fresh k3d cluster is the fallback
-when a VM is unavailable. No existing personal cluster is a substitute.
+Run `python3 -I -B hack/bootstrap-acceptance/ci.py` from the source checkout.
+It requires Go, Python 3.9+, OpenSSL, Git and the plugin's ordinary shell tools.
+The existing rest-test Pod supplies them; no Helm, kubectl, VM, Docker socket,
+cluster credentials, nested cluster, privileged Pod or new ServiceAccount is
+required. The Helm and kubectl used by the plan fixture are deliberately narrow
+local executables, and all Kubernetes HTTP requests go to a loopback TLS fixture.
 
+The cell invokes today's production plugin and installer fixture tests and
+requires an explicit pass event for every named fixture. Those tests cover:
+
+- The fixed-origin fetcher, real OpenSSL checksum signature verification,
+  pinned release key, all supported artifact names/architectures, refusal of
+  tampering, and preservation of an earlier verified installation.
+- Current answers schema and recovery-file path/mode/output validation;
+  multi-file and explicit kubeconfig/context selection.
+- Connect pin refusal, CA verification, CA bundle/settings merge and idempotence;
+  client certificate enrollment, invite redemption and add-repo context binding.
+
+It also builds the source CLI and runs real `install --plan --json --answers`
+against a loopback TLS API with two context names. A CLI context overrides the
+answers context; an unknown or ambiguous selection fails. The fixture asserts
+that no API mutation occurs. Separate assertions cover mTLS acceptance, wrong
+CA/client refusal, redirects, unsafe Helm archive members, exact pushed SHA,
+assisted non-evidence classification, and secret scanning across chunk boundaries.
+
+Every subprocess stdout/stderr and MCP response is captured in an owner-only
+scratch directory and scanned before success is printed. The inventory includes synthetic
+recovery/API credentials and every private-key body created by the Python cell.
+Go fixtures independently verify their own generated credential non-disclosure.
+Failures print a fixed diagnostic, withhold captured output and remove the private
+scratch directory. There is no public artifact upload of unscanned logs.
+
+Both `.oberth/build.yaml`'s `test-rest` and `.oberth/release.yaml`'s
+`release-test-rest` run `rest.sh`, which must pass this cell before the ordinary
+race-test rest group. They retain their existing CPU reservation (1000m), bounded
+CPU/memory/storage limits and token/workspace isolation. Release build depends on
+the successful release-test DAG; failure here prevents publication/finalization.
+The cell does not fetch or execute unsigned candidate binaries: candidate CLI
+planning uses the source build; fetch verification uses private signed fixtures.
+
+## Fresh Linux VM (outside CI)
+
+The entry point is `fresh_machine.py`; it is never called by either CI workflow.
+It runs unchanged on a disposable amd64/arm64 systemd Linux VM with working
+cgroups, container networking and persistent local disk. The runner supplies root,
+Python 3.9+, CA roots, Git/git-shell, OpenSSL, OpenSSH client/server tools, useradd/passwd and ordinary
+system utilities. Start without any `KUBECONFIG`, user kubeconfig, k3s installation
+or prior cell state. Allocate at least 4 CPUs, 12 GiB memory and 40 GiB free disk;
+these are provisional fixture prerequisites, not measured acceptance sizing.
+Allow outbound HTTPS for the pinned tools, signed Oberth release, charts and
+container images. The guest must permit k3s/sshd systemd services and a real reboot.
+
+```sh
+sudo python3 -I -B hack/bootstrap-acceptance/fresh_machine.py \
+  --version v0.21.9 --confirm-disposable-host
 ```
-python3 hack/bootstrap-acceptance/probe.py \
-  --version v0.21.5 --context <disposable-context> \
-  --kubeconfig <private-kubeconfig> --answers <answers.json> \
-  --confirm-disposable-cluster
-```
 
-The reviewed answers/context are the consent boundary. The script creates a
-local SSH identity and passes only its public key to installation. Its private
-ceremony and key files never become artifacts. Fetch uses the plugin's fixed
-public release origin and pinned key; it has no unsigned candidate override.
-The initial MCP probe uses the existing bearer interface in this branch;
-certificate-mode enrollment awaits integration of pane 2's mutual TLS bundle.
+`--state-dir /absolute/new/path` selects a new private state directory outside
+the checkout; it must not exist and its path must contain no whitespace.
+`--answers /absolute/answers.json` optionally supplies nonsecret version-1 JSON
+answers for resources and other installation settings. The cell fixes its own
+context, kubeconfig, localhost DNS endpoint, production OpenBao, assist setting,
+throwaway upstream and public host-key pin. Private material is generated locally;
+never supply production credentials or an existing deployment's answers.
 
-## Remaining release gate work
+The cell installs k3s v1.34.3+k3s1 and Helm v3.19.0 from their official HTTPS
+release origins, checking committed per-architecture SHA-256 pins in `pins.json`
+before installation. It reads only the expected regular Helm archive member.
+k3s supplies kubectl; Helm is installed in the private cell bin directory before
+the plugin installer runs. Helm and kubectl remain prerequisites of Oberth itself;
+this disposable-host harness owns their provisioning, not the installer.
+Pins come from the versioned upstream checksum files, not a network checksum
+accepted alongside the executable at runtime.
 
-The release workflow intentionally rejects privileged containers and hostPath,
-and ignores repository-selected service accounts. It cannot provision a
-KubeVirt VM or run Docker/k3d inside an ordinary release leaf. Do not widen
-those policies or mount the release host's Docker socket to make a test pass.
-An operator must supply an isolated disposable VM/runner with an authenticated
-provisioning and result channel before this can be connected to the release
-DAG. No such runner is configured in this checkout; build hosts are explicitly
-off limits during this handoff.
+On that VM the script:
 
-The reviewed private unseal implementation is integrated. An optional
-`--reboot-driver /absolute/path` invokes an operator-provided executable with
-only the chosen context as its argument, then requires initialized/sealed
-OpenBao, runs private unseal and independently requires unsealed status and
-Verify green. The driver must reboot only its disposable runner and wait for
-that cluster's API and pod exec to return. It is not a VM provisioning or
-reboot implementation, and has not been exercised against a real runner.
-Use `--openbao-namespace` for a reviewed custom namespace. The unseal CLI
-verifies the live OpenBao pod/controller and uses the explicit kubeconfig for
-both status checks and recovery. Client endpoints use DNS names, never IPs.
+1. Installs a new single-node k3s, copies its root-only kubeconfig into private
+   state and pins the `bootstrap-cell` context for every cluster command.
+2. Starts a separate sshd with a generated host key and one restricted Git work
+   key, serving a new bare fixture repository through a new fixture-only account
+   (password login disabled, including on hosts whose root account is locked). It leaves the VM's normal SSH
+   service and authorized_keys unchanged. No hosted forge account is needed.
+3. Uses the verified plugin fetcher, plugin keygen, current installer answers,
+   `--admin-csr` and public SSH key; plans, installs and requires every Verify
+   check to pass. Connect pins/merges the CA and installs certificate settings;
+   MCP uses that CA and client certificate, without a bearer fallback.
+4. Registers the throwaway repository, configures its Oberth remote with the
+   current add-repo/client binding, opens events_wait before the assisted push,
+   binds the held run to the exact pushed SHA, patches the failed file, continues
+   it and requires passed + assisted + the existing “not evidence” reason.
+5. Captures private server/Pod/process logs and scans them. It records the boot
+   ID, installs a one-shot resume unit and reboots the actual VM.
+6. The resume unit requires a changed boot ID, independently checks initialized
+   and sealed OpenBao, unseals through the current verified CLI, checks unsealed,
+   repeats all-ok install Verify and mTLS status, rechecks the same assisted run
+   and SHA in retained history, then captures/scans logs again.
 
-The full cell still needs: a repo-owned pinned VM/k3d provisioning manifest;
-a disposable forge and initial repository; the exact-SHA assisted failing push
-with events_wait started before it, run_hold_patch/run_continue and passed /
-not-evidence assertions; actual reboot and sealed-before/unsealed-after checks;
-server/Pod/process-log capture added to the private scan; and a release DAG
-success dependency before finalization. These are **not** claimed by this
-probe. The no-push handoff rule also prohibits executing its eventual push
-round trip here. No release dependency was added that could turn this partial
-probe into false end-to-end acceptance.
+The source/plugin are copied into root-only state so the resume command needs no
+checkout mount after reboot. Command output, recovery material and private keys
+remain under `/var/lib/oberth-bootstrap-cell` (mode 0700); files are owner-only.
+A completed run writes a public-only `PASSED.json` there after scanning. Reboot
+interrupts the initiating SSH session; the runner must reconnect and require the
+resume unit's success and that receipt. On failure no receipt is written. Raw
+state must never be uploaded: it contains recovery material. Destroy the VM and
+its disks after either result, including failure before/after reboot. No automatic
+wipe of another host or an existing installation is attempted.
 
-Run offline assertions with:
-`python3 -m unittest discover -s hack/bootstrap-acceptance -p 'test_*.py'`.
-They exercise all-ok validation, credential scan boundaries/decoding,
-non-disclosing command failures, redirect refusal, and a real local HTTPS
-handshake that accepts only the chosen CA; they are not live
-installation or reboot evidence.
+## Runner work still required
+
+CI cannot yet allocate this VM or receive a trustworthy post-reboot result. An
+external runner must provision the fresh guest and host prerequisites, stage the
+exact candidate checkout and a matching signed immutable release, run the command,
+wait across the real reboot, retrieve only a successful receipt through an
+authenticated channel and attest its candidate/VM identity, then destroy the guest
+and all private storage. A release DAG dependency on that authenticated receipt
+must be added only when the runner exists. A local JSON file alone is not an
+authenticated release acceptance receipt. No live installation, push or reboot was
+performed when adding these scripts, and no complete VM acceptance is claimed.

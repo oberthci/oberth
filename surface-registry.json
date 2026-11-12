@@ -767,6 +767,14 @@
     "value:cpu_reason": {
       "doc_anchor": "docs/cpu-admission.md#defaults",
       "test_ref": "internal/service/admission_live_test.go TestCapacityHeldPoolRefreshUnblocksWithoutRestart"
+    },
+    "flag:state-dir": {
+      "doc_anchor": "hack/bootstrap-acceptance/README.md#fresh-linux-vm-outside-ci",
+      "test_ref": "hack/bootstrap-acceptance/test_cell.py FreshHostBoundary"
+    },
+    "flag:confirm-disposable-host": {
+      "doc_anchor": "hack/bootstrap-acceptance/README.md#fresh-linux-vm-outside-ci",
+      "test_ref": "hack/bootstrap-acceptance/test_cell.py FreshHostBoundary"
     }
   }
 }

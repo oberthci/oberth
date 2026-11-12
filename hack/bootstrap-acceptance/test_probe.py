@@ -1,11 +1,6 @@
 import base64
 import importlib.util
-import http.server
 import json
-import shutil
-import ssl
-import subprocess
-import threading
 from pathlib import Path
 import secrets
 import tempfile
@@ -56,54 +51,39 @@ class AcceptanceAssertions(unittest.TestCase):
             self.assertEqual(len(runner.logs), 2)
             self.assertNotIn('OBERTH_TOKEN', runner.env)
 
-    @unittest.skipUnless(shutil.which('openssl'), 'OpenSSL prerequisite is unavailable')
-    def test_real_https_requires_selected_ca_and_keeps_credentials_private(self):
+    def test_real_mtls_requires_selected_ca_and_keeps_private_key_out_of_logs(self):
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from fixtures import private_values, tls_server
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for name in ('server', 'other'):
-                subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048',
-                                '-nodes', '-days', '1', '-subj', '/CN=localhost',
-                                '-addext', 'subjectAltName=DNS:localhost',
-                                '-keyout', str(root / (name + '.key')),
-                                '-out', str(root / (name + '.crt'))],
-                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            credential = secrets.token_hex(32)
+            runner = probe.Probe(root, root, 'disposable', root / 'config')
+            for name in ('client', 'other'):
+                runner.run(name + '-key', ['openssl', 'req', '-x509', '-newkey', 'ec',
+                           '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1',
+                           '-subj', '/CN=fixture-client', '-keyout', str(root / (name + '.key')),
+                           '-out', str(root / (name + '.crt'))])
             received = []
 
-            class Handler(http.server.BaseHTTPRequestHandler):
-                def log_message(self, *args):
-                    pass
+            def respond(method, path, headers, raw):
+                received.append(headers.get('Authorization'))
+                request = json.loads(raw)
+                return 200, {'jsonrpc': '2.0', 'id': request['id'],
+                             'result': {'tools': [{'name': 'system_status'}]}}
 
-                def do_POST(self):
-                    received.append(self.headers.get('Authorization') == 'Bearer ' + credential)
-                    request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                    body = json.dumps({'jsonrpc': '2.0', 'id': request['id'],
-                                       'result': {'tools': [{'name': 'system_status'}]}}).encode()
-                    self.send_response(200)
-                    self.send_header('Content-Length', str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-
-            server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
-            tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            tls.load_cert_chain(root / 'server.crt', root / 'server.key')
-            server.socket = tls.wrap_socket(server.socket, server_side=True)
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            try:
-                runner = probe.Probe(root, root, 'disposable', root / 'config')
-                url = 'https://localhost:' + str(server.server_port) + '/mcp'
-                result = runner.mcp(url, root / 'server.crt', credential, 'tools/list', {}, 1)
+            with tls_server(runner, 'server', respond, root / 'client.crt') as (url, ca, _):
+                result = runner.mcp(url + '/mcp', ca, root / 'client.crt', root / 'client.key',
+                                    'tools/list', {}, 1)
                 self.assertEqual(result['tools'][0]['name'], 'system_status')
-                self.assertEqual(received, [True])
-                probe.scan_logs(runner.logs, [credential.encode()])
+                self.assertEqual(received, [None])
                 with self.assertRaises(probe.Refused):
-                    runner.mcp(url, root / 'other.crt', credential, 'tools/list', {}, 2)
-                self.assertEqual(received, [True])
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join()
+                    runner.mcp(url + '/mcp', root / 'other.crt', root / 'client.crt',
+                               root / 'client.key', 'tools/list', {}, 2)
+                with self.assertRaises(probe.Refused):
+                    runner.mcp(url + '/mcp', ca, root / 'other.crt', root / 'other.key',
+                               'tools/list', {}, 3)
+                self.assertEqual(received, [None])
+            probe.scan_logs(runner.logs, private_values(root))
 
     def test_redirect_is_refused(self):
         with self.assertRaises(probe.Refused):
