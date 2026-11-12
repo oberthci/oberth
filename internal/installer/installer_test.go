@@ -43,7 +43,10 @@ func TestExecuteRefusesNodePreflightBeforeInstalling(t *testing.T) {
 	kube := fake.NewClientset()
 	deps := InstallDeps{Output: io.Discard, GOOS: "linux", LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
-	}, RunHelm: func(context.Context, []string) ([]byte, error) {
+	}, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
+			return []byte("[]"), nil
+		}
 		t.Fatal("Helm called before preflight passed")
 		return nil, nil
 	}}

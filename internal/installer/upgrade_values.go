@@ -117,6 +117,10 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
+	if deps.Output != nil {
+		describeStoredPolicy(deps.Output, values)
+		_, _ = fmt.Fprintln(deps.Output, "NetworkPolicy capability: unverified (not probed during upgrade maintenance); run install --verify for an explicit security check.")
+	}
 	if err := checkRemovedUpgradeValues(cfg, values); err != nil {
 		return preparedUpgradeValues{}, err
 	}

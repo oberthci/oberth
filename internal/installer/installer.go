@@ -212,6 +212,7 @@ type Config struct {
 	PushBannerURL           string
 	PushBannerURLSet        bool
 	AcceptWitnessGenesisSet bool
+	existingValuesRead      bool
 	existingRelease         bool
 	installValuesRequested  bool
 	liveInstallValues       map[string]any
@@ -477,8 +478,9 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
-	baoToken         string
-	baoTokenCaptured bool
+	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
+	baoToken           string
+	baoTokenCaptured   bool
 	// ClientConfigRoot overrides where this machine's CLI/MCP client files
 	// live (default ~/.config/oberth); tests point it at their own directory.
 	ClientConfigRoot func() (string, error)

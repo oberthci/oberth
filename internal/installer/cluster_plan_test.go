@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,10 +31,10 @@ func preflightStats(context.Context, []byte, string, ...string) ([]byte, error) 
 func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	node := preflightNode()
 	kube := fake.NewClientset(node, preflightStorage())
-	deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: preflightStats}
+	deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture}
 	identity := ClusterIdentity{}
 	result := InstallResult{OK: true}
-	inspectClusterPreflight(context.Background(), &Config{}, deps, &identity, &result)
+	inspectCluster(context.Background(), &Config{}, deps, &identity, &result, false)
 	if !result.OK || len(identity.Nodes) != 1 || identity.Nodes[0].AvailableBytes == nil || identity.Distribution != "k3s" {
 		t.Fatalf("preflight facts missing: %v", result.Checks)
 	}
@@ -44,11 +43,14 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	if _, err := kube.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	deps.ProbeNetworkPolicy = func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+		return NetworkPolicyProbeResult{Status: "absent", Remedy: "Enable data-plane enforcement and repeat plan."}
+	}
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return nil, errors.New("private diagnostic")
 	}
 	result = InstallResult{OK: true}
-	inspectClusterPreflight(context.Background(), &Config{}, deps, &ClusterIdentity{}, &result)
+	inspectCluster(context.Background(), &Config{}, deps, &ClusterIdentity{}, &result, false)
 	failed := map[string]bool{}
 	for _, check := range result.Checks {
 		if !check.OK {
@@ -128,12 +130,12 @@ func TestFreshK3sNeverUsedWhenUserFileExists(t *testing.T) {
 func TestPlanReportsSelectedRemoteClusterWithoutAnotherGate(t *testing.T) {
 	ca := newTestServerCA([]string{"api.example.test"})
 	kube := fake.NewClientset(preflightNode(), preflightStorage())
-	deps := InstallDeps{LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(name string) (kubernetes.Interface, *rest.Config, string, error) {
+	deps := InstallDeps{RunHelm: func(context.Context, []string) ([]byte, error) { return []byte("[]"), nil }, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(name string) (kubernetes.Interface, *rest.Config, string, error) {
 		if name != "chosen" {
 			t.Fatal("context changed")
 		}
 		return kube, &rest.Config{Host: "https://api.example.test:6443", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, name, nil
-	}, RunCommand: preflightStats}
+	}, RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture}
 	plan := PlanInstall(context.Background(), Config{ContextName: "chosen"}, deps)
 	if !plan.OK || plan.Identity.Context != "chosen" || plan.Identity.CAPin == "" || plan.Identity.Server != "https://api.example.test:6443" || len(plan.Identity.Nodes) != 1 {
 		t.Fatalf("plan failed: %v", plan.Checks)
@@ -151,7 +153,12 @@ func TestExecuteRefusesUnknownNetworkPolicyBeforeHelm(t *testing.T) {
 	kube := fake.NewClientset(node, preflightStorage())
 	deps := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
-	}, RunCommand: preflightStats, RunHelm: func(context.Context, []string) ([]byte, error) {
+	}, ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+		return NetworkPolicyProbeResult{Status: "unverified", Remedy: "Allow the probe and repeat plan."}
+	}, RunCommand: preflightStats, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
+			return []byte("[]"), nil
+		}
 		t.Fatal("Helm ran without network-policy enforcement")
 		return nil, nil
 	}}
@@ -177,46 +184,25 @@ func TestVerifyRequiresUpstreamAuthentication(t *testing.T) {
 	}
 }
 
-func TestPolicyPreflightReadsControllerConfiguration(t *testing.T) {
-	for _, test := range []struct {
-		name, controller string
-		args             []string
-		config           map[string]string
-		ready            int32
-		nodeCount        int
-		want             bool
-	}{
-		{name: "cilium enabled", controller: "cilium", config: map[string]string{"enable-policy": "default"}, ready: 1, want: true},
-		{name: "cilium disabled", controller: "cilium", config: map[string]string{"enable-policy": "never"}, ready: 1},
-		{name: "cilium audit only", controller: "cilium", config: map[string]string{"policy-audit-mode": "true"}, ready: 1},
-		{name: "cilium k8s policies disabled", controller: "cilium", config: map[string]string{"enable-k8s-networkpolicy": "false"}, ready: 1},
-		{name: "cilium argument overrides config", controller: "cilium", args: []string{"--enable-policy", "never"}, config: map[string]string{"enable-policy": "default"}, ready: 1},
-		{name: "router firewall enabled", controller: "kube-router", args: []string{"--run-firewall=true"}, ready: 1, want: true},
-		{name: "router firewall disabled", controller: "kube-router", args: []string{"--run-firewall=false"}, ready: 1},
-		{name: "router split disabled flag", controller: "kube-router", args: []string{"--run-firewall", "false"}, ready: 1},
-		{name: "controller does not cover nodes", controller: "kube-router", ready: 1, nodeCount: 2},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+func enforcedPolicyFixture(context.Context, Config, Deps) NetworkPolicyProbeResult {
+	return NetworkPolicyProbeResult{Status: "enforced"}
+}
+
+func TestPolicyPreflightUsesLiveEvidenceForEveryDistribution(t *testing.T) {
+	for _, providerID := range []string{"kind://example/node", "", "arbitrary://node"} {
+		for _, status := range []string{"enforced", "absent", "unverified"} {
 			node := preflightNode()
-			node.Annotations = nil
-			ds := &appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: test.controller, Namespace: "networking", Generation: 1},
-				Spec:   appsv1.DaemonSetSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: test.controller, Args: test.args}}}}},
-				Status: appsv1.DaemonSetStatus{ObservedGeneration: 1, DesiredNumberScheduled: test.ready, NumberReady: test.ready, UpdatedNumberScheduled: test.ready}}
-			config := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cilium-config", Namespace: "networking"}, Data: test.config}
-			kube := fake.NewClientset(node, preflightStorage(), ds, config)
-			if test.nodeCount > 1 {
-				other := node.DeepCopy()
-				other.Name = "node-two"
-				if _, err := kube.CoreV1().Nodes().Create(context.Background(), other, metav1.CreateOptions{}); err != nil {
-					t.Fatal(err)
-				}
-			}
+			node.Spec.ProviderID = providerID
+			node.Status.NodeInfo.KubeletVersion = "v1.37.0"
 			result := InstallResult{OK: true}
-			inspectClusterPreflight(context.Background(), &Config{}, Deps{KubeClient: kube, RunCommand: preflightStats}, &ClusterIdentity{}, &result)
-			if result.OK != test.want {
-				t.Fatalf("preflight ok=%t, want %t", result.OK, test.want)
+			deps := Deps{KubeClient: fake.NewClientset(node, preflightStorage()), RunCommand: preflightStats, ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+				return NetworkPolicyProbeResult{Status: status, Remedy: "Repeat the live probe."}
+			}}
+			inspectCluster(t.Context(), &Config{}, deps, &ClusterIdentity{}, &result, false)
+			if result.OK != (status == "enforced") || result.Checks[len(result.Checks)-1].Reason != status {
+				t.Fatalf("%s: %+v", providerID, result)
 			}
-		})
+		}
 	}
 }
 

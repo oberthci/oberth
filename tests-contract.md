@@ -468,3 +468,17 @@ Mac onboarding #1553: `TestInstallRejectsClusterCreationOption`,
 `TestSavedAnswersRejectRemovedClusterCreationState` keep the CLI, setup choices
 and resumed answers on existing operator-provided clusters. Printed kind
 remedies remain guarded instructions with a separate kubeconfig destination.
+
+Mac onboarding #1548: `TestPluginNetworkPolicyLiveProbeAndCleanup` drives the
+real probe through fake Kubernetes resources and exec outcomes: enforced,
+absent, namespace/exec denial, unavailable image, cancellation, lost create
+response and cleanup refusal. It verifies the shared image pin, restricted
+tokenless Pods, allowed/blocked/recovered sequence and UID-bound cleanup.
+`TestPolicyPreflightUsesLiveEvidenceForEveryDistribution` keeps enforcement
+independent of kind/managed/unknown controller and distribution names.
+
+Mac onboarding R3 #1548: `TestExistingUpgradeDoesNotRequireFreshProbe` reaches
+the real Execute Review boundary with unverified capability for stored true,
+false and missing values; `TestRunUpgradePreservesPolicyWithoutProbePrivileges`
+exercises real upgrade application with no fresh-probe requirement. Replacement,
+renewed and unknown-lifetime namespaces never acquire stale deletion authority.

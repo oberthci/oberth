@@ -351,6 +351,22 @@ class ContractGuards(unittest.TestCase):
     def test_build_annotation_requires_registration(self):
         self.assertIn('law3-surface', [r for r, _, _ in self.scan('a.go', '"oberth.ci/new-mode"')])
 
+    def test_registered_label_has_the_same_surface_guard(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "deprecations.yaml").write_text('{"deprecations":[]}')
+            source = root / "a.go"
+            source.write_text('package a\nvar labels = map[string]string{"oberth.ci/probe": "owned"}\n')
+            registry = {"entries": {"label:oberth.ci/probe": {"doc_anchor": "probe.md", "test_ref": "probe test"}}}
+            (root / "surface-registry.json").write_text(json.dumps(registry))
+            CHECK.validate_registries(root)
+            self.assertNotIn("law3-surface", [r for r, _, _ in CHECK.scan(root, ["a.go"], registry, [])])
+            self.assertIn("law3-surface", [r for r, _, _ in CHECK.scan(root, ["a.go"], {"entries": {}}, [])])
+            del registry["entries"]["label:oberth.ci/probe"]["test_ref"]
+            (root / "surface-registry.json").write_text(json.dumps(registry))
+            with self.assertRaisesRegex(ValueError, "test_ref"):
+                CHECK.validate_registries(root)
+
     def test_generic_registry_test_reference(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

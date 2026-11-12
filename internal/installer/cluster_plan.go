@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -154,15 +153,27 @@ func PlanInstall(ctx context.Context, cfg Config, host InstallDeps) InstallPlan 
 		return plan
 	}
 	run := host.RunCommand
-	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run}
-	inspectClusterPreflight(ctx, &cfg, deps, &plan.Identity, &r)
+	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy}
+	inspectInstallPreflight(ctx, &cfg, deps, host, selected, &plan.Identity, &r)
 	plan.Review = Review(cfg)
 	plan.Review.Context = selected
 	plan.OK, plan.Checks = r.OK, r.Checks
 	return plan
 }
 
-func inspectClusterPreflight(ctx context.Context, cfg *Config, deps Deps, identity *ClusterIdentity, r *InstallResult) {
+// Maintenance discovers the release before deciding whether capability is a gate.
+func inspectInstallPreflight(ctx context.Context, cfg *Config, deps Deps, host InstallDeps, selected string, identity *ClusterIdentity, r *InstallResult) {
+	if err := readInstallValues(ctx, cfg, installPolicyDeps(host, *cfg, selected)); err != nil {
+		r.check("installed_values", false, "Read the existing Helm release values before choosing policy configuration.")
+		return
+	}
+	if cfg.existingRelease {
+		cfg.NetworkPolicy = "auto"
+	}
+	inspectCluster(ctx, cfg, deps, identity, r, cfg.existingRelease)
+}
+
+func inspectCluster(ctx context.Context, cfg *Config, deps Deps, identity *ClusterIdentity, r *InstallResult, maintenance bool) {
 	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	r.check("nodes", err == nil && len(nodes.Items) > 0, "Grant read access to nodes and bring at least one node Ready.")
 	if err != nil {
@@ -226,40 +237,28 @@ func inspectClusterPreflight(ctx context.Context, cfg *Config, deps Deps, identi
 		}
 	}
 	r.check("default_storage_class", defaultClass, "Configure a default StorageClass with a working provisioner for persistent OpenBao and Oberth data.")
-	enforcement := networkPolicyController(ctx, deps, nodes.Items)
-	r.check("network_policy", enforcement && cfg.NetworkPolicy != "false", "Enable an enforcing NetworkPolicy controller (Calico, Cilium, kube-router, or the k3s built-in controller) and pipeline network policy. Unknown enforcement fails this check.")
-}
-
-func networkPolicyController(ctx context.Context, deps Deps, nodes []corev1.Node) bool {
-	allK3s := len(nodes) > 0
-	for _, node := range nodes {
-		args, known := node.Annotations["k3s.io/node-args"]
-		var parsed []string
-		if !strings.Contains(node.Status.NodeInfo.KubeletVersion, "+k3s") || !known || json.Unmarshal([]byte(args), &parsed) != nil || len(parsed) == 0 || strings.Contains(args, "disable-network-policy") {
-			allK3s = false
-		}
+	if cfg.NetworkPolicy == "false" && !maintenance {
+		r.check("network_policy", false, "Pipeline NetworkPolicy is disabled; enable it and repeat the live enforcement probe.")
+		r.Checks[len(r.Checks)-1].Reason = "disabled"
+		return
 	}
-	if allK3s {
-		return true
+	if !r.OK {
+		r.check("network_policy", false, "NetworkPolicy enforcement is unverified; resolve the earlier cluster checks and repeat the live probe.")
+		r.Checks[len(r.Checks)-1].Reason = "unverified"
+		return
 	}
-	controllers, err := deps.KubeClient.AppsV1().DaemonSets(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return false
+	probe := deps.ProbeNetworkPolicy
+	if probe == nil {
+		probe = ProbeNetworkPolicy
 	}
-	for _, ds := range controllers.Items {
-		if int(ds.Status.DesiredNumberScheduled) < len(nodes) || ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady < ds.Status.DesiredNumberScheduled || ds.Status.ObservedGeneration < ds.Generation || ds.Status.UpdatedNumberScheduled < ds.Status.DesiredNumberScheduled {
-			continue
-		}
-		switch ds.Name {
-		case "calico-node":
-			return true
-		case "cilium", "kube-router":
-			if controllerPolicyEnabled(ctx, deps, ds.Name, ds.Namespace, ds.Spec.Template.Spec.Containers) {
-				return true
-			}
-		}
+	enforcement := probe(ctx, *cfg, deps)
+	if maintenance {
+		r.Checks = append(r.Checks, CheckResult{Code: "network_policy", OK: enforcement.Status == "enforced", Warning: enforcement.Status != "enforced", Reason: enforcement.Status, Remedy: enforcement.Remedy, Evidence: enforcement.Evidence})
+		return
 	}
-	return false
+	r.check("network_policy", enforcement.Status == "enforced", enforcement.Remedy)
+	r.Checks[len(r.Checks)-1].Reason = enforcement.Status
+	r.Checks[len(r.Checks)-1].Evidence = enforcement.Evidence
 }
 
 func PrintPlan(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) error {
@@ -270,7 +269,7 @@ func PrintPlan(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) e
 		}
 	} else {
 		_, _ = fmt.Fprintf(deps.Output, "Cluster: %s %s; CA sha256 %s; files %v\n", plan.Identity.Context, plan.Identity.Server, plan.Identity.CAPin, plan.Identity.Files)
-		PrintReview(deps.Output, cfg)
+		printReview(deps.Output, plan.Review)
 		for _, check := range plan.Checks {
 			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
 		}
@@ -286,82 +285,4 @@ func checkClusterTrust(config *rest.Config, identity ClusterIdentity, result *In
 	trusted := config != nil && !config.Insecure && identity.CAPin != "" && strings.HasPrefix(identity.Server, "https://")
 	result.check("cluster_ca", trusted, "Use an HTTPS kubeconfig with an explicit trusted cluster CA and TLS verification enabled.")
 	return trusted
-}
-
-// Read the controller's policy settings, not just its name and readiness.
-// Unresolved settings fail closed; a traffic test remains a separate check.
-func controllerPolicyEnabled(ctx context.Context, deps Deps, name, namespace string, containers []corev1.Container) bool {
-	settings := map[string]string{}
-	if name == "cilium" {
-		config, err := deps.KubeClient.CoreV1().ConfigMaps(namespace).Get(ctx, "cilium-config", metav1.GetOptions{})
-		if err != nil || !policySettingsSafe(name, config.Data) {
-			return false
-		}
-	}
-	for _, container := range containers {
-		if container.Name != name && (name != "cilium" || container.Name != "cilium-agent") {
-			continue
-		}
-		if len(container.EnvFrom) != 0 {
-			return false
-		}
-		for _, env := range container.Env {
-			key := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(env.Name, "CILIUM_"), "_", "-"))
-			if !policySetting(name, key) {
-				continue
-			}
-			if env.ValueFrom != nil {
-				return false
-			}
-			settings[key] = env.Value
-		}
-		if !policySettingsSafe(name, settings) {
-			return false
-		}
-		args := append(append([]string(nil), container.Command...), container.Args...)
-		for i := 0; i < len(args); i++ {
-			key, value, equal := strings.Cut(strings.TrimPrefix(args[i], "--"), "=")
-			if !policySetting(name, key) {
-				continue
-			}
-			if !equal {
-				value = "true"
-				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
-					i++
-					value = args[i]
-				}
-			}
-			if !policySettingsSafe(name, map[string]string{key: value}) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func policySetting(controller, key string) bool {
-	if controller == "kube-router" {
-		return key == "run-firewall"
-	}
-	return key == "enable-policy" || key == "enable-k8s-networkpolicy" || key == "policy-audit-mode"
-}
-
-func policySettingsSafe(controller string, settings map[string]string) bool {
-	for key, value := range settings {
-		if !policySetting(controller, key) {
-			continue
-		}
-		if key == "enable-policy" {
-			if value != "default" && value != "always" {
-				return false
-			}
-			continue
-		}
-		active, err := strconv.ParseBool(value)
-		if err != nil || (key == "policy-audit-mode" && active) || (key != "policy-audit-mode" && !active) {
-			return false
-		}
-	}
-	return true
 }

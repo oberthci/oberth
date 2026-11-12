@@ -32,7 +32,8 @@ Arguments given to the command: `$ARGUMENTS`
    explicit release version). It uses the plugin's pinned release key, OpenSSL
    and SHA-256 to verify before installing into `~/.local/bin`. It needs no
    sudo, cosign, jq or Python. A verification failure stops the flow.
-3. **The cluster.** Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" plan` with the
+3. **The cluster.** Explain that plan runs the bounded short-lived NetworkPolicy probe below.
+   Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" plan` with the
    chosen `--context` and answers file when available. Show its kubeconfig
    files, API URL, CA pin, node facts and remedies. Any chosen context is a valid
    target; never add a local/remote gate. With multiple contexts, ask the user.
@@ -92,7 +93,7 @@ Arguments given to the command: `$ARGUMENTS`
    that authenticated SSH connection. Never set `--admin-bearer` by default.
 
 7. **Review.** Show the complete command and wait for the user to say
-   "install". Nothing runs before that.
+   "install". The Oberth release is installed only after that approval.
 
    ```sh
    sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" run --yes --json --context '<context>' --install-secretstore \
@@ -229,3 +230,55 @@ for the next plan/install; choose unused names if either already exists.
 
 The CLI and setup wizard only target an existing operator-provided cluster and
 kubeconfig. Oberth never creates or recreates a Kubernetes cluster.
+
+### Live NetworkPolicy enforcement check
+
+Plan, install preflight and verification use a bounded live egress probe, not
+controller names or CNI brands. A server and one client/control pair per Ready,
+schedulable, untainted node run in an owned scratch namespace. The control Pod
+shares its client's node and stays outside the egress-deny selector. Receiver
+ingress stays open. Each denial observation checks a working path to the same
+server before, throughout, and after the tested client request. HTTP errors, refused
+listeners, changed Pod health or failed controls are unverified. Only timeouts
+without an HTTP response are denial candidates; three observations and two
+separate deny/recover transitions are required.
+
+The public check's `evidence` states the scratch and pipeline namespaces,
+client/control nodes and server node. Existing pipeline namespace labels are
+copied except Kubernetes' immutable namespace-name label; the probe adds its
+ownership label. Namespace-name-specific exclusions, other node-pair routes,
+ingress enforcement and the installed policy's selectors/allow rules are not
+covered by this TCP default-deny capability measurement. Read that scope with
+the result; do not present it as proof of every installed isolation rule.
+The pinned utility image supports arm64/amd64. An air-gapped installation needs
+an accessible explicit `--utility-image` mirror; saved image pull secrets are
+not copied into the scratch namespace.
+
+A slow or non-converging policy is **unverified**, with the phase and observed
+elapsed time, rather than proven absence. API, image, exec, server and route
+failures are unverified too. Failed or disabled security checks refuse a fresh install or explicit
+verification; repeat after repairing the reported condition. Required rights are
+namespaces create/get/list/delete, Pods create/get, pods/exec get/create, and
+NetworkPolicies create/delete, in addition to existing cluster reads. The probe
+has a 90-second budget plus a separate 30-second cleanup budget after normal
+return or cancellation. This is not a hard-kill cleanup guarantee: the next run
+finds ownership-labelled leftovers and removes only an expired object with the
+same listed UID, rechecking its expiry and binding deletion to UID/resource
+version. Replacements, renewed lifetimes and missing/malformed expiry metadata
+are preserved and reported as unverified. Recent or active probes stay until expiry. Foreign ownership
+is reported and left untouched. Disclose these scratch writes before plan;
+Review remains the approval for installing the release.
+
+Capability is separate from configuration. Plan/install discover the existing
+release and stored values before probing. Existing-release maintenance preserves
+that choice and needs no new scratch-probe privileges: an unverified observation
+remains unverified, shown as information, and does not block maintenance. Review
+shows true, false or unspecified (preserved), with disabled/unknown warnings.
+Fresh installs and explicit `install --verify` stay fail-closed. Verification
+reads the effective installed boolean, so false is disabled and missing is
+unverified, regardless of desired flags. Automatic post-maintenance JSON checks
+retain informational probe results; they do not claim explicit security verification.
+The dedicated upgrade path preserves stored values, prints the stored choice and
+warning, and reports capability as unverified/not probed. A successful upgrade
+is not NetworkPolicy evidence. Use `install --verify --json` for the explicit
+bounded security check; rollback does not run this probe.

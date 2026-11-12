@@ -40,13 +40,15 @@ type InteractiveRunner func(ctx context.Context, name string, args ...string) er
 // InstallDeps holds injectable host and cluster dependencies for the CLI-level
 // install orchestration.
 type InstallDeps struct {
-	Output         io.Writer
-	Input          io.Reader
-	GOOS           string
-	LookPath       func(string) (string, error)
-	RunCommand     CommandRunner
-	RunInteractive InteractiveRunner
-	IsTerminal     func() bool
+	installResolved    func(Config)
+	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
+	Output             io.Writer
+	Input              io.Reader
+	GOOS               string
+	LookPath           func(string) (string, error)
+	RunCommand         CommandRunner
+	RunInteractive     InteractiveRunner
+	IsTerminal         func() bool
 	// OutputIsTerminal reports whether Output reaches a terminal (default:
 	// standard output is one). Credentials are shown only on a terminal;
 	// anywhere else they go to --secrets-file or the install refuses.
@@ -214,6 +216,7 @@ func executeWithCredentials(ctx context.Context, cfg Config, deps InstallDeps) (
 }
 
 func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFileSink bool) error {
+	preflightRun := deps.RunCommand
 	contextName := cfg.ContextName
 
 	if deps.KubeContexts != nil {
@@ -260,10 +263,9 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 			return fmt.Errorf("%w: cluster_ca: %s", errInstallPreflight, preflight.Checks[0].Remedy)
 		}
 		preflightConfig := cfg
-		// RunCommand already carries an explicit kubeconfig, if supplied.
-		preflightConfig.KubeconfigPath = ""
-		inspectClusterPreflight(ctx, &preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: deps.RunCommand}, &ClusterIdentity{}, &preflight)
-		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = preflightConfig.TLSExtraDNSNames, preflightConfig.TLSExtraIPs
+		// Preflight builds its own explicit kubeconfig arguments.
+		inspectInstallPreflight(ctx, &preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: preflightRun, ProbeNetworkPolicy: deps.ProbeNetworkPolicy}, deps, selectedContext, &ClusterIdentity{}, &preflight)
+		cfg = preflightConfig
 		if !preflight.OK {
 			var failures []string
 			for _, check := range preflight.Checks {
@@ -273,8 +275,19 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 			}
 			return fmt.Errorf("%w:\n%s", errInstallPreflight, strings.Join(failures, "\n"))
 		}
+		if cfg.existingRelease {
+			for _, check := range preflight.Checks {
+				if check.Code == "network_policy" {
+					_, _ = fmt.Fprintf(deps.Output, "NetworkPolicy capability: %s (information during maintenance). %s\n", check.Reason, check.Remedy)
+				}
+			}
+		}
+
 	}
 
+	if deps.installResolved != nil {
+		deps.installResolved(cfg)
+	}
 	PrintReview(deps.Output, cfg)
 	// Wire the production ReadPassword and MakeRaw defaults when the session
 	// is interactive: x/term.ReadPassword and x/term.MakeRaw on the stdin fd.

@@ -129,10 +129,16 @@ CA, unreadable or unready nodes, unsupported architecture, less than 1 GiB
 available node filesystem space, missing default StorageClass, and unknown
 NetworkPolicy enforcement. Free space comes from the kubelet stats API, not
 from capacity or allocatable estimates; unreadable stats fail the check.
-NetworkPolicy detection recognizes ready Calico, Cilium and kube-router
-DaemonSets covering the nodes, including Cilium policy/audit settings and
-kube-router firewall settings, or the k3s built-in controller when node
-arguments do not disable it. Plan, Verify and install refuse untrusted or
-plaintext Kubernetes endpoints before contacting the API. This checks controller configuration, not a traffic isolation probe;
-the bootstrap acceptance cell tests traffic behavior. An unfamiliar controller
-fails closed and needs explicit support before its plan can pass.
+NetworkPolicy enforcement is measured with two short-lived Pods in a uniquely
+labelled scratch namespace, using the installer's pinned multi-architecture
+utility image (or the selected `--utility-image` mirror). The probe checks
+allowed traffic, applies default-deny, requires blocked fresh connections,
+removes the policy, and requires traffic to recover. It does not infer security
+from a CNI/controller name. Plain kind can pass with its own enforcing network.
+Unblocked traffic after the convergence window is `absent` and installation is
+refused. Pull/RBAC/exec/readiness failures are `unverified` with a remedy; they
+never claim enforcement. The probe has a 90-second bound and always attempts
+cleanup with its own 30-second bound, including after cancellation. Cleanup
+failure names the exact scratch namespace and refuses a successful check.
+Plan and verification therefore create short-lived probe resources; they do not
+install an Oberth release or change the selected kubeconfig.

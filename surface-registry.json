@@ -783,6 +783,22 @@
     "flag:namespace": {
       "doc_anchor": "docs/plugin-install.md#no-reachable-node-loadbalancer-proposal",
       "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginWaitLoadBalancerIsBoundedAndSelected"
+    },
+    "label:oberth.ci/network-policy-probe": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/plugin_network_policy_test.go TestPluginNetworkPolicyLiveProbeAndCleanup"
+    },
+    "annotation:oberth.ci/probe-expires-at": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/network_policy_review_test.go TestProbeReconcilesStaleNamespacesAndProtectsActiveAndForeign"
+    },
+    "value:evidence": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/network_policy_review_test.go TestProbeEvidenceRequiresEgressControlAndConvergence"
+    },
+    "value:network_policy": {
+      "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
+      "test_ref": "internal/installer/network_policy_values_test.go TestStoredDisabledPolicySurvivesPreflightAndUpgrade"
     }
   }
 }

@@ -3726,3 +3726,19 @@ the operator. The CLI and setup wizard do not create clusters, load kind images
 or run package managers. Missing prerequisites print commands/links and stop;
 printed kind remedies are instructions for the operator, with a separate new
 kubeconfig target. Validation and address waiting do not change settings.
+
+Installer NetworkPolicy preflight uses live scratch-Pod traffic, not CNI names
+or controller readiness/configuration. Allowed → default-deny blocked → allowed
+after deletion is required; absent and unverified are distinct failing states.
+Only the random ownership-labelled namespace is cleaned with a UID precondition,
+under a separate bounded cleanup context even after cancellation. The pinned
+utility image and restricted, non-root, tokenless Pods are shared across CPU
+architectures. Plan/verification create these scratch resources before the
+release install Review and never mutate the operator's kubeconfig.
+
+Mac onboarding R3 #1548: existing-release maintenance reads stored values before
+capability probing and preserves true, false or unspecified policy configuration.
+Unverified capability is information during maintenance; fresh installs and
+explicit verification remain fail-closed. Cleanup carries the observed UID,
+revalidates expiry and binds deletion to resource version; unknown or replaced
+objects stay untouched. The live scratch-resource probe is the accepted default.
