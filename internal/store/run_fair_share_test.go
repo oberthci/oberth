@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestClaimFairShareAcrossRepositoriesWithinPriority(t *testing.T) {
+func TestClaimFIFOAcrossRepositoriesWithinPriority(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -34,43 +34,14 @@ func TestClaimFairShareAcrossRepositoriesWithinPriority(t *testing.T) {
 		t.Fatal(claimed, err)
 	}
 	peek, err := s.NextQueuedRun(t.Context())
-	if err != nil || peek.ID != b.ID {
-		t.Fatalf("busy repository jumped fair share: %+v %v", peek, err)
+	if err != nil || peek.ID != pending.ID {
+		t.Fatalf("FIFO acceptance order changed: %+v %v", peek, err)
 	}
 	promotion := enqueue(repo.ID, "promotion/main/one", "promotion")
-	for _, want := range []model.Run{promotion, b, pending} {
+	for _, want := range []model.Run{promotion, pending, b} {
 		got, err := s.ClaimNextRun(t.Context())
 		if err != nil || got.ID != want.ID {
 			t.Fatalf("claim=%+v want=%s err=%v", got, want.ID, err)
-		}
-	}
-}
-func TestFairShareLookupsUseBoundedIndexes(t *testing.T) {
-	now := time.Now()
-	s := testStore(t, &now)
-	for query, index := range map[string]string{
-		"SELECT count(*) FROM runs active WHERE active.repo_id=? AND active.status='running' AND active.phase!='publishing'": "runs_repo_active_idx",
-		"SELECT max(served.started_at) FROM runs served WHERE served.repo_id=? AND served.started_at IS NOT NULL":            "runs_repo_started_idx",
-	} {
-		rows, err := s.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		found := false
-		for rows.Next() {
-			var id, parent, unused int
-			var detail string
-			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-				t.Fatal(err)
-			}
-			found = found || strings.Contains(detail, index)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		rows.Close()
-		if !found {
-			t.Fatalf("fair-share lookup does not use %s", index)
 		}
 	}
 }

@@ -88,16 +88,6 @@ func priorityOrderSQL(now time.Time) string {
  ELSE 0 END DESC, admission_sequence, queue_sequence`
 }
 
-// Active claims count immediately so one repository cannot fill the pool
-// while another waits at the same priority. Last admission breaks idle ties.
-func fairPriorityOrderSQL(now time.Time) string {
-	order := priorityOrderSQL(now)
-	return strings.Replace(order, "DESC, admission_sequence", `DESC,
- (SELECT count(*) FROM runs active WHERE active.repo_id=runs.repo_id AND active.status='running' AND active.phase!='publishing'),
- COALESCE((SELECT max(served.started_at) FROM runs served WHERE served.repo_id=runs.repo_id AND served.started_at IS NOT NULL),0),
- admission_sequence`, 1)
-}
-
 func (s *Store) QueuePriorityPatterns(ctx context.Context) ([]string, error) {
 	return queuePriorityPatterns(ctx, s.reader())
 }
@@ -217,7 +207,7 @@ func automaticRetryReadySQL(now time.Time) string {
 const claimableRunSQL = `status='queued' AND NOT EXISTS (SELECT 1 FROM run_cancellations WHERE run_cancellations.run_id=runs.id AND completed_at IS NULL) AND NOT EXISTS (SELECT 1 FROM publications AS publication WHERE publication.status='pending' AND publication.repo_id=runs.repo_id AND publication.ref_kind=runs.ref_kind AND publication.ref=runs.ref)`
 
 func (s *Store) NextQueuedRun(ctx context.Context) (model.Run, error) {
-	return scanRun(s.reader().QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE `+claimableRunSQL+` AND `+automaticRetryReadySQL(s.now())+` AND `+admissionHoldAllowedSQL+` ORDER BY `+fairPriorityOrderSQL(s.now())+` LIMIT 1`, unixNano(s.now())))
+	return scanRun(s.reader().QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE `+claimableRunSQL+` AND `+automaticRetryReadySQL(s.now())+` AND `+admissionHoldAllowedSQL+` ORDER BY `+priorityOrderSQL(s.now())+` LIMIT 1`, unixNano(s.now())))
 }
 
 // inheritQueuePriorityTx preserves the same work item's wait and explicit bump

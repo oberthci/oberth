@@ -297,7 +297,7 @@ DELETE FROM schema_migrations WHERE id='20261111202000-uplink-invites';
 
 // PostAPIReadIndexesDowngrade removes indexes and their receipt only from
 // disposable fixtures before replaying historical schemas.
-const PostAPIReadIndexesDowngrade = `
+const PostAPIReadIndexesDowngrade = PostNativeSchedulingDowngrade + `
 DROP INDEX IF EXISTS runs_repo_active_idx;
 DROP INDEX IF EXISTS runs_repo_started_idx;
 DELETE FROM schema_migrations WHERE id='20261112105147-run-fair-share-indexes-d4e558943b179505491a455daf163db8';
@@ -306,4 +306,9 @@ DROP INDEX IF EXISTS runs_active_ref_idx;
 DROP INDEX IF EXISTS runs_terminal_end_idx;
 DROP INDEX IF EXISTS audit_actions_type_idx;
 DELETE FROM schema_migrations WHERE id='20261112095139-api-read-indexes-5088d2686292709cb56a6d94bddb707b';
+`
+
+// PostNativeSchedulingDowngrade removes new removal receipts in disposable historical fixtures.
+const PostNativeSchedulingDowngrade = `
+DELETE FROM schema_migrations WHERE id='20261112182311-remove-run-fair-share-63db0cad7aad5e31cfcb60e26f63f922';
 `
