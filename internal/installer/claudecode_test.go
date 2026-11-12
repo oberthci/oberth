@@ -193,6 +193,7 @@ func newTestAuthorityFor(t *testing.T, name string, permitted ...string) testAut
 	if err != nil {
 		t.Fatal(err)
 	}
+	bootstrapPrivateKey(t, key)
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: name},
@@ -225,6 +226,7 @@ func (authority testAuthority) issue(t *testing.T) ([]byte, *ecdsa.PrivateKey) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bootstrapPrivateKey(t, key)
 	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject:      pkix.Name{CommonName: "localhost"},

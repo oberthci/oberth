@@ -3714,3 +3714,28 @@ selected install CA pin and reads SSH host identity and canonical git_path over
 mTLS. Repo-local core.sshCommand uses a per-install SSH config and pinned
 known_hosts; the global oberth Host alias never chooses a plugin push target.
 See [plugin install and repository connections](docs/plugin-install.md).
+
+# Bootstrap contract cell runtime and capture boundary (#1533 review follow-ups)
+
+The branch/release rest wrapper records one existing race run and requires all
+18 named top-level fixture pass events. Its Go memory/timeout/cache/interactive
+Git controls survive child-environment isolation. The race command has a wall
+budget including compilation, followed by a bounded added cell/scan budget
+inside the existing Pod deadline. CLI construction and the generated-key adverse
+control use the same race compilation flags/cache. Failed stages/test identities
+are public; captured output, argv and exception diagnostics remain private.
+
+Installer fixture helpers export credential inventories into the standard Go
+test output directory before fixture cleanup. Raw/base64 values and PEM body
+lines are scanned against captures and decoded Go event Output, with overlap
+across writes. A fresh Go-generated CA leak must be rejected by the parent even
+when its fixture passes. This is not a complete assertion over all credentials,
+all encodings or nested buffers in every rest-suite fixture.
+
+Loopback planning contexts have distinct endpoints, CAs and bearer credentials.
+Every HTTP method is recorded before body reading and non-GET API calls refuse;
+TLS acceptance, request handling and server teardown have bounded waits. The
+out-of-CI machine harness refuses pre-existing k3s configuration/drop-ins/data
+and owned units/enable paths, uses private explicit k3s paths, and exclusively
+creates units/binaries. Disposable-VM provisioning/reboot acceptance remains
+unqualified; the contract cell grants no publisher privileges or tool-pin bypass.

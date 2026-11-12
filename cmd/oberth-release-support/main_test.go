@@ -144,15 +144,28 @@ func TestReleaseHeartbeatSurvivesPartialChildOutputThroughLineBuffer(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	output := newLineBufferedSink()
+	ready := filepath.Join(t.TempDir(), "ready")
 	finished := make(chan error, 1)
 	go func() {
-		command := exec.CommandContext(ctx, "/bin/sh", "-c", "printf partial-secret; exec sleep 30")
+		command := exec.CommandContext(ctx, "/bin/sh", "-c", `printf partial-secret; : > "$1"; exec sleep 30`, "child", ready)
 		finished <- runHeartbeatCommand("publish-r2", command, output, 10*time.Millisecond)
 	}()
 
 	deadline := time.NewTimer(testtimeout.Start(2 * time.Second))
 	defer deadline.Stop()
-	for strings.Count(output.String(), "release heartbeat: publish-r2 active\n") < 2 {
+	// Heartbeats can precede the child's first write on a loaded host. Wait for
+	// that write before measuring progress or canceling the child.
+	target := 0
+	for target == 0 || strings.Count(output.String(), "release heartbeat: publish-r2 active\n") < target {
+		if target == 0 {
+			if _, err := os.Stat(ready); err == nil {
+				target = strings.Count(output.String(), "release heartbeat: publish-r2 active\n") + 2
+			} else if !os.IsNotExist(err) {
+				cancel()
+				<-finished
+				t.Fatal(err)
+			}
+		}
 		select {
 		case <-output.changed:
 		case err := <-finished:

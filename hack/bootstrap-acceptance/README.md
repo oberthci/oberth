@@ -7,15 +7,24 @@ that installation, a held run or reboot recovery succeeded on a real machine.
 
 ## Ordinary CI Pod
 
-Run `python3 -I -B hack/bootstrap-acceptance/ci.py` from the source checkout.
+From the source checkout, the CI entry point is:
+
+```sh
+sh hack/with-test-node.sh sh hack/bootstrap-acceptance/rest.sh \
+  python3 -I -S -B .oberth/test-packages.py rest
+```
+
+`python3 -I -B hack/bootstrap-acceptance/ci.py` also runs the full rest command;
+its PATH must already contain the verified test Node runtime.
 It requires Go, Python 3.9+, OpenSSL, Git and the plugin's ordinary shell tools.
 The existing rest-test Pod supplies them; no Helm, kubectl, VM, Docker socket,
 cluster credentials, nested cluster, privileged Pod or new ServiceAccount is
 required. The Helm and kubectl used by the plan fixture are deliberately narrow
 local executables, and all Kubernetes HTTP requests go to a loopback TLS fixture.
 
-The cell invokes today's production plugin and installer fixture tests and
-requires an explicit pass event for every named fixture. Those tests cover:
+The cell records the existing rest race run once and requires an explicit pass
+event for every named fixture. It does not compile/run the 18 fixtures a second
+time. The CLI build and one adverse fixture reuse the same race build flags/cache. Those tests cover:
 
 - The fixed-origin fetcher, real OpenSSL checksum signature verification,
   pinned release key, all supported artifact names/architectures, refusal of
@@ -32,15 +41,39 @@ that no API mutation occurs. Separate assertions cover mTLS acceptance, wrong
 CA/client refusal, redirects, unsafe Helm archive members, exact pushed SHA,
 assisted non-evidence classification, and secret scanning across chunk boundaries.
 
-Every subprocess stdout/stderr and MCP response is captured in an owner-only
-scratch directory and scanned before success is printed. The inventory includes synthetic
-recovery/API credentials and every private-key body created by the Python cell.
-Go fixtures independently verify their own generated credential non-disclosure.
-Failures print a fixed diagnostic, withhold captured output and remove the private
-scratch directory. There is no public artifact upload of unscanned logs.
+## Captured output boundary
+
+Captured subprocess stdout/stderr and MCP responses stay in an owner-only
+scratch directory. The 17 installer contract fixtures export private inventories
+through Go's standard test output directory before their keys/temp files vanish;
+the remaining public-pin fixture generates no credential. Inventories include
+private CA/leaf/signing keys recorded by their helpers, script-generated client
+key files and the designated synthetic recovery credentials. The parent scans
+both raw/base64 credential values and PEM body lines in captures and decoded
+Go event Output strings, including split writes.
+An adverse rerun of the CSR fixture deliberately prints its freshly generated
+private CA key: its Go test must pass, while the parent scan must reject it.
+That adverse capture is deleted and never published. The flag
+`-bootstrap-credential-leak-control` belongs only to the installer test binary.
+
+This boundary does not assert complete nondisclosure of every credential in
+every rest-suite fixture, or contents retained only in nested Go buffers. It
+covers the inventoried contract credentials in captured channels and Python-cell
+credentials/keys; a nonempty canary alone is not evidence of that coverage.
+Failures identify the stage and available top-level Go or Python test identity, never
+captured output, argv, credentials or exception text. There is no public upload
+of private logs or inventories.
+
+The existing race command has a 3120-second wall bound (including compilation),
+followed by a 120-second bound for the added cell stages and final scan. This
+leaves cleanup headroom inside the existing 3300-second rest Pod deadline.
+Child environments retain GOMEMLIMIT, OBERTH_TEST_TIMEOUT_SCALE, GOPATH and
+GIT_TERMINAL_PROMPT as well as the existing Go/cache controls. The cell prints
+race_seconds and added_cell_seconds separately. A cold release still needs the
+ordinary module-download network access; publisher isolation is unchanged.
 
 Both `.oberth/build.yaml`'s `test-rest` and `.oberth/release.yaml`'s
-`release-test-rest` run `rest.sh`, which must pass this cell before the ordinary
+`release-test-rest` run `rest.sh`, which must pass this cell using the ordinary
 race-test rest group. They retain their existing CPU reservation (1000m), bounded
 CPU/memory/storage limits and token/workspace isolation. Release build depends on
 the successful release-test DAG; failure here prevents publication/finalization.
@@ -54,7 +87,13 @@ It runs unchanged on a disposable amd64/arm64 systemd Linux VM with working
 cgroups, container networking and persistent local disk. The runner supplies root,
 Python 3.9+, CA roots, Git/git-shell, OpenSSL, OpenSSH client/server tools, useradd/passwd and ordinary
 system utilities. Start without any `KUBECONFIG`, user kubeconfig, k3s installation
-or prior cell state. Allocate at least 4 CPUs, 12 GiB memory and 40 GiB free disk;
+or prior cell state. Existing k3s configuration, drop-ins, data, service units,
+environment files and enable links are refused before mutation, including the
+resume and forge units. Every unit is exclusively created, refusing files and
+symlinks. K3s gets explicit config/data/kubeconfig paths under the new private
+state directory instead of the host's default configuration or data. See the
+[K3s configuration file contract](https://docs.k3s.io/installation/configuration#configuration-file)
+and [server options](https://docs.k3s.io/cli/server). Allocate at least 4 CPUs, 12 GiB memory and 40 GiB free disk;
 these are provisional fixture prerequisites, not measured acceptance sizing.
 Allow outbound HTTPS for the pinned tools, signed Oberth release, charts and
 container images. The guest must permit k3s/sshd systemd services and a real reboot.
@@ -65,7 +104,8 @@ sudo python3 -I -B hack/bootstrap-acceptance/fresh_machine.py \
 ```
 
 `--state-dir /absolute/new/path` selects a new private state directory outside
-the checkout; it must not exist and its path must contain no whitespace.
+the checkout; it must not exist; use only ASCII letters/digits, slash, dot, underscore and
+hyphen in its path (no unit specifiers or whitespace).
 `--answers /absolute/answers.json` optionally supplies nonsecret version-1 JSON
 answers for resources and other installation settings. The cell fixes its own
 context, kubeconfig, localhost DNS endpoint, production OpenBao, assist setting,
@@ -83,7 +123,7 @@ accepted alongside the executable at runtime.
 
 On that VM the script:
 
-1. Installs a new single-node k3s, copies its root-only kubeconfig into private
+1. Installs a new single-node k3s with its kubeconfig written directly into private
    state and pins the `bootstrap-cell` context for every cluster command.
 2. Starts a separate sshd with a generated host key and one restricted Git work
    key, serving a new bare fixture repository through a new fixture-only account

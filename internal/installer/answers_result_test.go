@@ -32,6 +32,7 @@ import (
 )
 
 func TestAnswersStrictRoundTrip(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	cfg := Config{ContextName: "selected", InstallSecretStore: true, ClientAccess: "none", AlsoUpstreams: []string{"codeberg.org/acme"}, TLSExtraIPs: []string{"::1"}, SecretsFile: "/secure/install", AdminSSHPublicKeyPath: "-"}
 	path := filepath.Join(t.TempDir(), "answers.json")
 	if err := WriteAnswers(path, cfg); err != nil {

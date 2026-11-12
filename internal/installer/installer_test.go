@@ -825,7 +825,7 @@ func TestKindNodePlatformArch(t *testing.T) {
 func TestExecuteRefusesNodePreflightBeforeInstalling(t *testing.T) {
 	kube := fake.NewClientset()
 	deps := InstallDeps{Output: io.Discard, GOOS: "linux", LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA([]string{"api.example.test"})}}, "chosen", nil
+		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 	}, RunHelm: func(context.Context, []string) ([]byte, error) {
 		t.Fatal("Helm called before preflight passed")
 		return nil, nil
@@ -1825,9 +1825,9 @@ func freshStoreResponses() map[string]fakeBaoResponse {
 // configuredServerPKIResponses scripts a server PKI that already covers the
 // default names: a valid default issuer and a matching role, so a rerun
 // writes nothing.
-func configuredServerPKIResponses(responses map[string]fakeBaoResponse) {
+func configuredServerPKIResponses(t *testing.T, responses map[string]fakeBaoResponse) {
 	dnsNames, _ := serverPKINames(Config{})
-	caPEM := newTestServerCA(dnsNames)
+	caPEM := newTestServerCA(t, dnsNames)
 	issuer, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(caPEM)}})
 	responses["read -format=json oberth-pki/issuer/default"] = fakeBaoResponse{out: string(issuer)}
 	role := serverPKIRole(dnsNames, nil)
@@ -1836,14 +1836,14 @@ func configuredServerPKIResponses(responses map[string]fakeBaoResponse) {
 	responses["read -format=json oberth-pki/roles/oberth-server"] = fakeBaoResponse{out: string(roleJSON)}
 }
 
-func configuredProductionStoreResponses() map[string]fakeBaoResponse {
+func configuredProductionStoreResponses(t *testing.T) map[string]fakeBaoResponse {
 	responses := configuredStoreResponses()
 	responses["secrets list -format=json"] = fakeBaoResponse{out: `{
 "oberth/":{"type":"kv","options":{"version":"2"}},
 "oberth-transit/":{"type":"transit","options":{}},
 "oberth-pki/":{"type":"pki","options":{}}
 }`}
-	configuredServerPKIResponses(responses)
+	configuredServerPKIResponses(t, responses)
 	responses["read -format=json oberth-transit/keys/trusted-plan-artifacts"] = fakeBaoResponse{out: `{"data":{
 "type":"aes256-gcm96","derived":false,"exportable":false,"allow_plaintext_backup":false,
 "supports_encryption":true,"supports_decryption":true
@@ -2077,7 +2077,7 @@ func TestConfigureSecretStoreProductionCreatesNarrowTransitKeyAndPolicy(t *testi
 
 func TestConfigureSecretStoreProductionRerunPositivelyVerifiesTransitWithoutMutation(t *testing.T) {
 	t.Parallel()
-	runner := &fakeBaoRunner{t: t, responses: configuredProductionStoreResponses()}
+	runner := &fakeBaoRunner{t: t, responses: configuredProductionStoreResponses(t)}
 	deps := secretStoreTestDeps(runner, io.Discard)
 	cfg := Config{InstallSecretStore: true}
 	if err := cfg.Validate(); err != nil {
@@ -2097,7 +2097,7 @@ func TestConfigureSecretStoreProductionRerunPositivelyVerifiesTransitWithoutMuta
 
 func TestConfigureSecretStoreProductionRefusesUnsafeExistingTransitKey(t *testing.T) {
 	t.Parallel()
-	responses := configuredProductionStoreResponses()
+	responses := configuredProductionStoreResponses(t)
 	responses["read -format=json oberth-transit/keys/trusted-plan-artifacts"] = fakeBaoResponse{out: `{"data":{
 "type":"aes256-gcm96","derived":false,"exportable":true,"allow_plaintext_backup":false,
 "supports_encryption":true,"supports_decryption":true
@@ -3473,7 +3473,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedUsesEnvToken(t *testing.T) 
 	const envToken = "s.envtoken999"
 	t.Setenv(baoTokenEnvVar, envToken)
 
-	responses := configuredProductionStoreResponses()
+	responses := configuredProductionStoreResponses(t)
 	responses["status -format=json"] = fakeBaoResponse{out: `{"initialized":true,"sealed":false,"storage_type":"file"}`}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	var buf bytes.Buffer

@@ -192,6 +192,7 @@ func runTrust(t *testing.T, shell, claudeDir string, environment []string, args 
 	command.Env = append(command.Env, "HOME="+t.TempDir(), "TMPDIR="+t.TempDir(), "CLAUDE_CONFIG_DIR="+claudeDir)
 	command.Env = append(command.Env, environment...)
 	out, err := command.CombinedOutput()
+	bootstrapPrivateFiles(t, claudeDir)
 	return string(out), err
 }
 
@@ -233,6 +234,7 @@ func emptyDirectory(t *testing.T, path string) bool {
 // its SHA-256 equals the pin, the server must hold a leaf that CA issued,
 // and on any refusal Claude Code's directory is left as it was.
 func TestPluginConnectRefusesWithoutAMatchingPin(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	requireOpenSSL(t)
 	authority := newTestAuthority(t, "Oberth test CA")
 	other := newTestAuthority(t, "Another CA")
@@ -301,6 +303,7 @@ func pemOf(der []byte) []byte {
 // other setting. Each case is also given to `oberth client setup`'s own
 // merge: both must leave the same settings and the same trusted bundle.
 func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	requireOpenSSL(t)
 	authority := newTestAuthority(t, "Oberth test CA")
 	leaf, key := authority.issue(t)
@@ -458,6 +461,7 @@ func TestPluginConnectStoresTheCAAndMergesSettings(t *testing.T) {
 // Settings the script cannot edit safely are refused and left byte for
 // byte; `oberth client setup` refuses the same files.
 func TestPluginConnectRefusesSettingsItCannotMerge(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	requireOpenSSL(t)
 	authority := newTestAuthority(t, "Oberth test CA")
 	leaf, key := authority.issue(t)
@@ -607,6 +611,7 @@ func TestPluginSessionHint(t *testing.T) {
 // by default (here through SSL_CERT_DIR) does not make another CA's leaf
 // pass, even when the server also presents the pinned CA.
 func TestPluginConnectIgnoresTheDefaultTrustOfOpenSSL(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	requireOpenSSL(t)
 	authority := newTestAuthority(t, "Oberth test CA")
 	other := newTestAuthority(t, "A default CA")

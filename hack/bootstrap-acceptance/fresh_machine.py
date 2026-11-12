@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import platform
 import pwd
+import re
 import shutil
 import stat
 import sys
@@ -77,6 +78,34 @@ class Cell:
 
 
 
+UNITS = ('k3s.service', 'oberth-bootstrap-forge.service', 'oberth-bootstrap-resume.service')
+UNIT_ROOTS = ('/etc/systemd/system', '/run/systemd/system', '/usr/local/lib/systemd/system', '/usr/lib/systemd/system', '/lib/systemd/system')
+
+
+def occupied(path):
+    return path.exists() or path.is_symlink()
+
+
+def fresh_host_paths():
+    paths = [Path('/etc/rancher/k3s'), Path('/etc/rancher/k3s/config.yaml'),
+             Path('/etc/rancher/k3s/config.yaml.d'), Path('/etc/rancher/k3s/k3s.yaml'),
+             Path('/var/lib/rancher/k3s'), Path('/usr/local/bin/k3s'),
+             Path('/var/lib/oberth-bootstrap-forge')]
+    for root in UNIT_ROOTS:
+        for name in (*UNITS, 'k3s-agent.service'):
+            paths.extend(Path(root) / suffix for suffix in
+                         (name, name + '.d', name + '.env', 'multi-user.target.wants/' + name))
+    return paths
+
+
+def write_new_unit(path, body):
+    try:
+        with path.open('x', encoding='utf-8') as stream:
+            stream.write(body)
+    except FileExistsError:
+        raise Refused('fresh-machine unit path already exists; refusing replacement') from None
+
+
 def require_fresh_host(work):
     if sys.version_info < (3, 9):
         raise Refused('fresh-machine cell requires Python 3.9 or newer')
@@ -85,37 +114,40 @@ def require_fresh_host(work):
     for name in ('systemctl', 'journalctl', 'git', 'openssl', 'ssh', 'ssh-keygen', 'sshd', 'useradd', 'passwd'):
         if not shutil.which(name):
             raise Refused('fresh-machine host prerequisite is missing')
-    if (os.environ.get('KUBECONFIG') or (Path.home() / '.kube/config').exists()
-            or Path('/etc/rancher/k3s/k3s.yaml').exists() or Path('/usr/local/bin/k3s').exists()
-            or Path('/etc/systemd/system/k3s.service').exists() or work.exists()):
+    if (os.environ.get('KUBECONFIG') or occupied(Path.home() / '.kube/config')
+            or any(occupied(path) for path in fresh_host_paths()) or occupied(work)):
         raise Refused('cell requires a kubeconfig-less fresh host and a new state directory')
-    if not work.is_absolute() or any(c.isspace() for c in str(work)):
-        raise Refused('state directory must be an absolute path without whitespace')
     if work.resolve().is_relative_to(Path(__file__).resolve().parents[2]):
         raise Refused('private machine state must be outside the checkout')
+    if not work.is_absolute() or not re.fullmatch(r'/[A-Za-z0-9/._-]+', str(work)):
+        raise Refused('state directory must be an absolute simple path without whitespace or unit specifiers')
 
 
 def start_cluster(cell):
     arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(platform.machine(), '')
     install_tools(cell.work, arch)
+    cluster = cell.work / 'k3s'
+    cluster.mkdir(mode=0o700)
+    config, data = cluster / 'config.yaml', cluster / 'data'
+    with config.open('x', encoding='utf-8') as stream:
+        stream.write('{}\n')
     unit = Path('/etc/systemd/system/k3s.service')
-    if unit.exists():
-        raise Refused('fresh host already has a k3s service')
-    unit.write_text('[Unit]\nAfter=network-online.target\nWants=network-online.target\n'
+    write_new_unit(unit, '[Unit]\nAfter=network-online.target\nWants=network-online.target\n'
                     '[Service]\nType=notify\nExecStart=/usr/local/bin/k3s server --disable traefik '
-                    '--write-kubeconfig-mode 600\nKillMode=process\nDelegate=yes\n'
+                    '--config ' + str(config) + ' --data-dir ' + str(data) +
+                    ' --write-kubeconfig ' + str(cell.work / 'kubeconfig') +
+                    ' --write-kubeconfig-mode 600\nKillMode=process\nDelegate=yes\n'
                     'Restart=on-failure\nLimitNOFILE=1048576\nLimitNPROC=infinity\n'
                     '[Install]\nWantedBy=multi-user.target\n')
     cell.run('daemon-reload', ['systemctl', 'daemon-reload'])
     cell.run('start-k3s', ['systemctl', 'enable', '--now', 'k3s'], timeout=600)
-    source = Path('/etc/rancher/k3s/k3s.yaml')
+    source = cell.work / 'kubeconfig'
     deadline = time.monotonic() + 600
     while not source.exists() and time.monotonic() < deadline:
         time.sleep(2)
     if not source.exists():
         raise Refused('k3s did not create its private kubeconfig')
-    shutil.copyfile(source, cell.work / 'kubeconfig')
-    (cell.work / 'kubeconfig').chmod(0o600)
+    source.chmod(0o600)
     cell.run('context', ['kubectl', '--kubeconfig', str(cell.work / 'kubeconfig'),
                         'config', 'rename-context', 'default', 'bootstrap-cell'])
     cell.k('wait', '--for=condition=Ready', 'nodes', '--all', '--timeout=600s')
@@ -162,7 +194,7 @@ def start_forge(cell):
     unit = Path('/etc/systemd/system/oberth-bootstrap-forge.service')
     if unit.exists():
         raise Refused('fresh host already has a fixture forge service')
-    unit.write_text('[Unit]\nAfter=k3s.service\n[Service]\nExecStart=' + shutil.which('sshd') +
+    write_new_unit(unit, '[Unit]\nAfter=k3s.service\n[Service]\nExecStart=' + shutil.which('sshd') +
                     ' -D -e -f ' + str(config) + '\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n')
     cell.run('forge-config', [shutil.which('sshd'), '-t', '-f', str(config)])
     cell.run('daemon-reload', ['systemctl', 'daemon-reload'])
@@ -236,7 +268,7 @@ def arrange_reboot(cell, receipt):
              'mcp_url': cell.url, 'roundtrip': receipt, 'release_version': cell.version, 'source_sha': cell.source_sha}
     (cell.work / 'state.json').write_text(json.dumps(state))
     unit = Path('/etc/systemd/system/oberth-bootstrap-resume.service')
-    unit.write_text('[Unit]\nAfter=k3s.service network-online.target\nWants=network-online.target\n'
+    write_new_unit(unit, '[Unit]\nAfter=k3s.service network-online.target\nWants=network-online.target\n'
                     '[Service]\nType=oneshot\nExecStart=/usr/bin/python3 -I -B ' +
                     str(cell.root / 'hack/bootstrap-acceptance/fresh_machine.py') + ' --resume ' + str(cell.work) +
                     '\nStandardOutput=null\nStandardError=null\n[Install]\nWantedBy=multi-user.target\n')

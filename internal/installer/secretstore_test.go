@@ -22,7 +22,7 @@ func TestSetupProductionSecretStoreInteractiveTokenPrompt(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "")
 	const injectedToken = "s.interactivetoken42"
 
-	responses := configuredProductionStoreResponses()
+	responses := configuredProductionStoreResponses(t)
 	responses["status -format=json"] = fakeBaoResponse{
 		out: `{"initialized":true,"sealed":false,"storage_type":"file"}`,
 	}

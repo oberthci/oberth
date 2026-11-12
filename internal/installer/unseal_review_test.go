@@ -16,7 +16,7 @@ import (
 )
 
 func TestUnsealTrustGatePrecedesClusterAndRecoveryAccess(t *testing.T) {
-	ca := newTestServerCA([]string{"api.example.test"})
+	ca := newTestServerCA(t, []string{"api.example.test"})
 	for _, config := range []*rest.Config{nil, {Host: "http://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, {Host: "https://api.example.test"}, {Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: ca, Insecure: true}}} {
 		kube := fake.NewClientset()
 		_, err := ExecuteUnseal(t.Context(), UnsealConfig{SecretsFile: "/missing/not-read"}, InstallDeps{

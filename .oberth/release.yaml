@@ -1483,7 +1483,7 @@ spec:
       - bootstrap-clean
       - /bin/sh
       - hack/with-test-node.sh
-      # The same no-VM contract cell must pass before release rest tests.
+      # The no-VM contract consumes this race run and gates release completion.
       - /bin/sh
       - hack/bootstrap-acceptance/rest.sh
       - /usr/bin/python3

@@ -1,5 +1,4 @@
 #!/bin/sh
-# Both branch and release rest leaves stop here if the bootstrap contract fails.
+# One race run supplies the contract's pass events; no extra fixture compile.
 set -eu
-/usr/bin/python3 -I -B hack/bootstrap-acceptance/ci.py
-exec "$@"
+exec /usr/bin/python3 -I -B hack/bootstrap-acceptance/ci.py "$@"

@@ -23,6 +23,7 @@ import (
 const testOnceCredential = "s.not-a-real-root-token"
 
 func TestSecretsFilePathRefusals(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	t.Parallel()
 	dir := t.TempDir()
 	existing := filepath.Join(dir, "existing")
@@ -58,6 +59,7 @@ func TestSecretsFilePathRefusals(t *testing.T) {
 }
 
 func TestSecretsFileHoldsCredentialsAndOutputOnlyItsDigest(t *testing.T) {
+	bootstrapCredentialInventory(t, []byte(testOnceCredential), []byte(testOnceCredential+"-unseal"), []byte(testOnceCredential+"-bearer"))
 	old := syscall.Umask(0)
 	defer syscall.Umask(old)
 	path := filepath.Join(t.TempDir(), "secrets.txt")
@@ -147,6 +149,7 @@ func TestInstallRefusesToPrintCredentialsWithoutATerminal(t *testing.T) {
 // --secrets-file is checked and reserved before the cluster is contacted, and
 // a run that created nothing leaves no file.
 func TestInstallReservesTheSecretsFileFirst(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.txt")

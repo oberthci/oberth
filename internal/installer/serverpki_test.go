@@ -19,11 +19,12 @@ import (
 
 // newTestServerCA stands in for the CA OpenBao generates: self-signed, CA,
 // pathlen 0, critical DNS name constraints.
-func newTestServerCA(dnsNames []string, ips ...string) []byte {
+func newTestServerCA(t *testing.T, dnsNames []string, ips ...string) []byte {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		panic(err)
 	}
+	bootstrapPrivateKey(t, key)
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Oberth server CA"},
 		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(serverCAValidity),
@@ -42,7 +43,7 @@ func newTestServerCA(dnsNames []string, ips ...string) []byte {
 
 func TestServerCACoversItsDNSNames(t *testing.T) {
 	t.Parallel()
-	ca, err := parseCertificatePEM(newTestServerCA([]string{"oberth", "localhost"}))
+	ca, err := parseCertificatePEM(newTestServerCA(t, []string{"oberth", "localhost"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestServerPKIReinstallPreservesExistingNames(t *testing.T) {
 			role := serverPKIRole(dns, []string{"192.0.2.1/32"})
 			role["ttl"], role["max_ttl"] = 2592000, 2592000
 			roleJSON, _ := json.Marshal(map[string]any{"data": role})
-			issuerJSON, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(newTestServerCA(dns))}})
+			issuerJSON, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(newTestServerCA(t, dns))}})
 			responses := freshStoreResponses()
 			responses["read -format=json oberth-pki/issuer/default"] = fakeBaoResponse{out: string(issuerJSON)}
 			responses["read -format=json oberth-pki/roles/oberth-server"] = fakeBaoResponse{out: string(roleJSON)}

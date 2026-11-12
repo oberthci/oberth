@@ -53,7 +53,8 @@ def install_tools(work, arch):
     for source, target in [(binary, Path('/usr/local/bin/k3s'))]:
         if target.exists() or target.is_symlink():
             raise Refused('fresh host already has a k3s binary')
-        target.write_bytes(source.read_bytes())
+        with target.open('xb') as stream:
+            stream.write(source.read_bytes())
         target.chmod(0o755)
     helm = work / 'bin/helm'
     helm.parent.mkdir()

@@ -441,3 +441,14 @@ waits from the stall bound and the pre-start watchdog;
 `TestBuildSerializesReleasesWithOneNativeMutex` covers `releases.serialize`;
 `TestBuildIgnoresRetiredExclusiveAnnotationInFragments` keeps the retired
 annotation inert.
+
+# Bootstrap cell review follow-ups (#1533)
+
+The mandatory Python suite verifies release environment preservation, own wall
+budget enforcement, exact required Go pass events and safe event test identities,
+decoded/split Go output scanning, attempted mutation rejection for POST/PUT/PATCH/
+DELETE, stalled TLS teardown, refusal of every owned fresh-host path and exclusive
+unit creation against files and symlinks. CI additionally reruns the real CSR
+fixture with its test-only generated-key leak control and requires the parent
+scanner to reject that otherwise-passing Go fixture. The 18 named fixture pass
+events come from the normal rest race run rather than a separate non-race run.

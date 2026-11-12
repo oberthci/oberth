@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,10 +117,12 @@ func TestPluginLocalCertificateEnrollment(t *testing.T) {
 }
 
 func TestFirstAdminCSRDoesNotMintBearer(t *testing.T) {
+	bootstrapCredentialInventory(t)
 	public, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+	bootstrapPrivateKey(t, key)
 	sshKey, err := ssh.NewPublicKey(public)
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +135,10 @@ func TestFirstAdminCSRDoesNotMintBearer(t *testing.T) {
 	files, err := clientcert.GenerateAuthority()
 	if err != nil {
 		t.Fatal(err)
+	}
+	bootstrapCredentialInventory(t, files["ca.key"])
+	if *bootstrapLeakControl {
+		fmt.Printf("%s", files["ca.key"])
 	}
 	ca, err := clientcert.Load(files["ca.crt"], files["ca.key"])
 	if err != nil {

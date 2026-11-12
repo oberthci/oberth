@@ -41,7 +41,7 @@ func TestInstallAgeRecoveryUnsealRoundTrip(t *testing.T) {
 			sealed, writes := true, 0
 			var output bytes.Buffer
 			kube := fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet())
-			ca := newTestServerCA([]string{"api.example.test"})
+			ca := newTestServerCA(t, []string{"api.example.test"})
 			deps := InstallDeps{
 				Output:   &output,
 				LookPath: func(name string) (string, error) { return name, nil },

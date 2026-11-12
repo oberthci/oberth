@@ -89,6 +89,52 @@ class AcceptanceAssertions(unittest.TestCase):
         with self.assertRaises(probe.Refused):
             probe.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://elsewhere.invalid')
 
+class FixtureTransportBoundary(unittest.TestCase):
+    def test_every_mutating_verb_is_recorded_and_rejected(self):
+        import sys
+        import ssl
+        import urllib.request
+        import urllib.error
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from fixtures import tls_server
+        from ci import assert_no_mutations, Refused as FixtureRefused
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = probe.Probe(root, root, 'selected', root / 'unused')
+            seen = []
+            def respond(method, path, headers, body):
+                return (200 if method == 'GET' else 403), {}
+            with tls_server(runner, 'methods', respond, record=lambda method, path: seen.append((method, path)), allowed_methods={'GET'}) as (url, cert, _):
+                context = ssl.create_default_context(cafile=str(cert))
+                for method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+                    with self.subTest(method=method):
+                        seen.clear()
+                        request = urllib.request.Request(url, data=b'{}', method=method)
+                        with self.assertRaises(urllib.error.HTTPError) as error:
+                            urllib.request.urlopen(request, context=context, timeout=3)
+                        self.assertEqual(error.exception.code, 403)
+                        error.exception.close()
+                        self.assertEqual(seen, [(method, '/')])
+                        with self.assertRaises(FixtureRefused):
+                            assert_no_mutations(seen)
+
+    def test_stalled_tls_peer_does_not_hang_shutdown(self):
+        import socket
+        import time
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from fixtures import tls_server
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = probe.Probe(root, root, 'selected', root / 'unused')
+            started = time.monotonic()
+            with tls_server(runner, 'stalled', lambda *args: (200, {})) as (url, _, _):
+                port = int(url.rsplit(':', 1)[1])
+                peer = socket.create_connection(('127.0.0.1', port), timeout=2)
+                time.sleep(0.05)
+            peer.close()
+            self.assertLess(time.monotonic() - started, 4)
+
 
 if __name__ == '__main__':
     unittest.main()
