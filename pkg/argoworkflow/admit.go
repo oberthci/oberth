@@ -154,9 +154,8 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	if spec.SchedulerName != "" {
 		problems = append(problems, errors.New("argoworkflow: spec.schedulerName is not admitted"))
 	}
-	// Pod metadata reaches every Pod the run creates, and that surface
-	// includes AppArmor and seccomp annotations and sidecar-injection
-	// triggers. Pod metadata is assigned server-side.
+	// Author Pod metadata is native except literal keys reserved for ownership
+	// and the selectors installed by Oberth.
 	problems = append(problems, admitPodMetadata("spec.podMetadata", spec.PodMetadata)...)
 	problems = append(problems, admitWorkflowMetadata("spec.workflowMetadata", spec.WorkflowMetadata)...)
 	problems = append(problems, admitSynchronization("spec.synchronization", spec.Synchronization)...)
@@ -686,22 +685,13 @@ func admitHooks(location string, hooks wfv1.LifecycleHooks) []error {
 	return problems
 }
 
-// admitPodMetadata refuses repository-authored Pod labels and annotations.
-// Annotations are the delivery mechanism for AppArmor profiles, seccomp
-// overrides, and service-mesh or sidecar injection; labels decide which
-// NetworkPolicies and admission policies select the Pod. Oberth sets both.
+// admitPodMetadata preserves author metadata outside ownership/selector keys.
 func admitPodMetadata(location string, metadata *wfv1.Metadata) []error {
 	if metadata == nil {
 		return nil
 	}
-	var problems []error
-	if len(metadata.Annotations) != 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
-	}
-	if len(metadata.Labels) != 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.labels is assigned by Oberth; Pod labels select NetworkPolicies and admission policies", location))
-	}
-	return problems
+	problems := admitPodMetadataKeys(location+".annotations", metadata.Annotations)
+	return append(problems, admitPodMetadataKeys(location+".labels", metadata.Labels)...)
 }
 
 func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
@@ -723,12 +713,10 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 		case "oberth.ci/exclusive":
 			problems = append(problems, removedAnnotation(location, name))
 		default:
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
+			problems = append(problems, admitPodMetadataKeys(location+".annotations", map[string]string{name: value})...)
 		}
 	}
-	if len(metadata.Labels) != 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.labels is assigned by Oberth; Pod labels select NetworkPolicies and admission policies", location))
-	}
+	problems = append(problems, admitPodMetadataKeys(location+".labels", metadata.Labels)...)
 	return problems
 }
 

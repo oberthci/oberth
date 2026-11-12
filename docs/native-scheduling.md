@@ -35,8 +35,18 @@ ports; token/ServiceAccount/automount overrides; unauthorized secrets/configs,
 volumes, images, registries, runtimes and devices; and arbitrary Pod patches
 remain unavailable. Workflow identity is assigned by the server; template and
 patch identity escape routes are refused. Repository Pod priority classes stay
-refused. Authored Pod metadata remains restricted because labels/annotations
-can select NetworkPolicies or trigger security-sensitive admission mutation.
+refused. Authors may set Pod labels and annotations in `spec.podMetadata` and
+`templates[].metadata` (including defaults/inline templates). Use literal
+Kubernetes-qualified keys. `oberth.ci/` and `workflows.argoproj.io/` keys are
+reserved, as are the installed selector keys `app.kubernetes.io/name`,
+`app.kubernetes.io/instance`, `app.kubernetes.io/component`, `component`,
+`openbao-active`, `openbao-internal`, and `kubernetes.io/metadata.name`; Argo’s
+`kubectl.kubernetes.io/default-container` annotation is also reserved. This
+protects the installed policies and Services without restricting native affinity
+selectors. Existing validated template controls for workspace mounts/env and
+release WIF remain author-facing configuration. Other author annotations pass
+through; an operator’s additional admission webhooks remain cluster policy.
+Oberth’s own run/trigger/tier labels remain server-assigned.
 Affinity namespace selectors are explicitly permitted despite other namespace
 reference restrictions.
 A repository semaphore may read only the `oberth-sync-limits` ConfigMap in the
@@ -217,20 +227,26 @@ and node-id annotations, the default-container annotation, and optional Pod-GC
 and progress annotations. These belong to the pinned Argo release, not Oberth.
 Do not depend on generated Pod names or internal node IDs as stable selectors.
 
-For example, keep Pods of one existing run apart using a native selector:
+For example, keep replicas of an authored workload apart using a label the
+author sets on every Pod (the Kubernetes anti-affinity example):
 
 ```yaml
 spec:
+  podMetadata:
+    labels:
+      app: store
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         - labelSelector:
             matchLabels:
-              oberth.ci/run: RUN_LABEL_VALUE
+              app: store
           topologyKey: kubernetes.io/hostname
 ```
 
-Alternatively select `workflows.argoproj.io/workflow: WORKFLOW_NAME` for one
-Workflow. Use actual existing label values. A selector on `oberth.ci/repo` will
+A template can additionally set its own labels/annotations, for example
+`metadata.labels: {component.example.test/part: worker}`. Both scopes reach
+the Pod. Selectors may also read the server-owned `oberth.ci/run` label or
+`workflows.argoproj.io/workflow: WORKFLOW_NAME` for one Workflow. Use actual existing label values. A selector on `oberth.ci/repo` will
 not select every user Pod of that repository: Oberth does not inject that label
 onto those Pods.

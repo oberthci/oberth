@@ -240,7 +240,7 @@ func TestAssistHoldEligibilityRefusesIdentityAndLaunchers(t *testing.T) {
 
 func TestBuildRefusesRepositoryAssistAnnotations(t *testing.T) {
 	document := strings.Replace(assistDocument, "    - name: test\n      activeDeadlineSeconds: 600\n", "    - name: test\n      activeDeadlineSeconds: 600\n      metadata:\n        annotations:\n          oberth.ci/assist-hold: \"99999\"\n", 1)
-	if _, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, document)); err == nil || !strings.Contains(err.Error(), "annotations is assigned by Oberth") {
+	if _, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, document)); err == nil || !strings.Contains(err.Error(), "is reserved for Oberth, Argo or installed selectors") {
 		t.Fatalf("repository hold annotation admitted: %v", err)
 	}
 	authored := strings.Replace(assistDocument, "example.com/tier: M", "example.com/tier: M\n    oberth.ci/assist: \"1\"", 1)
