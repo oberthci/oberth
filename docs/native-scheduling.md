@@ -39,18 +39,16 @@ refused. Authored Pod metadata remains restricted because labels/annotations
 can select NetworkPolicies or trigger security-sensitive admission mutation.
 Affinity namespace selectors are explicitly permitted despite other namespace
 reference restrictions.
+A repository semaphore may read only the `oberth-sync-limits` ConfigMap in the
+run's namespace, using a key of the author's choice. Other ConfigMap references
+remain refused because Argo's failure text can expose their data. Oberth no
+longer creates or manages this ConfigMap; operators apply and maintain it.
 
 Two existing security exceptions remain explicit: an administrator-selected
 execution target must still prove its exact approved namespace/node/controller
 placement and rejects conflicting source placement; granted device resources
 still require a bounded aggregate device authorization proof. Neither is a
 CPU/memory capacity scheduler. Ordinary Workflows do not use either exception.
-A further executable-delivery constraint remains in read-only usage instrumentation:
-when it wraps a step with the server-delivered native binary, its server-owned
-Pod patch pins `kubernetes.io/arch` to that binary's architecture. The authored
-Workflow/template selectors are preserved, but the constructed Pod inherits
-this extra selector; conflicting authored architecture can remain Pending.
-This is a retained runtime requirement, not a capacity or queue decision.
 Server-owned executor/identity helpers have their own requests; these do not
 rewrite the author's container resources. Opted-in assisted holds retain their
 private scratch resources, retry/hold behavior and hold-lifetime deadlines.
@@ -90,6 +88,24 @@ Oberth has no automatic infrastructure retry. Authors choose native Argo
 `retryStrategy`, such as `retryPolicy: OnError`, on Workflow/templates. Manual
 `run_retry` and `run_rerun` remain. Argo cannot retry a preparation failure that
 happens before a Workflow exists; retry that failed run manually.
+
+## TEMPORARY DEVIATION: measurement executable architecture
+
+Usage instrumentation wraps eligible steps with the server-delivered native
+executable. Its server-owned Pod patch adds `kubernetes.io/arch` matching that
+binary, after Argo resolves the authored Workflow/template placement. The
+original fields are preserved, but the constructed Pod has this extra selector;
+a conflicting authored architecture can remain Pending. This violates the
+no-placement-injection model and remains a second explicit deviation.
+
+The release publishes Linux amd64 and arm64 executables, but each server image
+contains only its own executable. Source delivery copies `os.Executable()` and
+verifies its SHA-256 after streaming to the seed Pod. Removing this selector
+requires changing the server image's contents and release delivery: include both
+authenticated executables, verify each delivered hash, select the matching
+binary inside the step, and cover both architectures and recovery. That is
+outside this bootstrap correction. The selector remains until that delivery
+replacement is implemented; execution-target placement is unchanged.
 
 ## Source delivery and load
 
