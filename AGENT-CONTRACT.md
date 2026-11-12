@@ -1565,6 +1565,11 @@ containing CI and real workload qualification remain separately required.
   admission reservation when it was still preparing or waiting, without a
   restart; a granted reservation is released only by its owner, once the
   Workflow is terminal or its deletion was accepted.
+- A branch deletion atomically cancels that ref's unfinished non-promotion runs
+  with phase `cancelled` and reason `ref deleted`, recording the same durable
+  cleanup obligations. Deferred receives retain a cancelled reason and cannot
+  drain into new runs. Receive replay cannot cancel later recreations, including
+  at the same SHA. Tags, promotion CI and pending publication owners are untouched.
 - An explicit run cancel (`run_cancel`, `oberth run cancel`, `oberth runs
   cancel`) terminalizes one queued, waiting or running run through an audited
   `CancelRun(actor, run, reason)`: the run becomes `interrupted` with phase

@@ -169,6 +169,9 @@ func (ingestor *PushIngestor) deleteBranch(ctx context.Context, push BranchPush,
 	if ingestor.queued != nil {
 		ingestor.queued()
 	}
+	if scheduler, ok := ingestor.branches.(interface{ NotifyQueue() }); ok {
+		scheduler.NotifyQueue()
+	}
 	return PushResult{Repository: repository, Deleted: true, Duplicate: duplicate, Reason: "branch deleted on the mirror; upstream deletion queued; no CI run"}, nil
 }
 

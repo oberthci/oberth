@@ -30,7 +30,7 @@ func queueCap(ctx context.Context, reader queueCapReader) (model.QueueCapStatus,
 	var value model.QueueCapStatus
 	err := reader.QueryRowContext(ctx, `SELECT max_not_started,
  (SELECT COUNT(*) FROM runs WHERE `+notStartedSQL+`),
- (SELECT COUNT(*) FROM deferred_branch_receives) FROM queue_cap WHERE singleton=1`).Scan(&value.MaxNotStarted, &value.NotStarted, &value.Deferred)
+ (SELECT COUNT(*) FROM deferred_branch_receives WHERE reason!=?) FROM queue_cap WHERE singleton=1`, refDeletedReason).Scan(&value.MaxNotStarted, &value.NotStarted, &value.Deferred)
 	if err != nil {
 		return value, fmt.Errorf("read queue cap: %w", err)
 	}
@@ -149,7 +149,7 @@ func (s *Store) DrainDeferredBranch(ctx context.Context) (model.EnqueueRunResult
 	var id, body, reason string
 	err = tx.QueryRowContext(ctx, `SELECT d.event_id,d.run_spec,d.reason FROM deferred_branch_receives d
  JOIN receive_events e ON e.id=d.event_id JOIN repositories r ON r.id=e.repo_id
- WHERE `+repositoryArchiveAt+` IS NULL ORDER BY d.sequence LIMIT 1`).Scan(&id, &body, &reason)
+ WHERE `+repositoryArchiveAt+` IS NULL AND d.reason!=? ORDER BY d.sequence LIMIT 1`, refDeletedReason).Scan(&id, &body, &reason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.EnqueueRunResult{}, nil
 	}
@@ -216,8 +216,8 @@ func (s *Store) DrainDeferredBranch(ctx context.Context) (model.EnqueueRunResult
 func (s *Store) DeferredBranchReason(ctx context.Context, repoID int64, ref, sha string) (string, error) {
 	var reason string
 	err := s.reader().QueryRowContext(ctx, `SELECT d.reason FROM deferred_branch_receives d
- JOIN receive_events e ON e.id=d.event_id WHERE e.repo_id=? AND e.ref=? AND e.commit_sha=?
- ORDER BY d.sequence DESC LIMIT 1`, repoID, ref, strings.ToLower(sha)).Scan(&reason)
+ JOIN receive_events e ON e.id=d.event_id WHERE e.repo_id=? AND e.ref=? AND e.commit_sha=? AND d.reason!=?
+ ORDER BY d.sequence DESC LIMIT 1`, repoID, ref, strings.ToLower(sha), refDeletedReason).Scan(&reason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
