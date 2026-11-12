@@ -10,7 +10,13 @@ Connect an AI agent (Claude Code or any MCP client) to Oberth.
 The Claude Code plugin (step 2) can be installed before that: its server
 options are optional, and without them its session-start note offers
 `/oberth:install`, which installs Oberth on the cluster your kubeconfig names
-with every credential in a secrets file instead of the session.
+with every credential in a secrets file instead of the session. Leave `url`
+and `ca_pin` empty beforehand; install records the connection settings. Claude
+Code may still show an optional-unset notice; no placeholder URL or pin is needed.
+Client identities live in `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/current/`;
+executable examples use `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. See the
+[client endpoint probe](plugin-install.md#client-ports-before-install) before
+reviewing an install with NodePorts or host port forwards.
 
 ## 1. Create an uplink
 

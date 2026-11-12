@@ -815,6 +815,8 @@ Commands:
   setup   trust the server's CA in Claude Code and install the Oberth plugin
   redeem  redeem a private invitation with a local CSR and SSH public key
   renew   renew with the current certificate and rotate the local key
+  repository  bind one repository to the selected server and pinned SSH identity
+  ports   probe planned client endpoints and propose published host ports
   pin     print the SHA-256 pin of the server's CA, for /oberth:connect
 
 Use oberth client <command> --help for its flags.
@@ -868,6 +870,56 @@ equals this pin. The CA is --ca-file, else OBERTH_CA_CERT, else the ca.crt
 oberth install writes in ~/.config/oberth; the server is not contacted.
   -ca-file string
         the deployment's CA certificate (PEM)
+```
+
+## oberth client ports
+
+```text
+Usage: oberth client ports --plan-file <public plan JSON> [flags]
+Probe the advertised client ports before install and propose host port mappings.
+Reads the selected plan's node identities; local Docker inspection is optional.
+Explicit client ports override discovered mappings. Prints advisory JSON only;
+TCP success does not establish server readiness or TLS trust. Nothing is installed.
+  -client-host string
+        advertised host (default: plan review client_host)
+  -client-https-port string
+        explicit host HTTPS port; overrides discovery
+  -client-ssh-port string
+        explicit host SSH port; overrides discovery
+  -plan-file string
+        public JSON from install --plan --json
+  -service-type string
+        planned Service type: NodePort, ClusterIP or LoadBalancer (default "NodePort")
+```
+
+## oberth client repository
+
+```text
+Usage: oberth client repository --path <repo> --installation <public install JSON> --registered-repo <upstream/org/repo> --ssh-key <local private key> --ca-file <public CA> --client-cert <certificate> --client-key <TLS key> [flags]
+Read the selected server's registered repository path and SSH host key over mTLS.
+Print the exact push URL and per-install SSH binding as JSON. --consent writes
+that binding and repository-local configuration. No global SSH alias is used.
+Explicit connection files are required; ambient credentials are not selected.
+  -assist
+        enable repository-local assisted pushes
+  -ca-file string
+        public server CA matching the install result's pin
+  -client-cert string
+        explicit mTLS client certificate
+  -client-key string
+        explicit local mTLS private key
+  -consent
+        apply the reviewed repository and SSH binding
+  -installation string
+        public JSON from the selected install
+  -mode string
+        remote, replace-remote or push-url (default "remote")
+  -path string
+        local Git repository
+  -registered-repo string
+        canonical repository path registered on that server
+  -ssh-key string
+        local private SSH identity registered for this uplink
 ```
 
 ## oberth client redeem

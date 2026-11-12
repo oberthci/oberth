@@ -547,6 +547,66 @@
     "value:uplink_redeem": {
       "doc_anchor": "docs/uplink-invites.md#enrollment-boundary-and-recovery",
       "test_ref": "internal/service/uplink_invite_http_test.go TestInviteRedemptionOverMCPAndMutualTLS"
+    },
+    "flag:plan-file": {
+      "doc_anchor": "docs/plugin-install.md#client-ports-before-install",
+      "test_ref": "cmd/oberth/client_ports_test.go TestClientPortsUsesPublicPlanAndExplicitEndpoints"
+    },
+    "value:plugin.install.ports": {
+      "doc_anchor": "docs/plugin-install.md#client-ports-before-install",
+      "test_ref": "internal/installer/client_probe_test.go TestClientPortProbeProposesSelectedClusterMappings"
+    },
+    "flag:installation": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "cmd/oberth/client_repository_test.go TestClientRepositoryTwoServersPushOnlyToTheirPinnedServer"
+    },
+    "flag:registered-repo": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "cmd/oberth/client_repository_test.go TestClientRepositoryTwoServersPushOnlyToTheirPinnedServer"
+    },
+    "flag:ssh-key": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "cmd/oberth/client_repository_test.go TestClientRepositoryTwoServersPushOnlyToTheirPinnedServer"
+    },
+    "value:plugin.add-repo.ssh-binding": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "cmd/oberth/client_repository_test.go TestClientRepositoryTwoServersPushOnlyToTheirPinnedServer"
+    },
+    "value:repo_list.git_path": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "internal/service/repo_list_test.go TestRepoListReturnsOnlySlimScopedRecords"
+    },
+    "flag:unassisted": {
+      "doc_anchor": "docs/plugin-install.md#custom-ssh-forges-and-evidence",
+      "test_ref": "internal/installer/plugin_add_repo_test.go TestAddRepoSmokeRequiresApprovedTargetCommittedWorkflowAndNewBranch"
+    },
+    "flag:client-host": {
+      "doc_anchor": "docs/plugin-install.md#client-ports-before-install",
+      "test_ref": "cmd/oberth/client_ports_test.go TestClientPortsUsesPublicPlanAndExplicitEndpoints"
+    },
+    "flag:service-type": {
+      "doc_anchor": "docs/plugin-install.md#client-ports-before-install",
+      "test_ref": "cmd/oberth/client_ports_test.go TestClientPortsUsesPublicPlanAndExplicitEndpoints"
+    },
+    "flag:mode": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "cmd/oberth/client_repository_test.go TestClientRepositoryRefusesWrongPinMissingRegistrationAndSSHOverride"
+    },
+    "env:GIT_SSH_COMMAND": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "cmd/oberth/client_repository_test.go TestClientRepositoryRefusesWrongPinMissingRegistrationAndSSHOverride"
+    },
+    "env:GIT_SSH": {
+      "doc_anchor": "docs/plugin-install.md#repository-ssh-binding",
+      "test_ref": "cmd/oberth/client_repository_test.go TestClientRepositoryRefusesWrongPinMissingRegistrationAndSSHOverride"
+    },
+    "env:DOCKER_HOST": {
+      "doc_anchor": "docs/plugin-install.md#client-ports-before-install",
+      "test_ref": "internal/installer/client_probe_test.go TestClientPortProbeDoesNotBorrowRemoteOrOtherClusterBindings"
+    },
+    "env:DOCKER_CONTEXT": {
+      "doc_anchor": "docs/plugin-install.md#client-ports-before-install",
+      "test_ref": "internal/installer/client_probe_test.go TestClientPortProbeDoesNotBorrowRemoteOrOtherClusterBindings"
     }
   }
 }

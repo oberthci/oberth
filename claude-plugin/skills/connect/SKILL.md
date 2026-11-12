@@ -39,7 +39,7 @@ Tell the user to restart Claude Code once. No bearer token is issued.
 An invite is single use and expires. Do not retry a redemption automatically:
 a lost response can mean the invite was consumed. Keep the local keys and
 ask the admin to issue their certificate with `uplink_cert` if necessary.
-The registered SSH key is `~/.claude/oberth/push_ed25519.pub`; its private
+The registered SSH key is `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/push_ed25519.pub`; its private
 counterpart stays here and is the push key to use when adding repositories.
 
 ## Connect with an admin-issued certificate
@@ -75,7 +75,7 @@ counterpart stays here and is the push key to use when adding repositories.
    and no other shell syntax in it); it is checked against the same pin.
 4. Generate the local TLS key and CSR with
    `sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" keygen`. The key is 0600 under
-   `~/.claude/oberth/`; never display or upload it. Give only `current/client.csr` to
+   `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/`; never display or upload it. Give only `current/client.csr` to
    the admin, who issues `oberth uplink cert <identity> --csr <file>` (or the
    `uplink_cert` MCP tool). The SSH public key must already be registered on
    that uplink. Save the returned public certificate as `current/client.csr.crt`.

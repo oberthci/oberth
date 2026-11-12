@@ -60,7 +60,7 @@ sh "$CLAUDE_PLUGIN_ROOT/scripts/trust" credentials
 sh "$CLAUDE_PLUGIN_ROOT/scripts/trust" configure '<https MCP URL>'
 ```
 
-Keygen creates a private version directory under `~/.claude/oberth/` and the
+Keygen creates a private version directory under `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/` and the
 `current` symlink; the public CSR is `current/client.csr`. Supply this CSR to the
 installer or administrator before `credentials`. The issued certificate is
 `current/client.csr.crt`. Existing key material is never overwritten.

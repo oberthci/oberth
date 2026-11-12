@@ -14,6 +14,7 @@ cli=$HOME/.local/bin/oberth
 [ -x "$cli" ] || { printf 'Run the plugin scripts/fetch-oberth first.\n' >&2; exit 1; }
 case "$command" in
  plan) exec "$cli" install --plan --json "$@" ;;
+ ports) exec "$cli" client ports "$@" ;;
  verify) exec "$cli" install --verify --json "$@" ;;
  run)
   have_secrets_file=false
@@ -37,5 +38,5 @@ case "$command" in
    exit 1
   fi
   exec "$cli" install "$@" ;;
- *) printf 'Usage: scripts/install prerequisites|plan|verify|run [installer options]\n' >&2; exit 1 ;;
+ *) printf 'Usage: scripts/install prerequisites|plan|ports|verify|run [installer options]\n' >&2; exit 1 ;;
 esac

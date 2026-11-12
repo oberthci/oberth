@@ -3700,3 +3700,12 @@ file or directory. Reduce the baseline when removing debt.
 The review checklist is `.gitea/pull_request_template.md`; issues use
 `.gitea/ISSUE_TEMPLATE/contract.md`. Incorrect answers about copied facts,
 unmeasured claims or missing sunsets block promotion.
+
+## Plugin client endpoint and SSH binding
+
+The plugin probes the selected plan's client endpoints before install review,
+without using cluster type as an admission gate. Repository setup verifies the
+selected install CA pin and reads SSH host identity and canonical git_path over
+mTLS. Repo-local core.sshCommand uses a per-install SSH config and pinned
+known_hosts; the global oberth Host alias never chooses a plugin push target.
+See [plugin install and repository connections](docs/plugin-install.md).
