@@ -1,9 +1,9 @@
 #!/bin/sh
 # Check candidate pipeline YAML with the exact server that must build v0.22.0.
 set -eu
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 candidate=${1:-$root}
-candidate=$(CDPATH= cd -- "$candidate" && pwd)
+candidate=$(CDPATH='' cd -- "$candidate" && pwd)
 base=e5421125df457ba4ce08d72467069c2d47187a21
 checkout=$(mktemp -d)
 trap 'rm -rf "$checkout"' EXIT HUP INT TERM

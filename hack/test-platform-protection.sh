@@ -59,7 +59,7 @@ argo_render() {
     --set server.enabled=false --set crds.install=false \
     --set createAggregateRoles=false \
     --set controller.clusterWorkflowTemplates.enabled=false \
-    --set workflow.serviceAccount.create=false --set workflow.rbac.create=false "$@"
+    --set workflow.serviceAccount.create=false --set workflow.rbac.create=false
 }
 argo_render >"$work/argo-off.yaml"
 if grep -Eq '^[[:space:]]+(podPriorityClassName|priorityClassName):' "$work/argo-off.yaml"; then
@@ -69,7 +69,7 @@ fi
 openbao_render() {
   "$helm_tool" template openbao \
     "$bao_chart" \
-    --namespace openbao --show-only templates/server-statefulset.yaml "$@"
+    --namespace openbao --show-only templates/server-statefulset.yaml
 }
 openbao_render >"$work/bao-off.yaml"
 if grep -q 'priorityClassName:' "$work/bao-off.yaml"; then
