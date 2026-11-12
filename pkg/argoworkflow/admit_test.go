@@ -419,13 +419,6 @@ func TestAdmitRefusesMutableAndUnpinnedImages(t *testing.T) {
 	refuse(t, strings.Replace(admissibleDocument, admissibleImage, "golang", 1), Policy{}, "must contain an @sha256")
 }
 
-func TestAdmitRequiresAWorkflowDeadline(t *testing.T) {
-	refuse(t, strings.Replace(admissibleDocument, "  activeDeadlineSeconds: 3600\n", "", 1),
-		Policy{}, "activeDeadlineSeconds")
-	refuse(t, strings.Replace(admissibleDocument, "activeDeadlineSeconds: 3600", "activeDeadlineSeconds: 0", 1),
-		Policy{}, "activeDeadlineSeconds")
-}
-
 func TestAdmitRefusesServerOwnedMetadata(t *testing.T) {
 	for _, field := range []string{"name: chosen-by-the-repository", "generateName: chosen-", "namespace: oberth"} {
 		document := strings.Replace(admissibleDocument, "kind: Workflow\n",
@@ -437,11 +430,6 @@ func TestAdmitRefusesServerOwnedMetadata(t *testing.T) {
 func TestAdmitRefusesAnUnknownEntrypoint(t *testing.T) {
 	refuse(t, strings.Replace(admissibleDocument, "entrypoint: main", "entrypoint: nowhere", 1),
 		Policy{}, "names no template")
-}
-
-func TestAdmitRefusesSuspend(t *testing.T) {
-	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  suspend: true\n", 1),
-		Policy{}, "suspend")
 }
 
 func TestAdmitRejectsAMalformedAdministratorAllowlist(t *testing.T) {
@@ -764,50 +752,17 @@ spec:
 
 // --- Finding 7 tests: resource amplification ceilings ---
 
-func TestAdmitRefusesExcessiveRetryLimit(t *testing.T) {
-	t.Parallel()
-	document := strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        limit: \"99\"\n      container:", 1)
-	refuse(t, document, Policy{}, "retryStrategy.limit 99 exceeds")
-}
-
-// The ceiling also binds the workflow-wide retryStrategy and the template
-// defaults, and a templated limit (known only at run time) is refused.
-func TestAdmitRefusesUnboundedRetryLimitsEverywhere(t *testing.T) {
-	t.Parallel()
-	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy:\n    limit: 1000\n", 1), Policy{}, "spec.retryStrategy.limit 1000 exceeds")
-	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  templateDefaults:\n    retryStrategy:\n      limit: 50\n", 1), Policy{}, "spec.templateDefaults.retryStrategy.limit 50 exceeds")
-	refuse(t, strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        limit: \"{{inputs.parameters.n}}\"\n      container:", 1), Policy{}, "must be a literal integer")
-	// No limit is no bound: the controller retries until the step passes.
-	refuse(t, strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        retryPolicy: Always\n      container:", 1), Policy{}, "retryStrategy.limit is required")
-	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy: {}\n", 1), Policy{}, "spec.retryStrategy.limit is required")
-	mustAdmit(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  retryStrategy:\n    limit: 2\n", 1), Policy{})
-}
-
-func TestAdmitAcceptsRetryLimitAtCeiling(t *testing.T) {
+func TestAdmitAcceptsAuthoredRetryLimit(t *testing.T) {
 	t.Parallel()
 	document := strings.Replace(admissibleDocument, "      container:", "      retryStrategy:\n        limit: \"10\"\n      container:", 1)
 	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRefusesExcessiveCPU(t *testing.T) {
-	t.Parallel()
-	document := strings.Replace(admissibleDocument, "        command: [/bin/true]\n",
-		"        command: [/bin/true]\n        resources:\n          requests:\n            cpu: \"32\"\n", 1)
-	refuse(t, document, Policy{}, "cpu 32 exceeds the 8 ceiling")
-}
-
-func TestAdmitAcceptsCPUAtCeiling(t *testing.T) {
+func TestAdmitAcceptsAuthoredCPU(t *testing.T) {
 	t.Parallel()
 	document := strings.Replace(admissibleDocument, "        command: [/bin/true]\n",
 		"        command: [/bin/true]\n        resources:\n          requests:\n            cpu: \"8\"\n            memory: 16Gi\n", 1)
 	mustAdmit(t, document, Policy{})
-}
-
-func TestAdmitRefusesExcessiveMemory(t *testing.T) {
-	t.Parallel()
-	document := strings.Replace(admissibleDocument, "        command: [/bin/true]\n",
-		"        command: [/bin/true]\n        resources:\n          requests:\n            memory: 128Gi\n", 1)
-	refuse(t, document, Policy{}, "memory 128Gi exceeds the 16Gi ceiling")
 }
 
 func TestAdmitRefusesExcessivePVCCapacity(t *testing.T) {

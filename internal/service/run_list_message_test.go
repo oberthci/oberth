@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 func TestRunListMessageContract(t *testing.T) {
@@ -67,25 +66,6 @@ func TestRunListQueuedResourcesAndQualifier(t *testing.T) {
 	got := queuedDisplayReason(&model.RunScheduling{State: "waiting", Admission: admission}, nil)
 	if want := "needs 9.9 CPU, 16 GiB · host IO busy"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestRunListPersistsTypedCeilingCauseAndFullError(t *testing.T) {
-	f := newControlFixture(t)
-	run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/ceiling", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "push"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	failure := &argoworkflow.ResourceCeilingError{Detail: "full refusal with resource grant remediation", Cause: "cpu limit 5994m over ceiling 4"}
-	if err := f.scheduler.finishInfrastructureFailure(t.Context(), run.Run, f.repo, failure); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := f.store.Run(t.Context(), run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.Error != failure.Error() || presentationRun(stored).DisplayReason != "infrastructure error: cpu limit 5994m over ceiling 4" {
-		t.Fatalf("typed cause or evidence lost: %+v", stored)
 	}
 }
 

@@ -1,0 +1,33 @@
+# Source: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/
+# Fetched: 2026-11-12; example copied verbatim below.
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    # Assume that all relevant Pods have a "tenant" label set
+    tenant: tenant-a
+...
+spec:
+  affinity:
+    podAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      # ensure that Pods associated with this tenant land on the correct node pool
+      - matchLabelKeys:
+          - tenant
+        labelSelector: {}
+        topologyKey: node-pool
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      # ensure that Pods associated with this tenant can't schedule to nodes used for another tenant
+      - mismatchLabelKeys:
+        - tenant # whatever the value of the "tenant" label for this Pod, prevent
+                 # scheduling to nodes in any pool where any Pod from a different
+                 # tenant is running.
+        labelSelector:
+          # We have to have the labelSelector which selects only Pods with the tenant label,
+          # otherwise this Pod would have anti-affinity against Pods from daemonsets as well, for example,
+          # which aren't supposed to have the tenant label.
+          matchExpressions:
+          - key: tenant
+            operator: Exists
+        topologyKey: node-pool

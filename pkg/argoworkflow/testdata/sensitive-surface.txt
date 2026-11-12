@@ -1,4 +1,3 @@
-WorkflowSpec.Affinity:Affinity
 WorkflowSpec.Arguments.Artifacts.ArtifactLocation.Artifactory.ArtifactoryAuth.PasswordSecret:SecretKeySelector
 WorkflowSpec.Arguments.Artifacts.ArtifactLocation.Artifactory.ArtifactoryAuth.UsernameSecret:SecretKeySelector
 WorkflowSpec.Arguments.Artifacts.ArtifactLocation.Azure.AzureBlobContainer.AccountKeySecret:SecretKeySelector
@@ -57,7 +56,6 @@ WorkflowSpec.SecurityContext.SELinuxOptions:SELinuxOptions
 WorkflowSpec.SecurityContext.SeccompProfile:SeccompProfile
 WorkflowSpec.SecurityContext.Sysctls:Sysctl
 WorkflowSpec.Synchronization.Semaphores.ConfigMapKeyRef:ConfigMapKeySelector
-WorkflowSpec.TemplateDefaults.Affinity:Affinity
 WorkflowSpec.TemplateDefaults.ArchiveLocation.Artifactory.ArtifactoryAuth.PasswordSecret:SecretKeySelector
 WorkflowSpec.TemplateDefaults.ArchiveLocation.Artifactory.ArtifactoryAuth.UsernameSecret:SecretKeySelector
 WorkflowSpec.TemplateDefaults.ArchiveLocation.Azure.AzureBlobContainer.AccountKeySecret:SecretKeySelector
@@ -328,7 +326,6 @@ WorkflowSpec.TemplateDefaults.Steps.Steps.Hooks.Arguments.Artifacts.ArtifactLoca
 WorkflowSpec.TemplateDefaults.Steps.Steps.Hooks.Arguments.Artifacts.ArtifactLocation.S3.S3Bucket.SessionTokenSecret:SecretKeySelector
 WorkflowSpec.TemplateDefaults.Steps.Steps.Hooks.Arguments.Parameters.ValueFrom.ConfigMapKeyRef:ConfigMapKeySelector
 WorkflowSpec.TemplateDefaults.Synchronization.Semaphores.ConfigMapKeyRef:ConfigMapKeySelector
-WorkflowSpec.TemplateDefaults.Tolerations:Toleration
 WorkflowSpec.TemplateDefaults.Volumes.VolumeSource.CSI:CSIVolumeSource
 WorkflowSpec.TemplateDefaults.Volumes.VolumeSource.CephFS.SecretRef:LocalObjectReference
 WorkflowSpec.TemplateDefaults.Volumes.VolumeSource.Cinder.SecretRef:LocalObjectReference
@@ -342,7 +339,6 @@ WorkflowSpec.TemplateDefaults.Volumes.VolumeSource.RBD.SecretRef:LocalObjectRefe
 WorkflowSpec.TemplateDefaults.Volumes.VolumeSource.ScaleIO.SecretRef:LocalObjectReference
 WorkflowSpec.TemplateDefaults.Volumes.VolumeSource.Secret:SecretVolumeSource
 WorkflowSpec.TemplateDefaults.Volumes.VolumeSource.StorageOS.SecretRef:LocalObjectReference
-WorkflowSpec.Templates.Affinity:Affinity
 WorkflowSpec.Templates.ArchiveLocation.Artifactory.ArtifactoryAuth.PasswordSecret:SecretKeySelector
 WorkflowSpec.Templates.ArchiveLocation.Artifactory.ArtifactoryAuth.UsernameSecret:SecretKeySelector
 WorkflowSpec.Templates.ArchiveLocation.Azure.AzureBlobContainer.AccountKeySecret:SecretKeySelector
@@ -613,7 +609,6 @@ WorkflowSpec.Templates.Steps.Steps.Hooks.Arguments.Artifacts.ArtifactLocation.S3
 WorkflowSpec.Templates.Steps.Steps.Hooks.Arguments.Artifacts.ArtifactLocation.S3.S3Bucket.SessionTokenSecret:SecretKeySelector
 WorkflowSpec.Templates.Steps.Steps.Hooks.Arguments.Parameters.ValueFrom.ConfigMapKeyRef:ConfigMapKeySelector
 WorkflowSpec.Templates.Synchronization.Semaphores.ConfigMapKeyRef:ConfigMapKeySelector
-WorkflowSpec.Templates.Tolerations:Toleration
 WorkflowSpec.Templates.Volumes.VolumeSource.CSI:CSIVolumeSource
 WorkflowSpec.Templates.Volumes.VolumeSource.CephFS.SecretRef:LocalObjectReference
 WorkflowSpec.Templates.Volumes.VolumeSource.Cinder.SecretRef:LocalObjectReference
@@ -627,7 +622,6 @@ WorkflowSpec.Templates.Volumes.VolumeSource.RBD.SecretRef:LocalObjectReference
 WorkflowSpec.Templates.Volumes.VolumeSource.ScaleIO.SecretRef:LocalObjectReference
 WorkflowSpec.Templates.Volumes.VolumeSource.Secret:SecretVolumeSource
 WorkflowSpec.Templates.Volumes.VolumeSource.StorageOS.SecretRef:LocalObjectReference
-WorkflowSpec.Tolerations:Toleration
 WorkflowSpec.Volumes.VolumeSource.CSI:CSIVolumeSource
 WorkflowSpec.Volumes.VolumeSource.CephFS.SecretRef:LocalObjectReference
 WorkflowSpec.Volumes.VolumeSource.Cinder.SecretRef:LocalObjectReference

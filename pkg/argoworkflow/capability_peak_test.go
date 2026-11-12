@@ -58,33 +58,6 @@ func TestExtendedResourcePeakFollowsWorkflowConcurrency(t *testing.T) {
 	}
 }
 
-func TestCapabilityReceiptSizesMixedResourceAndContainerSteps(t *testing.T) {
-	wf, err := Decode([]byte(capabilityResourceDocument))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wf.Spec.Templates[0].Name = "create-task"
-	leaf := declaredLeaf("worker", "1", "128Mi")
-	leaf.Container.Image = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	device := corev1.ResourceName("devices.example.test/worker")
-	leaf.Container.Resources.Requests[device] = resource.MustParse("1")
-	leaf.Container.Resources.Limits[device] = resource.MustParse("1")
-	wf.Spec.Templates = append(wf.Spec.Templates, leaf, wfv1.Template{Name: "main", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "create", Template: "create-task"}, {Name: "run", Template: "worker", Dependencies: []string{"create"}}}}})
-	body, _ := json.Marshal(wf)
-	resolved, err := ResolveRunSource(body, nil, RunSourceBinding{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	receipt, err := resolved.Receipt(capabilityPolicyForTest(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	demand, err := receipt.DeclaredPodDemand()
-	if err != nil || demand == nil || demand.ExtendedResources[string(device)] != 1 || demand.Pods != 1 {
-		t.Fatalf("mixed operator workflow lost bounded demand: %+v %v", demand, err)
-	}
-}
-
 func TestCapabilityPeakIncludesExitAndConcurrentHookResources(t *testing.T) {
 	device := corev1.ResourceName("devices.example.test/worker")
 	main, handler := declaredLeaf("work", "1", "128Mi"), declaredLeaf("handler", "1", "128Mi")

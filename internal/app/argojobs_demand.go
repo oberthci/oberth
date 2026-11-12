@@ -48,7 +48,7 @@ func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service
 	if err != nil {
 		return nil, err
 	}
-	policy := argoworkflow.Policy{ServerDeadline: true, RunnerImagePrefixes: jobs.config.RunnerImagePrefixes}
+	policy := argoworkflow.Policy{RunnerImagePrefixes: jobs.config.RunnerImagePrefixes}
 	workflow := resolved.Workflow()
 	if jobs.capabilityGrants != nil {
 		capability, err := jobs.capabilityGrants(ctx, request.Repository.ID)

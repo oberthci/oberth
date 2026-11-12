@@ -1,0 +1,15 @@
+# Source: https://kubernetes.io/docs/tasks/configure-pod-container/assign-pods-nodes/
+# Fetched: 2026-11-12; linked from the owner reference page; verbatim example below.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    env: test
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+    imagePullPolicy: IfNotPresent
+  nodeSelector:
+    disktype: ssd

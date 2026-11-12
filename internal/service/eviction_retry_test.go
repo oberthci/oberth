@@ -119,7 +119,6 @@ func TestEvictedStepAutomaticallyRetriesWithinBudget(t *testing.T) {
 
 func TestDeterministicAdmissionRefusalsDoNotAutoRetry(t *testing.T) {
 	for name, cause := range map[string]error{
-		"ceiling":       &argoworkflow.ResourceCeilingError{Detail: "requests.cpu exceeds administrator resource ceiling", Cause: "cpu request over ceiling"},
 		"configuration": &argoworkflow.AdmissionError{Cause: fmt.Errorf("invalid workflow configuration")},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -176,7 +175,6 @@ func TestPreparationRetryOnlyRejectsExplicitDeterministicRefusals(t *testing.T) 
 		{"source-claim-conflict", fmt.Errorf("create source claim: conflict"), true},
 		{"identity-refresh", fmt.Errorf("refresh nonroot identity: transient read"), true},
 		{"admission", &argoworkflow.AdmissionError{Cause: fmt.Errorf("invalid workflow")}, false},
-		{"ceiling", &argoworkflow.ResourceCeilingError{Detail: "requests.cpu exceeds administrator resource ceiling"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Now()

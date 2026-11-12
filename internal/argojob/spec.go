@@ -824,7 +824,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	policy := argoworkflow.Policy{
 		Capability:          request.Capability,
 		RunnerImagePrefixes: config.RunnerImagePrefixes,
-		ServerDeadline:      true,
 	}
 	receipt, err := resolved.Receipt(policy)
 	if err != nil {

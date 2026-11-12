@@ -24,26 +24,18 @@ const (
 
 	// Resource amplification ceilings. Each bounds one dimension a
 	// repository-authored document can amplify into Kubernetes objects.
-	MaxDAGTasks           = 64
-	MaxStepInvocations    = 64
-	MaxWithItemsCount     = 100
-	MaxWithSequenceCount  = 100
-	MaxRetryLimit         = 10
-	MaxParallelism        = 32
-	MaxContainerCPU       = "8"
-	MaxContainerMemory    = "16Gi"
-	MaxContainerEphemeral = "32Gi"
-	MaxEmptyDirSize       = "8Gi"
-	MaxDiskEmptyDirSize   = "50Gi"
-	MaxPVCCapacity        = "64Gi"
+	MaxDAGTasks          = 64
+	MaxStepInvocations   = 64
+	MaxWithItemsCount    = 100
+	MaxWithSequenceCount = 100
+	MaxEmptyDirSize      = "8Gi"
+	MaxDiskEmptyDirSize  = "50Gi"
+	MaxPVCCapacity       = "64Gi"
 )
 
 // Policy is the administrator-owned admission boundary for repository YAML.
 type Policy struct {
 	Capability *Capability
-	// ServerDeadline permits an omitted deadline only for a server that injects
-	// its own bound before submission and enforces a separate watchdog.
-	ServerDeadline bool
 	// RunnerImagePrefixes is the administrator's image allowlist.
 	// Empty selects the built-in
 	// pipeline.DefaultRunnerImagePrefixes.
@@ -85,7 +77,7 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	if _, err := DeclaredGoProxyMirrorOnly(workflow); err != nil {
 		problems = append(problems, err)
 	}
-	problems = append(problems, admitSpec(&workflow.Spec, policy.ServerDeadline)...)
+	problems = append(problems, admitSpec(&workflow.Spec)...)
 	problems = append(problems, admitTemplates(workflow, policy)...)
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
 		problems = append(problems, err)
@@ -123,7 +115,7 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	return problems
 }
 
-func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
+func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	var problems []error
 	if strings.TrimSpace(spec.Entrypoint) == "" {
 		problems = append(problems, errors.New("argoworkflow: spec.entrypoint is required"))
@@ -162,7 +154,6 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 	if spec.SchedulerName != "" {
 		problems = append(problems, errors.New("argoworkflow: spec.schedulerName is not admitted"))
 	}
-	problems = append(problems, admitNodeTargeting("spec", spec.NodeSelector, spec.Affinity, spec.Tolerations)...)
 	// Pod metadata reaches every Pod the run creates, and that surface
 	// includes AppArmor and seccomp annotations and sidecar-injection
 	// triggers. Pod metadata is assigned server-side.
@@ -175,19 +166,8 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 	if spec.PodDisruptionBudget != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.podDisruptionBudget is not admitted"))
 	}
-	if spec.Suspend != nil && *spec.Suspend {
-		problems = append(problems, errors.New("argoworkflow: spec.suspend would hold a queue slot indefinitely"))
-	}
-	if (spec.ActiveDeadlineSeconds == nil && !serverDeadline) || (spec.ActiveDeadlineSeconds != nil && *spec.ActiveDeadlineSeconds <= 0) {
-		// The examples corpus demonstrates no acquisition timeout on
-		// synchronization mutexes; a workflow that blocks on a held mutex
-		// forever would occupy a scheduler slot forever. A positive workflow
-		// deadline is the only bound that always applies.
-		problems = append(problems, errors.New("argoworkflow: spec.activeDeadlineSeconds is required and must be positive"))
-	}
-	if spec.Parallelism != nil && *spec.Parallelism > MaxParallelism {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.parallelism %d exceeds the %d ceiling",
-			*spec.Parallelism, MaxParallelism))
+	if spec.ActiveDeadlineSeconds != nil && *spec.ActiveDeadlineSeconds <= 0 {
+		problems = append(problems, errors.New("argoworkflow: spec.activeDeadlineSeconds must be positive when supplied"))
 	}
 	problems = append(problems, admitPodSecurityContext("spec.securityContext", spec.SecurityContext)...)
 	problems = append(problems, admitVolumes("spec.volumes", spec.Volumes)...)
@@ -231,29 +211,8 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 	return problems
 }
 
-// admitRetryLimit bounds a retryStrategy's limit. A templated limit is
-// refused: its value is only known at run time, past this ceiling. So is a
-// strategy without a limit: the controller then retries without end.
-func admitRetryLimit(location string, strategy *wfv1.RetryStrategy) []error {
-	if strategy == nil {
-		return nil
-	}
-	if strategy.Limit == nil {
-		return []error{fmt.Errorf("argoworkflow: %s.limit is required (a literal integer of at most %d): without it the controller retries without end", location, MaxRetryLimit)}
-	}
-	limit, err := strconv.Atoi(strategy.Limit.String())
-	if err != nil {
-		return []error{fmt.Errorf("argoworkflow: %s.limit %q must be a literal integer of at most %d", location, strategy.Limit.String(), MaxRetryLimit)}
-	}
-	if limit > MaxRetryLimit {
-		return []error{fmt.Errorf("argoworkflow: %s.limit %d exceeds the %d ceiling", location, limit, MaxRetryLimit)}
-	}
-	return nil
-}
-
 func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	var problems []error
-	problems = append(problems, admitRetryLimit("spec.retryStrategy", workflow.Spec.RetryStrategy)...)
 	if len(workflow.Spec.Templates) == 0 {
 		problems = append(problems, errors.New("argoworkflow: spec.templates is required"))
 	}
@@ -418,18 +377,9 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	if template.Memoize != nil {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.memoize reads and writes a ConfigMap-backed cache and is not admitted", location))
 	}
-	problems = append(problems, admitNodeTargeting(location, template.NodeSelector, template.Affinity, template.Tolerations)...)
 	problems = append(problems, admitTemplateMetadata(location+".metadata", template.Metadata)...)
 	problems = append(problems, admitParameters(location+".inputs.parameters", template.Inputs.Parameters)...)
 	problems = append(problems, admitParameters(location+".outputs.parameters", template.Outputs.Parameters)...)
-	if template.Suspend != nil {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.suspend would hold a queue slot indefinitely", location))
-	}
-	if template.Parallelism != nil && *template.Parallelism > MaxParallelism {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.parallelism %d exceeds the %d ceiling",
-			location, *template.Parallelism, MaxParallelism))
-	}
-	problems = append(problems, admitRetryLimit(location+".retryStrategy", template.RetryStrategy)...)
 	problems = append(problems, admitPodSecurityContext(location+".securityContext", template.SecurityContext)...)
 	problems = append(problems, admitVolumes(location+".volumes", template.Volumes)...)
 	problems = append(problems, admitContainers(location, template, policy)...)
@@ -606,39 +556,28 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 	return problems
 }
 
-// admitContainerResources caps per-container CPU, memory, and ephemeral
-// storage. GPU and custom resources are refused outright: the deployment
-// target has none, and admitting them by name would let a repository
-// claim unbounded quantities of resources the server cannot price.
+// admitContainerResources preserves native compute declarations. Device resources
+// remain constrained by the installation's separate security capability.
 func admitContainerResources(location string, resources corev1.ResourceRequirements, capability *Capability) []error {
 	var problems []error
-	ceilings := map[corev1.ResourceName]string{
-		corev1.ResourceCPU:              MaxContainerCPU,
-		corev1.ResourceMemory:           MaxContainerMemory,
-		corev1.ResourceEphemeralStorage: MaxContainerEphemeral,
+	if len(resources.Claims) > 0 {
+		problems = append(problems, fmt.Errorf("argoworkflow: %s.resources.claims is outside the installed device capability", location))
 	}
-	checkList := func(tier string, list corev1.ResourceList) {
-		for name, quantity := range list {
-			ceiling, known := ceilings[name]
-			if !known && capability != nil && capability.ExtendedResources[string(name)] > 0 {
-				continue
+	for _, list := range []corev1.ResourceList{resources.Requests, resources.Limits} {
+		for name, q := range list {
+			if q.Sign() < 0 {
+				problems = append(problems, fmt.Errorf("argoworkflow: %s resource %s must not be negative", location, name))
 			}
-			if !known {
-				problems = append(problems, fmt.Errorf(
-					"argoworkflow: %s.resources.%s declares resource %q: %w",
-					location, tier, name, ErrWorkflowCapabilityRequired))
-				continue
-			}
-			max := resource.MustParse(ceiling)
-			if quantity.Cmp(max) > 0 {
-				problems = append(problems, fmt.Errorf(
-					"argoworkflow: %s.resources.%s.%s %s exceeds the %s ceiling",
-					location, tier, name, quantity.String(), ceiling))
+			if name != corev1.ResourceCPU && name != corev1.ResourceMemory && name != corev1.ResourceEphemeralStorage && (capability == nil || capability.ExtendedResources[string(name)] <= 0) {
+				problems = append(problems, fmt.Errorf("argoworkflow: %s resource %s: %w", location, name, ErrWorkflowCapabilityRequired))
 			}
 		}
 	}
-	checkList("requests", resources.Requests)
-	checkList("limits", resources.Limits)
+	for name, q := range resources.Requests {
+		if limit, ok := resources.Limits[name]; ok && q.Cmp(limit) > 0 {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s request %s exceeds its limit", location, name))
+		}
+	}
 	problems = append(problems, admitExtendedResources(location, resources, capability)...)
 	return problems
 }
@@ -743,22 +682,6 @@ func admitHooks(location string, hooks wfv1.LifecycleHooks) []error {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.templateRef points outside this document; inline the template", where))
 		}
 		problems = append(problems, admitArguments(where+".arguments", hook.Arguments)...)
-	}
-	return problems
-}
-
-// admitNodeTargeting reserves placement for the administrator: a repository
-// must not select its node or the tenants beside which its Pods run.
-func admitNodeTargeting(location string, selector map[string]string, affinity *corev1.Affinity, tolerations []corev1.Toleration) []error {
-	var problems []error
-	if len(selector) != 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.nodeSelector is assigned by the administrator, not the repository", location))
-	}
-	if affinity != nil {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.affinity is assigned by the administrator, not the repository", location))
-	}
-	if len(tolerations) != 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.tolerations would let a run schedule onto tainted nodes and is not admitted", location))
 	}
 	return problems
 }

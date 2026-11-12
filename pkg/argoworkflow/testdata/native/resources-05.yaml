@@ -1,0 +1,16 @@
+# Source: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+# Fetched: 2026-11-12; example copied verbatim below.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+spec:
+  containers:
+  - name: my-container
+    image: myimage
+    resources:
+      requests:
+        cpu: 2
+        example.com/foo: 1
+      limits:
+        example.com/foo: 1
