@@ -44,6 +44,9 @@ var ErrInterrupted = errors.New("interrupted")
 // the remaining steps are documented in the output.
 var ErrOnboardingPartial = errors.New("onboarding partial: manual steps remain")
 
+// ErrUpstreamKeyPending means the installation is ready for clients, with forge access still to authorize.
+var ErrUpstreamKeyPending = fmt.Errorf("%w: upstream deploy key pending", ErrOnboardingPartial)
+
 const (
 	defaultUplinkKeyPath = "~/.ssh/id_ed25519.pub"
 )
@@ -99,6 +102,21 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		return ErrOnboardingPartial
 	}
 	if configured {
+		if deps.upstreamResult != nil {
+			for _, upstream := range existing {
+				if upstream.BaseURL != cfg.ForgeURL {
+					continue
+				}
+				raw, readErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "admin", "read-file", "/run/oberth-identities/upstream/id_ed25519.pub")...)
+				public := ""
+				if readErr == nil && len(raw) <= 16384 {
+					public = string(raw)
+				}
+				deps.upstreamResult(installUpstreamResult(cfg, deps, upstream.Name, upstream.BaseURL, public, true))
+				clear(raw)
+				break
+			}
+		}
 		// An upstream already exists, so there is nothing to onboard. The
 		// client offer still belongs here: it is about this machine, not about
 		// the deployment, and a second machine reaches a server that is already
@@ -449,59 +467,16 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		tw.AppendSpanRow(deployPubKey)
 	}
 
-	// --- Key registration verification ---
-	// The upstream row only exists after a run of `upstream add` whose
-	// authentication probe succeeded (the incomplete bootstrap path deliberately
-	// registers nothing), so each verification attempt must RERUN the add —
-	// exactly the rerun the pod-side flow instructs. Merely re-listing
-	// upstreams can never observe the registration.
-	keyPending := false
-	if registered {
-		tw.AppendRow("Key registration", hostnameFromURL(baseURL), "✓ accepted", false)
-	} else if !isInteractive(deps) {
-		// Non-interactive (TUI wizard): the deploy key was just generated
-		// and needs manual registration at the forge. Skip the
-		// verification loop — the operator registers it after setup.
+	// Registration makes the server ready independently of forge authorization.
+	// Never wait for a key that the operator has not yet received.
+	keyPending := !registered
+	if keyPending {
 		tw.AppendRow("Key registration", hostnameFromURL(baseURL), "pending", false)
-		keyPending = true
 	} else {
-		forgeHost := hostnameFromURL(baseURL)
-		var lastAttemptErr error
-		for attempt := 0; ; attempt++ {
-			startPrompt(w, color, "Key registration", forgeHost+" — register key, Enter to verify: ")
-			if _, readErr := readLine(ctx, deps.Input); readErr != nil {
-				return fmt.Errorf("read key-registration confirmation: %w", readErr)
-			}
-			var attemptErr error
-			registered, _, attemptErr = registerUpstreamQuiet(ctx, cfg, deps, name, baseURL)
-			if registered {
-				// Erase the prompt line, then append the result to the table.
-				erasePromptLines(w, color, 1)
-				tw.AppendRow("Key registration", forgeHost, "✓ accepted", false)
-				break
-			}
-			if attemptErr != nil {
-				// Unexpected probe failure — a knownhosts mismatch here is an
-				// active MITM indicator; surface it instead of a silent retry
-				// (allowlist classification per issue #89).
-				lastAttemptErr = attemptErr
-				completePrompt(w, color, "Key registration", forgeHost, "⚠ error")
-				_, _ = fmt.Fprintf(w, "  ⚠ %s\n", terseInstallError(attemptErr))
-			} else {
-				completePrompt(w, color, "Key registration", forgeHost, "⚠ not yet")
-			}
-			if attempt >= 2 {
-				tw.AppendRow("Key registration", forgeHost, "✗ failed", false)
-				tw.WriteFooter()
-				_, _ = fmt.Fprintln(w, "Upstream key not accepted after 3 attempts. Finish the setup manually:")
-				if lastAttemptErr != nil {
-					_, _ = fmt.Fprintf(w, "Last verification error: %s\n", terseInstallError(lastAttemptErr))
-				}
-				_ = PrintNextSteps(cfg, w)
-				printAlsoUpstreamCommands(w, cfg, deps, []NextStepsUpstream{{Name: name, BaseURL: baseURL}})
-				return ErrOnboardingPartial
-			}
-		}
+		tw.AppendRow("Key registration", hostnameFromURL(baseURL), "✓ accepted", false)
+	}
+	if deps.upstreamResult != nil {
+		deps.upstreamResult(installUpstreamResult(cfg, deps, name, baseURL, deployPubKey, registered))
 	}
 
 	// --- More organizations, same upstream key (#060) ---
@@ -562,24 +537,16 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	tw.WriteFooter()
 	emitCredentials(creds, deps, w, color)
 
-	// When the deploy key is pending (non-interactive: the forge has not
-	// accepted it yet), the server stays NotReady until the first upstream
-	// probe succeeds. Waiting 5 minutes for that here would block the
-	// wizard with no user action possible. Skip WaitForReady and return a
-	// partial-success sentinel so the done page shows what remains.
 	if keyPending {
+		if err := waitAndAnnounceReady(ctx, cfg, deps); err != nil {
+			return err
+		}
 		if deps.StepProgressSink != nil {
 			deps.StepProgressSink("upstream discovery", "pending")
-			deps.StepProgressSink("audit genesis", "pending")
 		}
-		_, _ = fmt.Fprintf(w, "\nDeploy key not yet registered at %s.\n", hostnameFromURL(baseURL))
-		if deployPubKey != "" {
-			_, _ = fmt.Fprintf(w, "Register the upstream public key, then verify the connection:\n")
-		} else {
-			_, _ = fmt.Fprintf(w, "Retrieve the upstream public key, register it with your forge account, then verify the connection:\n")
-		}
-		_, _ = fmt.Fprintf(w, "\n    %s\n", printedKubectl(cfg, kubectlOberthArgs(cfg, deps, false, cfg.upstreamAddArgs(name, baseURL)...)))
-		return ErrOnboardingPartial
+		result := installUpstreamResult(cfg, deps, name, baseURL, deployPubKey, false)
+		_, _ = fmt.Fprintf(w, "\n%s\n%s\nThen run:\n    %s\n", upstreamKeyRemedy(result), result.DeployPublicKey, result.NextCommand)
+		return ErrUpstreamKeyPending
 	}
 
 	_, _ = fmt.Fprintf(deps.Output, "\nWaiting for Oberth to become ready...\n")
@@ -1015,24 +982,8 @@ func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateK
 	return nil
 }
 
-// registerUpstreamQuiet runs the pod's own `oberth upstream add --yes
-// --no-wait` non-interactively, capturing output. --no-wait is load-bearing:
-// without it the pod-side bootstrap blocks up to ProbeWait (10 minutes in
-// production) probing a key the operator has not yet seen — the captured
-// output means nothing reaches the terminal until the exec exits. With
-// --no-wait a fresh generation prints the key and exits zero immediately via
-// the ErrUpstreamBootstrapIncomplete path (which deliberately does NOT
-// register the upstream row — a rerun after the operator registers the key
-// completes it, which is exactly what the verification loop does).
-//
-// Returns whether the upstream is configured, the deploy public key extracted
-// from the output, and any error. A publickey auth rejection (the key is not
-// registered on the forge yet) is the one EXPECTED failure and returns
-// (false, key, nil); every other failure — a knownhosts mismatch is an active
-// MITM indicator, a handshake EOF means the endpoint is not an SSH forge — is
-// returned as an error for the caller to surface. Silencing unknown errors
-// here would reintroduce the fail-open classification issue #89 fixed in the
-// pod-side wait loop.
+// registerUpstreamQuiet registers without a forge auth probe. The durable
+// upstream and SSH identity make readiness independent of key authorization.
 func registerUpstreamQuiet(ctx context.Context, cfg Config, deps Deps, name, baseURL string) (bool, string, error) {
 	registration, err := registerUpstream(ctx, cfg, deps, name, baseURL)
 	return registration.configured, registration.pubKey, err
@@ -1096,11 +1047,7 @@ func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL 
 		if err == nil {
 			break
 		}
-		if pubKey != "" && isExpectedRegistrationPending(string(out)+" "+err.Error()) {
-			// The bootstrap advertised the key and the forge rejected the
-			// authentication — the normal "key not registered yet" state.
-			return upstreamRegistration{pubKey: pubKey, reusedKey: strings.Contains(string(out), persistedDeployKeyMarker)}, nil
-		}
+
 		// Server responded with a key but a non-auth error (knownhosts
 		// mismatch, handshake EOF) — a real failure, not a startup race.
 		if pubKey != "" {
@@ -1113,24 +1060,10 @@ func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL 
 	}
 	configured, _ := upstreamConfigured(ctx, cfg, deps)
 	return upstreamRegistration{
-		configured: configured,
+		configured: configured && !strings.Contains(string(out), "registered; deploy key pending."),
 		pubKey:     pubKey,
 		reusedKey:  strings.Contains(string(out), persistedDeployKeyMarker),
 	}, nil
-}
-
-// isExpectedRegistrationPending reports whether captured `upstream add`
-// output describes the normal "deploy key not registered on the forge yet"
-// publickey rejection. It mirrors the allowlist of the pod-side
-// app.isExpectedAuthRejection (issue #89): matching is deliberately an
-// ALLOWLIST of the x/crypto/ssh auth-failure signature, so a knownhosts
-// mismatch, a handshake EOF, or any other unexpected failure classifies as
-// NOT pending and gets surfaced by the caller. The contract is textual
-// because it crosses the kubectl-exec boundary to the in-pod binary.
-func isExpectedRegistrationPending(text string) bool {
-	lower := strings.ToLower(text)
-	return strings.Contains(lower, "unable to authenticate") ||
-		strings.Contains(lower, "no supported methods remain")
 }
 
 // terseInstallError compresses an error to one bounded line for warning

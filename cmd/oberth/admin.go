@@ -155,7 +155,7 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	upstreamKey := flags.String("upstream-key", identityRoot+"/upstream/id_ed25519", "upstream SSH private key")
 	knownHosts := flags.String("known-hosts", identityRoot+"/hosts/known_hosts", "upstream known_hosts")
 	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
-	noWait := flags.Bool("no-wait", false, "print the deploy key and exit immediately instead of waiting for its registration")
+	noWait := flags.Bool("no-wait", false, "register pending and print the deploy key without probing forge authentication")
 	autoYes := flags.Bool("yes", false, "auto-accept key generation and host-key prompts")
 	dedicatedKey := flags.Bool("dedicated-key", false, "provision a dedicated SSH identity for this upstream instead of the shared key (stored in the OpenBao upstream-key bundle)")
 	expectedHostFingerprint := flags.String("expected-host-fingerprint", "", "expected SSH host-key fingerprint (SHA256:...) for unattended bootstrap of unknown forges")
@@ -198,38 +198,23 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if *dedicatedKey && kind == "ssh" {
 		keyName = app.UpstreamKeyDataKey(filepath.Base(*upstreamKey), name)
 	}
-	var database *store.Store
-	defer func() {
-		if database != nil {
-			_ = database.Close()
-		}
-	}()
-	openDatabase := func() error {
-		if database != nil {
-			return nil
-		}
-		if dependencies.mutationGate == nil {
-			return errors.New("admin audit mutation gate is unavailable")
-		}
-		if err := dependencies.mutationGate(ctx, "upstream.database.open", *databasePath); err != nil {
-			return err
-		}
-		opened, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
-		if err != nil {
-			return err
-		}
-		database = opened
-		return nil
+	// Check existing registrations before provisioning any identity.
+	if dependencies.mutationGate == nil {
+		return errors.New("admin audit mutation gate is unavailable")
 	}
-	// Validate an existing registration before generating keys or scanning pins,
-	// including the ordinary add path used after restore.
-	if err := openDatabase(); err != nil {
+	if err := dependencies.mutationGate(ctx, "upstream.database.open", *databasePath); err != nil {
 		return err
 	}
+	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = database.Close() }()
 	registered, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
 	if err != nil {
 		return err
 	}
+	pending := false
 	var identityStore app.BootstrapIdentityStore
 	if kind == "ssh" {
 		if dependencies.identityStore == nil {
@@ -277,23 +262,20 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			CheckRepository:         *checkRepo,
 			RepositoryProbe:         dependencies.repositoryProbe,
 		}).Ensure(ctx, baseURL); err != nil {
-			if errors.Is(err, app.ErrUpstreamBootstrapIncomplete) {
-				// The flow completed normally: the key was generated, persisted,
-				// and printed. Registering it upstream is the user's next step,
-				// not a failure, so this path exits zero.
+			if errors.Is(err, app.ErrUpstreamBootstrapIncomplete) && *noWait {
+				pending = true
+			} else if errors.Is(err, app.ErrUpstreamBootstrapIncomplete) {
 				rerun := upstreamAddRerunCommand(name, baseURL, *dedicatedKey, *namespace, *expectedHostFingerprint, *checkRepo)
-				_, printErr := fmt.Fprintf(output,
-					"→ Register this key with the upstream, then rerun:\n\n    %s\n", rerun)
+				_, printErr := fmt.Fprintf(output, "→ Register this key with the upstream, then rerun:\n\n    %s\n", rerun)
 				return printErr
+			} else {
+				return fmt.Errorf("upstream SSH identity is not ready: %w", err)
 			}
-			return fmt.Errorf("upstream SSH identity is not ready: %w", err)
 		}
 	}
-	if registered && *repin {
+
+	if registered && *repin && !pending {
 		_, err := fmt.Fprintf(output, "Upstream %s: host keys re-pinned; registration unchanged.\n", name)
-		return err
-	}
-	if err := openDatabase(); err != nil {
 		return err
 	}
 	same, err := sameUpstreamRegistered(ctx, database, model.UpstreamSpec{Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName})
@@ -301,6 +283,10 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		return err
 	}
 	if same {
+		if pending {
+			_, err = fmt.Fprintf(output, "Upstream %s registered; deploy key pending.\n", name)
+			return err
+		}
 		_, err = fmt.Fprintf(output, "Upstream %s: identity verified; identical registration kept.\n", name)
 		return err
 	}
@@ -310,6 +296,10 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if _, err := database.RegisterUpstream(ctx, administrativeActor, model.UpstreamSpec{
 		Name: name, Kind: kind, BaseURL: baseURL, KeyName: keyName,
 	}); err != nil {
+		return err
+	}
+	if pending {
+		_, err = fmt.Fprintf(output, "Upstream %s registered; deploy key pending.\n", name)
 		return err
 	}
 	if _, err := fmt.Fprintf(output, "Upstream %s registered (%s).\n", name, baseURL); err != nil {
@@ -345,7 +335,7 @@ func runUpstreamAddFromHost(ctx context.Context, arguments []string, output io.W
 	expectedHostFingerprint := flags.String("expected-host-fingerprint", "", "expected SSH host-key fingerprint (SHA256:...)")
 	repin := flags.Bool("repin", false, "rescan the forge's SSH host keys and replace this endpoint's pins (same trust rules as the first pin); keeps an identical registration")
 	checkRepo := flags.String("check-repo", "", "existing repository name to read through the new upstream before registering it (proves the organization path)")
-	noWait := flags.Bool("no-wait", false, "print the deploy key and exit immediately instead of waiting for its registration")
+	noWait := flags.Bool("no-wait", false, "register pending and print the deploy key without probing forge authentication")
 	// These flags are accepted but only consumed by the in-pod command:
 	_ = flags.String("database", "", "")
 	_ = flags.String("upstream-key", "", "")
@@ -1973,7 +1963,7 @@ func upstreamAuthStatus(ctx context.Context, upstream model.Upstream, repository
 	if err := app.ProbeSSHAuthentication(ctx, upstream.BaseURL, privateKey, hosts); err != nil {
 		message := err.Error()
 		if strings.Contains(message, "unable to authenticate") {
-			return "REJECTED: the forge no longer accepts this key"
+			return "pending: the forge has not accepted this deploy key"
 		}
 		return "error: " + message
 	}

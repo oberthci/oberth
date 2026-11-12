@@ -258,7 +258,7 @@ func TestNonInteractiveOnboardingFromFlags(t *testing.T) {
 	if deps.ContextName == "" {
 		t.Fatal("the fixture names no context")
 	}
-	want := "kubectl --kubeconfig '/srv/kube/lab config' exec --context " + deps.ContextName + " -c oberth -n oberth deploy/oberth -- /usr/local/bin/oberth upstream add --yes --no-wait --expected-host-fingerprint " + cfg.ExpectedHostFingerprint
+	want := "kubectl --kubeconfig '/srv/kube/lab config' exec --context " + deps.ContextName + " -c oberth -n oberth deploy/oberth -- /usr/local/bin/oberth upstream add --yes --expected-host-fingerprint " + cfg.ExpectedHostFingerprint
 	if !strings.Contains(buf.String(), want) {
 		t.Fatalf("the printed upstream add lacks the install's target (%s):\n%s", want, buf.String())
 	}

@@ -540,6 +540,7 @@ type Deps struct {
 	// stepNameToIndex map. Status is "done".
 	StepProgressSink func(step, status string)
 	UplinkCreated    func(identity string)
+	upstreamResult   func(InstallUpstream)
 	// ReleaseGetter fetches published release objects for oberth upgrade;
 	// nil selects HTTPS (releaseverify.HTTPSGetter).
 	ReleaseGetter releaseverify.Getter

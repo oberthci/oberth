@@ -184,7 +184,8 @@ func repinBootstrap(t *testing.T, store *memoryIdentityStore, fingerprint string
 		Namespace:    "oberth", PrivateKeySecret: "oberth-upstream-key", KnownHostsSecret: "oberth-known-hosts",
 		PrivateKeyPath: filepath.Join(directory, "upstream", "id_ed25519"), KnownHostsPath: filepath.Join(directory, "hosts", "known_hosts"),
 		PrivateKeyDataKey: "id_ed25519", PublicKeyDataKey: "id_ed25519.pub", KnownHostsDataKey: "known_hosts",
-		NoWait: true, AutoYes: true, ExpectedHostFingerprint: fingerprint,
+		AutoYes: true, ExpectedHostFingerprint: fingerprint,
+		ProbeWait: 20 * time.Millisecond, ProbeInterval: time.Millisecond,
 	}
 }
 

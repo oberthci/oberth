@@ -475,7 +475,7 @@ Flags:
   -install-secretstore-dev
         also install a dev-mode OpenBao (in-memory, auto-unsealed, well-known root token) and configure it as Oberth's release secret store — evaluation only
   -json
-        emit the public install result and verification checks as JSON
+        emit public install result/checks as JSON (exit 0: passed, 3: installed/action needed, 1: failure)
   -kubeconfig string
         kubeconfig file for an existing cluster
   -namespace string
@@ -2165,7 +2165,7 @@ Flags:
   -namespace string
         Kubernetes namespace (default "oberth")
   -no-wait
-        print the deploy key and exit immediately instead of waiting for its registration
+        register pending and print the deploy key without probing forge authentication
   -repin
         rescan the forge's SSH host keys and replace this endpoint's pins (same trust rules as the first pin); keeps an identical registration
   -upstream-key string
@@ -2266,7 +2266,7 @@ Flags:
   -namespace string
         Kubernetes namespace (default "oberth")
   -no-wait
-        print the deploy key and exit immediately instead of waiting for its registration
+        register pending and print the deploy key without probing forge authentication
   -repin
         rescan the forge's SSH host keys and replace this endpoint's pins (same trust rules as the first pin); keeps an identical registration
   -upstream-key string

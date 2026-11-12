@@ -23,9 +23,10 @@ import (
 
 // CheckResult is a stable public check. Diagnostics never include subprocess output.
 type CheckResult struct {
-	Code   string `json:"code"`
-	OK     bool   `json:"ok"`
-	Remedy string `json:"remedy,omitempty"`
+	DeployPublicKey string `json:"deploy_public_key,omitempty"`
+	Code            string `json:"code"`
+	OK              bool   `json:"ok"`
+	Remedy          string `json:"remedy,omitempty"`
 }
 
 type InstallReview struct {
@@ -54,6 +55,7 @@ func PrintReviewJSON(w io.Writer, cfg Config) error {
 }
 
 type InstallResult struct {
+	Upstream      *InstallUpstream `json:"upstream,omitempty"`
 	Cluster       *ClusterIdentity `json:"cluster,omitempty"`
 	SecretsValues []string         `json:"secrets_values,omitempty"`
 	Review        *InstallReview   `json:"review,omitempty"`
@@ -149,8 +151,25 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 	deployment, err := kube.AppsV1().Deployments(cfg.Namespace).Get(ctx, "oberth", metav1.GetOptions{})
 	ready := err == nil && deployment.Status.ReadyReplicas > 0 && deployment.Spec.Replicas != nil && deployment.Status.ReadyReplicas >= *deployment.Spec.Replicas
 	r.check("deployment_ready", ready, "Check Oberth pod events, unseal OpenBao, and finish upstream registration.")
-	upstreamOutput, upstreamErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "upstream", "list", "--check")...)
-	r.check("upstream", upstreamErr == nil && verifiedUpstreams(upstreamOutput), "Register the upstream deploy public key at the forge, then rerun upstream add and upstream list --check.")
+	r.Upstream = host.upstream
+	if r.Upstream != nil && r.Upstream.State == "pending" {
+		r.checkUpstreamPending(*r.Upstream)
+		r.check("upstream_public_key", r.Upstream.DeployPublicKey != "", "Read the public deploy key through the selected cluster administration connection.")
+	} else {
+		upstreamOutput, upstreamErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "upstream", "list", "--check")...)
+		healthy := upstreamErr == nil && verifiedUpstreams(upstreamOutput)
+		if r.Upstream != nil && !healthy {
+			r.Upstream.State = "pending"
+		}
+		if !healthy && r.Upstream != nil && upstreamErr == nil && upstreamsVerifiedOrPending(upstreamOutput, true) {
+			r.checkUpstreamPending(*r.Upstream)
+			r.check("upstream_public_key", r.Upstream.DeployPublicKey != "", "Read the public deploy key through the selected cluster administration connection.")
+		} else {
+			r.check("upstream", healthy, "Register the upstream deploy public key at the forge, then rerun upstream add and upstream list --check.")
+		}
+
+	}
+
 	caPEM, err := serverCACertificate(ctx, cfg, deps)
 	ca, parseErr := parseCertificatePEM(caPEM)
 	caOK := err == nil && parseErr == nil
@@ -194,6 +213,10 @@ func PrintVerification(ctx context.Context, cfg Config, deps InstallDeps, asJSON
 }
 
 func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
+	return executeJSON(ctx, cfg, deps, Execute)
+}
+
+func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func(context.Context, Config, InstallDeps) error) error {
 	if cfg.DryRun {
 		return errors.New("use --dry-run without --json to review the install")
 	}
@@ -205,7 +228,8 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 	var values []string
 	deps.secretsSaved = func(keys []string) { values = append([]string(nil), keys...) }
 	deps.UplinkCreated = func(value string) { identity = value }
-	installErr := Execute(ctx, cfg, deps)
+	deps.upstreamResult = func(upstream InstallUpstream) { deps.upstream = &upstream }
+	installErr := execute(ctx, cfg, deps)
 	result := InstallResult{Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
 		result = VerifyInstall(ctx, cfg, deps)
@@ -220,9 +244,10 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 		review := Review(cfg)
 		result.Review = &review
 	}
+	result.Upstream = deps.upstream
 	result.FirstUplink = identity
 	result.SecretsValues = values
-	result.check("install", installErr == nil, "Inspect the selected cluster; finish pending onboarding and rerun --verify --json.")
+	result.check("install", installErr == nil || errors.Is(installErr, ErrUpstreamKeyPending), "Inspect the selected cluster; finish pending onboarding and rerun --verify --json.")
 	if cfg.SecretsFile != "" {
 		if raw, err := os.ReadFile(cfg.SecretsFile); err == nil { //nolint:gosec // G304: operator-selected credential sink; only its digest is public
 			sum := sha256.Sum256(raw)
@@ -233,15 +258,14 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 	if err := json.NewEncoder(output).Encode(result); err != nil {
 		return err
 	}
-	if !result.OK {
-		return errors.New("install did not pass all checks; follow the reported remedies")
-	}
-	return nil
+	return installResultError(result)
 }
 
 // The CLI's tabwriter aligns AUTH with its header. Require a recognized
 // successful probe; registration alone does not prove the forge still works.
-func verifiedUpstreams(raw []byte) bool {
+func verifiedUpstreams(raw []byte) bool { return upstreamsVerifiedOrPending(raw, false) }
+
+func upstreamsVerifiedOrPending(raw []byte, allowPending bool) bool {
 	authAt, rows := -1, 0
 	for _, line := range strings.Split(string(raw), "\n") {
 		fields := strings.Fields(line)
@@ -259,7 +283,8 @@ func verifiedUpstreams(raw []byte) bool {
 		}
 		status := strings.TrimSpace(line[authAt:])
 		healthy := status == "ok" || (strings.HasPrefix(status, "ok (read ") && strings.HasSuffix(status, ")")) || (fields[1] != "ssh" && status == "-")
-		if !healthy {
+		pending := allowPending && status == "pending: the forge has not accepted this deploy key"
+		if !healthy && !pending {
 			return false
 		}
 		rows++

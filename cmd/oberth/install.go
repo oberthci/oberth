@@ -41,7 +41,7 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	options.yes = flags.Bool("yes", false, "confirm the reviewed install on the selected kubeconfig context")
 	options.plan = flags.Bool("plan", false, "inspect the selected cluster and preflight checks without installing")
 	options.verify = flags.Bool("verify", false, "check an existing installation without changing it")
-	options.jsonOutput = flags.Bool("json", false, "emit the public install result and verification checks as JSON")
+	options.jsonOutput = flags.Bool("json", false, "emit public install result/checks as JSON (exit 0: passed, 3: installed/action needed, 1: failure)")
 	flags.StringVar(&cfg.AdminCSRPath, "admin-csr", "", "local client CSR for the first admin; certificate written to <CSR>.crt, no bearer by default")
 	flags.BoolVar(&cfg.AdminBearer, "admin-bearer", false, "also mint a bearer token with --admin-csr")
 	flags.StringVar(&cfg.AdminSSHPublicKeyPath, "admin-ssh-public-key", "", "local SSH public key for the first admin uplink (file or - for stdin; never a private key)")

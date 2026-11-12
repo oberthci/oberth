@@ -59,7 +59,40 @@ checks. `--json --yes` also verifies after installing. The version 1 result
 contains `ok`, `context`, `server_url`, `mcp_url`, `git_url`, `ca_sha256`
 (SHA-256 of DER CA certificate), `first_uplink` when created in this invocation,
 and the secrets path and digest when written. `checks` contains stable `code`,
-boolean `ok`, and `remedy` for failures. Failed checks return a nonzero exit.
+boolean `ok`, and `remedy` for failures.
+
+### Pending forge authorization
+
+When onboarding a forge, `upstream` contains `name`, `url`, `deploy_public_key`,
+`fingerprint`, `forge_settings_url`, `state` (`pending` or `verified`), and
+`next_command`. The command includes the selected kubeconfig, context, namespace,
+and upstream; run it after authorizing the key. Only public key material is
+included. `checks` contains `code: "upstream_key_pending"`, `ok: false`, the
+`deploy_public_key` inline, and an actionable remedy. If a valid public key is
+unavailable, `upstream_public_key` fails and the result remains a real failure.
+
+Exit **0** means every check passed. Exit **3** means the installation is Ready
+and only forge-key authorization remains. Exit **1** means an installation or
+verification failure; invalid command syntax uses exit **2**. Read JSON even on
+nonzero exit. A readiness, TLS, SSH, or other failure takes precedence over exit
+3. A pending key is not a reason to reinstall or regenerate the admin identity.
+
+`upstream add --yes --no-wait` persists the upstream and prints its public key
+without a forge authentication or repository probe, including when the key
+already exists. SSH host-key pins are still validated and persisted. Pending
+registration counts for readiness once its SSH identity is available. Forge
+acceptance remains a diagnostic, reported by `upstream list --check`.
+
+GitHub deploy keys are per repository: use `/oberth:add-repo` and the specific
+repository's **Settings → Deploy keys**, with write access. An organization URL
+has no deploy-key page. For organization-wide access, `forge_settings_url` points
+to the machine user's SSH-key settings; sign in as that machine user, add the
+public key, and grant that account write access to the intended repositories.
+Do not attach the install key to the operator's personal account by default.
+The result also supplies machine-user settings links for GitLab and Codeberg;
+for other forges the field is empty instead of inventing a settings URL.
+If no repository exists yet, connect to MCP now and onboard one later.
+
 Tokens and subprocess diagnostics never enter this response. For a remote
 install, copy the recovery file through the authenticated SSH channel directly
 into the user's chosen secure destination, never into tool output.

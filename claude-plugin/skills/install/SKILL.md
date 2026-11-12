@@ -76,11 +76,24 @@ Arguments given to the command: `$ARGUMENTS`
    When the install stops part-way, the secrets file it names is kept and
    may hold the only copy of the OpenBao root token and unseal key. Leave it
    where it is, tell the user, and give a rerun a new `--secrets-file` name.
-7. **Finish what the output asks for:**
-   - When a deploy key is printed, the user adds it at the forge as a key with
-     write access to the organization's repositories. Then run the `upstream
-     add` command the output printed, exactly as printed: it names the
-     cluster that was installed on.
+7. **Add this key at the returned link with write access.** Parse the JSON even
+   on exit code 3 (installed, action needed). For `upstream_key_pending`, show
+   `upstream.deploy_public_key`, `upstream.fingerprint`, and
+   `upstream.forge_settings_url` first. The registered upstream is pending;
+   Oberth is Ready and MCP/mTLS can connect before the forge accepts the key.
+   - GitHub deploy keys belong to a **specific repository**, not an organization.
+     Use `/oberth:add-repo` and that repository's Settings → Deploy keys, with
+     write access. With no repository yet, the user can create one later.
+   - For organization-wide use, the returned GitHub settings link is the SSH-key
+     page: sign in as a **machine user** with write access to the intended
+     repositories and add the key there. Do not add it to the operator's personal
+     account by default. The same choice applies to other supported forges.
+   - After the key is authorized, run `upstream.next_command` exactly as provided;
+     it includes the selected cluster and upstream. Then verify again. Use the
+     JSON fields, never discarded text output or a guessed upstream name.
+   - Exit code 0 means all checks passed; exit code 1 is a real failure. Resolve
+     failing checks before declaring success. Do not reinstall merely because
+     the deploy key is pending.
    - When the output says the client files were kept because they differ,
      this machine is set up for another Oberth server. Ask the user before
      rerunning with `--replace-client-files`; never add it yourself.

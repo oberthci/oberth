@@ -139,7 +139,7 @@ func TestClaudePluginManifests(t *testing.T) {
 		"install": {
 			"name: install", "description:", "$ARGUMENTS", "--secrets-file", "--context", "--expected-host-fingerprint",
 			"Never pick one yourself", "Never print, read, grep, copy or upload the secrets file", "scripts/fetch-oberth", "allowed-tools:", "trust on first",
-			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "exactly as printed", "--replace-client-files",
+			"never interrupt it", "Never delete, move, truncate or overwrite a secrets file", "upstream.next_command", "--replace-client-files",
 		},
 		"add-repo": {
 			"name: add-repo", "allowed-tools:", "--consent", "push.pushOption=oberth.assist=1", "Never set assist globally", "settings URL", "Never overwrite", "events_wait", "run_wait", "No token",

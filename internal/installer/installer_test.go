@@ -3854,119 +3854,38 @@ func TestFinishInstallOnboardingSkipOnEmptyUpstream(t *testing.T) {
 	}
 }
 
-func TestFinishInstallOnboardingKeyRegistrationExhausted(t *testing.T) {
+func TestFinishInstallPendingKeyDoesNotWaitForForge(t *testing.T) {
 	t.Parallel()
-	// Every upstream add prints the key but never registers the upstream —
-	// the incomplete-bootstrap contract when the forge has not accepted the
-	// key (the pod exits zero without creating the upstream row).
-	host := &fakeOberthHost{t: t, addResults: []fakeAddResult{{registers: false}}}
-	var buf bytes.Buffer
-	// Input: upstream URL, generate, then 3 Enter presses for registration attempts.
-	input := strings.NewReader("codeberg.org/acme\ng\n\n\n\n")
-	deps := onboardingDeps(t, host, &buf, input, true)
-	cfg := Config{}
-	_ = cfg.Validate()
-
-	err := finishInstallTest(context.Background(), cfg, deps, &buf)
-	if !errors.Is(err, ErrOnboardingPartial) {
-		t.Fatalf("exhausted key registration must return ErrOnboardingPartial, got %v", err)
-	}
-	// Registration only completes through a RERUN of upstream add (the
-	// incomplete bootstrap registers nothing), so every verification attempt
-	// must rerun it: 1 initial + 3 attempts.
-	if host.addCalls != 4 {
-		t.Fatalf("each verification attempt must rerun upstream add: want 4 calls, got %d", host.addCalls)
-	}
-	for i, argv := range host.addArgv {
-		joined := strings.Join(argv, " ")
-		if !strings.Contains(joined, "--yes") || !strings.Contains(joined, "--no-wait") {
-			t.Fatalf("upstream add call %d must pass --yes --no-wait, got: %s", i, joined)
-		}
-	}
-	output := buf.String()
-	if !strings.Contains(output, "register key, Enter to verify") {
-		t.Fatalf("output missing key-registration prompt:\n%s", output)
-	}
-	if !strings.Contains(output, "not accepted after 3 attempts") || !strings.Contains(output, "oberth upstream add") {
-		t.Fatalf("exhausted key registration must fall back to manual steps:\n%s", output)
-	}
-	if host.uplinkStdin != "" {
-		t.Fatal("uplink must not run when the upstream key is not accepted")
-	}
-}
-
-func TestFinishInstallOnboardingKeyRegistrationSecondAttempt(t *testing.T) {
-	t.Parallel()
-	// First add: key generated, forge has not accepted it (incomplete, exit
-	// zero, nothing registered). The operator registers the key and presses
-	// Enter; the rerun's probe passes and registers the upstream.
-	host := &fakeOberthHost{
-		t:            t,
-		addResults:   []fakeAddResult{{registers: false}, {registers: true}},
-		uplinkOutput: "Uplink token for tester@box (shown once):\ntok_456\n",
-	}
+	host := &fakeOberthHost{t: t, addResults: []fakeAddResult{{registers: true, out: fakeDeployKeyLine + "\nUpstream codeberg registered; deploy key pending.\n"}}, uplinkOutput: "Uplink token for tester@box (shown once):\n" + testOnceCredential + "\n"}
 	keyPath, _ := stageUplinkKeyPair(t)
-	// Input: upstream URL, generate, one Enter to verify, uplink key path,
-	// identity, SSH config decline.
-	input := strings.NewReader("codeberg.org/acme\ng\n\n" + keyPath + "\ntester@box\nn\n")
-	var buf bytes.Buffer
-	deps := onboardingDeps(t, host, &buf, input, true)
+	var output bytes.Buffer
+	deps := onboardingDeps(t, host, &output, strings.NewReader("codeberg.org/acme\ng\n"+keyPath+"\ntester@box\nn\n"), true)
+	deps.CredentialSink = func(string, string) {}
 	cfg := Config{}
-	_ = cfg.Validate()
-
-	if err := finishInstallTest(context.Background(), cfg, deps, &buf); err != nil {
+	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if host.addCalls != 2 {
-		t.Fatalf("want initial add plus one verification rerun, got %d calls", host.addCalls)
+	err := finishInstallTest(t.Context(), cfg, deps, &output)
+	if !errors.Is(err, ErrUpstreamKeyPending) || host.addCalls != 1 || host.uplinkStdin == "" || !strings.Contains(output.String(), "Ready") {
+		t.Fatal("pending forge prevented local onboarding or readiness")
 	}
-	output := buf.String()
-	if !strings.Contains(output, fakeDeployKeyLine) {
-		t.Fatalf("generated key must be shown before verification:\n%s", output)
-	}
-	if !strings.Contains(output, "accepted") {
-		t.Fatalf("second-attempt registration must be accepted:\n%s", output)
-	}
-	if !strings.Contains(output, "tok_456") || !strings.Contains(output, "Credentials (save now, shown once)") {
-		t.Fatalf("uplink must complete after late registration:\n%s", output)
+	if strings.Contains(output.String(), "Enter to verify") {
+		t.Fatal("install waited for forge authorization")
 	}
 }
 
-func TestFinishInstallOnboardingSurfacesUnexpectedProbeError(t *testing.T) {
+func TestFinishInstallOnboardingSurfacesHostPinFailure(t *testing.T) {
 	t.Parallel()
-	// Attempt classification is an allowlist (issue #89): only the publickey
-	// auth rejection is the quiet "not yet" state. A knownhosts mismatch is
-	// an active MITM indicator and must be shown to the operator, not
-	// rendered as another silent retry.
-	mitm := fakeAddResult{
-		out: fakeDeployKeyLine + "\nupstream SSH identity is not ready: app: upstream SSH authentication probe failed: ssh: handshake failed: knownhosts: key mismatch\n",
-		err: errors.New("exit status 1"),
-	}
-	host := &fakeOberthHost{
-		t:          t,
-		addResults: []fakeAddResult{{registers: false}, mitm, {registers: false}, {registers: false}},
-	}
-	var buf bytes.Buffer
-	input := strings.NewReader("codeberg.org/acme\ng\n\n\n\n")
-	deps := onboardingDeps(t, host, &buf, input, true)
+	host := &fakeOberthHost{t: t, addResults: []fakeAddResult{{out: fakeDeployKeyLine + "\nknownhosts: key mismatch", err: errors.New("host pin rejected")}}}
+	var output bytes.Buffer
+	deps := onboardingDeps(t, host, &output, strings.NewReader("codeberg.org/acme\ng\n"), true)
 	cfg := Config{}
-	_ = cfg.Validate()
-
-	err := finishInstallTest(context.Background(), cfg, deps, &buf)
-	if !errors.Is(err, ErrOnboardingPartial) {
-		t.Fatalf("exhausted key registration with probe errors must return ErrOnboardingPartial, got %v", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
 	}
-	output := buf.String()
-	// The borderless format separates the ⚠ symbol (ANSI-colorized) from the
-	// status word "error", so check for the word alone.
-	if !strings.Contains(output, "Key registration") || !strings.Contains(output, "error") {
-		t.Fatalf("unexpected probe failure must mark the attempt row:\n%s", output)
-	}
-	if !strings.Contains(output, "knownhosts: key mismatch") {
-		t.Fatalf("MITM indicator must be surfaced verbatim:\n%s", output)
-	}
-	if !strings.Contains(output, "Last verification error:") {
-		t.Fatalf("exhausted flow must include the last verification error:\n%s", output)
+	err := finishInstallTest(t.Context(), cfg, deps, &output)
+	if err == nil || errors.Is(err, ErrOnboardingPartial) || !strings.Contains(err.Error(), "key mismatch") {
+		t.Fatal("host pin error was not a real failure")
 	}
 }
 
@@ -4021,7 +3940,8 @@ func TestRegisterUpstreamQuietClassifiesOutcomes(t *testing.T) {
 			wantKey:        true,
 		},
 		{
-			name: "auth rejection is the expected pending state",
+			name:    "nonzero auth error is not a successful pending registration",
+			wantErr: "unable to authenticate",
 			result: fakeAddResult{
 				out: fakeDeployKeyLine + "\nupstream SSH identity is not ready: " + authRejection + "\n",
 				err: errors.New("exit status 1"),
@@ -4075,36 +3995,6 @@ func TestRegisterUpstreamQuietClassifiesOutcomes(t *testing.T) {
 				t.Fatalf("upstream add must pass --yes --no-wait, got: %s", joined)
 			}
 		})
-	}
-}
-
-// TestIsExpectedRegistrationPendingMirrorsPodClassifier guards the textual
-// contract with the pod-side allowlist (app.isExpectedAuthRejection, issue
-// #89): ONLY the x/crypto/ssh publickey auth-rejection signature is the
-// expected quiet state; every other failure class must classify as
-// unexpected so callers surface it.
-func TestIsExpectedRegistrationPendingMirrorsPodClassifier(t *testing.T) {
-	t.Parallel()
-	for _, expected := range []string{
-		"ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey], no supported methods remain",
-		"SSH: UNABLE TO AUTHENTICATE",
-		"no supported methods remain",
-	} {
-		if !isExpectedRegistrationPending(expected) {
-			t.Fatalf("auth rejection must classify as pending: %q", expected)
-		}
-	}
-	for _, unexpected := range []string{
-		"ssh: handshake failed: knownhosts: key mismatch",
-		"ssh: handshake failed: knownhosts: key is unknown",
-		"ssh: handshake failed: EOF",
-		"dial tcp: connection refused",
-		"app: parse SSH identity: invalid format",
-		"verify authenticated Git write capability: EOF",
-	} {
-		if isExpectedRegistrationPending(unexpected) {
-			t.Fatalf("unexpected failure must NOT classify as pending: %q", unexpected)
-		}
 	}
 }
 

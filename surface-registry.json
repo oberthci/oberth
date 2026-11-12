@@ -547,6 +547,30 @@
     "value:uplink_redeem": {
       "doc_anchor": "docs/uplink-invites.md#enrollment-boundary-and-recovery",
       "test_ref": "internal/service/uplink_invite_http_test.go TestInviteRedemptionOverMCPAndMutualTLS"
+    },
+    "flag:no-wait": {
+      "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
+      "test_ref": "cmd/oberth/upstream_pending_test.go TestNoWaitPendingGitHubIsReadyWithCertificateMCP"
+    },
+    "value:upstream_key_pending": {
+      "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
+      "test_ref": "internal/installer/upstream_result_test.go TestInstallJSONPendingUpstreamCarriesAction"
+    },
+    "value:deploy_public_key": {
+      "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
+      "test_ref": "internal/installer/upstream_result_test.go TestInstallJSONPendingUpstreamCarriesAction"
+    },
+    "value:forge_settings_url": {
+      "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
+      "test_ref": "internal/installer/upstream_result_test.go TestInstallJSONPendingUpstreamCarriesAction"
+    },
+    "value:next_command": {
+      "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
+      "test_ref": "internal/installer/upstream_result_test.go TestInstallJSONPendingUpstreamCarriesAction"
+    },
+    "value:upstream_public_key": {
+      "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
+      "test_ref": "internal/installer/upstream_result_test.go TestInstallUpstreamResultRejectsPrivateMaterial"
     }
   }
 }

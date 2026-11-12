@@ -156,6 +156,12 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 	projectedPrivate, projectedPrivateErr := readPrivateIdentityFile(bootstrap.PrivateKeyPath)
 	projectedHosts, projectedHostsErr := readKnownHostsFile(bootstrap.KnownHostsPath, address)
 	if !bootstrap.Repin && projectedPrivateErr == nil && projectedHostsErr == nil && len(projectedHosts.keys) > 0 {
+		if bootstrap.NoWait {
+			if err := bootstrap.printPersistedIdentity(projectedPrivate, host, port); err != nil {
+				return UpstreamSSHIdentity{}, err
+			}
+			return projectedPrivate.publicIdentity(false), ErrUpstreamBootstrapIncomplete
+		}
 		if err := bootstrap.Probe(ctx, baseURL, projectedPrivate.privateKey, projectedHosts.body); err != nil {
 			if displayErr := bootstrap.printPersistedIdentity(projectedPrivate, host, port); displayErr != nil {
 				return UpstreamSSHIdentity{}, displayErr
@@ -248,6 +254,12 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 		}
 		return identity.publicIdentity(true), fmt.Errorf("%w: register the printed public key with the upstream, then rerun upstream add", ErrUpstreamBootstrapIncomplete)
 	}
+	if bootstrap.NoWait {
+		if err := bootstrap.printPersistedIdentity(identity, host, port); err != nil {
+			return UpstreamSSHIdentity{}, err
+		}
+		return identity.publicIdentity(false), ErrUpstreamBootstrapIncomplete
+	}
 	advertised := false
 	if recovered {
 		if err := bootstrap.printPersistedIdentity(identity, host, port); err != nil {
@@ -260,9 +272,6 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 			if displayErr := bootstrap.printPersistedIdentity(identity, host, port); displayErr != nil {
 				return UpstreamSSHIdentity{}, displayErr
 			}
-		}
-		if bootstrap.NoWait {
-			return UpstreamSSHIdentity{}, fmt.Errorf("app: upstream SSH authentication probe failed: %w", err)
 		}
 		if !bootstrap.waitForRegistration(ctx, baseURL, host, port, identity.privateKey, knownHosts) {
 			return UpstreamSSHIdentity{}, fmt.Errorf("%w: the persisted key was not accepted in time (%w); register it, then rerun upstream add", ErrUpstreamBootstrapIncomplete, err)

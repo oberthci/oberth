@@ -67,11 +67,18 @@ func main() {
 			os.Exit(130)
 		}
 		_, _ = fmt.Fprintln(os.Stderr, "oberth:", err)
-		if errors.Is(err, errUsage) {
-			os.Exit(2)
-		}
-		os.Exit(1)
+		os.Exit(cliFailureExitCode(err))
 	}
+}
+
+func cliFailureExitCode(err error) int {
+	if errors.Is(err, errUsage) {
+		return 2
+	}
+	if errors.Is(err, installer.ErrUpstreamKeyPending) {
+		return 3
+	}
+	return 1
 }
 
 const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, unseal, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, client, preflight, or version"

@@ -89,6 +89,8 @@ type InstallDeps struct {
 	// matched by the TUI's stepNameToIndex map.
 	StepProgressSink func(step, status string)
 	UplinkCreated    func(identity string)
+	upstreamResult   func(InstallUpstream)
+	upstream         *InstallUpstream
 	secretsSaved     func(keys []string)
 	// ReleaseGetter fetches the signed release (default: HTTPS).
 	ReleaseGetter releaseverify.Getter
@@ -405,6 +407,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 		credentialsAtOnce: secretsFileSink,
 		StepProgressSink:  deps.StepProgressSink,
 		UplinkCreated:     deps.UplinkCreated,
+		upstreamResult:    deps.upstreamResult,
 		ReleaseGetter:     deps.ReleaseGetter,
 		releaseKey:        deps.releaseKey,
 	})
