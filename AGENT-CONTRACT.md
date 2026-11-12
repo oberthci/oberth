@@ -3454,3 +3454,9 @@ signals include SIGQUIT. Startup reclaims recognized, unlocked copies whose age
 is known; active, unmarked, malformed and future-dated objects are preserved.
 Cleanup errors are surfaced. A surviving child or absent next startup extends
 the residual window; this is neither a hard wall-clock bound nor secure erasure.
+
+Combined bootstrap contract: a loopback API that refuses scratch writes cannot
+qualify a fresh installation. Its existing-release maintenance plans may remain
+green only with the stored choice and an explicit unverified warning. The cell
+requires the corresponding fresh plan to fail its hard NetworkPolicy check; it
+does not manufacture enforcement evidence or weaken verification semantics.

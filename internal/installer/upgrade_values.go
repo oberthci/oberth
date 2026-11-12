@@ -97,6 +97,11 @@ func readUpgradeStoredValues(ctx context.Context, namespace, revision string, de
 	if values == nil {
 		values = map[string]any{}
 	}
+	if deps.Output != nil {
+		describeStoredPolicy(deps.Output, values)
+		_, _ = fmt.Fprintln(deps.Output, "NetworkPolicy capability: unverified (not probed during upgrade maintenance); run install --verify for an explicit security check.")
+	}
+
 	return values, nil
 }
 
@@ -116,10 +121,6 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
 	if err != nil {
 		return preparedUpgradeValues{}, err
-	}
-	if deps.Output != nil {
-		describeStoredPolicy(deps.Output, values)
-		_, _ = fmt.Fprintln(deps.Output, "NetworkPolicy capability: unverified (not probed during upgrade maintenance); run install --verify for an explicit security check.")
 	}
 	if err := checkRemovedUpgradeValues(cfg, values); err != nil {
 		return preparedUpgradeValues{}, err

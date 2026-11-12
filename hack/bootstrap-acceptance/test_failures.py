@@ -75,6 +75,55 @@ class PlanResultSemantics(unittest.TestCase):
             self.assertIs(caught.exception, original)
 
 
+class RestrictedPlanFixture(unittest.TestCase):
+    def test_only_the_denied_scratch_namespace_attempt_is_expected(self):
+        ci.assert_restricted_probe_requests([('GET', '/api/v1/nodes'),
+                                             ('POST', '/api/v1/namespaces')])
+        for method, path in [('POST', '/api/v1/pods'), ('PUT', '/api/v1/namespaces'),
+                             ('PATCH', '/api/v1/namespaces'), ('DELETE', '/api/v1/namespaces')]:
+            with self.subTest(method=method), self.assertRaises(Refused):
+                ci.assert_restricted_probe_requests([(method, path)])
+
+    def test_maintenance_preserves_the_stored_choice_without_claiming_enforcement(self):
+        result = dict(review=dict(network_policy='true'), checks=[dict(
+            code='network_policy', ok=False, warning=True, reason='unverified')])
+        ci.require_maintenance_policy(result)
+        for change in [dict(ok=True), dict(warning=False), dict(warning='true'),
+                       dict(reason='enforced')]:
+            with self.subTest(change=change), self.assertRaises(Refused):
+                ci.require_maintenance_policy(result | dict(checks=[result['checks'][0] | change]))
+        with self.assertRaises(Refused):
+            ci.require_maintenance_policy(result | dict(review=dict(network_policy='false')))
+
+    def test_real_fresh_refusal_must_identify_the_hard_policy_check_and_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            probe = Probe(root, root, 'selected', root / 'unused')
+            probe.last_returncode = 1
+            error = Refused('private detail', stage='plan-fresh-policy-refusal',
+                            check='network_policy', package=ci.CLI_PACKAGE)
+            with patch.object(ci, 'verify_plan', side_effect=error):
+                ci.require_fresh_policy_refusal(probe, [])
+                probe.last_returncode = 2
+                with self.assertRaises(Refused) as caught:
+                    ci.require_fresh_policy_refusal(probe, [])
+                self.assertEqual(caught.exception.check, 'fresh-policy-diagnostic')
+
+    def test_unexpected_fresh_failure_keeps_its_original_identity(self):
+        error = Refused('private detail', stage='plan-fresh-policy-refusal',
+                        check='command-timeout', package=ci.CLI_PACKAGE)
+        with patch.object(ci, 'verify_plan', side_effect=error):
+            with self.assertRaises(Refused) as caught:
+                ci.require_fresh_policy_refusal(None, [])
+        self.assertIs(caught.exception, error)
+
+    def test_a_green_fresh_result_cannot_satisfy_the_refusal_control(self):
+        with patch.object(ci, 'verify_plan', return_value={}):
+            with self.assertRaises(Refused) as caught:
+                ci.require_fresh_policy_refusal(None, [])
+        self.assertEqual(caught.exception.check, 'fresh-policy-refusal')
+
+
 class FixtureIdentity(unittest.TestCase):
     def passes(self):
         return [dict(Package=package, Test=test, Action='pass') for package, test in ci.TESTS]

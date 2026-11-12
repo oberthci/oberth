@@ -39,7 +39,15 @@ time. The CLI build and one adverse fixture reuse the same race build flags/cach
 It also builds the source CLI and runs real `install --plan --json --answers`
 against a loopback TLS API with two context names. A CLI context overrides the
 answers context; an unknown or ambiguous selection fails. The fixture asserts
-that no API mutation occurs. Separate assertions cover mTLS acceptance, wrong
+that no API mutation occurs. Narrow Helm stubs model an existing release with
+stored policy enabled, and then no release. The TLS fixture accepts reads only;
+the live probe reaches a scratch namespace POST which receives 403 before its
+body is read. Maintenance plans retain an honest unverified warning and stored
+choice. The actual fresh plan must exit 1 with the hard `network_policy` check;
+no unverified fresh result becomes green. Unexpected mutation attempts still
+refuse. This restricted-cluster contract does not claim CNI enforcement: the
+ordinary installer race tests cover synthetic enforced/denied/control/recovery
+behavior and cleanup. Separate assertions cover mTLS acceptance, wrong
 CA/client refusal, redirects, unsafe Helm archive members, exact pushed SHA,
 assisted non-evidence classification, and secret scanning across chunk boundaries.
 Plan verification honors the installer's advisory `warning: true` checks:
