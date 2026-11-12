@@ -209,7 +209,7 @@ func validateNonrootReuseFor(values map[string]any, namespace string, nonroot ar
 	if objects, ok := values["extraObjects"].([]any); ok {
 		rest := make([]any, 0, len(objects))
 		for _, object := range objects {
-			if !isSyncLimitsConfigMap(object, namespace) {
+			if !isRetiredSyncLimitsObject(object, namespace) {
 				rest = append(rest, object)
 			}
 		}
@@ -288,15 +288,16 @@ func prepareNonrootArgoValues(ctx context.Context, cfg Config, deps Deps, exists
 		return "", nil, noop, err
 	}
 	profile := nonrootArgoValues(cfg.ArgoNamespace, nonroot)
-	if cfg.ArgoSyncLimits == nil {
-		// This values file replaces the release's extraObjects. Keep the
-		// limits ConfigMap an earlier run wrote there (#1517): a list without
-		// it would make Helm delete it under the Workflows whose semaphores
-		// name it. A requested limit set goes through --set-json instead.
-		if object := storedSyncLimitsConfigMap(stored, cfg.ArgoNamespace); object != nil {
+	// Keep reviewed unrelated objects; replace only the exact profile ConfigMap and retired limits.
+	if objects, ok := stored["extraObjects"].([]any); ok {
+		for _, object := range objects {
+			if isRetiredSyncLimitsObject(object, cfg.ArgoNamespace) || isNonrootProfileObject(object, cfg.ArgoNamespace) {
+				continue
+			}
 			profile["extraObjects"] = append(profile["extraObjects"].([]any), object)
 		}
 	}
+
 	encoded, err := json.Marshal(profile)
 	if err != nil {
 		return "", nil, noop, fmt.Errorf("encode built-in Argo profile: %w", err)

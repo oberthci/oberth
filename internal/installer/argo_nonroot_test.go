@@ -226,7 +226,7 @@ func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
 // --argo-sync-limit carries the stored ConfigMap into its values file, and
 // a run with limits leaves it to --set-json.
 func TestNonrootArgoReuseAcceptsInstallerLimits(t *testing.T) {
-	limits := syncLimitsConfigMap(map[string]int{"kvm": 1, "heavy-go": 2}, DefaultArgoNamespace)
+	limits := map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": retiredSyncLimitsName, "namespace": DefaultArgoNamespace}, "data": map[string]any{"kvm": "1", "heavy-go": "2"}}
 	roundTrip := func(t *testing.T, values map[string]any) (map[string]any, []byte) {
 		t.Helper()
 		encoded, err := json.Marshal(values)
@@ -258,7 +258,6 @@ func TestNonrootArgoReuseAcceptsInstallerLimits(t *testing.T) {
 		`{"controller":{"namespaceParallelism":"4"}}`,
 		`{"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"oberth-sync-limits","namespace":"oberth-argo"},"data":{"kvm":"1"}},{"kind":"Secret"}]}`,
 		`{"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"oberth-sync-limits","namespace":"elsewhere"},"data":{"kvm":"1"}}]}`,
-		`{"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"oberth-sync-limits","namespace":"oberth-argo"},"data":{"kvm":"x"}}]}`,
 	} {
 		var values map[string]any
 		if err := json.Unmarshal([]byte(data), &values); err != nil {
@@ -294,13 +293,10 @@ func TestNonrootArgoReuseAcceptsInstallerLimits(t *testing.T) {
 	}
 	cfg := Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}
 	objects := profileValues(t, cfg)
-	if len(objects) != 2 || !isSyncLimitsConfigMap(objects[1], DefaultArgoNamespace) {
-		t.Fatalf("profile re-run dropped the stored limits ConfigMap: %v", objects)
+	if len(objects) != 1 || isRetiredSyncLimitsObject(objects[0], DefaultArgoNamespace) {
+		t.Fatalf("retired limits kept: %v", objects)
 	}
-	cfg.ArgoSyncLimits = map[string]int{"kvm": 3}
-	if objects := profileValues(t, cfg); len(objects) != 1 {
-		t.Fatalf("requested limits duplicated in the profile values: %v", objects)
-	}
+
 }
 
 // Stored values outside the allowlist refuse the profile unless the operator

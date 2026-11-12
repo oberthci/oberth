@@ -159,11 +159,9 @@ type Config struct {
 	// ArgoParallelism and ArgoNamespaceParallelism set the managed Argo
 	// controller's workflow limits (controller.parallelism and
 	// controller.namespaceParallelism); nil keeps the release's value.
-	// ArgoSyncLimits, when non-nil, replaces the semaphore limits in the
-	// ConfigMap oberth-sync-limits (docs/where-limits-live.md).
 	ArgoParallelism          *int
 	ArgoNamespaceParallelism *int
-	ArgoSyncLimits           map[string]int
+
 	// argoProfile is the nonroot controller profile the Argo phase rendered
 	// (#1517): the built-in config plus the effective controller limits.
 	argoProfile               *argoworkflow.NonrootProfile

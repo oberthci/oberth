@@ -155,14 +155,18 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	}
 	defer cleanup()
 	cfg.argoProfile, result.Profile = profile, profile
+	retiredArgs, retiredValues, err := removeSyncLimitsValues(ctx, deps, ns, exists)
+	if err != nil {
+		return result, err
+	}
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
-	if (profileFile != "" || argoLimitsRequested(cfg)) && action == actionSkip {
+	if (profileFile != "" || argoLimitsRequested(cfg) || retiredValues) && action == actionSkip {
 		action = actionUpgrade
 	}
 	switch action {
 	case actionSkip:
 		result.AlreadyInstalled = true
-		return result, nil
+		return result, deleteRetiredSyncLimits(ctx, cfg, deps, ns)
 	case actionUpgrade:
 		result.Upgraded = true
 		if result.InstalledVersion != "" && result.InstalledVersion != result.TargetVersion {
@@ -175,19 +179,17 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		_, _ = fmt.Fprintln(deps.Output, "Installing Argo Workflows...")
 	}
 
-	if action != actionInstall {
-		if err := handOverSyncLimits(ctx, cfg, deps, ns); err != nil {
-			return result, err
-		}
-	}
 	args := ArgoHelmArgs(cfg)
 	if profileFile != "" {
 		args = append(args, "--values", profileFile)
 	}
+	if profileFile == "" {
+		args = append(args, retiredArgs...)
+	}
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}
-	return result, nil
+	return result, deleteRetiredSyncLimits(ctx, cfg, deps, ns)
 }
 
 // installArgoPinningProfile installs Argo and records the nonroot profile it
@@ -241,7 +243,7 @@ func ArgoHelmArgs(cfg Config) []string {
 		"--reuse-values",
 		"--wait",
 	}
-	return append(args, argoLimitArgs(cfg, ns)...)
+	return append(args, argoLimitArgs(cfg)...)
 }
 
 // VerifyArgoController checks that a controller is actually watching the

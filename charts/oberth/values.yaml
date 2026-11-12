@@ -36,10 +36,7 @@ uplinkTokens:
   maxTTL: 8760h # 365-day hard ceiling; may be lowered
 
 replicaCount: 1
-# Run limits live in Argo since v0.20.0 (docs/where-limits-live.md): how many
-# pipeline Workflows run at once is the argo-workflows release's
-# controller.parallelism, and shared step limits are the ConfigMap
-# oberth-sync-limits that release renders. Oberth submits every run at once.
+# Argo controller.parallelism controls the number of concurrent pipeline Workflows.
 # Automatic retries per lineage for eligible branch infrastructure failures
 # (retry_hint class infrastructure, never code); each retains the original
 # queue position and is audited. 0 disables, at most 5.

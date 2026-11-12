@@ -22,12 +22,12 @@ type installFlagOptions struct {
 	argoNamespaceParallelism *int
 	alsoUpstreams            stringList
 	credentialedSecretPaths  stringList
-	argoSyncLimits           stringList
-	tlsExtraDNSNames         stringList
-	tlsExtraIPs              stringList
-	tlsRemoveDNSNames        stringList
-	tlsRemoveIPs             stringList
-	valuesFiles              stringList
+
+	tlsExtraDNSNames  stringList
+	tlsExtraIPs       stringList
+	tlsRemoveDNSNames stringList
+	tlsRemoveIPs      stringList
+	valuesFiles       stringList
 }
 
 func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
@@ -138,9 +138,6 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 			"the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2)")
 	options.argoNamespaceParallelism = flags.Int("argo-namespace-parallelism", -1,
 		"Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value)")
-	flags.Var(&options.argoSyncLimits, "argo-sync-limit",
-		"semaphore limit key=N in the ConfigMap oberth-sync-limits, rendered by the argo-workflows release (repeatable; "+
-			"the set given replaces the previous one; see docs/where-limits-live.md)")
 	flags.Var(&options.credentialedSecretPaths, "credentialed-secret-path",
 		"full KV data path approved in the secret-access table (repeatable, exactly the string "+
 			"`oberth access allow` records, e.g. oberth/data/release/cosign-secret); synced into the "+
@@ -189,7 +186,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		options.tlsRemoveDNSNames = append(stringList(nil), cfg.TLSRemoveDNSNames...)
 		options.tlsRemoveIPs = append(stringList(nil), cfg.TLSRemoveIPs...)
 		options.valuesFiles = append(stringList(nil), cfg.ValuesFiles...)
-		options.argoSyncLimits = nil
 		*options.timeout = cfg.Timeout
 		if *options.timeout == 0 {
 			*options.timeout = installer.DefaultTimeout
@@ -230,16 +226,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			cfg.ArgoNamespaceParallelism = options.argoNamespaceParallelism
 		}
 	})
-	if len(options.argoSyncLimits) > 0 {
-		cfg.ArgoSyncLimits = map[string]int{}
-		for _, value := range options.argoSyncLimits {
-			key, limit, err := installer.ParseArgoSyncLimit(value)
-			if err != nil {
-				return usageError(err)
-			}
-			cfg.ArgoSyncLimits[key] = limit
-		}
-	}
 
 	deps := installer.InstallDeps{Output: output, Input: input}
 	if *options.answersPath != "" {
