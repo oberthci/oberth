@@ -49,11 +49,37 @@ func baseNonrootProfile() argoworkflow.NonrootProfile {
 // storedParallelism reads controller.<key> from helm get values output.
 func storedParallelism(values map[string]any, key string) int {
 	controller, _ := values["controller"].(map[string]any)
-	value, _ := controller[key].(float64)
-	if value < 0 || value > argoworkflow.MaxNonrootParallelism || value != math.Trunc(value) {
-		return 0
+	value, _ := nonrootParallelism(controller[key])
+	return value
+}
+
+// nonrootParallelism accepts exact stored JSON integers and ordinary in-memory
+// values used by callers, without rounding a fractional or overflowing value.
+func nonrootParallelism(value any) (int, bool) {
+	var n int64
+	switch value := value.(type) {
+	case json.Number:
+		var err error
+		n, err = value.Int64()
+		if err != nil {
+			return 0, false
+		}
+	case float64:
+		if value < 0 || value > argoworkflow.MaxNonrootParallelism || value != math.Trunc(value) {
+			return 0, false
+		}
+		n = int64(value)
+	case int:
+		n = int64(value)
+	case int64:
+		n = value
+	default:
+		return 0, false
 	}
-	return int(value)
+	if n < 0 || n > argoworkflow.MaxNonrootParallelism {
+		return 0, false
+	}
+	return int(n), true
 }
 
 // effectiveNonrootProfile is the profile for this run's limits: a requested
@@ -180,8 +206,8 @@ func validateNonrootReuseFor(values map[string]any, namespace string, nonroot ar
 		// the controller's own parallelism, non-negative whole numbers.
 		for _, key := range []string{"parallelism", "namespaceParallelism"} {
 			if value, exists := controller[key]; exists {
-				n, ok := value.(float64)
-				if !ok || n < 0 || n > maxArgoParallelism || n != math.Trunc(n) {
+				_, ok := nonrootParallelism(value)
+				if !ok {
 					return fmt.Errorf("nonroot profile requires a non-negative integer controller.%s", key)
 				}
 				controllerAllowed[key] = value
@@ -227,7 +253,7 @@ func validateNonrootReuseFor(values map[string]any, namespace string, nonroot ar
 					return false
 				}
 			} else {
-				// Helm's JSON numbers decode as float64; compare canonical JSON
+				// Compare canonical JSON for exact numbers and in-memory integers
 				// so the exact supported integer file modes survive reuse.
 				actualJSON, actualErr := json.Marshal(value)
 				expectedJSON, expectedErr := json.Marshal(expected)
@@ -260,7 +286,9 @@ func prepareNonrootArgoValues(ctx context.Context, cfg Config, deps Deps, exists
 		if err != nil {
 			return "", nil, noop, errors.New("cannot inspect existing Argo profile settings")
 		}
-		if err := json.Unmarshal(encoded, &stored); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(encoded))
+		decoder.UseNumber()
+		if err := decoder.Decode(&stored); err != nil {
 			return "", nil, noop, errors.New("cannot decode existing Argo profile settings")
 		}
 		if err := checkNonrootReuse(encoded, stored, cfg.ArgoNamespace, cfg.ArgoValuesReviewed); err != nil {

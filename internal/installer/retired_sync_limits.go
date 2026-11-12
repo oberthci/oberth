@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,7 +43,9 @@ func removeSyncLimitsValues(ctx context.Context, deps Deps, ns string, exists bo
 		return nil, false, fmt.Errorf("read Argo values to remove retired semaphore management: %w", err)
 	}
 	var stored map[string]any
-	if err = json.Unmarshal(raw, &stored); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err = decoder.Decode(&stored); err != nil {
 		return nil, false, fmt.Errorf("decode Argo values: %w", err)
 	}
 	objects, _ := stored["extraObjects"].([]any)
