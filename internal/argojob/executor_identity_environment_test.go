@@ -77,7 +77,7 @@ func TestExecutorIdentityRejectsDuplicateEnvironment(t *testing.T) {
 				continue
 			}
 			for _, expected := range executorEnvironment {
-				for _, duplicate := range []string{"unsafe", "identical"} {
+				for _, duplicate := range []string{"conflicting", "identical"} {
 					t.Run(shape+"/"+target+"/"+expected[0]+"/"+duplicate, func(t *testing.T) {
 						value := "author-wins"
 						if duplicate == "identical" {
@@ -147,7 +147,7 @@ func TestExecutorIdentityRejectsEnvironmentDrift(t *testing.T) {
 						case "missing":
 							c.Env = append(c.Env[:j], c.Env[j+1:]...)
 						case "wrong":
-							c.Env[j].Value = "unsafe"
+							c.Env[j].Value = "drifted"
 						case "valueFrom":
 							c.Env[j].ValueFrom = &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}
 						}

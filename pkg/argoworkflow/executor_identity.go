@@ -5,13 +5,11 @@ import (
 	"strings"
 )
 
-// ExecutorTokenVolumeName and ExecutorTokenMountPath belong exclusively to
+// ExecutorIdentityVolumeName and ExecutorIdentityMountPath belong exclusively to
 // the server-delivered Argo executor identity, never authored containers.
 const (
-	// #nosec G101 -- reserved runtime volume name, not credential material.
-	ExecutorTokenVolumeName = "exec-sa-token"
-	// #nosec G101 -- reserved runtime directory, not credential material.
-	ExecutorTokenMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
+	ExecutorIdentityVolumeName = "exec-sa-token"
+	ExecutorIdentityMountPath  = "/var/run/secrets/kubernetes.io/serviceaccount"
 )
 
 func admitExecutorContainerName(location, name string, main bool) []error {
@@ -42,7 +40,7 @@ func serverOwnedName(name string) bool {
 // namespace. Authored references must never alias controller scratch or identity.
 func reservedArgoVolumeName(name string) bool {
 	switch name {
-	case ExecutorTokenVolumeName, "tmp-dir-argo", "var-run-argo", "argo-staging", "argo-env-config", "input-artifacts", "kubeconfig":
+	case ExecutorIdentityVolumeName, "tmp-dir-argo", "var-run-argo", "argo-staging", "argo-env-config", "input-artifacts", "kubeconfig":
 		return true
 	default:
 		return strings.HasPrefix(name, "artifact-plugin-")

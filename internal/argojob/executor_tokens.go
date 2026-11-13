@@ -28,10 +28,10 @@ import (
 const executorTokenWaiter = "oberth-executor-token"
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenVolume = argoworkflow.ExecutorTokenVolumeName
+const executorTokenVolume = argoworkflow.ExecutorIdentityVolumeName
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenDir = argoworkflow.ExecutorTokenMountPath
+const executorTokenDir = argoworkflow.ExecutorIdentityMountPath
 
 // executorKubeconfig is the only fixed name the executor identity has inside
 // the tmpfs. Argo's wait container reads outputs.parameters valueFrom.path and

@@ -43,7 +43,7 @@ func helperPathMayBeShadowed(value string) bool {
 		return true
 	}
 	cleaned := path.Clean(value)
-	for _, root := range []string{"/run/oberth", "/var/run/oberth", ExecutorTokenMountPath, "/run/secrets/kubernetes.io/serviceaccount"} {
+	for _, root := range []string{"/run/oberth", "/var/run/oberth", ExecutorIdentityMountPath, "/run/secrets/kubernetes.io/serviceaccount"} {
 		if cleaned == root || strings.HasPrefix(cleaned, root+"/") {
 			return true
 		}

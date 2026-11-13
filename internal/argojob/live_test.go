@@ -721,6 +721,7 @@ func TestLiveExecutorIdentityDefaulting(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			evidence := t.ArtifactDir()
 			t.Cleanup(func() {
 				if !t.Failed() {
 					return
@@ -737,12 +738,10 @@ func TestLiveExecutorIdentityDefaulting(t *testing.T) {
 						t.Logf("target %s/%s image=%s mounts=%v", pod.Name, c.Name, c.Image, c.VolumeMounts)
 					}
 				}
-				if dir := os.Getenv("OBERTH_ARGO_LIVE_EVIDENCE"); dir != "" {
-					body, marshalErr := json.MarshalIndent(pods, "", "  ")
-					if marshalErr == nil {
-						if writeErr := os.WriteFile(filepath.Join(dir, shape+"-failed-pods.json"), body, 0o600); writeErr != nil {
-							t.Log(writeErr)
-						}
+				body, marshalErr := json.MarshalIndent(pods, "", "  ")
+				if marshalErr == nil {
+					if writeErr := os.WriteFile(filepath.Join(evidence, shape+"-failed-pods.json"), body, 0o600); writeErr != nil {
+						t.Log(writeErr)
 					}
 				}
 			})
@@ -825,17 +824,16 @@ spec:
 			if checked != 1 {
 				t.Fatalf("checked %d workflow Pods, want one", checked)
 			}
-			if dir := os.Getenv("OBERTH_ARGO_LIVE_EVIDENCE"); dir != "" {
-				// Pod specs contain references and public trust, never delivered token data.
-				body, marshalErr := json.MarshalIndent(pods, "", "  ")
-				must(marshalErr)
-				must(os.WriteFile(filepath.Join(dir, shape+"-pods.json"), body, 0o600))
-				stored, getErr := cluster.workflows.Get(ctx, request.Name, metav1.GetOptions{})
-				must(getErr)
-				body, marshalErr = json.MarshalIndent(stored, "", "  ")
-				must(marshalErr)
-				must(os.WriteFile(filepath.Join(dir, shape+"-workflow.json"), body, 0o600))
-			}
+			// Pod specs contain references and public trust, never delivered token
+			// data. Keep them with go test -artifacts for the testdata replay.
+			body, marshalErr := json.MarshalIndent(pods, "", "  ")
+			must(marshalErr)
+			must(os.WriteFile(filepath.Join(evidence, shape+"-pods.json"), body, 0o600))
+			stored, getErr := cluster.workflows.Get(ctx, request.Name, metav1.GetOptions{})
+			must(getErr)
+			body, marshalErr = json.MarshalIndent(stored, "", "  ")
+			must(marshalErr)
+			must(os.WriteFile(filepath.Join(evidence, shape+"-workflow.json"), body, 0o600))
 		})
 	}
 }
