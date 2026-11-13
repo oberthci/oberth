@@ -369,7 +369,7 @@ one with a non-admin token is still answered with the server's refusal.
 | `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, admission context, superseded status, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained timing |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
-| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
+| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; an in-flight create is cancelled and any claimed Workflow is deleted; the run is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run (`id`): step, pod, attempt, `held_since`, kubelet `deadline`, `patch_capable`, `released`; plus the run's assist record and the `assist.*` policy. Read-only. See [assisted continuation](assisted-continuation.md) |
 | `run_hold_exec` | Run one bounded argv (no shell) inside a held step's main container (`id`, `argv`, optional `step`, `stdin`, `timeout_s`). Any uplink whose scope covers the run's repository, or admin; bounded by `assist.execTimeout`/`execOutputBytes`; serialized per run; recorded and audited (`run.assist.exec`) before the command runs, which marks the run assisted |
 | `run_hold_patch` | Apply a unified `diff` to the held step's writable `/work/src` through the server's Pod helper (`id`, `diff`, optional `step`): exact context, clean relative paths only, no renames/binaries/`.git`/symlinks, bounded by `assist.patchMaxBytes`/`patchMaxFiles`; the diff's sha256 is recorded and audited as `run.assist.patch` before it is applied, which marks the run assisted |
@@ -581,7 +581,7 @@ step: a single step can exceed a model's context window.
 | `branch_deletion_list` | Upstream state of accepted branch deletions: pending, propagated, failed or skipped, with global `counts` and per-page `page_counts` (unscoped admin only) |
 | `branch_deletion_resolve` | Close failed branch deletion records as skipped with a reason line, by id or (without ids) those whose branch is gone from the mirror; no ref changes; audited (unscoped admin only) |
 | `receive_outbox` | Show, retry or abandon a receive record that blocks its repository; retry/abandon audited (unscoped admin only) |
-| `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page); `own:true` keeps the caller's own runs, `held:true` the running assisted runs with a parked hold (one unpaged list) |
+| `run_list` | List runs with repository/ref/SHA, superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page); `own:true` keeps the caller's own runs, `held:true` the running assisted runs with a parked hold (one unpaged list) |
 | `audit_list` | Admin-only: verified audit-chain entries newest first, filtered by action prefix, actor, repo and time range (paged) |
 | `schedule_list` | Schedules declared in `.oberth/schedule.yaml`: cron, next run, last outcome, pause (scoped uplinks see their repositories) |
 | `schedule_pause` | Admin-only: pause one schedule entry (audited `schedule.pause`) |
@@ -722,8 +722,7 @@ head or guarantee that a matching run is safe to cancel.
 
 Use `run_list({"superseded":true})` or `/api/runs?superseded=true` to find
 matching runs in one read, optionally with `repo`, `ref` and `view`. Omitted or
-false leaves the list unfiltered. Filtering happens before the page limit,
-while queue positions retain their global rank. To inspect only active work,
+false leaves the list unfiltered. Filtering happens before the page limit. To inspect only active work,
 use `view:"active"`; results can include running work as well as queued work.
 Review each matching run and explicitly call the admin `run_cancel` tool with
 its ID and a reason. Listing never cancels work; existing publication-custody
@@ -943,8 +942,8 @@ It returns `id`, `repo` (repository name), `ref`, `sha`,
 `burn`, `name`, `status`, `started_at`, and `finished_at`; unknown times are null
 and an empty step list is `[]`. Burn names distinguish steps with the same name in different burns. This read omits
 retained timing, the full repository record, diagnostics, and telemetry. It
-does not load the retained timing record. Omit `summary` or pass false for
-the existing full `Run`/`Steps`/`Repository` response. Authorization and upstream scope are
+does not load the retained timing record. Pass `"summary":false` for
+the full `Run`/`Steps`/`Repository` response with retained Workflow/step timing. Authorization and upstream scope are
 the same for compact and full reads.
 
 ### Server-side wait correlation

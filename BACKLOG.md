@@ -32,13 +32,8 @@ marked **deadline-bound** carry an external clock.
   declarations, explicit repository-pair grants and read-only delivery are
   implemented. Publication and hosted positive/negative proof remain required;
   see [pinned sources](docs/pinned-sources.md).
-- **Resource measurement completion** (from #754): per-template history and
-  read-only suggestions are implemented. Complete representative measurements
-  and commit reviewed Pod resources in repository YAML. Kubernetes places the
-  Pods; Oberth never rewrites resources. See [measured requests](docs/measured-requests.md).
 - **Adaptive GOMAXPROCS** (from #755): auto-derive GOMAXPROCS from the Workflow Pod's
-  cgroup quota. The admission load guard half of the original entry shipped
-  in v0.10.57 as size-weighted scheduler admission.
+  cgroup quota.
 - **Branch Workflow egress policy option** (from #691 residual): the inline
   pinned-tool pattern requires egress, and branch Workflow Pods hold no secrets — but
   an optional chart NetworkPolicy restricting branch-pipeline egress to declared
@@ -143,9 +138,3 @@ single-upstream-only by design).
   and the chart pins the index digest. The former runner image and its
   evidence tooling are retired: Argo Workflow templates use repository-declared tool images and commands
   with server-injected source and an Oberth credential wrapper.
-- **Node Budget — continued qualification** (OBERTH-RELEASE-012): declared
-  admission classes, per-template Pod requests, resource measurement and
-  numeric recommendations are implemented. Continue qualifying capacity
-  accounting under contention and incomplete observations; see
-  [admission and native synchronization](docs/native-synchronization.md) and
-  [runtime capacity](docs/runtime-admission-capacity.md).

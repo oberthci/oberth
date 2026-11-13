@@ -1377,7 +1377,7 @@ Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>
 Usage: oberth runs [flags]
        oberth runs cancel --repo <repo> --ref <branch> [flags] (see oberth runs cancel --help)
   -active
-        only queued and running runs, in scheduling order, with queue position and wait reason
+        only queued and running runs, in scheduling order, with wait reason
   -all
         follow pages to the oldest run
   -before string
@@ -1750,10 +1750,6 @@ Flags:
         OpenBao Kubernetes auth role bound to the Oberth ServiceAccount
   -secretstore-sa-token string
         optional ServiceAccount token path override for the OpenBao login
-  -secretstore-transit-key string
-        OpenBao transit key for trusted Plan artifacts
-  -secretstore-transit-mount string
-        OpenBao transit mount for trusted Plan artifacts (enables trusted Plan/Apply with --secretstore-transit-key)
   -source-allowlist string
         JSON map of consumer upstream/org/repository to allowed pinned source repositories; empty denies all (default "{}")
   -ssh-host-key string
