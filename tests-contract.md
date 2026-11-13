@@ -594,6 +594,10 @@ reason, cancelled display and agent event without an infrastructure retry hint.
 The isolated real-Argo B1/B2 race proofs retain their classification protections.
 
 `TestRemovedExecutionFormatsRefusedWithoutReseeding` exercises Create and Adopt
-with removed helper policies and observer wrappers, proving that refusal does
+with removed helper policies, proving that refusal does
 not seed source or create another Workflow. Captured controller Pods remain
 immutable security evidence; current helper budgets are tested independently.
+
+`TestAdmittedUsageCommandSurvivesCreateRetryAndAdoption` compiles an admitted
+command under `/run/oberth/usage/`, reconciles a lost create acknowledgement,
+then retries and adopts without reseeding, recreating or changing the command.

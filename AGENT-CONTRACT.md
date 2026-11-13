@@ -3394,5 +3394,6 @@ install after approval; maintenance preserves its stored policy choice. Plans
 provide no enforcement evidence. Fresh install apply and explicit verification
 retain their enforcement gates.
 
-Recovery supports only the current helper-storage policy and server command
-format. Removed formats are refused before reseeding or adopting a Workflow.
+Recovery requires the current helper-storage policy before reseeding or
+adopting a Workflow. Admitted commands are preserved without interpreting
+server command wrappers.

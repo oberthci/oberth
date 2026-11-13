@@ -934,8 +934,7 @@ func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string, 
 		}
 		execPaths := extractExecPaths(template)
 		if len(execPaths) == 0 {
-			// A materialize invocation does not declare --path flags; it reads
-			// from environment variables set by secretstore exec. No path check needed.
+			// This invocation has no explicit --path flags to check.
 			return
 		}
 		if len(declaredPaths) == 0 {
@@ -1307,9 +1306,7 @@ const (
 
 	// ReleaseTokenVolumeName and ReleaseTokenMountPath deliver the projected
 	// ServiceAccount token a release-tier step logs in to OpenBao with. The
-	// path is the one Kubernetes has always used, because that is what every
-	// Vault client, including the secretstore exec configuration in a repository,
-	// reads by default.
+	// mount uses the conventional Kubernetes token path read by secretstore exec.
 	// #nosec G101 -- a volume name and a mount path. The token they deliver is
 	// minted by the kubelet inside the Pod; no credential exists here.
 	ReleaseTokenVolumeName = "oberth-release-token"

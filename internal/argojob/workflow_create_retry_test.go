@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -304,4 +305,52 @@ func TestWorkflowCreateRetryWrappedCancellationDoesNotWait(t *testing.T) {
 			t.Fatalf("wrapped cancellation retried/waited or lost uncertainty: posts=%d elapsed=%s err=%v", len(client.posts), time.Since(start), err)
 		}
 	})
+}
+
+// Authored commands keep their admission semantics at every recovery boundary.
+func TestAdmittedUsageCommandSurvivesCreateRetryAndAdoption(t *testing.T) {
+	config := seedTestConfig()
+	kube := fake.NewClientset()
+	runningSeedPods(kube)
+	client := &createRetryWorkflowClient{}
+	client.postHook = func(_ context.Context, workflow *wfv1.Workflow) (*wfv1.Workflow, error) {
+		client.stored = workflow.DeepCopy()
+		client.stored.UID = "persisted-workflow"
+		return nil, apierrors.NewServerTimeout(workflowTestResource, "post", 0)
+	}
+	controller, err := NewController(client, kube, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seeds []seedExecCall
+	controller.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seeds), config))
+	source := strings.Replace(greedyDocument, "command: [/bin/true]", "command: [/run/oberth/usage/tool]", 1)
+	request := testRequest(pipeline.TriggerCI, source)
+	request.SourceDir = writeCheckout(t)
+	// Actual Create admits and compiles the document, then reconciles a lost
+	// POST acknowledgement. It must neither rewrite the command nor POST again.
+	if name, err := controller.Create(t.Context(), request); err != nil || name != request.Name {
+		t.Fatalf("ambiguous Create = %q, %v", name, err)
+	}
+	before, seedCount := client.stored.DeepCopy(), len(seeds)
+	t.Run("create-retry", func(t *testing.T) {
+		if name, err := controller.Create(t.Context(), request); err != nil || name != request.Name {
+			t.Fatalf("retry of admitted command = %q, %v", name, err)
+		}
+	})
+	t.Run("adoption", func(t *testing.T) {
+		binding, found, err := controller.Adopt(t.Context(), AdoptionRequest{
+			Name: request.Name, RunID: request.RunID, Ref: request.Ref, SHA: request.SHA,
+			Trigger: request.Trigger, RunTrigger: argoworkflow.RunTriggerBranch,
+		})
+		if err != nil || !found || binding.UID != before.UID {
+			t.Fatalf("adoption of admitted command = %v, %v, %v", binding.UID, found, err)
+		}
+	})
+	if len(client.posts) != 1 || len(seeds) != seedCount || !reflect.DeepEqual(before, client.stored) {
+		t.Fatal("recovery reseeded, recreated or mutated the submitted Workflow")
+	}
+	if got := client.stored.Spec.Templates[0].Container.Command; !reflect.DeepEqual(got, []string{"/run/oberth/usage/tool"}) {
+		t.Fatalf("admitted command changed: %q", got)
+	}
 }

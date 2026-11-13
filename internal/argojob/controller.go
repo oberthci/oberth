@@ -173,12 +173,12 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
-		if err := validateWorkflowRecovery(existing); err != nil {
+		if err := validateHelperStorage(existing); err != nil {
 			return "", err
 		}
 		request.SourceVolume = controller.expectedSourceVolume(request)
 		// Reconstruct the current delivery footprint without reseeding.
-		// Removed execution formats have already been refused.
+		// Unsupported helper policies have already been refused.
 		intended, buildErr := Build(controller.config, request)
 		if buildErr != nil {
 			return "", buildErr

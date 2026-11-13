@@ -224,15 +224,10 @@ func TestRemovedExecutionFormatsRefusedWithoutReseeding(t *testing.T) {
 	}
 	current := client.stored.DeepCopy()
 	seedCount := len(seeds)
-	for _, policy := range []string{"", "argo-256Mi-512Mi-v1", "argo-256Mi-512Mi-v2", "argo-256Mi-512Mi-v3", "unknown-policy", "observer-wrapper"} {
+	for _, policy := range []string{"", "argo-256Mi-512Mi-v1", "argo-256Mi-512Mi-v2", "argo-256Mi-512Mi-v3", "unknown-policy"} {
 		t.Run(policy, func(t *testing.T) {
 			client.stored = current.DeepCopy()
-			if policy == "observer-wrapper" {
-				c := client.stored.Spec.Templates[0].Container
-				c.Command = append([]string{"/run/oberth/usage/oberth", "internal-step-exec", "--"}, c.Command...)
-			} else {
-				client.stored.Annotations[helperStorageAnnotation] = policy
-			}
+			client.stored.Annotations[helperStorageAnnotation] = policy
 			if _, err := controller.Create(t.Context(), request); err == nil {
 				t.Fatal("removed execution format recovered")
 			}
@@ -241,10 +236,6 @@ func TestRemovedExecutionFormatsRefusedWithoutReseeding(t *testing.T) {
 			}
 			adopted, binding := adoptionWorkflow()
 			adopted.Annotations[helperStorageAnnotation] = policy
-			if policy == "observer-wrapper" {
-				adopted.Annotations[helperStorageAnnotation] = helperStoragePolicy
-				adopted.Spec.Templates[0].Container = client.stored.Spec.Templates[0].Container.DeepCopy()
-			}
 			observer := &Controller{workflows: &staticWorkflowClient{workflow: adopted}, config: Config{Namespace: adopted.Namespace}}
 			if _, found, err := observer.Adopt(t.Context(), binding); found || !errors.Is(err, ErrAdoptionRefused) {
 				t.Fatalf("removed format adopted: %v %v", found, err)
