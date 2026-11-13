@@ -247,6 +247,10 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 	dialer := net.Dialer{Timeout: 5 * time.Second}
 	connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(address, ssh))
 	r.check("ssh_reachable", err == nil, "Make the advertised SSH port reachable or set --client-host and --client-ssh-port.")
+	if err != nil {
+		r.Checks[len(r.Checks)-1].Reason = "SSH endpoint verification at " + r.GitURL + ": " + err.Error()
+		r.Checks[len(r.Checks)-1].Remedy = clientEndpointRemedy(cfg, deps)
+	}
 	if connection != nil {
 		_ = connection.Close()
 	}

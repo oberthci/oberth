@@ -20,11 +20,11 @@ func (e *installStepError) Error() string {
 }
 
 func clientRoutingRemedy(cfg Config, deps Deps) string {
-	_, https := clientPorts(deps)
+	ssh, https := clientPorts(deps)
 	if cfg.Namespace == "" {
 		cfg.Namespace = DefaultNamespace
 	}
-	command := printedKubectl(cfg, []string{"--context", deps.ContextName, "-n", cfg.Namespace, "port-forward", "service/oberth", https + ":443"})
+	command := printedKubectl(cfg, []string{"--context", deps.ContextName, "-n", cfg.Namespace, "port-forward", "service/oberth", https + ":https", ssh + ":ssh"})
 	return "The client endpoint must be reachable from this machine. Start the documented port-forward in another terminal (" + command + ") for a loopback client host, or choose a reachable --client-host with the required DNS/hosts entry and matching TLS names."
 }
 

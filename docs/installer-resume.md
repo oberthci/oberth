@@ -34,6 +34,24 @@ Existing `Host oberth` SSH configuration is updated to the selected SSH port and
 uplink key. An unconfigured Claude plugin has no MCP entry; configure it through
 `/oberth:connect` after enrollment.
 
+## Keep an already-issued admin certificate
+
+Keep the original `--admin-csr`, `--admin-ssh-public-key` and `--uplink-identity`
+answers when resuming after enrollment succeeded but upstream registration failed.
+The installer reads `<CSR>.crt` itself. A valid client-auth certificate matching
+that CSR's public key and the admin identity is kept unchanged; enrollment
+and credential minting are skipped while the remaining install steps continue.
+An omitted identity is recovered from the matching certificate. A malformed,
+expired, wrong-purpose, mismatched or symlinked certificate stops recovery before
+cluster changes. Keep that file and report the error; do not delete or replace it
+to force another enrollment. Reuse does not establish successful authentication
+against the selected deployment; finish the documented verification/connect checks.
+
+When client routing is the only unfinished step, follow the printed port-forward
+with **both** chosen local ports, mapped to the Service's `https` and `ssh` ports.
+The names resolve custom Service port numbers too. Run the printed verification
+command afterward; HTTPS alone cannot satisfy the SSH verification check.
+
 ## Restore forge access
 
 The database retains its upstream registrations, but deploy keys belong to the

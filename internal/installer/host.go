@@ -421,10 +421,8 @@ func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) er
 		}
 		cfg.adminCSR = raw
 		if !cfg.DryRun {
-			if _, err := os.Lstat(cfg.AdminCSRPath + ".crt"); err == nil {
-				return errors.New("admin certificate output already exists; choose a new CSR path")
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return err
+			if err := reuseAdminCertificate(cfg); err != nil {
+				return &installStepError{check: CheckResult{Code: "admin_certificate", Reason: "admin certificate output already exists but cannot be reused: " + err.Error(), Remedy: "Keep the certificate and select the matching original CSR and identity, or use documented certificate renewal/enrollment; do not delete it to force a retry."}}
 			}
 		}
 	}

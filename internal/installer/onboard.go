@@ -76,7 +76,7 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 
 	// The admin identity is independent of forge registration. Save its token
 	// immediately, including when subsequent onboarding is partial.
-	if cfg.AdminSSHPublicKeyPath != "" {
+	if cfg.AdminSSHPublicKeyPath != "" && !cfg.uplinkOnboarded {
 		if err := defaultOnboardingIdentity(&cfg, deps, tw); err != nil {
 			return err
 		}
@@ -93,6 +93,11 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 		cfg.uplinkOnboarded, cfg.adminToken, cfg.UplinkIdentity = true, token, identity
 		if deps.UplinkCreated != nil {
 			deps.UplinkCreated(identity)
+		}
+	} else if cfg.AdminSSHPublicKeyPath != "" && cfg.AdminCSRPath != "" {
+		tw.AppendRow("Client certificate", cfg.AdminCSRPath+".crt", "✓ kept (matching CSR)", false)
+		if deps.UplinkCreated != nil {
+			deps.UplinkCreated(cfg.UplinkIdentity)
 		}
 	}
 	existing, err := listUpstreams(ctx, cfg, deps)
