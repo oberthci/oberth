@@ -76,6 +76,7 @@ func hotfixHelm(t *testing.T, values map[string]any, output *bytes.Buffer) (Deps
 
 func TestUpgradeStoredInstallerValuesRenderAfterCleanup(t *testing.T) {
 	values := hotfixStoredValues(t)
+	values["argo"].(map[string]any)["executorScratchSizeLimit"] = "1Gi"
 	var output bytes.Buffer
 	deps, chart := hotfixHelm(t, values, &output)
 	prepared, err := prepareUpgradeValues(t.Context(), UpgradeConfig{Namespace: "oberth", ChartOverride: chart}, deps, chart, "example.invalid/server@sha256:"+strings.Repeat("1", 64))
@@ -87,12 +88,13 @@ func TestUpgradeStoredInstallerValuesRenderAfterCleanup(t *testing.T) {
 	argo := values["argo"].(map[string]any)
 	delete(argo, "controllerProfile")
 	delete(argo, "controllerProfileConfigMap")
+	delete(argo, "executorScratchSizeLimit")
 	want, _ := json.Marshal(values)
 	got, _ := json.Marshal(prepared.storedSnapshot)
 	if !bytes.Equal(got, want) {
 		t.Fatalf("another stored value changed: got %s want %s", got, want)
 	}
-	const omitted = "Omitted retired installer-written stored values: secretstore.transit.enabled, secretstore.transit.mount, secretstore.transit.key, argo.controllerProfile, argo.controllerProfileConfigMap\n"
+	const omitted = "Omitted retired installer-written stored values: secretstore.transit.enabled, secretstore.transit.mount, secretstore.transit.key, argo.controllerProfile, argo.controllerProfileConfigMap, argo.executorScratchSizeLimit\n"
 	if strings.Count(output.String(), omitted) != 1 || strings.Count(output.String(), "Omitted retired installer-written") != 1 {
 		t.Fatal("omission list differs", output.String())
 	}

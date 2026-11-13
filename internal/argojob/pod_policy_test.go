@@ -185,7 +185,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 		}
 	}
 	for _, shape := range []string{"container", "script"} {
-		wf := authoredNonrootWithScratch(t, shape == "script", "128Mi")
+		wf := authoredNonrootFixture(t, shape == "script")
 		pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), wf)
 		if accepts(pod) {
 			t.Fatalf("hostile native %s executor context was repaired or admitted", shape)

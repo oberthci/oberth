@@ -44,11 +44,6 @@ spec:
 
 func authoredNonrootFixture(t *testing.T, script bool) *wfv1.Workflow {
 	t.Helper()
-	return authoredNonrootWithScratch(t, script, "")
-}
-
-func authoredNonrootWithScratch(t *testing.T, script bool, scratch string) *wfv1.Workflow {
-	t.Helper()
 	document := authoredNonrootDocument
 	if script {
 		wf, err := argoworkflow.Decode([]byte(document))
@@ -66,7 +61,6 @@ func authoredNonrootWithScratch(t *testing.T, script bool, scratch string) *wfv1
 		document = string(encoded)
 	}
 	config := testConfig()
-	config.ExecutorScratchSizeLimit = scratch
 	config.CICacheRoot = "/server/cache/ci"
 	config.ReleaseCacheRoot = "/server/cache/release"
 	request := testRequest(pipeline.TriggerCI, document)
