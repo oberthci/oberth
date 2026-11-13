@@ -108,7 +108,7 @@ func TestRefusalPlannerCycleMetadataAndBounds(t *testing.T) {
 	}
 }
 
-func TestRefusalPlannerCycleFreeDuplicatesRemainRefused(t *testing.T) {
+func TestNativePlannerRetainsCycleFreeRepeatedDisplayRows(t *testing.T) {
 	workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{
 		{Name: "root", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "left", Template: "left"}, {Name: "right", Template: "right"}}}},
 		{Name: "left", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "shared", Template: "shared"}}}},
@@ -116,8 +116,8 @@ func TestRefusalPlannerCycleFreeDuplicatesRemainRefused(t *testing.T) {
 		{Name: "shared", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "run", Template: "leaf"}}}},
 		{Name: "leaf", Container: &corev1.Container{Image: "registry.example.test/runner:1"}},
 	}}}
-	if _, err := PlanSteps(workflow); err == nil || !strings.Contains(err.Error(), "duplicate step key") {
-		t.Fatalf("cycle-free repeated rows were not refused: %v", err)
+	if plan, err := PlanSteps(workflow); err != nil || len(plan.Steps) != 2 || plan.BackEdgeCut {
+		t.Fatalf("native repeated rows were refused: %+v %v", plan, err)
 	}
 }
 

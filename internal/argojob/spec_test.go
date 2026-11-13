@@ -1133,7 +1133,7 @@ func TestBranchAndPromotionNeverGetCredentialedSA(t *testing.T) {
 // PlannedSteps has the same check for `oberth validate`, but the scheduler's
 // recordStepPlan deliberately swallows plan errors, so without this gate a
 // colliding pipeline would submit and execute.
-func TestBuildRejectsDuplicateStepKeysAtSubmission(t *testing.T) {
+func TestBuildAllowsDuplicateDisplayKeysAtSubmission(t *testing.T) {
 	// A Steps entrypoint with two sequential step groups, each containing a
 	// step named "deploy" that invokes the same container template. At the
 	// entrypoint level (no enclosing DAG), BurnAndStep("", "deploy") yields
@@ -1157,11 +1157,8 @@ spec:
       command: [/bin/true]
 `
 	_, err := Build(testConfig(), testRequest(pipeline.TriggerCI, duplicateStepDoc))
-	if err == nil {
-		t.Fatal("Build accepted a pipeline with duplicate step keys; expected rejection before Workflow creation")
-	}
-	if !strings.Contains(err.Error(), "duplicate step key") {
-		t.Fatalf("error = %v, want mention of duplicate step key", err)
+	if err != nil {
+		t.Fatalf("Build refused repeated display names: %v", err)
 	}
 }
 

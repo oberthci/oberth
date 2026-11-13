@@ -32,11 +32,6 @@ type PlannedStep struct {
 	Template *wfv1.Template `json:"-"`
 }
 
-// MaxPlannedSteps bounds the enumeration. A repository-authored document is
-// untrusted input, and a nest of DAGs can express more pods than the template count, so the walk carries its own ceiling
-// rather than trusting the product of the two.
-const MaxPlannedSteps = 512
-
 // MaxPlanVisits bounds planner work independently of rows, memoization and
 // recursive shape. This is a planner safety limit, not an Argo workload budget.
 const MaxPlanVisits = 65536
@@ -117,21 +112,6 @@ func PlanSteps(workflow *wfv1.Workflow) (StepPlan, error) {
 	if err != nil {
 		return plan, err
 	}
-	// Reject duplicate normalized (burn, step) keys. Two branches invoking
-	// the same nested DAG can normalize to the same key; the durable result
-	// model cannot represent them (deduplicateRetries collapses duplicates),
-	// so one branch's result and log would disappear.
-	seen := make(map[[2]string]struct{}, len(walk.steps))
-	for _, step := range walk.steps {
-		key := [2]string{step.Stage, step.Step}
-		if _, duplicate := seen[key]; duplicate {
-			return plan, fmt.Errorf("argoworkflow: duplicate step key (%s, %s) — "+
-				"two pipeline branches invoke templates that normalize to the same burn/step name; "+
-				"rename one of the invoking tasks to disambiguate",
-				step.Stage, step.Step)
-		}
-		seen[key] = struct{}{}
-	}
 	return plan, nil
 }
 
@@ -163,10 +143,7 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 		return fmt.Errorf("argoworkflow: pipeline nests templates deeper than %d levels", MaxIdentityWalkDepth)
 	}
 	visit := planVisit{template: template, enclosing: enclosing}
-	if hasSteps, seen := walk.visits[visit]; seen {
-		if hasSteps {
-			return fmt.Errorf("argoworkflow: duplicate step key below repeated template %q at boundary %q", template.Name, enclosing)
-		}
+	if hasSteps, seen := walk.visits[visit]; seen && !hasSteps {
 		return nil
 	}
 	start, backEdges := len(walk.steps), walk.backEdges
@@ -219,9 +196,6 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 			stage, step := StageAndStep(enclosing, called.name)
 			if stage == "" || step == "" {
 				continue
-			}
-			if len(walk.steps) >= MaxPlannedSteps {
-				return fmt.Errorf("argoworkflow: pipeline declares more than %d steps", MaxPlannedSteps)
 			}
 			walk.steps = append(walk.steps, PlannedStep{Stage: stage, Step: step, Ordinal: len(walk.steps), Secrets: UsesSecrets(target), Credentialed: UsesCredentials(target), Template: target})
 		}

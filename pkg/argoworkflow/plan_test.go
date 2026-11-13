@@ -1,6 +1,7 @@
 package argoworkflow
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -238,10 +239,9 @@ func TestStageAndStepIsTheOneRule(t *testing.T) {
 	}
 }
 
-// TestPlannedStepsRejectsDuplicateStepKeys verifies that a pipeline producing
-// duplicate (burn, step) keys is rejected at plan time because the durable
-// result model cannot represent them (deduplicateRetries collapses duplicates).
-func TestPlannedStepsRejectsDuplicateStepKeys(t *testing.T) {
+// Repeated display names remain valid because runtime rows use node IDs.
+// The declaration walk reads each branch without collapsing it.
+func TestPlannedStepsAllowsDuplicateDisplayKeys(t *testing.T) {
 	// A steps template that runs the same named step in two sequential
 	// groups. Each invocation normalizes to the same (burn, step) key
 	// since the enclosing context is the same.
@@ -271,12 +271,9 @@ spec:
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	_, err = PlannedSteps(workflow)
-	if err == nil {
-		t.Fatal("pipeline with duplicate step keys should be rejected at plan time")
-	}
-	if !strings.Contains(err.Error(), "duplicate step key") {
-		t.Fatalf("error should mention duplicate step key, got: %v", err)
+	planned, err := PlannedSteps(workflow)
+	if err != nil || len(planned) != 2 {
+		t.Fatalf("native repeated display names refused: %+v %v", planned, err)
 	}
 }
 
@@ -415,5 +412,19 @@ func TestPlannedStepsCredentialedIncludesReleaseWIF(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("missing WIF leaf")
+	}
+}
+
+func TestPlannedStepsHasNoDisplayRowCap(t *testing.T) {
+	workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "entry", Templates: []wfv1.Template{
+		{Name: "entry", DAG: &wfv1.DAGTemplate{}},
+		{Name: "leaf", Container: &corev1.Container{Image: "example:tag"}},
+	}}}
+	for i := range 2000 {
+		workflow.Spec.Templates[0].DAG.Tasks = append(workflow.Spec.Templates[0].DAG.Tasks, wfv1.DAGTask{Name: fmt.Sprintf("task-%d", i), Template: "leaf"})
+	}
+	planned, err := PlannedSteps(workflow)
+	if err != nil || len(planned) != 2000 {
+		t.Fatalf("native fan-out was capped: rows=%d error=%v", len(planned), err)
 	}
 }
