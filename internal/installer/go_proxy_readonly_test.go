@@ -88,3 +88,23 @@ func TestRetiredGoProxyVerifyAndPlanKeepReadAccess(t *testing.T) {
 		})
 	}
 }
+
+func TestRetiredGoProxyRestoreRefusesBeforePreparingValues(t *testing.T) {
+	for _, value := range []any{nil, map[string]any{}, map[string]any{"enabled": false}, map[string]any{"enabled": true}} {
+		raw, err := json.Marshal(map[string]any{"argo": map[string]any{"goProxy": value}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps := backupDeps{Deps: Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 2 && args[0] == "get" && args[1] == "values" && args[2] == "oberth" {
+				return bytes.Clone(raw), nil
+			}
+			t.Fatalf("restore proceeded before rejecting retired values: %v", args)
+			return nil, nil
+		}}}
+		args, err := restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: "unread-chart"}, deps, restoreTarget{Overlay: map[string]any{}}, t.TempDir())
+		if args != nil || err == nil || !strings.Contains(err.Error(), "oberth restore changed nothing") || !strings.Contains(err.Error(), "Run oberth upgrade first") {
+			t.Fatalf("restore reused retired proxy values: %v %v", args, err)
+		}
+	}
+}

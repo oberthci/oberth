@@ -98,13 +98,9 @@ func (e *ErrSchemaValidation) Error() string {
 	return fmt.Sprintf("chart schema validation failed: %s", e.Detail)
 }
 
-// upgradePinnedKeys are the helm values protected by the upgrade path. The
-// enablement of an existing private module proxy is preserved from stored values;
-// callers cannot disable that existing routing boundary as an upgrade override.
+// upgradePinnedKeys protect the image and durable compatibility identities.
 var upgradePinnedKeys = map[string]bool{
 	"image.ref":                    true,
-	"argo.goProxy.enabled":         true,
-	"argo.goProxy.port":            true,
 	"compatibility.schemaIdentity": true,
 	"compatibility.auditDomain":    true,
 	"compatibility.witnessKeyInfo": true,

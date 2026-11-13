@@ -30,7 +30,7 @@ func TestModuleEnvironmentOwnedByRepository(t *testing.T) {
 					{Name: "script", Script: script},
 					{Name: "steps", Steps: []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "inline", Inline: &wfv1.Template{Container: inline}}}}}},
 				}}}
-				injectRunEnvironment(workflow, testConfig(), testRequest(trigger, ""), false)
+				injectRunEnvironment(workflow, testConfig(), testRequest(trigger, ""), nil)
 				for _, c := range []*corev1.Container{ordinary, inline, &script.Container} {
 					var actual []corev1.EnvVar
 					for _, env := range c.Env {
