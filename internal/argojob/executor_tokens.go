@@ -2,8 +2,10 @@ package argojob
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,12 +32,24 @@ const executorTokenVolume = "exec-sa-token"
 // #nosec G101 -- fixed runtime path/command, not credential material.
 const executorTokenDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
+// executorKubeconfig is the only fixed name the executor identity has inside
+// the tmpfs. Argo's wait container reads outputs.parameters valueFrom.path and
+// the script result with plain os.ReadFile in its own mount namespace, so a
+// symlink a step plants is resolved against wait's filesystem (#1564). The
+// in-cluster default path /var/run/secrets/kubernetes.io/serviceaccount/token
+// therefore stays absent: the token lives under a 128-bit random directory
+// named only by this kubeconfig, which client-go reads through KUBECONFIG. A
+// symlink target is a string fixed before wait reads it, and the name is
+// created at delivery inside a mount namespace no step can enter.
+// #nosec G101 -- fixed runtime path/command, not credential material.
+const executorKubeconfig = executorTokenDir + "/kubeconfig"
+
 // #nosec G101 -- fixed runtime path/command, not credential material.
 const executorTokenWaitCommand = `trap 'printf "%s\n" "executor token wait terminated" >&2; exit 143' TERM
 trap 'printf "%s\n" "executor token wait interrupted" >&2; exit 130' INT
 printf '%s\n' 'waiting for executor token from Oberth' >&2
 waited_seconds=0
-until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do
+until test -f /var/run/secrets/kubernetes.io/serviceaccount/kubeconfig; do
   if ! sleep 1; then
     printf '%s\n' 'executor token wait failed' >&2
     exit 1
@@ -46,10 +60,6 @@ until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do
   fi
 done
 printf '%s\n' 'executor token ready' >&2`
-
-// Existing Pods retain their exact server-authored waiter across an upgrade.
-// #nosec G101 -- fixed runtime path/command, not credential material.
-const legacyExecutorTokenWaitCommand = "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
 
 // Argo adds a Secret-backed executor volume before applying the server-owned
 // pod patch. Replace that volume with tmpfs and wait for a Pod-bound TokenRequest
@@ -88,6 +98,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 			if value, ok := item.(map[string]any); ok {
 				if name, ok := value["name"].(string); ok {
 					if name == "init" {
+						setExecutorKubeconfig(value)
 						if _, exists := value["resources"]; !pinnedProfile && !exists {
 							value["resources"] = helperResources(workflow, t, storage)
 						}
@@ -104,11 +115,11 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 			result = errors.New("executor initializer missing from server patch")
 			return
 		}
+		// Match Argo: resource/data executors normally run only main. A
+		// resource template gains wait only when it archives logs.
+		hasWait := (t.Resource == nil && t.Data == nil) || (t.Resource != nil && t.SaveLogsAsArtifact())
 		if !pinnedProfile {
 			containers, _ := patch["containers"].([]any)
-			// Match Argo: resource/data executors normally run only main. A
-			// resource template gains wait only when it archives logs.
-			hasWait := (t.Resource == nil && t.Data == nil) || (t.Resource != nil && t.SaveLogsAsArtifact())
 			foundWait, foundMain := false, false
 			for _, item := range containers {
 				value, ok := item.(map[string]any)
@@ -139,6 +150,33 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 			}
 			patch["containers"] = containers
 		}
+		// Every Argo executor container that mounts the identity finds it
+		// through the kubeconfig; the in-cluster default token path is empty.
+		containers, _ := patch["containers"].([]any)
+		executors := []string{}
+		if hasWait {
+			executors = append(executors, "wait")
+		}
+		if t.Resource != nil || t.Data != nil {
+			executors = append(executors, "main")
+		}
+		for _, name := range executors {
+			found := false
+			for _, item := range containers {
+				if value, ok := item.(map[string]any); ok && value["name"] == name {
+					setExecutorKubeconfig(value)
+					found = true
+				}
+			}
+			if !found {
+				value := map[string]any{"name": name}
+				setExecutorKubeconfig(value)
+				containers = append(containers, value)
+			}
+		}
+		if len(containers) != 0 {
+			patch["containers"] = containers
+		}
 
 		patch["initContainers"] = merged
 		patch["$setElementOrder/initContainers"] = order
@@ -154,6 +192,28 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 		}
 	})
 	return result
+}
+
+// executorTokenDirectory names the directory the token is delivered under. It
+// exists only in the Pod's tmpfs and the kubeconfig there, never in a
+// Kubernetes object, so no step can name it before wait reads its outputs.
+func executorTokenDirectory() string {
+	var name [16]byte
+	_, _ = rand.Read(name[:]) // crypto/rand.Read never returns an error.
+	return hex.EncodeToString(name[:])
+}
+
+// setExecutorKubeconfig points an Argo executor container at the delivered
+// kubeconfig. Env merges by name, so Argo's own variables are kept.
+func setExecutorKubeconfig(container map[string]any) {
+	env, _ := container["env"].([]any)
+	for _, item := range env {
+		if value, ok := item.(map[string]any); ok && value["name"] == "KUBECONFIG" {
+			value["value"] = executorKubeconfig
+			return
+		}
+	}
+	container["env"] = append(env, map[string]any{"name": "KUBECONFIG", "value": executorKubeconfig})
 }
 
 func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool, unavailable func()) error {
@@ -270,7 +330,7 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 		if token.Status.Token == "" {
 			return identityFailure("token_response", errors.New("empty executor token response"))
 		}
-		payload := []byte(token.Status.Token + "\n" + wf.Namespace + "\n" + base64.StdEncoding.EncodeToString([]byte(ca.Data["ca.crt"])) + "\n")
+		payload := []byte(token.Status.Token + "\n" + wf.Namespace + "\n" + base64.StdEncoding.EncodeToString([]byte(ca.Data["ca.crt"])) + "\n" + executorTokenDirectory() + "\n")
 		err = controller.execExecutorIdentity(ctx, wf, pod, launcher, payload)
 		clear(payload)
 		if errors.Is(err, errExecutorIdentityTargetGone) {
@@ -336,7 +396,7 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 	found := false
 	for _, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
 		if container.Name == executorTokenWaiter {
-			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || (container.Command[2] != executorTokenWaitCommand && container.Command[2] != legacyExecutorTokenWaitCommand) {
+			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || container.Command[2] != executorTokenWaitCommand {
 				return errors.New("executor identity waiter was modified")
 			}
 			found = true

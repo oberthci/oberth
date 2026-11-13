@@ -2,7 +2,9 @@ package argojob
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +114,57 @@ func TestExecutorIdentityDeliveryUsesSeparateBoundPodAndStdin(t *testing.T) {
 	pod.Spec.Containers[0].VolumeMounts = pod.Spec.InitContainers[0].VolumeMounts
 	if err := validateExecutorTokenTarget(pod, config.SourceSeedImage, false); err == nil {
 		t.Fatal("pipeline could read executor identity")
+	}
+}
+
+// #1564: Argo's wait container resolves outputs.parameters valueFrom.path and
+// the script result in its own mount namespace, so every executor container
+// must authenticate through the kubeconfig instead of the in-cluster default
+// token path, and step containers must not be pointed at it.
+func TestExecutorContainersReadIdentityThroughKubeconfig(t *testing.T) {
+	config := testConfig()
+	config.applyDefaults()
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{
+		{Name: "container", Container: &corev1.Container{Image: "busybox"}},
+		{Name: "script", Script: &wfv1.ScriptTemplate{Container: corev1.Container{Image: "busybox"}, Source: "true"}},
+		{Name: "resource", Resource: &wfv1.ResourceTemplate{Action: "get", Manifest: "{}"}},
+	}}}
+	if err := projectExecutorTokens(wf, config, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range wf.Spec.Templates {
+		var patch corev1.PodSpec
+		if err := json.Unmarshal([]byte(template.PodSpecPatch), &patch); err != nil {
+			t.Fatal(err)
+		}
+		kubeconfig := map[string]bool{}
+		for _, container := range append(append([]corev1.Container{}, patch.InitContainers...), patch.Containers...) {
+			for _, env := range container.Env {
+				if env.Name == "KUBECONFIG" {
+					if env.Value != executorTokenDir+"/kubeconfig" {
+						t.Fatalf("%s/%s KUBECONFIG = %q", template.Name, container.Name, env.Value)
+					}
+					kubeconfig[container.Name] = true
+				}
+			}
+		}
+		want := map[string]bool{"init": true, "wait": true}
+		if template.Resource != nil {
+			want = map[string]bool{"init": true, "main": true}
+		}
+		if !reflect.DeepEqual(kubeconfig, want) {
+			t.Fatalf("%s: executor containers with KUBECONFIG = %v, want %v", template.Name, kubeconfig, want)
+		}
+	}
+}
+
+func TestExecutorTokenDirectoryIsFreshPerDelivery(t *testing.T) {
+	seen := map[string]bool{}
+	for range 64 {
+		name := executorTokenDirectory()
+		if !executorDirectoryName.MatchString(name) || seen[name] {
+			t.Fatalf("directory %q", name)
+		}
+		seen[name] = true
 	}
 }
