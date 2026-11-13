@@ -32,6 +32,14 @@ func TestOberthPostedAuthorMetadataReachesPod(t *testing.T) {
 	}
 	ctx := logging.TestContext(t.Context())
 	woc := newWoc(ctx, wf)
+	if err = woc.updateWorkflowMetadata(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range wf.Spec.WorkflowMetadata.Annotations {
+		if woc.wf.Annotations[key] != value {
+			t.Fatal("workflowMetadata was not applied to Workflow", key)
+		}
+	}
 	tmpl := &wf.Spec.Templates[0]
 	if _, err = woc.controller.kubeclientset.CoreV1().ServiceAccounts(wf.Namespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "oberth-argo-executor", Namespace: wf.Namespace}}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
@@ -39,6 +47,16 @@ func TestOberthPostedAuthorMetadataReachesPod(t *testing.T) {
 	pod, err := woc.createWorkflowPod(ctx, wf.Name, []corev1.Container{*tmpl.Container}, tmpl, &createWorkflowPodOpts{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, annotations := range []map[string]string{wf.Annotations, wf.Spec.WorkflowMetadata.Annotations} {
+		if len(annotations) == 0 {
+			t.Fatal("missing Workflow-object annotation regression input")
+		}
+		for key := range annotations {
+			if _, exists := pod.Annotations[key]; exists {
+				t.Fatal("Workflow-object annotation propagated to Pod", key)
+			}
+		}
 	}
 	for key, want := range map[string]string{"app": "store", "security": "S2"} {
 		if pod.Labels[key] != want {

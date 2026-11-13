@@ -17,12 +17,20 @@ import (
 
 func TestNativeAuthorLabelsAndAntiAffinityReachWorkflowAPI(t *testing.T) {
 	wf := nativeWorkflow(t)
+	wf.Annotations = map[string]string{"sidecar.istio.io/inject": "false", "example.org/workflow-note": "root-only"}
+	wf.Spec.WorkflowMetadata = &wfv1.WorkflowMetadata{Annotations: map[string]string{"vault.hashicorp.com/agent-inject": "true", "example.org/spec-note": "workflow-only"}}
 	wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")}
 	wf.Spec.PodMetadata = &wfv1.Metadata{Labels: map[string]string{"app": "store"}}
 	wf.Spec.Templates[0].Metadata = wfv1.Metadata{Labels: map[string]string{"security": "S2"}}
 	wf.Spec.Affinity = nativeExample(t, "../../pkg/argoworkflow/testdata/native/placement-06.yaml").Affinity
 	submitted := nativeSubmit(t, wf)
 	nativeEqual(t, wf.Spec.Affinity, submitted.Spec.Affinity)
+	for key, value := range wf.Annotations {
+		if submitted.Annotations[key] != value {
+			t.Fatal("Workflow-object annotation lost", key)
+		}
+	}
+	nativeEqual(t, wf.Spec.WorkflowMetadata, submitted.Spec.WorkflowMetadata)
 	if submitted.Spec.PodMetadata.Labels["app"] != "store" || submitted.Spec.Templates[0].Metadata.Labels["security"] != "S2" {
 		t.Fatal("author labels lost")
 	}
