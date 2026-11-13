@@ -33,7 +33,8 @@ import (
 
 func TestAnswersStrictRoundTrip(t *testing.T) {
 	bootstrapCredentialInventory(t)
-	cfg := Config{ContextName: "selected", InstallSecretStore: true, ClientAccess: "none", AlsoUpstreams: []string{"codeberg.org/acme"}, TLSExtraIPs: []string{"::1"}, SecretsFile: "/secure/install", AdminSSHPublicKeyPath: "-"}
+	parallelism, namespaceParallelism := 7, 3
+	cfg := Config{ArgoParallelism: &parallelism, ArgoNamespaceParallelism: &namespaceParallelism, ContextName: "selected", InstallSecretStore: true, ClientAccess: "none", AlsoUpstreams: []string{"codeberg.org/acme"}, TLSExtraIPs: []string{"::1"}, SecretsFile: "/secure/install", AdminSSHPublicKeyPath: "-"}
 	path := filepath.Join(t.TempDir(), "answers.json")
 	if err := WriteAnswers(path, cfg); err != nil {
 		t.Fatal(err)
@@ -241,9 +242,22 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}})
 	forgeAuthorized := true
 	readinessJSON := `{"status":"not ready","code":"no_upstream"}`
+	argoReads, argoResourceReads := 0, 0
 	deps := InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-		if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
+		command := " " + strings.Join(args, " ") + " "
+		if strings.Contains(command, " list ") {
+			if strings.Contains(command, "-n "+DefaultArgoNamespace+" ") {
+				return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil
+			}
 			return []byte(`[{"name":"oberth"}]`), nil
+		}
+		if strings.Contains(command, " get values argo-workflows ") {
+			if strings.Contains(command, " --all ") {
+				argoReads++
+				return []byte(`{"controller":{"parallelism":17,"namespaceParallelism":5}}`), nil
+			}
+			argoResourceReads++
+			return []byte(`{"executor":{"resources":{"requests":{"cpu":"75m"}}}}`), nil
 		}
 		return []byte(`{"networkPolicy":{"enabled":true}}`), nil
 	}, ProbeNetworkPolicy: enforcedPolicyFixture, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
@@ -273,6 +287,40 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	if !result.OK || result.CAPin != hex.EncodeToString(digest[:]) || result.ServerURL != server.URL || result.MCPURL != server.URL+"/mcp" || result.Context != "selected" {
 		t.Fatalf("public verification failed: checks=%v", result.Checks)
 	}
+
+	if result.Review == nil || result.Review.ArgoParallelism != "17 (preserved)" || result.Review.ArgoNamespaceParallelism != "5 (preserved)" || argoReads != 1 || argoResourceReads != 1 {
+		t.Fatal("verify omitted current native Argo values", result.Review, argoReads)
+	}
+	assertCurrentResources := func(review *InstallReview) {
+		t.Helper()
+		if review == nil || review.ArgoExecutorResources == nil || !review.ArgoExecutorResources.OperatorSet {
+			t.Fatal("current operator resources omitted", review)
+		}
+		raw, err := json.Marshal(review.ArgoExecutorResources.Resources)
+		if err != nil || string(raw) != `{"requests":{"cpu":"75m"}}` {
+			t.Fatal("stale executor resource snapshot", string(raw), err)
+		}
+	}
+	assertCurrentResources(result.Review)
+	// A fresh apply carries snapshots in which the releases were absent.
+	// Successful JSON output must read the now-installed releases again.
+	var output bytes.Buffer
+	postHost := deps
+	postHost.Output = &output
+	postCfg := cfg
+	postCfg.argoValuesRead, postCfg.existingValuesRead, postCfg.argoReleaseRead = true, true, true
+	postCfg.argoExecutorResources = &ArgoExecutorResourcesReview{OperatorSet: true, Resources: map[string]any{"requests": map[string]any{"cpu": "1m"}}}
+	if err := executeJSON(t.Context(), postCfg, postHost, func(context.Context, Config, InstallDeps) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	var installed InstallResult
+	if err := json.Unmarshal(output.Bytes(), &installed); err != nil {
+		t.Fatal(err)
+	}
+	if !installed.OK || installed.Review == nil || installed.Review.ArgoParallelism != "17 (preserved)" || installed.Review.ArgoNamespaceParallelism != "5 (preserved)" || argoReads != 2 || argoResourceReads != 2 {
+		t.Fatal("successful JSON output reused preflight defaults", installed.Review, argoReads)
+	}
+	assertCurrentResources(installed.Review)
 	service, err := kube.CoreV1().Services(DefaultNamespace).Get(t.Context(), "oberth", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)

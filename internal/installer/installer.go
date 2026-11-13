@@ -150,8 +150,14 @@ type Config struct {
 	RekorChartVersion     string
 	ArgoChartVersion      string
 	argoExecutorResources *ArgoExecutorResourcesReview
-	// ArgoParallelism sets native controller.parallelism; nil preserves its value.
+	// ArgoParallelism and ArgoNamespaceParallelism set native controller limits;
+	// nil preserves the stored value.
 	ArgoParallelism           *int
+	ArgoNamespaceParallelism  *int
+	argoReleaseRead           bool
+	argoValuesRead            bool
+	existingArgoRelease       bool
+	liveArgoValues            map[string]any
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
 	// CredentialedSecretPaths are exact secret paths for the shared

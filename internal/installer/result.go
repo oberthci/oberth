@@ -37,20 +37,22 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
-	ArgoExecutorResources *ArgoExecutorResourcesReview `json:"argo_executor_resources,omitempty"`
-	UpstreamName          string                       `json:"upstream_name,omitempty"`
-	ClientRequirements    []string                     `json:"client_requirements,omitempty"`
-	NetworkPolicy         string                       `json:"network_policy"`
-	ReissueServerCA       bool                         `json:"reissue_server_ca"`
-	Context               string                       `json:"context"`
-	Namespace             string                       `json:"namespace"`
-	ArgoNamespace         string                       `json:"argo_namespace"`
-	ProductionStore       bool                         `json:"production_store"`
-	DevStore              bool                         `json:"dev_store"`
-	ClientHost            string                       `json:"client_host"`
-	AdminIdentity         string                       `json:"admin_identity"`
-	DNSNames              []string                     `json:"tls_dns_names"`
-	IPs                   []string                     `json:"tls_ips"`
+	ArgoParallelism          string                       `json:"argo_parallelism"`
+	ArgoNamespaceParallelism string                       `json:"argo_namespace_parallelism"`
+	ArgoExecutorResources    *ArgoExecutorResourcesReview `json:"argo_executor_resources,omitempty"`
+	UpstreamName             string                       `json:"upstream_name,omitempty"`
+	ClientRequirements       []string                     `json:"client_requirements,omitempty"`
+	NetworkPolicy            string                       `json:"network_policy"`
+	ReissueServerCA          bool                         `json:"reissue_server_ca"`
+	Context                  string                       `json:"context"`
+	Namespace                string                       `json:"namespace"`
+	ArgoNamespace            string                       `json:"argo_namespace"`
+	ProductionStore          bool                         `json:"production_store"`
+	DevStore                 bool                         `json:"dev_store"`
+	ClientHost               string                       `json:"client_host"`
+	AdminIdentity            string                       `json:"admin_identity"`
+	DNSNames                 []string                     `json:"tls_dns_names"`
+	IPs                      []string                     `json:"tls_ips"`
 }
 
 func Review(cfg Config) InstallReview {
@@ -59,7 +61,7 @@ func Review(cfg Config) InstallReview {
 	if cfg.ClientHost != "" {
 		dns, ips = CertificateNamesForClientHost(cfg.ClientHost, dns, ips)
 	}
-	return InstallReview{ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
+	return InstallReview{ArgoParallelism: argoReviewLimit(cfg, cfg.ArgoParallelism, "parallelism", DefaultArgoParallelism), ArgoNamespaceParallelism: argoReviewLimit(cfg, cfg.ArgoNamespaceParallelism, "namespaceParallelism", DefaultArgoNamespaceParallelism), ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -104,6 +106,7 @@ func printReview(w io.Writer, review InstallReview) {
 	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
 	_, _ = fmt.Fprintln(w, "NetworkPolicy enforcement check runs first at install, after approval, using temporary probe Pods and their scratch namespace; fresh installs refuse unless enforcement is measured.")
 	printArgoExecutorResources(w, review.ArgoExecutorResources)
+	_, _ = fmt.Fprintf(w, "Argo controller.parallelism: %s; controller.namespaceParallelism: %s (0 means unlimited)\n", review.ArgoParallelism, review.ArgoNamespaceParallelism)
 	for _, requirement := range review.ClientRequirements {
 		_, _ = fmt.Fprintln(w, requirement)
 	}
@@ -163,6 +166,10 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		r.Cluster = &identity
 		return r
 	}
+	// Verification reads installed releases afresh, not pre-apply snapshots.
+	cfg.existingValuesRead, cfg.existingRelease, cfg.liveInstallValues = false, false, nil
+	cfg.argoReleaseRead, cfg.argoValuesRead, cfg.existingArgoRelease, cfg.liveArgoValues = false, false, false, nil
+	cfg.argoExecutorResources = nil
 	if maintenance {
 		if err := readInstallValues(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil || !cfg.existingRelease {
 			r.check("installed_values", false, "Restore read access to the existing Helm release.")
@@ -172,6 +179,17 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 	} else if err := resolveInstalledPolicy(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil {
 		r.check("network_policy", false, "Installed NetworkPolicy setting is unverified; restore read access to the installed Helm release values.")
 		r.Checks[len(r.Checks)-1].Reason = "unverified"
+		return r
+	}
+
+	if err := readArgoReviewValues(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil {
+		r.check("argo_values", false, argoValuesRemedy)
+		r.Cluster = &identity
+		return r
+	}
+	if err := resolveArgoExecutorResources(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil {
+		r.check("argo_executor_resources", false, "Read the stored argo-workflows values so operator executor.resources can be preserved.")
+		r.Cluster = &identity
 		return r
 	}
 	preflightDeps := deps

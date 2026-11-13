@@ -165,7 +165,8 @@ func stepSummary(st *WizardState, step stepID) string {
 			target += " · " + st.ClusterInfo.engine + " " + st.ClusterInfo.version
 		}
 		np := map[string]string{"": "auto", "auto": "auto", "true": "strict", "false": "off"}[c.NetworkPolicy]
-		return fmt.Sprintf("%s · namespaces %s/%s/%s · egress policy %s", target, c.Namespace, c.ArgoNamespace, c.OpenBaoNamespace, np)
+		review := installer.Review(c)
+		return fmt.Sprintf("%s · namespaces %s/%s/%s · egress policy %s · Argo parallelism %s / namespaceParallelism %s", target, c.Namespace, c.ArgoNamespace, c.OpenBaoNamespace, np, review.ArgoParallelism, review.ArgoNamespaceParallelism)
 	case stepStore:
 		switch st.StoreMode {
 		case storeInstallDev:

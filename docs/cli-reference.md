@@ -405,8 +405,10 @@ Flags:
         argo-workflows chart version
   -argo-namespace string
         namespace pipelines execute in; must differ from --namespace (default: oberth-argo)
+  -argo-namespace-parallelism int
+        Argo controller namespaceParallelism: Workflows running at once per namespace, 0 for no limit; default: 0 for a new release; preserve existing values unless explicitly chosen
   -argo-parallelism int
-        Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2) (default -1)
+        Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; default: 4 for a new release; preserve existing values unless explicitly chosen (default 4)
   -argo-vault-address string
         OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
