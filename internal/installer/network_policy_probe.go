@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"slices"
@@ -25,22 +26,32 @@ import (
 
 const policyProbeLabel = "oberth.ci/network-policy-probe"
 const policyProbeExpiry = "oberth.ci/probe-expires-at"
+const policyProbeRounds = 6
+const policyProbeSamples = 2
 
 type NetworkPolicyProbeResult struct{ Status, Remedy, Evidence string }
 type policyProbeTiming struct{ total, ready, traffic, cleanup, interval time.Duration }
 
 func ProbeNetworkPolicy(ctx context.Context, cfg Config, deps Deps) NetworkPolicyProbeResult {
-	return probeNetworkPolicy(ctx, cfg, deps, policyProbeTiming{120 * time.Second, 30 * time.Second, 35 * time.Second, 30 * time.Second, 500 * time.Millisecond})
+	return probeNetworkPolicy(ctx, cfg, deps, policyProbeTiming{120 * time.Second, 30 * time.Second, 20 * time.Second, 30 * time.Second, 250 * time.Millisecond})
 }
 
-func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming) (result NetworkPolicyProbeResult) {
+func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming) NetworkPolicyProbeResult {
+	return probeNetworkPolicyWithRandom(ctx, cfg, deps, timing, rand.Reader)
+}
+
+func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming, random io.Reader) (result NetworkPolicyProbeResult) {
 	result.Status = "unverified"
 	phase := "preparation"
 	remedy := "Allow namespaces create/get/list/delete, Pods create/get, pods/exec get/create and NetworkPolicies create/delete; ensure the pinned utility image can be pulled. Repeat plan after repairing the reported phase."
 	started := time.Now()
 	defer func() {
+		elapsed := time.Since(started).Round(time.Millisecond)
+		if result.Evidence != "" {
+			result.Evidence += fmt.Sprintf(" Measurement elapsed %s including owned cleanup.", elapsed)
+		}
 		if result.Status != "enforced" {
-			result.Remedy = fmt.Sprintf("NetworkPolicy egress is unverified during %s after %s. %s %s", phase, time.Since(started).Round(time.Millisecond), remedy, result.Remedy)
+			result.Remedy = fmt.Sprintf("NetworkPolicy egress is unverified during %s after %s. %s %s", phase, elapsed, remedy, result.Remedy)
 		}
 	}()
 	if deps.KubeClient == nil || deps.RunCommand == nil {
@@ -75,7 +86,12 @@ func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing polic
 	}
 	delete(labels, "kubernetes.io/metadata.name")
 	tokenBytes := make([]byte, 8)
-	if _, err = rand.Read(tokenBytes); err != nil {
+	if _, err = io.ReadFull(random, tokenBytes); err != nil {
+		return
+	}
+	order, err := policyProbeSelections(random)
+	if err != nil {
+		result.Remedy = "The randomized measurement sequence could not be prepared."
 		return
 	}
 	token := hex.EncodeToString(tokenBytes)
@@ -84,7 +100,7 @@ func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing polic
 	if _, exists := labels["pod-security.kubernetes.io/enforce"]; !exists {
 		labels["pod-security.kubernetes.io/enforce"] = "restricted"
 	}
-	result.Evidence = fmt.Sprintf("TCP default-deny egress only; scratch namespace %s; pipeline namespace %s; client/control nodes %s; server node %s; %s. Ingress enforcement is not tested.", namespace, target, strings.Join(nodes, ","), nodes[0], coverage) + " " + leftovers
+	result.Evidence = fmt.Sprintf("Bounded TCP egress measurement: %d randomized selection rounds, %d denial samples per node per round; scratch namespace %s; pipeline namespace %s; client/control nodes %s; server node %s; %s. Ingress enforcement is not tested. Traffic measurements cannot prove causality; coincident faults can match the samples.", policyProbeRounds, policyProbeSamples, namespace, target, strings.Join(nodes, ","), nodes[0], coverage) + " " + leftovers
 	var createdUID types.UID
 	defer func() {
 		cleanupCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), timing.cleanup)
@@ -156,12 +172,6 @@ func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing polic
 		return
 	}
 	policies := deps.KubeClient.NetworkingV1().NetworkPolicies(namespace)
-	// Randomize which source is selected first; each source must then pass as
-	// the unselected peer and fail as the selected peer on the same server.
-	order := []string{"client", "control"}
-	if tokenBytes[0]&1 != 0 {
-		slices.Reverse(order)
-	}
 	for round, selected := range order {
 		selector := token
 		if selected == "control" {
@@ -179,7 +189,7 @@ func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing polic
 			result.Remedy = policyProbeFailure(err)
 			return
 		}
-		result.Evidence += fmt.Sprintf(" %d paired denials verified: unselected HTTP response started before and completed after each selected attempt.", 3*len(nodes))
+		result.Evidence += fmt.Sprintf(" %d paired denial measurements: held overlap and fresh unselected connections succeeded.", policyProbeSamples*len(nodes))
 		phase = "egress policy removal"
 		if err = policies.Delete(ctx, "default-deny", metav1.DeleteOptions{}); err != nil {
 			result.Remedy = policyProbeFailure(err)
@@ -191,9 +201,33 @@ func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing polic
 			return
 		}
 	}
-	result.Evidence += " Both sources connected at baseline and after each policy removal."
+	result.Evidence += fmt.Sprintf(" Measured egress enforcement: %d/%d rounds completed on the listed nodes. Both sources connected at baseline and after each policy removal.", len(order), policyProbeRounds)
 	result.Status = "enforced"
 	return
+}
+
+// Draw a fresh bit for each round; condition the sequence on including both
+// sources. Rejection sampling avoids making the final choice predictable.
+func policyProbeSelections(random io.Reader) ([]string, error) {
+	var bits [policyProbeRounds]byte
+	for range 8 {
+		if _, err := io.ReadFull(random, bits[:]); err != nil {
+			return nil, err
+		}
+		order := make([]string, len(bits))
+		selectedA := 0
+		for i, bit := range bits {
+			order[i] = "control"
+			if bit&1 == 0 {
+				order[i] = "client"
+				selectedA++
+			}
+		}
+		if selectedA != 0 && selectedA != len(bits) {
+			return order, nil
+		}
+	}
+	return nil, errors.New("random selection did not include both sources")
 }
 
 func policyProbeNodes(ctx context.Context, deps Deps) ([]string, error) {
@@ -294,7 +328,7 @@ func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policy
 					last = fmt.Sprintf("Client %s: %s; expected %s.", name, policyTrafficDescription(state), want)
 				}
 			}
-			all = all && counts[name] >= 3
+			all = all && counts[name] >= policyProbeSamples
 		}
 		return all, nil
 	})
@@ -351,15 +385,32 @@ func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyPr
 	if err != nil {
 		return "", &policyTrafficError{"Unselected client " + control + ": HTTP overlap start could not be established. " + policyProbeFailure(err), err}
 	}
+	// Each ordinary wget invocation opens a fresh connection. Successful
+	// established traffic alone does not measure acceptance of new connections.
+	fresh := func(phase string) error {
+		state, err := policyProbeTraffic(ctx, cfg, deps, namespace, control, url)
+		if err != nil || state != "allowed" {
+			return &policyTrafficError{"Fresh unselected connection " + phase + " selected attempt: " + policyTrafficDescription(state) + ". " + policyProbeFailure(err), err}
+		}
+		return nil
+	}
+	if err := fresh("before"); err != nil {
+		return "", err
+	}
 	attemptStarted := time.Now()
 	state, err := policyProbeTraffic(ctx, cfg, deps, namespace, client, url)
 	attemptCompleted := time.Now()
 	if err != nil {
 		return "", err
 	}
+	if err := fresh("after"); err != nil {
+		return "", err
+	}
+	// The start/end marker checks bracket both fresh connections and the
+	// selected attempt. The server cannot emit the end marker before release.
 	open, err := checkOpen(ctx)
 	if err != nil || !open {
-		return "", &policyTrafficError{"Selected client " + client + ": " + policyTrafficDescription(state) + "; unselected HTTP response did not remain open through the attempt.", err}
+		return "", &policyTrafficError{"Selected client " + client + ": " + policyTrafficDescription(state) + "; unselected HTTP response did not span the selected attempt and both fresh connections.", err}
 	}
 	released, err := policyProbeExec(ctx, cfg, deps, namespace, "server", policyOverlapReleaseScript, nonce)
 	if err != nil || released != "released" {

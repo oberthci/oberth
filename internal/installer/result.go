@@ -272,6 +272,9 @@ func PrintVerification(ctx context.Context, cfg Config, deps InstallDeps, asJSON
 	} else {
 		for _, check := range result.Checks {
 			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
+			if check.Code == "network_policy" && check.Evidence != "" {
+				_, _ = fmt.Fprintln(deps.Output, check.Evidence)
+			}
 		}
 	}
 	if !result.OK {

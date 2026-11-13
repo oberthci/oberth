@@ -108,7 +108,6 @@ func readyPolicyModelPod(action k8stesting.Action) (bool, runtime.Object, error)
 func TestProbeEvidenceRejectsAndRecovers(t *testing.T) {
 	for _, tc := range []struct{ name, denial, want string }{
 		{"drop", "timeout", "enforced"}, {"reject", "refused", "enforced"}, {"reset", "reset", "enforced"},
-		{"delayed recovery", "refused", "enforced"},
 		{"refused baseline", "refused", "unverified"}, {"refused peer baseline", "refused", "unverified"}, {"never recovers", "refused", "unverified"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,14 +121,6 @@ func TestProbeEvidenceRejectsAndRecovers(t *testing.T) {
 			if tc.name == "refused peer baseline" {
 				model.fault = func(source string, _ int) string {
 					if !policyModelSourceA(source) {
-						return "refused"
-					}
-					return ""
-				}
-			}
-			if tc.name == "delayed recovery" {
-				model.fault = func(_ string, n int) string {
-					if n == 7 {
 						return "refused"
 					}
 					return ""
@@ -151,7 +142,7 @@ func TestProbeEvidenceRejectsAndRecovers(t *testing.T) {
 				t.Fatal("wrong failed source", result)
 			}
 			if tc.want == "enforced" {
-				if !strings.Contains(result.Evidence, "selects client") || !strings.Contains(result.Evidence, "selects control") || strings.Count(result.Evidence, "3 paired denials verified") != 2 {
+				if !strings.Contains(result.Evidence, "selects client") || !strings.Contains(result.Evidence, "selects control") || strings.Count(result.Evidence, "2 paired denial measurements") != policyProbeRounds || !strings.Contains(result.Evidence, "Measured egress enforcement") || !strings.Contains(result.Evidence, "cannot prove causality") || !strings.Contains(result.Evidence, "including owned cleanup") {
 					t.Fatal("missing selection/overlap evidence", result)
 				}
 			} else if !strings.Contains(result.Remedy, "connection refused") {
@@ -222,6 +213,7 @@ func TestPolicyOverlapRejectsEarlyCompletionAndControlFailure(t *testing.T) {
 						return nil, ctx.Err()
 					}
 				case policyOverlapReleaseScript:
+					close(release)
 					return []byte("released"), nil
 				case policyOverlapReadyScript:
 					n := reads.Add(1)
@@ -229,16 +221,73 @@ func TestPolicyOverlapRejectsEarlyCompletionAndControlFailure(t *testing.T) {
 						if mode == "early completion" {
 							return []byte("closed"), nil
 						}
-						close(release)
 					}
 					return []byte("open"), nil
 				default:
+					_, pod, _, _ := policyModelArgs(args)
+					if pod == "control-0" {
+						return []byte("allowed"), nil
+					}
 					return []byte("refused"), nil
 				}
 			}}
 			state, err := policyProbePair(t.Context(), Config{}, deps, policyProbeTiming{interval: time.Millisecond}, "scratch", "client-0", "control-0", "http://192.0.2.10:8080")
 			if err == nil || state != "" {
 				t.Fatal("missing overlap/control success accepted", state, err)
+			}
+		})
+	}
+}
+
+func TestPolicyRecoveryConvergesAfterTransientSourceFailures(t *testing.T) {
+	kube := fake.NewClientset(preflightNode())
+	probeNamespaceUIDFixture(kube)
+	namespace := "scratch"
+	_, err := kube.CoreV1().Namespaces().Create(t.Context(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"server", "client-0", "control-0"}
+	for _, name := range names {
+		pod := policyProbePod(namespace, "token", "client", "image")
+		pod.Name = name
+		pod.Status = corev1.PodStatus{PodIP: "192.0.2.10", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
+		if _, err := kube.CoreV1().Pods(namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	model := &policyTrafficModel{kube: kube, mode: "absent", fault: func(_ string, n int) string {
+		if n == 1 {
+			return "refused"
+		}
+		return ""
+	}}
+	if err := waitPolicyTraffic(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming(), namespace, names, "http://192.0.2.10/", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPolicyFreshUnselectedFailureBeforeAndAfter(t *testing.T) {
+	for _, tc := range []struct {
+		phase   string
+		request int
+	}{{"before", 2}, {"after", 3}} {
+		t.Run(tc.phase, func(t *testing.T) {
+			model := &policyTrafficModel{mode: "absent", fault: func(source string, n int) string {
+				if policyModelSourceA(source) {
+					return "reset"
+				}
+				if n == tc.request {
+					return "refused"
+				}
+				return ""
+			}}
+			state, err := policyProbePair(t.Context(), Config{}, Deps{RunCommand: model.run}, policyModelTiming(), "scratch", "client-0", "control-0", "http://192.0.2.10/")
+			if err == nil || state != "" || !strings.Contains(policyProbeFailure(err), "Fresh unselected connection "+tc.phase) || !strings.Contains(policyProbeFailure(err), "connection refused") {
+				t.Fatal(state, err)
+			}
+			if len(model.streams) != 0 {
+				t.Fatal("held response worker not joined")
 			}
 		})
 	}

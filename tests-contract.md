@@ -453,6 +453,15 @@ The positive model evaluates actual Pod labels against egress selectors; it does
 not treat policy existence as enforcement.
 `TestPolicyTrafficScriptDistinguishesTransportFailures` executes the shell
 classifier against timeout/refusal/reset, HTTP-error and unexpected-body outputs.
+`TestPolicyRealHTTPConnectionPressureAndStall` bridges actual localhost HTTP
+bytes/reset connections without any enforcing dataplane: a fresh-connection
+failure while a long response occupies the server remains unverified.
+`TestPolicyIndependentAlternatingSourcesSeeded` measures original and periodic
+source-counter fault windows over seeds 1..1024 for refusal/reset, using virtual
+time with nonzero modeled I/O. It logs false-pass counts, including a nonzero
+residual in the periodic model; it makes no universal error-rate claim. Positive
+seeded controls can complete all rounds, and selection tests require both sources.
+The human plan test retains measured scope and the lack of causal proof.
 
 Mac onboarding #1549: `TestPluginPlanAndInstallKeepKubeconfigBytes` retains two
 operator files, comments, current-context fields and both contexts without changing bytes

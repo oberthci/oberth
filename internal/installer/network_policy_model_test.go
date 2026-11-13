@@ -152,3 +152,10 @@ func policyModelTiming() policyProbeTiming {
 
 // Test fixtures identify source A independently of which source is selected.
 func policyModelSourceA(name string) bool { return strings.HasPrefix(name, "client-") }
+
+// Give simulated exec/network operations a nonzero duration under synctest, so
+// start/completion ordering is represented rather than collapsed to one instant.
+func (m *policyTrafficModel) runTimed(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+	time.Sleep(time.Microsecond)
+	return m.run(ctx, input, name, args...)
+}

@@ -276,10 +276,13 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 			}
 			return fmt.Errorf("%w:\n%s", errInstallPreflight, strings.Join(failures, "\n"))
 		}
-		if cfg.existingRelease {
-			for _, check := range preflight.Checks {
-				if check.Code == "network_policy" {
+		for _, check := range preflight.Checks {
+			if check.Code == "network_policy" {
+				if cfg.existingRelease {
 					_, _ = fmt.Fprintf(deps.Output, "NetworkPolicy capability: %s (information during maintenance). %s\n", check.Reason, check.Remedy)
+				}
+				if check.Evidence != "" {
+					_, _ = fmt.Fprintln(deps.Output, check.Evidence)
 				}
 			}
 		}

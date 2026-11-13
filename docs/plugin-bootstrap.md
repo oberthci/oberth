@@ -131,26 +131,34 @@ reinstalled. Linux retains the installation links.
 
 ### Live NetworkPolicy enforcement check
 
-Plan, install preflight and verification use a bounded live egress probe, not
-controller names or CNI brands. A server and one client/control pair per Ready,
-schedulable, untainted node run in an owned scratch namespace. The control Pod
-shares its client's node and stays outside the egress-deny selector. Receiver
-ingress stays open. Each denial observation checks a working path to the same
-server with two differently labelled sources per node. The first selected source
-is randomized. Each source must time out, refuse or reset only while selected by
-the egress-deny policy, and the unselected peer must connect to the same server.
-The selection then swaps. Three paired observations are required in each round;
-both sources must connect at baseline and after each policy removal.
+Plan, install preflight and verification use a bounded traffic measurement on
+the operator's cluster against Oberth's own server Pod. They do not identify CNI
+brands or try to defend against a hostile server. A server and two differently
+labelled sources per Ready, schedulable, untainted node run in an owned scratch
+namespace. Both sources connect at baseline and after every policy removal.
 
-Overlap uses a token-matched, held HTTP response from the unselected peer: its
-start chunk must arrive before the selected attempt and its end chunk must still
-be absent after that attempt. The probe then releases the held response through
-its server Pod; the complete response must succeed, with completion recorded
-after the selected attempt. A goroutine start or a sample
-count alone never proves overlap. Missing overlap, HTTP errors, changed Pod
-health, failed peers or behavior that does not follow the selection is unverified.
-Public evidence names round order and verified overlap; remedies describe the
-observed client/peer failure.
+Six selection rounds draw a fresh random bit per round, conditioned on including
+both sources at least once. Each round requires two consecutive paired denial
+samples per node. The selected source must time out, refuse or reset. While a
+held response from the unselected source remains open, that same source must
+also complete a fresh connection to the same server and port before and after
+the selected attempt. This measures acceptance of new connections as well as
+continuity of an established one. Any failed fresh connection is ambiguous.
+
+A token-matched start chunk must arrive before the attempts, and the end chunk
+must remain absent until after them. The probe then releases the held response
+through its server Pod and requires successful completion. Missing overlap,
+HTTP errors, changed Pod health and failed peers are unverified. Baseline and
+recovery each require two consecutive successful samples from both sources.
+
+The result is **measured enforcement** on the reported nodes for these six
+rounds. Traffic measurements cannot prove causality: independent fault windows
+can still coincide with every selection. Random repetition reduces some such
+coincidences; it does not eliminate false passes. Read `enforced` as the wire
+status for a completed measurement, not a proof of isolation. Evidence records
+the actual selection order, per-round sample counts and node/namespace scope;
+remedies describe observed failures. Elapsed measurement time includes owned
+cleanup.
 
 The public check's `evidence` states the scratch and pipeline namespaces,
 client/control nodes and server node. Existing pipeline namespace labels are

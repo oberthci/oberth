@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -147,6 +148,19 @@ func TestPlanReportsSelectedRemoteClusterWithoutAnotherGate(t *testing.T) {
 			t.Fatal("remote cluster gate introduced")
 		}
 	}
+	var output bytes.Buffer
+	deps.Output = &output
+	evidence := "Measured egress enforcement: 6/6 rounds on node. Traffic measurements cannot prove causality."
+	deps.ProbeNetworkPolicy = func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+		return NetworkPolicyProbeResult{Status: "enforced", Evidence: evidence}
+	}
+	if err := PrintPlan(t.Context(), Config{ContextName: "chosen"}, deps, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), evidence) {
+		t.Fatal("human plan omitted measurement scope", output.String())
+	}
+
 }
 
 func TestExecuteRefusesUnknownNetworkPolicyBeforeHelm(t *testing.T) {
