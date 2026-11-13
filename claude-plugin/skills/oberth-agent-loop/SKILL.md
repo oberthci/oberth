@@ -49,8 +49,7 @@ events_wait {"kinds": ["run.held", "run.finished"], "own": true, "after_id": <cu
 
 `retry_hint.class` says what to do: `infrastructure` means retry unchanged
 (`run_rerun`); `code` means read `run_logs` for the failed step
-(filter with `pattern`) and fix the code. A step named `frag-<hash>-<template>`
-comes from a pinned pipeline fragment of another repository.
+(filter with `pattern`) and fix the code.
 
 ## Assisted continuation (holds)
 

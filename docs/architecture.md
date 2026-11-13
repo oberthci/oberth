@@ -28,7 +28,7 @@ Workflow parallelism and Kubernetes controls Pod scheduling.
 
 ## Source resolution and Workflow submission
 
-The source resolver pins the exact source and fragment set in a source receipt.
+The source resolver pins the exact source graph in a source receipt.
 Submission checks that binding again. Admission validates dangerous content and
 credential boundaries while preserving admitted native Argo fields. Trusted
 upstream policy refresh can delay submission; it counts no capacity and rewrites

@@ -274,7 +274,7 @@ trust assumptions and complete invalidation rules.
   the audit binds its path and commit. Default-branch tag admission and all
   identity gates still apply. Release preflight/identity plans/declarations
   include routed files with their source-file provenance. Dispatch requires
-  `Run.RefKind == tag` and the stored bare name. Reserved build/fragment/schedule/
+  `Run.RefKind == tag` and the stored bare name. Reserved build/schedule/
   tests contracts cannot be route targets. Dedicated WIF-only step accounts also
   require `step_routes.<template>` pinning an existing exact route file and pattern;
   copying a template into the default file or another pattern cannot reuse it.
@@ -501,7 +501,7 @@ trust assumptions and complete invalidation rules.
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
 
-- Source receipts bind the exact reviewed source and fragments to submission.
+- Source receipts bind the exact reviewed source to submission.
   They carry no aggregate resource authorization or packing budget.
 
 - Native resources and placement are preserved as authored. Oberth has no
@@ -1878,8 +1878,7 @@ trust assumptions and complete invalidation rules.
   wildcard granting access to templates only within that workflow file. Enforcement is at admission:
   `admitSecretstoreExecPaths` checks each template's `--path` arguments
   against that workflow file's step grants before any Workflow is submitted. A path with only
-  named-step grants is refused when consumed by an inline, unnamed, or
-  fragment-renamed template (fail-closed: the name is not stable or
+  named-step grants is refused when consumed by an inline or unnamed template (fail-closed: the name is not stable or
   authoritative).
 - **Per-step Vault identities:** every (upstream repository, workflow file,
   named or wildcard step) with a grant gets a dedicated ServiceAccount,
@@ -2336,7 +2335,7 @@ remain required, with no public listener or insecure fallback.
 | Let a repository annotation change a run's identity or credentials | Forbidden |
 | Refuse a document for carrying the retired `oberth.ci/concurrency-group` or `oberth.ci/concurrency-limit` annotation | Breaking |
 | Decide a run's admission from its workflow document (size, weight, declared demand, a class annotation), rewrite or refuse native `synchronization`, or add a run status or label for a lock wait | Forbidden |
-| Count an assisted run (any exec, patch or continue on a retry hold) as promotion, publication, SHA-pinned fragment or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
+| Count an assisted run (any exec, patch or continue on a retry hold) as promotion, publication or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
 | Change the ConfigMap name `oberth-sync-limits`, the mutex name `oberth-release`, or the trigger that `releases.serialize` applies to | Breaking |
 | Charge Pod start-up to a step's declared deadline budget again by default, or report a step whose `main` exited 0 as a deadline failure | Breaking |
 | Change a scheduling or placement default (`admission.stepStartupAllowance`, `admission.stallTimeout`, `argo.defaultWorkflowTimeout`, `schedules.*`), or add such a setting without a Helm value | Breaking |
@@ -2518,6 +2517,8 @@ and v2 backup-and-replace semantics are unchanged. See
 | `20261111201000-run-ref-prefix-index` | Ref prefix index | Bounded literal-prefix run lookup | Drop index |
 | `20261111200000-canonical-priorities` | Canonical priorities | Rewrite stored priority classes and constrain new values | Database restore |
 | `YYYYMMDDHHMMSS-<slug>-<random>` | Future migrations | Per-file `Purpose` and `Rollback` contract in `internal/store/migrations/`; no shared number allocation | Per-file contract (database restore by default) |
+
+Timestamp migration `20261113213557-remove-fragment-run-index-8c4f9bbfa3c091b95cecdb689775370b`: remove the obsolete fragment passed-run lookup index; retain runs and audit history. Rollback restores the pre-upgrade database backup.
 
 Timestamp migration `20261104190000-priority-four-classes`: extend execution-priority vocabulary while preserving legacy receipts; rollback restores the pre-upgrade backup.
 
@@ -2768,11 +2769,11 @@ context unified diffs applied through the Pod helper `oberth internal-hold-fs`
 with no symlink following, no `.git`, no renames or binaries) append to the
 audited `runs.assist_record` (`run.assist.<kind>`) before they execute; a
 failed release abandons the Pod. Admission refuses every `ARGO_*` environment
-name from repositories (template defaults and fragments included) and a hold is
+name from repositories (template defaults included) and a hold is
 recognised only on a retry node (`(N)`, N >= 1). **A run with any exec, patch or
 continue on a held step is assisted** (`runs.assisted`, monotonic), also when a
 continue follows nothing: it is never a promotion source, never published upstream,
-never SHA-pinned fragment evidence and never resolves a CI issue. No status,
+never resolves a CI issue. No status,
 label or layout is added; the existing status carries the reason line
 `assisted: step <name> continued after patch sha256:<12 hex> by <actor>; not
 evidence`. Held runs keep their run slot, template locks and groups;
@@ -3086,7 +3087,7 @@ restart adoption. Repository YAML cannot choose or widen it.
 GPUs and other extended resources use vanilla Kubernetes requests and limits,
 with no Oberth grant or amount bound. Operators enforce namespace ResourceQuota
 and admission policies, including limits on device-plugin resources. The source
-receipt pins exact source, fragments and run binding across submission.
+receipt pins exact source and run binding across submission.
 
 Retired execution tables are inert; existing migration SQL remains unchanged.
 The five legacy execution tools and technology-specific runtime are removed.

@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -42,7 +41,6 @@ const (
 	// value is a list of OpenBao paths; on this tier no secret value ever
 	// passes through the server at all.
 	secretPathsAnnotation = "oberth.ci/declared-secret-paths"
-	FragmentsAnnotation   = "oberth.ci/fragments"
 
 	// tierLabel classifies pipeline pods by trust tier so network policy,
 	// monitoring, and RBAC can scope rules to branch-tier (untrusted) or
@@ -569,8 +567,6 @@ type Request struct {
 	// Issue #623.
 	StepGrants map[string]map[string]bool
 
-	Fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
-
 	// Identities overrides Config.PerRepoIdentities and Config.PerRepoCIIdentities
 	// when non-nil. The caller sets this from IdentityStore.Snapshot() to bind
 	// both Builds of one admission to the same identity version, so the audit
@@ -611,7 +607,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := request.validate(); err != nil {
 		return nil, err
 	}
-	resolved, err := argoworkflow.ResolveRunSource(request.Source, request.Fragments, argoworkflow.RunSourceBinding{
+	resolved, err := argoworkflow.ResolveRunSource(request.Source, argoworkflow.RunSourceBinding{
 		RunID: request.RunID, RepositoryID: request.RepositoryID, SHA: request.SHA,
 		File: request.PipelineFile, Trigger: request.RunTrigger, ScheduleEntry: request.ScheduleEntry,
 	})
@@ -638,7 +634,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.Capability != nil && request.RepositoryID <= 0 {
 		return nil, errors.New("argojob: workflow capability requires a durable repository binding")
 	}
-	fragmentLock := resolved.Lock()
 	wifLeaves, err := authorizeReleaseWIF(workflow, config, request)
 	if err != nil {
 		return nil, err
@@ -752,7 +747,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 			}
 		}
 	}
-	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
+	applyServerMetadata(workflow, config, request, declaredPaths)
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
 	}
@@ -957,7 +952,7 @@ func tierFor(trigger pipeline.Trigger) string {
 	}
 }
 
-func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request, declaredPaths []string, fragmentLock argoworkflow.Lock) {
+func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request, declaredPaths []string) {
 	workflow.APIVersion = argoworkflow.APIVersion
 	workflow.Kind = argoworkflow.Kind
 	workflow.Name = request.Name
@@ -982,11 +977,6 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 		// Paths only, never values: this is the auditable statement of intent
 		// that the run's audit action records at submission time.
 		workflow.Annotations[secretPathsAnnotation] = strings.Join(declaredPaths, ",")
-	}
-	if len(fragmentLock) != 0 {
-		if encoded, err := json.Marshal(fragmentLock); err == nil {
-			workflow.Annotations[FragmentsAnnotation] = string(encoded)
-		}
 	}
 	if workflow.Spec.PodMetadata == nil {
 		workflow.Spec.PodMetadata = &wfv1.Metadata{}

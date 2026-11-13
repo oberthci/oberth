@@ -47,8 +47,7 @@ func GrantedSecretSteps(workflow *wfv1.Workflow, declaredPaths []string, stepGra
 		}
 		// Determine whether this template has a stable, unambiguous name
 		// suitable for per-step grant matching: it must be a top-level
-		// template (not inline), have a non-empty name, and not be a
-		// fragment-renamed template (frag-<hash>-<name>).
+		// template (not inline) and have a non-empty name.
 		grantName := secretStepGrantName(workflow, template)
 		stableName := grantName != "*"
 		for _, execPath := range execPaths {
@@ -67,11 +66,11 @@ func GrantedSecretSteps(workflow *wfv1.Workflow, declaredPaths []string, stepGra
 			}
 			if !stableName {
 				// Fail closed: a path with only named-step grants cannot
-				// be consumed by an inline, unnamed, or fragment-renamed
+				// be consumed by an inline or unnamed
 				// template because the name is not stable or authoritative.
 				problems = append(problems, fmt.Errorf(
 					"secret grant denied: step %q not authorized for path %q "+
-						"-- template does not have a stable name (inline, unnamed, or fragment-renamed); "+
+						"-- template does not have a stable name (inline or unnamed); "+
 						"only wildcard grants (step \"*\") may authorize these templates",
 					template.Name, execPath))
 				continue
@@ -99,10 +98,10 @@ func GrantedSecretSteps(workflow *wfv1.Workflow, declaredPaths []string, stepGra
 }
 
 // secretStepGrantName is shared by admission and identity selection. Inline,
-// fragment-renamed consumers can use only the file's wildcard
+// unnamed consumers can use only the file's wildcard
 // identity, even if their display name happens to match a named step grant.
 func secretStepGrantName(workflow *wfv1.Workflow, template *wfv1.Template) string {
-	if template.Name == "" || strings.HasPrefix(template.Name, "frag-") {
+	if template.Name == "" {
 		return "*"
 	}
 	for i := range workflow.Spec.Templates {

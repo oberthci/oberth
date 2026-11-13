@@ -407,7 +407,6 @@ No new label was added for this release.
 | `oberth.ci/spec-identity` | Workflow | Opaque digest of intended submitted spec |
 | `oberth.ci/declared-secret-paths` | Workflow, when credentialed | Admitted secret-path record; no values |
 | `oberth.ci/sources` | Workflow with pinned sources | Canonical immutable pinned-source record |
-| `oberth.ci/fragments` | Workflow, when fragments used | Immutable fragment-resolution record |
 | `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator API-kind/action capability binding |
 | `oberth.ci/helper-storage` | Workflow | Current Oberth token-waiter footprint binding; older policies are refused on recovery |
 | `oberth.ci/release-wif-policy-sha256` | Workflow, WIF release | Public role/policy binding digest |

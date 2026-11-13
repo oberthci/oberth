@@ -77,7 +77,6 @@ type ArgoJobs struct {
 	config            argojob.Config
 	secretAccess      SecretAccessLoader
 	declarations      DeclarationRecorder
-	fragments         FragmentLoader
 	collector         ArtifactCollector
 	artifacts         ArtifactStore
 	artifactLimit     int64
@@ -144,7 +143,7 @@ func (jobs *ArgoJobs) SetReconcilerHealth(checker ReconcilerHealthChecker) {
 	jobs.reconcilerHealthy = checker
 }
 
-func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.Auditor, secretAccess SecretAccessLoader, fragments FragmentLoader) (*ArgoJobs, error) {
+func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.Auditor, secretAccess SecretAccessLoader) (*ArgoJobs, error) {
 	config.ReleaseWIF = config.ReleaseWIF.Clone()
 	config.ReleaseTagRoutes = config.ReleaseTagRoutes.Clone()
 	if controller == nil {
@@ -160,7 +159,7 @@ func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	jobs := &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, fragments: fragments, intents: map[string]argoIntent{}}
+	jobs := &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, intents: map[string]argoIntent{}}
 	return jobs, nil
 }
 
@@ -318,15 +317,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if testedSHA == "" {
 		testedSHA = request.Run.SHA
 	}
-	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
-	if request.SourceReceipt != nil {
-		fragments = request.SourceReceipt.Fragments()
-	} else {
-		fragments, err = loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind, request.Run.Trigger)
-		if err != nil {
-			return fmt.Errorf("app: resolve fragments for %s: %w", request.Repository.Name, err)
-		}
-	}
 	kind, err := runKind(request.Run)
 	if err != nil {
 		return err
@@ -335,7 +325,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if err != nil {
 		return err
 	}
-	resolved, err := argoworkflow.ResolveRunSource(source, fragments, argoworkflow.RunSourceBinding{
+	resolved, err := argoworkflow.ResolveRunSource(source, argoworkflow.RunSourceBinding{
 		RunID: request.Run.ID, RepositoryID: request.Repository.ID, SHA: testedSHA,
 		File: pipelineFile, Trigger: kind, ScheduleEntry: request.Run.ScheduleEntry,
 	})
@@ -356,7 +346,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		Assist:    request.Run.AssistRequested,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
-		Fragments:  fragments,
 	}
 
 	sources, err := argoworkflow.PinnedSources(resolved.Workflow())
@@ -466,10 +455,6 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 	if workflow.Annotations != nil {
 		declared = workflow.Annotations["oberth.ci/declared-secret-paths"]
 	}
-	fragments := ""
-	if workflow.Annotations != nil {
-		fragments = workflow.Annotations[argojob.FragmentsAnnotation]
-	}
 	automount := workflow.Spec.AutomountServiceAccountToken != nil && *workflow.Spec.AutomountServiceAccountToken
 	details := map[string]any{
 		"repo": request.Repository.Name, "upstream_org": request.UpstreamOrg,
@@ -491,7 +476,6 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 		}(),
 		"automount_service_account_token": automount,
 		"declared_secret_paths":           declared,
-		"fragments":                       fragments,
 		"sources":                         sourcesForAudit(submission.PinnedSources),
 	}
 	if submission.SourceReceipt != nil {

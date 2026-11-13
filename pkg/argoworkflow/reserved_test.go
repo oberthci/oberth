@@ -167,5 +167,8 @@ func TestAdmitAllowsNativePodNameFormat(t *testing.T) {
 	for _, format := range []string{"v1", "v2"} {
 		document := reservedBase + "  workflowMetadata:\n    annotations:\n      workflows.argoproj.io/pod-name-format: " + format + "\n  templates:" + reservedLeaf
 		mustAdmit(t, document, Policy{})
+		metadata := "metadata:\n  annotations:\n    workflows.argoproj.io/pod-name-format: " + format + "\nspec:\n"
+		document = strings.Replace(reservedBase, "spec:\n", metadata, 1) + "  templates:" + reservedLeaf
+		mustAdmit(t, document, Policy{})
 	}
 }

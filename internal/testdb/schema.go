@@ -494,8 +494,14 @@ CREATE TABLE resource_attempts (
 DELETE FROM schema_migrations WHERE id='20261113013336-remove-step-measurement-32ae7f0f09084618bddcb8f20fd0fbac';
 `
 
+// PostFragmentIndexDowngrade restores the lookup index only in disposable historical fixtures.
+const PostFragmentIndexDowngrade = `
+CREATE INDEX IF NOT EXISTS runs_passed_tested_sha_idx ON runs(repo_id,tested_sha) WHERE status='passed';
+DELETE FROM schema_migrations WHERE id='20261113213557-remove-fragment-run-index-8c4f9bbfa3c091b95cecdb689775370b';
+`
+
 // Historical schema reconstruction for disposable migration fixtures only.
-const historicalRestartTimingSchema = `
+const historicalRestartTimingSchema = PostFragmentIndexDowngrade + `
 CREATE TABLE IF NOT EXISTS restart_workflow_timings (
  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
  epoch INTEGER NOT NULL CHECK(epoch > 0),
