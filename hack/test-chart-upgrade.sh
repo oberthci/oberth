@@ -12,8 +12,12 @@ if "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
   exit 1
 fi
 grep -q 'transit' "$work/raw.yaml"
+# A6 also removed two empty profile defaults. Omit those known DEFAULT
+# leaves for this raw-values render only; runtime cleanup still removes just
+# the installer-owned Transit leaves from stored USER configuration.
+awk '!/^  controllerProfile(ConfigMap)?:/' "$fixtures/v0.22.3-cleaned-values.yaml.golden" >"$work/target-values.yaml"
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
-  --values "$fixtures/v0.22.3-cleaned-values.yaml.golden" \
+  --values "$work/target-values.yaml" \
   --set-string "image.ref=$server_image" >"$work/upgrade.yaml"
 grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/upgrade.yaml"
 test "$(grep -c '^kind: PriorityClass$' "$work/upgrade.yaml")" -eq 1
@@ -22,4 +26,4 @@ if "$helm_tool" template oberth "$chart" --is-upgrade --set admission.capacity=3
   exit 1
 fi
 grep -q 'additional properties' "$work/invalid.yaml"
-echo 'v0.22.3 historical values render after exact installer-owned Transit cleanup'
+echo 'v0.22.3 historical values render after Transit cleanup and removal of empty profile defaults'

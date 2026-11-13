@@ -2411,7 +2411,7 @@ because they are empty. Direct `--reuse-values` upgrades also need template
 fallbacks for newly introduced keys: `utilityImage` falls back to the shared
 utility pin. Native Git is the only backend. The historical v0.22.3 chart gate proves the
 old Transit defaults are refused raw and render after exact installer-key
-cleanup. Real Helm upgrade, install and restore tests retain live settings.
+cleanup plus omission of the empty retired profile defaults. Real Helm upgrade, install and restore tests retain live settings.
 
 Helm >= 3.14 is checked before a real upgrade. The three compatibility identity
 values are read from the installed release with `helm get values --all`,

@@ -627,7 +627,7 @@ func TestExecutionTargetGitOutageDoesNotSerializeLocalAdmission(t *testing.T) {
 		t.Fatal("native policy refresh not entered")
 	}
 	localDone := make(chan error, 1)
-	go func() { _, err := f.jobs.PipelineDemandReceipt(ctx, local); localDone <- err }()
+	go func() { _, err := f.jobs.ResolvePipelineSource(ctx, local); localDone <- err }()
 	select {
 	case err := <-localDone:
 		if err != nil {
