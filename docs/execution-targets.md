@@ -87,3 +87,11 @@ authored deadlines, and Kubernetes owns Pod placement. Deployment still requires
 target capacity/storage/device and transport qualification, containing source
 review and CI, and operator approval. Offline fake-client tests establish no
 installed route or physical execution result.
+
+
+An upgrade quarantines a retained binding whose original resource custody is
+inconsistent. It preserves that binding and its object intents as inert evidence
+and continues upgrading other work. Status reports execution_target_recovery,
+with a count and operator remedy. Inspect those records against a verified
+pre-upgrade backup, reconcile the original objects manually and start a fresh
+run; quarantined bindings cannot be reused or grant cleanup authority.

@@ -759,15 +759,16 @@ func runRepos(ctx context.Context, arguments []string, output io.Writer) error {
 }
 
 type remoteHealthStatus struct {
-	ClusterDetail string `json:"cluster_detail,omitempty"`
-	Database      string `json:"database"`
-	Upstreams     int    `json:"upstreams"`
-	Repositories  int    `json:"repositories"`
-	VCS           string `json:"vcs"`
-	Cluster       string `json:"cluster"`
-	Audit         string `json:"audit"`
-	Version       string `json:"version,omitempty"`
-	SSHHostKey    string `json:"ssh_host_key_fingerprint,omitempty"`
+	ExecutionTargetRecovery *model.ExecutionTargetRecoveryStatus `json:"execution_target_recovery"`
+	ClusterDetail           string                               `json:"cluster_detail,omitempty"`
+	Database                string                               `json:"database"`
+	Upstreams               int                                  `json:"upstreams"`
+	Repositories            int                                  `json:"repositories"`
+	VCS                     string                               `json:"vcs"`
+	Cluster                 string                               `json:"cluster"`
+	Audit                   string                               `json:"audit"`
+	Version                 string                               `json:"version,omitempty"`
+	SSHHostKey              string                               `json:"ssh_host_key_fingerprint,omitempty"`
 }
 
 func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) error {
@@ -789,6 +790,11 @@ func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) 
 	var status remoteHealthStatus
 	if err := api.Get(ctx, "/api/status", nil, &status); err != nil {
 		return err
+	}
+	if recovery := status.ExecutionTargetRecovery; recovery != nil {
+		if _, err := fmt.Fprintf(output, "target recovery: %d quarantined bindings\n%s\nremedy: %s\n", recovery.QuarantinedBindings, recovery.Reason, recovery.Remedy); err != nil {
+			return err
+		}
 	}
 	cluster := status.Cluster
 	if status.ClusterDetail != "" {

@@ -1642,6 +1642,7 @@ async function renderStatus(seq) {
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
       ${controllerProfileStatusCard(s.controller_profile)}
+      ${s.execution_target_recovery ? svcCard("execution target recovery", String(s.execution_target_recovery.quarantined_bindings) + " quarantined bindings", esc(s.execution_target_recovery.reason + " " + s.execution_target_recovery.remedy), "warn") : ""}
     </div>
     ${uplinkExpiryWarnings(uplinks)}
     <div class="vcs-panel">

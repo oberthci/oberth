@@ -48,21 +48,19 @@ func TestExecutionTargetPlacementMigrationPreservesCustody(t *testing.T) {
 	}
 	snapshot := json.RawMessage(`{"Version":1,"Config":{"Namespace":"remote","Other":9007199254740993,"ExecutionPlacement":{"schema":"oberth.execution-placement/branch-v2","node_name":"old-node","node_uid":"node-uid","provider_id":"cloud/node","zone":"old-zone","pool":"old-pool","taint_key":"dedicated","taint_value":"trusted","node_version":"approved-admission-version","namespace":"remote","endpoint_identity":"unchanged"}},"Cleanup":{"Pod":"seed"}}`)
 	b := model.ExecutionTargetBinding{RunID: run.ID, Workflow: run.WorkflowName, Target: "remote", Repository: qualified, RepositoryID: repo.ID, RefKind: string(run.RefKind), Trigger: run.Trigger, Ref: run.Ref, SHA: run.SHA, TestedSHA: run.SHA, Namespace: "remote", Snapshot: snapshot}
-	if err := s.BindExecutionTarget(ctx, b); err != nil {
+	body, _ := json.Marshal(b)
+	if _, err := s.db.Exec(`INSERT INTO execution_target_bindings(run_id,workflow_name,binding_json) VALUES(?,?,?)`, b.RunID, b.Workflow, string(body)); err != nil {
 		t.Fatal(err)
 	}
 	admission := []byte(`{"workflow":{"metadata":{"annotations":{"oberth.ci/execution-placement":"original-authority"}}},"identity":"unchanged"}`)
-	if err := s.BindExecutionTargetAdmission(ctx, b.RunID, admission); err != nil {
+	if _, err := s.db.Exec(`UPDATE execution_target_bindings SET admission_json=? WHERE run_id=?`, string(admission), b.RunID); err != nil {
 		t.Fatal(err)
 	}
 	original, _ := json.Marshal(b)
 	hash := sha256.Sum256(original)
 	digest := hex.EncodeToString(hash[:])
 	resource := model.ExecutionTargetResource{RunID: b.RunID, Kind: "Workflow", Namespace: b.Namespace, Name: b.Workflow, NotBefore: time.Now().Add(time.Minute), Object: json.RawMessage(`{"metadata":{"annotations":{"oberth.ci/execution-target":"` + digest + `","oberth.ci/execution-placement":"original-authority"}},"spec":{"nodeSelector":{"pool":"old-pool"}}}`)}
-	if first, err := s.PrepareExecutionTargetResource(ctx, resource); err != nil || !first {
-		t.Fatal(first, err)
-	}
-	if err := s.ObserveExecutionTargetUID(ctx, b.RunID, resource.Kind, resource.Namespace, resource.Name, "original-uid"); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO execution_target_resources(run_id,kind,namespace,name,uid,object_json,not_before) VALUES(?,?,?,?,?,?,?)`, b.RunID, resource.Kind, resource.Namespace, resource.Name, "original-uid", string(resource.Object), resource.NotBefore.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	beforeResources, err := s.ExecutionTargetResources(ctx, b.RunID)

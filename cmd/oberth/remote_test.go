@@ -748,3 +748,17 @@ func TestRunDetailJSONRetainsFullDiagnostics(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusRendersTargetQuarantineRemedy(t *testing.T) {
+	payload := `{"database":"ready","execution_target_recovery":{"quarantined_bindings":2,"reason":"Retained target custody is inconsistent.","remedy":"Inspect the original objects and start a fresh run."}}`
+	configure(t, remoteServer(t, payload))
+	var out bytes.Buffer
+	if err := runRemoteStatus(t.Context(), nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"2 quarantined bindings", "Retained target custody is inconsistent.", "remedy: Inspect the original objects and start a fresh run."} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatal("status omitted recovery guidance", out.String())
+		}
+	}
+}

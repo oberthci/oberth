@@ -20,3 +20,10 @@ const recovered=vm.runInContext('combinedHTML',sandbox);
 assert.ok(recovered.includes('controller verified')&&!recovered.includes('controller verification required'));
 for(const text of ['8 admitted','host pressure','admission paused']) assert.ok(!recovered.includes(text));
 console.log('controller verification status rendering passed');
+
+vm.runInContext("api=async path=>path==='/api/status'?{version:'test',execution_target_recovery:{quarantined_bindings:2,reason:'Custody <inconsistent>',remedy:'Inspect <original objects>'}}:[];",sandbox);
+await vm.runInContext('renderStatus(0)',sandbox);
+const recovery=vm.runInContext('combinedHTML',sandbox);
+for(const text of ['execution target recovery','2 quarantined bindings','Custody &lt;inconsistent&gt;','Inspect &lt;original objects&gt;'])assert.ok(recovery.includes(text),text);
+assert.ok(!recovery.includes('Custody <inconsistent>'));
+console.log('quarantined target recovery status rendering passed');

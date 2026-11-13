@@ -24,3 +24,14 @@ type ExecutionTargetResource struct {
 	Object                            json.RawMessage
 	NotBefore                         time.Time
 }
+
+// ExecutionTargetRecoveryStatus exposes only a count and fixed operator remedy,
+// never retained repository identities, target configuration or object bodies.
+type ExecutionTargetRecoveryStatus struct {
+	QuarantinedBindings int64  `json:"quarantined_bindings"`
+	Reason              string `json:"reason"`
+	Remedy              string `json:"remedy"`
+}
+
+const ExecutionTargetRecoveryReason = "Retained execution target bindings have inconsistent original resource custody."
+const ExecutionTargetRecoveryRemedy = "Inspect retained bindings and original resource intents against a verified pre-upgrade backup; reconcile the original objects manually and start a fresh run. Quarantined bindings cannot be reused."

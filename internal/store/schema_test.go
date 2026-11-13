@@ -1077,6 +1077,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"execution_target_cancel_monotonic",
 		"execution_target_cleanup_immutable",
 		"execution_target_custody_digest_immutable",
+		"execution_target_quarantine_immutable",
 		"execution_target_resource_immutable",
 		"execution_target_uid_immutable",
 		"issues_metadata_revision",

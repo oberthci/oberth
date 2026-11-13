@@ -132,6 +132,7 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
+	ExecutionTargetRecovery *model.ExecutionTargetRecoveryStatus      `json:"execution_target_recovery,omitempty"`
 	DatabaseRetries         uint64                                    `json:"database_retries_total,omitempty"`
 	ControllerProfile       *model.ControllerProfileStatus            `json:"controller_profile,omitempty"`
 	ExecutionTargetProfiles map[string]*model.ControllerProfileStatus `json:"execution_target_profiles,omitempty"`
@@ -276,6 +277,14 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	}
 	if health.Store == nil {
 		return status, nil
+	}
+	if reader, ok := health.Store.(interface {
+		ExecutionTargetRecoveryStatus(context.Context) (*model.ExecutionTargetRecoveryStatus, error)
+	}); ok {
+		recovery, err := reader.ExecutionTargetRecoveryStatus(ctx)
+		if err == nil {
+			status.ExecutionTargetRecovery = recovery
+		}
 	}
 	upstreams, upstreamErr := health.Store.ListUpstreams(ctx)
 	repositories, repositoryErr := health.Store.ListRepositories(ctx)

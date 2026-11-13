@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -45,9 +46,12 @@ func (s *Store) BindExecutionTarget(ctx context.Context, binding model.Execution
 	if err != nil {
 		return err
 	}
-	var saved string
-	if err := tx.QueryRowContext(ctx, `SELECT binding_json FROM execution_target_bindings WHERE run_id=?`, binding.RunID).Scan(&saved); err != nil {
+	var saved, quarantine string
+	if err := tx.QueryRowContext(ctx, `SELECT binding_json,quarantine_reason FROM execution_target_bindings WHERE run_id=?`, binding.RunID).Scan(&saved, &quarantine); err != nil {
 		return err
+	}
+	if quarantine != "" {
+		return executionTargetQuarantineError()
 	}
 	if saved != string(body) {
 		return ErrInvalid
@@ -61,18 +65,21 @@ func (s *Store) BindExecutionTarget(ctx context.Context, binding model.Execution
 }
 
 func (s *Store) ExecutionTarget(ctx context.Context, runID, workflow string) (model.ExecutionTargetBinding, bool, error) {
-	var body, custodyDigest string
-	query, value := `SELECT binding_json,custody_digest FROM execution_target_bindings WHERE run_id=?`, runID
+	var body, custodyDigest, quarantine string
+	query, value := `SELECT binding_json,custody_digest,quarantine_reason FROM execution_target_bindings WHERE run_id=?`, runID
 	if runID == "" {
-		query, value = `SELECT binding_json,custody_digest FROM execution_target_bindings WHERE workflow_name=?`, workflow
+		query, value = `SELECT binding_json,custody_digest,quarantine_reason FROM execution_target_bindings WHERE workflow_name=?`, workflow
 	}
-	err := s.db.QueryRowContext(ctx, query, value).Scan(&body, &custodyDigest)
+	err := s.db.QueryRowContext(ctx, query, value).Scan(&body, &custodyDigest, &quarantine)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.ExecutionTargetBinding{}, false, nil
 	}
 	var binding model.ExecutionTargetBinding
 	if err != nil {
 		return binding, false, err
+	}
+	if quarantine != "" {
+		return binding, true, executionTargetQuarantineError()
 	}
 	if json.Unmarshal([]byte(body), &binding) != nil || (workflow != "" && binding.Workflow != workflow) {
 		return binding, false, ErrInvalid
@@ -119,7 +126,7 @@ func (s *Store) BindExecutionTargetAdmission(ctx context.Context, runID string, 
 	if len(body) > 2<<20 || !json.Valid(body) {
 		return ErrInvalid
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE execution_target_bindings SET admission_json=? WHERE run_id=? AND cancelled=0 AND (admission_json='' OR admission_json=?)`, string(body), runID, string(body))
+	result, err := s.db.ExecContext(ctx, `UPDATE execution_target_bindings SET admission_json=? WHERE run_id=? AND quarantine_reason='' AND cancelled=0 AND (admission_json='' OR admission_json=?)`, string(body), runID, string(body))
 	if err != nil {
 		return err
 	}
@@ -142,11 +149,14 @@ func (s *Store) PrepareExecutionTargetResource(ctx context.Context, resource mod
 	}
 	defer func() { _ = tx.Rollback() }()
 	var cancelled bool
-	var admission, body string
-	if err := tx.QueryRowContext(ctx, `SELECT cancelled,admission_json,binding_json FROM execution_target_bindings WHERE run_id=?`, resource.RunID).Scan(&cancelled, &admission, &body); err != nil {
+	var admission, body, quarantine string
+	if err := tx.QueryRowContext(ctx, `SELECT cancelled,admission_json,binding_json,quarantine_reason FROM execution_target_bindings WHERE run_id=?`, resource.RunID).Scan(&cancelled, &admission, &body, &quarantine); err != nil {
 		return false, err
 	}
 	var binding model.ExecutionTargetBinding
+	if quarantine != "" {
+		return false, executionTargetQuarantineError()
+	}
 	if cancelled || admission == "" || json.Unmarshal([]byte(body), &binding) != nil || resource.Namespace != binding.Namespace {
 		return false, ErrInvalid
 	}
@@ -181,6 +191,9 @@ func (s *Store) ObserveExecutionTargetUID(ctx context.Context, runID, kind, name
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := requireUsableExecutionTarget(ctx, tx, runID); err != nil {
+		return err
+	}
 	var old string
 	if err := tx.QueryRowContext(ctx, `SELECT uid FROM execution_target_resources WHERE run_id=? AND kind=? AND namespace=? AND name=?`, runID, kind, namespace, name).Scan(&old); err != nil {
 		return err
@@ -264,6 +277,9 @@ func (s *Store) RetainExecutionTargetOwnedResource(ctx context.Context, r model.
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := requireUsableExecutionTarget(ctx, tx, r.RunID); err != nil {
+		return err
+	}
 	var parentUID, body string
 	if err := tx.QueryRowContext(ctx, `SELECT r.uid,b.binding_json FROM execution_target_resources r JOIN execution_target_bindings b ON b.run_id=r.run_id WHERE r.run_id=? AND r.kind='Workflow'`, r.RunID).Scan(&parentUID, &body); err != nil {
 		return err
@@ -307,7 +323,7 @@ func (s *Store) auditTarget(ctx context.Context, tx *sql.Tx, runID, action strin
 // NextExecutionTargetCleanup rotates terminal work without a second allocator.
 func (s *Store) NextExecutionTargetCleanup(ctx context.Context, after string) (model.ExecutionTargetBinding, bool, error) {
 	var body, custodyDigest string
-	err := s.db.QueryRowContext(ctx, `SELECT b.binding_json,b.custody_digest FROM execution_target_bindings b JOIN runs r ON r.id=b.run_id WHERE r.status IN ('passed','failed','interrupted') AND b.cleanup_receipt='' AND EXISTS(SELECT 1 FROM execution_target_resources x WHERE x.run_id=b.run_id) ORDER BY (b.run_id<=?),b.run_id LIMIT 1`, after).Scan(&body, &custodyDigest)
+	err := s.db.QueryRowContext(ctx, `SELECT b.binding_json,b.custody_digest FROM execution_target_bindings b JOIN runs r ON r.id=b.run_id WHERE r.status IN ('passed','failed','interrupted') AND b.quarantine_reason='' AND b.cleanup_receipt='' AND EXISTS(SELECT 1 FROM execution_target_resources x WHERE x.run_id=b.run_id) ORDER BY (b.run_id<=?),b.run_id LIMIT 1`, after).Scan(&body, &custodyDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.ExecutionTargetBinding{}, false, nil
 	}
@@ -331,6 +347,9 @@ func (s *Store) CompleteExecutionTargetCleanup(ctx context.Context, runID string
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := requireUsableExecutionTarget(ctx, tx, runID); err != nil {
+		return err
+	}
 	var cancelled bool
 	var receipt string
 	if err := tx.QueryRowContext(ctx, `SELECT cancelled,cleanup_receipt FROM execution_target_bindings WHERE run_id=?`, runID).Scan(&cancelled, &receipt); err != nil {
@@ -380,4 +399,30 @@ func (s *Store) CompleteExecutionTargetCleanup(ctx context.Context, runID string
 		return err
 	}
 	return tx.Commit()
+}
+
+func executionTargetQuarantineError() error {
+	return fmt.Errorf("%w: execution target binding is quarantined; %s", ErrInvalidState, model.ExecutionTargetRecoveryRemedy)
+}
+
+func requireUsableExecutionTarget(ctx context.Context, tx *sql.Tx, runID string) error {
+	var reason string
+	if err := tx.QueryRowContext(ctx, `SELECT quarantine_reason FROM execution_target_bindings WHERE run_id=?`, runID).Scan(&reason); err != nil {
+		return err
+	}
+	if reason != "" {
+		return executionTargetQuarantineError()
+	}
+	return nil
+}
+
+func (s *Store) ExecutionTargetRecoveryStatus(ctx context.Context) (*model.ExecutionTargetRecoveryStatus, error) {
+	var count int64
+	if err := s.reader().QueryRowContext(ctx, `SELECT count(*) FROM execution_target_bindings WHERE quarantine_reason!=''`).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	return &model.ExecutionTargetRecoveryStatus{QuarantinedBindings: count, Reason: model.ExecutionTargetRecoveryReason, Remedy: model.ExecutionTargetRecoveryRemedy}, nil
 }
