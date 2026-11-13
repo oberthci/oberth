@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/client-go/kubernetes/fake"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -54,7 +56,7 @@ func TestArgoUpgradeCombinedValuesPreserveExactNumbers(t *testing.T) {
 				t.Fatal(err)
 			}
 			upgraded := false
-			deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			deps := Deps{Output: io.Discard, KubeClient: fake.NewClientset(), RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
 				case "list":
 					return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil
