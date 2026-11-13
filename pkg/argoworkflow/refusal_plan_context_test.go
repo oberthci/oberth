@@ -1,6 +1,7 @@
 package argoworkflow
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +67,15 @@ func TestRefusalPlannerCycleMetadataAndBounds(t *testing.T) {
 		wfv1.Template{Name: "root", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "through", Template: "t0"}, {Name: "run", Template: "leaf"}}}},
 		wfv1.Template{Name: "leaf", Container: &corev1.Container{Image: "registry.example.test/runner:1"}},
 	)
+	blankComplete := refusalCompositeGraph("complete-13")
+	for i := range blankComplete.Spec.Templates {
+		blankComplete.Spec.Templates[i].Steps[0].Steps = append(blankComplete.Spec.Templates[i].Steps[0].Steps, wfv1.WorkflowStep{Name: " ", Template: "leaf"}, wfv1.WorkflowStep{Name: "", Template: "leaf"})
+	}
+	leaf := wfv1.Template{Name: "leaf", Container: &corev1.Container{Image: "registry.example.test/runner:1"}}
+	blankComplete.Spec.Templates = append(blankComplete.Spec.Templates, leaf)
+	blankDiamond := refusalCompositeGraph("diamond-40")
+	blankDiamond.Spec.Templates[40].DAG.Tasks = []wfv1.DAGTask{{Name: "again", Template: "t0"}, {Name: " ", Template: "leaf"}}
+	blankDiamond.Spec.Templates = append(blankDiamond.Spec.Templates, leaf)
 	for _, test := range []struct {
 		name     string
 		workflow *wfv1.Workflow
@@ -76,6 +86,8 @@ func TestRefusalPlannerCycleMetadataAndBounds(t *testing.T) {
 		{"diamond-40", refusalCompositeGraph("diamond-40"), false, 0},
 		{"empty-inner-cycle", emptyCycle, true, 0},
 		{"ancestor-only-leaf", blocked, true, 1},
+		{"factorial-13-blank-leaf", blankComplete, true, 0},
+		{"diamond-40-back-edge-blank-leaf", blankDiamond, true, 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			type result struct {
@@ -106,5 +118,40 @@ func TestRefusalPlannerCycleFreeDuplicatesRemainRefused(t *testing.T) {
 	}}}
 	if _, err := PlanSteps(workflow); err == nil || !strings.Contains(err.Error(), "duplicate step key") {
 		t.Fatalf("cycle-free repeated rows were not refused: %v", err)
+	}
+}
+
+func TestRefusalPlannerResolvesInlineBeforeCycleCut(t *testing.T) {
+	leaf := &wfv1.Template{Container: &corev1.Container{Image: "registry.example.test/runner:1"}}
+	workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{{Name: "root", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "run", Template: "root", Inline: leaf}}}}}}}
+	if err := Admit(workflow, Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanSteps(workflow)
+	if err != nil || len(plan.Steps) != 1 || plan.Steps[0].Step != "run" || plan.BackEdgeCut {
+		t.Fatalf("inline Pod was mistaken for recursive composite: %+v %v", plan, err)
+	}
+}
+
+func TestRefusalPlannerHardVisitBudget(t *testing.T) {
+	// A large, empty recursive graph exercises search work independently of the
+	// number of emitted rows and of whether any subtree can be memoized.
+	workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "t0"}}
+	for i := 0; i < 300; i++ {
+		template := wfv1.Template{Name: fmt.Sprintf("t%d", i), DAG: &wfv1.DAGTemplate{}}
+		for j := 0; j < 300; j++ {
+			template.DAG.Tasks = append(template.DAG.Tasks, wfv1.DAGTask{Name: fmt.Sprintf("s%d", j), Template: fmt.Sprintf("t%d", j)})
+		}
+		workflow.Spec.Templates = append(workflow.Spec.Templates, template)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := PlanSteps(workflow); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "step planning exceeded the") || !strings.Contains(err.Error(), "visit limit") {
+			t.Fatalf("missing plain planner safety refusal: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("hard visit budget did not bound planning")
 	}
 }

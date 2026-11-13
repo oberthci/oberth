@@ -13,15 +13,16 @@ func (walk *planWalk) callsFor(template *wfv1.Template) []invocation {
 }
 
 func (walk *planWalk) reachableTarget(called invocation) (*wfv1.Template, bool) {
-	if called.expands {
+	if !walk.spendVisit() || called.expands {
 		return nil, false
 	}
-	if called.template != "" {
+	target := walk.resolve(called)
+	if target != nil && (target.DAG != nil || len(target.Steps) != 0) && called.template != "" {
 		if _, cut := walk.onPath[called.template]; cut {
 			return nil, true
 		}
 	}
-	return walk.resolve(called), false
+	return target, false
 }
 
 // A subtree unable to reach a Pod in this recursion context cannot add rows.
@@ -33,12 +34,17 @@ func (walk *planWalk) reachesPod(start *wfv1.Template) (bool, bool) {
 	cut := false
 	for i := 0; i < len(pending); i++ {
 		template := pending[i]
-		composite := template.DAG != nil || len(template.Steps) != 0
-		if !composite && podProducing(template) {
-			return true, cut
-		}
 		for _, called := range walk.callsFor(template) {
 			target, backEdge := walk.reachableTarget(called)
+			if walk.exhausted {
+				return false, cut
+			}
+			if target != nil && target.DAG == nil && len(target.Steps) == 0 && podProducing(target) {
+				if StepName(called.name) != "" {
+					return true, cut
+				}
+				continue
+			}
 			cut = cut || backEdge
 			if target != nil && !seen[target] {
 				seen[target] = true
@@ -57,6 +63,9 @@ func (walk *planWalk) containsCycle(nodes []*wfv1.Template, seen map[*wfv1.Templ
 	for _, node := range nodes {
 		for _, called := range walk.callsFor(node) {
 			target, _ := walk.reachableTarget(called)
+			if walk.exhausted {
+				return false
+			}
 			if target != nil && seen[target] {
 				incoming[target]++
 			}
@@ -71,6 +80,9 @@ func (walk *planWalk) containsCycle(nodes []*wfv1.Template, seen map[*wfv1.Templ
 	for i := 0; i < len(ready); i++ {
 		for _, called := range walk.callsFor(ready[i]) {
 			target, _ := walk.reachableTarget(called)
+			if walk.exhausted {
+				return false
+			}
 			if target == nil || !seen[target] {
 				continue
 			}

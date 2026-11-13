@@ -33,10 +33,13 @@ type PlannedStep struct {
 }
 
 // MaxPlannedSteps bounds the enumeration. A repository-authored document is
-// untrusted input, and admission bounds the template count but not the number
-// of pods a nest of DAGs can express, so the walk carries its own ceiling
+// untrusted input, and a nest of DAGs can express more pods than the template count, so the walk carries its own ceiling
 // rather than trusting the product of the two.
 const MaxPlannedSteps = 512
+
+// MaxPlanVisits bounds planner work independently of rows, memoization and
+// recursive shape. This is a planner safety limit, not an Argo workload budget.
+const MaxPlanVisits = 65536
 
 // PlannedSteps enumerates every step the document declares, in declaration
 // order, from the already-decoded object.
@@ -108,6 +111,9 @@ func PlanSteps(workflow *wfv1.Workflow) (StepPlan, error) {
 	// whose BoundaryID is the root node.
 	err := walk.descend(root, "", 0)
 	plan := StepPlan{Steps: walk.steps, BackEdgeCut: walk.backEdges > 0}
+	if walk.exhausted {
+		return plan, fmt.Errorf("argoworkflow: step planning exceeded the %d visit limit", MaxPlanVisits)
+	}
 	if err != nil {
 		return plan, err
 	}
@@ -139,6 +145,8 @@ type planWalk struct {
 	visits    map[planVisit]bool
 	calls     map[*wfv1.Template][]invocation
 	backEdges int
+	work      int
+	exhausted bool
 }
 
 // Only cycle-free subtrees have context-independent normalized rows at a boundary.
@@ -148,6 +156,9 @@ type planVisit struct {
 }
 
 func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth int) error {
+	if !walk.spendVisit() {
+		return nil
+	}
 	if depth > MaxIdentityWalkDepth {
 		return fmt.Errorf("argoworkflow: pipeline nests templates deeper than %d levels", MaxIdentityWalkDepth)
 	}
@@ -171,6 +182,9 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 		return nil
 	}
 	for _, called := range walk.callsFor(template) {
+		if !walk.spendVisit() {
+			return nil
+		}
 		if called.expands {
 			continue
 		}
@@ -213,6 +227,16 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 		}
 	}
 	return nil
+}
+
+// Count traversal and graph-search work under one hard per-plan ceiling.
+func (walk *planWalk) spendVisit() bool {
+	if walk.work >= MaxPlanVisits {
+		walk.exhausted = true
+		return false
+	}
+	walk.work++
+	return true
 }
 
 func (walk *planWalk) resolve(called invocation) *wfv1.Template {
