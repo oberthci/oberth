@@ -17,6 +17,7 @@ func TestServerWorkflowShutdownRBACCannotDeleteWorkflows(t *testing.T) {
 	}
 	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(output), 4096)
 	workflowRules := 0
+	patchAllowed := false
 	for {
 		var document struct {
 			Kind  string
@@ -45,13 +46,14 @@ func TestServerWorkflowShutdownRBACCannotDeleteWorkflows(t *testing.T) {
 			}
 			workflowRules++
 			for _, verb := range rule.Verbs {
+				patchAllowed = patchAllowed || verb == "patch"
 				if verb == "delete" || verb == "deletecollection" || verb == "*" {
 					t.Fatalf("server shutdown Role can delete Workflows: %+v", rule)
 				}
 			}
 		}
 	}
-	if workflowRules == 0 {
-		t.Fatal("missing Workflow RBAC; test examined no permissions")
+	if workflowRules == 0 || !patchAllowed {
+		t.Fatal("missing native Workflow shutdown patch permission")
 	}
 }
