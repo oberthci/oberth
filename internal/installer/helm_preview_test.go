@@ -3,8 +3,8 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -287,8 +287,14 @@ func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
 			case strings.HasPrefix(joined, "list"):
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.26"}]`), nil
 			case strings.HasPrefix(joined, "get values"):
-				return []byte(`{"secretstore":{"enabled":true,"address":"https://openbao.openbao.svc:8200","caCert":` +
-					strconv.Quote(liveCA) + `,"transit":{"enabled":true}},"compatibility":{"schemaIdentity":"legacy-schema-v1","auditDomain":"legacy-audit-v1","witnessKeyInfo":"legacy-witness-v1"}}`), nil
+				return json.Marshal(map[string]any{
+					"secretstore": map[string]any{"enabled": true, "address": "https://openbao.openbao.svc:8200", "caCert": liveCA, "transit": map[string]bool{"enabled": true}},
+					"compatibility": map[string]string{
+						"schemaIdentity": testUpgradeCompatibility.SchemaIdentity,
+						"auditDomain":    testUpgradeCompatibility.AuditDomain,
+						"witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo,
+					},
+				})
 			case strings.Contains(joined, "--dry-run=server"):
 				preview = joined
 				return []byte(`{"config":{}}`), nil
