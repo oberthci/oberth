@@ -30,7 +30,7 @@ fixture.
 The cell records the existing rest race run once and requires an explicit pass
 event for every required (Go package, top-level test) pair. A same-named test in
 another package cannot satisfy that requirement, and a later skip cannot replace
-the required terminal pass. It does not compile/run the 18 fixtures a second
+the required terminal pass. It does not compile/run the required fixtures a second
 time. The CLI build and one adverse fixture reuse the same race build flags/cache. Those tests cover:
 
 - The fixed-origin fetcher, real OpenSSL checksum signature verification,
@@ -38,6 +38,10 @@ time. The CLI build and one adverse fixture reuse the same race build flags/cach
   tampering, and preservation of an earlier verified installation.
 - Current answers schema and recovery-file path/mode/output validation;
   multi-file and explicit kubeconfig/context selection.
+- First-admin command issuance through the real daemon gate and SQLite Store:
+  first run, same-key redelivery, active-admin refusal and inactive-admin recovery.
+  The recorded rest events must also include the complete non-interactive JSON
+  onboarding/resume flow. These tests cannot be silently skipped.
 - Connect pin refusal, CA verification, CA bundle/settings merge and idempotence;
   client certificate enrollment, invite redemption and add-repo context binding.
 

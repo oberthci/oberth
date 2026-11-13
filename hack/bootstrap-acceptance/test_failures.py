@@ -97,7 +97,13 @@ class RestrictedPlanFixture(unittest.TestCase):
 
 class FixtureIdentity(unittest.TestCase):
     def passes(self):
-        return [dict(Package=package, Test=test, Action='pass') for package, test in ci.TESTS]
+        return [dict(Package=package, Test=test, Action='pass') for package, test in ci.TESTS + ci.FLOW_TESTS]
+
+    def test_missing_live_first_admin_flow_fails(self):
+        events = [dict(Package=package, Test=test, Action='pass') for package, test in ci.TESTS]
+        with self.assertRaises(Refused) as caught:
+            self.check(events)
+        self.assertEqual((caught.exception.package, caught.exception.test), ci.FLOW_TESTS[0])
 
     def check(self, events):
         ci.require_pass_events('\n'.join(map(json.dumps, events)).encode())
