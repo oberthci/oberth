@@ -83,6 +83,7 @@ type SchedulingReason struct {
 
 // IsExecutionDeadlineReason recognizes fixed controller vocabulary, not exit signals.
 func IsExecutionDeadlineReason(message string) bool {
+	message, _ = SplitArtifactCollectionDeadline(message)
 	message = strings.TrimSpace(message)
 	// The watchdog may join a Cancel error on subsequent lines, and adopted
 	// Workflow observation adds this fixed wrapper. Ordinary operation timeouts

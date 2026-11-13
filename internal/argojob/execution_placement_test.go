@@ -214,7 +214,7 @@ func TestExecutionPlacementConfigurationAndEnvironment(t *testing.T) {
 	}
 	client := placementClient(objects...)
 	seeder := NewSourceSeeder(client, recordingExec(nil), config)
-	if err := seeder.createSeedPod(t.Context(), sourceClaimName(request.Name), sourceClaimName(request.Name), &request); err == nil {
+	if _, err := seeder.createSeedPodBound(t.Context(), sourceClaimName(request.Name), sourceClaimName(request.Name), &request); err == nil {
 		t.Fatal("fake API without UID/RV claimed authenticated seed")
 	}
 }
@@ -251,7 +251,7 @@ func TestExecutionPlacementSeedCreateAndReadback(t *testing.T) {
 	if err := verifyPlacedSeed(created, readback, config.ExecutionPlacement); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutate := range []func(*corev1.Pod){func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/true"} }, func(p *corev1.Pod) { p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "INJECTED", Value: "1"}} }, func(p *corev1.Pod) { p.Spec.Containers[0].Resources = corev1.ResourceRequirements{} }, func(p *corev1.Pod) { p.Spec.Volumes[0].PersistentVolumeClaim.ClaimName = "foreign" }, func(p *corev1.Pod) { p.Spec.HostNetwork = true }, func(p *corev1.Pod) { p.Spec.ServiceAccountName = "foreign" }} {
+	for _, mutate := range []func(*corev1.Pod){func(p *corev1.Pod) { p.OwnerReferences = []metav1.OwnerReference{{UID: "foreign"}} }, func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/true"} }, func(p *corev1.Pod) { p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "INJECTED", Value: "1"}} }, func(p *corev1.Pod) { p.Spec.Containers[0].Resources = corev1.ResourceRequirements{} }, func(p *corev1.Pod) { p.Spec.Volumes[0].PersistentVolumeClaim.ClaimName = "foreign" }, func(p *corev1.Pod) { p.Spec.HostNetwork = true }, func(p *corev1.Pod) { p.Spec.ServiceAccountName = "foreign" }} {
 		pod := readback.DeepCopy()
 		mutate(pod)
 		if err := verifyPlacedSeed(created, pod, config.ExecutionPlacement); err == nil {

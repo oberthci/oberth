@@ -216,7 +216,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 	}
 	kube := fake.NewClientset()
 	seeder := &SourceSeeder{client: kube, config: testConfig()}
-	if err := seeder.createSeedPod(t.Context(), "seed", "claim"); err != nil {
+	if _, err := seeder.createSeedPodBound(t.Context(), "seed", "claim"); err != nil {
 		t.Fatal(err)
 	}
 	pod, err := kube.CoreV1().Pods(testNamespace).Get(t.Context(), "seed", metav1.GetOptions{})

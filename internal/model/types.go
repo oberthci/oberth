@@ -572,6 +572,10 @@ type PublicationSpec struct {
 	PreviousKnown bool
 	ResultSHA     string
 	Actor         string
+
+	// ArtifactCollectionDeadline carries the fixed evidence note into the
+	// durable publication transaction. It does not affect the Git mutation.
+	ArtifactCollectionDeadline bool
 }
 
 // PublicationFinalization is returned from the one transaction that closes a

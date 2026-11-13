@@ -1724,6 +1724,8 @@ func presentationRun(run model.Run) model.Run {
 
 func presentationRunAt(run model.Run, now time.Time) model.Run {
 	visible := visibleRun(run)
+	var collectionDeadline bool
+	run.Error, collectionDeadline = model.SplitArtifactCollectionDeadline(run.Error)
 	visible.DisplayStatus = model.DisplayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
 	if visible.DisplayStatus == model.DisplayQueued {
@@ -1742,6 +1744,9 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 			visible.DisplayReason = displayFailureText(visible.DisplayReason)
 		}
 		visible.DisplayReason = parkPolicyDisplayReason(run, visible.DisplayReason)
+		if (run.Status == model.RunPassed || run.Status == model.RunFailed) && collectionDeadline {
+			visible.DisplayReason = joinRunMessage(visible.DisplayReason, model.ArtifactCollectionDeadlineReason)
+		}
 		// The assisted fragment stays whole: its digest and actor are the
 		// evidence trail, so it is appended after the bounded clipping.
 		if reason := assistDisplayReason(run); reason != "" {

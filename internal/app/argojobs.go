@@ -866,12 +866,17 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 	// A terminal Workflow keeps its outputs even when its observation ended in
 	// error (log budget breach, executor identity retirement). Partial evidence
 	// from a running Workflow must not trigger live artifact collection.
+	artifactReason := ""
 	if completion.Terminal || completion.Succeeded {
 		if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger); reason != "" {
 			jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
+			artifactReason = reason
 		}
 	}
 	result := jobs.result(completion)
+	if artifactReason == model.ArtifactCollectionDeadlineReason {
+		result.Error = model.WithArtifactCollectionDeadline(result.Error)
+	}
 	result.Reobserve = reobserve
 	return result, err
 }

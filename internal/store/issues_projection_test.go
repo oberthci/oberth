@@ -142,6 +142,7 @@ func TestInfrastructureIssueProjectionDistinguishesNodeAndSchedulerFailures(t *t
 			{"scratch eviction", `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "128Mi".`, true},
 			{"storage pressure", "Evicted: The node was low on resource: ephemeral-storage.", true},
 			{"memory pressure", "Evicted: The node was low on resource: memory.", true},
+			{"eviction with collection deadline", "Evicted\n" + model.ArtifactCollectionDeadlineReason, true},
 			{"trusted eviction", "trusted preflight: trusted preflight infrastructure failure: Evicted: The node was low on resource: memory.", true},
 			{"group", "read pipeline concurrency group: invalid concurrency group", false},
 			{"size grant", "resource size XL exceeds repository maximum L", false},

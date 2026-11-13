@@ -19,6 +19,7 @@ import (
 // there is nothing to retry: the run passed, is still running without a
 // publication retry, or was cancelled.
 func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHint {
+	run.Error, _ = model.SplitArtifactCollectionDeadline(run.Error)
 	if publication != nil && publication.Status == model.PublicationPending && publication.Attempts > 0 {
 		hint := &model.RetryHint{Class: model.RetryInfrastructure, Cause: "git_transport", Action: "none: Oberth retries the publication automatically",
 			Detail:      "upstream publication is retrying after a transient transport failure",

@@ -46,7 +46,7 @@ func TestSourceSeedPodHasCheckoutExecutionHeadroom(t *testing.T) {
 	seeder := NewSourceSeeder(client, func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
 		return nil
 	}, seedTestConfig())
-	if err := seeder.createSeedPod(t.Context(), "source-seed", "source-claim"); err != nil {
+	if _, err := seeder.createSeedPodBound(t.Context(), "source-seed", "source-claim"); err != nil {
 		t.Fatal(err)
 	}
 	pod, err := client.CoreV1().Pods(seeder.config.Namespace).Get(t.Context(), "source-seed", metav1.GetOptions{})

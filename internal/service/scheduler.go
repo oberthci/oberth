@@ -1190,7 +1190,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if publish, gateErr := scheduler.publicationGate(finalizeCtx, run.ID, jobResult, require); gateErr != nil {
 		return gateErr
 	} else if publish {
-		publication, beginErr := scheduler.beginRunPublication(finalizeCtx, repository, run, promotion)
+		publication, beginErr := scheduler.beginRunPublication(finalizeCtx, repository, run, promotion, jobResult)
 		if beginErr != nil {
 			jobResult.Status = model.RunFailed
 			jobResult.Phase = "publishing"
@@ -1356,10 +1356,11 @@ func (scheduler *Scheduler) publicationGate(ctx context.Context, runID string, r
 	return true, require(ctx)
 }
 
-func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository model.Repository, run model.Run, promotion model.Promotion) (model.Publication, error) {
+func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository model.Repository, run model.Run, promotion model.Promotion, result JobResult) (model.Publication, error) {
+	_, collectionDeadline := model.SplitArtifactCollectionDeadline(result.Error)
 	if promotion.ID != "" {
 		return scheduler.database().BeginPublication(ctx, model.PublicationSpec{
-			RepoID: repository.ID, RunID: run.ID, PromotionID: promotion.ID,
+			ArtifactCollectionDeadline: collectionDeadline, RepoID: repository.ID, RunID: run.ID, PromotionID: promotion.ID,
 			RefKind: model.RefBranch, Ref: promotion.TargetRef,
 			PreviousSHA: promotion.PreviousSHA, PreviousKnown: true,
 			ResultSHA: promotion.ResultSHA, Actor: promotion.Actor,
@@ -1369,7 +1370,7 @@ func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository 
 		return model.Publication{}, err
 	}
 	return scheduler.database().BeginPublication(ctx, model.PublicationSpec{
-		RepoID: repository.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref,
+		ArtifactCollectionDeadline: collectionDeadline, RepoID: repository.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref,
 		PreviousKnown: false, ResultSHA: run.SHA, Actor: run.Actor,
 	})
 }
@@ -1811,7 +1812,7 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 		if err != nil {
 			return err
 		}
-		publication, beginErr := scheduler.beginRunPublication(ctx, repository, run, promotion)
+		publication, beginErr := scheduler.beginRunPublication(ctx, repository, run, promotion, jobResult)
 		if beginErr != nil {
 			jobResult.Status = model.RunFailed
 			jobResult.Phase = "publishing"

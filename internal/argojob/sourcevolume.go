@@ -478,10 +478,6 @@ func (seeder *SourceSeeder) fillServerBinary(
 	return nil
 }
 
-func (seeder *SourceSeeder) createSeedPod(ctx context.Context, name, claimName string, requests ...*Request) error {
-	_, err := seeder.createSeedPodBound(ctx, name, claimName, requests...)
-	return err
-}
 func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimName string, requests ...*Request) (*corev1.Pod, error) {
 	if p := seeder.config.ExecutionPlacement; p != nil {
 		collector := false
@@ -557,8 +553,28 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 			}},
 		},
 	}
+	if name == claimName+collectPodSuffix {
+		claim, err := seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).Get(ctx, claimName, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("argojob: read artifact source claim %s: %w", claimName, err)
+		}
+		owner, err := sourceWorkflowOwner(claim, strings.TrimSuffix(claimName, "-src"))
+		if err != nil {
+			return nil, err
+		}
+		pod.OwnerReferences = []metav1.OwnerReference{owner}
+		deadline := int64(artifactCollectionTimeout / time.Second)
+		pod.Spec.ActiveDeadlineSeconds = &deadline
+	}
 	expected := pod.DeepCopy()
 	created, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) && name == claimName+collectPodSuffix && seeder.config.Custody == nil {
+		if err := seeder.removeLeftoverCollector(ctx, pod, claimName); err != nil {
+			return nil, err
+		}
+		// Exactly one new CREATE after observed deletion; never execute the leftover.
+		created, err = seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+	}
 	if seeder.config.ExecutionPlacement != nil {
 		if err != nil {
 			return nil, fmt.Errorf("argojob: isolated seed Pod create cannot be adopted: %w", err)
@@ -571,6 +587,9 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 		}
 	}
 	if apierrors.IsAlreadyExists(err) {
+		if name == claimName+collectPodSuffix {
+			return nil, fmt.Errorf("argojob: artifact collector Pod already exists: %w", err)
+		}
 		// A non-nil return is proof that this attempt created the Pod. The typed
 		// Kubernetes client may allocate an empty result even on AlreadyExists.
 		return nil, nil
@@ -627,7 +646,7 @@ func (seeder *SourceSeeder) interval() time.Duration {
 	return time.Second
 }
 
-// SweepOrphanedSourceClaims deletes source claims that no Workflow owns.
+// SweepOrphanedSourceClaims deletes old unowned seeds and source claims that no Workflow owns.
 //
 // Every claim is normally adopted by its Workflow immediately after submission,
 // so the Workflow's own deletion collects it. Two windows escape that: the
@@ -653,10 +672,16 @@ func (seeder *SourceSeeder) SweepOrphanedSourceClaims(ctx context.Context) {
 	}
 	for index := range list.Items {
 		claim := &list.Items[index]
-		if len(claim.OwnerReferences) != 0 {
+		if time.Since(claim.CreationTimestamp.Time) < seeder.orphanGrace() {
 			continue
 		}
-		if time.Since(claim.CreationTimestamp.Time) < seeder.orphanGrace() {
+		// A crash before Workflow creation/adoption can leave an ownerless
+		// seed. Remove it before the PVC, whose protection finalizer would
+		// otherwise wait for that Pod. Also repair this gap on owned claims.
+		if !seeder.sweepUnownedSeed(ctx, claim.Name) {
+			continue
+		}
+		if len(claim.OwnerReferences) != 0 {
 			continue
 		}
 		// Before sweeping an unowned claim, check whether the Workflow it
@@ -718,6 +743,7 @@ func (seeder *SourceSeeder) DeleteClaim(ctx context.Context, name string) {
 // AdoptClaim makes the Workflow the owner of the run's claim, so deleting the
 // Workflow — by TTL, by supersession, or by hand — collects the storage too.
 //
+// A surviving source seed is also bound directly to the Workflow.
 // This runs after submission because an owner reference needs the owner's UID,
 // which only exists once the Workflow does.
 func (seeder *SourceSeeder) AdoptClaim(ctx context.Context, name, workflowName, workflowUID string) error {
@@ -735,7 +761,7 @@ func (seeder *SourceSeeder) AdoptClaim(ctx context.Context, name, workflowName, 
 	if _, err := claims.Update(ctx, claim, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("argojob: bind source claim %s to its Workflow: %w", name, err)
 	}
-	return nil
+	return seeder.adoptSeedPod(ctx, claim, workflowName, workflowUID)
 }
 
 // sourceClaimName derives the claim name from the Workflow name, which the

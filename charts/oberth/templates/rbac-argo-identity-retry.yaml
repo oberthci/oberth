@@ -1,5 +1,6 @@
 # Persist the single executor-identity retry across observer/server restarts.
-# Pod patch permission is bound only to the trusted server ServiceAccount.
+# Pod patch also binds surviving source seeds to their Workflow UID.
+# Permission is bound only to the trusted server ServiceAccount.
 # Separate from the frozen -argo Role to preserve Helm SSA ownership.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
