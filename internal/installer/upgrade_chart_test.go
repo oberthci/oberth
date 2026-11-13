@@ -176,6 +176,9 @@ func testUpgradeValuePreflight(args []string) ([]byte, bool) {
 	if len(args) == 0 {
 		return nil, false
 	}
+	if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
+		return out, true
+	}
 	if args[0] == "upgrade" && slices.Contains(args, "--dry-run=server") {
 		return []byte(`{"config":{}}`), true
 	}
@@ -194,6 +197,37 @@ func testUpgradeValuePreflight(args []string) ([]byte, bool) {
 		}
 		return []byte(`{}`), true
 	}
+	return nil, false
+}
+
+func testUpgradeArgoSecurityPreflight(args []string) ([]byte, bool) {
+	if len(args) == 0 {
+		return nil, false
+	}
+	if args[0] == "list" && slices.Contains(args, DefaultArgoNamespace) {
+		return []byte(`[{"name":"argo-workflows","namespace":"oberth-argo","status":"deployed","chart":"argo-workflows-1.0.24"}]`), true
+	}
+	if len(args) >= 3 && args[0] == "get" && args[1] == "values" && args[2] == "argo-workflows" {
+		flags, _, err := argoSecurityDefaults(nil)
+		if err != nil {
+			panic(err)
+		}
+		values := map[string]any{}
+		for i := 0; i+1 < len(flags); i += 2 {
+			key, raw, _ := strings.Cut(flags[i+1], "=")
+			var value any
+			if err := json.Unmarshal([]byte(raw), &value); err != nil {
+				panic(err)
+			}
+			setAbsentArgoSecurityValue(values, strings.Split(key, "."), value)
+		}
+		body, err := json.Marshal(values)
+		if err != nil {
+			panic(err)
+		}
+		return body, true
+	}
+
 	return nil, false
 }
 

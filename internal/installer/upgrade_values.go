@@ -211,5 +211,9 @@ func prepareUpgradeDryRunValues(ctx context.Context, cfg *UpgradeConfig, deps De
 		return err
 	}
 	_, err = prepareUpgradeServerPKI(ctx, cfg, deps, values)
+	if err != nil {
+		return err
+	}
+	_, err = planUpgradeArgoSecurity(ctx, deps, values, cfg.ArgoSecurityDefaults)
 	return err
 }

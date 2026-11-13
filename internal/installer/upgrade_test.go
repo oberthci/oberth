@@ -20,7 +20,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -96,7 +95,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 					}
 					return nil, fmt.Errorf("unexpected helm call: %v", args)
 				},
-				KubeClient: fake.NewClientset(),
+				KubeClient: argoSecurityTestClient(),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 			}
 
@@ -134,7 +133,7 @@ func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected Helm call in dry-run: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -163,7 +162,7 @@ func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected Helm mutation in dry-run: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -204,7 +203,7 @@ func TestRunUpgradeSameVersionRefusesPendingAndUnknownStates(t *testing.T) {
 						}
 						return nil, fmt.Errorf("unexpected helm call: %v", args)
 					},
-					KubeClient: fake.NewClientset(),
+					KubeClient: argoSecurityTestClient(),
 					RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 				}
 				result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -266,7 +265,7 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.16.6 commit=abc123 date=2026-09-28T00:00:00Z\n"), nil
 		},
-		KubeClient: fake.NewClientset(deployment),
+		KubeClient: argoSecurityTestClient(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	withSignedRelease(t, &deps, targetVersion, targetImage)
@@ -339,7 +338,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.16.6 commit=abc123 date=2026-09-28T00:00:00Z\n"), nil
 		},
-		KubeClient: fake.NewClientset(deployment),
+		KubeClient: argoSecurityTestClient(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
@@ -392,7 +391,7 @@ func TestRunUpgradeFailedSameVersionRejectsTagOnlyImage(t *testing.T) {
 				return nil, fmt.Errorf("unexpected helm call: %v", args)
 			}
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	withSignedRelease(t, &deps, "0.16.6", fakeChartImageRef)
@@ -417,7 +416,7 @@ func TestRunUpgradeNoRelease(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -453,7 +452,7 @@ func TestRunUpgradeRejectsDowngrade(t *testing.T) {
 					}
 					return nil, fmt.Errorf("unexpected helm call: %v", args)
 				},
-				KubeClient: fake.NewClientset(),
+				KubeClient: argoSecurityTestClient(),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 			}
 			_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -486,7 +485,7 @@ func TestRunUpgradeRejectsUnparseableInstalledVersion(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -526,7 +525,7 @@ func TestRunUpgradeDryRun(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -913,7 +912,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected Kubernetes API request: %s %s", r.Method, r.URL.Path)
 	}))
@@ -1144,7 +1143,7 @@ func TestRunUpgradeTargetsAnyCluster(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 	}
 	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1213,7 +1212,7 @@ func TestRunUpgradeRejectsEmptyInstalledVersion(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1263,7 +1262,7 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
 	deps := Deps{
@@ -1349,7 +1348,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
 	deps := Deps{
@@ -1440,7 +1439,7 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	execAttempts := 0
 	deps := Deps{
@@ -1529,7 +1528,7 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 				return nil, fmt.Errorf("unexpected: %v", args)
 			}
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1589,7 +1588,7 @@ func TestRunUpgradeRecoveryGuidanceOnRolloutFailure(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewClientset(deployment)
+	kubeClient := argoSecurityTestClient(deployment)
 
 	deps := Deps{
 		Output: &output,
@@ -1798,7 +1797,7 @@ func TestDryRunRendersGoProxyPins(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1840,7 +1839,7 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1949,7 +1948,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("16\n"), nil
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
@@ -1996,7 +1995,7 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("17\n"), nil
 		},
-		KubeClient: fake.NewClientset(),
+		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 

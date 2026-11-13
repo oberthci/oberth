@@ -37,6 +37,7 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
+	ArgoSecurity             []ArgoSecurityReview         `json:"argo_security,omitempty"`
 	ArgoParallelism          string                       `json:"argo_parallelism"`
 	ArgoNamespaceParallelism string                       `json:"argo_namespace_parallelism"`
 	ArgoExecutorResources    *ArgoExecutorResourcesReview `json:"argo_executor_resources,omitempty"`
@@ -61,7 +62,7 @@ func Review(cfg Config) InstallReview {
 	if cfg.ClientHost != "" {
 		dns, ips = CertificateNamesForClientHost(cfg.ClientHost, dns, ips)
 	}
-	return InstallReview{ArgoParallelism: argoReviewLimit(cfg, cfg.ArgoParallelism, "parallelism", DefaultArgoParallelism), ArgoNamespaceParallelism: argoReviewLimit(cfg, cfg.ArgoNamespaceParallelism, "namespaceParallelism", DefaultArgoNamespaceParallelism), ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
+	return InstallReview{ArgoSecurity: cfg.argoSecurityReview, ArgoParallelism: argoReviewLimit(cfg, cfg.ArgoParallelism, "parallelism", DefaultArgoParallelism), ArgoNamespaceParallelism: argoReviewLimit(cfg, cfg.ArgoNamespaceParallelism, "namespaceParallelism", DefaultArgoNamespaceParallelism), ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -102,6 +103,7 @@ func (r *InstallResult) check(code string, ok bool, remedy string) {
 // PrintReview deliberately enumerates only non-secret install choices.
 func PrintReview(w io.Writer, cfg Config) { printReview(w, Review(cfg)) }
 func printReview(w io.Writer, review InstallReview) {
+	printArgoSecurityReview(w, review.ArgoSecurity)
 	_, _ = fmt.Fprintf(w, "Review install: context %q, namespace %q, pipeline namespace %q\nSecret store: production=%t dev=%t; client address=%q; admin identity=%q\nTLS DNS names: %v; IP addresses: %v\n", review.Context, review.Namespace, review.ArgoNamespace, review.ProductionStore, review.DevStore, review.ClientHost, review.AdminIdentity, review.DNSNames, review.IPs)
 	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
 	_, _ = fmt.Fprintln(w, "NetworkPolicy enforcement check runs first at install, after approval, using temporary probe Pods and their scratch namespace; fresh installs refuse unless enforcement is measured.")
@@ -414,3 +416,17 @@ func upstreamsVerifiedOrPending(raw []byte, allowPending bool) bool {
 	}
 	return rows > 0
 }
+
+func printArgoSecurityReview(w io.Writer, contexts []ArgoSecurityReview) {
+	if w == nil {
+		return
+	}
+	for _, security := range contexts {
+		before, _ := json.Marshal(security.Current)
+		after, _ := json.Marshal(security.Planned)
+		_, _ = fmt.Fprintf(w, "Argo %s.%s: %s -> %s (existing values preserved)\n", security.Component, security.Field, before, after)
+	}
+}
+
+// VerifyInstall reads cluster state and verifies the advertised TLS endpoint
+// against the CA obtained over the authenticated Kubernetes connection.

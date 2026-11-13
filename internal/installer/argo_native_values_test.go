@@ -16,7 +16,7 @@ import (
 func TestArgoUpgradePreservesOperatorValuesAndUsesNativeCap(t *testing.T) {
 	stored := `{"controller":{"parallelism":3,"namespaceParallelism":2,"resources":{"requests":{"cpu":"100m","memory":"128Mi"}},"priorityClassName":"oberth-oberth-control-plane","config":{"artifactDrivers":[{"name":"operator"}],"archiveLogs":true}},"executor":{"resources":{"requests":{"cpu":"75m"}}},"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"operator-extra"}}]}`
 	var applied []string
-	deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+	deps := Deps{KubeClient: argoSecurityTestClient(), Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		switch args[0] {
 		case "list":
 			return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil

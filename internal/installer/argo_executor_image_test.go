@@ -33,7 +33,7 @@ func renderArgoHelmObjects(t *testing.T, flags []string, values map[string]any) 
 	}
 	args := []string{"template", "argo-workflows", "testdata/argo-workflows-1.0.24.tgz", "--values", file}
 	for i := 0; i+1 < len(flags); i++ {
-		if slices.Contains([]string{"--set", "--set-string", "--set-json"}, flags[i]) {
+		if slices.Contains([]string{"--set", "--set-string", "--set-json", "-n"}, flags[i]) {
 			args = append(args, flags[i], flags[i+1])
 			i++
 		}
@@ -108,7 +108,7 @@ func TestManagedArgoExecutorImagePreservesMatchingAndRefusesConflictingValues(t 
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			writes := 0
-			deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			deps := Deps{KubeClient: argoSecurityTestClient(), Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
 				case "get":
 					return []byte(test.stored), nil
@@ -137,7 +137,7 @@ func TestManagedArgoExecutorImagePreservesMatchingAndRefusesConflictingValues(t 
 func TestManagedArgoReconcilesMissingExecutorPinWithoutChartUpgrade(t *testing.T) {
 	stored := `{}`
 	writes := 0
-	deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+	deps := Deps{KubeClient: argoSecurityTestClient(), Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		switch args[0] {
 		case "list":
 			return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil
@@ -159,7 +159,7 @@ func TestManagedArgoReconcilesMissingExecutorPinWithoutChartUpgrade(t *testing.T
 	}
 }
 
-// Model Helm's persisted executor settings without discarding unrelated values.
+// Model Helm's persisted executor and main settings without discarding unrelated values.
 func storedArgoExecutorOverrides(t *testing.T, stored string, args []string) string {
 	t.Helper()
 	var values map[string]any
@@ -171,7 +171,7 @@ func storedArgoExecutorOverrides(t *testing.T, stored string, args []string) str
 			continue
 		}
 		key, raw, ok := strings.Cut(args[i+1], "=")
-		if !ok || !strings.HasPrefix(key, "executor.") {
+		if !ok || (!strings.HasPrefix(key, "executor.") && !strings.HasPrefix(key, "mainContainer.") && !strings.HasPrefix(key, "controller.") && !strings.HasPrefix(key, "server.")) {
 			continue
 		}
 		var value any = raw

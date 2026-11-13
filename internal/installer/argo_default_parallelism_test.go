@@ -14,7 +14,7 @@ func TestFreshArgoInstallSetsDefaultParallelism(t *testing.T) {
 	t.Parallel()
 	run := func(cfg Config, existing bool) []string {
 		var install []string
-		deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		deps := Deps{KubeClient: argoSecurityTestClient(), Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			switch args[0] {
 			case "list":
 				if existing {

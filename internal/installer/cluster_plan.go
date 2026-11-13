@@ -202,6 +202,16 @@ func inspectInstallPreflight(ctx context.Context, cfg *Config, deps Deps, host I
 		cfg.NetworkPolicy = "auto"
 	}
 
+	securityDeps := installPolicyDeps(host, *cfg, selected)
+	securityDeps.KubeClient = deps.KubeClient
+	if measure {
+		securityDeps.Input, securityDeps.IsTerminal = host.Input, host.IsTerminal
+	}
+	if err := readArgoSecurityReview(ctx, cfg, securityDeps); err != nil {
+		r.check("argo_security_values", false, err.Error())
+		return
+	}
+
 	inspectCluster(ctx, cfg, deps, identity, r, cfg.existingRelease, measure)
 }
 

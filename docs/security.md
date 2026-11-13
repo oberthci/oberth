@@ -39,6 +39,20 @@
   still needs proof under the actual runtime; no capabilities, unconfined
   seccomp or sandbox-disabling flags are granted by this mode.
 
+- Before deploying the Argo Pod policy, install and upgrade check the live
+  controller ConfigMap for `mainContainer.securityContext` and
+  `executor.securityContext`: no privilege escalation, drop ALL capabilities,
+  only NET_BIND_SERVICE added back, and RuntimeDefault or Localhost seccomp.
+  Fresh managed installs supply missing defaults. Existing Argo releases require
+  approval in interactive security review or `--argo-security-defaults` to fill
+  absent native Helm values; operator values are preserved. Without consent the
+  command refuses and prints the exact values to set. An external controller
+  passes once its live configuration complies, including when installation uses
+  `--skip-argo-workflows`. Unreadable live configuration refuses before policy
+  deployment. A stored `controller.configMap.create=false` is accepted when the live defaults
+  comply. Otherwise the error names the exact ConfigMap keys to configure and
+  links the [v0.22.5 migration](releases/v0.22.5.md) for old-profile releases.
+
 - SSH accepts only registered uplink public keys and exactly the two Git smart
   protocol commands. It rejects shells, PTYs, forwarding, traversal, and helper
   protocols. Receive-pack accepts only branch and tag namespaces; Git replacement

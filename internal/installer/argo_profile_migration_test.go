@@ -110,7 +110,7 @@ func TestOldArgoProfileExecutorResourcesNoticeWithoutParallelism(t *testing.T) {
 				t.Fatal(err)
 			}
 			var output strings.Builder
-			deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			deps := Deps{KubeClient: argoSecurityTestClient(), Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
 				case "list":
 					return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil

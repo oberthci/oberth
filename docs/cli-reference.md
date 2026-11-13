@@ -409,6 +409,8 @@ Flags:
         Argo controller namespaceParallelism: Workflows running at once per namespace, 0 for no limit; default: 0 for a new release; preserve existing values unless explicitly chosen
   -argo-parallelism int
         Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; default: 4 for a new release; preserve existing values unless explicitly chosen (default 4)
+  -argo-security-defaults
+        consent to filling absent native security defaults on an existing Argo release; preserve operator values
   -argo-vault-address string
         OpenBao/Vault base URL injected into granted step containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
@@ -1849,6 +1851,8 @@ Usage: oberth upgrade [flags]
 Flags:
   -allow-downgrade
         accept a CLI older than the installed release (a deliberate rollback within one database schema)
+  -argo-security-defaults
+        consent to filling absent native security defaults on an existing Argo release; preserve operator values
   -backup-dir DIR
         write the pre-upgrade backup and the rollback record to DIR (default: the current directory)
   -backup-recipient CERT
