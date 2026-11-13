@@ -17,7 +17,7 @@ func TestSetupSecretStoreScriptIsEmbedded(t *testing.T) {
 		"setup-secretstore.sh",
 		"reads, writes, or prints a token",
 		"secretstore.enabled=true",
-		"oberth secretstore verify",
+		"oberth mcp call secretstore_verify",
 		"token_no_default_policy=true",
 		"auth/token/revoke-self",
 		"--kv-prefix",
