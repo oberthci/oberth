@@ -213,7 +213,7 @@ func TestWatchWaitOutageTimeDoesNotExpireIdentityClocks(t *testing.T) {
 				c.kube.(*fake.Clientset).PrependReactor("get", "configmaps", func(ktesting.Action) (bool, runtime.Object, error) {
 					reads.Add(1)
 					if unavailable.Load() {
-						return true, nil, apierrors.NewServiceUnavailable("temporary trust read")
+						return true, nil, apierrors.NewServiceUnavailable("trust read unavailable")
 					}
 					return false, nil, nil
 				})

@@ -102,7 +102,7 @@ type changedNodeWriter struct {
 func (w *changedNodeWriter) PutStepResults(_ context.Context, _ string, rows []model.StepResult) error {
 	w.batches = append(w.batches, append([]model.StepResult(nil), rows...))
 	if w.fail {
-		return errors.New("temporary history failure")
+		return errors.New("history write unavailable")
 	}
 	return nil
 }
