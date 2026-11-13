@@ -12,10 +12,8 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// A missing main limit does not make the Pod unlimited once wait is bounded:
-// kubelet compares total local usage (including disk emptyDirs) with the sum
-// of container limits. Explicitly inspect admitted Pod resources, not usage
-// report defaults that can label an unbounded main with the helper's request.
+// Repository-authored main storage budgets remain independent of native
+// executor defaults, which supply no storage request or limit.
 func TestOberthEveryLeafHasMainStorageBudget(t *testing.T) {
 	for _, file := range []string{"build.yaml", "release.yaml"} {
 		t.Run(file, func(t *testing.T) {
@@ -63,16 +61,13 @@ func TestOberthEveryLeafHasMainStorageBudget(t *testing.T) {
 						total += c.Resources.Limits.StorageEphemeral().Value()
 						if c.Name == "wait" {
 							wait = c.Resources.Limits.StorageEphemeral().Value()
-							assertBoundedControlContainer(t, c)
+							if len(c.Resources.Limits) != 0 || c.Resources.Requests.StorageEphemeral().Sign() != 0 {
+								t.Fatal("native executor acquired a limit or storage request")
+							}
 						}
 					}
-					if wait != 512<<20 || total < limit.Value()+wait {
-						t.Fatal("admitted Pod lost its main or helper storage allowance")
-					}
-					// Preserve the real release92 counterfactual: unbounded main leaves
-					// only wait's 512Mi aggregate, below a valid main scratch allocation.
-					if total-limit.Value() != wait {
-						t.Fatal("unexpected steady-state sidecar storage requires review")
+					if wait != 0 || total != limit.Value() {
+						t.Fatal("native defaults changed the authored steady-state storage budget", total, wait, limit.Value())
 					}
 				})
 			})
@@ -105,14 +100,13 @@ func TestOberthHelmPodStorageCoversObservedWorkingSet(t *testing.T) {
 				if total <= observedLowerBound {
 					t.Fatal("admitted aggregate remains below the observed release91 lower bound")
 				}
-				// Retain full existing private compiler/cache scratch capacity until a
-				// representative cold volume cohort can justify tighter main budgets.
+				// Retain the repository's own compiler/cache scratch capacity.
 				capacity := resource.MustParse("8Gi")
 				if main.Resources.Limits.StorageEphemeral().Cmp(capacity) < 0 {
-					t.Fatal("cold Go bootstrap cannot retain its private scratch capacity")
+					t.Fatal("cold bootstrap lost its authored scratch capacity")
 				}
-				if total-main.Resources.Limits.StorageEphemeral().Value() >= observedLowerBound {
-					t.Fatal("counterfactual does not reproduce helper-only eviction")
+				if total != main.Resources.Limits.StorageEphemeral().Value() {
+					t.Fatal("native helper added storage limits to the Pod total")
 				}
 				return
 			}

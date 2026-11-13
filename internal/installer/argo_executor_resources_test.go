@@ -44,7 +44,7 @@ func TestArgoExecutorResourcesPreservesEveryOperatorChoice(t *testing.T) {
 			config := Config{argoExecutorResources: review}
 			var text strings.Builder
 			PrintReview(&text, config)
-			if !strings.Contains(text.String(), "keeping the operator-set value") {
+			if !strings.Contains(text.String(), "stored value kept") {
 				t.Fatal("review hides preserved resources", text.String())
 			}
 			if Review(config).ArgoExecutorResources != review {
@@ -90,7 +90,7 @@ func TestArgoExecutorDefaultsReconcileAnExistingReleaseOnlyOnce(t *testing.T) {
 	if err != nil || !second.AlreadyInstalled || writes != 1 {
 		t.Fatal(second, writes, err)
 	}
-	if !strings.Contains(output.String(), "installer defaults") || !strings.Contains(output.String(), "keeping the operator-set value") {
+	if !strings.Contains(output.String(), "installer defaults") || !strings.Contains(output.String(), "stored value kept") {
 		t.Fatal(output.String())
 	}
 }
@@ -186,5 +186,15 @@ func TestArgoChartRendersNativeExecutorResources(t *testing.T) {
 		if !found {
 			t.Fatal("native controller ConfigMap missing")
 		}
+	}
+}
+
+func TestArgoExecutorDefaultResourcesAreRequestsOnly(t *testing.T) {
+	resources, ok := Review(Config{}).ArgoExecutorResources.Resources.(corev1.ResourceRequirements)
+	if !ok || len(resources.Requests) != 2 || resources.Requests.Cpu().MilliValue() != 50 || resources.Requests.Memory().Value() != 64<<20 || len(resources.Limits) != 0 {
+		t.Fatalf("native defaults exceed CPU/memory requests: %+v", resources)
+	}
+	if resources.Requests.StorageEphemeral().Sign() != 0 {
+		t.Fatal("native defaults request ephemeral storage")
 	}
 }

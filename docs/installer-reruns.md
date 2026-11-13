@@ -48,7 +48,9 @@ It refuses another cluster, a release that moved since, and a stale record: each
 
 Argo helper budgets use the separate controller release's native
 `executor.resources`. Managed `oberth install --upgrade` fills this setting only
-when absent and reports an existing operator value as preserved in install review.
-Partial and empty operator maps stay unchanged. Standalone `oberth upgrade`
+when absent and reports an existing setting as "stored value kept" in install
+review. Partial and empty maps stay unchanged, including values written by an
+earlier installer run. The defaults contain only CPU/memory requests; adopting
+them for an existing stored map requires an explicit operator edit. Standalone `oberth upgrade`
 updates the Oberth release; configure the native Argo setting before using that
 path with a server that no longer writes helper resources into Workflow patches.

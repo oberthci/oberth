@@ -37,10 +37,10 @@ func argoLimitArgs(cfg Config) []string {
 	return args
 }
 
-// noticeArgoExternalConfigMap explains why a native cap cannot change a
-// controller whose ConfigMap is supplied outside the chart.
-func noticeArgoExternalConfigMap(ctx context.Context, cfg Config, deps Deps, namespace string, exists bool) error {
-	if !exists || !argoLimitsRequested(cfg) {
+// noticeArgoExternalConfigMap explains why native controller settings cannot
+// change a ConfigMap supplied outside the chart.
+func noticeArgoExternalConfigMap(ctx context.Context, deps Deps, namespace string, exists bool) error {
+	if !exists {
 		return nil
 	}
 	raw, err := deps.RunHelm(ctx, []string{"get", "values", "argo-workflows", "-n", namespace, "-o", "json"})
@@ -58,7 +58,7 @@ func noticeArgoExternalConfigMap(ctx context.Context, cfg Config, deps Deps, nam
 		return fmt.Errorf("decode Argo controller ConfigMap setting: %w", err)
 	}
 	if create, ok := stored.Controller.ConfigMap.Create.(bool); ok && !create {
-		_, _ = fmt.Fprintln(deps.Output, "Argo controller.configMap.create=false: --argo-parallelism does not change the external ConfigMap; migrate the old profile settings as described in docs/releases/v0.22.4.md.")
+		_, _ = fmt.Fprintln(deps.Output, "Argo controller.configMap.create=false: controller.parallelism and executor.resources values do not change the external ConfigMap; migrate the old profile settings as described in docs/releases/v0.22.5.md.")
 	}
 	return nil
 }
