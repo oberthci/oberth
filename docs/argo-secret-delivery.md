@@ -96,3 +96,13 @@ return the workflow file; `access_dismiss` requires it too. After re-approval,
 run `oberth secretstore sync` to prune the old OpenBao roles and policies, then install the scoped identities.
 
 For upstream-scoped paths, the step and workflow-file scope is enforced at admission. The current OpenBao policy still grants the repository upstream subtree; a follow-up narrows that policy.
+
+The optional helper image is published for Linux amd64 and arm64 alongside each
+release. It contains only the static Oberth binary at `/usr/local/bin/oberth`
+and CA certificates. Select its immutable reference from `images.helper.ref`
+in the signed `release.json`; that record also includes the helper digest in
+its release-note paragraph. The image uses the same release signing key as the
+server image. Use it directly for Oberth commands, or copy its binary into a
+step image with the tools that `oberth secretstore exec` must launch; the helper
+contains no shell or build tools. It provides no grants, credentials or automatic
+Workflow injection.

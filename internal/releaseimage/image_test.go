@@ -143,8 +143,7 @@ func TestContractsRequireBothReleasePlatforms(t *testing.T) {
 	if len(definition.platforms) != 2 || definition.platforms[0] != "amd64" || definition.platforms[1] != "arm64" {
 		t.Fatalf("server release platforms = %v, want [amd64 arm64]", definition.platforms)
 	}
-	// The runner image is retired: only the server contract exists, and any
-	// other kind fails closed.
+	// The retired runner image remains unsupported.
 	if _, err := contract(Kind("runner")); err == nil {
 		t.Fatal("retired runner image contract still exists")
 	}
@@ -537,7 +536,7 @@ func TestVerifyImageRejectsMissingExecutable(t *testing.T) {
 	config.Author = "Oberth"
 	definition, _ := contract(Server)
 	config.Config = definition.config
-	config.Config.Labels = releaseLabels(created, "v1.0.0", "abc")
+	config.Config.Labels = releaseLabels(Server, created, "v1.0.0", "abc")
 	config.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
@@ -573,7 +572,7 @@ func TestVerifyImageRejectsNonExecutablePermissions(t *testing.T) {
 	config.Author = "Oberth"
 	definition, _ := contract(Server)
 	config.Config = definition.config
-	config.Config.Labels = releaseLabels(created, "v1.0.0", "abc")
+	config.Config.Labels = releaseLabels(Server, created, "v1.0.0", "abc")
 	config.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
@@ -607,7 +606,7 @@ func TestVerifyImageRejectsMissingRequiredBootstrapPath(t *testing.T) {
 	config.Author = "Oberth"
 	definition, _ := contract(Server)
 	config.Config = definition.config
-	config.Config.Labels = releaseLabels(created, "v1.0.0", "abc")
+	config.Config.Labels = releaseLabels(Server, created, "v1.0.0", "abc")
 	config.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
