@@ -177,3 +177,65 @@ func withoutCapturedHelperBudgets(t *testing.T, pod *corev1.Pod) {
 		}
 	}
 }
+
+// Frozen controller captures predate native run-fact parameters. Remove only
+// the retired fact env when comparing security behavior; captures stay intact.
+func withoutCapturedRunFactEnvironment(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
+	strip := withoutRunFactEnvironment
+	for _, containers := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
+		for i := range containers {
+			c := &containers[i]
+			strip(c)
+			for j := range c.Env {
+				env := &c.Env[j]
+				if env.Name != "ARGO_TEMPLATE" {
+					continue
+				}
+				var template wfv1.Template
+				if err := json.Unmarshal([]byte(env.Value), &template); err != nil {
+					t.Fatal(err)
+				}
+				walkTemplate(&template, func(t *wfv1.Template) { templateContainers(t, strip) }, 0)
+				encoded, err := json.Marshal(template)
+				if err != nil {
+					t.Fatal(err)
+				}
+				env.Value = string(encoded)
+			}
+		}
+	}
+}
+
+func withoutRunFactEnvironment(c *corev1.Container) {
+	kept := c.Env[:0]
+	for _, env := range c.Env {
+		switch env.Name {
+		case "OBERTH_REPO", "OBERTH_REF", "OBERTH_SHA", "OBERTH_TRIGGER", "OBERTH_RUN_ID", "OBERTH_RELEASE_TAG", "OBERTH_RELEASE_SHA", "OBERTH_STEP":
+			continue
+		}
+		kept = append(kept, env)
+	}
+	c.Env = kept
+}
+
+// Compare immutable controller inputs after removing only the retired run-fact
+// interface. Every secret, helper, identity and security field still compares.
+func withoutCapturedWorkflowRunFacts(t *testing.T, workflow *wfv1.Workflow) {
+	t.Helper()
+	parameters := workflow.Spec.Arguments.Parameters[:0:0]
+	for _, parameter := range workflow.Spec.Arguments.Parameters {
+		switch parameter.Name {
+		case "oberth-repo", "oberth-ref", "oberth-sha", "oberth-trigger", "oberth-release-tag", "oberth-release-sha":
+			continue
+		}
+		parameters = append(parameters, parameter)
+	}
+	workflow.Spec.Arguments.Parameters = parameters
+	walkTemplates(workflow, func(template *wfv1.Template) { templateContainers(template, withoutRunFactEnvironment) })
+	identity, err := specIdentity(workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow.Annotations[identityAnnotation] = identity
+}

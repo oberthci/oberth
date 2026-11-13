@@ -28,6 +28,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -826,11 +827,11 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 
-	// Stamp before wrapping so producer inputs cannot inherit a stale
-	// document default instead of the durable run's trigger.
+	// Bind native workflow parameters before wrapping the authored templates.
 	if err := resolved.BindParameters(workflow, request.effectiveRunTrigger()); err != nil {
 		return nil, err
 	}
+	setRunFactParameters(workflow, request)
 	workflow.Annotations[helperStorageAnnotation] = helperStoragePolicy
 	if err := projectExecutorTokens(workflow, config); err != nil {
 		return nil, err
@@ -1776,16 +1777,39 @@ func injectWorkspaceEnvironment(workflow *wfv1.Workflow) {
 	}
 }
 
-// injectRunEnvironment gives every container run identity and public tool
-// settings. Store coordinates are delivered separately to admitted consumers.
-func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Request, secretSteps map[*wfv1.Template]bool) {
-	environment := []corev1.EnvVar{
-		{Name: "OBERTH_REPO", Value: request.Repo},
-		{Name: "OBERTH_REF", Value: request.Ref},
-		{Name: "OBERTH_SHA", Value: request.SHA},
-		{Name: "OBERTH_TRIGGER", Value: string(request.Trigger)},
-		{Name: "OBERTH_RUN_ID", Value: request.RunID},
+// setRunFactParameters makes run facts available through native Argo workflow
+// parameters. Non-release runs omit the release parameters; release runs carry
+// the exact ref and SHA, including an empty string when a fact is empty.
+func setRunFactParameters(workflow *wfv1.Workflow, request Request) {
+	facts := []wfv1.Parameter{
+		{Name: "oberth-repo", Value: wfv1.AnyStringPtr(request.Repo)},
+		{Name: "oberth-ref", Value: wfv1.AnyStringPtr(request.Ref)},
+		{Name: "oberth-sha", Value: wfv1.AnyStringPtr(request.SHA)},
 	}
+	if request.Trigger == pipeline.TriggerRelease {
+		facts = append(facts,
+			wfv1.Parameter{Name: "oberth-release-tag", Value: wfv1.AnyStringPtr(request.Ref)},
+			wfv1.Parameter{Name: "oberth-release-sha", Value: wfv1.AnyStringPtr(request.SHA)},
+		)
+	}
+	names := make(map[string]bool, len(facts))
+	for _, fact := range facts {
+		names[fact.Name] = true
+	}
+	kept := workflow.Spec.Arguments.Parameters[:0:0]
+	for _, parameter := range workflow.Spec.Arguments.Parameters {
+		if !names[parameter.Name] && parameter.Name != "oberth-release-tag" && parameter.Name != "oberth-release-sha" {
+			kept = append(kept, parameter)
+		}
+	}
+	workflow.Spec.Arguments.Parameters = append(kept, facts...)
+}
+
+// injectRunEnvironment supplies artifact, workspace, toolchain and secret-store
+// coordinates. Run facts are workflow parameters; authored environment names
+// such as OBERTH_SHA pass through unchanged.
+func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Request, secretSteps map[*wfv1.Template]bool) {
+	var environment []corev1.EnvVar
 	if request.artifactsDelivered() {
 		environment = append(environment, corev1.EnvVar{Name: "OBERTH_ARTIFACTS", Value: ArtifactsMountPath})
 	}
@@ -1802,16 +1826,6 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 			corev1.EnvVar{Name: "GOMODCACHE", Value: ModuleCachePath},
 			corev1.EnvVar{Name: "GOCACHE", Value: BuildCachePath},
 			corev1.EnvVar{Name: "OBERTH_CACHE_DIR", Value: CacheMountPath},
-		)
-	}
-	if request.Trigger == pipeline.TriggerRelease {
-		// release.sh reads these from the environment (not from Argo workflow
-		// parameters). They are the release-tier counterparts of OBERTH_REF
-		// and OBERTH_SHA: the ref is the tag (e.g. "refs/tags/v0.12.11") and
-		// the SHA is the exact commit the tag points to.
-		environment = append(environment,
-			corev1.EnvVar{Name: "OBERTH_RELEASE_TAG", Value: request.Ref},
-			corev1.EnvVar{Name: "OBERTH_RELEASE_SHA", Value: request.SHA},
 		)
 	}
 	// Go module proxy environment: injected into every pipeline container so
@@ -1880,13 +1894,6 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 			continue
 		}
 		localEnvironment = append(localEnvironment, env)
-	}
-	// OBERTH_STEP: the Argo template name, set on every template for
-	// observability. Not a security control (the value is self-declared by
-	// the workflow document), but useful for diagnostic correlation between
-	// per-step grant denials and in-pod log lines. Issue #623.
-	if template.Name != "" {
-		localEnvironment = append(localEnvironment, corev1.EnvVar{Name: "OBERTH_STEP", Value: template.Name})
 	}
 	templateContainers(template, func(c *corev1.Container) { c.Env = overrideEnvironment(c.Env, localEnvironment) })
 	for group := range template.Steps {
@@ -1959,8 +1966,8 @@ func (request Request) validate() error {
 	if strings.TrimSpace(request.Repo) == "" {
 		problems = append(problems, errors.New("argojob: repository is required"))
 	}
-	if strings.TrimSpace(request.Ref) == "" || strings.ContainsAny(request.Ref, "\x00\r\n") {
-		problems = append(problems, errors.New("argojob: ref is required and must not contain control characters"))
+	if err := model.ValidateRunRef(request.Ref); err != nil {
+		problems = append(problems, err)
 	}
 	if !fullSHA(request.SHA) {
 		problems = append(problems, errors.New("argojob: SHA must be a lowercase 40-character object ID"))

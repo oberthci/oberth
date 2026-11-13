@@ -291,6 +291,11 @@ spec:
 
   - name: notify
     container:
+      env:
+      - name: OBERTH_REF
+        value: "{{workflow.parameters.oberth-ref}}"
+      - name: OBERTH_SHA
+        value: "{{workflow.parameters.oberth-sha}}"
       # Refresh digest: crane digest debian:trixie-slim
       image: debian:trixie-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
       command: [/bin/sh]

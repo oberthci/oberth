@@ -205,14 +205,16 @@ win name/path collisions; validated workspace opt-outs remain available.
   namespace, run/repository/SHA/trigger/tier labels and immutable source,
   policy and custody annotations. Pod metadata adds run/trigger/tier labels;
   other author Pod labels survive outside reserved keys; author Pod annotations
-  are refused. Declared trigger
-  and schedule arguments are bound to the actual run. These do not set node
+  are refused. Run-fact workflow parameters are set by the server; the
+  `oberth-` parameter prefix is reserved for server-owned declarations.
+  Referenced schedule arguments are bound to the actual run. These do not set node
   placement or resource requests. Labels can affect cluster policy and native
   affinity when selected; that is why installed selector keys are reserved.
-- **Environment.** Run containers receive `OBERTH_REPO`, `OBERTH_REF`,
-  `OBERTH_SHA`, `OBERTH_TRIGGER`, `OBERTH_RUN_ID` and per-template `OBERTH_STEP`.
-  Artifact delivery adds `OBERTH_ARTIFACTS`. Release runs add
-  `OBERTH_RELEASE_TAG` and `OBERTH_RELEASE_SHA`. Standard work-volume setup
+- **Environment.** Run facts are [native workflow parameters](run-facts.md).
+  Authors map them to env explicitly. Oberth preserves authored run-fact env
+  and adds no `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`, `OBERTH_TRIGGER`,
+  `OBERTH_RUN_ID`, `OBERTH_STEP`, `OBERTH_RELEASE_TAG` or `OBERTH_RELEASE_SHA`.
+  Artifact delivery retains `OBERTH_ARTIFACTS`. Standard work-volume setup
   supplies `PATH`, `OBERTH_TOOLS_DIR`, `HOME`, `GOPATH`, `GOTOOLCHAIN`, `GOWORK`,
   `GOENV`, `GOMODCACHE`, `GOCACHE`, `GIT_TERMINAL_PROMPT`, `KUBEBUILDER_ASSETS`,
   `TRIVY_CACHE_DIR` and `GOLANGCI_LINT_CACHE`; workspace annotations can omit

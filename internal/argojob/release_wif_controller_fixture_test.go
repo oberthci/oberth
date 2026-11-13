@@ -89,8 +89,11 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				t.Fatal(err)
 			}
 			if shape == "vault" {
-				capturedJSON, _ := json.Marshal(input)
-				currentJSON, _ := json.Marshal(current)
+				capturedComparison, currentComparison := input.DeepCopy(), current.DeepCopy()
+				withoutCapturedWorkflowRunFacts(t, capturedComparison)
+				withoutCapturedWorkflowRunFacts(t, currentComparison)
+				capturedJSON, _ := json.Marshal(capturedComparison)
+				currentJSON, _ := json.Marshal(currentComparison)
 				if string(capturedJSON) != string(currentJSON) {
 					t.Fatal("vault capture input differs from current Build")
 				}

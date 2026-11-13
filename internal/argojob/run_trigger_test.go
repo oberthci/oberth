@@ -10,18 +10,13 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// guardedDocument skips its heavy task on branch runs and declares a
-// promotion default for servers that predate the parameter.
+// guardedDocument references the server-owned trigger without declaring it.
 const guardedDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600
-  arguments:
-    parameters:
-    - name: oberth-trigger
-      value: promotion
   templates:
     - name: main
       dag:
@@ -47,7 +42,7 @@ func triggerParameters(workflow *wfv1.Workflow) []string {
 	return values
 }
 
-func TestBuildStampsTheDurableRunTriggerOverTheDocumentDefault(t *testing.T) {
+func TestBuildStampsTheDurableRunTrigger(t *testing.T) {
 	for _, trigger := range []argoworkflow.RunTrigger{
 		argoworkflow.RunTriggerBranch, argoworkflow.RunTriggerPromotion, argoworkflow.RunTriggerSchedule,
 	} {
@@ -70,18 +65,6 @@ func TestBuildStampsTheDurableRunTriggerOverTheDocumentDefault(t *testing.T) {
 	}
 	if values := triggerParameters(built); len(values) != 1 || values[0] != "tag" {
 		t.Fatalf("release run submitted oberth-trigger %v", values)
-	}
-}
-
-func TestBuildLeavesDocumentsThatNeverMentionTheParameterUnchanged(t *testing.T) {
-	request := testRequest(pipeline.TriggerCI, greedyDocument)
-	request.RunTrigger = argoworkflow.RunTriggerPromotion
-	built, err := Build(testConfig(), request)
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-	if len(built.Spec.Arguments.Parameters) != 0 {
-		t.Fatalf("unrelated document gained parameters %+v", built.Spec.Arguments.Parameters)
 	}
 }
 

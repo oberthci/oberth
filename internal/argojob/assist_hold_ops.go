@@ -87,14 +87,7 @@ func assistHoldOf(pod *corev1.Pod) (model.AssistHold, bool) {
 		return model.AssistHold{}, false
 	}
 	hold := model.AssistHold{Pod: pod.Name, Node: pod.Annotations[argoNodeNameAnnotation], SourcePath: SourceMountPath, PatchCapable: hasAssistBinary(main)}
-	for _, variable := range main.Env {
-		if variable.Name == "OBERTH_STEP" {
-			hold.Step = variable.Value
-		}
-	}
-	if hold.Step == "" {
-		hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
-	}
+	hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
 	// Only a retry child (node "...(N)", N >= 1) can be a hold: the held
 	// patch branch is never applied to attempt 1, and the pause variable is
 	// refused from repositories, so an attempt-1 Pod carrying it is not ours.
@@ -368,19 +361,7 @@ func assistEvictedOf(pod *corev1.Pod) (model.AssistHold, bool) {
 	if hold.Attempt, _ = strconv.Atoi(match[1]); hold.Attempt < 1 {
 		return model.AssistHold{}, false
 	}
-	for _, container := range pod.Spec.Containers {
-		if container.Name != mainContainerName {
-			continue
-		}
-		for _, variable := range container.Env {
-			if variable.Name == "OBERTH_STEP" {
-				hold.Step = variable.Value
-			}
-		}
-	}
-	if hold.Step == "" {
-		hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
-	}
+	hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name != mainContainerName {
 			continue

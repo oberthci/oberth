@@ -99,7 +99,7 @@ func TestBuildWorkspaceIsolation(t *testing.T) {
 				}
 			}
 			env := environmentOf(t, wf, "main")
-			if env["PATH"] != "/private/bin" || env["GOCACHE"] != "/private/cache" || env["OBERTH_SHA"] != testSHA {
+			if env["PATH"] != "/private/bin" || env["GOCACHE"] != "/private/cache" || env["OBERTH_SHA"] != "" {
 				t.Fatalf("isolation env = %v", env)
 			}
 		})

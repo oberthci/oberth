@@ -158,7 +158,7 @@ func TestPublisherVerifierHasCredentialFreeRetainedLogGate(t *testing.T) {
 	}
 }
 
-// Execute the actual wrappers after Build has injected cache and run variables.
+// Execute the actual wrappers with explicit run facts after Build sets cache env.
 // Merely checking authored env fields misses the deployed server's overrides.
 func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testing.T) {
 	config := oberthConfig()
@@ -207,7 +207,10 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 			for _, item := range container.Env {
 				command.Env = append(command.Env, item.Name+"="+item.Value)
 			}
+			// This wrapper-only fixture supplies the facts its shell requires.
+			// The repository's explicit parameter-to-env mapping is T1-YAML work.
 			command.Env = append(command.Env,
+				"OBERTH_RELEASE_TAG=v1.2.3", "OBERTH_RELEASE_SHA="+testSHA,
 				"OBERTH_SECRETSTORE_DIR=/run/oberth-secrets", "COSIGN_KEY=synthetic-key",
 				"COSIGN_PASSWORD=synthetic-password", "VAULT_TOKEN=synthetic-token",
 				"GOOGLE_APPLICATION_CREDENTIALS=/work/cache/poison.json",
