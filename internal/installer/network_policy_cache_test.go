@@ -309,3 +309,35 @@ func TestPolicyPlanNamespaceCreationInvalidatesAbsence(t *testing.T) {
 		t.Fatal("namespace creation reused absent-namespace proof", f.calls)
 	}
 }
+
+// The hardened measurement selects its container and fences Pod/policy UIDs.
+// A receipt from the earlier measurement cannot satisfy this install's gate.
+func TestPolicyPlanRejectsEarlierMeasurementReceipt(t *testing.T) {
+	f := newPolicyPlanFixture(t)
+	f.plan(t)
+	path := f.receipt(t)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt policyPlanMeasurement
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.Version = 1
+	raw, err = json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.deps.ProbeNetworkPolicy = func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+		f.calls++
+		return NetworkPolicyProbeResult{Status: "unverified", Remedy: "fresh hardened measurement required"}
+	}
+	result := f.preflight(t)
+	if result.OK || f.calls != 2 {
+		t.Fatal("earlier measurement receipt bypassed fresh enforcement gate", result.Checks, f.calls)
+	}
+}

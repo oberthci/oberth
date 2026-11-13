@@ -21,6 +21,10 @@ import (
 
 const policyPlanValidity = 5 * time.Minute
 
+// Receipt versions bind the measurement protocol as well as its schema. Version2
+// selects the probe container and checks created Pod and NetworkPolicy UIDs.
+const policyPlanVersion = 2
+
 type policyPlanMeasurement struct {
 	Version     int                      `json:"version"`
 	Binding     string                   `json:"binding"`
@@ -56,7 +60,7 @@ func networkPolicyForInstall(ctx context.Context, cfg Config, deps Deps, nodes [
 		if err != nil || binding != policyPlanBinding(ctx, cfg, deps, current.Items) {
 			return result
 		}
-		savePolicyPlan(root, policyPlanMeasurement{Version: 1, Binding: binding, CompletedAt: time.Now().UTC(), Result: result})
+		savePolicyPlan(root, policyPlanMeasurement{Version: policyPlanVersion, Binding: binding, CompletedAt: time.Now().UTC(), Result: result})
 	}
 	return result
 }
@@ -106,7 +110,7 @@ func policyPlanBinding(ctx context.Context, cfg Config, deps Deps, nodes []corev
 		Server, CA, ClusterUID, Context, Namespace, TargetUID, OberthNamespace, Image string
 		Labels                                                                        map[string]string
 		Nodes                                                                         []nodeIdentity
-	}{Version: 1, Rounds: policyProbeRounds, Samples: policyProbeSamples, Server: identity.Server, CA: identity.CAPin, ClusterUID: string(cluster.UID), Context: deps.ContextName, Namespace: namespace, OberthNamespace: oberthNamespace, Image: cfg.UtilityImage, Nodes: selected}
+	}{Version: policyPlanVersion, Rounds: policyProbeRounds, Samples: policyProbeSamples, Server: identity.Server, CA: identity.CAPin, ClusterUID: string(cluster.UID), Context: deps.ContextName, Namespace: namespace, OberthNamespace: oberthNamespace, Image: cfg.UtilityImage, Nodes: selected}
 	if target != nil && err == nil {
 		object.TargetUID, object.Labels = string(target.UID), target.Labels
 	}
@@ -184,7 +188,7 @@ func consumePolicyPlan(root, binding string, now time.Time) (NetworkPolicyProbeR
 	var receipt policyPlanMeasurement
 	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&receipt) != nil || receipt.Version != 1 || receipt.Binding != binding || receipt.Result.Status != "enforced" || receipt.Result.Evidence == "" || receipt.CompletedAt.IsZero() {
+	if decoder.Decode(&receipt) != nil || receipt.Version != policyPlanVersion || receipt.Binding != binding || receipt.Result.Status != "enforced" || receipt.Result.Evidence == "" || receipt.CompletedAt.IsZero() {
 		return NetworkPolicyProbeResult{}, false
 	}
 	var extra any

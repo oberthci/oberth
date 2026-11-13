@@ -44,3 +44,7 @@ Every other preflight check still runs. Missing, expired, failed, malformed or
 unreadable receipts require the complete live measurement; public plan JSON is
 not accepted as proof. An install without a recent successful plan still has
 the full fresh-install NetworkPolicy gate.
+
+Plan receipts from the earlier measurement protocol are not reused after the
+probe-container and Pod/NetworkPolicy UID checks were added. A new measurement
+is required; fresh receipts retain the same five-minute, single-use window.
