@@ -310,7 +310,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 	t.Parallel()
 	source := string(staticAssets["app.js"].body)
 	for _, want := range []string{
-		`const runFilters = ["all", "queued", "running", "passed", "failed", "superseded", "cancelled"]`,
+		`const runFilters = ["all", "queued", "running", "passed", "failed", "cancelled"]`,
 		`const statusOK = state.filter === "all" || displayRunStatus(run) === state.filter`,
 		`return statusOK && (!state.releaseOnly || run.release)`,
 		`data-kind-filter="release"`, `state.releaseOnly = !state.releaseOnly`,
@@ -320,8 +320,7 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 		`localStorage.getItem("oberth-filter") === "release"`,
 		`state.runNext = runPageFull(source)`,
 		`function shortSuccessor(s) { return String(s || "").slice(0, 12); }`,
-		`view successor ${esc(shortSuccessor(run.superseded_by))}`,
-		`(status === "cancelled" || status === "superseded") ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
+		`(status === "cancelled") ?`, `esc(runMessage(run))`, `server restart, retry needed`, `retry-warning`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("dashboard missing %q", want)

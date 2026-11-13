@@ -63,7 +63,7 @@ func (s *Store) BeginPublication(ctx context.Context, spec model.PublicationSpec
 		if err != nil {
 			return model.Publication{}, fmt.Errorf("load publication run: %w", err)
 		}
-		if run.Status != model.RunRunning || run.RepoID != spec.RepoID || run.Actor != spec.Actor ||
+		if run.Status != model.RunRunning || run.Cancelled() || run.RepoID != spec.RepoID || run.Actor != spec.Actor ||
 			!strings.EqualFold(run.SHA, spec.ResultSHA) {
 			return model.Publication{}, fmt.Errorf("%w: publication does not match active run", ErrInvalidState)
 		}

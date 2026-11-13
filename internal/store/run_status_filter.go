@@ -25,7 +25,7 @@ func init() {
 			}
 			values[i] = value
 		}
-		run := model.Run{Status: model.RunStatus(values[0]), Phase: values[1], Reason: values[2], Error: values[3], SupersededBy: values[4]}
+		run := model.Run{Status: model.RunStatus(values[0]), Phase: values[1], Reason: values[2], Error: values[3]}
 		if started, ok := args[5].(int64); ok && started != 0 {
 			at := time.Unix(0, started)
 			run.StartedAt = &at
@@ -67,7 +67,7 @@ func runStatusRestriction(statuses model.RunStatusFilter) (string, []any, error)
 			durable["running"] = true
 		case "failed":
 			durable["failed"] = true
-		case "cancelled", "superseded":
+		case "cancelled":
 			durable["interrupted"] = true
 		case "passed":
 			durable["passed"] = true

@@ -38,7 +38,6 @@ type remoteRun struct {
 	DisplayReason string `json:"display_reason"`
 	Scheduling    *model.RunScheduling
 	Release       bool
-	SupersededBy  string
 	// Phase and Error carry why a run failed. Without them the client decodes
 	// a failed run into a struct that says only "failed", which is the one
 	// thing the reader already knows.

@@ -66,9 +66,9 @@ Only recognized transport/API failures at identity-delivery stages are labelled
 remote exit and unclassified errors remain hard `job` failures. Fixed safe
 validation diagnostics stay actionable; raw
 transport/server response text stays out of public errors and logs. A real
-terminal CI result takes precedence, and ownership-checked Workflow deletion
-must succeed before an observation failure terminalizes the run. Unsuccessful
-deletion leaves the run owned for recovery. Existing replay authorization and
+terminal CI result takes precedence. An observation failure requests an
+ownership-checked Argo Stop; the run stays owned until Argo finishes, including
+exit handlers. A failed Stop request leaves the run owned for recovery. Existing replay authorization and
 evidence rules still apply to `run_retry`.
 
 Bounded `executor_identity` logs record the Workflow, Pod UID, stage, reason

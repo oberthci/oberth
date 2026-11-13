@@ -291,7 +291,7 @@ func (remote remoteRunCanceller) activeRuns(ctx context.Context, repo, ref strin
 // podRunCanceller cancels in-pod as the administrative actor. It records the
 // same audited cancel and obligation as the MCP tool, then asks the live
 // daemon over its admin socket to run its cancellation pass, which withdraws
-// a waiting run's reservation and deletes a claimed run's Workflow.
+// a waiting run's reservation and stops a claimed run's Workflow.
 type podRunCanceller struct {
 	database *store.Store
 	path     string
@@ -305,7 +305,7 @@ func (pod *podRunCanceller) cancel(ctx context.Context, id, reason string, force
 	if err != nil {
 		return api.RunCancelResponse{}, nil, err
 	}
-	if !run.Status.Active() {
+	if !run.Status.Active() && !run.Cancelled() {
 		return api.RunCancelResponse{}, nil, fmt.Errorf("%w: run %s is already %s; nothing to cancel", store.ErrRunNotActive, run.ID, run.Status)
 	}
 	var warning string
@@ -331,7 +331,7 @@ func (pod *podRunCanceller) cancel(ctx context.Context, id, reason string, force
 			response.Workflow = "not_submitted"
 		}
 		if err := requestAdminSchedulerWake(ctx, pod.socket, pod.path); err != nil {
-			notice := "the live scheduler deletes the Workflow on its next cancellation pass: " + err.Error()
+			notice := "the live scheduler stops the Workflow on its next cancellation pass: " + err.Error()
 			if response.Warning != "" {
 				notice = response.Warning + "; " + notice
 			}

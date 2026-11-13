@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -163,16 +162,15 @@ func (f *raceFixture) request(name, runID string) service.WorkflowRequest {
 	}
 }
 
-// TestDeleteDuringInflightCreateAbortsAndCleansUp verifies that when Delete
-// arrives while controller.Create is still running, the created Workflow is
-// cancelled, the intent map is clean, and create returns ErrSuperseded.
+// TestStopDuringInflightCreateRetainsTerminalObservation verifies that Stop
+// during Create stops the late Workflow and keeps its intent for Wait.
 //
 // Interleaving:
 //
 //	create() reserves intent -> controller.Create begins (blocks)
-//	Delete() marks intent cancelled, returns success
-//	controller.Create returns -> create() sees cancelled, cancels workflow, returns ErrSuperseded
-func TestDeleteDuringInflightCreateAbortsAndCleansUp(t *testing.T) {
+//	Stop() marks intent cancelled, returns success
+//	controller.Create returns -> create() sees cancelled, stops Workflow, retains intent and returns success
+func TestStopDuringInflightCreateRetainsTerminalObservation(t *testing.T) {
 	t.Parallel()
 	fixture := newRaceFixture(t)
 	const name = "oberth-test-race-01"
@@ -189,25 +187,25 @@ func TestDeleteDuringInflightCreateAbortsAndCleansUp(t *testing.T) {
 	// Wait for Create to begin.
 	<-entered
 
-	// Delete arrives while Create is blocked.
-	if err := fixture.jobs.Delete(context.Background(), name, runID); err != nil {
-		t.Fatalf("Delete during in-flight create: %v", err)
+	// Stop arrives while Create is blocked.
+	if err := fixture.jobs.Stop(context.Background(), name, runID); err != nil {
+		t.Fatalf("Stop during in-flight create: %v", err)
 	}
 
 	// Let Create return.
 	close(proceed)
 
-	// create() must return ErrSuperseded.
-	if err := <-createErr; !errors.Is(err, ErrSuperseded) {
-		t.Fatalf("create error = %v, want ErrSuperseded", err)
+	// A successfully created Workflow remains available for terminal observation.
+	if err := <-createErr; err != nil {
+		t.Fatalf("create error = %v, want success", err)
 	}
 
-	// The intent map must be empty — no untracked workflows.
+	// The intent stays owned until its native terminal observation.
 	fixture.jobs.mu.Lock()
 	remaining := len(fixture.jobs.intents)
 	fixture.jobs.mu.Unlock()
-	if remaining != 0 {
-		t.Fatalf("intent map has %d entries, want 0 (clean)", remaining)
+	if remaining != 1 {
+		t.Fatalf("intent map has %d entries, want 1 (awaiting terminal observation)", remaining)
 	}
 
 	// The controller must have received a Cancel for the created workflow.
@@ -304,7 +302,7 @@ func TestSameNameSameRunIDConcurrentCreateIsIdempotent(t *testing.T) {
 
 // TestDeleteBeforeCreateSeeding verifies the early-abort path: Delete arrives
 // between reservation and the start of seeding (controller.Create not yet
-// called). create() must return ErrSuperseded without ever calling
+// called). create() must return ErrCreationCancelled without ever calling
 // controller.Create.
 func TestDeleteBeforeCreateSeeding(t *testing.T) {
 	t.Parallel()
@@ -376,7 +374,7 @@ spec:
 	// To truly test the early-abort path, we need to exercise it through
 	// the real flow. Let's use a different approach: gate the Create so
 	// Delete can arrive between reservation and seeding. But we already
-	// tested that in TestDeleteDuringInflightCreateAbortsAndCleansUp.
+	// tested that in TestStopDuringInflightCreateRetainsTerminalObservation.
 	// Instead, let's verify that calling Delete on a not-yet-created intent
 	// marks it cancelled and lets a fresh create detect the cancellation.
 
@@ -406,24 +404,24 @@ spec:
 	// reading + audit all passed). Then Delete the intent.
 	<-entered
 
-	if err := jobs.Delete(context.Background(), name, runID); err != nil {
+	if err := jobs.Stop(context.Background(), name, runID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
 	// Release Create.
 	close(proceed)
 
-	// create() should see cancelled and return ErrSuperseded.
-	if err := <-createErr; !errors.Is(err, ErrSuperseded) {
-		t.Fatalf("create after Delete = %v, want ErrSuperseded", err)
+	// create() should see cancelled and return ErrCreationCancelled.
+	if err := <-createErr; err != nil {
+		t.Fatalf("create after Delete = %v, want ErrCreationCancelled", err)
 	}
 
 	// Intent map must be clean.
 	jobs.mu.Lock()
 	remaining := len(jobs.intents)
 	jobs.mu.Unlock()
-	if remaining != 0 {
-		t.Fatalf("intent map has %d entries after early abort, want 0", remaining)
+	if remaining != 1 {
+		t.Fatalf("intent map has %d entries after early abort, want 1", remaining)
 	}
 
 	// controller.Create was called (because the gate entered), but a Cancel

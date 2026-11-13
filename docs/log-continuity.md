@@ -36,7 +36,7 @@ retained loss marker prevents stale cursor reuse even if file removal failed.
 Journal failure before projection falls back to writing the received body once;
 a partial projection keeps its valid WAL for recovery rather than appending the
 same bytes again. An unavailable retained-file handle cannot turn an observed
-terminal Workflow into an API re-probe/delete failure: progress/termination
+terminal Workflow into an API re-probe/Stop failure: progress/termination
 observation continues, unavailable output stays lost, and the audit/global warning
 identifies the gap. Corrupt data is never trusted or guessed.
 

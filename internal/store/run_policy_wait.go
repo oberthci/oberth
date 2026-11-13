@@ -19,6 +19,9 @@ func (s *Store) SetRunPolicyWaiting(ctx context.Context, id string, waiting bool
 	if err != nil {
 		return current, err
 	}
+	if current.Cancelled() {
+		return current, nil
+	}
 	reason := current.Reason
 	suffix := "; " + PolicyRefreshWaitingReason
 	if waiting {
@@ -37,7 +40,7 @@ func (s *Store) SetRunPolicyWaiting(ctx context.Context, id string, waiting bool
 	}
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
 UPDATE runs SET reason = ?, updated_at = ?
-WHERE id = ? AND status = 'running' AND reason = ?
+WHERE id = ? AND status = 'running' AND phase != 'cancelled' AND reason = ?
 RETURNING `+runColumns, reason, unixNano(s.now()), id, current.Reason))
 	if errors.Is(err, sql.ErrNoRows) {
 		return s.Run(ctx, id)

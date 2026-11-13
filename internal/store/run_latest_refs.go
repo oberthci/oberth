@@ -42,10 +42,6 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 		beforeID = cursor.ID
 		beforeTime = unixNano(runEndTime(cursor))
 	}
-	// A latest-per-ref head cannot have a newer run of that same ref.
-	if filter.Superseded {
-		return []model.Run{}, nil
-	}
 	statusSQL, statusArgs, err := runStatusRestriction(filter.Status)
 	if err != nil {
 		return nil, err

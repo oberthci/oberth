@@ -60,7 +60,6 @@ func TestDisplayRunStatusCollapsesNotStartedRunsIntoQueued(t *testing.T) {
 		{"infra error retried", Run{Status: RunFailed, Phase: "infrastructure"}, DisplayFailed},
 		{"cancelled", Run{Status: RunInterrupted, Phase: PhaseCancelled}, DisplayCancelled},
 		{"cancelled despite a successor", Run{Status: RunInterrupted, Phase: PhaseCancelled, SupersededBy: "newer"}, DisplayCancelled},
-		{"superseded", Run{Status: RunInterrupted, Phase: "interrupted", SupersededBy: "newer"}, DisplaySuperseded},
 		{"restart, retry needed", Run{Status: RunInterrupted, Phase: "interrupted"}, DisplayCancelled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

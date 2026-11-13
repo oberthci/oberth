@@ -366,10 +366,10 @@ one with a non-admin token is still answered with the server's refusal.
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
-| `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, run context, superseded status, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained Workflow/step timing, without admission episodes |
+| `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, run context, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained timing |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
-| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; an in-flight create is cancelled and any claimed Workflow is deleted; the run is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
+| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). A claimed run stays active with a cancelling reason until native Argo Stop and its exit handlers finish; Argo's terminal phase supplies its final status. Queued work with no Workflow finishes cancelled. Non-admins: branch-push runs only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Repeating a cancel is idempotent |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run (`id`): step, pod, attempt, `held_since`, kubelet `deadline`, `patch_capable`, `released`; plus the run's assist record and the `assist.*` policy. Read-only. See [assisted continuation](assisted-continuation.md) |
 | `run_hold_exec` | Run one bounded argv (no shell) inside a held step's main container (`id`, `argv`, optional `step`, `stdin`, `timeout_s`). Any uplink whose scope covers the run's repository, or admin; bounded by `assist.execTimeout`/`execOutputBytes`; serialized per run; recorded and audited (`run.assist.exec`) before the command runs, which marks the run assisted |
 | `run_hold_patch` | Apply a unified `diff` to the held step's writable `/work/src` through the server's Pod helper (`id`, `diff`, optional `step`): exact context, clean relative paths only, no renames/binaries/`.git`/symlinks, bounded by `assist.patchMaxBytes`/`patchMaxFiles`; the diff's sha256 is recorded and audited as `run.assist.patch` before it is applied, which marks the run assisted |
@@ -450,7 +450,7 @@ returns not-found. If both are omitted, the failed burn/step remains the default
 An explicit burn without step defaults only when that burn has exactly one step.
 
 `run_list` accepts `status` as one existing display status or a non-empty list:
-`queued`, `running`, `passed`, `failed`, `cancelled`, `superseded`,
+`queued`, `running`, `passed`, `failed`, `cancelled`,
 or `cancelled`. `repo` and `ref` remain
 optional exact filters. Filtering precedes the page limit; queue-first ordering,
 active-row limits and terminal cursors are unchanged. Send the same filters with
@@ -581,7 +581,7 @@ step: a single step can exceed a model's context window.
 | `branch_deletion_list` | Upstream state of accepted branch deletions: pending, propagated, failed or skipped, with global `counts` and per-page `page_counts` (unscoped admin only) |
 | `branch_deletion_resolve` | Close failed branch deletion records as skipped with a reason line, by id or (without ids) those whose branch is gone from the mirror; no ref changes; audited (unscoped admin only) |
 | `receive_outbox` | Show, retry or abandon a receive record that blocks its repository; retry/abandon audited (unscoped admin only) |
-| `run_list` | List runs with repository/ref/SHA, superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page); `own:true` keeps the caller's own runs, `held:true` the running assisted runs with a parked hold (one unpaged list) |
+| `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position; optional repo/ref, display-status (one value or list) filters (bounded page); `own:true` keeps the caller's own runs, `held:true` the running assisted runs with a parked hold (one unpaged list) |
 | `audit_list` | Admin-only: verified audit-chain entries newest first, filtered by action prefix, actor, repo and time range (paged) |
 | `schedule_list` | Schedules declared in `.oberth/schedule.yaml`: cron, next run, last outcome, pause (scoped uplinks see their repositories) |
 | `schedule_pause` | Admin-only: pause one schedule entry (audited `schedule.pause`) |
@@ -667,8 +667,7 @@ declared without one:
   admin-only and audited (`schedule.trigger`, written once the run is queued
   and naming it in `run_id`, so a refused or failed enqueue records nothing).
   Like the cron path it is refused while the repository has active runs, and
-  while the entry is paused, unless `force` is set; a forced run supersedes the
-  branch's active runs as a push would. A manual trigger does not count as the
+  while the entry is paused, unless `force` is set. Existing runs stay active. A manual trigger does not count as the
   entry's last fire, so it never moves the cron cadence.
 
 A scoped admin uplink can pause, resume and trigger only entries of its own
@@ -702,31 +701,12 @@ required.
 ## Run list views
 
 Run rows in `run_list` and `/api/runs` carry `Repo` (repository name),
-`Ref`, `SHA`, and the boolean `superseded`.
+`Ref` and `SHA`.
 Full run detail carries the same context in `Run`; compact `run_get` uses
 `repo`, `ref`, and `sha`. Argo controls execution parallelism; run records
 report no size or CPU/memory reservation. Kubernetes places Pods using their
 requests. See
 [admission and native synchronization](native-synchronization.md).
-
-`superseded` is true for a branch run when a run with a greater accepted run
-sequence is queued or running in the same lane: repository, ref kind, ref and
-schedule entry, as in enqueue supersession. Named schedules are independent of
-ordinary branch pushes and of other schedule entries. Legacy unnamed schedules
-share the ordinary branch lane. Tags and promotion attempts never qualify and
-cannot supersede branch work. A newer terminal run does not qualify.
-The signal is independent of SHA equality, accepted order and page
-boundaries. Runs with pending publications can still match. This is a live read observation, distinct from durable
-`SupersededBy` cancellation history; it does not compare with an upstream branch
-head or guarantee that a matching run is safe to cancel.
-
-Use `run_list({"superseded":true})` or `/api/runs?superseded=true` to find
-matching runs in one read, optionally with `repo`, `ref` and `view`. Omitted or
-false leaves the list unfiltered. Filtering happens before the page limit. To inspect only active work,
-use `view:"active"`; results can include running work as well as queued work.
-Review each matching run and explicitly call the admin `run_cancel` tool with
-its ID and a reason. Listing never cancels work; existing publication-custody
-and cancellation authorization checks still apply.
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
 list has three groups: accepted work awaiting submission in FIFO order;
@@ -749,7 +729,7 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
 
 Every run response includes `display_status` and `display_reason`, while
 durable `Status` stays unchanged. `display_status` is exactly one of
-`queued`, `running`, `passed`, `failed`, `superseded` and
+`queued`, `running`, `passed`, `failed` and
 `cancelled`; everything finer is the reason line. Accepted work awaiting submission and Workflows Pending in Argo display
 `queued`; running Workflows display `running`. The reason names native
 waiting, for example `waiting for an Argo workflow slot`, `pod pending:
@@ -758,8 +738,9 @@ Insufficient cpu`, or a native synchronization lock. `Scheduling.state` and
 and template deadlines apply; Oberth adds no startup timer or watchdog.
 Terminal runs display
 `passed` (including published releases), `failed` (a deadline or memory
-kill is the reason), `superseded` with the superseding SHA,
-or `cancelled` with the cancelling actor or restart action.
+kill is the reason), or `cancelled` for work stopped before submission.
+Submitted cancellations finish with Argo's phase and retain the stopping actor
+in their reason.
 After a server restart, an existing Argo Workflow is adopted: it keeps its run
 ID and continues to its real result. Oberth does not stop or delete a live
 Workflow merely because its observer restarted. A claimed run whose Workflow
@@ -937,7 +918,7 @@ live pagination, not a point-in-time snapshot.
 
 `run_get({"id":"<run ID or unique 8+ character prefix>"})` returns the compact run; add `"summary":false` only when you need step diagnostics or retained Workflow/step timing. Admission episodes and requested/granted/closed timestamps are absent; ordinary run milestones remain.
 It returns `id`, `repo` (repository name), `ref`, `sha`,
-`superseded`, `status`,
+`status`,
 `phase`, `failed_burn`, `failed_step`, `error`, and `steps`. Each step contains
 `burn`, `name`, `status`, `started_at`, and `finished_at`; unknown times are null
 and an empty step list is `[]`. Burn names distinguish steps with the same name in different burns. This read omits

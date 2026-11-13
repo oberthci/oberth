@@ -110,13 +110,7 @@ func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 		if result.Duplicate {
 			line += " · replay of an already-recorded push"
 		}
-		if count := result.SupersededCount; count > 0 {
-			plural := ""
-			if count != 1 {
-				plural = "s"
-			}
-			line += fmt.Sprintf(" · superseded %d earlier run%s", count, plural)
-		}
+
 		return line
 	case result.Reason != "":
 		return fmt.Sprintf("%s %s: %s", kind, name, result.Reason)

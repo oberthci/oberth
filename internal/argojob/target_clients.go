@@ -161,10 +161,18 @@ func (c *TargetClients) verify(ctx context.Context, kind string, object metav1.O
 	switch actual := object.(type) {
 	case *wfv1.Workflow:
 		var intended wfv1.Workflow
-		if json.Unmarshal(r.Object, &intended) != nil || !apiequality.Semantic.DeepEqual(actual.Spec, intended.Spec) {
+		if json.Unmarshal(r.Object, &intended) != nil {
+			return fmt.Errorf("%w: retained Workflow intent is invalid", ErrTargetUncertain)
+		}
+		observed := actual.DeepCopy()
+		if observed.Spec.Shutdown == wfv1.ShutdownStrategyStop {
+			// A native Stop changes execution control, not the admitted graph.
+			observed.Spec.Shutdown = intended.Spec.Shutdown
+		}
+		if !apiequality.Semantic.DeepEqual(observed.Spec, intended.Spec) {
 			return fmt.Errorf("%w: retained Workflow spec differs", ErrTargetUncertain)
 		}
-		if err := sameSubmission(actual, &intended); err != nil {
+		if err := sameSubmission(observed, &intended); err != nil {
 			return err
 		}
 		for key, value := range intended.Annotations {
@@ -236,16 +244,19 @@ func (w *targetWorkflows) Get(ctx context.Context, name string, options metav1.G
 	}
 	return object, nil
 }
-func (w *targetWorkflows) Delete(ctx context.Context, name string, options metav1.DeleteOptions) error {
+func (w *targetWorkflows) Patch(ctx context.Context, name string, kind types.PatchType, data []byte, options metav1.PatchOptions, subresources ...string) (*wfv1.Workflow, error) {
 	object, err := w.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	options, err = w.clients.deletion(ctx, "Workflow", object.Namespace, name, object, options)
+	patched, err := w.clients.workflows.Patch(ctx, name, kind, data, options, subresources...)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return w.clients.workflows.Delete(ctx, name, options)
+	if patched.UID != object.UID {
+		return nil, ErrTargetUncertain
+	}
+	return patched, nil
 }
 
 type targetKubernetes struct {
@@ -482,6 +493,24 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 			return false, err
 		}
 	}
+	// Journal rows need not list the Workflow before its children. Establish
+	// native terminality first, so onExit retains every Pod and PVC it needs.
+	for _, r := range rows {
+		if r.Kind != "Workflow" {
+			continue
+		}
+		workflow, err := c.WorkflowClient().Get(ctx, r.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !workflow.Status.Phase.Completed() {
+			_, err := requestWorkflowStop(ctx, c.workflows, workflow)
+			return false, err
+		}
+	}
 	allAbsent := true
 	for _, r := range rows {
 		notBefore = maxTargetTime(notBefore, r.NotBefore)
@@ -504,7 +533,6 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 		if readErr != nil {
 			return false, readErr
 		}
-		allAbsent = false
 		if object.GetUID() == "" || (r.UID != "" && r.UID != string(object.GetUID())) {
 			return false, ErrTargetUncertain
 		}
@@ -516,6 +544,15 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 				return false, err
 			}
 		}
+		if r.Kind == "Workflow" {
+			workflow := object.(*wfv1.Workflow)
+			if !workflow.Status.Phase.Completed() {
+				_, err := requestWorkflowStop(ctx, c.workflows, workflow)
+				return false, err // Keep its children and custody through onExit.
+			}
+			continue // Only Argo TTL deletes a completed Workflow.
+		}
+		allAbsent = false
 		uid := object.GetUID()
 		options := metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}
 		propagation := metav1.DeletePropagationForeground
@@ -523,8 +560,6 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 		var deleteErr error
 		switch r.Kind {
 
-		case "Workflow":
-			deleteErr = c.workflows.Delete(ctx, r.Name, options)
 		case "Pod":
 			deleteErr = c.kube.CoreV1().Pods(r.Namespace).Delete(ctx, r.Name, options)
 		case "PersistentVolumeClaim":
@@ -576,6 +611,15 @@ func (c *TargetClients) VerifyResultCustody(ctx context.Context) error {
 		return err
 	}
 	if cancelled {
+		// Source cleanup follows Stop; it cannot invalidate the original
+		// Workflow's native verdict after its exit handlers have finished.
+		workflow, err := c.WorkflowClient().Get(ctx, c.journal.Binding().Workflow, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if workflow.Status.Phase.Completed() {
+			return nil
+		}
 		return ErrTargetUncertain
 	}
 	b := c.journal.Binding()

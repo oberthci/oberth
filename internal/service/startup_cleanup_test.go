@@ -19,7 +19,7 @@ type retryingStartupJobs struct {
 	proceed chan struct{}
 }
 
-func (j *retryingStartupJobs) Delete(ctx context.Context, name, id string) error {
+func (j *retryingStartupJobs) Stop(ctx context.Context, name, id string) error {
 	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 2*time.Minute {
 		return errors.New("startup cleanup has no bounded attempt")
 	}
@@ -29,7 +29,7 @@ func (j *retryingStartupJobs) Delete(ctx context.Context, name, id string) error
 	}
 	select {
 	case <-j.proceed:
-		return nil
+		return j.recoveryJobs.Stop(ctx, name, id)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -80,6 +80,7 @@ func TestStartupCancellationWaitsForObservedCleanup(t *testing.T) {
 	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("cleanup did not retry")
 	}
+	awaitCreateState(t, scheduler, run.ID, 0, true)
 	pending, err = f.store.PendingRunCancellations(t.Context())
 	if err != nil || len(pending) != 0 || jobs.calls.Load() < 2 {
 		t.Fatalf("cleanup did not finish: %+v %v calls=%d", pending, err, jobs.calls.Load())
@@ -125,7 +126,7 @@ type steadyCancellationJobs struct {
 	deleted chan struct{}
 }
 
-func (j *steadyCancellationJobs) Delete(_ context.Context, name, _ string) error {
+func (j *steadyCancellationJobs) Stop(ctx context.Context, name, id string) error {
 	switch j.calls.Add(1) {
 	case 1:
 		close(j.failed)
@@ -133,7 +134,7 @@ func (j *steadyCancellationJobs) Delete(_ context.Context, name, _ string) error
 	case 2:
 		close(j.deleted)
 	}
-	return nil
+	return j.recoveryJobs.Stop(ctx, name, id)
 }
 
 // After startup, a Workflow deletion the API refuses keeps the server up and
@@ -219,7 +220,7 @@ func TestSteadyCancellationDeleteFailureRetriesWithoutExit(t *testing.T) {
 }
 
 func TestOnlyPendingJobDeletions(t *testing.T) {
-	pending := fmt.Errorf("delete superseded Job x: %w", &pendingJobDeletionError{errors.New("api down")})
+	pending := fmt.Errorf("Stop Workflow x: %w", &pendingWorkflowStopError{errors.New("api down")})
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -232,18 +233,18 @@ func TestOnlyPendingJobDeletions(t *testing.T) {
 		{"deletion beside store error", errors.Join(pending, errors.New("constraint failed")), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := onlyPendingJobDeletions(tc.err); got != tc.want {
-				t.Fatalf("onlyPendingJobDeletions = %v, want %v", got, tc.want)
+			if got := onlyPendingWorkflowStops(tc.err); got != tc.want {
+				t.Fatalf("onlyPendingWorkflowStops = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
 // Every worker call site of the cancellation pass routes its error through
-// deferRefusedDeletions: refused deletions become a dispatch-loop retry,
+// deferRefusedStops: refused deletions become a dispatch-loop retry,
 // anything else, or a cancelled worker, keeps the error.
 func TestDeferRefusedDeletionsWakesDispatchRetry(t *testing.T) {
-	pending := fmt.Errorf("delete superseded Job x: %w", &pendingJobDeletionError{errors.New("api down")})
+	pending := fmt.Errorf("Stop Workflow x: %w", &pendingWorkflowStopError{errors.New("api down")})
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, tc := range []struct {
@@ -264,9 +265,9 @@ func TestDeferRefusedDeletionsWakesDispatchRetry(t *testing.T) {
 			signals := NewSignals()
 			signals.Observe(func(_, id string) { notified = append(notified, id) })
 			scheduler := &Scheduler{wake: make(chan struct{}, 1), signals: signals}
-			got := scheduler.deferRefusedDeletions(tc.ctx, "run", tc.err)
+			got := scheduler.deferRefusedStops(tc.ctx, "run", tc.err)
 			if (got == nil) != (tc.want == nil) {
-				t.Fatalf("deferRefusedDeletions = %v, want error=%t", got, tc.want != nil)
+				t.Fatalf("deferRefusedStops = %v, want error=%t", got, tc.want != nil)
 			}
 			if len(scheduler.wake) != tc.wakeups {
 				t.Fatalf("dispatch wakeups = %d, want %d", len(scheduler.wake), tc.wakeups)
@@ -277,4 +278,20 @@ func TestDeferRefusedDeletionsWakesDispatchRetry(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (j *retryingStartupJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := j.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	if err := j.recoveryJobs.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+func (j *steadyCancellationJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := j.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }

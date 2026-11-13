@@ -386,7 +386,7 @@ DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-
 `
 
 // PostWorkflowCapabilityUIDDowngrade reconstructs an empty UID-less table only in disposable historical fixtures.
-const PostWorkflowCapabilityUIDDowngrade = historicalRestartTimingSchema + `
+const PostWorkflowCapabilityUIDDowngrade = PostWorkflowStopDowngrade + historicalRestartTimingSchema + `
 DELETE FROM schema_migrations WHERE id='20261113181825-remove-restart-timings-370d05c58486149250a7139eb6afdca7';
 DELETE FROM schema_migrations WHERE id='20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153';
 DELETE FROM schema_migrations WHERE id='20261113190600-remove-admission-timing-18a8ff23a732be469158310b6aab30a5';
@@ -512,4 +512,24 @@ WHEN NEW.run_id != OLD.run_id OR NEW.epoch != OLD.epoch OR NEW.node_id != OLD.no
  OR (OLD.pod_uid != '' AND NEW.pod_uid != OLD.pod_uid)
  OR (OLD.available = 1 AND NEW.timing_json != OLD.timing_json)
 BEGIN SELECT RAISE(ABORT,'restart step timing attempt is immutable'); END;
+`
+
+// PostWorkflowStopDowngrade reconstructs the prior ledger only in disposable
+// historical-schema fixtures. Production migrations remain forward-only.
+const PostWorkflowStopDowngrade = `
+CREATE TEMP TABLE stop_fixture AS SELECT * FROM run_cancellations;
+DROP TABLE run_cancellations;
+CREATE TABLE run_cancellations (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    job_name TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL CHECK (reason IN ('superseded', 'owner_restart')),
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+INSERT INTO run_cancellations SELECT run_id,job_name,superseded_by,
+ CASE WHEN reason='cancelled' THEN 'superseded' ELSE reason END,created_at,completed_at FROM stop_fixture;
+DROP TABLE stop_fixture;
+CREATE INDEX run_cancellations_pending_idx ON run_cancellations(completed_at, created_at, run_id);
+DELETE FROM schema_migrations WHERE id='20261113211827-native-workflow-stop-cf632f1572dd335b9cbe33a78eb4e6fa';
 `

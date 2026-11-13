@@ -166,12 +166,16 @@ func TestTargetWorkflowAmbiguousPOSTRestartLateCommitAndUIDFence(t *testing.T) {
 	clients.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
 	remote.object = remote.late
 	done, err := clients.Settle(t.Context(), time.Time{})
-	if err != nil || done || remote.deletes != 1 {
-		t.Fatal("late commit not retained/deleted", done, err)
+	if err != nil || done || remote.deletes != 0 || remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop {
+		t.Fatal("late commit not retained/stopped", done, err)
 	}
+	if done, err := clients.Settle(t.Context(), time.Time{}); done || err != nil {
+		t.Fatal("running Stop released target custody", done, err)
+	}
+	remote.object.Status.Phase = wfv1.WorkflowFailed
 	done, err = clients.Settle(t.Context(), time.Time{})
-	if err != nil || !done {
-		t.Fatal("fresh original-target absence not settled", done, err)
+	if err != nil || !done || remote.object == nil {
+		t.Fatal("Argo completion not settled or Workflow deleted", done, err)
 	}
 	if local.posts != 0 || local.deletes != 0 {
 		t.Fatal("local fallback touched")
@@ -179,7 +183,7 @@ func TestTargetWorkflowAmbiguousPOSTRestartLateCommitAndUIDFence(t *testing.T) {
 	remote.object = remote.late.DeepCopy()
 	remote.object.UID = "replacement"
 	done, err = clients.Settle(t.Context(), time.Time{})
-	if done || err == nil || remote.deletes != 1 {
+	if done || err == nil || remote.deletes != 0 {
 		t.Fatal("replacement deleted or accepted")
 	}
 }
@@ -348,10 +352,68 @@ func TestTargetConfigurationMigrationRetainsOriginalObjectIdentity(t *testing.T)
 		t.Fatal("migration accepted replacement UID")
 	}
 	remote.object = created.DeepCopy()
-	if err := migrated.WorkflowClient().Delete(t.Context(), original.Name, metav1.DeleteOptions{}); err != nil {
-		t.Fatal("original fenced deletion failed", err)
+	if _, err := requestWorkflowStop(t.Context(), migrated.WorkflowClient(), created); err != nil {
+		t.Fatal("original fenced Stop failed", err)
 	}
-	if remote.posts != 1 || remote.deletes != 1 {
-		t.Fatal("migration repeated POST or deletion", remote.posts, remote.deletes)
+	if remote.posts != 1 || remote.deletes != 0 || remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop {
+		t.Fatal("migration repeated POST, deleted or failed to Stop", remote.posts, remote.deletes)
 	}
+}
+
+func TestTargetStopKeepsChildrenUntilExitHandlersFinish(t *testing.T) {
+	j := newCustodyJournal(t, "exit-workflow")
+	remote := &custodyWorkflows{}
+	kube := fake.NewClientset()
+	clients, err := NewTargetClients(remote, kube, j, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = clients.WorkflowClient().Create(t.Context(), custodyWorkflow(t, j), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// PVC kinds sort before Workflow in the journal. Their presence must never
+	// let settlement clean source storage before it has checked onExit.
+	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "exit-source", Namespace: j.b.Namespace, UID: "source-uid"}}
+	if err = kube.Tracker().Add(pvc); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(pvc)
+	if _, err = j.Prepare(t.Context(), model.ExecutionTargetResource{RunID: j.b.RunID, Kind: "PersistentVolumeClaim", Namespace: pvc.Namespace, Name: pvc.Name, NotBefore: time.Now(), Object: body}); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Observe(t.Context(), "PersistentVolumeClaim", pvc.Namespace, pvc.Name, string(pvc.UID)); err != nil {
+		t.Fatal(err)
+	}
+	clients.now = func() time.Time { return time.Now().Add(time.Hour) }
+	if done, err := clients.Settle(t.Context(), time.Time{}); err != nil || done {
+		t.Fatal(done, err)
+	}
+	if remote.object == nil || remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop || remote.deletes != 0 {
+		t.Fatal("Stop did not retain Workflow")
+	}
+	for _, action := range kube.Actions() {
+		if action.GetVerb() == "delete" {
+			t.Fatal("Stop deleted onExit storage", action)
+		}
+	}
+	remote.object.Status.Phase = wfv1.WorkflowFailed
+	if _, err = clients.Settle(t.Context(), time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = kube.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(t.Context(), pvc.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatal("terminal cleanup kept source", err)
+	}
+	if remote.deletes != 0 || remote.object == nil {
+		t.Fatal("terminal cleanup deleted Workflow")
+	}
+	if err := j.db.CancelExecutionTarget(t.Context(), j.b.RunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, strategy := range []wfv1.ShutdownStrategy{wfv1.ShutdownStrategyStop, ""} {
+		remote.object.Spec.Shutdown = strategy
+		if err := clients.VerifyResultCustody(t.Context()); err != nil {
+			t.Fatal("cleanup lost original native terminal verdict", err)
+		}
+	}
+
 }

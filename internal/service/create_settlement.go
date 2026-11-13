@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const createObservationWindow = time.Minute
@@ -231,6 +233,27 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	if err != nil {
 		return false, err
 	}
+	if run.Status.Terminal() {
+		// A terminal observer may have closed this obligation before an API
+		// cancellation snapshot handed off its local bookkeeping.
+		cancellations, err := scheduler.store.PendingRunCancellations(ctx)
+		if err != nil {
+			return false, err
+		}
+		stillPending := false
+		for _, c := range cancellations {
+			if c.RunID == run.ID {
+				stillPending = true
+			}
+		}
+		if !stillPending {
+			scheduler.pruneDeferredPodJournal(ctx, run.ID)
+			if err := scheduler.workspaces.cleanupRun(ctx, run.ID); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
 	if !pending.persisted {
 		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName, pending.reason); err != nil {
 			return false, err
@@ -288,9 +311,37 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		case store.ExecutorIdentityPendingMessage:
 			message = "executor identity readiness deadline exceeded after one issuance retry; cleanup confirmed absence"
 		}
-		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
+		if terminal, err := scheduler.jobs.TerminalResult(ctx, run.WorkflowName); err == nil {
+			if terminal.Status == model.RunFailed && !run.Cancelled() && strings.HasPrefix(run.Reason, store.OberthStopReasonPrefix) {
+				terminal.Error = "Oberth requested Argo Stop: " + strings.TrimPrefix(run.Reason, store.OberthStopReasonPrefix)
+			}
+			if run.Error == argoworkflow.ErrWorkflowCapabilityRequired.Error() && terminal.Status == model.RunFailed {
+				terminal.Error = "Workflow stopped by Oberth: " + run.Error
+			}
+			if run.Cancelled() && terminal.Status != model.RunPassed {
+				terminal.Phase = model.PhaseCancelled
+				terminal.Error = strings.Replace(run.Reason, "cancelling by ", "stopped by ", 1)
+			}
+			if err := scheduler.persistSteps(ctx, run.ID, terminal.Steps, runlog.Index{}); err != nil {
+				return false, err
+			}
+			_, err = scheduler.store.FinishRun(ctx, run.ID, model.RunResult{Status: terminal.Status, Phase: terminal.Phase, Error: terminal.Error, FailedStage: terminal.FailedStage, FailedStep: terminal.FailedStep, TerminalObservation: terminal.TerminalObservation})
+			if err != nil {
+				return false, err
+			}
+		} else if !errors.Is(err, ErrJobNotTerminal) {
+			return false, err
+		} else if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
 			return false, err
 		}
+	}
+	scheduler.signals.NotifyRun(run.ID)
+	if run.Trigger == "promotion" {
+		promotion, err := scheduler.store.PromotionByRun(ctx, run.ID)
+		if err != nil {
+			return false, err
+		}
+		scheduler.signals.NotifyPromotion(promotion.ID)
 	}
 	// Do not release against a concurrent cancellation re-arm.
 	cancellations, err = scheduler.store.PendingRunCancellations(ctx)
@@ -320,6 +371,10 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, failures ...error) {
 	reason := ""
 	for _, failure := range failures {
+		if errors.Is(failure, argoworkflow.ErrWorkflowCapabilityRequired) {
+			reason = argoworkflow.ErrWorkflowCapabilityRequired.Error()
+			run.Error = reason
+		}
 		var expired interface{ ExecutorIdentityExpired() bool }
 		if errors.As(failure, &expired) {
 			reason = store.ExecutorIdentityPendingMessage

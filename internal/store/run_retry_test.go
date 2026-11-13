@@ -134,36 +134,6 @@ func TestRetryRunRefusesOlderBranchRunAfterNewerRunFinishes(t *testing.T) {
 	}
 }
 
-func TestRetryRunRefusesSupersededSource(t *testing.T) {
-	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
-	ctx := context.Background()
-	repo := createRepo(t, s)
-	source, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch,
-		Ref: "feature/retry", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "branch"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch,
-		Ref: source.Ref, SHA: strings.Repeat("b", 40), Actor: "pusher", Trigger: "branch"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	old, err := s.Run(ctx, source.ID)
-	if err != nil || old.Status != model.RunInterrupted || old.SupersededBy != replacement.ID {
-		t.Fatalf("superseded source = %+v, %v", old, err)
-	}
-	if _, err := s.FinishRun(ctx, replacement.ID, model.RunResult{Status: model.RunPassed}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: old.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("superseded source retried: %v", err)
-	}
-}
-
 func TestTagReplayEvidenceAndPublicationGuardAreTransactional(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)

@@ -5,7 +5,7 @@ package installer
 // an installation on 2026-10-16 (issues 038 and 048): validate the database offline,
 // write OpenBao state field-for-field and verify it by read-back, scale the
 // server to zero, swap the database on its volume keeping the previous one
-// aside, restore the secret-access table, remove Argo Workflows whose runs
+// aside, restore the secret-access table, stop Argo Workflows whose runs
 // only the replaced database knew, set the compatibility values the restored
 // database needs, and scale back up.
 //
@@ -591,17 +591,21 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		_, _ = fmt.Fprintf(w, "  ✓ ConfigMap %s restored (%d grants)\n", secretAccessConfigMapName, countGrants(archive.Grants))
 	}
 
-	// List again now that no server can submit new workflows.
-	if workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace); parts.History && err == nil {
+	// List again now that no server can submit new Workflows.
+	if parts.History {
+		workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
+		if err != nil {
+			return stopped(fmt.Errorf("list Workflows for Stop: %w", err))
+		}
 		orphans, err := orphanedWorkflows(ctx, workflows, archive, cfg.InterruptQueued)
 		if err != nil {
 			return stopped(err)
 		}
-		if err := deleteWorkflows(ctx, deps, cfg.ArgoNamespace, orphans); err != nil {
+		if err := stopWorkflows(ctx, deps, cfg.ArgoNamespace, orphans); err != nil {
 			return stopped(err)
 		}
 		if len(orphans) > 0 {
-			_, _ = fmt.Fprintf(w, "  ✓ deleted %d orphaned workflows\n", len(orphans))
+			_, _ = fmt.Fprintf(w, "  ✓ requested Argo Stop for %d orphaned workflows (completed Workflows stay for TTL cleanup)\n", len(orphans))
 		}
 	}
 
@@ -971,9 +975,12 @@ func writeSecretAccess(ctx context.Context, deps Deps, namespace string, grants 
 
 // runWorkflow is one Argo Workflow submitted for an Oberth run.
 type runWorkflow struct {
-	Name  string
-	RunID string
-	Phase string
+	Name            string
+	RunID           string
+	UID             string
+	ResourceVersion string
+	Phase           string
+	Shutdown        string
 }
 
 func listRunWorkflows(ctx context.Context, deps backupDeps, namespace string) ([]runWorkflow, error) {
@@ -985,9 +992,14 @@ func listRunWorkflows(ctx context.Context, deps backupDeps, namespace string) ([
 	var list struct {
 		Items []struct {
 			Metadata struct {
-				Name   string            `json:"name"`
-				Labels map[string]string `json:"labels"`
+				Name            string            `json:"name"`
+				UID             string            `json:"uid"`
+				ResourceVersion string            `json:"resourceVersion"`
+				Labels          map[string]string `json:"labels"`
 			} `json:"metadata"`
+			Spec struct {
+				Shutdown string `json:"shutdown"`
+			} `json:"spec"`
 			Status struct {
 				Phase string `json:"phase"`
 			} `json:"status"`
@@ -998,7 +1010,7 @@ func listRunWorkflows(ctx context.Context, deps backupDeps, namespace string) ([
 	}
 	workflows := make([]runWorkflow, 0, len(list.Items))
 	for _, item := range list.Items {
-		workflows = append(workflows, runWorkflow{Name: item.Metadata.Name, RunID: item.Metadata.Labels["oberth.ci/run"], Phase: item.Status.Phase})
+		workflows = append(workflows, runWorkflow{Name: item.Metadata.Name, RunID: item.Metadata.Labels["oberth.ci/run"], UID: item.Metadata.UID, ResourceVersion: item.Metadata.ResourceVersion, Phase: item.Status.Phase, Shutdown: item.Spec.Shutdown})
 	}
 	return workflows, nil
 }
@@ -1046,16 +1058,32 @@ func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive res
 	return orphans, nil
 }
 
-func deleteWorkflows(ctx context.Context, deps backupDeps, namespace string, workflows []runWorkflow) error {
-	if len(workflows) == 0 {
-		return nil
-	}
-	args := kubectlContextArgs(deps.ContextName, "delete", "workflows.argoproj.io", "-n", namespace, "--ignore-not-found", "--wait=false")
+// stopWorkflows requests native Stop on the exact objects listed after the
+// server stopped. UID and resourceVersion prevent a replacement or changed
+// ownership from being patched. Argo runs exit handlers and owns TTL cleanup.
+func stopWorkflows(ctx context.Context, deps backupDeps, namespace string, workflows []runWorkflow) error {
 	for _, wf := range workflows {
-		args = append(args, wf.Name)
-	}
-	if out, err := deps.RunCommand(ctx, nil, "kubectl", args...); err != nil {
-		return fmt.Errorf("delete orphaned workflows: %w%s", err, commandOutputSuffix(out))
+		switch wf.Phase {
+		case "Succeeded", "Failed", "Error":
+			continue
+		}
+		if wf.Shutdown == "Stop" {
+			continue
+		}
+		if wf.Name == "" || wf.RunID == "" || wf.UID == "" || wf.ResourceVersion == "" {
+			return fmt.Errorf("stop orphaned Workflow %s: original object identity required", wf.Name)
+		}
+		patch, err := json.Marshal(map[string]any{
+			"metadata": map[string]string{"uid": wf.UID, "resourceVersion": wf.ResourceVersion},
+			"spec":     map[string]string{"shutdown": "Stop"},
+		})
+		if err != nil {
+			return err
+		}
+		args := kubectlContextArgs(deps.ContextName, "patch", "workflows.argoproj.io", wf.Name, "-n", namespace, "--type=merge", "-p", string(patch))
+		if out, err := deps.RunCommand(ctx, nil, "kubectl", args...); err != nil {
+			return fmt.Errorf("stop orphaned Workflow %s: %w%s", wf.Name, err, commandOutputSuffix(out))
+		}
 	}
 	return nil
 }

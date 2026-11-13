@@ -56,7 +56,7 @@ func TestScheduleOccurrenceCoalescesOnlySameEntryAndBranch(t *testing.T) {
 			spec.SHA, spec.TestedSHA = event.ObjectSHA, event.CommitSHA
 			fire.HasPrevious, fire.Previous, fire.At = true, now, now.Add(15*time.Minute)
 			next, err := s.EnqueueScheduleOccurrence(t.Context(), event, spec, fire)
-			if err != nil || next.Outcome != "coalesced" || next.Enqueued.ID != first.Enqueued.ID || len(next.Enqueued.Cancellations) != 0 {
+			if err != nil || next.Outcome != "coalesced" || next.Enqueued.ID != first.Enqueued.ID {
 				t.Fatalf("overlap = %+v, %v", next, err)
 			}
 			retained, err := s.Run(t.Context(), first.Enqueued.ID)

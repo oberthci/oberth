@@ -19,6 +19,7 @@ type submissionOwner struct {
 	sequence, order, repoID int64
 	runID                   string
 	adopted                 bool
+	submitted               bool
 }
 
 func newSubmissionRegistry() *submissionRegistry {
@@ -54,7 +55,13 @@ func (g *submissionRegistry) abandon(sequence int64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if r := g.owners[sequence]; r != nil {
-		g.withdrawLocked(r)
+		// Withdraw creation without dropping its live observer/worker ownership.
+		// The worker's deferred cancel releases that ownership after it joins.
+		select {
+		case <-r.withdrawn:
+		default:
+			close(r.withdrawn)
+		}
 	}
 }
 
@@ -69,4 +76,11 @@ func (r *submissionOwner) creationContext(parent context.Context) (context.Conte
 		}
 	}()
 	return ctx, cancel
+}
+
+// Remember a created or uncertain Workflow, independently of execution capacity.
+func (r *submissionOwner) markSubmitted() {
+	r.gate.mu.Lock()
+	defer r.gate.mu.Unlock()
+	r.submitted = true
 }

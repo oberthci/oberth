@@ -796,15 +796,14 @@ func TestResultMapping(t *testing.T) {
 			wantPhase:  "test",
 		},
 		{
-			name: "succeeded but reports failed step -- inconsistent",
+			name: "succeeded with tolerated failed step",
 			completion: argojob.Completion{
 				Succeeded:   true,
 				FailedStage: "build",
 				FailedStep:  "compile",
 			},
-			wantStatus: model.RunFailed,
-			wantPhase:  "build",
-			wantError:  "successful Workflow reported a failed step",
+			wantStatus: model.RunPassed,
+			wantPhase:  "passed",
 		},
 		{
 			name: "with step results",
@@ -826,7 +825,7 @@ func TestResultMapping(t *testing.T) {
 			if tc.completion.Infrastructure && (result.FailedStage != "" || result.FailedStep != "") {
 				t.Fatal("infrastructure failure retained test-failure attribution")
 			}
-			if !tc.completion.Infrastructure && result.FailedStep != tc.completion.FailedStep {
+			if !tc.completion.Infrastructure && !tc.completion.Succeeded && result.FailedStep != tc.completion.FailedStep {
 				t.Fatal("test failure lost step attribution")
 			}
 			if result.Status != tc.wantStatus {
@@ -871,7 +870,7 @@ func TestDelete_EmptyRunID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = jobs.Delete(context.Background(), "wf-delete", "")
+	err = jobs.Stop(context.Background(), "wf-delete", "")
 	if err == nil || !strings.Contains(err.Error(), "run ID is required") {
 		t.Fatalf("expected run-ID-required error, got: %v", err)
 	}
@@ -896,7 +895,7 @@ func TestDelete_WrongRunIDForIntent(t *testing.T) {
 	jobs.intents[name] = argoIntent{runID: "run-owner", trigger: pipeline.TriggerCI, created: true}
 	jobs.mu.Unlock()
 
-	err = jobs.Delete(context.Background(), name, "run-intruder")
+	err = jobs.Stop(context.Background(), name, "run-intruder")
 	if err == nil || !strings.Contains(err.Error(), "different in-process run") {
 		t.Fatalf("expected different-run error, got: %v", err)
 	}
@@ -923,7 +922,7 @@ func TestDelete_CreatedIntent(t *testing.T) {
 	jobs.intents[name] = argoIntent{runID: runID, trigger: pipeline.TriggerCI, created: true}
 	jobs.mu.Unlock()
 
-	if err := jobs.Delete(context.Background(), name, runID); err != nil {
+	if err := jobs.Stop(context.Background(), name, runID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -931,8 +930,8 @@ func TestDelete_CreatedIntent(t *testing.T) {
 	jobs.mu.Lock()
 	_, present := jobs.intents[name]
 	jobs.mu.Unlock()
-	if present {
-		t.Fatal("intent was not removed after Delete of created workflow")
+	if !present {
+		t.Fatal("Stop discarded terminal observation custody")
 	}
 
 	// Controller should have received a Cancel.
@@ -966,7 +965,7 @@ func TestDelete_NoIntent(t *testing.T) {
 	}
 
 	// No intent planted -- Delete should still call controller.Cancel.
-	err = jobs.Delete(context.Background(), "wf-absent", "run-absent")
+	err = jobs.Stop(context.Background(), "wf-absent", "run-absent")
 	if err != nil {
 		t.Fatalf("Delete with no intent: %v", err)
 	}

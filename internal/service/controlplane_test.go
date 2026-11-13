@@ -853,8 +853,8 @@ func TestDurableEnqueueWakeSurvivesMutationGateClosingBeforeAcceptance(t *testin
 		Branch: "feature/durable-wake", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Actor: "agent@host",
 	})
-	if !errors.Is(err, errMutationBlocked) {
-		t.Fatalf("enqueue error = %v, want mutation blocked after durable admission", err)
+	if err != nil {
+		t.Fatalf("durable admission wake failed: %v", err)
 	}
 	gate.set(nil)
 	waitForFixtureRunStatus(t, fixture, enqueued.ID, model.RunPassed)
@@ -891,6 +891,7 @@ type fakeJobs struct {
 	// Wait call at the same position, so a test can stream a realistic
 	// interleaved multi-step log.
 	transcripts     []string
+	stopResult      JobResult
 	waitErr         error
 	createdCI       []WorkflowRequest
 	createdReleases []WorkflowRequest
@@ -925,7 +926,7 @@ func (jobs *completingJobs) Wait(_ context.Context, _ string, output io.Writer) 
 	}
 	return jobs.result, nil
 }
-func (*completingJobs) Delete(context.Context, string, string) error { return nil }
+func (*completingJobs) Stop(context.Context, string, string) error { return nil }
 func (*completingJobs) TerminalResult(context.Context, string) (JobResult, error) {
 	return JobResult{}, ErrJobNotTerminal
 }
@@ -950,51 +951,6 @@ func (gate *mutableMutationGate) set(err error) {
 	gate.mu.Unlock()
 }
 
-type createCancellationRaceJobs struct {
-	mu             sync.Mutex
-	createStarted  chan struct{}
-	allowCreate    chan struct{}
-	created        bool
-	deleteBefore   int
-	deleteAfter    int
-	deleteFailures int
-}
-
-func (jobs *createCancellationRaceJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
-	close(jobs.createStarted)
-	<-jobs.allowCreate
-	jobs.mu.Lock()
-	jobs.created = true
-	jobs.mu.Unlock()
-	return nil
-}
-
-func (*createCancellationRaceJobs) CreateRelease(context.Context, WorkflowRequest) error { return nil }
-
-func (*createCancellationRaceJobs) Wait(context.Context, string, io.Writer) (JobResult, error) {
-	return JobResult{}, errors.New("superseded Job unexpectedly reached Wait")
-}
-
-func (jobs *createCancellationRaceJobs) Delete(context.Context, string, string) error {
-	jobs.mu.Lock()
-	defer jobs.mu.Unlock()
-	if jobs.created {
-		jobs.deleteAfter++
-	} else {
-		jobs.deleteBefore++
-	}
-	if jobs.deleteFailures > 0 {
-		jobs.deleteFailures--
-		return errors.New("injected Job deletion failure")
-	}
-	jobs.created = false
-	return nil
-}
-
-func (*createCancellationRaceJobs) TerminalResult(context.Context, string) (JobResult, error) {
-	return JobResult{}, ErrJobNotTerminal
-}
-
 type runSubmissionFailStore struct {
 	*store.Store
 	failNextSubmission bool
@@ -1014,7 +970,7 @@ type flakyDeleteJobs struct {
 	attempted      []string
 }
 
-func (jobs *flakyDeleteJobs) Delete(_ context.Context, name, _ string) error {
+func (jobs *flakyDeleteJobs) Stop(_ context.Context, name, _ string) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.attempted = append(jobs.attempted, name)
@@ -1047,7 +1003,7 @@ func (jobs *blockingJobs) Wait(ctx context.Context, _ string, _ io.Writer) (JobR
 	return JobResult{}, ctx.Err()
 }
 
-func (jobs *blockingJobs) Delete(_ context.Context, name, _ string) error {
+func (jobs *blockingJobs) Stop(_ context.Context, name, _ string) error {
 	jobs.deleted <- name
 	return nil
 }
@@ -1118,15 +1074,31 @@ func (jobs *fakeJobs) Wait(_ context.Context, name string, output io.Writer) (Jo
 	return result, nil
 }
 
-func (jobs *fakeJobs) Delete(_ context.Context, name, _ string) error {
+func (jobs *fakeJobs) Stop(_ context.Context, name, _ string) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.deleted = append(jobs.deleted, name)
 	return nil
 }
 
-func (*fakeJobs) TerminalResult(context.Context, string) (JobResult, error) {
+func (jobs *fakeJobs) TerminalResult(_ context.Context, name string) (JobResult, error) {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	for _, stopped := range jobs.deleted {
+		if stopped == name {
+			if jobs.stopResult.Status.Terminal() {
+				return jobs.stopResult, nil
+			}
+			return JobResult{Status: model.RunFailed, Phase: "job", Error: "Stopped with strategy 'Stop'"}, nil
+		}
+	}
 	return JobResult{}, ErrJobNotTerminal
+}
+func (jobs *fakeJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := jobs.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 type controlFixture struct {
@@ -1535,6 +1507,7 @@ func TestStatusReturnsRefWithoutRunWhenBranchExists(t *testing.T) {
 		t.Fatalf("unknown selector error = %v, want not-found", err)
 	}
 
+	fixture.jobs.results = append(fixture.jobs.results, JobResult{Status: model.RunPassed, Phase: "passed"})
 	// (c) Existing run resolution is unchanged.
 	const runSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	// A branch selector now requires the admitted cache ref to match the run.
@@ -1908,93 +1881,6 @@ func TestSyncRejectsBareSHAWhenMultipleBranchesShareIt(t *testing.T) {
 	}
 }
 
-func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing.T) {
-	fixture := newControlFixture(t)
-	ctx := context.Background()
-	first, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "receive-first", Repository: fixture.repo, Branch: "feature/cancel",
-		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	workflowName, err := deterministicWorkflowName(fixture.repo.Name, first.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.store.SetRunWorkflowName(ctx, first.ID, workflowName); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "receive-second", Repository: fixture.repo, Branch: "feature/cancel",
-		OldSHA: first.SHA, SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(fixture.jobs.deleted) != 1 || fixture.jobs.deleted[0] != workflowName {
-		t.Fatalf("supersede deletions = %#v", fixture.jobs.deleted)
-	}
-	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("pending supersede cancellations = %#v, %v", pending, err)
-	}
-	second, err := fixture.store.ClaimNextRun(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.store.FinishRun(ctx, second.ID, model.RunResult{Status: model.RunInterrupted}); err != nil {
-		t.Fatal(err)
-	}
-
-	restart, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
-		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/restart-intent",
-		SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host", Trigger: "branch",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	restartJob, _ := deterministicWorkflowName(fixture.repo.Name, restart.ID)
-	if _, err := fixture.store.SetRunWorkflowName(ctx, restart.ID, restartJob); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.store.MarkRunSubmissionStarted(ctx, restart.ID); err != nil {
-		t.Fatal(err)
-	}
-	// This models a crash after the durable Job intent and before idempotent
-	// Create/observe. Owner recovery records the obligation even if no Job ever
-	// appeared; Delete is required to be idempotent.
-	if err := fixture.store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := storetest.Open(ctx, filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture.store = reopened
-	t.Cleanup(func() { _ = reopened.Close() })
-	recoveryScheduler, err := NewScheduler(SchedulerConfig{
-		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: restartStateJobs{JobController: fixture.jobs}, ReleaseJobs: fixture.jobs,
-		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: filepath.Join(fixture.root, "work")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := recoveryScheduler.reconcileStrandedRunsWithGate(ctx, recoveryScheduler.requireMutation, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := recoveryScheduler.completePendingCancellations(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if len(fixture.jobs.deleted) != 1 {
-		t.Fatalf("restart deletions = %#v", fixture.jobs.deleted)
-	}
-}
-
 func TestDeterministicWorkflowNameExposesRepositoryAndDistinctRunIdentity(t *testing.T) {
 	firstRun := "2d2f0986" + strings.Repeat("a", 24)
 	secondRun := "2d2f0986" + strings.Repeat("b", 24)
@@ -2023,123 +1909,6 @@ func TestDeterministicWorkflowNameExposesRepositoryAndDistinctRunIdentity(t *tes
 	}
 }
 
-func TestSupersessionBetweenJobIntentAndCreateCannotOrphanJob(t *testing.T) {
-	fixture := newControlFixture(t)
-	jobs := &createCancellationRaceJobs{createStarted: make(chan struct{}), allowCreate: make(chan struct{})}
-	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
-		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "create-cancel-race")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	first, err := scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "receive-create-race-first", Repository: fixture.repo, Branch: "feature/create-race",
-		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processed := make(chan error, 1)
-	go func() { processed <- scheduler.ProcessNext(ctx) }()
-	select {
-	case <-jobs.createStarted:
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("worker did not reach Job creation")
-	}
-	if _, err := scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "receive-create-race-second", Repository: fixture.repo, Branch: "feature/create-race",
-		OldSHA: first.SHA, SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	close(jobs.allowCreate)
-	select {
-	case err := <-processed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("superseded worker did not finish")
-	}
-	jobs.mu.Lock()
-	created, before, after := jobs.created, jobs.deleteBefore, jobs.deleteAfter
-	jobs.mu.Unlock()
-	if created || before != 1 || after != 1 {
-		t.Fatalf("Job create/cancel handshake = created:%v delete-before:%d delete-after:%d", created, before, after)
-	}
-	interrupted, err := fixture.store.Run(ctx, first.ID)
-	if err != nil || interrupted.Status != model.RunInterrupted {
-		t.Fatalf("superseded run = %#v, %v", interrupted, err)
-	}
-	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("pending cancellations after direct delete = %#v, %v", pending, err)
-	}
-}
-
-func TestSupersessionDeleteFailureRetainsCancellationUntilRetry(t *testing.T) {
-	fixture := newControlFixture(t)
-	jobs := &createCancellationRaceJobs{
-		createStarted: make(chan struct{}), allowCreate: make(chan struct{}), deleteFailures: 2,
-	}
-	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
-		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "create-delete-failure")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	first, err := scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "receive-delete-failure-first", Repository: fixture.repo, Branch: "feature/delete-failure",
-		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processed := make(chan error, 1)
-	go func() { processed <- scheduler.ProcessNext(ctx) }()
-	select {
-	case <-jobs.createStarted:
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("worker did not reach Job creation")
-	}
-	if _, err := scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "receive-delete-failure-second", Repository: fixture.repo, Branch: "feature/delete-failure",
-		OldSHA: first.SHA, SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host",
-	}); err == nil || !strings.Contains(err.Error(), "injected Job deletion failure") {
-		t.Fatalf("superseding enqueue error = %v, want deletion failure", err)
-	}
-	close(jobs.allowCreate)
-	select {
-	case err := <-processed:
-		if err == nil || !strings.Contains(err.Error(), "injected Job deletion failure") {
-			t.Fatalf("worker error = %v, want deletion failure", err)
-		}
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("superseded worker did not finish")
-	}
-	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID {
-		t.Fatalf("pending cancellation after failed deletes = %#v, %v", pending, err)
-	}
-	if err := scheduler.completePendingCancellations(ctx); err != nil {
-		t.Fatal(err)
-	}
-	pending, err = fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("pending cancellation after retry = %#v, %v", pending, err)
-	}
-	jobs.mu.Lock()
-	created, before, after := jobs.created, jobs.deleteBefore, jobs.deleteAfter
-	jobs.mu.Unlock()
-	if created || before != 1 || after != 2 {
-		t.Fatalf("Job delete retries = created:%v before:%d after:%d", created, before, after)
-	}
-}
-
 func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	fixture := newControlFixture(t)
 	wrappedStore := &runSubmissionFailStore{Store: fixture.store, failNextSubmission: true}
@@ -2159,9 +1928,10 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := scheduler.ProcessNext(ctx); err == nil || !strings.Contains(err.Error(), "delete Job") {
-		t.Fatalf("process error = %v, want exact Job deletion failure", err)
+	if err := scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
 	}
+	scheduler.settleOneCreate(ctx)
 	running, err := fixture.store.Run(ctx, enqueued.ID)
 	if err != nil || running.Status != model.RunRunning || running.WorkflowName == "" {
 		t.Fatalf("run retained for owner recovery = %#v, %v", running, err)
@@ -2190,6 +1960,7 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	recovery.settleOneCreate(ctx)
 	if err := recovery.completePendingCancellations(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2285,7 +2056,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 // TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown verifies
 // that a Wait error from an inner observation context (context.Canceled,
 // context.DeadlineExceeded) is recorded as RunFailed — NOT RunInterrupted,
-// which is the scheduler-shutdown pattern. The workflow IS deleted before
+// which is the scheduler-shutdown pattern. The Workflow finishes Stop before
 // terminalizing (Fix 2: a still-running workflow must not be left untracked
 // while its durable run is recorded as terminal).
 func TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown(t *testing.T) {
@@ -2312,7 +2083,7 @@ func TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown(t *testin
 			}
 			// The run must be terminalized as RunFailed (not RunInterrupted,
 			// which is the scheduler shutdown pattern).
-			if finished.Status != model.RunFailed || finished.Phase != "job" || finished.Error != waitErr.Error() {
+			if finished.Status != model.RunFailed || finished.Phase != "job" || !strings.Contains(finished.Error, "Stopped with strategy") {
 				t.Fatalf("inner observation cancellation = %#v, want failed job without scheduler shutdown", finished)
 			}
 			// The workflow must be deleted before terminalizing: a
@@ -4154,4 +3925,11 @@ func TestPublishIssueKindDistinguishesPublishFromCodeFailure(t *testing.T) {
 	if !errors.Is(closedErr, store.ErrNotFound) {
 		t.Fatalf("issue after retry = %v, want ErrNotFound (closed)", closedErr)
 	}
+}
+
+func (jobs *flakyDeleteJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := jobs.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }

@@ -23,11 +23,11 @@ type contractFailureJobs struct {
 	deleteErr error
 }
 
-func (j *contractFailureJobs) Delete(ctx context.Context, name, id string) error {
+func (j *contractFailureJobs) Stop(ctx context.Context, name, id string) error {
 	if j.deleteErr != nil {
 		return j.deleteErr
 	}
-	return j.pendingCreateJobs.Delete(ctx, name, id)
+	return j.pendingCreateJobs.Stop(ctx, name, id)
 }
 
 func TestWorkflowCreateContractCleanupAfterDefiniteFailure(t *testing.T) {
@@ -49,6 +49,9 @@ func TestWorkflowCreateContractCleanupAfterDefiniteFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = f.scheduler.ProcessNext(t.Context())
+			if mode == "submission-record-failed" {
+				f.scheduler.settleOneCreate(t.Context())
+			}
 			_, statErr := os.Stat(f.scheduler.createAdmissionPath(source.ID))
 			current, lookupErr := f.store.Run(t.Context(), source.ID)
 			if lookupErr != nil {
@@ -83,6 +86,9 @@ func TestWorkflowCreateContractTerminalSweepRespectsPendingCancellation(t *testi
 	}
 	if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); err != nil {
 		t.Fatal("pending cancellation lost recovery metadata", err)
+	}
+	if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: model.PhaseCancelled, Error: "stopped by operator"}); err != nil {
+		t.Fatal(err)
 	}
 	if err := f.store.CompleteRunCancellation(t.Context(), run.ID, run.WorkflowName); err != nil {
 		t.Fatal(err)
@@ -131,4 +137,11 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	if scheduler.pendingCreateCount() != 1 || state.Runs != 1 {
 		t.Fatalf("concurrent registration duplicated admission: %+v", state)
 	}
+}
+
+func (j *contractFailureJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := j.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }
