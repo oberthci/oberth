@@ -41,7 +41,7 @@ func (s *Store) stepAdmission(ctx context.Context, runID string) (stepAdmission,
  json_extract(e.value,'$.template'),
  CASE WHEN json_type(e.value,'$.known')='true' THEN json_extract(e.value,'$.credentialed') END,
  json_extract(e.value,'$.grants'),
- json_type(e.value,'$.credentialed') IN ('true','false') AND json_type(e.value,'$.grants')='array',
+ json_type(e.value,'$.template')='text' AND json_type(e.value,'$.credentialed') IN ('true','false') AND json_type(e.value,'$.grants')='array',
  CASE WHEN json_type(e.value,'$.complete')='true' THEN 1 ELSE 0 END`+stepAdmissionSourceSQL+`
  ORDER BY CASE WHEN json_type(e.value,'$.known')='true' THEN 1 ELSE 0 END, json_extract(e.value,'$.credentialed') DESC,a.id ASC`, runID)
 	if err != nil {
