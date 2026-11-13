@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -551,9 +550,25 @@ func assistScratchResources(containers []any, main *corev1.Container, scratch in
 }
 
 func hasAssistBinary(main *corev1.Container) bool {
-	return slices.ContainsFunc(main.VolumeMounts, func(m corev1.VolumeMount) bool {
-		return m.Name == SourceVolumeName && m.MountPath == holdfs.HelperMountPath && m.ReadOnly
-	})
+	if main == nil {
+		return false
+	}
+	found := 0
+	for _, mount := range main.VolumeMounts {
+		if mount.Name == SourceVolumeName && mount.MountPath == holdfs.HelperMountPath && mount.ReadOnly && mount.SubPathExpr == "" {
+			found++
+			continue
+		}
+		if assistHelperShadow(mount.MountPath) {
+			return false
+		}
+	}
+	for _, device := range main.VolumeDevices {
+		if assistHelperShadow(device.DevicePath) {
+			return false
+		}
+	}
+	return found == 1
 }
 
 // assistConditionalPatch renders both branches into one Argo expression

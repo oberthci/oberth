@@ -225,6 +225,14 @@ reports and replays each attempt once, with no retry suffix in any key, and
 not again from a restored reporter; `TestWaitResumedRetriedDAGIsGreen` adopts
 such a Workflow after a restart and reports only the passing retry.
 
+Helper mount isolation: `TestAuthoredMountsCannotShadowServerHelpers` covers
+literal, normalized, runtime-templated, parent, nested and conventional alias
+paths across all admitted Pod container forms. `TestAuthoredBlockDeviceCannotShadowServerHelper`
+extends the boundary to block devices. `TestBuildProtectsHeldPodHelperFromAuthoredShadows`
+checks actual held-Pod construction, and `TestExistingHeldPodShadowIsNotPatchCapable`
+checks retained Pods and release through the image fallback. Segment siblings
+remain supported and existing own-PVC device admission stays unchanged.
+
 Capability recovery: `TestWorkflowCapabilityUIDMigrationDiscardsUnboundReceipts`
 runs the forward migration twice, discards UID-less authority and keeps grants,
 runs and audit history. `TestOldDeviceGrantWorkflowRecoversThroughRealMigration`

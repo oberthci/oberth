@@ -483,6 +483,7 @@ func admitContainers(location string, template wfv1.Template, policy Policy) []e
 		problems = append(problems, admitContainer(location+".script", &template.Script.Container, policy)...)
 	}
 	if template.ContainerSet != nil {
+		problems = append(problems, admitHelperMounts(location+".containerSet", template.ContainerSet.VolumeMounts, nil)...)
 		for index := range template.ContainerSet.Containers {
 			containers++
 			problems = append(problems, admitContainer(
@@ -545,6 +546,7 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.env[%q] reads pod/downward state and is not admitted", location, variable.Name))
 		}
 	}
+	problems = append(problems, admitHelperMounts(location, container.VolumeMounts, container.VolumeDevices)...)
 	problems = append(problems, admitContainerPorts(location, container.Ports)...)
 	problems = append(problems, admitContainerSecurityContext(location+".securityContext", container.SecurityContext)...)
 	problems = append(problems, admitContainerResources(location, container.Resources)...)

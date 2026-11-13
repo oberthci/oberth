@@ -189,3 +189,20 @@ Kubernetes 1.35.7 Pod-create validation. Oberth resolves duplicate helper mirror
 and supplies container-set volume definitions before submission. They do not establish behavior
 of cluster admission webhooks or container execution. Regenerate that proof
 when upgrading the controller; see `internal/argojob/testdata/isolation-argo4.0.8`.
+
+## Server helper mounts
+
+Authored mounts cannot overlap `/run/oberth` or its conventional image alias
+`/var/run/oberth`. This includes the assist helper, nested files and directories,
+and parent mounts such as `/run` or `/`. Read-only mounts can hide the helper
+just as writable mounts can. Volume-device paths have the same restriction.
+Runtime-templated mount and device paths are refused because their resolved
+paths cannot be checked at admission. Literal segment siblings such as
+`/run/oberth-other` and `/run/oberth-gar` remain available.
+
+The rule applies to every container, script, container-set common/member mount,
+init container, sidecar and inline leaf. Existing held Pods are also checked for
+helper shadows before being marked patch-capable. A shadowed hold remains
+inspect-only for patching; release uses the image's `touch` fallback. These
+checks protect declared mount paths, rather than attesting arbitrary filesystem
+symlinks inside an authored image.
