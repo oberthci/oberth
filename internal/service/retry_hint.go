@@ -39,7 +39,11 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 		return &model.RetryHint{Class: model.RetryCode, Cause: cause, Action: action, Detail: detail}
 	}
 	if run.Status == model.RunFailed && run.Phase == "job" && strings.HasPrefix(run.FailureCause, validationRefusalPrefix) {
-		return code("validation", "fix the Workflow YAML and push a new commit", boundedText(run.Error, 200))
+		action := "fix the Workflow YAML and push a new commit"
+		if strings.Contains(run.Error, "argojob: unapproved secret path ") {
+			action = "correct secret paths in the Workflow YAML and push, or ask an operator to approve access and rerun"
+		}
+		return code("validation", action, boundedText(run.Error, 200))
 	}
 	message := run.Error
 	lower := strings.ToLower(message)
