@@ -10,8 +10,6 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -26,6 +24,8 @@ type Adoption struct {
 	UID         types.UID
 	Identity    string
 	SpecSHA256  string
+	// Terminal is populated only from a successful live startup read.
+	Terminal *Completion
 }
 
 // ErrAdoptionRefused marks a Workflow that exists but must not be observed as
@@ -43,12 +43,9 @@ type AdoptionRequest struct {
 }
 
 func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest) (Adoption, bool, error) {
-	workflow, err := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return Adoption{}, false, nil
-	}
-	if err != nil {
-		return Adoption{}, false, fmt.Errorf("argojob: read Workflow for adoption: %w", err)
+	workflow, found, err := controller.workflowForAdoption(ctx, request)
+	if err != nil || !found {
+		return Adoption{}, found, err
 	}
 	if workflow.Annotations[capabilityAnnotation] != "" {
 		if request.RepositoryID <= 0 {
@@ -61,6 +58,13 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 	binding, err := controller.bindAdoption(workflow, request)
 	if err != nil {
 		return Adoption{}, false, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
+	}
+	if workflow.Status.Phase.Completed() {
+		completion := completionFor(workflow)
+		controller.retainWorkflowTiming(ctx, workflow)
+		controller.collectRestartStepDiagnostics(ctx, workflow, &completion, binding.RestartedAt)
+		completion.classifyRestartCut()
+		binding.Terminal = &completion
 	}
 	return binding, true, nil
 }

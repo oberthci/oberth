@@ -26,6 +26,7 @@ type adoptingJobs struct {
 	mu             sync.Mutex
 	found          bool
 	adoptErr       error
+	adoptHook      func(context.Context, model.Run) (bool, error)
 	adopted        []string
 	created        int
 	releaseCreated int
@@ -33,10 +34,13 @@ type adoptingJobs struct {
 	retained       int64
 }
 
-func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (bool, error) {
+func (jobs *adoptingJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.adopted = append(jobs.adopted, run.ID)
+	if jobs.adoptHook != nil {
+		return jobs.adoptHook(ctx, run)
+	}
 	return jobs.found, jobs.adoptErr
 }
 
@@ -207,8 +211,13 @@ func TestAdoptionMissingWorkflowFailsButReadFailureDoesNot(t *testing.T) {
 		run := fixture.enqueueAndClaim(t, "feature/missing", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 		fixture.setWorkflowName(t, run.ID, "oberth-missing")
 		jobs := &adoptingJobs{adoptErr: readErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		if readErr != nil {
+			jobs.adoptHook = func(context.Context, model.Run) (bool, error) { cancel(); return false, readErr }
+		}
 		scheduler := fixture.scheduler(t, jobs)
-		err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("absent Workflow adopted") })
+		err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(model.Run) error { return errors.New("absent Workflow adopted") })
 		current, lookupErr := fixture.store.Run(context.Background(), run.ID)
 		if lookupErr != nil {
 			t.Fatal(lookupErr)
@@ -557,6 +566,11 @@ func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 			run := fixture.enqueueAndClaim(t, "feature/refused", "abcdefabcdefabcdefabcdefabcdefabcdefabcd")
 			fixture.setWorkflowName(t, run.ID, "oberth-refused")
 			jobs := &adoptingJobs{found: test.adoptErr == nil, adoptErr: test.adoptErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if test.name == "read-failure" {
+				jobs.adoptHook = func(context.Context, model.Run) (bool, error) { cancel(); return false, test.adoptErr }
+			}
 			scheduler := fixture.scheduler(t, jobs)
 			if test.holdOther {
 				// Another run already holds this run's admission key.
@@ -564,7 +578,7 @@ func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run) error {
+			err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(run model.Run) error {
 				_, err := scheduler.submissions.adopt(run)
 				return err
 			})

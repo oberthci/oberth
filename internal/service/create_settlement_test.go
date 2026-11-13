@@ -23,6 +23,10 @@ type pendingCreateJobs struct {
 	adoptHook  func(context.Context, model.Run) (bool, error)
 }
 
+func (*pendingCreateJobs) WaitForWatchSync(ctx context.Context) error { return ctx.Err() }
+func (*pendingCreateJobs) AdoptedResult(context.Context, model.Run) (JobResult, error) {
+	return JobResult{}, ErrJobNotTerminal
+}
 func (j *pendingCreateJobs) CreateWorkflow(ctx context.Context, req WorkflowRequest) error {
 	if j.createHook != nil {
 		return j.createHook(ctx, req)

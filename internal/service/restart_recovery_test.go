@@ -17,6 +17,10 @@ type restartStateJobs struct {
 	found bool
 }
 
+func (restartStateJobs) WaitForWatchSync(ctx context.Context) error { return ctx.Err() }
+func (restartStateJobs) AdoptedResult(context.Context, model.Run) (JobResult, error) {
+	return JobResult{}, ErrJobNotTerminal
+}
 func (j restartStateJobs) Adopt(context.Context, model.Run) (bool, error) { return j.found, nil }
 func (restartStateJobs) WorkflowNamespace() string                        { return "test-argo" }
 func (j restartStateJobs) WaitResumed(ctx context.Context, name string, w io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
