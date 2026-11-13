@@ -62,7 +62,7 @@ func TestRefusalNativeEnvAcrossTemplates(t *testing.T) {
 				c.Name = "side"
 				leaf.Sidecars = []wfv1.UserContainer{{Container: *c}}
 			case "init":
-				c.Name = "init"
+				c.Name = "setup"
 				leaf.InitContainers = []wfv1.UserContainer{{Container: *c}}
 			case "containerSet":
 				c.Name = "main"
