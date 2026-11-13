@@ -34,3 +34,13 @@ command prints the safe JSON and exits successfully even for a not-ready state.
 reading recovery credentials. Existing admin certificate and secrets output
 files are allowed and left untouched. A real install still protects existing
 outputs from overwrite.
+
+A successful `install --plan` NetworkPolicy measurement can be reused once by
+the following install for up to five minutes. The private local receipt is bound
+to the verified API endpoint and CA, cluster UID, selected context, pipeline
+namespace name/UID/labels, node names/UIDs/labels, install namespace and probe
+image. Namespace creation/replacement or changed labels/nodes invalidate it.
+Every other preflight check still runs. Missing, expired, failed, malformed or
+unreadable receipts require the complete live measurement; public plan JSON is
+not accepted as proof. An install without a recent successful plan still has
+the full fresh-install NetworkPolicy gate.
