@@ -168,16 +168,6 @@ func ProducePerStepIdentities(ctx context.Context, cfg Config, deps Deps) ([]Per
 	return DerivePerStepIdentities(nil, grants), nil
 }
 
-// produceFromConfigMap reads the secret-access ConfigMap and builds per-repo
-// identities from entries whose repo field is already in qualified
-// "upstream/org/repo" format. Bare-name entries are skipped because the
-// ConfigMap may not have been canonicalized yet and the installer has no
-// database access to resolve them.
-//
-// Only a genuine not-found error (fresh install, no ConfigMap yet) returns
-// nil, nil. Other errors (RBAC, transport) are surfaced so the caller's
-// warning path is reachable.
-
 // ProducePerRepoIdentitiesForSync reads the desired set for destructive reconciliation.
 func ProducePerRepoIdentitiesForSync(ctx context.Context, cfg Config, deps Deps) ([]PerRepoIdentity, []string, error) {
 	return ProducePerRepoIdentities(ctx, cfg, deps)

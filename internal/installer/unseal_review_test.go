@@ -61,6 +61,12 @@ esac
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("UNSEAL_TEST_TRACE", trace)
+	configPath := filepath.Join(t.TempDir(), "kubeconfig")
+	if err := os.WriteFile(configPath, []byte(strings.ReplaceAll(testKubeconfig, "test", "chosen")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", configPath)
+
 	deps := testAdminDeps(Deps{KubeClient: fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet()), ContextName: "chosen", RunCommand: privateUnsealCommand})
 	_, err := unsealWithDeps(t.Context(), UnsealConfig{SecretsFile: path, OpenBaoNamespace: "openbao"}, deps)
 	if err == nil || strings.Contains(err.Error(), string(key)) {

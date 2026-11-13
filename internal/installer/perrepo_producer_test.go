@@ -10,10 +10,6 @@ import (
 	"testing"
 )
 
-// --- ConfigMap fallback path (run == nil) ---
-
-// --- Exec path (access list parsing — tabwriter) ---
-
 // --- JSON path tests ---
 
 func TestParseAccessListJSONQualifiedEntries(t *testing.T) {
@@ -121,23 +117,15 @@ func TestParseAccessListJSONEntriesNoQualifiedReturnsError(t *testing.T) {
 func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 	t.Parallel()
 
-	// Simulate access list output with both data-prefix and upstream-prefix grants.
-	accessListOutput := strings.Join([]string{
-		"REPO                                        WORKFLOW   STEP   SECRET                                             APPROVED BY       APPROVED AT        STATUS",
-		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/cosign-secret                  admin             2026-08-21 16:40   active",
-		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/gar-sa-key                     admin             2026-08-21 16:40   active",
-		"codeberg/acme/terraform               .oberth/release.yaml   *      oberth/upstream/acme/terraform/credentials   admin             2026-08-23 22:23   active",
-	}, "\n")
-
-	// Mock runner: --json fails (old binary), tabwriter succeeds.
-	mockRun := func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--json" {
-				return nil, fmt.Errorf("flag provided but not defined: -json")
-			}
-		}
-		return []byte(accessListOutput), nil
+	output, err := json.Marshal([]accessListJSONEntry{
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/acme/acme-example-service", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/acme/acme-example-service", Step: "*", Secret: "oberth/data/release/gar-sa-key"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/acme/terraform", Step: "*", Secret: "oberth/upstream/acme/terraform/credentials"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	mockRun := func(context.Context, []byte, string, ...string) ([]byte, error) { return output, nil }
 
 	identities, _, err := testProducePerRepoIdentities(context.Background(), nil, mockRun, "", "oberth")
 	if err != nil {
@@ -202,11 +190,11 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 	t.Fatal("terraform policy write call not found")
 }
 
-// TestProducePerStepIdentitiesExecFailureReturnsError verifies that
-// ProducePerStepIdentities returns a hard error when the kubectl exec fails,
+// TestProducePerStepIdentitiesAPIFailureReturnsError verifies that
+// ProducePerStepIdentities returns a hard error when the admin API fails,
 // rather than silently returning nil. Issue #623, finding 1: a nil return
 // on failure causes orphan removal to delete all per-step identities.
-func TestProducePerStepIdentitiesExecFailureReturnsError(t *testing.T) {
+func TestProducePerStepIdentitiesAPIFailureReturnsError(t *testing.T) {
 	t.Parallel()
 
 	failingRunner := func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
@@ -214,17 +202,12 @@ func TestProducePerStepIdentitiesExecFailureReturnsError(t *testing.T) {
 	}
 	_, err := testProducePerStepIdentities(context.Background(), failingRunner, "", "oberth")
 	if err == nil {
-		t.Fatal("expected an error when exec fails, got nil")
+		t.Fatal("expected an error when the API fails, got nil")
 	}
-	if !strings.Contains(err.Error(), "exec access list --json") {
-		t.Fatalf("error should mention exec access list --json: %v", err)
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("API transport error lost: %v", err)
 	}
 }
-
-// TestProducePerStepIdentitiesNilRunnerReturnsNil verifies backward compat:
-// when run is nil (no exec possible, e.g. fresh install), the function returns
-// nil, nil — this is safe because there are no grants to produce and no
-// orphans to remove.
 
 // --- Issue #814: per-repo identities carry wildcard grants only ---
 

@@ -23,6 +23,7 @@ import (
 // only the Kubernetes and subprocess transports are simulated.
 func TestInstallUnreachableClientEndpoint(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	ca := newTestServerCA(t, []string{"api.example.test"})
 	for _, jsonOutput := range []bool{false, true} {
 		t.Run(strconv.FormatBool(jsonOutput), func(t *testing.T) {
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -36,7 +37,7 @@ func TestInstallUnreachableClientEndpoint(t *testing.T) {
 			deployed := false
 			host := testAdminInstallDeps(InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
 				LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
-					return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
+					return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, "chosen", nil
 				},
 				RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 					if slices.Contains(args, "create-first-admin") {
