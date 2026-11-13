@@ -12,8 +12,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Only these leaves were written by the installer for the removed Plan
-// feature. Keep every live setting and every other unknown key for validation.
+// Only these leaves were written by the installer for removed features.
+// Keep every live setting and every other unknown key for validation.
 func dropRetiredInstallerValues(values map[string]any, output io.Writer) bool {
 	store, _ := values["secretstore"].(map[string]any)
 	transit, _ := store["transit"].(map[string]any)
@@ -24,10 +24,18 @@ func dropRetiredInstallerValues(values map[string]any, output io.Writer) bool {
 			removed = append(removed, "secretstore.transit."+key)
 		}
 	}
+	transitRemoved := len(removed) > 0
+	argo, _ := values["argo"].(map[string]any)
+	for _, key := range []string{"controllerProfile", "controllerProfileConfigMap"} {
+		if _, exists := argo[key]; exists {
+			delete(argo, key)
+			removed = append(removed, "argo."+key)
+		}
+	}
 	if len(removed) == 0 {
 		return false
 	}
-	if len(transit) == 0 {
+	if transitRemoved && len(transit) == 0 {
 		delete(store, "transit")
 	}
 	if output != nil {

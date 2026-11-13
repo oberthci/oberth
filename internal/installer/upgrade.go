@@ -356,13 +356,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	if cfg.DryRun {
-		if err := prepareUpgradeDryRunValues(ctx, &cfg, deps); err != nil {
-			return result, err
-		}
-		return printUpgradeDryRun(w, cfg, result, retryFailed)
-	}
-
 	if err := requireUpgradeHelmVersion(ctx, deps); err != nil {
 		return result, err
 	}
@@ -403,6 +396,13 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	prepared, err := prepareUpgradeValues(ctx, cfg, deps, chart, imageRef)
 	if err != nil {
 		return result, err
+	}
+	if cfg.DryRun {
+		if prepared.storedSnapshot != nil {
+			cfg.storedValuesFile = "<cleaned-stored-values>"
+		}
+		prepared.pki.configure(&cfg)
+		return printUpgradeDryRun(w, cfg, result, retryFailed)
 	}
 	cleanupStored, err := prepared.configureStoredSnapshot(&cfg)
 	if err != nil {

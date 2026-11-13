@@ -1,0 +1,112 @@
+{
+  "clientEndpoint": {
+    "host": "service.example.test",
+    "sshPort": "2222",
+    "httpsPort": "8443"
+  },
+  "image": {
+    "ref": "example.invalid/server@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "assist": {
+    "enabled": false
+  },
+  "utilityImage": "example.invalid/utility@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "tls": {
+    "extraDNSNames": [
+      "service.example.test"
+    ],
+    "extraIPs": [
+      "192.0.2.10"
+    ],
+    "pki": {
+      "enabled": true,
+      "mount": "server-pki",
+      "role": "server",
+      "ttl": "24h"
+    }
+  },
+  "pushBannerURL": "https://service.example.test:8443/runs",
+  "service": {
+    "type": "NodePort"
+  },
+  "podAnnotations": {
+    "oberth.ci/server-certificate-sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "secretstore": {
+    "enabled": true,
+    "address": "https://openbao.store.svc:8200",
+    "role": "oberth-ci",
+    "caCert": "public-ca",
+    "insecureHTTPForDev": false,
+    "transit": {
+      "enabled": true,
+      "mount": "retired-mount",
+      "key": "retired-key"
+    }
+  },
+  "auditAnchor": {
+    "rekorURL": "http://witness.audit.svc:3000",
+    "rekorInsecureHTTP": true,
+    "rekorPublicKey": "-----BEGIN PUBLIC KEY-----\nYWFhYQ==\n-----END PUBLIC KEY-----\n",
+    "acceptWitnessGenesis": ""
+  },
+  "networkPolicy": {
+    "enabled": true
+  },
+  "retention": {
+    "logs": {
+      "budgetBytes": 0
+    }
+  },
+  "compatibility": {
+    "schemaIdentity": "schema-fixture-v1",
+    "auditDomain": "audit-fixture-v1",
+    "witnessKeyInfo": "witness-fixture-v1"
+  },
+  "argo": {
+    "namespace": "oberth-argo",
+    "controllerProfile": "nonroot-static-v1",
+    "controllerProfileConfigMap": "",
+    "vault": {
+      "address": "https://openbao.store.svc:8200",
+      "credentialedRole": "oberth-release",
+      "caCert": "public-ca"
+    },
+    "ciSecrets": {
+      "vaultRole": "oberth-ci-secrets"
+    },
+    "perRepoIdentities": [
+      "oberth-release-project"
+    ],
+    "perRepoCIIdentities": [
+      "oberth-ci-project"
+    ],
+    "perStepIdentities": [
+      "oberth-step-project-publish"
+    ],
+    "goProxy": {
+      "enabled": true,
+      "port": 8444,
+      "modulePrefix": "modules.example.test/team",
+      "repositoryPrefix": "",
+      "upstream": "source",
+      "organization": "team"
+    },
+    "releaseWIF": {
+      "namespace": "oberth-argo",
+      "roles": {
+        "publish": {
+          "provider": "projects/123/locations/global/workloadIdentityPools/workloads/providers/issuer",
+          "service_account": "publisher@project.iam.gserviceaccount.com"
+        }
+      },
+      "repositories": {
+        "source/team/project": {
+          "templates": {
+            "publish": "publish"
+          }
+        }
+      }
+    }
+  }
+}
