@@ -117,6 +117,11 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	if err != nil {
 		return result, err
 	}
+	cfg.argoExecutorResources, err = readArgoExecutorResources(ctx, deps, ns, exists)
+	if err != nil {
+		return result, err
+	}
+	printArgoExecutorResources(deps.Output, argoExecutorResourcesForReview(cfg))
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "argo-workflows")
 	result.TargetVersion = cfg.ArgoChartVersion
 	if result.TargetVersion == "" {
@@ -143,8 +148,8 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		if err != nil {
 			return result, err
 		}
-	} else {
-		_, _ = fmt.Fprintf(deps.Output, "Argo chart %s: executor image left unchanged; resource-template token delivery requires %s.\n", displayVersion(effectiveVersion), argoworkflow.ExecutorImage)
+	} else if err := noticeArgoExecutorImage(ctx, deps, ns, effectiveVersion, exists); err != nil {
+		return result, err
 	}
 	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "argo-workflows", ns, "controller", controlPlanePriority(cfg), exists)
 	if err != nil {
@@ -158,7 +163,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	if err := noticeArgoExternalConfigMap(ctx, cfg, deps, ns, exists); err != nil {
 		return result, err
 	}
-	if (argoLimitsRequested(cfg) || retiredValues || dependencyChanged || imageMissing) && action == actionSkip {
+	if (argoLimitsRequested(cfg) || retiredValues || dependencyChanged || imageMissing || cfg.argoExecutorResources == nil) && action == actionSkip {
 		if canonicalChartVersion(result.InstalledVersion) == "" {
 			return result, errors.New("cannot reconcile existing Argo values without a known installed chart version")
 		}
@@ -233,7 +238,8 @@ func ArgoHelmArgs(cfg Config) []string {
 	if canonicalChartVersion(chartVersion) == canonicalChartVersion(DefaultArgoChartVersion) {
 		args = append(args, "--set-string", "executor.image.tag="+strings.SplitN(argoworkflow.ExecutorImage, ":", 2)[1])
 	}
-	return append(args, argoLimitArgs(cfg)...)
+	args = append(args, argoLimitArgs(cfg)...)
+	return append(args, argoExecutorResourceArgs(cfg)...)
 }
 
 // VerifyArgoController checks that a controller is actually watching the

@@ -127,13 +127,10 @@ func TestKubeletMessageIsBounded(t *testing.T) {
 	}
 }
 
-// #1491: when the step declared its own ephemeral-storage limit, the kubelet
-// Pod total is the step's budget, and so is a limit on one of the step's own
-// containers. Exceeding it is a step resource failure that a rerun repeats, so
-// it is not infrastructure and is not auto-retried.
+// Only a named authored container's own limit proves a step resource failure.
+// Pod totals include native operator-controlled helpers and stay infrastructure.
 func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 	const total = "Pod ephemeral local storage usage exceeds the total limit of containers 1152Mi. "
-	const totalReason = "the total container limit 1152Mi"
 	mainOver := `Container main exceeded its local ephemeral storage limit "640Mi". `
 	limit := corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("640Mi")}}
 	declared := wfv1.Template{Name: "test-template", Container: &corev1.Container{Resources: limit}}
@@ -152,13 +149,13 @@ func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 		podMsg   string
 		reason   string // the enforced limit the run reason names; "" means infrastructure
 	}{
-		{name: "v4/node", policy: helperStoragePolicy, template: undeclared, nodeMsg: total, reason: totalReason},
-		{name: "v4/node-prefixed", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted: " + total, reason: totalReason},
-		{name: "v4/pod-only", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: total, reason: totalReason},
+		{name: "v4/node", policy: helperStoragePolicy, template: undeclared, nodeMsg: total},
+		{name: "v4/node-prefixed", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted: " + total},
+		{name: "v4/pod-only", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: total},
 		// The kubelet prints Quantity.String(), which keeps exponent form.
-		{name: "v4/exponent", policy: helperStoragePolicy, template: declared, nodeMsg: "Pod ephemeral local storage usage exceeds the total limit of containers 1e9. ", reason: "the total container limit 1e9"},
+		{name: "v4/exponent", policy: helperStoragePolicy, template: declared, nodeMsg: "Pod ephemeral local storage usage exceeds the total limit of containers 1e9. "},
 		// Container-set default lists do not contribute the step limit.
-		{name: "v4/containerset-defaults", policy: helperStoragePolicy, defaults: setDefaults, template: set, nodeMsg: total, reason: totalReason},
+		{name: "v4/containerset-defaults", policy: helperStoragePolicy, defaults: setDefaults, template: set, nodeMsg: total},
 
 		// A step container's own limit.
 		{name: "v4/container", policy: helperStoragePolicy, template: declared, nodeMsg: mainOver, reason: "container main's own limit 640Mi"},
@@ -220,17 +217,3 @@ func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 }
 
 // Every form resource.Quantity.String() prints parses back to the same total.
-func TestPodStorageTotalMessageAcceptsQuantityForms(t *testing.T) {
-	for _, q := range []string{"1152Mi", "1Gi", "2Ei", "1500M", "1G", "1E", "512", "1e9", "12e6", "1e+9", "1500m"} {
-		want := resource.MustParse(q)
-		for _, suffix := range []string{". ", ".", "", " "} {
-			match := podStorageTotalMessage.FindStringSubmatch("Pod ephemeral local storage usage exceeds the total limit of containers " + q + suffix)
-			if match == nil {
-				t.Fatalf("total %q%q not recognised", q, suffix)
-			}
-			if got := resource.MustParse(match[1]); got.Cmp(want) != 0 {
-				t.Fatalf("total %q parsed as %q", q, match[1])
-			}
-		}
-	}
-}

@@ -92,9 +92,6 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 				if name, ok := value["name"].(string); ok {
 					if name == "init" {
 						setExecutorEnvironment(value)
-						if _, exists := value["resources"]; !exists {
-							value["resources"] = helperResources(workflow, t)
-						}
 						merged = append(merged, waiter)
 						order = append(order, map[string]string{"name": executorTokenWaiter})
 						inserted = true
@@ -112,35 +109,6 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 		// resource template gains wait only when it archives logs.
 		hasWait := (t.Resource == nil && t.Data == nil) || (t.Resource != nil && t.SaveLogsAsArtifact())
 		containers, _ := patch["containers"].([]any)
-		foundWait, foundMain := false, false
-		for _, item := range containers {
-			value, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			switch value["name"] {
-			case "wait":
-				foundWait = true
-			case "main":
-				if t.Resource == nil && t.Data == nil {
-					continue
-				}
-				foundMain = true
-			default:
-				continue
-			}
-			// Existing server-authored guards keep their resources and commands.
-			if _, exists := value["resources"]; !exists {
-				value["resources"] = helperResources(workflow, t)
-			}
-		}
-		if hasWait && !foundWait {
-			containers = append(containers, map[string]any{"name": "wait", "resources": helperResources(workflow, t)})
-		}
-		if (t.Resource != nil || t.Data != nil) && !foundMain {
-			containers = append(containers, map[string]any{"name": "main", "resources": helperResources(workflow, t)})
-		}
-		patch["containers"] = containers
 		// Every Argo executor container that mounts the identity finds it
 		// through the kubeconfig; the in-cluster default token path is empty.
 		executors := []string{}

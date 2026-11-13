@@ -204,6 +204,12 @@ func TestRemoteContextIsAValidTarget(t *testing.T) {
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://35.200.100.1:6443"},
 		ContextName: "gke_project_zone_cluster",
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] != "list" {
+				t.Fatalf("unexpected Helm mutation: %v", args)
+			}
+			return []byte(`[]`), nil
+		},
 	}
 	err := Run(context.Background(), Config{SecretStoreUndecided: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "OpenBao is required") {
@@ -241,8 +247,8 @@ func TestDryRunZeroWrites(t *testing.T) {
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 1 {
-		t.Fatalf("dry-run called helm %d times, want one read-only release lookup", helmCalls)
+	if helmCalls != 2 {
+		t.Fatalf("dry-run called helm %d times, want read-only Oberth and Argo release lookups", helmCalls)
 	}
 	output := buf.String()
 	if !strings.Contains(output, "Dry-run plan") {
@@ -833,8 +839,8 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 1 {
-		t.Fatalf("dry-run called helm %d times, want one read-only release lookup", helmCalls)
+	if helmCalls != 2 {
+		t.Fatalf("dry-run called helm %d times, want read-only Oberth and Argo release lookups", helmCalls)
 	}
 	output := buf.String()
 	for _, want := range []string{

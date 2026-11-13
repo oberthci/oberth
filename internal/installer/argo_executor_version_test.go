@@ -13,15 +13,16 @@ import (
 func TestManagedArgoExecutorPinFollowsEffectiveChartVersion(t *testing.T) {
 	cap := 6
 	for _, test := range []struct {
-		name, installed, target     string
-		parallelism                 *int
-		upgrade, write, pin, mirror bool
+		name, installed, target                string
+		parallelism                            *int
+		upgrade, write, pin, mirror, storedPin bool
 	}{
 		{name: "installed nondefault", installed: "1.0.30"},
 		{name: "installed nondefault mirror", installed: "1.0.30", mirror: true},
 		{name: "installed nondefault cap", installed: "1.0.30", parallelism: &cap, write: true},
 		{name: "fresh explicit nondefault", target: "1.0.30", write: true},
 		{name: "upgrade to nondefault", installed: DefaultArgoChartVersion, target: "1.0.30", write: true},
+		{name: "upgrade to nondefault keeps stored pin", installed: DefaultArgoChartVersion, target: "1.0.30", write: true, storedPin: true},
 		{name: "fresh default", write: true, pin: true},
 		{name: "fresh explicit default", target: "v" + DefaultArgoChartVersion, write: true, pin: true},
 		{name: "installed default missing pin", installed: DefaultArgoChartVersion, write: true, pin: true},
@@ -31,11 +32,16 @@ func TestManagedArgoExecutorPinFollowsEffectiveChartVersion(t *testing.T) {
 			var output strings.Builder
 			writes := 0
 			var applied []string
+			// Stored operator resources isolate image reconciliation from resource defaults.
 			// A custom stored image demonstrates that nondefault charts skip the pin's
 			// compatibility check as well as its Helm flag.
-			stored := `{}`
+			stored := `{"executor":{"resources":{}}}`
 			if test.mirror {
-				stored = `{"executor":{"image":{"registry":"mirror.invalid","tag":"operator"}}}`
+				stored = `{"executor":{"resources":{},"image":{"registry":"mirror.invalid","tag":"operator"}}}`
+			}
+			_, storedTag, _ := strings.Cut(argoworkflow.ExecutorImage, ":")
+			if test.storedPin {
+				stored = `{"executor":{"resources":{},"image":{"tag":"` + storedTag + `"}}}`
 			}
 			deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
@@ -74,6 +80,12 @@ func TestManagedArgoExecutorPinFollowsEffectiveChartVersion(t *testing.T) {
 			}
 			if notices != wantNotices || (!test.pin && !strings.Contains(output.String(), argoworkflow.ExecutorImage)) {
 				t.Fatal(output.String())
+			}
+			if test.storedPin {
+				retained := fmt.Sprintf("stored executor.image.tag=%q is present and left in place", storedTag)
+				if strings.Count(output.String(), retained) != 1 || !slices.Contains(applied, "--reuse-values") {
+					t.Fatal("stored executor pin was hidden or replaced", output.String(), applied)
+				}
 			}
 			if test.write && !test.pin {
 				index := slices.Index(applied, "--version")

@@ -55,7 +55,7 @@ func TestOberthEveryLeafHasMainStorageBudget(t *testing.T) {
 					if request.Sign() <= 0 || limit.Cmp(minimum) < 0 || request.Cmp(*limit) > 0 {
 						t.Fatalf("explicit ordered main storage with a 512Mi minimum limit required: %s/%s", request, limit)
 					}
-					before := credentialWaitControllerShape(*main.DeepCopy())
+					before := nativeBudgetControllerShape(credentialWaitControllerShape(*main.DeepCopy()))
 					before.Containers[1].Name = "main"
 					after := applyCredentialWaitPatch(t, before, leaf.PodSpecPatch)
 					var total, wait int64
@@ -96,7 +96,7 @@ func TestOberthHelmPodStorageCoversObservedWorkingSet(t *testing.T) {
 				}
 				main := *leaf.Container.DeepCopy()
 				main.Name = "main"
-				pod := applyCredentialWaitPatch(t, credentialWaitControllerShape(main), leaf.PodSpecPatch)
+				pod := applyCredentialWaitPatch(t, nativeBudgetControllerShape(credentialWaitControllerShape(main)), leaf.PodSpecPatch)
 				const observedLowerBound int64 = 1987485696
 				var total int64
 				for _, c := range pod.Containers {

@@ -123,7 +123,9 @@ check leaves fresh-machine acceptance incomplete for that candidate.
 
    Separately inventory generated helpers: Argo's `wait` and `init`,
    `oberth-executor-token`, and `oberth-prepare-nonroot` when that profile is
-   selected. Compare each helper's fixed requests and limits, including the
+   selected. Compare Argo-generated helpers with the controller's native
+   `executor.resources`; record the stored operator value or installer defaults.
+   Compare Oberth-owned helpers' requests and limits, including the token waiter's
    conditional ephemeral-storage budget, with the
    [documented helper resource contract](native-scheduling.md#what-oberth-writes-into-the-users-workflow-and-pods).
    Report their CPU, memory and storage requests and their scheduling cost in

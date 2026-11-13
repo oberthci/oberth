@@ -140,7 +140,7 @@ func evictionDisplayReason(run model.Run) string {
 	}
 	if match := evictionStorageLimit.FindStringSubmatch(run.Error); len(match) == 2 {
 		if quantity, err := resource.ParseQuantity(match[1]); err == nil {
-			return "evicted: ephemeral storage limit " + bytesText(quantity.Value()) + "; raise the step's ephemeral-storage limit"
+			return "evicted: pod storage limit " + bytesText(quantity.Value())
 		}
 	}
 	switch {
@@ -148,8 +148,10 @@ func evictionDisplayReason(run model.Run) string {
 		return "evicted: node storage pressure"
 	case strings.Contains(run.Error, "The node was low on resource: memory."):
 		return "evicted: node memory pressure"
-	case strings.Contains(run.Error, "local ephemeral storage limit"), strings.Contains(run.Error, "Pod ephemeral local storage usage exceeds"):
-		return "evicted: ephemeral storage limit; raise the step's ephemeral-storage limit"
+	case strings.Contains(run.Error, "Pod ephemeral local storage usage exceeds"):
+		return "evicted: pod storage limit"
+	case strings.Contains(run.Error, "local ephemeral storage limit"):
+		return "evicted: container storage limit"
 	case strings.HasPrefix(run.Error, "Evicted: Usage of EmptyDir volume "):
 		return "evicted: temporary volume storage limit"
 	default:

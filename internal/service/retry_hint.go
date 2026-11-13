@@ -56,23 +56,16 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 		return infrastructure("git_transport", "run_rerun (retries only the publication)", "every step passed; only the upstream publication failed")
 	}
 	if reason := evictionDisplayReason(run); reason != "" {
-		if strings.Contains(reason, "storage limit") {
-			return code("resource_limit", "raise the step's ephemeral-storage limit in git", reason)
-		}
 		return infrastructure("eviction", "run_retry", reason)
 	}
-	// A step's own eviction names the step, so evictionDisplayReason (the
-	// step-less infrastructure line) does not see it; without this the
-	// generic step branch below advised fixing the code.
+	// Only a positively identified authored-container budget failure warrants
+	// changing the step's limit. A named step can also have a Pod/helper eviction.
 	switch {
 	case strings.Contains(message, "exceeded its declared ephemeral-storage budget"):
 		return code("resource_limit", "raise the step's ephemeral-storage limit in git", boundedText(message, 200))
 	case run.FailedStep != "" && (message == "Evicted" || strings.HasPrefix(message, "Evicted: ")):
 		// The same kubelet message classification as the step-less line.
 		reason := evictionDisplayReason(model.Run{Phase: "infrastructure", Error: message})
-		if strings.Contains(reason, "storage limit") {
-			return code("resource_limit", "raise the step's ephemeral-storage limit in git", reason)
-		}
 		return infrastructure("eviction", "run_retry", reason)
 	}
 	switch {

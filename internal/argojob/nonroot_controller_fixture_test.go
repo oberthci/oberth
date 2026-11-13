@@ -194,9 +194,12 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 			nonrootHistoricalMeasurementInput(t, wf, shape)
 			current := nonrootApplyControllerFixture(t, before, wf)
 			for _, c := range append(current.Spec.InitContainers, current.Spec.Containers...) {
-				if c.Name == "init" || c.Name == "wait" || c.Name == executorTokenWaiter {
+				if c.Name == executorTokenWaiter {
 					assertControlContainer(t, c, false)
 				}
+			}
+			for _, template := range wf.Spec.Templates {
+				assertNativeExecutorPatch(t, template.PodSpecPatch)
 			}
 			withoutCapturedHelperBudgets(t, current)
 			withoutCapturedHelperBudgets(t, observed)
