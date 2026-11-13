@@ -91,7 +91,7 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   and caches are exactly today's;
 - the template annotation `oberth.ci/assist-hold: <held deadline seconds>`,
   inherited by the Pods, and the mount of the server's own executable at
-  `/run/oberth/usage/oberth` (the mount measured steps already have) so
+  `/run/oberth/assist/oberth` on hold-eligible steps so
   `run_hold_patch` and `run_continue` need no shell in the image.
 
 The Workflow gets `oberth.ci/assist: <hold TTL seconds>` and its
@@ -146,7 +146,7 @@ Everything else keeps today's behaviour.
 
 `run_hold_patch` writes files through the server's own static executable,
 which every hold-eligible step's `main` container receives read-only at
-`/run/oberth/usage` from the run's source claim. The image does not matter:
+`/run/oberth/assist` from the run's source claim. The image does not matter:
 a stock `debian`, `alpine` or distroless image is patch-capable, with or
 without a shell and whatever its memory limit (only resource measurement
 keeps its 256Mi floor). The step's `patch_capable` (in `run.held` and
