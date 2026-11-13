@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestRunTimingMilestonesAndAdmissionEpisodes(t *testing.T) {
+func TestRunTimingMilestones(t *testing.T) {
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	ctx := context.Background()
@@ -32,30 +32,6 @@ func TestRunTimingMilestonesAndAdmissionEpisodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkout := now
-	now = now.Add(time.Second)
-	if err = s.RecordAdmissionRequested(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	requested := now
-	now = now.Add(time.Second)
-	if err = s.RecordAdmissionRequested(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	granted := now
-	now = now.Add(time.Second)
-	// Reproduce a historical admission reset; runtime no longer emits it.
-	if _, err = s.db.ExecContext(ctx, `UPDATE runs SET started_at=NULL, updated_at=? WHERE id=?`, unixNano(now), run.ID); err != nil {
-		t.Fatal(err)
-	}
-	parked := now
-	now = now.Add(time.Second)
-	if err = s.RecordAdmissionRequested(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	secondRequest := now
 	now = now.Add(time.Second)
 	if _, err = s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 		t.Fatal(err)
@@ -81,14 +57,12 @@ func TestRunTimingMilestonesAndAdmissionEpisodes(t *testing.T) {
 	if err != nil || got.Version != 1 || !got.QueuedAt.Equal(queued) || got.ClaimedAt == nil || !got.ClaimedAt.Equal(claimed) || got.CheckoutReadyAt == nil || !got.CheckoutReadyAt.Equal(checkout) || (got.TerminalAt == nil || !got.TerminalAt.Equal(now)) || got.SourceReadyAt == nil {
 		t.Fatalf("milestones=%+v err=%v", got, err)
 	}
-	if len(got.Admissions) != 2 || got.Admissions[0].RequestedAt == nil || !got.Admissions[0].RequestedAt.Equal(requested) || got.Admissions[0].GrantedAt == nil || !got.Admissions[0].GrantedAt.Equal(granted) || !got.Admissions[0].ClosedAt.Equal(parked) || !got.Admissions[1].RequestedAt.Equal(secondRequest) || got.Admissions[1].ClosedAt == nil {
-		t.Fatalf("episodes=%+v", got.Admissions)
-	}
+
 	fresh, err := s.RunTiming(ctx, finished.ID)
-	if err != nil || fresh.ClaimedAt == nil || !fresh.ClaimedAt.Equal(claimed) || len(fresh.Admissions) != 2 || (fresh.TerminalAt == nil || !fresh.TerminalAt.Equal(now)) || finished.ID != run.ID || finished.AdmissionSequence != run.AdmissionSequence {
+	if err != nil || fresh.ClaimedAt == nil || !fresh.ClaimedAt.Equal(claimed) || (fresh.TerminalAt == nil || !fresh.TerminalAt.Equal(now)) || finished.ID != run.ID || finished.AdmissionSequence != run.AdmissionSequence {
 		t.Fatalf("terminalization lost timing evidence: %+v %v", fresh, err)
 	}
-	for _, query := range []string{`UPDATE run_timings SET claimed_at=1 WHERE run_id=?`, `UPDATE run_admission_timings SET requested_at=1 WHERE run_id=?`} {
+	for _, query := range []string{`UPDATE run_timings SET claimed_at=1 WHERE run_id=?`} {
 		if _, err = s.db.Exec(query, run.ID); err == nil {
 			t.Fatal("immutable milestone rewritten")
 		}
@@ -239,7 +213,7 @@ func TestRunTimingDoesNotInferAdmissionFromLegacySubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.RunTiming(ctx, run.ID)
-	if err != nil || got.ClaimedAt == nil || len(got.Admissions) != 0 || got.WorkflowCreatedAt != nil {
+	if err != nil || got.ClaimedAt == nil || got.WorkflowCreatedAt != nil {
 		t.Fatalf("inferred overloaded timestamps: %+v %v", got, err)
 	}
 }
@@ -269,7 +243,7 @@ func TestRunTimingMigrationDoesNotBackfillLegacyStartedAt(t *testing.T) {
 	if _, err = s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(publicationRetryDowngradeSQL+`DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version>=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DELETE FROM schema_migrations WHERE version=?`, runTimingMigrationVersion); err != nil {
+	if _, err = s.db.Exec(publicationRetryDowngradeSQL+`DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version>=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER IF EXISTS run_timing_grant; DROP TRIGGER IF EXISTS run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE IF EXISTS run_admission_timings; DROP TABLE run_timings; DELETE FROM schema_migrations WHERE version=?`, runTimingMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
@@ -282,7 +256,7 @@ func TestRunTimingMigrationDoesNotBackfillLegacyStartedAt(t *testing.T) {
 	}
 	defer s.Close()
 	got, err := s.RunTiming(ctx, run.ID)
-	if err != nil || got.Unavailable != "not-recorded" || got.ClaimedAt != nil || got.TerminalAt != nil || len(got.Admissions) != 0 {
+	if err != nil || got.Unavailable != "not-recorded" || got.ClaimedAt != nil || got.TerminalAt != nil {
 		t.Fatalf("legacy inference: %+v %v", got, err)
 	}
 	retained, err := s.Run(ctx, run.ID)
@@ -296,31 +270,4 @@ func TestRunTimingMigrationDoesNotBackfillLegacyStartedAt(t *testing.T) {
 		}
 	}
 	assertFreshSchemaLedger(t, s.db)
-}
-
-func TestRunTimingNewRequestOnLegacyActiveRunKeepsEarlierPhasesUnknown(t *testing.T) {
-	now := time.Now().UTC()
-	s := testStore(t, &now)
-	ctx := context.Background()
-	repo := createRepo(t, s)
-	run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "legacy-active", strings.Repeat("d", 40)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	// Emulate an active row claimed before the timing migration. The new
-	// request is knowable; the earlier claim/grant timestamps are not.
-	if _, err = s.db.Exec(`DELETE FROM run_timings WHERE run_id=?`, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(time.Second)
-	if err = s.RecordAdmissionRequested(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.RunTiming(ctx, run.ID)
-	if err != nil || got.Unavailable != "" || got.ClaimedAt != nil || len(got.Admissions) != 1 || got.Admissions[0].RequestedAt == nil || !got.Admissions[0].RequestedAt.Equal(now) || got.Admissions[0].GrantedAt != nil {
-		t.Fatalf("partial legacy observation lost/inferred: %+v %v", got, err)
-	}
 }

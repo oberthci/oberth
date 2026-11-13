@@ -759,7 +759,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline source receipt: %w", err))
 	}
 	jobRequest.SourceReceipt = receipt
-	scheduler.admissionRequested(ctx, run.ID)
 	if err := require(ctx); err != nil {
 		_ = logFile.Close()
 		return err

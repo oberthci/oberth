@@ -366,7 +366,7 @@ one with a non-admin token is still answered with the server's refusal.
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
-| `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, admission context, superseded status, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained timing |
+| `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, run context, superseded status, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained Workflow/step timing, without admission episodes |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; an in-flight create is cancelled and any claimed Workflow is deleted; the run is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
@@ -935,7 +935,7 @@ options or `issue_get`. Requests must contain 1..50 unique positive IDs. Neither
 read tool acquires or renews locks, and neither changes stored content. This is
 live pagination, not a point-in-time snapshot.
 
-`run_get({"id":"<run ID or unique 8+ character prefix>"})` returns the compact run; add `"summary":false` only when you need step diagnostics or retained timing.
+`run_get({"id":"<run ID or unique 8+ character prefix>"})` returns the compact run; add `"summary":false` only when you need step diagnostics or retained Workflow/step timing. Admission episodes and requested/granted/closed timestamps are absent; ordinary run milestones remain.
 It returns `id`, `repo` (repository name), `ref`, `sha`,
 `superseded`, `status`,
 `phase`, `failed_burn`, `failed_step`, `error`, and `steps`. Each step contains

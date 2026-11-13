@@ -11,29 +11,21 @@ const TimingVersion = 1
 const MaxTimingTasks = 2048
 const MaxStepTimingBytes = 16 << 10
 
-// RunTiming retains first-observed milestones, admission episodes, and the
+// RunTiming retains first-observed milestones and the
 // Workflow and step evidence bound to this run. Explicit retries have new IDs.
 type RunTiming struct {
-	Version             int               `json:"version"`
-	RunID               string            `json:"run_id"`
-	Unavailable         string            `json:"unavailable,omitempty"`
-	QueuedAt            time.Time         `json:"queued_at"`
-	ClaimedAt           *time.Time        `json:"claimed_at,omitempty"`
-	CheckoutReadyAt     *time.Time        `json:"checkout_ready_at,omitempty"`
-	SourceSeedStartedAt *time.Time        `json:"source_seed_started_at,omitempty"`
-	SourceReadyAt       *time.Time        `json:"source_ready_at,omitempty"`
-	WorkflowCreatedAt   *time.Time        `json:"workflow_created_at,omitempty"`
-	TerminalAt          *time.Time        `json:"terminal_at,omitempty"`
-	Workflow            *WorkflowTiming   `json:"workflow,omitempty"`
-	Admissions          []AdmissionTiming `json:"admissions"`
-	Steps               []StepTiming      `json:"steps"`
-}
-
-type AdmissionTiming struct {
-	Episode     int        `json:"episode"`
-	RequestedAt *time.Time `json:"requested_at,omitempty"`
-	GrantedAt   *time.Time `json:"granted_at,omitempty"`
-	ClosedAt    *time.Time `json:"closed_at,omitempty"`
+	Version             int             `json:"version"`
+	RunID               string          `json:"run_id"`
+	Unavailable         string          `json:"unavailable,omitempty"`
+	QueuedAt            time.Time       `json:"queued_at"`
+	ClaimedAt           *time.Time      `json:"claimed_at,omitempty"`
+	CheckoutReadyAt     *time.Time      `json:"checkout_ready_at,omitempty"`
+	SourceSeedStartedAt *time.Time      `json:"source_seed_started_at,omitempty"`
+	SourceReadyAt       *time.Time      `json:"source_ready_at,omitempty"`
+	WorkflowCreatedAt   *time.Time      `json:"workflow_created_at,omitempty"`
+	TerminalAt          *time.Time      `json:"terminal_at,omitempty"`
+	Workflow            *WorkflowTiming `json:"workflow,omitempty"`
+	Steps               []StepTiming    `json:"steps"`
 }
 
 // Tasks contain admitted expanded identities and dependency names, never

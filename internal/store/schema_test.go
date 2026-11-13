@@ -623,7 +623,7 @@ ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
 ALTER TABLE upstreams DROP COLUMN key_name;
 ALTER TABLE runs DROP COLUMN credentialed;
-DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER IF EXISTS run_timing_grant; DROP TRIGGER IF EXISTS run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE IF EXISTS run_admission_timings; DROP TABLE run_timings;
 DROP INDEX repository_archive_actions_idx;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
@@ -983,7 +983,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"receive_events",
 		"release_wif_overrides",
 		"repositories",
-		"run_admission_timings",
 		"run_cancellations",
 		"run_timings",
 		"runs",
@@ -1037,7 +1036,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"receive_events_repo_idx",
 		"receive_events_run_idx",
 		"repository_archive_actions_idx",
-		"run_admission_timing_open",
 		"run_cancellations_pending_idx",
 		"runs_active_ref_idx", "runs_admission_idx", "runs_counts_idx",
 		"runs_fifo_idx",
@@ -1055,7 +1053,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_suite_resource_uid",
 	})
 	assertSchemaObjects(t, store.db, "trigger", []string{
-		"admission_timing_immutable",
 		"audit_actions_no_delete",
 		"audit_actions_no_update",
 		"audit_anchors_no_delete",
@@ -1096,9 +1093,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"run_schedule_entry_immutable",
 		"run_source_bindings_immutable",
 		"run_timing_claim",
-		"run_timing_grant",
 		"run_timing_immutable",
-		"run_timing_park",
 		"run_timing_terminal",
 		"schema_identity_no_delete",
 		"schema_identity_no_insert",
@@ -1122,7 +1117,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"publication_policy_waits":  {"publication_id", "since"},
 		"schedule_fires":            {"repo", "entry", "fired_at", "outcome", "last_fired_at"},
 		"run_timings":               {"run_id", "version", "claimed_at", "checkout_ready_at", "source_seed_started_at", "source_ready_at", "workflow_created_at", "terminal_at", "workflow_json"},
-		"run_admission_timings":     {"run_id", "episode", "requested_at", "granted_at", "closed_at"},
 		"step_timings":              {"run_id", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},
 		"schema_identity":           {"singleton", "identity"},
 		"schema_migrations":         {"version", "applied_at", "id"},
