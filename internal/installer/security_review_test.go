@@ -69,7 +69,7 @@ func TestOpenBaoPodRequiresLiveControllerUID(t *testing.T) {
 	}
 }
 func TestServerPoliciesAndPathsKeepInstallIdentitiesIsolated(t *testing.T) {
-	for _, policy := range []string{OberthPolicy("oberth", "install-a"), OberthProductionPolicy("oberth", "transit", "key", "install-a")} {
+	for _, policy := range []string{OberthPolicy("oberth", "install-a"), OberthPolicy("oberth", "install-a") + serverPKIPolicy()} {
 		if strings.Contains(policy, `path "oberth/data/*"`) {
 			t.Fatal("server can read another install's identities")
 		}

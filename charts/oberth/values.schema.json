@@ -1098,49 +1098,6 @@
           "type": "boolean",
           "description": "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address."
         },
-        "transit": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "OpenBao Transit engine used for trusted-plan artifact envelopes. Enabled only over verified HTTPS.",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "mount": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9._-]+$",
-              "not": {
-                "enum": [
-                  ".",
-                  "..",
-                  "auth",
-                  "sys",
-                  "identity",
-                  "cubbyhole"
-                ]
-              }
-            },
-            "key": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9._-]+$",
-              "not": {
-                "enum": [
-                  ".",
-                  ".."
-                ]
-              }
-            }
-          },
-          "required": [
-            "enabled",
-            "mount",
-            "key"
-          ]
-        },
         "kvMount": {
           "type": "string",
           "minLength": 1,
@@ -1178,8 +1135,7 @@
         }
       },
       "required": [
-        "enabled",
-        "transit"
+        "enabled"
       ],
       "if": {
         "properties": {

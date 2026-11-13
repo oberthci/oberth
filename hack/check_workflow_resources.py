@@ -65,10 +65,6 @@ def check(document, label="workflow"):
     spec = document.get("spec", {})
     if kind == "CronWorkflow":
         spec = spec.get("workflowSpec", {})
-    for metadata in (document.get("metadata") or {}, spec.get("workflowMetadata") or {}):
-        for key in metadata.get("annotations") or {}:
-            if key.startswith("oberth.ci/") and (key.split("/", 1)[1].startswith("size") or "weight" in key):
-                failures.append(f"{label}: resource admission cannot use {key}")
     templates = spec.get("templates")
     if not isinstance(templates, list) or not templates:
         return failures + [f"{label}: missing templates"]

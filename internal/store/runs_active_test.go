@@ -80,13 +80,6 @@ func TestListActiveRunsOrdersByStartThenAdmissionThenQueue(t *testing.T) {
 	if got := runIDs(active); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("active order = %v, want %v", got, want)
 	}
-	// The not-started rows, claimed or not, are one queue in queue_position order.
-	for i, run := range active[2:] {
-		if run.QueuePosition != int64(i+1) {
-			t.Fatalf("queue position of %s = %d, want %d", run.Ref, run.QueuePosition, i+1)
-		}
-	}
-
 	// The uplink repository restriction applies to the active view.
 	scoped, err := s.ListActiveRuns(ctx, model.RunListFilter{RepoIDs: []int64{other.ID}})
 	if err != nil || strings.Join(runIDs(scoped), ",") != hidden.ID {
@@ -206,12 +199,6 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 				t.Fatalf("%s: %s queue in admission order = %v, want %v", label, name, got, wantAdmission)
 			}
 
-			for i, run := range queue {
-				if run.QueuePosition != int64(i+1) {
-					t.Fatalf("%s: %s queue position of %s = %d, want %d", label, name, run.Ref, run.QueuePosition, i+1)
-				}
-
-			}
 		}
 	}
 

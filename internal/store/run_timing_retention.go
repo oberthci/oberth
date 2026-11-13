@@ -24,7 +24,7 @@ const (
 // older than the newest keepRuns terminal runs. Runs the evidence retention
 // protects (active, release and tag, pending publication or promotion, open
 // issue on the ref, the newest keepNewest per ref) keep their records. The run
-// row, its step results and admission episodes stay; the run's milestones stay
+// row and its step results stay; the run's milestones stay
 // and its timing reads unavailable=pruned. One pass handles at most 200 runs,
 // 20 per transaction, within two seconds; the next sweep continues.
 func (s *Store) PruneRunTiming(ctx context.Context, keepRuns, keepNewest int) (int64, error) {
@@ -47,9 +47,7 @@ func (s *Store) PruneRunTiming(ctx context.Context, keepRuns, keepNewest int) (i
 	rows, err := s.reader().QueryContext(ctx, `SELECT r.id FROM runs r
 WHERE r.finished_at IS NOT NULL AND r.queue_sequence < ?
  AND (EXISTS(SELECT 1 FROM run_timings t WHERE t.run_id=r.id AND t.workflow_json IS NOT NULL)
-  OR EXISTS(SELECT 1 FROM step_timings t WHERE t.run_id=r.id)
-  OR EXISTS(SELECT 1 FROM restart_workflow_timings t WHERE t.run_id=r.id)
-  OR EXISTS(SELECT 1 FROM restart_step_timings t WHERE t.run_id=r.id))
+  OR EXISTS(SELECT 1 FROM step_timings t WHERE t.run_id=r.id))
  AND NOT (`+evidenceProtectionSQL+`)
 ORDER BY r.queue_sequence LIMIT ?`, cutoff, unixNano(s.now()), keepNewest, keepNewest, runTimingSweepRuns)
 	if err != nil {
@@ -105,14 +103,8 @@ func (s *Store) pruneRunTimingBatch(ctx context.Context, ids []string, keepNewes
 		if err != nil {
 			return 0, err
 		}
-		for _, statement := range []string{
-			`DELETE FROM step_timings WHERE run_id=?`,
-			`DELETE FROM restart_step_timings WHERE run_id=?`,
-			`DELETE FROM restart_workflow_timings WHERE run_id=?`,
-		} {
-			if _, err := tx.ExecContext(ctx, statement, id); err != nil {
-				return 0, err
-			}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM step_timings WHERE run_id=?`, id); err != nil {
+			return 0, err
 		}
 		// run_timings is immutable once a value is set; replace the row and keep
 		// every milestone. A kept workflow_created_at without workflow_json is the

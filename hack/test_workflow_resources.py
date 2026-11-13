@@ -58,11 +58,13 @@ class ResourceGuardTests(unittest.TestCase):
         workflow['spec']['templates'][0]['container']['resources']['requests']['cpu'] = '1001m'
         self.assertTrue(guard.check(workflow))
 
-    def test_no_size_or_weight(self):
-        for key in ("oberth.ci/size", "oberth.ci/size-by-trigger", "oberth.ci/size-weight", "oberth.ci/weight"):
-            workflow = self.workflow()
-            workflow["metadata"] = {"annotations": {key: "XL"}}
-            self.assertTrue(guard.check(workflow))
+    def test_workflow_annotations_are_not_resource_policy(self):
+        workflow = self.workflow()
+        workflow["metadata"] = {"annotations": {
+            "/".join(("oberth.ci", "size")): "XL",
+            "/".join(("oberth.ci", "weight")): "4",
+        }}
+        self.assertEqual([], guard.check(workflow))
 
     def test_empty_metadata(self):
         workflow = self.workflow()

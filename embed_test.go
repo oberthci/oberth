@@ -20,8 +20,7 @@ func TestSetupSecretStoreScriptIsEmbedded(t *testing.T) {
 		"oberth secretstore verify",
 		"token_no_default_policy=true",
 		"auth/token/revoke-self",
-		"trusted-plan-artifacts",
-		"--disable-transit",
+		"--kv-prefix",
 	} {
 		if !bytes.Contains(SetupSecretStoreScript, []byte(want)) {
 			t.Fatalf("embedded setup script misses %q", want)

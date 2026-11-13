@@ -8,8 +8,7 @@
 #   2. writes its config (kubernetes_host + cluster CA) — only if unset,
 #      and refuses to repoint a config that names a different cluster
 #   3. enables a KV v2 mount for Oberth secrets (if absent; verifies v2 if not)
-#   4. over verified HTTPS, enables Transit and creates one non-exportable key
-#   5. writes a minimal KV-read + exact Transit encrypt/decrypt policy
+#   4. writes a minimal KV-read and token-revocation policy
 #   6. creates a role bound to the Oberth ServiceAccount and namespace
 #
 # The CLUSTER side (ServiceAccount, TokenReview permission, server flags) is
@@ -37,9 +36,6 @@ MOUNT="kubernetes"
 ROLE="oberth-ci"
 POLICY="oberth-ci"
 KV_PREFIX="oberth"
-TRANSIT_MOUNT="oberth-transit"
-TRANSIT_KEY="trusted-plan-artifacts"
-TRANSIT_ENABLED="true"
 NAMESPACE="oberth"
 SERVICE_ACCOUNT="oberth"
 KUBERNETES_HOST=""
@@ -58,9 +54,6 @@ Options:
   --role NAME              auth role for Oberth              (default: oberth-ci)
   --policy NAME            policy name                       (default: oberth-ci)
   --kv-prefix NAME         KV v2 mount for Oberth secrets    (default: oberth)
-  --transit-mount NAME     Transit mount for trusted plans    (default: oberth-transit)
-  --transit-key NAME       non-exportable trusted-plan key    (default: trusted-plan-artifacts)
-  --disable-transit        KV-only development setup; required for plain HTTP
   --namespace NAME         Oberth Kubernetes namespace       (default: oberth)
   --service-account NAME   Oberth ServiceAccount name        (default: oberth)
   --kubernetes-host URL    API server URL the secret store uses for TokenReview
@@ -87,9 +80,6 @@ while [ $# -gt 0 ]; do
     --role) ROLE="$2"; shift 2 ;;
     --policy) POLICY="$2"; shift 2 ;;
     --kv-prefix) KV_PREFIX="$2"; shift 2 ;;
-    --transit-mount) TRANSIT_MOUNT="$2"; shift 2 ;;
-    --transit-key) TRANSIT_KEY="$2"; shift 2 ;;
-    --disable-transit) TRANSIT_ENABLED="false"; shift ;;
     --namespace) NAMESPACE="$2"; shift 2 ;;
     --service-account) SERVICE_ACCOUNT="$2"; shift 2 ;;
     --kubernetes-host) KUBERNETES_HOST="$2"; shift 2 ;;
@@ -103,14 +93,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$MOUNT$ROLE$POLICY$KV_PREFIX$TRANSIT_MOUNT$TRANSIT_KEY$NAMESPACE$SERVICE_ACCOUNT" in
+case "$MOUNT$ROLE$POLICY$KV_PREFIX$NAMESPACE$SERVICE_ACCOUNT" in
   *[!A-Za-z0-9_.-]*) fail "names may use only letters, digits, dots, dashes, and underscores" ;;
 esac
-for required_name in "$MOUNT" "$ROLE" "$POLICY" "$KV_PREFIX" "$TRANSIT_MOUNT" "$TRANSIT_KEY" "$NAMESPACE" "$SERVICE_ACCOUNT"; do
+for required_name in "$MOUNT" "$ROLE" "$POLICY" "$KV_PREFIX" "$NAMESPACE" "$SERVICE_ACCOUNT"; do
   [ -n "$required_name" ] || fail "names must not be empty"
   case "$required_name" in .|..) fail "names must be clean path segments, not . or .." ;; esac
 done
-case "$TRANSIT_MOUNT" in auth|sys|identity|cubbyhole) fail "Transit mount must not use a reserved API namespace" ;; esac
 
 # --- CLI detection -----------------------------------------------------------
 if [ -z "$CLI" ]; then
@@ -133,10 +122,8 @@ STORE_ADDR="${BAO_ADDR:-${VAULT_ADDR:-}}"
 case "$STORE_ADDR" in
   https://*) : ;;
   http://127.0.0.1*|http://localhost*|http://\[::1\]*)
-    [ "$TRANSIT_ENABLED" = "false" ] || fail "trusted-plan Transit requires verified HTTPS; use --disable-transit only for a KV-only local development setup"
     warn "secret store address $STORE_ADDR is loopback plain HTTP — acceptable only for local development" ;;
   http://*)
-    [ "$TRANSIT_ENABLED" = "false" ] || fail "trusted-plan Transit requires verified HTTPS; use --disable-transit only for a KV-only development setup"
     warn "secret store address $STORE_ADDR uses PLAIN HTTP over the network."
     warn "Oberth requires https:// unless you explicitly set secretstore.insecureHTTPForDev." ;;
   *) fail "secret store address $STORE_ADDR must be an http(s) URL" ;;
@@ -145,7 +132,6 @@ SKIP_VERIFY_ENABLED="false"
 case "${BAO_SKIP_VERIFY:-}" in 1|t|T|true|TRUE|True) SKIP_VERIFY_ENABLED="true" ;; esac
 case "${VAULT_SKIP_VERIFY:-}" in 1|t|T|true|TRUE|True) SKIP_VERIFY_ENABLED="true" ;; esac
 if [ "$SKIP_VERIFY_ENABLED" = "true" ]; then
-  [ "$TRANSIT_ENABLED" = "false" ] || fail "trusted-plan Transit setup refuses a CLI environment with TLS verification disabled (BAO_SKIP_VERIFY/VAULT_SKIP_VERIFY)"
   warn "TLS verification is DISABLED in your CLI environment (SKIP_VERIFY). Fix the trust chain instead; Oberth itself always verifies."
 fi
 
@@ -362,67 +348,10 @@ else
   run "$CLI" secrets enable -path="$KV_PREFIX" -version=2 kv
 fi
 
-# --- 4. trusted-plan Transit engine and non-exportable key -------------------
-if [ "$TRANSIT_ENABLED" = "true" ]; then
-  TRANSIT_TYPE="$(read_mount_type secrets "$TRANSIT_MOUNT")"
-  if [ -n "$TRANSIT_TYPE" ]; then
-    [ "$TRANSIT_TYPE" = "transit" ] || fail "secrets mount $TRANSIT_MOUNT/ already exists with type '$TRANSIT_TYPE', not transit"
-    note "Transit mount $TRANSIT_MOUNT/ already exists — keeping it"
-  else
-    note "enabling Transit mount at $TRANSIT_MOUNT/"
-    run "$CLI" secrets enable -path="$TRANSIT_MOUNT" transit
-  fi
-
-  TRANSIT_KEY_PATH="$TRANSIT_MOUNT/keys/$TRANSIT_KEY"
-  TRANSIT_KEY_TYPE="$(read_field type "$TRANSIT_KEY_PATH")"
-  if [ -z "$TRANSIT_KEY_TYPE" ]; then
-    note "creating non-exportable Transit key $TRANSIT_KEY"
-    run "$CLI" write "$TRANSIT_KEY_PATH" \
-      type=aes256-gcm96 derived=false exportable=false allow_plaintext_backup=false
-  else
-    TRANSIT_DERIVED="$(read_field derived "$TRANSIT_KEY_PATH")"
-    TRANSIT_EXPORTABLE="$(read_field exportable "$TRANSIT_KEY_PATH")"
-    TRANSIT_PLAINTEXT_BACKUP="$(read_field allow_plaintext_backup "$TRANSIT_KEY_PATH")"
-    TRANSIT_SUPPORTS_ENCRYPTION="$(read_field supports_encryption "$TRANSIT_KEY_PATH")"
-    TRANSIT_SUPPORTS_DECRYPTION="$(read_field supports_decryption "$TRANSIT_KEY_PATH")"
-    if [ "$TRANSIT_KEY_TYPE" != "aes256-gcm96" ] || [ "$TRANSIT_DERIVED" != "false" ] || \
-       [ "$TRANSIT_EXPORTABLE" != "false" ] || [ "$TRANSIT_PLAINTEXT_BACKUP" != "false" ] || \
-       [ "$TRANSIT_SUPPORTS_ENCRYPTION" != "true" ] || [ "$TRANSIT_SUPPORTS_DECRYPTION" != "true" ]; then
-      fail "Transit key $TRANSIT_KEY exists with an unsafe or incompatible configuration; refusing to overwrite it"
-    fi
-    note "Transit key $TRANSIT_KEY already matches — unchanged"
-  fi
-fi
-
-# --- 5. minimal KV + exact Transit data policy -------------------------------
+# --- 5. minimal KV data policy -------------------------------
 # revoke-self is the one extra grant: Oberth's client revokes its short-lived
 # login token after every fetch instead of leaving it to expire, and the role
 # below attaches no default policy that would otherwise permit that.
-if [ "$TRANSIT_ENABLED" = "true" ]; then
-  WANT_POLICY="$(cat <<POLICYEOF
-# Oberth release secrets: read-only, data endpoints only. No list, no
-# metadata, no write, no delete. Managed by setup-secretstore.sh.
-path "$KV_PREFIX/data/*" {
-  capabilities = ["read"]
-}
-
-# Trusted-plan envelope encryption/decryption through one non-exportable key.
-path "$TRANSIT_MOUNT/encrypt/$TRANSIT_KEY" {
-  capabilities = ["update"]
-}
-
-path "$TRANSIT_MOUNT/decrypt/$TRANSIT_KEY" {
-  capabilities = ["update"]
-}
-
-# Allow the fetch client to revoke its own short-lived login token.
-path "auth/token/revoke-self" {
-  capabilities = ["update"]
-}
-POLICYEOF
-)"
-  POLICY_DESCRIPTION="KV read plus exact Transit encrypt/decrypt paths"
-else
   WANT_POLICY="$(cat <<POLICYEOF
 # Oberth release secrets: read-only, data endpoints only. No list, no
 # metadata, no write, no delete. Managed by setup-secretstore.sh.
@@ -436,8 +365,7 @@ path "auth/token/revoke-self" {
 }
 POLICYEOF
 )"
-  POLICY_DESCRIPTION="KV read only; Transit disabled"
-fi
+  POLICY_DESCRIPTION="KV read and token revocation"
 HAVE_POLICY="$(read_policy "$POLICY")"
 if [ -n "$HAVE_POLICY" ] && [ "$(printf '%s' "$HAVE_POLICY")" = "$(printf '%s' "$WANT_POLICY")" ]; then
   note "policy $POLICY already matches — unchanged"
@@ -533,12 +461,9 @@ Next steps:
        --set secretstore.address=$HELM_ADDR \\
        --set secretstore.k8sAuthMount=$MOUNT \\
        --set secretstore.role=$ROLE \\
-       --set secretstore.kvMount=$KV_PREFIX \\
-       --set secretstore.transit.enabled=$TRANSIT_ENABLED
+       --set secretstore.kvMount=$KV_PREFIX
 
-   (When Transit is enabled, keep its managed identifiers aligned:
-       --set secretstore.transit.mount=$TRANSIT_MOUNT \\
-       --set secretstore.transit.key=$TRANSIT_KEY)
+
 
    (For a private CA, also set secretstore.caCert to the PEM bundle. For
    system-namespace secrets, add them to secretstore.allowedPaths, e.g.

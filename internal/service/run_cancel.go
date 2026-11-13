@@ -19,7 +19,7 @@ type RunCancelStore interface {
 }
 
 // RunCancellationObserver executes the obligations a cancel recorded: it
-// withdraws the run's admission reservation and deletes its Workflow. The
+// cancels an in-flight create and deletes the run's Workflow. The
 // scheduler implements it; an API without one leaves the obligations to the
 // scheduler's next cancellation pass.
 type RunCancellationObserver interface {
@@ -75,8 +75,8 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 // CancelRun is the audited cancel of one queued, waiting or running run by
 // actor. It resolves the run within the actor's scope, applies RunCancelPolicy,
 // terminalizes the run durably, and hands any Workflow-deletion obligation to
-// the scheduler, which also withdraws a waiting run's admission reservation at
-// once. Cancelling a terminal run is refused without any change.
+// the scheduler, which also cancels an in-flight create. Cancelling a terminal
+// run is refused without any change.
 func (service *API) CancelRun(ctx context.Context, actor api.Actor, runID, reason string, force bool) (api.RunCancelResponse, error) {
 	if strings.TrimSpace(actor.Identity) == "" {
 		return api.RunCancelResponse{}, errors.New("service: acting uplink identity is required")

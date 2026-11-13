@@ -107,10 +107,6 @@ type RunQueueStore interface {
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
 	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)
 	RunningRunsWithJobs(context.Context) ([]model.Run, error)
-	// RequeueStrandedRun resets one unexecuted stranded run under the same ID;
-	// the durable cancellation ledger fences any old Workflow before another claim.
-	// store.ErrRequeueIneligible signals the caller must terminalize instead.
-	RequeueStrandedRun(context.Context, string) (model.Run, error)
 }
 
 type ReceiveRecorder interface {
@@ -359,7 +355,7 @@ type LogStore interface {
 }
 
 type WorkflowRequest struct {
-	DemandReceipt *argoworkflow.DemandReceipt
+	SourceReceipt *argoworkflow.SourceReceipt
 	WorkflowName  string `json:"WorkflowName"`
 	Run           model.Run
 	Repository    model.Repository
@@ -376,10 +372,6 @@ type WorkflowRequest struct {
 	// PipelineFile identifies the document under read-only release preflight.
 	PipelineFile string
 	SourceDir    string
-	// Exclusive is the sorted exclusive-class set admission granted (#1499),
-	// read from the fragment-resolved graph. Build refuses a Workflow whose
-	// resolved classes differ.
-	Exclusive []string
 }
 
 type JobResult struct {
@@ -424,8 +416,8 @@ type JobController interface {
 }
 
 // ErrAdoptionRefused marks an existing Workflow that startup must not adopt
-// (binding mismatch, invalid size declaration, conflicting group). Startup
-// stops until the operator deletes that Workflow; recovery then re-queues it.
+// (binding mismatch, conflicting ownership). Recovery fails that run and
+// leaves the original Workflow for operator inspection.
 var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 
 // JobAdopter restores observation of an existing Workflow without submitting it.

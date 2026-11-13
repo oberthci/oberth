@@ -9,17 +9,4 @@ metadata:
 value: 1000000
 globalDefault: false
 preemptionPolicy: PreemptLowerPriority
-description: "Oberth server, Argo controller and OpenBao recover ahead of pipeline workloads."
----
-apiVersion: scheduling.k8s.io/v1
-kind: PriorityClass
-metadata:
-  name: {{ include "oberth.pipelinePriorityClass" . }}
-  annotations:
-    helm.sh/resource-policy: keep
-  labels:
-    {{- include "oberth.labels" . | nindent 4 }}
-value: 0
-globalDefault: false
-preemptionPolicy: Never
-description: "Oberth pipeline workloads wait for capacity without preempting other Pods."
+description: "Oberth server recovers ahead of pipeline workloads."

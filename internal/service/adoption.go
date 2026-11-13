@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type adoptedRun struct {
@@ -74,12 +73,12 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.owners[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.repoID != run.RepoID {
-			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
+		if previous.runID != run.ID || previous.order != order || !previous.adopted || previous.repoID != run.RepoID {
+			return nil, fmt.Errorf("%w: conflicting adopted run", ErrAdoptionRefused)
 		}
 		return previous, nil
 	}
-	reservation := &submissionOwner{withdrawn: make(chan struct{}), gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, granted: true, submitted: true}
+	reservation := &submissionOwner{withdrawn: make(chan struct{}), gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, adopted: true}
 	gate.owners[run.QueueSequence] = reservation
 	return reservation, nil
 }
@@ -87,38 +86,32 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner) error {
 	defer reservation.cancel()
 	if err := require(ctx); err != nil {
-		reservation.retain()
 		return err
 	}
 	repository, err := scheduler.database().Repository(ctx, run.RepoID)
 	if err != nil {
-		reservation.retain()
 		return err
 	}
 
 	current, err := scheduler.database().Run(ctx, run.ID)
 	if err != nil {
-		reservation.retain()
 		return err
 	}
 	if current.Preempted() {
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			reservation.retain()
 			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 		}
 		return nil
 	}
 	file, events, retained, err := scheduler.logs.Resume(run.ID)
 	if err != nil {
-		reservation.retain()
 		return err
 	}
 	// A previous owner can stop between Workflow creation and this transition.
-	if run.Phase == "waiting" {
+	if run.Phase == "waiting" || isPendingCreate(run) {
 		run, err = scheduler.database().MarkRunSubmitted(ctx, run.ID)
 		if err != nil {
 			_ = file.Close()
-			reservation.retain()
 			return err
 		}
 	}
@@ -146,24 +139,4 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		}
 	}
 	return errors.Join(err, cleanupErr)
-}
-
-// Retired execution is terminal, rather than a reason to stop the new owner.
-// Delete only the owned Argo Workflow; operators own any external resources.
-func (scheduler *Scheduler) failRetiredRun(ctx context.Context, run model.Run, require mutationRequirement) error {
-	if err := require(ctx); err != nil {
-		return err
-	}
-	if err := scheduler.jobs.Delete(ctx, run.WorkflowName, run.ID); err != nil {
-		return fmt.Errorf("stop retired Workflow %s: %w", run.WorkflowName, err)
-	}
-	if err := scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: argoworkflow.ErrWorkflowCapabilityRequired.Error()}, require); err != nil {
-		return err
-	}
-	if err := scheduler.database().CompleteRunCancellation(ctx, run.ID, run.WorkflowName); err != nil && !errors.Is(err, store.ErrNotFound) {
-		return err
-	}
-	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
-	defer cancel()
-	return scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
 }

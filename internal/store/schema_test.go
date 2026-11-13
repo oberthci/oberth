@@ -623,7 +623,7 @@ ALTER TABLE uplinks_v1 RENAME TO uplinks;
 CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id);
 ALTER TABLE upstreams DROP COLUMN key_name;
 ALTER TABLE runs DROP COLUMN credentialed;
-DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER IF EXISTS run_timing_grant; DROP TRIGGER IF EXISTS run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE IF EXISTS run_admission_timings; DROP TABLE run_timings;
 DROP INDEX repository_archive_actions_idx;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
@@ -983,9 +983,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"receive_events",
 		"release_wif_overrides",
 		"repositories",
-		"restart_step_timings",
-		"restart_workflow_timings",
-		"run_admission_timings",
 		"run_cancellations",
 		"run_timings",
 		"runs",
@@ -996,8 +993,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"step_results",
 		"step_timings",
 		"sync_intervals", "token_credentials",
-		"trusted_applies",
-		"trusted_plans",
 		"uplink_client_pins", "uplink_invites", "uplink_scopes",
 		"uplinks",
 		"upstreams",
@@ -1041,7 +1036,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"receive_events_repo_idx",
 		"receive_events_run_idx",
 		"repository_archive_actions_idx",
-		"run_admission_timing_open",
 		"run_cancellations_pending_idx",
 		"runs_active_ref_idx", "runs_admission_idx", "runs_counts_idx",
 		"runs_fifo_idx",
@@ -1053,18 +1047,12 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"schema_migrations_id_unique",
 		"secret_access_active",
 		"step_results_order_idx",
-		"sync_intervals_lock_idx", "sync_intervals_open_idx", "trusted_applies_repo_idx",
-		"trusted_plans_active_backend_idx",
-		"trusted_plans_apply_idx",
-		"trusted_plans_expiry_idx",
-		"trusted_plans_promotion_idx",
-		"trusted_plans_repo_idx",
+		"sync_intervals_lock_idx", "sync_intervals_open_idx",
 		"uplink_client_pins_uplink_idx", "uplinks_token_credential_idx",
 		"vm_execution_capacity",
 		"vm_suite_resource_uid",
 	})
 	assertSchemaObjects(t, store.db, "trigger", []string{
-		"admission_timing_immutable",
 		"audit_actions_no_delete",
 		"audit_actions_no_update",
 		"audit_anchors_no_delete",
@@ -1099,26 +1087,18 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"publications_guard_update",
 		"publications_no_delete",
 		"publications_tag_tuple_insert",
-		"restart_step_timing_immutable",
-		"restart_workflow_timing_immutable",
 		"run_assist_requested_immutable",
 		"run_assisted_monotonic",
 		"run_issue_trailers_immutable",
 		"run_schedule_entry_immutable",
 		"run_source_bindings_immutable",
 		"run_timing_claim",
-		"run_timing_grant",
 		"run_timing_immutable",
-		"run_timing_park",
 		"run_timing_terminal",
 		"schema_identity_no_delete",
 		"schema_identity_no_insert",
 		"schema_identity_no_update",
 		"step_timing_immutable",
-		"trusted_applies_guard_update",
-		"trusted_applies_no_delete",
-		"trusted_plans_guard_update",
-		"trusted_plans_no_delete",
 		"vm_executions_guard_update",
 		"vm_executions_no_delete",
 		"vm_executions_no_replace",
@@ -1135,11 +1115,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"release_wif_overrides":     {"repo", "revoked", "grant_json", "reason", "actor", "updated_at"},
 		"branch_deletions":          {"sequence", "id", "repo_id", "branch", "old_sha", "actor", "source", "batch_id", "status", "attempts", "retry_after", "error", "created_at", "updated_at"},
 		"publication_policy_waits":  {"publication_id", "since"},
-		"restart_workflow_timings":  {"run_id", "epoch", "workflow_created_at", "workflow_json"},
-		"restart_step_timings":      {"run_id", "epoch", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},
 		"schedule_fires":            {"repo", "entry", "fired_at", "outcome", "last_fired_at"},
 		"run_timings":               {"run_id", "version", "claimed_at", "checkout_ready_at", "source_seed_started_at", "source_ready_at", "workflow_created_at", "terminal_at", "workflow_json"},
-		"run_admission_timings":     {"run_id", "episode", "requested_at", "granted_at", "closed_at"},
 		"step_timings":              {"run_id", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},
 		"schema_identity":           {"singleton", "identity"},
 		"schema_migrations":         {"version", "applied_at", "id"},
@@ -1165,8 +1142,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_work":             {"sequence", "repo_id", "branch", "origin", "run_id", "promotion_id", "actor", "created_at"},
 		"ci_issue_projections":      {"repo_id", "branch", "origin", "work_sequence", "work_id", "outcome", "title", "body", "actor", "updated_at"},
 		"secret_access":             {"id", "repo", "step", "secret", "approved_by", "approved_at", "revoked_by", "revoked_at"},
-		"trusted_plans":             {"sequence", "id", "repo_id", "upstream_id", "source_ref", "source_sha", "target_ref", "base_sha", "result_sha", "green_run_id", "plan_run_id", "promotion_id", "apply_id", "apply_enqueue_error", "backend_identity", "backend_key", "tool_digest", "lock_digest", "config_digest", "artifact_digest", "artifact_size", "transit_ciphertext", "actor", "status", "error", "created_at", "expires_at", "consumed_at", "updated_at"},
-		"trusted_applies":           {"sequence", "id", "plan_id", "promotion_id", "repo_id", "target_ref", "sha", "run_id", "artifact_digest", "backend_key", "actor", "status", "error", "created_at", "started_at", "finished_at", "updated_at"},
 	}
 	for table, expected := range expectedColumns {
 		actual := schemaTableColumns(t, store.db, table)

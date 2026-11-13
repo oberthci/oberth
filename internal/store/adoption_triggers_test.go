@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testing.T) {
+func TestRestartMigrationRetiresLegacyDeletionButKeepsCancel(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		t.Run(kind, func(t *testing.T) {
 			now := time.Now().UTC()
@@ -44,6 +44,7 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 			if _, err = s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "workflow", unixNano(now)); err != nil {
 				t.Fatal(err)
 			}
+			applyStopRestartMigration(t, s)
 			for range 2 {
 				if err = s.RecoverOwnerState(ctx); err != nil {
 					t.Fatal(err)

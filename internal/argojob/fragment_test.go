@@ -362,7 +362,7 @@ func TestBuildRefusesRemovedExclusiveAnnotationInFragments(t *testing.T) {
 	key, fragment := exclusiveFragment(t)
 	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
-	if _, err := Build(testConfig(), request); err == nil || !strings.Contains(err.Error(), "oberth.ci/exclusive is removed") {
+	if _, err := Build(testConfig(), request); err == nil || !strings.Contains(err.Error(), "annotations is assigned by Oberth") {
 		t.Fatalf("removed annotation built: %v", err)
 	}
 }

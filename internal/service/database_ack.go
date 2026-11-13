@@ -35,27 +35,6 @@ func (database schedulerDatabase) claimRun(ctx context.Context, claim func(conte
 	})
 }
 
-func (database schedulerDatabase) RequeueStrandedRun(ctx context.Context, id string) (model.Run, error) {
-	var candidate model.Run
-	return retryDatabase(ctx, "RequeueStrandedRun", func(ctx context.Context) (model.Run, error) {
-		if candidate.ID != "" {
-			current, err := database.SchedulerStore.Run(ctx, candidate.ID)
-			if err == nil {
-				if current.Status == model.RunRunning {
-					return current, fmt.Errorf("%w: restart reset acknowledgement is ambiguous while run remains active", store.ErrInvalidState)
-				}
-				return current, nil
-			}
-			if !errors.Is(err, store.ErrNotFound) {
-				return current, err
-			}
-		}
-		var err error
-		candidate, err = database.SchedulerStore.RequeueStrandedRun(ctx, id)
-		return candidate, err
-	})
-}
-
 func (database schedulerDatabase) BeginPublication(ctx context.Context, spec model.PublicationSpec) (model.Publication, error) {
 	var candidate model.Publication
 	return retryDatabase(ctx, "BeginPublication", func(ctx context.Context) (model.Publication, error) {

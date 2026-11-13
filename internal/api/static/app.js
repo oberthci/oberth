@@ -522,10 +522,8 @@ function isTerminalRun(run) { return ["passed", "failed", "interrupted"].include
    submission positions. The table presents its queue in reverse order and
    keeps queued work above running and terminal rows. */
 function orderRuns(runs) {
-  const queued = runs.filter(run => runListGroup(run) === 0);
-  const positioned = queued.length > 0 && queued.every(run => run.queue_position > 0 || run.scheduling?.queue_position > 0);
   const activeIndex = new Map(state.activeRuns.map((run, index) => [run.id, index + 1]));
-  const position = run => positioned ? run.queue_position || run.scheduling?.queue_position : activeIndex.get(run.id) || 0;
+  const position = run => activeIndex.get(run.id) || 0;
 
   const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
   return runs.map((run, index) => ({ run, index })).sort((a, b) => {
@@ -1024,7 +1022,6 @@ function summaryLines(detail) {
     const scheduling = detail.scheduling || {};
     lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
     if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
-    if (scheduling.queue_position) lines.push(`submission position ${scheduling.queue_position}`);
   }
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);

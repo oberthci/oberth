@@ -20,7 +20,7 @@ var ErrRunNotActive = fmt.Errorf("%w: run is not active", ErrInvalidState)
 // same transaction as its audit action. Authorization is the caller's.
 //
 // The run becomes interrupted with phase cancelled and a reason naming the
-// actor; it is never re-fired, because restart requeue and supersede select
+// actor; it is never re-fired, because recovery and supersede select
 // only active runs. A claimed run (waiting or running) additionally receives
 // the durable Workflow-deletion obligation a supersede records, with no
 // successor: the scheduler's cancellation pass deletes its Workflow (an

@@ -1107,9 +1107,6 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		return nil, err
 	}
 	for i := range runs {
-		if service.scope != nil {
-			runs[i].QueuePosition = 0
-		}
 		if filter.View == api.RunViewHistory {
 			continue
 		}
@@ -1215,7 +1212,6 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	run = service.runAdmissionContext(ctx, run, true)
 	if summary {
 		shown := service.presentationRun(ctx, run)
 		run.Repo, err = service.repositoryIdentity(ctx, run.RepoID)
@@ -1766,8 +1762,6 @@ func runDisplayReason(run model.Run) string {
 	switch {
 	case run.Phase == model.PhaseCancelled:
 		return strings.TrimPrefix(run.Reason, "cancelled ")
-	case run.SupersededBy != "" && (run.Reason == "re-queued after restart" || run.Reason == "retried once after trusted preflight owner restart"):
-		return "server restart, re-queued as " + shortRunID(run.SupersededBy)
 	case run.SupersededBy != "" && run.Reason == "superseded by newer run":
 		return "superseded by newer run"
 	default:
@@ -1803,7 +1797,7 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 	if !ok {
 		plain := *service
 		for i := range runs {
-			runs[i] = service.runAdmissionContext(ctx, plain.presentationRun(ctx, runs[i]), false)
+			runs[i] = plain.presentationRun(ctx, runs[i])
 		}
 		return runs, nil
 	}
@@ -1824,23 +1818,17 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 		}
 	}
 	for i := range runs {
-		runs[i] = service.runAdmissionContext(ctx, service.presentationRunWithSuccessor(ctx, runs[i], successors), false)
+		runs[i] = service.presentationRunWithSuccessor(ctx, runs[i], successors)
 	}
 	return runs, nil
 }
 
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
 	visible := presentationRunAt(run, service.schedulingClock().Now())
-	if service.scope != nil && strings.HasPrefix(visible.Reason, "branch run deferred:") {
-		visible.Reason = parkPolicyDisplayReason(run, "branch run deferred: waiting for queue capacity")
-	}
 	successor, ok := successors[run.SupersededBy]
 	if !ok {
 		if service.scope != nil && run.SupersededBy != "" {
 			visible.SupersededBy = ""
-			if run.Reason == "re-queued after restart" || run.Reason == "retried once after trusted preflight owner restart" {
-				visible.DisplayReason = "server restart, re-queued"
-			}
 		}
 		return visible
 	}

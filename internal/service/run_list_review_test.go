@@ -37,7 +37,7 @@ func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
 		case []model.Run:
 			rows = value
 		}
-		if len(rows) != 1 || rows[0].DisplayReason != "in line" || rows[0].QueuePosition != 0 {
+		if len(rows) != 1 || rows[0].DisplayReason != "in line" {
 			t.Fatalf("scoped queue invented head: %+v", rows)
 		}
 	}

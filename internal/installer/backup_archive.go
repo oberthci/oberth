@@ -207,7 +207,7 @@ type backupMemberDigest struct {
 // backupNotRestored is the fixed reference-only statement every manifest
 // carries, so the archive itself says what it cannot bring back.
 var backupNotRestored = []string{
-	"OpenBao Transit keys are non-exportable: only their metadata is recorded. The installer creates a new key on the target, so trusted-plan envelopes sealed under the old key cannot be decrypted after a restore.",
+	"OpenBao Transit keys are non-exportable: only their metadata is recorded. Rekor signing keys remain subject to the documented log-identity restore procedure.",
 	"The server PKI CA key never leaves OpenBao: only the CA certificate is recorded. The installer issues a new CA on the target, so every client must re-pin the new server CA.",
 	"The Kubernetes auth method configuration is cluster-specific (API server CA and issuer): it is recorded for reference and never restored.",
 	"KV secrets are captured at their current version only; version history and per-secret metadata are not preserved.",

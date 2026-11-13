@@ -21,8 +21,7 @@ compatibility:
   auditDomain: oberth-audit-v1
   witnessKeyInfo: oberth-audit-witness-v1
 
-# Job pods run the repository-declared runner image (default derived from the
-# repository's go.mod: golang:<version>-alpine) executing `go -C .oberth run .`.
+# Workflow templates declare their own images and commands.
 # The server admits only images matching one of these prefixes.
 runnerImagePrefixes:
   - "golang:"
@@ -93,9 +92,8 @@ agentEvents:
   # Keepalive interval of MCP streams (1s-5m).
   heartbeat: 20s
 
-# The chart always creates control-plane and non-preempting pipeline
-# PriorityClasses for installed-object continuity. The control-plane class belongs to the
-# server. Argo and OpenBao have no injected class. See docs/platform-protection.md.
+# The server uses the chart-owned control-plane PriorityClass. Pipeline helpers,
+# Argo and OpenBao receive no injected class. See docs/platform-protection.md.
 
 # Prometheus Operator scrape of the server's /metrics (default off). Mint a
 # metrics-scoped token (oberth uplink add --scope metrics), which reads
@@ -492,13 +490,6 @@ secretstore:
   caCert: ""
   # DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address.
   insecureHTTPForDev: false
-  # Server-owned OpenBao Transit encryption for trusted promotion plan
-  # artifacts. The chart default is fail-closed; the production installer
-  # enables it only after exact mount/key/policy/role provisioning succeeds.
-  transit:
-    enabled: false
-    mount: oberth-transit
-    key: trusted-plan-artifacts
   # KV v2 mount that physically backs the virtual oberth/upstream/ secret
   # namespace. Release paths may be org- or repository-scoped. Trusted paths
   # are always repository- and phase-scoped as
@@ -531,7 +522,7 @@ cache:
   ciRoot: /var/cache/oberth/ci
   releaseRoot: /var/cache/oberth/release
 
-# Reserve CPU for the control plane while allowing bursts during queue/event
+# Reserve CPU for the control plane while allowing bursts during receive/dispatch
 # fan-out. See docs/server-cpu.md for measurements and explicit limit overrides.
 resources:
   requests:

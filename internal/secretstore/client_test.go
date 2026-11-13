@@ -6,7 +6,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"io"
@@ -29,8 +28,6 @@ type mockVault struct {
 	revokes    atomic.Int64
 	badLogins  atomic.Int64
 	reads      atomic.Int64
-	encrypts   atomic.Int64
-	decrypts   atomic.Int64
 	sealed     atomic.Bool
 	sealChecks atomic.Int64
 }
@@ -113,78 +110,6 @@ func newMockVault(t *testing.T) *mockVault {
 		}
 		_, _ = writer.Write([]byte(`{"data":{"data":null,"metadata":{"deletion_time":"2026-08-08T00:00:00Z","version":3}}}`))
 	})
-	handler.HandleFunc("PUT /v1/oberth-transit/encrypt/trusted-plan-artifacts", func(writer http.ResponseWriter, request *http.Request) {
-		if !authenticated(writer, request) {
-			return
-		}
-		var body struct {
-			Plaintext string `json:"plaintext"`
-		}
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			writer.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		plaintext, err := base64.StdEncoding.DecodeString(body.Plaintext)
-		if err != nil || len(plaintext) == 0 {
-			writer.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		mock.encrypts.Add(1)
-		ciphertext := "vault:v1:" + base64.StdEncoding.EncodeToString(plaintext)
-		_ = json.NewEncoder(writer).Encode(map[string]any{"data": map[string]any{"ciphertext": ciphertext}})
-	})
-	handler.HandleFunc("PUT /v1/oberth-transit/decrypt/trusted-plan-artifacts", func(writer http.ResponseWriter, request *http.Request) {
-		if !authenticated(writer, request) {
-			return
-		}
-		var body struct {
-			Ciphertext string `json:"ciphertext"`
-		}
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil || !strings.HasPrefix(body.Ciphertext, "vault:v1:") {
-			writer.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		plaintext, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(body.Ciphertext, "vault:v1:"))
-		if err != nil || len(plaintext) == 0 {
-			writer.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		mock.decrypts.Add(1)
-		_ = json.NewEncoder(writer).Encode(map[string]any{"data": map[string]any{"plaintext": base64.StdEncoding.EncodeToString(plaintext)}})
-	})
-	handler.HandleFunc("PUT /v1/oberth-transit/encrypt/malformed-response", func(writer http.ResponseWriter, request *http.Request) {
-		if !authenticated(writer, request) {
-			return
-		}
-		_, _ = writer.Write([]byte(`{"data":{}}`))
-	})
-	handler.HandleFunc("PUT /v1/oberth-transit/encrypt/error-reflection", func(writer http.ResponseWriter, request *http.Request) {
-		if !authenticated(writer, request) {
-			return
-		}
-		var body struct {
-			Plaintext string `json:"plaintext"`
-		}
-		_ = json.NewDecoder(request.Body).Decode(&body)
-		plaintext, _ := base64.StdEncoding.DecodeString(body.Plaintext)
-		writer.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(writer).Encode(map[string]any{
-			"errors": []string{strings.Repeat("oversized-error-", 1<<17) + string(plaintext)},
-		})
-	})
-	handler.HandleFunc("PUT /v1/oberth-transit/decrypt/error-reflection", func(writer http.ResponseWriter, request *http.Request) {
-		if !authenticated(writer, request) {
-			return
-		}
-		var body struct {
-			Ciphertext string `json:"ciphertext"`
-		}
-		_ = json.NewDecoder(request.Body).Decode(&body)
-		writer.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(writer).Encode(map[string]any{
-			"errors": []string{strings.Repeat("oversized-error-", 1<<17) + body.Ciphertext},
-		})
-	})
 	handler.HandleFunc("PUT /v1/auth/token/revoke-self", func(writer http.ResponseWriter, request *http.Request) {
 		if !authenticated(writer, request) {
 			return
@@ -220,42 +145,13 @@ func (mock *mockVault) config() Config {
 		Role:                    "oberth",
 		CACertPEM:               mock.caPEM,
 		ServiceAccountTokenPath: mock.tokenPath,
-		TransitMountPath:        "oberth-transit",
-		TransitKey:              "trusted-plan-artifacts",
-	}
-}
-
-func TestTransitRoundTripUsesFixedKeyAndShortLivedLogins(t *testing.T) {
-	t.Parallel()
-	mock := newMockVault(t)
-	client, err := New(mock.config())
-	if err != nil {
-		t.Fatal(err)
-	}
-	plaintext := []byte("opaque trusted plan envelope")
-	ciphertext, err := client.Encrypt(context.Background(), plaintext)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(ciphertext, string(plaintext)) || !strings.HasPrefix(ciphertext, "vault:v1:") {
-		t.Fatalf("unexpected transit ciphertext shape: %q", ciphertext)
-	}
-	opened, err := client.Decrypt(context.Background(), ciphertext)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(opened) != string(plaintext) {
-		t.Fatalf("decrypted transit payload = %q", opened)
-	}
-	if mock.encrypts.Load() != 1 || mock.decrypts.Load() != 1 || mock.logins.Load() != 2 || mock.revokes.Load() != 2 {
-		t.Fatalf("encrypts=%d decrypts=%d logins=%d revokes=%d", mock.encrypts.Load(), mock.decrypts.Load(), mock.logins.Load(), mock.revokes.Load())
 	}
 }
 
 func TestSecretStoreNeverFollowsCrossOriginRedirects(t *testing.T) {
-	for _, redirectAt := range []string{"login", "transit"} {
+	for _, redirectAt := range []string{"login", "kv"} {
 		t.Run(redirectAt, func(t *testing.T) {
-			const plaintext = "plan-plaintext-must-not-cross-origin"
+			const plaintext = "kv-plaintext-must-not-cross-origin"
 			var targetRequests atomic.Int64
 			var targetObservedSecret atomic.Bool
 			target := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -278,8 +174,8 @@ func TestSecretStoreNeverFollowsCrossOriginRedirects(t *testing.T) {
 				}
 				_, _ = writer.Write([]byte(`{"auth":{"client_token":"` + testLoginToken + `","lease_duration":60}}`))
 			})
-			sourceMux.HandleFunc("PUT /v1/oberth-transit/encrypt/trusted-plan-artifacts", func(writer http.ResponseWriter, request *http.Request) {
-				http.Redirect(writer, request, target.URL+"/transit-leak", http.StatusTemporaryRedirect)
+			sourceMux.HandleFunc("GET /v1/oberth/data/release/test", func(writer http.ResponseWriter, request *http.Request) {
+				http.Redirect(writer, request, target.URL+"/kv-leak", http.StatusTemporaryRedirect)
 			})
 			sourceMux.HandleFunc("PUT /v1/auth/token/revoke-self", func(writer http.ResponseWriter, request *http.Request) {
 				writer.WriteHeader(http.StatusNoContent)
@@ -296,95 +192,27 @@ func TestSecretStoreNeverFollowsCrossOriginRedirects(t *testing.T) {
 			client, err := New(Config{
 				Address: source.URL, Role: "oberth", CACertPEM: caPEM,
 				ServiceAccountTokenPath: tokenPath,
-				TransitMountPath:        "oberth-transit",
-				TransitKey:              "trusted-plan-artifacts",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = client.Encrypt(context.Background(), []byte(plaintext))
+			_, err = client.FetchKV(context.Background(), []string{"oberth/data/release/test"})
 			if err == nil || !strings.Contains(err.Error(), "HTTP 307 Temporary Redirect") {
-				t.Fatalf("Encrypt() error = %v, want sanitized 307", err)
+				t.Fatalf("FetchKV() error = %v, want sanitized 307", err)
 			}
 			for _, forbidden := range []string{plaintext, testServiceJWT, testLoginToken, target.URL} {
 				if strings.Contains(err.Error(), forbidden) {
-					t.Fatalf("Encrypt() error disclosed %q: %v", forbidden, err)
+					t.Fatalf("FetchKV() error disclosed %q: %v", forbidden, err)
 				}
 			}
 			if got := targetRequests.Load(); got != 0 {
 				t.Fatalf("redirect target requests = %d, want 0", got)
 			}
 			if targetObservedSecret.Load() {
-				t.Fatal("redirect target observed login or Plan secret material")
+				t.Fatal("redirect target observed login or KV secret material")
 			}
 		})
 	}
-}
-
-func TestTransitFailsClosedBeforeOrAfterAuthentication(t *testing.T) {
-	t.Parallel()
-	mock := newMockVault(t)
-	client, err := New(mock.config())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Encrypt(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "non-empty") {
-		t.Fatalf("empty transit plaintext error = %v", err)
-	}
-	if _, err := client.Decrypt(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "non-empty") {
-		t.Fatalf("empty transit ciphertext error = %v", err)
-	}
-	if err := validateTransitPlaintextSize(maxTransitPlaintextBytes + 1); err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("oversized transit plaintext error = %v", err)
-	}
-	if err := validateTransitCiphertextSize(maxTransitCiphertextBytes + 1); err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("oversized transit ciphertext error = %v", err)
-	}
-	if mock.logins.Load() != 0 {
-		t.Fatalf("locally invalid transit requests must not authenticate: logins=%d", mock.logins.Load())
-	}
-
-	badConfig := mock.config()
-	badConfig.TransitKey = "does-not-exist"
-	badClient, err := New(badConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := badClient.Encrypt(context.Background(), []byte("plan")); err == nil || !strings.Contains(err.Error(), "encrypt") {
-		t.Fatalf("wrong transit key error = %v", err)
-	}
-
-	malformedConfig := mock.config()
-	malformedConfig.TransitKey = "malformed-response"
-	malformedClient, err := New(malformedConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := malformedClient.Encrypt(context.Background(), []byte("plan")); err == nil || !strings.Contains(err.Error(), "no ciphertext") {
-		t.Fatalf("malformed transit response error = %v", err)
-	}
-	if _, err := client.Decrypt(context.Background(), "vault:v1:not-base64"); err == nil || !strings.Contains(err.Error(), "decrypt") {
-		t.Fatalf("malformed transit ciphertext error = %v", err)
-	}
-}
-
-func TestTransitNonSuccessResponsesAreBoundedAndNeverReflected(t *testing.T) {
-	t.Parallel()
-	mock := newMockVault(t)
-	config := mock.config()
-	config.TransitKey = "error-reflection"
-	client, err := New(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	const plaintext = "sensitive-plan-marker-never-persist"
-	_, encryptErr := client.Encrypt(context.Background(), []byte(plaintext))
-	assertSanitizedTransitError(t, encryptErr, http.StatusBadGateway, plaintext, base64.StdEncoding.EncodeToString([]byte(plaintext)))
-
-	const ciphertext = "vault:v1:sensitive-ciphertext-marker-never-persist"
-	_, decryptErr := client.Decrypt(context.Background(), ciphertext)
-	assertSanitizedTransitError(t, decryptErr, http.StatusServiceUnavailable, ciphertext)
 }
 
 func TestLoginNonSuccessResponseIsBoundedAndNeverReflected(t *testing.T) {
@@ -396,25 +224,10 @@ func TestLoginNonSuccessResponseIsBoundedAndNeverReflected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, loginErr := client.Encrypt(context.Background(), []byte("plan-never-reached-transit"))
-	assertSanitizedTransitError(t, loginErr, http.StatusBadGateway, testServiceJWT, "oversized-login-error")
-	if mock.encrypts.Load() != 0 {
+	_, loginErr := client.FetchKV(context.Background(), []string{"oberth/data/release/test"})
+	assertSanitizedHTTPError(t, loginErr, http.StatusBadGateway, testServiceJWT, "oversized-login-error")
+	if mock.reads.Load() != 0 {
 		t.Fatal("Transit request ran after failed Kubernetes auth")
-	}
-}
-
-func assertSanitizedTransitError(t *testing.T, err error, status int, forbidden ...string) {
-	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), http.StatusText(status)) || !strings.Contains(err.Error(), "HTTP") {
-		t.Fatalf("Transit HTTP %d error = %v", status, err)
-	}
-	if len(err.Error()) > 512 {
-		t.Fatalf("Transit HTTP error retained an oversized response: %d bytes", len(err.Error()))
-	}
-	for _, value := range forbidden {
-		if strings.Contains(err.Error(), value) {
-			t.Fatalf("Transit HTTP error reflected sensitive value %q", value)
-		}
 	}
 }
 
@@ -541,10 +354,6 @@ func TestNewEnforcesExplicitSecureConfiguration(t *testing.T) {
 		{name: "missing role", mutate: func(c *Config) { c.Role = "" }, want: "role is required"},
 		{name: "role with slash", mutate: func(c *Config) { c.Role = "a/b" }, want: "single clean path segment"},
 		{name: "reserved auth mount grammar", mutate: func(c *Config) { c.AuthMountPath = "bad mount" }, want: "only ASCII"},
-		{name: "transit mount with slash", mutate: func(c *Config) { c.TransitMountPath = "transit/plans" }, want: "transit mount"},
-		{name: "transit mount dot segment", mutate: func(c *Config) { c.TransitMountPath = ".." }, want: "clean non-empty"},
-		{name: "transit mount reserved", mutate: func(c *Config) { c.TransitMountPath = "sys" }, want: "reserved"},
-		{name: "transit key with whitespace", mutate: func(c *Config) { c.TransitKey = " plan-key" }, want: "transit key"},
 		{name: "empty CA bundle", mutate: func(c *Config) { c.CACertPEM = []byte("not a certificate") }, want: "no certificates"},
 	}
 	for _, test := range tests {
@@ -562,16 +371,11 @@ func TestNewEnforcesExplicitSecureConfiguration(t *testing.T) {
 func TestNewAllowsHTTPOnlyWithExplicitDevelopmentOverride(t *testing.T) {
 	t.Parallel()
 	config := Config{Address: "http://127.0.0.1:8200", Role: "oberth", AllowInsecureHTTP: true}
-	client, err := New(config)
+	_, err := New(config)
 	if err != nil {
 		t.Fatalf("explicit insecure development override rejected: %v", err)
 	}
-	if _, err := client.Encrypt(context.Background(), []byte("must-not-cross-http")); err == nil || !strings.Contains(err.Error(), "verified HTTPS") {
-		t.Fatalf("trusted plan encryption over HTTP error = %v", err)
-	}
-	if _, err := client.Decrypt(context.Background(), "vault:v1:ciphertext"); err == nil || !strings.Contains(err.Error(), "verified HTTPS") {
-		t.Fatalf("trusted plan decryption over HTTP error = %v", err)
-	}
+
 }
 
 func TestVerifyLoginSucceedsAndNeverReadsKV(t *testing.T) {
@@ -589,9 +393,8 @@ func TestVerifyLoginSucceedsAndNeverReadsKV(t *testing.T) {
 	}
 	// The probe must never touch KV or transit — a timer-driven probe must not
 	// cycle release credentials through server heap to light a dashboard LED.
-	if mock.reads.Load() != 0 || mock.encrypts.Load() != 0 || mock.decrypts.Load() != 0 {
-		t.Fatalf("VerifyLogin touched KV or transit: reads=%d encrypts=%d decrypts=%d",
-			mock.reads.Load(), mock.encrypts.Load(), mock.decrypts.Load())
+	if mock.reads.Load() != 0 {
+		t.Fatalf("VerifyLogin touched KV: reads=%d", mock.reads.Load())
 	}
 }
 
@@ -630,8 +433,6 @@ func TestVerifyLoginFailsWhenStoreIsSealed(t *testing.T) {
 	client, err := New(Config{
 		Address: sealed.URL, Role: "oberth", CACertPEM: caPEM,
 		ServiceAccountTokenPath: tokenPath,
-		TransitMountPath:        "oberth-transit",
-		TransitKey:              "trusted-plan-artifacts",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -763,5 +564,20 @@ func TestSealStatusSendsNoAuthCredential(t *testing.T) {
 	}
 	if token := observedToken.Load().(string); token != "" {
 		t.Fatalf("seal-status request carried credential header: %q", token)
+	}
+}
+
+func assertSanitizedHTTPError(t *testing.T, err error, status int, forbidden ...string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), http.StatusText(status)) || !strings.Contains(err.Error(), "HTTP") {
+		t.Fatalf("Secret-store HTTP %d error = %v", status, err)
+	}
+	if len(err.Error()) > 512 {
+		t.Fatalf("Secret-store HTTP error retained an oversized response: %d bytes", len(err.Error()))
+	}
+	for _, value := range forbidden {
+		if strings.Contains(err.Error(), value) {
+			t.Fatalf("Secret-store HTTP error reflected sensitive value %q", value)
+		}
 	}
 }

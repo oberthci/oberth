@@ -44,25 +44,11 @@ upstream can map `go.example.test/wire` to `sample-wire` using repository prefix
 `sample-`; supplying the same suffix under a different upstream never qualifies
 that repository.
 
-## Queue depth cap
+## Run submission
 
-Run waiting belongs to Argo and Kubernetes; see [native scheduling](native-scheduling.md).
-
-At the cap, branch pushes are accepted into Oberth's Git cache, with the reason
-`branch run deferred: queue at N/M`; their CI runs are created later. Deferred
-receives keep the exact commit and actor, and create runs in arrival order when
-the count drops below the cap. The existing scheduler priority rules then apply
-to those runs. Both unclaimed queued runs and claimed runs waiting to start
-count toward the cap. Deferred receives have no run yet and are counted
-separately. Tags/releases, promotions and schedules bypass the cap and can take
-the count above it. Park refs continue to skip branch CI.
-
-Set `maxNotStarted` to 0 to drain the backlog without a depth limit. The accepted
-commit and durable receive journal stay local while run creation is deferred.
-Automatic upstream publication follows successful CI through the existing
-publication path, including the default branch's non-forced update. Explicit
-park and sync operations retain their existing policy and default-branch guards.
-Accepted receives create ordinary runs before preparation; use the returned run ID for observation.
+Oberth accepts durable run records and submits eligible Workflows without a
+queue-depth cap. Argo controls Workflow parallelism; Kubernetes places Pods by
+authored requests and placement. See [native scheduling](native-scheduling.md).
 
 ## Infrastructure failures
 

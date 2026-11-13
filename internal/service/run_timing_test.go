@@ -24,7 +24,7 @@ func TestRunGetRetainsVersionedTimingWithoutCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expected.ClaimedAt == nil || expected.CheckoutReadyAt == nil || expected.TerminalAt == nil || len(expected.Admissions) != 1 || expected.Admissions[0].RequestedAt == nil || expected.Admissions[0].GrantedAt == nil {
+	if expected.ClaimedAt == nil || expected.CheckoutReadyAt == nil || expected.TerminalAt == nil {
 		t.Fatalf("missing lifecycle evidence: %+v", expected)
 	}
 	value, err := fixture.api(t).CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID[:12]+`","summary":false}`))
@@ -37,6 +37,11 @@ func TestRunGetRetainsVersionedTimingWithoutCluster(t *testing.T) {
 	}
 	a, _ := json.Marshal(expected)
 	b, _ := json.Marshal(detail.Timing)
+	for _, field := range []string{`"admissions"`, `"requested_at"`, `"granted_at"`, `"closed_at"`} {
+		if strings.Contains(string(b), field) {
+			t.Fatalf("retired admission timing field %s", field)
+		}
+	}
 	if string(a) != string(b) {
 		t.Fatalf("run_get lost durable evidence: %s / %s", a, b)
 	}

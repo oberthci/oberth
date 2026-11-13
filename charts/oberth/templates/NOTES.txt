@@ -24,8 +24,6 @@ until step 1 completes; kubectl exec works throughout.
 Secret store: {{ .Values.secretstore.address }}. If the store side is not set
 up yet, run scripts/setup-secretstore.sh next to your OpenBao/Vault, then:
 kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- /usr/local/bin/oberth secretstore verify
-Trusted-plan Transit is available when secretstore.transit.enabled is set and
-requires a verified HTTPS secret store address.
 {{- end }}
 
 Upgrading from a pre-v0.10.57 (store schema v2) install? A plain helm upgrade

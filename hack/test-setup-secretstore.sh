@@ -3,9 +3,8 @@
 # Pins the script's security contract: idempotent re-runs mutate nothing,
 # drifted objects are refused without --force, a config naming another cluster
 # is refused without --force-auth-config, type/version mismatches fail closed,
-# --dry-run performs no mutation, Transit refuses plain HTTP unless explicitly
-# disabled for KV-only development, and the in-cluster branch works without
-# kubectl. Run by TestSetupSecretStore
+# --dry-run performs no mutation, CLI TLS posture is reported, and the
+# in-cluster branch works without kubectl. Run by TestSetupSecretStore
 # ScriptContract (embed_test.go) in every `go test ./...`.
 #
 # shellcheck disable=SC2016  # check() arguments are eval'd later by design.
@@ -53,13 +52,11 @@ case "$cmd" in
     exit 0 ;;
   secrets)
     if [ "${1:-}" = "list" ]; then
-      python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); print(json.dumps({mount + "/": {"type": (p / name).read_text().strip()} for mount, name in [("oberth", "kv-type"), ("oberth-transit", "transit-type")] if (p / name).exists()}))' "$state"
+      python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); print(json.dumps({mount + "/": {"type": (p / name).read_text().strip()} for mount, name in [("oberth", "kv-type")] if (p / name).exists()}))' "$state"
     fi
     if [ "${1:-}" = "enable" ]; then
-      case "$*" in
-        *" -path=oberth-transit transit") printf 'transit\n' >"$state/transit-type" ;;
-        *) printf 'kv\n' >"$state/kv-type"; printf '2\n' >"$state/kv-version" ;;
-      esac
+      printf 'kv\n' >"$state/kv-type"
+      printf '2\n' >"$state/kv-version"
     fi
     exit 0 ;;
   read)
@@ -74,7 +71,6 @@ case "$cmd" in
     case "$field:$path" in
       type:sys/auth/*) [ -f "$state/auth-type" ] && cat "$state/auth-type" || absent_mount 'No auth engine' ;;
       kubernetes_host:auth/*/config) [ -f "$state/config-host" ] && cat "$state/config-host" || absent ;;
-      type:sys/mounts/oberth-transit) [ -f "$state/transit-type" ] && cat "$state/transit-type" || absent_mount 'No secret engine mount' ;;
       type:sys/mounts/*) [ -f "$state/kv-type" ] && cat "$state/kv-type" || absent_mount 'No secret engine mount' ;;
       options:sys/mounts/*)
         [ -f "$state/kv-version" ] || absent_mount 'No secret engine mount'
@@ -85,12 +81,6 @@ case "$cmd" in
       token_no_default_policy:auth/*/role/*) [ -f "$state/${role_prefix}no-default" ] && cat "$state/${role_prefix}no-default" || absent ;;
       token_ttl:auth/*/role/*) [ -f "$state/${role_prefix}ttl" ] && cat "$state/${role_prefix}ttl" || absent ;;
       token_max_ttl:auth/*/role/*) [ -f "$state/${role_prefix}max-ttl" ] && cat "$state/${role_prefix}max-ttl" || absent ;;
-      type:oberth-transit/keys/*) [ -f "$state/transit-key-type" ] && cat "$state/transit-key-type" || absent ;;
-      derived:oberth-transit/keys/*) [ -f "$state/transit-derived" ] && cat "$state/transit-derived" || absent ;;
-      exportable:oberth-transit/keys/*) [ -f "$state/transit-exportable" ] && cat "$state/transit-exportable" || absent ;;
-      allow_plaintext_backup:oberth-transit/keys/*) [ -f "$state/transit-plaintext-backup" ] && cat "$state/transit-plaintext-backup" || absent ;;
-      supports_encryption:oberth-transit/keys/*) [ -f "$state/transit-supports-encryption" ] && cat "$state/transit-supports-encryption" || absent ;;
-      supports_decryption:oberth-transit/keys/*) [ -f "$state/transit-supports-decryption" ] && cat "$state/transit-supports-decryption" || absent ;;
       *) absent ;;
     esac ;;
   write)
@@ -113,13 +103,6 @@ case "$cmd" in
             token_max_ttl=*) printf '%s\n' "${argument#*=}" >"$state/${role_prefix}max-ttl" ;;
           esac
         done ;;
-      oberth-transit/keys/*)
-        printf 'aes256-gcm96\n' >"$state/transit-key-type"
-        printf 'false\n' >"$state/transit-derived"
-        printf 'false\n' >"$state/transit-exportable"
-        printf 'false\n' >"$state/transit-plaintext-backup"
-        printf 'true\n' >"$state/transit-supports-encryption"
-        printf 'true\n' >"$state/transit-supports-decryption" ;;
     esac
     exit 0 ;;
   policy)
@@ -194,20 +177,15 @@ check '[ "$status" = 0 ]' "fresh run must succeed (status=$status)"
 check 'contains "enabling Kubernetes auth at kubernetes/"' "must enable the auth method"
 check 'contains "writing auth/kubernetes/config"' "must write the auth config"
 check 'contains "enabling KV v2 secrets mount at oberth/"' "must enable the KV v2 mount"
-check 'contains "enabling Transit mount at oberth-transit/"' "must enable the Transit mount"
-check 'contains "creating non-exportable Transit key trusted-plan-artifacts"' "must create the managed Transit key"
 check 'contains "writing policy oberth-ci"' "must write the policy"
 check 'contains "writing role oberth-ci bound to ServiceAccount oberth/oberth"' "must write the role"
 check 'contains "secretstore.enabled=true"' "helm handoff must enable the secret store"
 check 'contains "secretstore.address=https://store.example:8200"' "helm handoff must carry the address"
-check 'contains "secretstore.transit.enabled=true"' "helm handoff must enable Transit"
 check 'contains "oberth secretstore verify"' "next steps must include the in-pod verification"
 check 'calls_contain "bao auth enable -path=kubernetes kubernetes"' "auth enable must reach the CLI"
 check 'calls_contain "token_no_default_policy=true"' "role must drop the default policy"
 check 'grep -Fq "auth/token/revoke-self" "$MOCK_STATE/policy-oberth-ci"' "policy must allow the client to revoke its own login token"
-check 'grep -Fq "oberth-transit/encrypt/trusted-plan-artifacts" "$MOCK_STATE/policy-oberth-ci"' "policy must grant only the managed Transit encrypt path"
-check 'grep -Fq "oberth-transit/decrypt/trusted-plan-artifacts" "$MOCK_STATE/policy-oberth-ci"' "policy must grant only the managed Transit decrypt path"
-check '! grep -Fq "oberth-transit/keys/" "$MOCK_STATE/policy-oberth-ci"' "policy must not grant Transit key management"
+check '! grep -Fq "oberth-transit/" "$MOCK_STATE/policy-oberth-ci"' "policy must not grant Transit access"
 check 'grep -Fq "https://kube.example:6443" "$MOCK_STATE/config-host"' "config must point at the kubeconfig API server"
 
 # --- 2. immediate re-run is a no-op ------------------------------------------
@@ -218,8 +196,6 @@ check '[ "$status" = 0 ]' "re-run must succeed (status=$status)"
 check 'contains "auth method already enabled at kubernetes/"' "auth method must be kept"
 check 'contains "already points at https://kube.example:6443 — unchanged"' "config must be reported unchanged"
 check 'contains "already exists (KV v2)"' "KV mount must be kept"
-check 'contains "Transit mount oberth-transit/ already exists"' "Transit mount must be kept"
-check 'contains "Transit key trusted-plan-artifacts already matches"' "Transit key must be kept"
 check 'contains "policy oberth-ci already matches — unchanged"' "policy must be reported unchanged"
 check 'contains "role oberth-ci already binds ServiceAccount oberth/oberth"' "role must be reported unchanged"
 check '! calls_contain "bao auth enable"' "re-run must not re-enable auth"
@@ -279,20 +255,6 @@ run_script
 check '[ "$status" != 0 ]' "KV v1 mount must fail"
 check 'contains "KV v1"' "failure must name the version conflict"
 
-# --- 6b. unsafe existing Transit key fails closed ----------------------------
-begin "unsafe-transit-key"
-fresh_state
-printf 'transit\n' >"$MOCK_STATE/transit-type"
-printf 'aes256-gcm96\n' >"$MOCK_STATE/transit-key-type"
-printf 'false\n' >"$MOCK_STATE/transit-derived"
-printf 'true\n' >"$MOCK_STATE/transit-exportable"
-printf 'false\n' >"$MOCK_STATE/transit-plaintext-backup"
-printf 'true\n' >"$MOCK_STATE/transit-supports-encryption"
-printf 'true\n' >"$MOCK_STATE/transit-supports-decryption"
-run_script
-check '[ "$status" != 0 ]' "exportable existing Transit key must fail"
-check 'contains "unsafe or incompatible configuration"' "Transit key rejection must explain the boundary"
-
 # --- 7. config naming another cluster is refused without --force-auth-config -
 begin "cross-cluster-config"
 fresh_state
@@ -310,12 +272,9 @@ check 'grep -Fq "https://kube.example:6443" "$MOCK_STATE/config-host"' "config m
 begin "http-warning"
 fresh_state
 BAO_ADDR="http://store.example:8200" run_script
-check '[ "$status" != 0 ]' "plain HTTP must reject trusted-plan Transit"
-check 'contains "Transit requires verified HTTPS"' "plain HTTP rejection must name the Transit boundary"
-BAO_ADDR="http://store.example:8200" run_script --disable-transit
+BAO_ADDR="http://store.example:8200" run_script
 check '[ "$status" = 0 ]' "explicit KV-only HTTP development setup must succeed (status=$status)"
 check 'contains "PLAIN HTTP"' "plain HTTP must be called out"
-check 'contains "secretstore.transit.enabled=false"' "HTTP Helm handoff must disable Transit"
 
 begin "loopback-address"
 fresh_state
@@ -333,33 +292,16 @@ check 'contains "secretstore.address=https://flag.example:8200"' "--address must
 begin "address-flag-http"
 fresh_state
 run_script --address http://flag.example:8200
-check '[ "$status" != 0 ]' "plain-HTTP --address must reject Transit"
-run_script --address http://flag.example:8200 --disable-transit
 check '[ "$status" = 0 ]' "plain-HTTP --address with explicit KV-only mode must succeed (status=$status)"
 check 'contains "PLAIN HTTP"' "plain-HTTP --address must be subject to the posture warning"
 
-begin "skip-verify-transit"
+begin "skip-verify-warning"
 fresh_state
 BAO_SKIP_VERIFY="true" run_script
-check '[ "$status" != 0 ]' "disabled TLS verification must reject Transit setup"
-check 'contains "refuses a CLI environment with TLS verification disabled"' "rejection must name the disabled-verification boundary"
+check '[ "$status" = 0 ]' "KV setup retains its explicit CLI posture warning"
+check 'contains "TLS verification is DISABLED"' "warning must name the disabled-verification boundary"
 BAO_SKIP_VERIFY="false" run_script
 check '[ "$status" = 0 ]' "an explicitly false skip-verify setting must remain verified (status=$status)"
-
-begin "empty-transit-name"
-fresh_state
-run_script --transit-key ""
-check '[ "$status" != 0 ]' "an empty Transit key name must fail before setup"
-check 'contains "names must not be empty"' "empty-name rejection must be explicit"
-
-begin "unsafe-transit-path-segments"
-fresh_state
-run_script --transit-key ".."
-check '[ "$status" != 0 ]' "a parent Transit key segment must fail before setup"
-check 'contains "clean path segments"' "dot-segment rejection must be explicit"
-run_script --transit-mount "sys"
-check '[ "$status" != 0 ]' "a reserved Transit mount must fail before setup"
-check 'contains "reserved API namespace"' "reserved-mount rejection must be explicit"
 
 # --- 9. dry-run performs no mutation -----------------------------------------
 begin "dry-run"
@@ -369,8 +311,6 @@ check '[ "$status" = 0 ]' "dry-run must succeed (status=$status)"
 check 'contains "DRY-RUN"' "dry-run must print planned mutations"
 check '[ ! -f "$MOCK_STATE/auth-type" ]' "dry-run must not enable the auth method"
 check '[ ! -f "$MOCK_STATE/config-host" ]' "dry-run must not write the config"
-check '[ ! -f "$MOCK_STATE/transit-type" ]' "dry-run must not enable Transit"
-check '[ ! -f "$MOCK_STATE/transit-key-type" ]' "dry-run must not create a Transit key"
 check '[ ! -f "$MOCK_STATE/policy-oberth-ci" ]' "dry-run must not write the policy"
 check '[ ! -f "$MOCK_STATE/role-names" ]' "dry-run must not write the role"
 check 'contains "kubernetes_ca_cert=<cluster CA PEM>"' "dry-run must summarize the CA instead of dumping PEM"
@@ -454,7 +394,7 @@ run_script
 check '[ "$status" = 0 ]' 'fresh store must configure successfully'
 check 'calls_contain "bao auth list -format=json"' 'auth discovery must use JSON'
 check 'calls_contain "bao secrets list -format=json"' 'secrets discovery must use JSON'
-check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ] && [ -f "$MOCK_STATE/transit-type" ]' 'fresh setup must enable auth, KV and Transit'
+check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ]' 'fresh setup must enable auth, KV and Transit'
 check '! calls_contain "bao read -field=type sys/"' 'mount discovery must not probe absent mount paths'
 for kind in auth secrets; do
   for failure in denied silent partial invalid null array missing-type empty-type wrong-type; do

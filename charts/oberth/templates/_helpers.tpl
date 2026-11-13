@@ -37,11 +37,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-%s-control-plane" .Release.Namespace (include "oberth.fullname" .) -}}
 {{- end }}
 
-{{- /* One execution owner per pipeline namespace, also on isolated targets. */ -}}
-{{- define "oberth.pipelinePriorityClass" -}}
-{{- printf "%s-oberth-pipeline" .Values.argo.namespace -}}
-{{- end }}
-
 {{- define "oberth.pvcName" -}}
 {{- if .Values.persistence.existingClaim -}}
 {{ .Values.persistence.existingClaim }}

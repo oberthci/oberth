@@ -304,13 +304,6 @@ spec:
             {{- if .Values.secretstore.kvMount }}
             - --secretstore-kv-mount={{ .Values.secretstore.kvMount }}
             {{- end }}
-            {{- if .Values.secretstore.transit.enabled }}
-            {{- if or .Values.secretstore.insecureHTTPForDev (not (hasPrefix "https://" .Values.secretstore.address)) }}
-            {{- fail "secretstore.transit.enabled requires an HTTPS address and forbids secretstore.insecureHTTPForDev" }}
-            {{- end }}
-            - --secretstore-transit-mount={{ required "secretstore.transit.mount is required when transit is enabled" .Values.secretstore.transit.mount }}
-            - --secretstore-transit-key={{ required "secretstore.transit.key is required when transit is enabled" .Values.secretstore.transit.key }}
-            {{- end }}
             {{- range .Values.secretstore.allowedPaths }}
             - --secretstore-path={{ . }}
             {{- end }}

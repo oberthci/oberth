@@ -80,8 +80,7 @@ repository uses; Oberth imposes no repository prefix rule.
 A repository semaphore may read only the `oberth-sync-limits` ConfigMap in the
 run's namespace, using a key of the author's choice. Other ConfigMap references
 remain refused because Argo's failure text can expose their data. Oberth no
-longer creates or manages this ConfigMap. Upgrade preserves an existing object
-and its data with Helm ownership removed; new installs create none. Operators
+longer creates or manages this ConfigMap. The installer neither creates it nor removes prior Helm ownership. Operators
 apply and maintain semaphore limits themselves.
 
 Order Trivy steps that share a cache with `depends`, or use a synchronization mutex.
@@ -148,10 +147,9 @@ sets 100m/128Mi requests or its control-plane class on either. A secret-store
 StatefulSet using OnDelete picks up this change only when its Pod is recreated.
 Oberth's own server Deployment keeps its control-plane class.
 
-The pipeline PriorityClass object remains for Workflows submitted by v0.21.10:
-their later Pods still reference it. New user Workflows do not receive that
-class. Source/executor helper Pods still use it. The object can be removed in
-the release after those old Workflows end.
+Source and executor identity helpers use Kubernetes default priority. The chart
+and installer no longer create a pipeline PriorityClass. A class retained by
+an older chart's `keep` annotation can remain unused.
 
 Oberth has no automatic infrastructure retry. Authors choose native Argo
 `retryStrategy`, such as `retryPolicy: OnError`, on Workflow/templates. Manual
@@ -287,18 +285,21 @@ win name/path collisions; validated workspace opt-outs remain available.
 
   Argo-generated init/wait containers, and executor main containers for resource
   and data templates, inherit native controller `executor.resources`. The managed
-  installer supplies requests of 50m CPU, 64 MiB memory and 256 MiB ephemeral
-  storage, with limits of 500m CPU, 512 MiB memory and 512 MiB ephemeral storage.
-  Workflow patches carry no resource overrides for those containers. An existing
-  operator-set `executor.resources` is kept exactly, including a partial or empty
-  map; install review shows the selected resources and whether they are preserved.
+  installer supplies only requests of 50m CPU and 64 MiB memory. It sets no
+  ephemeral-storage request and no CPU, memory or storage limits.
+  Workflow patches carry no resource overrides for those containers. Any stored
+  `executor.resources` is kept exactly, including a partial or empty map; install review shows the selected resources and labels an existing setting as
+  "stored value kept", without claiming who originally supplied it.
+  This includes settings written by earlier installer runs; remove stored limits
+  explicitly when choosing to adopt the requests-only defaults.
 
-  The native storage limit is uniform. A step without its own storage limit can
-  therefore run in a Pod capped by the helper's 512 MiB limit, including shared
-  disk EmptyDir usage. Operators can omit or change that limit in their Argo Helm
-  values. Oberth does not add main-container limits to compensate. Pod-total
-  storage evictions remain infrastructure observations because the total can
-  include operator-controlled helpers; a named authored container exceeding its
+  Native defaults add no helper storage limit, so they do not create a Pod
+  storage cap for a step that declares none. Operator-set limits can still create
+  such a cap. Steps that declare storage limits get no native helper-limit
+  headroom by default: account for shared control files, logs and disk EmptyDirs
+  when choosing those limits or explicitly configuring native helper resources.
+  Oberth leaves authored requests and limits alone. Pod-total storage evictions
+  remain infrastructure observations; a named authored container exceeding its
   own declared limit still reports a step resource failure.
 
   The Oberth-owned `oberth-executor-token` waiter keeps requests of 50m CPU,
@@ -326,7 +327,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   mounting the same source PVC at `/seed`, and streams the artifact archive
   back before deleting that Pod. The seed and collect helper request 100m
   CPU, 64 MiB memory and 16 MiB ephemeral storage, with 500m/512 MiB/64 MiB
-  limits. They keep the helper PriorityClass and `preemptionPolicy: Never`.
+  limits. They omit PriorityClass and preemptionPolicy; Kubernetes supplies its defaults.
   **Their resources and source-volume node binding affect scheduling**.
   They do not inherit the ordinary Workflow's authored affinity/selectors;
   collection is tied to the node/topology of that source volume. The running

@@ -12,7 +12,8 @@ import (
 
 // These immutable controller captures exercise security isolation under the
 // old submission policy. Reconstruct only their retired scheduling inputs;
-// current submissions are covered independently by native field preservation
+// This reconstruction applies only to historical Workflow Pods, never current
+// seed, collect or executor identity helpers. Current submissions use native field preservation
 // tests. No captured bytes or provenance hashes are rewritten.
 func historicalSchedulingInput(t *testing.T, wf *wfv1.Workflow, release bool) {
 	t.Helper()
@@ -84,9 +85,9 @@ func historicalSchedulingInput(t *testing.T, wf *wfv1.Workflow, release bool) {
 	wf.Annotations[identityAnnotation] = identity
 }
 
-func assertHistoricalPipelinePriority(t *testing.T, pod *corev1.Pod) {
+func assertHistoricalWorkflowPriority(t *testing.T, pod *corev1.Pod) {
 	t.Helper()
 	if pod.Spec.PriorityClassName != "oberth-argo-oberth-pipeline" || pod.Spec.PreemptionPolicy == nil || *pod.Spec.PreemptionPolicy != corev1.PreemptNever {
-		t.Fatal("historical Pod lost its captured non-preempting helper class")
+		t.Fatal("historical Workflow Pod lost its captured non-preempting class")
 	}
 }

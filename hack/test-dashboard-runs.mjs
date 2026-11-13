@@ -80,27 +80,27 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     const f3Page=[
       makeRun('passed-newest',{ref:'r1',started_at:f3Time(0),finished_at:f3Time(50)}),
       makeRun('passed-older',{ref:'r2',started_at:f3Time(5),finished_at:f3Time(40)}),
-      makeRun('queued-normal-late',{ref:'r3',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(20),queue_position:3}),
-      makeRun('queued-high-next',{ref:'r4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(21),queue_position:1}),
+      makeRun('queued-normal-late',{ref:'r3',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(20)}),
+      makeRun('queued-high-next',{ref:'r4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(21)}),
       makeRun('failed-middle',{ref:'r5',status:'failed',started_at:f3Time(10),finished_at:f3Time(45)}),
       makeRun('running-early',{ref:'r6',status:'running',started_at:f3Time(30),finished_at:null}),
     ];
     const f3Active=[
       makeRun('running-late-hidden',{ref:'r7',status:'running',started_at:f3Time(35),finished_at:null}),
-      makeRun('waiting-hidden',{ref:'r9',status:'running',started_at:null,finished_at:null,queued_at:f3Time(23),queue_position:4,display_status:'queued'}),
-      makeRun('queued-high-second-hidden',{ref:'r8',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22),queue_position:2}),
+      makeRun('waiting-hidden',{ref:'r9',status:'running',started_at:null,finished_at:null,queued_at:f3Time(23),display_status:'queued'}),
+      makeRun('queued-high-second-hidden',{ref:'r8',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22)}),
     ];
     api=async path=>{
       if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
       if(path==='/api/runs/counts')return {total:9,by_repo:{1:9}};
       const query=new URL(path,'https://example.test').searchParams;
-      if(query.get('limit')==='1')return [...f3Active,...f3Page.filter(row=>['queued','running'].includes(row.status))];
+      if(query.get('limit')==='1')return [f3Page[5],f3Active[0],f3Page[3],f3Active[2],f3Page[2],f3Active[1]];
       return {body:f3Page,next:''};
     };
   `);
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['waiting-hidden','queued-normal-late','queued-high-second-hidden','queued-high-next','running-late-hidden','running-early','passed-newest','failed-middle','passed-older'],
-    'F3: queue in reverse claim order by position, then running newest start first, then finished newest finish first');
+    'F3: queue in reverse server acceptance order, then running newest start first, then finished newest finish first');
   assert.ok(!run('runPageFull(f3Page)'), 'F3: queued and running rows never count toward the terminal page limit');
   // A scoped viewer sees no queue positions: the active view's order (the
   // server's submission order) decides, never the queue time, so an older
@@ -256,7 +256,7 @@ const badgeRow = run(`runRow({id:'labels',repo_id:1,ref:'v1',ref_kind:'tag',stat
 assert.ok(badgeRow.includes('<div class="repo-name">ours</div>'));
 assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history rows have no inline badges');
 assert.ok(!badgeRow.includes('priority highest') && !badgeRow.includes('urgent'),'priority metadata stays in detail');
-assert.ok(run(`runRow({id:'priority',repo_id:1,ref:'main',status:'queued',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',queue_position:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
+assert.ok(run(`runRow({id:'priority',repo_id:1,ref:'main',status:'queued',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>'})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
 assert.equal(run(`runMessageCell({status:'passed',release:true})`),'');
 assert.equal(run(`runMessageCell({status:'passed',trigger:'schedule',schedule_entry:'nightly<unsafe>',display_reason:'schedule nightly<unsafe>'})`),'schedule nightly&lt;unsafe&gt;');
 assert.equal(run(`runMessageCell({status:'passed',concurrency_group:'deploy'})`),'');
@@ -277,7 +277,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1'
     {id:'wire-waiting', status:'waiting', started_at:null, display_status:'queued', display_reason:'pod pending: Insufficient cpu', scheduling:{state:'waiting'}},
     {id:'admitted', status:'running', started_at:null, display_status:'queued', display_reason:'admitted, starting the workflow', scheduling:{state:'waiting', admission:{state:'admitted'}}},
     {id:'preflight', status:'running', started_at:null, display_status:'queued', display_reason:'KVM preflight running', scheduling:{state:'preflight'}},
-    {id:'durable', status:'queued', started_at:null, display_status:'queued', display_reason:'next in line', scheduling:{state:'queued', queue_position:1}},
+    {id:'durable', status:'queued', started_at:null, display_status:'queued', display_reason:'awaiting submission', scheduling:{state:'queued'}},
     {id:'raw-only', status:'waiting', started_at:null},
   ];
   sandbox.notStarted = notStarted;
@@ -309,11 +309,11 @@ for (const latest of [false, true]) {
       changeRunRepo('all'); state.filter=claimOrderLatest?'all':'queued'; state.activeRuns=[];
       claimListPath='';
       const claimOrderRows=[
-        makeRun('claim-high-first',{ref:'q1',status:'queued',started_at:null,finished_at:null,queue_position:1,priority_class:'promotion'}),
-        makeRun('claim-aged',{ref:'q2',status:'queued',started_at:null,finished_at:null,queue_position:2,priority_class:'promotion',priority_reason:'aged: standard run waited at least 60 minutes'}),
-        makeRun('claim-high-last',{ref:'q3',status:'queued',started_at:null,finished_at:null,queue_position:3,priority_class:'promotion'}),
-        makeRun('claim-normal',{ref:'q4',status:'waiting',started_at:null,finished_at:null,queue_position:4,display_status:'queued'}),
-      ].map(row=>claimOrderScoped?{...row,queue_position:0}:row);
+        makeRun('claim-high-first',{ref:'q1',status:'queued',started_at:null,finished_at:null,priority_class:'promotion'}),
+        makeRun('claim-aged',{ref:'q2',status:'queued',started_at:null,finished_at:null,priority_class:'promotion',priority_reason:'aged: standard run waited at least 60 minutes'}),
+        makeRun('claim-high-last',{ref:'q3',status:'queued',started_at:null,finished_at:null,priority_class:'promotion'}),
+        makeRun('claim-normal',{ref:'q4',status:'waiting',started_at:null,finished_at:null,display_status:'queued'}),
+      ].map(row=>claimOrderScoped?{...row}:row);
       api=async path=>{
         if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
         if(path==='/api/runs/counts')return {total:4,by_repo:{1:4}};
@@ -417,12 +417,10 @@ console.log('Dashboard detail explicitly requests the compact view');
 // Owner layout (#1487 R2): the next queued run is directly above running work.
 run(`
   const ownerQueue = [
-    ['owner-next','high',1], ['owner-high','high',2],
-    ['owner-standard','standard',3], ['owner-low','low',4],
-  ].map(([ID,priority,position])=>makeRun(ID,{
-    ref:ID,status:'queued',started_at:null,finished_at:null,queue_position:position,
-    priority_class:priority,display_status:'queued',
-    display_reason:'needs 2 CPU, 4 GiB · '+(position===1?'next in line':'position '+position),
+    'owner-first', 'owner-second', 'owner-third', 'owner-fourth',
+  ].map(ID=>makeRun(ID,{
+    ref:ID,status:'queued',started_at:null,finished_at:null,display_status:'queued',
+    display_reason:'awaiting submission',
   }));
   const ownerRunning = [
     makeRun('owner-running-new',{status:'running',started_at:'2026-11-05T12:00:00Z',finished_at:null}),
@@ -445,16 +443,15 @@ for (const filter of ['all','queued']) {
   sandbox.ownerFilter=filter;
   run(`changeRunRepo('all');state.filter=ownerFilter;state.activeRuns=[];`);
   await run('renderRuns(state.routeSeq)');
-  const expected=['owner-low','owner-standard','owner-high','owner-next'];
+  const expected=['owner-fourth','owner-third','owner-second','owner-first'];
   if(filter==='all')expected.push('owner-running-new','owner-running-old','owner-passed','owner-failed','owner-cancelled');
   assert.deepEqual(ids(),expected,`owner layout in ${filter} view`);
   const rows=[...run('html').matchAll(/<div class="trow" data-run-id="([^"]+)"[^>]*>([\s\S]*?)(?=<div class="trow"|$)/g)];
   const row=id=>rows.find(match=>match[1]===id)[2];
-  assert.match(row('owner-low'),/needs 2 CPU, 4 GiB · position 4/);
-  assert.doesNotMatch(row('owner-standard'),/priority|class="v4b/,'standard has no priority label');
-  assert.match(row('owner-standard'),/needs 2 CPU, 4 GiB · position 3/);
-  assert.match(row('owner-high'),/needs 2 CPU, 4 GiB · position 2/);
-  assert.match(row('owner-next'),/needs 2 CPU, 4 GiB · next in line/);
+  for (const id of ['owner-first','owner-second','owner-third','owner-fourth']) {
+    assert.match(row(id),/awaiting submission/);
+    assert.doesNotMatch(row(id),/priority|position|class="v4b/);
+  }
   assert.equal(run('JSON.stringify(ownerRows)'),run('ownerWire'),'rendering never reverses or rewrites the API response');
 }
 console.log('Owner layout passed: reversed submission queue and unchanged running/history/wire order');

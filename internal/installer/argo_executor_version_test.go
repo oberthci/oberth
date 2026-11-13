@@ -104,7 +104,7 @@ func TestManagedArgoExecutorPinFollowsEffectiveChartVersion(t *testing.T) {
 	}
 }
 
-func TestManagedArgoExternalConfigMapParallelismNotice(t *testing.T) {
+func TestManagedArgoExternalConfigMapNotice(t *testing.T) {
 	cap := 6
 	for _, test := range []struct {
 		name, values string
@@ -114,7 +114,7 @@ func TestManagedArgoExternalConfigMapParallelismNotice(t *testing.T) {
 		{"external requested", `{"controller":{"configMap":{"create":false}}}`, &cap, 1},
 		{"native requested", `{"controller":{"configMap":{"create":true}}}`, &cap, 0},
 		{"default requested", `{}`, &cap, 0},
-		{"external no request", `{"controller":{"configMap":{"create":false}}}`, nil, 0},
+		{"external no request", `{"controller":{"configMap":{"create":false}}}`, nil, 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output strings.Builder
@@ -130,10 +130,13 @@ func TestManagedArgoExternalConfigMapParallelismNotice(t *testing.T) {
 			if _, err := InstallArgoWorkflows(t.Context(), Config{ArgoParallelism: test.parallelism}, deps); err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.Count(output.String(), "controller.configMap.create=false: --argo-parallelism"); got != test.want {
+			if got := strings.Count(output.String(), "controller.configMap.create=false:"); got != test.want {
 				t.Fatal(got, output.String())
 			}
-			if test.want > 0 && !strings.Contains(output.String(), "docs/releases/v0.22.4.md") {
+			if test.want > 0 && !strings.Contains(output.String(), "executor.resources") {
+				t.Fatal("executor settings warning absent", output.String())
+			}
+			if test.want > 0 && !strings.Contains(output.String(), "docs/releases/v0.22.5.md") {
 				t.Fatal("migration remedy absent", output.String())
 			}
 		})

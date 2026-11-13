@@ -24,9 +24,9 @@ spec:
 ```
 
 Operators own and create the semaphore ConfigMap themselves. Oberth does not
-render it or accept `--argo-sync-limit`. The existing object is orphaned on upgrade with data unchanged; follow the
-[release-note handoff](releases/v0.22.0.md#action-required-semaphore-configmap-ownership)
-before semaphore Workflows run. Missing ConfigMaps fail in Argo. Authored mutex
+render it or accept `--argo-sync-limit`. Operators must resolve any former
+Helm ownership themselves; the installer no longer performs a handoff.
+Missing ConfigMaps fail in Argo. Authored mutex
 names and semaphore references are not rewritten or reserved for an injected
 Oberth release lock.
 

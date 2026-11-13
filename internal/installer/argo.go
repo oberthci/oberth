@@ -151,28 +151,16 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	} else if err := noticeArgoExecutorImage(ctx, deps, ns, effectiveVersion, exists); err != nil {
 		return result, err
 	}
-	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "argo-workflows", ns, "controller", controlPlanePriority(cfg), exists)
-	if err != nil {
+	if err := noticeArgoExternalConfigMap(ctx, deps, ns, exists); err != nil {
 		return result, err
 	}
-	defer cleanupDependency()
-	retiredArgs, retiredValues, err := removeSyncLimitsValues(ctx, deps, ns, exists)
-	if err != nil {
-		return result, err
-	}
-	if err := noticeArgoExternalConfigMap(ctx, cfg, deps, ns, exists); err != nil {
-		return result, err
-	}
-	if (argoLimitsRequested(cfg) || retiredValues || dependencyChanged || imageMissing || cfg.argoExecutorResources == nil) && action == actionSkip {
+	if (argoLimitsRequested(cfg) || imageMissing || cfg.argoExecutorResources == nil) && action == actionSkip {
 		if canonicalChartVersion(result.InstalledVersion) == "" {
 			return result, errors.New("cannot reconcile existing Argo values without a known installed chart version")
 		}
 		cfg.ArgoChartVersion = result.InstalledVersion
 		result.TargetVersion = result.InstalledVersion
 		action = actionUpgrade
-	}
-	if err := retireSyncLimitsBeforeHelm(ctx, cfg, deps, ns, retiredValues); err != nil {
-		return result, err
 	}
 	switch action {
 	case actionSkip:
@@ -190,7 +178,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		_, _ = fmt.Fprintln(deps.Output, "Installing Argo Workflows...")
 	}
 
-	args := append(withDependencyValues(ArgoHelmArgs(cfg), dependencyFile), retiredArgs...)
+	args := ArgoHelmArgs(cfg)
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}
