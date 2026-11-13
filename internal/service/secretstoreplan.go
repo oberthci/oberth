@@ -49,11 +49,12 @@ type SecretStorePlanRepo struct {
 }
 
 // SecretStorePlanStep describes the desired per-step policy state for one
-// (repo, step) combination. Issue #623.
+// (repo, workflow file, step) combination.
 type SecretStorePlanStep struct {
-	Step   string   `json:"step"`
-	Paths  []string `json:"paths"`
-	Policy string   `json:"policy"`
+	Workflow string   `json:"workflow"`
+	Step     string   `json:"step"`
+	Paths    []string `json:"paths"`
+	Policy   string   `json:"policy"`
 }
 
 func (service *API) secretStorePlan(ctx context.Context, actor api.Actor, raw json.RawMessage) (SecretStorePlanResponse, error) {
@@ -104,40 +105,21 @@ func (service *API) secretStorePlan(ctx context.Context, actor api.Actor, raw js
 // (issue #623). This is a pure computation with no side effects and no
 // secret values.
 func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanResponse {
-	// Group paths by repo and by (repo, step).
-	repoPathsMap := make(map[string][]string)
-	// stepPathsMap[repo][step] = []paths for named-step grants.
-	stepPathsMap := make(map[string]map[string][]string)
-	// wildcardPaths[repo] = []paths with step="*".
-	wildcardPaths := make(map[string][]string)
-	for _, grant := range grants {
-		if grant.RevokedAt != nil {
+	grouped := map[string]map[string]map[string][]string{}
+	for _, g := range grants {
+		if g.RevokedAt != nil {
 			continue
 		}
-		// Every granted repo has a per-repo identity, but its policy carries
-		// wildcard paths only: a named-step path belongs to that step's
-		// per-step policy and must not be readable by the per-repo
-		// ServiceAccount that every other template of the repo runs under.
-		// This mirrors installer.appendPerRepoGrant so the plan digest the
-		// server prints and the one `secretstore sync` records agree
-		// (issues #623, #814).
-		if _, seen := repoPathsMap[grant.Repo]; !seen {
-			repoPathsMap[grant.Repo] = nil
+		if grouped[g.Repo] == nil {
+			grouped[g.Repo] = map[string]map[string][]string{}
 		}
-		if grant.Step == "*" {
-			repoPathsMap[grant.Repo] = append(repoPathsMap[grant.Repo], grant.Secret)
-			wildcardPaths[grant.Repo] = append(wildcardPaths[grant.Repo], grant.Secret)
-		} else {
-			if stepPathsMap[grant.Repo] == nil {
-				stepPathsMap[grant.Repo] = make(map[string][]string)
-			}
-			stepPathsMap[grant.Repo][grant.Step] = append(
-				stepPathsMap[grant.Repo][grant.Step], grant.Secret)
+		if grouped[g.Repo][g.Workflow] == nil {
+			grouped[g.Repo][g.Workflow] = map[string][]string{}
 		}
+		grouped[g.Repo][g.Workflow][g.Step] = append(grouped[g.Repo][g.Workflow][g.Step], g.Secret)
 	}
-	// Sort repos for deterministic output.
-	repos := make([]string, 0, len(repoPathsMap))
-	for repo := range repoPathsMap {
+	repos := make([]string, 0, len(grouped))
+	for repo := range grouped {
 		repos = append(repos, repo)
 	}
 	sort.Strings(repos)
@@ -147,69 +129,46 @@ func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanRes
 		lines = append(lines, "No active grants. secretstore sync would produce zero-stanza shared policies and no per-repo policies.")
 	}
 	for _, repo := range repos {
-		paths := repoPathsMap[repo]
-		sort.Strings(paths)
-		policyName := derivePolicyName(repo)
-		entry := SecretStorePlanRepo{
-			Repo:   repo,
-			Paths:  paths,
-			Policy: policyName,
+		entry := SecretStorePlanRepo{Repo: repo, Policy: derivePolicyName(repo)}
+		files := make([]string, 0, len(grouped[repo]))
+		for file := range grouped[repo] {
+			files = append(files, file)
 		}
-
-		// Per-step entries for named grants.
-		if steps, ok := stepPathsMap[repo]; ok {
-			stepNames := make([]string, 0, len(steps))
+		sort.Strings(files)
+		for _, file := range files {
+			steps := grouped[repo][file]
+			names := make([]string, 0, len(steps))
 			for step := range steps {
-				stepNames = append(stepNames, step)
+				names = append(names, step)
 			}
-			sort.Strings(stepNames)
-			for _, step := range stepNames {
-				stepPaths := steps[step]
-				// Merge wildcard-granted paths (inherited by all steps).
-				merged := make([]string, 0, len(stepPaths)+len(wildcardPaths[repo]))
-				merged = append(merged, stepPaths...)
-				for _, wp := range wildcardPaths[repo] {
-					found := false
-					for _, sp := range merged {
-						if sp == wp {
-							found = true
-							break
-						}
-					}
-					if !found {
-						merged = append(merged, wp)
-					}
+			sort.Strings(names)
+			for _, step := range names {
+				paths := map[string]bool{}
+				for _, p := range steps[step] {
+					paths[p] = true
+				}
+				for _, p := range steps["*"] {
+					paths[p] = true
+				}
+				merged := make([]string, 0, len(paths))
+				for p := range paths {
+					merged = append(merged, p)
 				}
 				sort.Strings(merged)
-				stepPolicyName := identityname.PerStepNameFromQualified(repo, step)
-				entry.Steps = append(entry.Steps, SecretStorePlanStep{
-					Step:   step,
-					Paths:  merged,
-					Policy: stepPolicyName,
-				})
+				entry.Steps = append(entry.Steps, SecretStorePlanStep{Workflow: file, Step: step, Paths: merged, Policy: identityname.PerStepNameFromQualified(repo, file, step)})
 			}
 		}
-
 		result = append(result, entry)
-		lines = append(lines, fmt.Sprintf("repo: %s", repo))
-		lines = append(lines, fmt.Sprintf("  policy: %s", policyName))
-		for _, path := range paths {
-			lines = append(lines, fmt.Sprintf("  path: %s", path))
-		}
-		for _, stepEntry := range entry.Steps {
-			lines = append(lines, fmt.Sprintf("  step: %s", stepEntry.Step))
-			lines = append(lines, fmt.Sprintf("    policy: %s", stepEntry.Policy))
-			for _, path := range stepEntry.Paths {
-				lines = append(lines, fmt.Sprintf("    path: %s", path))
+		lines = append(lines, fmt.Sprintf("repo: %s", repo), fmt.Sprintf("  policy: %s", entry.Policy))
+		for _, step := range entry.Steps {
+			lines = append(lines, fmt.Sprintf("  workflow: %s", step.Workflow), fmt.Sprintf("  step: %s", step.Step), fmt.Sprintf("    policy: %s", step.Policy))
+			for _, p := range step.Paths {
+				lines = append(lines, fmt.Sprintf("    path: %s", p))
 			}
 		}
 	}
 	digest := ComputePlanDigest(result)
-	return SecretStorePlanResponse{
-		Repos:  result,
-		Digest: digest,
-		Text:   strings.Join(lines, "\n") + "\ndigest: " + digest,
-	}
+	return SecretStorePlanResponse{Repos: result, Digest: digest, Text: strings.Join(lines, "\n") + "\ndigest: " + digest}
 }
 
 // ComputePlanDigest computes a deterministic sha256 digest of the plan's
@@ -218,12 +177,10 @@ func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanRes
 // secretstore_plan tool prints and the sync receipt records — comparing them
 // answers "is the materialized state current?"
 //
-// v2: includes per-step entries in the digest (issue #623). The digest is
-// backward compatible: repos with no steps produce the same bytes as the
-// v1 format because the step loop simply doesn't write anything.
+// v3 includes exact workflow-file scope and deliberately invalidates prior sync receipts.
 func ComputePlanDigest(repos []SecretStorePlanRepo) string {
 	h := sha256.New()
-	h.Write([]byte("oberth-secretstore-plan-v1\x00"))
+	h.Write([]byte("oberth-secretstore-plan-v3\x00"))
 	for _, repo := range repos {
 		h.Write([]byte(repo.Repo))
 		h.Write([]byte{0})
@@ -234,9 +191,11 @@ func ComputePlanDigest(repos []SecretStorePlanRepo) string {
 			h.Write([]byte{0})
 		}
 		// Per-step entries (issue #623). Repos without steps produce no
-		// additional bytes, preserving backward compatibility with v1 digests.
+		// additional bytes.
 		for _, step := range repo.Steps {
 			h.Write([]byte("step:"))
+			h.Write([]byte(step.Workflow))
+			h.Write([]byte{0})
 			h.Write([]byte(step.Step))
 			h.Write([]byte{0})
 			h.Write([]byte(step.Policy))

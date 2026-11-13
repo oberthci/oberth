@@ -71,7 +71,9 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 					appendHistoricalRestart()
 				}
 			}
-			_, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, removeRestartTimingsMigrationID)
+			_, err = s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.
+ALTER TABLE runs ADD COLUMN credentialed INTEGER NOT NULL DEFAULT 0 CHECK (credentialed IN (0, 1));
+DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, removeRestartTimingsMigrationID)
 			requireRestartNoError(t, err)
 			requireRestartNoError(t, s.migrate(ctx, nil))
 			var retired int

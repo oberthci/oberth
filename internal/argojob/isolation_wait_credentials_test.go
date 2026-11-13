@@ -195,7 +195,7 @@ func TestWaitCredentialPatchMatchesAdmittedArgoPodShapes(t *testing.T) {
 				t.Fatalf("patch left wait credentials or removed main credentials: %+v", after.Containers)
 			}
 			for _, original := range wait.VolumeMounts {
-				if original.Name == SecretsVolumeName || original.Name == ReleaseTokenVolumeName {
+				if storeMount(original) {
 					continue
 				}
 				kept := false

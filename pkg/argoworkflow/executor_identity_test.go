@@ -74,13 +74,13 @@ func TestAdmitExecutorIdentityGuardsCoverEveryTemplateCarrier(t *testing.T) {
 					container.Env = []corev1.EnvVar{{Name: "{{='ARGO_'+'PROGRESS_PATCH_TICK_DURATION'}}", Value: "0"}}
 					want = "environment names must be literal"
 				case "volume-name":
-					leaf.Volumes = []corev1.Volume{{Name: ExecutorTokenVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: resource.NewQuantity(1<<20, resource.BinarySI)}}}}
+					leaf.Volumes = []corev1.Volume{{Name: ExecutorIdentityVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: resource.NewQuantity(1<<20, resource.BinarySI)}}}}
 					want = "reserved executor identity volume"
 				case "mount-name":
-					container.VolumeMounts = []corev1.VolumeMount{{Name: ExecutorTokenVolumeName, MountPath: "/identity"}}
+					container.VolumeMounts = []corev1.VolumeMount{{Name: ExecutorIdentityVolumeName, MountPath: "/identity"}}
 					want = "reserved executor identity volume"
 				case "mount-path":
-					container.VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: ExecutorTokenMountPath}}
+					container.VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: ExecutorIdentityMountPath}}
 					want = "reserved server helper path"
 				}
 				if err := Admit(wf, Policy{}); err == nil || !strings.Contains(err.Error(), want) {
@@ -100,8 +100,8 @@ func TestAdmitRefusesResourceExecutorTokenTheft(t *testing.T) {
 			}
 			image := decodeAdmissible(t, nil).Spec.Templates[0].Container.Image
 			attacker := wfv1.UserContainer{Container: corev1.Container{Name: "wait", Image: image,
-				VolumeMounts: []corev1.VolumeMount{{Name: ExecutorTokenVolumeName, MountPath: ExecutorTokenMountPath}},
-				Env: []corev1.EnvVar{{Name: "KUBECONFIG", Value: ExecutorTokenMountPath + "/kubeconfig"},
+				VolumeMounts: []corev1.VolumeMount{{Name: ExecutorIdentityVolumeName, MountPath: ExecutorIdentityMountPath}},
+				Env: []corev1.EnvVar{{Name: "KUBECONFIG", Value: ExecutorIdentityMountPath + "/kubeconfig"},
 					{Name: "{{='ARGO_'+'PROGRESS_PATCH_TICK_DURATION'}}", Value: "0"},
 					{Name: "{{='ARGO_'+'PROGRESS_FILE_TICK_DURATION'}}", Value: "0"}}}}
 			leaf := &wf.Spec.Templates[0]
@@ -158,7 +158,7 @@ func TestAdmitExecutorContainerNamesAndTemplatedValues(t *testing.T) {
 }
 
 func TestAdmitExecutorIdentityVolumeAliases(t *testing.T) {
-	for _, mountPath := range []string{ExecutorTokenMountPath, ExecutorTokenMountPath + "/kubeconfig", "/run/secrets/kubernetes.io/serviceaccount", "/var/run/secrets/kubernetes.io/serviceaccount/../serviceaccount/token"} {
+	for _, mountPath := range []string{ExecutorIdentityMountPath, ExecutorIdentityMountPath + "/kubeconfig", "/run/secrets/kubernetes.io/serviceaccount", "/var/run/secrets/kubernetes.io/serviceaccount/../serviceaccount/token"} {
 		t.Run(mountPath, func(t *testing.T) {
 			wf := decodeAdmissible(t, nil)
 			wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: mountPath}}
@@ -167,7 +167,7 @@ func TestAdmitExecutorIdentityVolumeAliases(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{ExecutorTokenVolumeName, "{{inputs.parameters.volume}}"} {
+	for _, name := range []string{ExecutorIdentityVolumeName, "{{inputs.parameters.volume}}"} {
 		for _, kind := range []string{"volume", "claim"} {
 			t.Run(kind+"/"+name, func(t *testing.T) {
 				wf := decodeAdmissible(t, nil)

@@ -80,10 +80,10 @@ spec:
 			wf.Spec.Templates[0].InitContainers = []wfv1.UserContainer{{Container: corev1.Container{Name: "main", Image: wf.Spec.Templates[0].Container.Image}}}
 		}, "reserved for the Argo executor"},
 		{"executor-token-mount-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
-			wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: argoworkflow.ExecutorTokenVolumeName, MountPath: "/identity"}}
+			wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: argoworkflow.ExecutorIdentityVolumeName, MountPath: "/identity"}}
 		}, "reserved executor identity volume"},
 		{"executor-token-mount-path", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
-			wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: argoworkflow.ExecutorTokenMountPath}}
+			wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: argoworkflow.ExecutorIdentityMountPath}}
 		}, "reserved server helper path"},
 		{"templated-env-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			wf.Spec.Templates[0].Container.Env = []corev1.EnvVar{{Name: "{{='ARGO_'+'PROGRESS_PATCH_TICK_DURATION'}}", Value: "0"}}
@@ -179,50 +179,59 @@ spec:
 		t.Run(tc.name, func(t *testing.T) {
 			wf := base.DeepCopy()
 			tc.mutate(wf)
-			source, err := json.Marshal(wf)
-			if err != nil {
-				t.Fatal(err)
-			}
-			config := argojob.Config{
-				Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release",
-				CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor",
-				VaultAddress: "https://vault.example.com", VaultCredentialedRole: "release", VaultCISecretsRole: "ci-secrets",
-				PerRepoIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-release"}},
-				PerRepoCIIdentities: map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-ci"}},
-			}
-			request := argojob.Request{
-				RunID: "parity", RepositoryID: 1, Name: "parity", Repo: "project", UpstreamName: "github", UpstreamOrg: "acme",
-				Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), Trigger: tc.trigger, Source: source,
-				ApprovedSecrets: map[string]bool{secretPath: true},
-				SourceVolume:    argojob.SourceVolume{ClaimName: "source", SubPath: "src", BinarySubPath: "bin"},
-			}
-			root := writeConsumer(t, document)
-			file := "build.yaml"
-			if tc.trigger == pipeline.TriggerRelease {
-				file = "release.yaml"
-				request.Ref = "refs/tags/v1.0.0"
-			}
-			if err := os.WriteFile(filepath.Join(root, ".oberth", file), source, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			_, serverErr := argojob.Build(config, request)
-			var output bytes.Buffer
-			cliErr := runValidate(context.Background(), []string{root}, &output)
-			if tc.refusal == "" {
-				if serverErr != nil || cliErr != nil || !strings.Contains(output.String(), "result: PASS") {
-					t.Fatalf("valid control: server=%v, validate=%v\n%s", serverErr, cliErr, output.String())
-				}
-				return
-			}
-			if serverErr == nil || !strings.Contains(serverErr.Error(), tc.refusal) {
-				t.Fatalf("server refusal = %v, want %q", serverErr, tc.refusal)
-			}
-			if cliErr == nil || !strings.Contains(output.String(), "result: FAIL") || strings.Contains(output.String(), "result: PASS") {
-				t.Fatalf("server refused %v; validate must also refuse: %v\n%s", serverErr, cliErr, output.String())
-			}
-			if !strings.Contains(output.String(), serverErr.Error()) {
-				t.Fatalf("validate did not report the identical server refusal %q:\n%s", serverErr, output.String())
-			}
+			assertValidateRuntimeParity(t, document, secretPath, tc.trigger, wf, tc.refusal)
 		})
+	}
+}
+
+// Build the server request and the CLI consumer from one mutated Workflow and
+// require both entrypoints to agree on acceptance or on the exact refusal.
+func assertValidateRuntimeParity(t *testing.T, document, secretPath string, trigger pipeline.Trigger, wf *wfv1.Workflow, refusal string) {
+	t.Helper()
+	source, err := json.Marshal(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := argojob.Config{
+		Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release",
+		CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor",
+		VaultAddress: "https://vault.example.com", VaultCredentialedRole: "release", VaultCISecretsRole: "ci-secrets",
+		PerRepoIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-release"}},
+		PerRepoCIIdentities: map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-ci"}},
+		PerStepIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project/.oberth/release.yaml/*": {ServiceAccountName: "project-release-step"}},
+	}
+	request := argojob.Request{
+		RunID: "parity", RepositoryID: 1, Name: "parity", Repo: "project", UpstreamName: "github", UpstreamOrg: "acme",
+		Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), Trigger: trigger, Source: source,
+		ApprovedSecrets: map[string]bool{secretPath: true},
+		StepGrants:      map[string]map[string]bool{secretPath: {"*": true}},
+		SourceVolume:    argojob.SourceVolume{ClaimName: "source", SubPath: "src", BinarySubPath: "bin"},
+	}
+	root := writeConsumer(t, document)
+	file := "build.yaml"
+	if trigger == pipeline.TriggerRelease {
+		file = "release.yaml"
+		request.Ref = "refs/tags/v1.0.0"
+	}
+	if err := os.WriteFile(filepath.Join(root, ".oberth", file), source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, serverErr := argojob.Build(config, request)
+	var output bytes.Buffer
+	cliErr := runValidate(context.Background(), []string{root}, &output)
+	if refusal == "" {
+		if serverErr != nil || cliErr != nil || !strings.Contains(output.String(), "result: PASS") {
+			t.Fatalf("valid control: server=%v, validate=%v\n%s", serverErr, cliErr, output.String())
+		}
+		return
+	}
+	if serverErr == nil || !strings.Contains(serverErr.Error(), refusal) {
+		t.Fatalf("server refusal = %v, want %q", serverErr, refusal)
+	}
+	if cliErr == nil || !strings.Contains(output.String(), "result: FAIL") || strings.Contains(output.String(), "result: PASS") {
+		t.Fatalf("server refused %v; validate must also refuse: %v\n%s", serverErr, cliErr, output.String())
+	}
+	if !strings.Contains(output.String(), serverErr.Error()) {
+		t.Fatalf("validate did not report the identical server refusal %q:\n%s", serverErr, output.String())
 	}
 }

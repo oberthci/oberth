@@ -36,9 +36,7 @@ func (j *deadlineJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
 func (j *deadlineJobs) PipelineConcurrencyGroup(context.Context, WorkflowRequest) (string, error) {
 	return "db-deadline", nil
 }
-func (j *deadlineJobs) PipelineCredentialed(context.Context, WorkflowRequest) (bool, error) {
-	return true, nil
-}
+
 func (j *deadlineJobs) Wait(context.Context, string, io.Writer) (JobResult, error) {
 	j.waits.Add(1)
 	if j.passed {
@@ -103,7 +101,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 // Exercise actual Run startup, dispatch, submitted background task and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
-	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunCredentialed", "MarkRunSubmissionStarted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
+	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "MarkRunSubmissionStarted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
 	for _, operation := range operations {
 		for _, fault := range []struct {
 			name string

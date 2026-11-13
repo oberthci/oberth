@@ -267,10 +267,7 @@ func TestExecutorIdentityResourceManifestAdmission(t *testing.T) {
 // Replay public Pod observations after final guard refinements without creating
 // further Workflows. The live test writes these only after real completion.
 func TestExecutorIdentityObservedAPIPods(t *testing.T) {
-	dir := os.Getenv("OBERTH_ARGO_LIVE_EVIDENCE")
-	if dir == "" {
-		t.Skip("requires captured live Pod evidence")
-	}
+	dir := filepath.Join("testdata", "executor-identity-argo4.0.8")
 	for _, shape := range []string{"ordinary", "resource"} {
 		t.Run(shape, func(t *testing.T) {
 			body, err := os.ReadFile(filepath.Join(dir, shape+"-pods.json"))

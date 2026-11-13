@@ -12,7 +12,7 @@ if "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
   exit 1
 fi
 grep -q 'transit' "$work/raw.yaml"
-# A6 also removed two empty profile defaults. Omit those known DEFAULT
+# Removing the controller profile also removed two empty defaults. Omit those known DEFAULT
 # leaves for this raw-values render only; runtime cleanup still removes just
 # the installer-owned Transit leaves from stored USER configuration.
 awk '!/^  controllerProfile(ConfigMap)?:/' "$fixtures/v0.22.3-cleaned-values.yaml.golden" >"$work/target-values.yaml"

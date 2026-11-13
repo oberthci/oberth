@@ -66,8 +66,9 @@ type Options struct {
 
 type Store struct {
 	// Supplied from the restore marker before owner recovery; immutable snapshots.
-	restoredRuns map[string]bool // protected by mu
-	protocol     ProtocolConfig
+	restoredRuns      map[string]bool // protected by mu
+	startupMigrations []string        // immutable; committed upgrades applied by this open
+	protocol          ProtocolConfig
 
 	authDB          *sql.DB       // reserved SSH/bearer read-only WAL readers; no cached authorization
 	sshAuthSlots    chan struct{} // per-Store admission; initialized before serving
@@ -832,6 +833,7 @@ func (s *Store) migrateWithMigrations(ctx context.Context, expectedLegacyHead *m
 			return err
 		}
 	}
+	var committed []string
 	for _, item := range items {
 		if applied[item.ID()] || item.version > targetVersion {
 			continue
@@ -897,12 +899,16 @@ func (s *Store) migrateWithMigrations(ctx context.Context, expectedLegacyHead *m
 			return fmt.Errorf("apply migration %s: %w", item.ID(), err)
 		}
 		applied[item.ID()] = true
+		committed = append(committed, item.ID())
 	}
 	if err := s.verifySchemaIdentity(ctx, tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit schema migrations: %w", err)
+	}
+	if databaseVersion > 0 {
+		s.startupMigrations = append(s.startupMigrations, committed...)
 	}
 	return nil
 }

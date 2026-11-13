@@ -4,7 +4,7 @@
 annotation selecting named, top-level ordinary container/script templates.
 The server sets their fixed UID/GID 65534 and security policy. It is not a request
 for arbitrary user IDs, groups, capabilities, Pod patches or security contexts.
-The first implementation rejects credentialed workflows, template defaults and
+The first implementation rejects workflows with secret-consuming steps, template defaults and
 selected leaves with extra init/sidecar/plugin/artifact or nested Pod shapes.
 Any declared SecretStore path rejects the entire workflow for this mode, even
 if the selected test leaf does not itself read credentials. Existing credentialed

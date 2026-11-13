@@ -7,17 +7,20 @@ import (
 	"fmt"
 )
 
-const maxArgoParallelism = 100000
+const (
+	DefaultArgoParallelism          = 4
+	DefaultArgoNamespaceParallelism = 0
+)
 
 // validateArgoLimits checks the limit flags before anything is installed.
 func validateArgoLimits(cfg Config) error {
-	for name, value := range map[string]*int{"--argo-parallelism": cfg.ArgoParallelism} {
-		if value != nil && (*value < 0 || *value > maxArgoParallelism) {
-			return fmt.Errorf("%s must be 0 (no limit) to %d", name, maxArgoParallelism)
+	for name, value := range map[string]*int{"--argo-parallelism": cfg.ArgoParallelism, "--argo-namespace-parallelism": cfg.ArgoNamespaceParallelism} {
+		if value != nil && *value < 0 {
+			return fmt.Errorf("%s must be a non-negative integer (0 means no limit)", name)
 		}
 	}
-	if cfg.ArgoParallelism != nil && cfg.SkipArgo {
-		return errors.New("--argo-parallelism configure the managed argo-workflows release; set them on your own controller when --skip-argo-workflows is used")
+	if argoLimitsRequested(cfg) && cfg.SkipArgo {
+		return errors.New("--argo-parallelism and --argo-namespace-parallelism configure the managed argo-workflows release; set them on your own controller when --skip-argo-workflows is used")
 	}
 	return nil
 }
@@ -25,7 +28,7 @@ func validateArgoLimits(cfg Config) error {
 // argoLimitsRequested reports whether this run changes any Argo limit, which
 // forces a helm upgrade of an otherwise current argo-workflows release.
 func argoLimitsRequested(cfg Config) bool {
-	return cfg.ArgoParallelism != nil
+	return cfg.ArgoParallelism != nil || cfg.ArgoNamespaceParallelism != nil
 }
 
 // argoLimitArgs renders the requested native controller cap.
@@ -33,6 +36,9 @@ func argoLimitArgs(cfg Config) []string {
 	var args []string
 	if cfg.ArgoParallelism != nil {
 		args = append(args, "--set", fmt.Sprintf("controller.parallelism=%d", *cfg.ArgoParallelism))
+	}
+	if cfg.ArgoNamespaceParallelism != nil {
+		args = append(args, "--set", fmt.Sprintf("controller.namespaceParallelism=%d", *cfg.ArgoNamespaceParallelism))
 	}
 	return args
 }

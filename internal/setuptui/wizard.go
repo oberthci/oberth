@@ -464,6 +464,13 @@ func BuildCommandLine(state *WizardState) string {
 	if c.ArgoNamespace != "" {
 		args = append(args, "--argo-namespace="+shellArg(c.ArgoNamespace))
 	}
+
+	if c.ArgoParallelism != nil {
+		args = append(args, fmt.Sprintf("--argo-parallelism=%d", *c.ArgoParallelism))
+	}
+	if c.ArgoNamespaceParallelism != nil {
+		args = append(args, fmt.Sprintf("--argo-namespace-parallelism=%d", *c.ArgoNamespaceParallelism))
+	}
 	if c.OpenBaoNamespace != "" && c.OpenBaoNamespace != installer.DefaultOpenBaoNamespace {
 		args = append(args, "--openbao-namespace="+shellArg(c.OpenBaoNamespace))
 	}

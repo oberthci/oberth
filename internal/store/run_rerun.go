@@ -103,7 +103,7 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 	}
 	spec, err := validateRunSpec(model.RunSpec{Assist: request.Assist, Reason: reason,
 		RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: request.Actor,
-		Release: source.Release, Credentialed: source.Release && source.Credentialed, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry,
+		Release: source.Release, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry,
 		TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA,
 	})
 	if err != nil {

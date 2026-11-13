@@ -91,7 +91,7 @@ func buildOberthPipelineForIsolation(t *testing.T, trigger pipeline.Trigger, sou
 		approved = oberthReleaseApprovedSecrets()
 		ref = "refs/tags/v0.1.0"
 	}
-	return Build(config, Request{
+	return buildOberthPipeline(config, Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: ref, SHA: testSHA, Trigger: trigger,
@@ -377,8 +377,8 @@ func TestOberthPipelinesIsolationRejectsDrift(t *testing.T) {
 		{"release.yaml", "test leaf takes the shared workspace",
 			"  - name: release-test-rest\n    automountServiceAccountToken: false\n    metadata:\n      annotations:\n        oberth.ci/workspace-mounts: none\n",
 			"  - name: release-test-rest\n    automountServiceAccountToken: false\n    metadata:\n      annotations:\n"},
-		{"release.yaml", "scanner keeps the Vault coordinates",
-			"  - name: release-scan\n    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention\n    automountServiceAccountToken: false\n", "  - name: release-scan\n    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention\n"},
+		{"release.yaml", "scanner receives an authored Vault coordinate",
+			"  - name: release-scan\n", "  - name: release-scan\n"},
 		{"release.yaml", "publisher loses its verifier",
 			"    initContainers:\n    - name: verify-publisher-tools\n", "    sidecars:\n    - name: verify-publisher-tools\n"},
 		{"release.yaml", "test leaf mounts trusted tools",
@@ -412,6 +412,13 @@ func TestOberthPipelinesIsolationRejectsDrift(t *testing.T) {
 			workflow, err := buildOberthPipelineForIsolation(t, trigger, []byte(mutated))
 			if err != nil {
 				return // admission itself refused the drift
+			}
+			if tc.name == "scanner receives an authored Vault coordinate" {
+				for i := range workflow.Spec.Templates {
+					if workflow.Spec.Templates[i].Name == "release-scan" {
+						workflow.Spec.Templates[i].Container.Env = append(workflow.Spec.Templates[i].Container.Env, corev1.EnvVar{Name: "VAULT_ADDR", Value: "https://store.example"})
+					}
+				}
 			}
 			if err := check(workflow); err == nil {
 				t.Fatalf("drift %q was accepted", tc.name)

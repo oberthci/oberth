@@ -45,10 +45,10 @@ func TestRunAccessListFormatsGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "oberth", "release", "cosign-secret", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "oberth", ".oberth/release.yaml", "release", "cosign-secret", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -79,10 +79,10 @@ func TestRunAccessListFiltersByRepo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "oberth", "release", "cosign-secret", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "oberth", ".oberth/release.yaml", "release", "cosign-secret", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -569,10 +569,10 @@ func TestRunAccessListShowsRevokedGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Revoke(context.Background(), "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Revoke(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -623,7 +623,7 @@ func TestRunAccessListJSONEmitsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "github/oberthci/oberth", "release", "oberth/data/release/cosign-secret", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "github/oberthci/oberth", ".oberth/release.yaml", "release", "oberth/data/release/cosign-secret", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -704,10 +704,10 @@ func TestRunAccessListJSONRevokedGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Revoke(context.Background(), "terraform", "*", "terraform/credentials", "revoker@localhost"); err != nil {
+	if _, err := database.Revoke(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "revoker@localhost"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -744,7 +744,7 @@ func TestRunAccessListJSONDefaultOutputUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(context.Background(), "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -779,16 +779,15 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 	}
 	// Seed qualified grants: two named-step rows and one wildcard row for
 	// oberth, one wildcard row for terraform. The per-repo identity carries
-	// wildcard grants only (issue #814), so the expected count proves the
-	// parser reads the STEP column of the real emitter output — not that the
-	// named rows were lost.
+	// no explicit grants; workflow-scoped named and wildcard identities
+	// carry the paths. The structured round trip below checks them.
 	for _, g := range []struct{ repo, step, secret string }{
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
 		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
 		{"github/acme/terraform", "*", "oberth/upstream/acme/terraform/gcp-sa"},
 	} {
-		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
+		if _, err := database.Grant(context.Background(), g.repo, ".oberth/release.yaml", g.step, g.secret, "admin@localhost"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -809,14 +808,10 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 	}
 
 	assertIdentitySet(t, identities, map[string]int{
-		"codeberg/oberthci/oberth": 1,
-		"github/acme/terraform":    1,
+		"codeberg/oberthci/oberth": 0,
+		"github/acme/terraform":    0,
 	})
-	for _, id := range identities {
-		if id.Repo == "oberth" && id.Grants[0] != "oberth/data/release/gar-reader-key" {
-			t.Fatalf("oberth per-repo grant must be the wildcard row, got %v\nraw output:\n%s", id.Grants, tabOutput.String())
-		}
-	}
+
 }
 
 func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
@@ -827,15 +822,15 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Same seed as the tabwriter round-trip: the per-repo side keeps the
-	// wildcard row only (issue #814); the named rows must reach the per-step
-	// side through the same real emitter output.
+	// repository identity carries no explicit paths; all rows reach the scoped
+	// identity side through the same real emitter output.
 	for _, g := range []struct{ repo, step, secret string }{
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
 		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
 		{"github/acme/terraform", "*", "oberth/upstream/acme/terraform/gcp-sa"},
 	} {
-		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
+		if _, err := database.Grant(context.Background(), g.repo, ".oberth/release.yaml", g.step, g.secret, "admin@localhost"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -856,8 +851,8 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 	}
 
 	assertIdentitySet(t, identities, map[string]int{
-		"codeberg/oberthci/oberth": 1,
-		"github/acme/terraform":    1,
+		"codeberg/oberthci/oberth": 0,
+		"github/acme/terraform":    0,
 	})
 
 	// The named-step rows are not lost: they round-trip to the per-step
@@ -867,9 +862,25 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 		t.Fatalf("JSON round-trip parse (with steps) failed: %v", err)
 	}
 	steps := installer.DerivePerStepIdentities(repoIdentities, rawGrants)
-	if len(steps) != 1 || steps[0].Repo != "oberth" || steps[0].Step != "release" || len(steps[0].GrantPaths) != 3 {
-		t.Fatalf("expected one per-step identity oberth/release with 3 paths (2 named + 1 inherited), got %+v\nraw output:\n%s", steps, jsonOutput.String())
+	if len(steps) != 3 {
+		t.Fatalf("expected three workflow-scoped identities, got %+v", steps)
 	}
+	found := false
+	for _, id := range steps {
+		if id.Workflow != ".oberth/release.yaml" {
+			t.Fatal("file scope lost", id)
+		}
+		if id.Repo == "oberth" && id.Step == "release" {
+			found = true
+			if len(id.GrantPaths) != 3 {
+				t.Fatal("named and same-file wildcard paths lost", id)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("named identity lost", steps)
+	}
+
 }
 
 // assertIdentitySet checks that identities match a map of

@@ -69,7 +69,7 @@ func TestPromotionTagQueuesOnceAcrossCrashAfterAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Release || run.Credentialed || run.RefKind != model.RefTag || run.Trigger != "tag" || run.SHA != strings.Repeat("e", 40) || run.TestedSHA != f.initial {
+	if run.Release || run.RefKind != model.RefTag || run.Trigger != "tag" || run.SHA != strings.Repeat("e", 40) || run.TestedSHA != f.initial {
 		t.Fatalf("wrong tag run: %+v", run)
 	}
 	// Replay the pending request after an upstream rewind. The already committed
@@ -146,7 +146,7 @@ func TestPromotionTagRealPublisherEnqueuesOrdinaryTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.SHA != object || run.TestedSHA != f.initial || run.Release || run.Credentialed || run.RefKind != model.RefTag {
+	if run.SHA != object || run.TestedSHA != f.initial || run.Release || run.RefKind != model.RefTag {
 		t.Fatalf("real publisher admission: %+v", run)
 	}
 }

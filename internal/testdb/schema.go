@@ -386,11 +386,20 @@ DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-
 `
 
 // PostWorkflowCapabilityUIDDowngrade reconstructs an empty UID-less table only in disposable historical fixtures.
-const PostWorkflowCapabilityUIDDowngrade = historicalRestartTimingSchema + `
+// postRunGrantClassificationDowngrade reconstructs the old column only in
+// disposable historical fixtures before replaying forward migrations.
+const postRunGrantClassificationDowngrade = `
+ALTER TABLE runs ADD COLUMN credentialed INTEGER NOT NULL DEFAULT 0 CHECK (credentialed IN (0, 1));
+DELETE FROM schema_migrations WHERE id='20261113193452-remove-run-credentialed-14b11551632068123f2deef9e27ca7dc';
+DELETE FROM schema_migrations WHERE id='20261113193519-scope-secret-approvals-to-workflow-4e48838f64a9b32ddba9d914280daa25';
+`
+
+const PostWorkflowCapabilityUIDDowngrade = historicalRestartTimingSchema + postRunGrantClassificationDowngrade + `
 DELETE FROM schema_migrations WHERE id='20261113181825-remove-restart-timings-370d05c58486149250a7139eb6afdca7';
 DELETE FROM schema_migrations WHERE id='20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153';
 DELETE FROM schema_migrations WHERE id='20261113190600-remove-admission-timing-18a8ff23a732be469158310b6aab30a5';
 DELETE FROM schema_migrations WHERE id='20261113190559-remove-trusted-plan-tables-4f79e6850c236b51af74321a36c610dc';
+
 DELETE FROM schema_migrations WHERE id='20261113073438-remove-unused-capability-recovery-842b529121af8cb6b818c84fa78a5024';
 DROP TABLE IF EXISTS workflow_capability_recoveries;
 CREATE TABLE workflow_capability_recoveries (

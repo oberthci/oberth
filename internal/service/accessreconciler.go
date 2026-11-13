@@ -21,6 +21,8 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
+var ErrUnscopedSecretGrant = errors.New("workflow is required; unscoped secret approvals are rejected")
+
 const (
 	secretAccessConfigMapName = "oberth-secret-access"
 	secretAccessConfigMapKey  = "grants"
@@ -28,12 +30,56 @@ const (
 	watchRetryDelay           = 5 * time.Second
 )
 
+func (r *AccessReconciler) clearUnscopedMigrationEntries(ctx context.Context, cm *corev1.ConfigMap) error {
+	var entries []SecretAccessGrantEntry
+	if err := yaml.Unmarshal([]byte(cm.Data[secretAccessConfigMapKey]), &entries); err != nil {
+		return r.configMapGrantError(err)
+	}
+	kept := make([]SecretAccessGrantEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Workflow != "" {
+			kept = append(kept, entry)
+		}
+	}
+	count := len(entries) - len(kept)
+	for i, entry := range kept {
+		if err := ValidateGrantEntry(i, entry); err != nil {
+			return r.configMapGrantError(err)
+		}
+	}
+	if count > 0 {
+		data, err := MarshalGrants(kept)
+		if err != nil {
+			return err
+		}
+		cm.Data[secretAccessConfigMapKey] = data
+		if _, err = r.client.CoreV1().ConfigMaps(r.namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("clear unscoped entries from ConfigMap %s/%s: %w", r.namespace, secretAccessConfigMapName, err)
+		}
+	}
+	r.logger.Printf("secret approval scope migration: removed %d unscoped entries from ConfigMap %s/%s", count, r.namespace, secretAccessConfigMapName)
+	return nil
+}
+
+func (r *AccessReconciler) configMapGrantError(err error) error {
+	return fmt.Errorf("secret access ConfigMap %s/%s: %w; remove the invalid entry with kubectl -n %s edit configmap %s, then re-approve with an exact workflow file", r.namespace, secretAccessConfigMapName, err, r.namespace, secretAccessConfigMapName)
+}
+
+func (r *AccessReconciler) parseConfigMapGrants(data string) ([]SecretAccessGrantEntry, error) {
+	entries, err := ParseGrants(data)
+	if err != nil {
+		return nil, r.configMapGrantError(err)
+	}
+	return entries, nil
+}
+
 // SecretAccessGrantEntry is the YAML representation of one grant in the
 // ConfigMap's grants list.
 type SecretAccessGrantEntry struct {
-	Repo   string `json:"repo"   yaml:"repo"`
-	Step   string `json:"step"   yaml:"step"`
-	Secret string `json:"secret" yaml:"secret"`
+	Repo     string `json:"repo"   yaml:"repo"`
+	Workflow string `json:"workflow" yaml:"workflow"`
+	Step     string `json:"step"   yaml:"step"`
+	Secret   string `json:"secret" yaml:"secret"`
 }
 
 // AccessReconciler synchronizes the oberth-secret-access ConfigMap with
@@ -47,12 +93,13 @@ type AccessReconciler struct {
 	mu             sync.Mutex
 	resyncInterval time.Duration
 	// reconcileSucceeded tracks whether at least one successful reconciliation
-	// has completed. Credentialed admission must not proceed before the initial
+	// has completed. Admission of granted secret steps must not proceed before the initial
 	// reconcile succeeds, because a transient Get failure at startup would
 	// leave stale grants active in sqlite — a failed reconciliation should
-	// block credentialed submission rather than silently running with stale
+	// block submission of granted secret steps rather than silently running with stale
 	// state.
-	reconcileSucceeded bool
+	reconcileSucceeded        bool
+	clearUnscopedForMigration bool
 
 	// OnReconcileSuccess is called after every successful reconciliation,
 	// outside the reconciler's own lock. It is intended for downstream
@@ -65,16 +112,15 @@ type AccessReconciler struct {
 // NewAccessReconciler builds a reconciler that watches the named namespace
 // for the oberth-secret-access ConfigMap.
 func NewAccessReconciler(client kubernetes.Interface, namespace string, accessStore SecretAccessStore, logger *log.Logger) *AccessReconciler {
-	return &AccessReconciler{
-		client:    client,
-		namespace: namespace,
-		store:     accessStore,
-		logger:    logger,
+	r := &AccessReconciler{client: client, namespace: namespace, store: accessStore, logger: logger}
+	if receipts, ok := accessStore.(interface{ AppliedStartupMigration(string) bool }); ok {
+		r.clearUnscopedForMigration = receipts.AppliedStartupMigration(store.WorkflowGrantScopeMigrationID)
 	}
+	return r
 }
 
 // ReconcileHealthy reports whether at least one successful reconciliation has
-// completed. Credentialed admission checks this to block jobs while the
+// completed. Admission of granted secret steps checks this to block jobs while the
 // ConfigMap cannot be read — a transient initial Get failure must not leave
 // stale sqlite grants active for admission to consume.
 func (r *AccessReconciler) ReconcileHealthy() bool {
@@ -101,6 +147,7 @@ func (r *AccessReconciler) reconcileLocked(ctx context.Context, actorPrefix stri
 	cm, err := r.client.CoreV1().ConfigMaps(r.namespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
+			r.clearUnscopedForMigration = false
 			absentActor := "configmap@absent"
 			if actorPrefix != "" {
 				absentActor = actorPrefix + "+" + absentActor
@@ -120,14 +167,22 @@ func (r *AccessReconciler) reconcileLocked(ctx context.Context, actorPrefix stri
 		actor = actorPrefix + "+" + actor
 	}
 
-	desired, err := ParseGrants(cm.Data[secretAccessConfigMapKey])
+	if r.clearUnscopedForMigration {
+		if err := r.clearUnscopedMigrationEntries(ctx, cm); err != nil {
+			return err
+		}
+		r.clearUnscopedForMigration = false
+	}
+	desired, err := r.parseConfigMapGrants(cm.Data[secretAccessConfigMapKey])
 	if err != nil {
 		r.logger.Printf("ERROR: unparseable grants in ConfigMap %s/%s: %v; reconciling to zero grants", r.namespace, secretAccessConfigMapName, err)
 		if revokeErr := r.revokeAllLocked(ctx, actor); revokeErr != nil {
 			return revokeErr
 		}
-		// An unparseable ConfigMap IS a successful reconciliation (to zero
-		// grants). The health gate blocks on Get failure, not on content.
+		if errors.Is(err, ErrUnscopedSecretGrant) {
+			r.reconcileSucceeded = false
+			return fmt.Errorf("reject secret access ConfigMap %s/%s: %w", r.namespace, secretAccessConfigMapName, err)
+		}
 		r.reconcileSucceeded = true
 		return nil
 	}
@@ -167,20 +222,20 @@ func (r *AccessReconciler) reconcileLocked(ctx context.Context, actorPrefix stri
 			continue
 		}
 		entry.Repo = canonical
-		key := entry.Repo + "\x00" + entry.Step + "\x00" + entry.Secret
+		key := entry.Repo + "\x00" + entry.Workflow + "\x00" + entry.Step + "\x00" + entry.Secret
 		desiredSet[key] = entry
 	}
 
 	activeSet := make(map[string]store.SecretAccessGrant, len(active))
 	for _, grant := range active {
-		key := grant.Repo + "\x00" + grant.Step + "\x00" + grant.Secret
+		key := grant.Repo + "\x00" + grant.Workflow + "\x00" + grant.Step + "\x00" + grant.Secret
 		activeSet[key] = grant
 	}
 
 	// Add grants present in ConfigMap but missing from sqlite.
 	for key, entry := range desiredSet {
 		if _, exists := activeSet[key]; !exists {
-			if _, err := r.store.Grant(ctx, entry.Repo, entry.Step, entry.Secret, actor); err != nil {
+			if _, err := r.store.Grant(ctx, entry.Repo, entry.Workflow, entry.Step, entry.Secret, actor); err != nil {
 				return fmt.Errorf("grant %s/%s/%s: %w", entry.Repo, entry.Step, entry.Secret, err)
 			}
 		}
@@ -189,7 +244,7 @@ func (r *AccessReconciler) reconcileLocked(ctx context.Context, actorPrefix stri
 	// Revoke grants present in sqlite but absent from ConfigMap.
 	for key, grant := range activeSet {
 		if _, exists := desiredSet[key]; !exists {
-			if _, err := r.store.Revoke(ctx, grant.Repo, grant.Step, grant.Secret, actor); err != nil {
+			if _, err := r.store.Revoke(ctx, grant.Repo, grant.Workflow, grant.Step, grant.Secret, actor); err != nil {
 				return fmt.Errorf("revoke %s/%s/%s: %w", grant.Repo, grant.Step, grant.Secret, err)
 			}
 		}
@@ -234,7 +289,7 @@ func (r *AccessReconciler) revokeAllLocked(ctx context.Context, actor string) er
 		return fmt.Errorf("list active grants for revocation: %w", err)
 	}
 	for _, grant := range active {
-		if _, err := r.store.Revoke(ctx, grant.Repo, grant.Step, grant.Secret, actor); err != nil {
+		if _, err := r.store.Revoke(ctx, grant.Repo, grant.Workflow, grant.Step, grant.Secret, actor); err != nil {
 			return fmt.Errorf("revoke %s/%s/%s: %w", grant.Repo, grant.Step, grant.Secret, err)
 		}
 	}
@@ -275,7 +330,7 @@ func (r *AccessReconciler) Watch(ctx context.Context) error {
 func (r *AccessReconciler) watchOnce(ctx context.Context, resync <-chan time.Time) error {
 	// Reconcile before establishing the watch so a revocation that occurred
 	// during the gap between the old watch closing and this new one starting
-	// is applied before any credentialed submission is allowed. Without this
+	// is applied before any submission of granted secret steps is allowed. Without this
 	// a revocation in the gap would stay active until the next periodic resync.
 	if err := r.Reconcile(ctx); err != nil {
 		r.logger.Printf("reconcile on watch reconnect error: %v", err)
@@ -360,7 +415,7 @@ func (r *AccessReconciler) UpdateConfigMap(ctx context.Context, actor string, mo
 		return r.reconcileLocked(ctx, actor)
 	}
 
-	existing, parseErr := ParseGrants(cm.Data[secretAccessConfigMapKey])
+	existing, parseErr := r.parseConfigMapGrants(cm.Data[secretAccessConfigMapKey])
 	if parseErr != nil {
 		return fmt.Errorf("parse existing grants: %w", parseErr)
 	}
@@ -414,6 +469,9 @@ func ValidateGrantEntry(index int, entry SecretAccessGrantEntry) error {
 	if strings.TrimSpace(entry.Repo) == "" || strings.TrimSpace(entry.Step) == "" || strings.TrimSpace(entry.Secret) == "" {
 		return fmt.Errorf("entry %d: repo, step, and secret are required", index)
 	}
+	if err := model.ValidateWorkflowFile(entry.Workflow); err != nil {
+		return fmt.Errorf("entry %d: %w", index, err)
+	}
 	if !grantEntryRepoPattern.MatchString(entry.Repo) {
 		return fmt.Errorf("entry %d: repo %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", index, entry.Repo)
 	}
@@ -443,12 +501,17 @@ func ParseGrants(data string) ([]SecretAccessGrantEntry, error) {
 	if err := yaml.Unmarshal([]byte(data), &entries); err != nil {
 		return nil, err
 	}
+	scoped := make([]SecretAccessGrantEntry, 0, len(entries))
 	for i, entry := range entries {
+		if entry.Workflow == "" {
+			return nil, fmt.Errorf("entry %d: %w; re-approve with an exact workflow file", i, ErrUnscopedSecretGrant)
+		}
 		if err := ValidateGrantEntry(i, entry); err != nil {
 			return nil, err
 		}
+		scoped = append(scoped, entry)
 	}
-	return entries, nil
+	return scoped, nil
 }
 
 // MarshalGrants serializes grants to YAML for ConfigMap storage. The "secret"
@@ -467,32 +530,32 @@ func MarshalGrants(entries []SecretAccessGrantEntry) (string, error) {
 
 // AddGrant returns a modify function that adds one grant entry, deduplicating
 // against existing entries by literal string comparison.
-func AddGrant(repo, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
+func AddGrant(repo, workflow, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 	return func(existing []SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 		for _, entry := range existing {
-			if entry.Repo == repo && entry.Step == step && entry.Secret == secret {
+			if entry.Repo == repo && entry.Workflow == workflow && entry.Step == step && entry.Secret == secret {
 				return existing, nil // already present
 			}
 		}
-		return append(existing, SecretAccessGrantEntry{Repo: repo, Step: step, Secret: secret}), nil
+		return append(existing, SecretAccessGrantEntry{Repo: repo, Workflow: workflow, Step: step, Secret: secret}), nil
 	}
 }
 
 // RemoveGrant returns a modify function that removes one grant entry by literal
 // string comparison. Returns an error if the entry is not found.
-func RemoveGrant(repo, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
+func RemoveGrant(repo, workflow, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 	return func(existing []SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 		result := make([]SecretAccessGrantEntry, 0, len(existing))
 		found := false
 		for _, entry := range existing {
-			if entry.Repo == repo && entry.Step == step && entry.Secret == secret {
+			if entry.Repo == repo && entry.Workflow == workflow && entry.Step == step && entry.Secret == secret {
 				found = true
 				continue
 			}
 			result = append(result, entry)
 		}
 		if !found {
-			return nil, fmt.Errorf("no grant for %s/%s/%s in ConfigMap", repo, step, secret)
+			return nil, fmt.Errorf("no grant for %s workflow %s step %s secret %s in ConfigMap", repo, workflow, step, secret)
 		}
 		return result, nil
 	}
@@ -503,7 +566,7 @@ func RemoveGrant(repo, step, secret string) func([]SecretAccessGrantEntry) ([]Se
 // qualified add beside an existing bare entry of the same canonical repo is a
 // no-op. Ambiguous entries are skipped during dedup (fail-closed: the add
 // proceeds). Resolution errors abort.
-func (r *AccessReconciler) AddGrantCanonical(ctx context.Context, repo, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
+func (r *AccessReconciler) AddGrantCanonical(ctx context.Context, repo, workflow, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 	return func(existing []SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 		for _, entry := range existing {
 			canonical, ok, err := r.canonicalGrantRepo(ctx, entry.Repo)
@@ -514,11 +577,11 @@ func (r *AccessReconciler) AddGrantCanonical(ctx context.Context, repo, step, se
 				// Ambiguous bare entry: cannot match; skip.
 				continue
 			}
-			if canonical == repo && entry.Step == step && entry.Secret == secret {
+			if canonical == repo && entry.Workflow == workflow && entry.Step == step && entry.Secret == secret {
 				return existing, nil // already present (canonical match)
 			}
 		}
-		return append(existing, SecretAccessGrantEntry{Repo: repo, Step: step, Secret: secret}), nil
+		return append(existing, SecretAccessGrantEntry{Repo: repo, Workflow: workflow, Step: step, Secret: secret}), nil
 	}
 }
 
@@ -531,7 +594,7 @@ func (r *AccessReconciler) AddGrantCanonical(ctx context.Context, repo, step, se
 // tuple matches are removed (bare and qualified duplicates both go). Surviving
 // entries preserve their original spelling. Returns ErrInvalidInput when the
 // canonical tuple is truly absent from the ConfigMap.
-func (r *AccessReconciler) RemoveGrantCanonical(ctx context.Context, repo, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
+func (r *AccessReconciler) RemoveGrantCanonical(ctx context.Context, repo, workflow, step, secret string) func([]SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 	return func(existing []SecretAccessGrantEntry) ([]SecretAccessGrantEntry, error) {
 		result := make([]SecretAccessGrantEntry, 0, len(existing))
 		found := false
@@ -545,14 +608,14 @@ func (r *AccessReconciler) RemoveGrantCanonical(ctx context.Context, repo, step,
 				result = append(result, entry)
 				continue
 			}
-			if canonical == repo && entry.Step == step && entry.Secret == secret {
+			if canonical == repo && entry.Workflow == workflow && entry.Step == step && entry.Secret == secret {
 				found = true
 				continue // remove this entry
 			}
 			result = append(result, entry)
 		}
 		if !found {
-			return nil, fmt.Errorf("%w: no grant for %s/%s/%s in ConfigMap", ErrInvalidInput, repo, step, secret)
+			return nil, fmt.Errorf("%w: no grant for %s workflow %s step %s secret %s in ConfigMap", ErrInvalidInput, repo, workflow, step, secret)
 		}
 		return result, nil
 	}

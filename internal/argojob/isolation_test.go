@@ -59,7 +59,7 @@ func TestBuildPreservesTokenOptOut(t *testing.T) {
 			if tmpl.AutomountServiceAccountToken == nil || *tmpl.AutomountServiceAccountToken {
 				t.Fatal("test-only leaf regained service-account token")
 			}
-			if tmpl.ServiceAccountName != testCredentialedAcct {
+			if tmpl.ServiceAccountName != testPipelineAcct {
 				t.Fatal("forced identity changed")
 			}
 			for _, env := range tmpl.Container.Env {

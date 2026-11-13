@@ -29,8 +29,8 @@ func (s *Store) BindExecutionTarget(ctx context.Context, binding model.Execution
 	defer func() { _ = tx.Rollback() }()
 	var repo int64
 	var ref, sha, tested, workflow, kind, trigger, schedule string
-	var release, credentialed bool
-	if err := tx.QueryRowContext(ctx, `SELECT repo_id,ref,sha,tested_sha,job_name,ref_kind,release,credentialed,trigger,schedule_entry FROM runs WHERE id=?`, binding.RunID).Scan(&repo, &ref, &sha, &tested, &workflow, &kind, &release, &credentialed, &trigger, &schedule); err != nil {
+	var release bool
+	if err := tx.QueryRowContext(ctx, `SELECT repo_id,ref,sha,tested_sha,job_name,ref_kind,release,trigger,schedule_entry FROM runs WHERE id=?`, binding.RunID).Scan(&repo, &ref, &sha, &tested, &workflow, &kind, &release, &trigger, &schedule); err != nil {
 		return err
 	}
 	if tested == "" {
@@ -43,7 +43,7 @@ func (s *Store) BindExecutionTarget(ctx context.Context, binding model.Execution
 	if qualified != binding.Repository {
 		return ErrInvalid
 	}
-	if repo != binding.RepositoryID || ref != binding.Ref || sha != binding.SHA || tested != binding.TestedSHA || workflow != binding.Workflow || kind != binding.RefKind || trigger != binding.Trigger || schedule != binding.ScheduleEntry || (binding.Target != "local" && (kind != string(model.RefBranch) || trigger != "branch" || schedule != "" || release || credentialed)) {
+	if repo != binding.RepositoryID || ref != binding.Ref || sha != binding.SHA || tested != binding.TestedSHA || workflow != binding.Workflow || kind != binding.RefKind || trigger != binding.Trigger || schedule != binding.ScheduleEntry || (binding.Target != "local" && (kind != string(model.RefBranch) || trigger != "branch" || schedule != "" || release)) {
 		return ErrInvalid
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO execution_target_bindings(run_id,workflow_name,binding_json) VALUES(?,?,?) ON CONFLICT(run_id) DO NOTHING`, binding.RunID, binding.Workflow, string(body))

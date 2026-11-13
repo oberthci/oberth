@@ -21,7 +21,7 @@ func builtOberthRelease(t *testing.T) *wfv1.Workflow {
 	t.Helper()
 	config := oberthConfig()
 	config.ReleaseCacheRoot = "/var/cache/oberth/release"
-	workflow, err := Build(config, Request{
+	workflow, err := buildOberthPipeline(config, Request{
 		RunID: "run-public", Name: "oberth-oberth-run-public-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "v1.2.3", SHA: testSHA,
 		Trigger: pipeline.TriggerRelease, Source: loadPipeline(t, "release.yaml"),

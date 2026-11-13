@@ -7,6 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type fakePerRepoStore struct {
@@ -23,11 +24,30 @@ func (s fakePerRepoStore) ListUpstreams(_ context.Context) ([]model.Upstream, er
 	return append([]model.Upstream(nil), s.upstreams...), nil
 }
 
-func (s fakePerRepoStore) ActiveSecretGrants(_ context.Context, repoID int64) (map[string]map[string]bool, error) {
+func (s fakePerRepoStore) ActiveSecretGrants(_ context.Context, repoID int64, workflow string) (map[string]map[string]bool, error) {
 	if s.grants == nil {
 		return nil, nil
 	}
 	return s.grants[repoID], nil
+}
+
+func (s fakePerRepoStore) SecretAccessList(_ context.Context, qualified string, _ bool) ([]store.SecretAccessGrant, error) {
+	var result []store.SecretAccessGrant
+	for _, repo := range s.repos {
+		for _, upstream := range s.upstreams {
+			if upstream.ID != repo.UpstreamID || model.CanonicalRepoKey(upstream.Name, upstream.Org(), repo.Name) != qualified {
+				continue
+			}
+			for step, secrets := range s.grants[repo.ID] {
+				for secret, allowed := range secrets {
+					if allowed {
+						result = append(result, store.SecretAccessGrant{Workflow: ".oberth/release.yaml", Repo: qualified, Step: step, Secret: secret})
+					}
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 func TestBuildPerRepoIdentitiesIncludesReposWithGrants(t *testing.T) {

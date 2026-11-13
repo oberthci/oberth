@@ -471,6 +471,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 
+	mutationStarted := time.Now()
 	// Build and execute the helm upgrade.
 	phase(w, "Chart", "updating", color)
 	args, flags := upgradeHelmArgs(cfg, chart, imageRef, compatibility)
@@ -496,6 +497,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	phase(w, "Oberth", "✓ "+displayVersion(runningVersion), color)
 
+	deps.Output = w
+	printSecretApprovalReset(ctx, deps, cfg.Namespace, mutationStarted)
 	result.Upgraded = true
 	deps.Output = w
 	details := map[string]any{"from": currentVersion, "to": targetVersion}

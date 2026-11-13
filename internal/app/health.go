@@ -529,7 +529,7 @@ func (o *SecretStoreObserver) Observe(result string) {
 	}
 	switch current {
 	case "sealed":
-		o.Log("WARNING: secret store SEALED at %s \u2014 credentialed releases and access grants will fail until unsealed (branch CI unaffected)", o.Address)
+		o.Log("WARNING: secret store SEALED at %s \u2014 granted secret-consuming steps and access grants will fail until unsealed; ordinary steps are unaffected", o.Address)
 	case "failing":
 		o.Log("WARNING: secret store probe failing at %s: %s", o.Address, result)
 	case "ready":

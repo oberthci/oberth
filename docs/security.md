@@ -22,7 +22,7 @@
   verification cycle; a new cycle may establish a new pin.
 
 - Pipeline leaves can opt out of their pipeline token and automatic shared
-  workspace access even inside credentialed workflows. Explicit false token
+  workspace access even inside workflows with secret-consuming steps. Explicit false token
   requests, read-only mount aliases and executor mirrors are preserved through
   controller Pod construction. These controls grant no new identity authority;
   see [workspace isolation](workspace-isolation.md) for supported shapes,
@@ -72,10 +72,10 @@
   capacity.
 - CI Jobs have no Secret volumes. Release Secrets and writable caches are wholly
   separate from branch CI.
-- Pipeline pods run under trigger-selected ServiceAccounts: no declared secret
-  paths means the tokenless pipeline identity on every trigger; declared paths
-  bind release runs to the credentialed identity and CI runs to the separate
-  ci-secrets identity. The two credentialed OpenBao roles bind those exact
+- Pipeline pods run under trigger-selected ServiceAccounts: no granted store
+  consumer means the tokenless pipeline identity on every trigger; granted steps
+  select the release-login identity or the separate
+  ci-secrets identity. The two OpenBao roles bind those exact
   (namespace, ServiceAccount) pairs, the ci-secrets policy covers the
   upstream subtree only and never receives approval-table grants, and only
   the release-tier policy carries exact release-secret grants — so a branch

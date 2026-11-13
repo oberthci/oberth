@@ -423,17 +423,17 @@ one with a non-admin token is still answered with the server's refusal.
 | `workflow_capability_revoke` | Revoke the repository's operator capability; blocks new authorization |
 | `workflow_capability_get` | Read the repository's current operator capability |
 | `access_list` | List secret access grants for a repository |
-| `access_allow` | Grant a step access to a secret path (admin-only) |
-| `access_revoke` | Revoke a step's access to a secret path (admin-only) |
+| `access_allow` | Grant a step in an exact workflow file access to a secret path (admin-only) |
+| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path (admin-only) |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix
 when present. For example, `oberth/data/release/cosign-secret` is a different
 identity from `release/cosign-secret`; the server does not expand or normalize
-one into the other. Copy the listed `repo`, `step`, and `secret` tuple when
+one into the other. Both tools require `workflow`, the exact clean repository-relative file, such as `.oberth/release.yaml`; no default or wildcard file is accepted. Copy the listed `repo`, `workflow`, `step`, and `secret` tuple when
 revoking a grant. The grant ID is returned as evidence, not accepted as a revoke
 selector. `step: "*"` selects the wildcard grant itself; it does not revoke
-named-step grants. A missing exact tuple is refused without changing grants.
+named-step grants or approvals in another workflow file. `access_dismiss` also requires `workflow`. A missing exact tuple is refused without changing grants.
 Revocation removes admission approval immediately; complete the documented
 `oberth secretstore sync` procedure to remove the corresponding Bao policy read.
 

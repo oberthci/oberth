@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -128,13 +125,14 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		result.TargetVersion = DefaultArgoChartVersion
 	}
 
-	if !exists && cfg.ArgoParallelism == nil {
-		// A fresh controller gets a run ceiling sized to the cluster instead of
-		// none: on a single node a push storm otherwise starts every run at
-		// once. An explicit --argo-parallelism (0 is no limit) always wins.
-		if parallelism, ok := defaultArgoParallelism(ctx, deps); ok {
+	if !exists {
+		if cfg.ArgoParallelism == nil {
+			parallelism := DefaultArgoParallelism
 			cfg.ArgoParallelism = &parallelism
-			_, _ = fmt.Fprintf(deps.Output, "Argo parallelism defaults to %d (half the cluster's allocatable CPUs, at least 2); change it with --argo-parallelism.\n", parallelism)
+		}
+		if cfg.ArgoNamespaceParallelism == nil {
+			parallelism := DefaultArgoNamespaceParallelism
+			cfg.ArgoNamespaceParallelism = &parallelism
 		}
 	}
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
@@ -263,9 +261,9 @@ func VerifyArgoController(ctx context.Context, cfg Config, deps Deps) error {
 // When the installer manages a secret store and no explicit --argo-vault-address
 // was given, the effective address defaults to the installed store's service
 // address. This ensures that the first push after a default
-// `oberth install --install-secretstore` produces credentialed release steps
+// `oberth install --install-secretstore` produces granted secret-consuming steps
 // that can reach the installed store — without this, argo.vault.address stays
-// empty and credentialed release steps cannot reach the installed store.
+// empty and granted secret-consuming steps cannot reach the installed store.
 func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	ns := cfg.ArgoNamespace
 	if ns == "" {
@@ -278,7 +276,7 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	// store the installer just provisioned. The HTTPS guard mirrors the
 	// validator's own rejection of plaintext vault addresses: release-tier
 	// credentials traverse the network, and dev-mode HTTP stores are not
-	// wired here because they cannot serve credentialed releases. The
+	// wired here because they cannot serve granted secret-consuming steps. The
 	// CA-pinning condition below then fires automatically because address
 	// equals ServiceAddress.
 	if address == "" && cfg.wantsSecretStore() {
@@ -339,26 +337,4 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 		"--set", "argo.goProxy.port=8444",
 	)
 	return values
-}
-
-// defaultArgoParallelism is half the cluster's allocatable CPUs, at least 2,
-// or false when no node can be read (the controller then keeps no limit).
-func defaultArgoParallelism(ctx context.Context, deps Deps) (int, bool) {
-	if deps.KubeClient == nil {
-		return 0, false
-	}
-	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil || len(nodes.Items) == 0 {
-		return 0, false
-	}
-	var millis int64
-	for _, node := range nodes.Items {
-		if cpu, ok := node.Status.Allocatable[corev1.ResourceCPU]; ok {
-			millis += cpu.MilliValue()
-		}
-	}
-	if millis <= 0 {
-		return 0, false
-	}
-	return int(min(max(millis/2000, 2), maxArgoParallelism)), true
 }

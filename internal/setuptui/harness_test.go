@@ -314,6 +314,8 @@ func (h *harness) answerAllSteps() {
 	h.enter()
 	h.expectQuestion("cluster.network")
 	h.enter()
+	h.expectQuestion("cluster.argo-limits")
+	h.enter()
 	h.expectQuestion("store.mode")
 	h.enter()
 	h.expectQuestion("store.anchoring")

@@ -19,7 +19,7 @@ func TestOrdinaryTagReceiveKeepsObjectAndCommitWithoutRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queued.Release || queued.Credentialed || queued.SHA != object || queued.TestedSHA != commit || queued.RefKind != model.RefTag {
+	if queued.Release || queued.SHA != object || queued.TestedSHA != commit || queued.RefKind != model.RefTag {
 		t.Fatalf("tag authority/provenance: %+v", queued.Run)
 	}
 	duplicate, err := s.EnqueueReceiveEvent(t.Context(), event, spec)

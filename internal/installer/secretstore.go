@@ -684,24 +684,8 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 		}
 	}
 
-	credentialedGrantPaths, err := credentialedPolicyPaths(defaultKVPrefix, cfg.CredentialedSecretPaths)
-	if err != nil {
-		return result, err
-	}
-
-	// When per-repo identities exist, strip the shared policies to zero
-	// stanzas: no upstream org access, no approval-table grants. Admission
-	// never selects the shared identities once per-repo identities exist
-	// (fail-closed in identityForWithRepo), so the remaining policy breadth
-	// is dormant standing privilege. Issue #456. This also aligns the install
-	// path with the sync path — both now produce the same zero-stanza shape.
-	sharedOrgs := upstreamOrgs
-	sharedGrants := credentialedGrantPaths
-	if len(cfg.PerRepoIdentities) > 0 {
-		sharedOrgs = nil
-		sharedGrants = nil
-	}
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, sharedOrgs, sharedGrants)
+	// Shared credentialed identities never carry approvals or upstream access.
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
 	haveCredentialedPolicy, credentialedPolicyExists, err := store.policyRead(ctx, rootToken, defaultCredentialedPolicy)
 	if err != nil {
 		return result, err
@@ -747,6 +731,10 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	// unlike the credentialed policy there is nothing approval-driven to sync
 	// — drift from the managed shape is always rewritten back.
 
+	sharedOrgs := upstreamOrgs
+	if len(cfg.PerRepoIdentities) > 0 {
+		sharedOrgs = nil
+	}
 	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, sharedOrgs)
 	haveCISecretsPolicy, ciSecretsPolicyExists, err := store.policyRead(ctx, rootToken, defaultCISecretsPolicy)
 	if err != nil {
@@ -925,7 +913,7 @@ func credentialedPolicyPaths(kvPrefix string, paths []string) ([]string, error) 
 // --upgrade` to sync.
 func OberthCredentialedPolicyWithGrants(kvPrefix string, upstreamOrgs []string, approvedPaths []string) string {
 	var builder strings.Builder
-	builder.WriteString("# Credentialed pipeline templates: read-only, per-upstream subtrees. The\n")
+	builder.WriteString("# Granted secret-consuming templates: read-only, per-upstream subtrees. The\n")
 	builder.WriteString("# approval table in the Oberth database is the fine-grained gate; this policy\n")
 	builder.WriteString("# is the coarse Vault-level boundary. Managed by oberth install.\n")
 	writeUpstreamOrgRules(&builder, kvPrefix, upstreamOrgs)
@@ -959,7 +947,7 @@ func OberthCredentialedPolicyWithGrants(kvPrefix string, upstreamOrgs []string, 
 // granted — fail closed.
 func OberthCISecretsPolicy(kvPrefix string, upstreamOrgs []string) string {
 	var builder strings.Builder
-	builder.WriteString("# CI-trigger credentialed pipelines: read-only, per-upstream subtrees. This\n")
+	builder.WriteString("# CI-trigger granted steps: read-only, per-upstream subtrees. This\n")
 	builder.WriteString("# policy never carries approval-table grants; release secrets are reachable\n")
 	builder.WriteString("# only through the release-tier credentialed role. Managed by oberth install.\n")
 	writeUpstreamOrgRules(&builder, kvPrefix, upstreamOrgs)

@@ -20,6 +20,7 @@ const (
 
 func testConfigWithPerRepo() Config {
 	cfg := testConfig()
+	cfg.PerStepIdentities["codeberg/oberthci/oberth/.oberth/release.yaml/*"] = PerRepoIdentityConfig{ServiceAccountName: testPerRepoSA}
 	cfg.PerRepoIdentities = map[string]PerRepoIdentityConfig{
 		"codeberg/oberthci/oberth": {ServiceAccountName: testPerRepoSA},
 	}
@@ -218,10 +219,9 @@ func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 	}
 }
 
-// TestBuildFallsBackToSharedIdentityForSingleRepo proves that when only one
-// repo has grants and no per-repo identities exist for any repo, the shared
-// SA fallback is safe: the shared policy carries only this repo's grants.
-func TestBuildFallsBackToSharedIdentityForSingleRepo(t *testing.T) {
+// A single-repository deployment still requires the workflow-scoped identity
+// for a granted consumer; repository count supplies no fallback authority.
+func TestBuildRequiresScopedIdentityForSingleRepo(t *testing.T) {
 	t.Parallel()
 	cfg := testConfig() // no PerRepoIdentities — single-repo case
 	path := "oberth/upstream/acme/other-repo/test-secret"
@@ -237,12 +237,17 @@ func TestBuildFallsBackToSharedIdentityForSingleRepo(t *testing.T) {
 		BinarySubPath:  "bin",
 	}
 
+	if _, err := Build(cfg, req); err == nil || !strings.Contains(err.Error(), "per-step identity is not materialized") {
+		t.Fatalf("missing workflow identity: %v", err)
+	}
+	key := canonicalRepoKey(req.UpstreamName, req.UpstreamOrg, req.Repo) + "/" + req.PipelineFile + "/*"
+	cfg.PerStepIdentities[key] = PerRepoIdentityConfig{ServiceAccountName: "scoped-other-repo"}
 	wf, err := Build(cfg, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wf.Spec.ServiceAccountName != testCredentialedAcct {
-		t.Fatalf("ServiceAccount = %q, want shared %q", wf.Spec.ServiceAccountName, testCredentialedAcct)
+	if got := wf.Spec.Templates[0].ServiceAccountName; got != "scoped-other-repo" {
+		t.Fatalf("consumer identity=%q", got)
 	}
 }
 
@@ -391,6 +396,7 @@ func TestCrossRepoReadRefusedByPerRepoRole(t *testing.T) {
 		BinarySubPath:  "bin",
 	}
 
+	cfg.PerStepIdentities["codeberg/org/repo-a/.oberth/release.yaml/*"] = PerRepoIdentityConfig{ServiceAccountName: cfg.PerRepoIdentities["codeberg/org/repo-a"].ServiceAccountName}
 	wfA, err := Build(cfg, reqA)
 	if err != nil {
 		t.Fatal(err)
@@ -409,6 +415,7 @@ func TestCrossRepoReadRefusedByPerRepoRole(t *testing.T) {
 		BinarySubPath:  "bin",
 	}
 
+	cfg.PerStepIdentities["codeberg/org/repo-b/.oberth/release.yaml/*"] = PerRepoIdentityConfig{ServiceAccountName: cfg.PerRepoIdentities["codeberg/org/repo-b"].ServiceAccountName}
 	wfB, err := Build(cfg, reqB)
 	if err != nil {
 		t.Fatal(err)

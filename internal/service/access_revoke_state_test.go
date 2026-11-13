@@ -27,11 +27,11 @@ func TestAccessRevokeDoesNotInventReadbackState(t *testing.T) {
 	s.secretAccess = f.store
 	s.secretAccessReconciler = NewAccessReconciler(fake.NewClientset(), "oberth", f.store, log.New(io.Discard, "", 0))
 	actor := api.Actor{Identity: "admin", Admin: true}
-	if _, err := s.accessAllow(t.Context(), actor, "unregistered", "*", "oberth/data/test"); err != nil {
+	if _, err := s.accessAllow(t.Context(), actor, "unregistered", ".oberth/release.yaml", "*", "oberth/data/test"); err != nil {
 		t.Fatal(err)
 	}
 	s.secretAccess = missingRevocationReadback{f.store}
-	value, err := s.accessRevoke(t.Context(), actor, "unregistered", "*", "oberth/data/test")
+	value, err := s.accessRevoke(t.Context(), actor, "unregistered", ".oberth/release.yaml", "*", "oberth/data/test")
 	if !errors.Is(err, ErrUnavailable) || value.RevokedAt != nil {
 		t.Fatalf("invented revocation: %+v, %v", value, err)
 	}

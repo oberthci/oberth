@@ -56,7 +56,9 @@ func TestStopRestartMigrationPreservesWorkflowsAndUncertainCreates(t *testing.T)
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at)VALUES(?,?,'owner_restart',?)`, old.ID, "original-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, stopRestartMigrationID); err != nil {
+	if _, err := s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.
+ALTER TABLE runs ADD COLUMN credentialed INTEGER NOT NULL DEFAULT 0 CHECK (credentialed IN (0, 1));
+DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, stopRestartMigrationID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(historicalRestartTimingSQL(t)); err != nil {

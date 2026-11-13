@@ -32,6 +32,8 @@ func TestBuildTypesDocumentRefusalsButNotOperatorConfiguration(t *testing.T) {
 			default:
 				request.Source = []byte(strings.Replace(greedyDocument, "    example.com/tier: L", "    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret", 1))
 				request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
+				request.StepGrants = map[string]map[string]bool{"oberth/upstream/acme/oberth/test-secret": {"*": true}}
+				request.Source = []byte(strings.Replace(string(request.Source), "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/test-secret, --, /bin/true]", 1))
 				doc = false
 				switch kind {
 				case "vault-address":

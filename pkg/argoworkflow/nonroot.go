@@ -55,7 +55,7 @@ func DeclaredNonrootTemplates(workflow *wfv1.Workflow) ([]string, error) {
 		return nil, err
 	}
 	if len(paths) != 0 {
-		return nil, errors.New("argoworkflow: nonroot leaves are not admitted in credentialed workflows")
+		return nil, errors.New("argoworkflow: nonroot leaves are not admitted in workflows declaring secret paths")
 	}
 	if workflow.Spec.TemplateDefaults != nil {
 		return nil, errors.New("argoworkflow: nonroot leaves cannot inherit templateDefaults")

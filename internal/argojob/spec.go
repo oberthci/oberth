@@ -17,7 +17,6 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
-	"sort"
 	"strings"
 	"time"
 
@@ -129,7 +128,7 @@ type Config struct {
 	VaultCredentialedRole string
 
 	// VaultCISecretsRole is the OpenBao Kubernetes-auth role CI-trigger
-	// credentialed pipelines log in with, bound to exactly (Namespace,
+	// granted steps log in with, bound to exactly (Namespace,
 	// CISecretsServiceAccount) with the upstream-only policy. Empty fails
 	// closed: a CI pipeline that declares secret paths is refused at
 	// admission rather than submitted under the release-tier role.
@@ -246,12 +245,9 @@ type Config struct {
 	// subtree (issue #433).
 	PerRepoCIIdentities map[string]PerRepoIdentityConfig
 
-	// PerStepIdentities maps canonical "upstream/org/repo/step" identity
-	// strings to their per-step Vault identities. When a template consumes
-	// a named-step-granted path, the per-step SA is set on that template
-	// (overriding the per-repo workflow-level SA), and OBERTH_VAULT_ROLE is
-	// overridden to the per-step role. Wildcard grants keep the per-repo
-	// identity. Issue #623.
+	// PerStepIdentities maps "upstream/org/repo/workflow-file/step" to the
+	// materialized store login identity. Named and wildcard steps both retain
+	// exact workflow-file scope. Every granted release main requires its entry.
 	PerStepIdentities map[string]PerRepoIdentityConfig
 
 	// ReleaseWIF is the administrator's startup-pinned capability allowlist.
@@ -360,7 +356,7 @@ func (config Config) Validate() error {
 			"argojob: a Vault CA certificate without a Vault address configures a trust anchor for a store no pipeline is told to reach"))
 	}
 	// VaultAddress and VaultCredentialedRole must come as a pair: one without
-	// the other configures a credentialed pipeline that cannot complete a login.
+	// the other configures a secret-consuming step that cannot complete a login.
 	hasAddr := strings.TrimSpace(config.VaultAddress) != ""
 	hasRole := strings.TrimSpace(config.VaultCredentialedRole) != ""
 	if hasAddr != hasRole {
@@ -370,7 +366,7 @@ func (config Config) Validate() error {
 	}
 	// The CI-secrets role without an address is the same misconfiguration in
 	// the other direction. The address WITHOUT a CI role is legal — it means
-	// this deployment admits no CI-trigger credentialed pipelines, and Build
+	// this deployment admits no CI-trigger granted steps, and Build
 	// fails such a submission closed at admission with the flag to set.
 	if strings.TrimSpace(config.VaultCISecretsRole) != "" && !hasAddr {
 		problems = append(problems, fmt.Errorf(
@@ -611,6 +607,9 @@ type Request struct {
 // It needs no cluster, so document admission is testable before submission.
 func Build(config Config, request Request) (result *wfv1.Workflow, resultErr error) {
 	config.applyDefaults()
+	if request.PipelineFile == "" {
+		request.PipelineFile, _ = argoworkflow.TriggerFile(request.Trigger)
+	}
 	if err := config.ExecutionPlacement.selectRequest(config, request); err != nil {
 		return nil, err
 	}
@@ -679,21 +678,27 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.ApprovedSecrets == nil {
 		return nil, errors.New("argojob: ApprovedSecrets must be non-nil; the caller must load the approval table before calling Build")
 	}
-	if err := authorizeWithApprovalTable(declaredPaths, request); err != nil {
-		return nil, &argoworkflow.AdmissionError{Cause: err}
+
+	// An unused annotation grants no authority and must not turn an ordinary
+	// step into a store-dependent admission. Use the same consumer predicate
+	// as the app's current-grant loader; actual consumers keep all path checks.
+	if SecretStoreRequested(workflow) {
+		if err := authorizeWithApprovalTable(declaredPaths, request); err != nil {
+			return nil, &argoworkflow.AdmissionError{Cause: err}
+		}
 	}
 
-	// A credentialed pipeline is one that declares secret-store paths it will
-	// read in-Pod. The trigger type alone does not grant credentials. This
-	// boolean selects the Vault token, environment and trust anchor. An
-	// independently approved WIF leaf can select the per-repository identity
-	// and its own audience-scoped projection without any Vault wiring.
-	credentialed := len(declaredPaths) > 0
-	if request.Capability != nil && (credentialed || len(wifLeaves) > 0) {
+	// Identity and settings follow the same admitted step grants.
+	secretSteps, err := GrantedSecretSteps(workflow, declaredPaths, request.StepGrants)
+	if err != nil {
+		return nil, &argoworkflow.AdmissionError{Cause: err}
+	}
+	hasSecretSteps := len(secretSteps) > 0
+	if request.Capability != nil && (hasSecretSteps || len(wifLeaves) > 0) {
 		return nil, errors.New("argojob: operator capabilities cannot be combined with secret or WIF identities")
 	}
 
-	// Refuse a credentialed run the deployment cannot possibly credential, at
+	// Refuse a secret consumer the deployment cannot authenticate, at
 	// admission, rather than letting the whole build run and die on the first
 	// step that needs the store. The check is on the configured anchor and not
 	// on this run's seeding, so it does not depend on the order Create does
@@ -701,17 +706,17 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	//
 	// A CI pipeline without secret-store paths receives no token and contacts
 	// no store, so an address it cannot verify costs it nothing.
-	if credentialed &&
+	if hasSecretSteps &&
 		strings.TrimSpace(config.VaultCACertPEM) == "" &&
 		vaultAddressRequiresPinnedAnchor(config.VaultAddress) {
 		return nil, fmt.Errorf("argojob: refusing to submit a %s run for %q: the Vault address %q is a "+
 			"cluster-internal endpoint no publicly trusted CA may issue for, and no trust anchor is configured, "+
-			"so every credentialed step would fail its login with \"x509: certificate signed by unknown authority\"; "+
+			"so every granted step would fail its login with \"x509: certificate signed by unknown authority\"; "+
 			"set argo.vault.caCert (--argo-vault-ca-cert) to the PEM of the CA that signed that endpoint",
 			request.Trigger, request.Repo, config.VaultAddress)
 	}
 
-	identity, err := config.identityForWithRepo(request.Trigger, credentialed || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
+	identity, err := config.identityForWithRepo(request.Trigger, hasSecretSteps || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
 	if err != nil {
 		return nil, err
 	}
@@ -733,6 +738,9 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 			return nil, err
 		}
 	}
+	if err := normalizeAndValidateDocument(workflow, request.Trigger); err != nil {
+		return nil, err
+	}
 	// Prepare admits and binds in one call so the order cannot be got wrong.
 	if err := argoworkflow.Prepare(
 		workflow,
@@ -751,15 +759,15 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if _, err := argoworkflow.PlannedSteps(workflow); err != nil {
 		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
-	// A credentialed run without Vault coordinates would proceed through the
+	// A granted step without Vault coordinates would proceed through the
 	// entire build and die at the first secretstore exec login — a worse signal than
 	// failing at admission. Require both non-empty before any build work. The
 	// role is the TRIGGER'S OWN tier's role: a deployment that has never
-	// configured the CI-secrets role fails a CI credentialed submission here,
+	// configured the CI-secrets role fails a CI secret submission here,
 	// closed, instead of submitting it under the release-tier role.
-	if credentialed {
+	if hasSecretSteps {
 		if strings.TrimSpace(config.VaultAddress) == "" {
-			return nil, errors.New("argojob: credentialed pipeline requires a Vault address (argo.vault.address / --argo-vault-address)")
+			return nil, errors.New("argojob: granted step requires a Vault address (argo.vault.address / --argo-vault-address)")
 		}
 		if config.vaultRoleForWithRepo(request.Trigger, request.UpstreamName, request.UpstreamOrg, request.Repo) == "" {
 			switch request.Trigger {
@@ -768,34 +776,23 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 					"CI-secrets Vault role is configured (argo.ciSecrets.vaultRole / --argo-vault-ci-secrets-role); "+
 					"a CI pipeline never runs under the release-tier credentialed role", request.Repo)
 			default:
-				return nil, errors.New("argojob: credentialed pipeline requires a Vault credentialed role (argo.vault.credentialedRole / --argo-vault-credentialed-role)")
+				return nil, errors.New("argojob: granted step requires a Vault credentialed role (argo.vault.credentialedRole / --argo-vault-credentialed-role)")
 			}
 		}
 	}
-	// Admission gate: for every template that uses `oberth secretstore exec`,
-	// parse its --path arguments and verify each is in the declared paths set.
-	// A wrapper invocation in a workflow with no declared paths is refused: it
-	// would run as the pipeline SA with no token and fail at the vault login.
-	if err := admitSecretstoreExecPaths(workflow, declaredPaths, request.StepGrants); err != nil {
-		return nil, &argoworkflow.AdmissionError{Cause: err}
-	}
-	if err := normalizeAndValidateDocument(workflow, request.Trigger); err != nil {
-		return nil, err
-	}
-
 	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
 	}
 	applyServerBounds(workflow, config)
-	if err := markAssistHolds(workflow, config, request, credentialed); err != nil {
+	if err := markAssistHolds(workflow, config, request, hasSecretSteps); err != nil {
 		return nil, err
 	}
 	applyServerSecurity(workflow)
-	injectServerVolumes(workflow, config, request, credentialed)
+	injectServerVolumes(workflow, config, request, secretSteps)
 	injectAssistHelperMounts(workflow, request)
 	injectWorkspaceEnvironment(workflow)
-	injectRunEnvironment(workflow, config, request, credentialed)
+	injectRunEnvironment(workflow, config, request, secretSteps)
 	// Per-step identity override (issue #623): for release templates consuming
 	// named-step-granted paths, override the ServiceAccountName and
 	// OBERTH_VAULT_ROLE with the per-step identity. This runs AFTER
@@ -808,8 +805,8 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	// Until grants have ref scopes, the same per-step policy can include
 	// release paths and upstream paths. A branch run must keep its CI-secrets
 	// identity even when it uses a named-step upstream grant.
-	if credentialed && request.Trigger == pipeline.TriggerRelease {
-		if err := applyPerStepIdentities(workflow, config, request); err != nil {
+	if hasSecretSteps && request.Trigger == pipeline.TriggerRelease {
+		if err := applyPerStepIdentities(workflow, config, request, secretSteps); err != nil {
 			return nil, err
 		}
 	}
@@ -860,11 +857,9 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 // pre-loaded approval table, preserving upstream namespace scoping and the
 // CI system-path prohibition as defense in depth.
 //
-// The approval table is keyed by (repo, step, secret). Until per-template
-// annotations land, the caller passes step="*" grants flattened into a
-// path set, so this function only checks path membership. Upstream scoping
-// (the declaring repo may only reach its own org/repo namespace) is enforced
-// independently of the approval table.
+// The caller loads the exact repository/upstream and workflow-file scope,
+// flattened to a path set here. GrantedSecretSteps enforces step membership.
+// Namespace and CI-tier checks remain independent defenses.
 func authorizeWithApprovalTable(paths []string, request Request) error {
 	var problems []error
 	for _, declared := range paths {
@@ -895,108 +890,16 @@ func authorizeWithApprovalTable(paths []string, request Request) error {
 		if !request.ApprovedSecrets[declared] {
 			problems = append(problems, fmt.Errorf(
 				"argojob: unapproved secret path %q for repo %q; "+
-					"correct the Workflow secret path, or ask an operator to approve with: oberth access allow %s '*' %s",
-				declared, request.Repo, request.Repo, declared))
+					"correct the Workflow secret path, or ask an operator to approve with: oberth access allow %s %s '*' %s",
+				declared, request.Repo, request.Repo, request.PipelineFile, declared))
 		}
 	}
 	return errors.Join(problems...)
 }
 
-// admitSecretstoreExecPaths walks every template in the workflow and, for any
-// that invoke `oberth secretstore exec`, checks that every --path argument
-// appears in the workflow's declared secret-paths annotation and that the
-// template is authorized by a per-step grant. Per-step enforcement (issue #623)
-// requires either a wildcard ("*") grant for the path or a grant naming the
-// exact template. Fail-closed: a path with only named-step grants is refused
-// when consumed by an inline template, a fragment-renamed template, or any
-// template that does not have a stable, unambiguous name.
-//
-// A workflow with no declared paths that contains an `oberth secretstore exec`
-// invocation is refused: the template would run as the pipeline SA with no
-// token and fail at vault login, which is a worse signal than a clear
-// admission error.
 func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string, stepGrants map[string]map[string]bool) error {
-	declared := make(map[string]struct{}, len(declaredPaths))
-	for _, p := range declaredPaths {
-		declared[p] = struct{}{}
-	}
-	// Build a set of top-level template pointers for stable-name detection.
-	topLevel := make(map[*wfv1.Template]bool, len(workflow.Spec.Templates))
-	for i := range workflow.Spec.Templates {
-		topLevel[&workflow.Spec.Templates[i]] = true
-	}
-	var problems []error
-	// Inline templates are visited too: the credential mount injection reaches
-	// them, so the admission that governs the same invocation must as well.
-	walkTemplates(workflow, func(template *wfv1.Template) {
-		if !templateUsesOberthSecretstore(template) {
-			return
-		}
-		execPaths := extractExecPaths(template)
-		if len(execPaths) == 0 {
-			// This invocation has no explicit --path flags to check.
-			return
-		}
-		if len(declaredPaths) == 0 {
-			problems = append(problems, fmt.Errorf(
-				"argojob: template %q uses oberth secretstore exec with --path flags "+
-					"but the workflow declares no %s annotation",
-				template.Name, argoworkflow.SecretPathsAnnotation))
-			return
-		}
-		// Determine whether this template has a stable, unambiguous name
-		// suitable for per-step grant matching: it must be a top-level
-		// template (not inline), have a non-empty name, and not be a
-		// fragment-renamed template (frag-<hash>-<name>).
-		stableName := topLevel[template] &&
-			template.Name != "" &&
-			!strings.HasPrefix(template.Name, "frag-")
-		for _, execPath := range execPaths {
-			if _, ok := declared[execPath]; !ok {
-				problems = append(problems, fmt.Errorf(
-					"argojob: template %q declares --path %q which is not in the "+
-						"workflow's %s annotation",
-					template.Name, execPath, argoworkflow.SecretPathsAnnotation))
-				continue
-			}
-			// Per-step grant check: when stepGrants is populated, verify
-			// the template is authorized for this specific path.
-			if stepGrants == nil {
-				continue
-			}
-			steps := stepGrants[execPath]
-			if steps["*"] {
-				// Wildcard grant covers all templates.
-				continue
-			}
-			if !stableName {
-				// Fail closed: a path with only named-step grants cannot
-				// be consumed by an inline, unnamed, or fragment-renamed
-				// template because the name is not stable or authoritative.
-				problems = append(problems, fmt.Errorf(
-					"secret grant denied: step %q not authorized for path %q "+
-						"-- template does not have a stable name (inline, unnamed, or fragment-renamed); "+
-						"only wildcard grants (step \"*\") may authorize these templates",
-					template.Name, execPath))
-				continue
-			}
-			if steps[template.Name] {
-				// Exact named-step match.
-				continue
-			}
-			// Named-step grant exists but does not match this template.
-			var granted []string
-			for s := range steps {
-				granted = append(granted, s)
-			}
-			sort.Strings(granted)
-			problems = append(problems, fmt.Errorf(
-				"secret grant denied: step %q not authorized for path %q "+
-					"-- granted to step %q only",
-				template.Name, execPath, strings.Join(granted, "\", \"")))
-		}
-	})
-	return errors.Join(problems...)
+	_, err := GrantedSecretSteps(workflow, declaredPaths, stepGrants)
+	return err
 }
 
 // identityFor selects the ServiceAccount from the trigger AND whether the
@@ -1019,19 +922,17 @@ func (config Config) identityFor(trigger pipeline.Trigger, hasSecretPaths bool) 
 	}
 	if !hasSecretPaths {
 		return argoworkflow.Identity{
-			Namespace:                    config.Namespace,
-			ServiceAccountName:           config.PipelineServiceAccount,
-			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
-			AutomountServiceAccountToken: false,
+			Namespace:                  config.Namespace,
+			ServiceAccountName:         config.PipelineServiceAccount,
+			ExecutorServiceAccountName: config.ExecutorServiceAccount,
 		}, nil
 	}
 	switch trigger {
 	case pipeline.TriggerRelease:
 		return argoworkflow.Identity{
-			Namespace:                    config.Namespace,
-			ServiceAccountName:           config.CredentialedServiceAccount,
-			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
-			AutomountServiceAccountToken: true,
+			Namespace:                  config.Namespace,
+			ServiceAccountName:         config.CredentialedServiceAccount,
+			ExecutorServiceAccountName: config.ExecutorServiceAccount,
 		}, nil
 	case pipeline.TriggerCI:
 		// Config.Validate requires the account, so this is a defensive
@@ -1043,10 +944,9 @@ func (config Config) identityFor(trigger pipeline.Trigger, hasSecretPaths bool) 
 					"refusing to run a CI pipeline with declared secret paths under the release-tier identity")
 		}
 		return argoworkflow.Identity{
-			Namespace:                    config.Namespace,
-			ServiceAccountName:           config.CISecretsServiceAccount,
-			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
-			AutomountServiceAccountToken: true,
+			Namespace:                  config.Namespace,
+			ServiceAccountName:         config.CISecretsServiceAccount,
+			ExecutorServiceAccountName: config.ExecutorServiceAccount,
 		}, nil
 	default:
 		return argoworkflow.Identity{}, fmt.Errorf("argojob: no credentialed identity exists for trigger %q", trigger)
@@ -1480,12 +1380,10 @@ func cacheVolumeAndMount(config Config, request Request) (corev1.Volume, corev1.
 // The server chooses the source claim and per-run subPath. Repository YAML
 // cannot name that claim, select another run's subPath, or write the checkout.
 //
-// Common mounts (cache, source, vault CA, workspace) go to every container via
-// injectTemplateVolumeMounts. The release token mount is scoped to credentialed
-// templates by a separate pass via injectCredentialVolumeMounts; see the inline
-// comment at the injection site for why the passes must be separate.
-func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request, credentialed bool) {
-	var mounts []corev1.VolumeMount
+// Common source/cache/workspace mounts are separate from secret settings.
+// The admitted step set controls all store mounts in one final pass.
+func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request, secretSteps map[*wfv1.Template]bool) {
+	var mounts, credentialMounts []corev1.VolumeMount
 	if volume, mount, ok := cacheVolumeAndMount(config, request); ok {
 		workflow.Spec.Volumes = append(workflow.Spec.Volumes, volume)
 		mounts = append(mounts, mount)
@@ -1518,10 +1416,10 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 				SubPath:   request.SourceVolume.ArtifactsSubPath,
 			})
 		}
-		if credentialed && request.vaultCADelivered() {
+		if len(secretSteps) > 0 && request.vaultCADelivered() {
 			// The anchor rides the same claim as a second subPath, so it needs
 			// no volume of its own and is collected with the run's storage.
-			mounts = append(mounts, corev1.VolumeMount{
+			credentialMounts = append(credentialMounts, corev1.VolumeMount{
 				Name:      SourceVolumeName,
 				MountPath: VaultCAMountPath,
 				SubPath:   request.SourceVolume.VaultCASubPath,
@@ -1532,7 +1430,7 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 			// The goproxy CA rides the same source claim as another subPath.
 			// Mounted into /etc/ssl/certs/ so Go's cert directory scan picks
 			// it up alongside the runner image's system CAs. This mount is for
-			// ALL runs, not just credentialed ones: go mod tidy -diff runs in
+			// Every Go consumer needs this trust anchor: go mod tidy -diff runs in
 			// CI pipelines.
 			mounts = append(mounts, corev1.VolumeMount{
 				Name:      SourceVolumeName,
@@ -1541,10 +1439,10 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 				ReadOnly:  true,
 			})
 		}
-		if credentialed && request.binaryDelivered() {
+		if len(secretSteps) > 0 && request.binaryDelivered() {
 			// The server binary rides the same claim as another subPath,
 			// enabling `oberth secretstore exec` in pipeline containers.
-			mounts = append(mounts, corev1.VolumeMount{
+			credentialMounts = append(credentialMounts, corev1.VolumeMount{
 				Name:      SourceVolumeName,
 				MountPath: OberthBinMountPath,
 				SubPath:   request.SourceVolume.BinarySubPath,
@@ -1561,24 +1459,9 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 	if hasWorkspaceVCT(workflow) {
 		mounts = append(mounts, workspaceVolumeMounts(request.Trigger)...)
 	}
-	// The projected token volume is declared at the workflow level for every
-	// credentialed Workflow (release, or CI with declared secret-store paths),
-	// but the mount is scoped to credentialed templates -- those whose
-	// container command is secretstore exec. Non-credentialed templates (setup, lint,
-	// test, scan, chart-test, build, package-chart) carry no login token and
-	// cannot attempt a Vault login regardless of what their ServiceAccount is
-	// bound to.
-	//
-	// The volume and the mount are split across two injection passes. The first
-	// pass (injectTemplateVolumeMounts) strips repository mounts that collide
-	// with any server-owned volume name -- including ReleaseTokenVolumeName --
-	// regardless of which mounts it is injecting. A second call to the same
-	// function with only the credential mount would strip the cache and source
-	// mounts the first call added, because the name-collision check is
-	// hardcoded. injectCredentialVolumeMounts avoids that: it appends the
-	// mount to qualifying templates and strips only colliding paths.
-	var credentialMounts []corev1.VolumeMount
-	if credentialed {
+	// The first pass strips collisions with server-owned volumes on every
+	// container. The final pass appends store mounts to admitted main containers.
+	if len(secretSteps) > 0 {
 		workflow.Spec.Volumes = append(workflow.Spec.Volumes, releaseTokenVolume())
 		credentialMounts = append(credentialMounts, releaseTokenMount())
 		// Memory-backed emptyDir for materialised secrets. `oberth secretstore
@@ -1607,7 +1490,7 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 		injectTemplateVolumeMounts(&workflow.Spec.Templates[index], mounts, 0)
 	}
 	for index := range workflow.Spec.Templates {
-		injectCredentialVolumeMounts(&workflow.Spec.Templates[index], credentialMounts, 0)
+		injectGrantedSecretSettings(&workflow.Spec.Templates[index], secretSteps, credentialMounts, nil, 0)
 	}
 }
 
@@ -1818,68 +1701,6 @@ func extractExecPaths(template *wfv1.Template) []string {
 	return nil
 }
 
-// injectCredentialVolumeMounts adds the release-tier login token only to
-// templates whose main command is oberth secretstore exec. Other templates
-// in a release Workflow (setup, lint, test,
-// scan, chart-test, build, package-chart) have no use for the projected
-// ServiceAccount token and must not mount it.
-//
-// This is a separate pass from injectTemplateVolumeMounts because that
-// function strips repository mounts matching ANY server-owned volume name
-// (SourceVolumeName, ReleaseTokenVolumeName, CacheVolumeName) on every call.
-// A second call with only the credential mount would strip the source and
-// cache mounts the first call added. This function avoids that by stripping
-// only colliding mount paths, not volume names: the first pass already
-// ensured no repository-declared name collision survived.
-func injectCredentialVolumeMounts(template *wfv1.Template, mounts []corev1.VolumeMount, depth int) {
-	if template == nil || depth > argoworkflow.MaxIdentityWalkDepth || len(mounts) == 0 {
-		return
-	}
-	// Mount the credential token only on the Container or Script whose command
-	// is oberth secretstore exec. Init containers and sidecars are repository-selected
-	// images that do not need the store credential and must not receive it: an
-	// init container running before the main step, or a sidecar sharing the Pod
-	// network, could exfiltrate the projected token.
-	if !tokenDisabled(template) && templateUsesCredentialChain(template) {
-		reserved := make(map[string]struct{}, len(mounts))
-		for _, mount := range mounts {
-			reserved[mount.MountPath] = struct{}{}
-		}
-		attach := func(existing []corev1.VolumeMount) []corev1.VolumeMount {
-			filtered := existing[:0:0]
-			for _, m := range existing {
-				if _, taken := reserved[m.MountPath]; taken {
-					continue
-				}
-				filtered = append(filtered, m)
-			}
-			return append(filtered, mounts...)
-		}
-		// Attach to the main container only when it runs a credential
-		// chain (oberth secretstore exec).
-		if template.Container != nil {
-			template.Container.VolumeMounts = attach(template.Container.VolumeMounts)
-		}
-		if template.Script != nil {
-			template.Script.VolumeMounts = attach(template.Script.VolumeMounts)
-		}
-		// ContainerSet, init containers, and sidecars never receive the
-		// credential mount regardless of their command.
-	}
-	// Recurse into inline templates regardless: an inline child may use
-	// secretstore exec even when its parent template does not.
-	for group := range template.Steps {
-		for step := range template.Steps[group].Steps {
-			injectCredentialVolumeMounts(template.Steps[group].Steps[step].Inline, mounts, depth+1)
-		}
-	}
-	if template.DAG != nil {
-		for task := range template.DAG.Tasks {
-			injectCredentialVolumeMounts(template.DAG.Tasks[task].Inline, mounts, depth+1)
-		}
-	}
-}
-
 // hasWorkspaceVCT reports whether the pipeline declares a volumeClaimTemplate
 // named "work". When present, the server injects the standard Go-toolchain
 // environment and workspace mount paths; when absent, the pipeline is assumed to
@@ -1955,12 +1776,9 @@ func injectWorkspaceEnvironment(workflow *wfv1.Workflow) {
 	}
 }
 
-// injectRunEnvironment gives every container the server-owned run identity
-// variables, plus Vault coordinates on any
-// credentialed tier. Repository-set values are preserved: a name collision
-// resolves in favour of the server's value, because these describe the run,
-// not the step.
-func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Request, credentialed bool) {
+// injectRunEnvironment gives every container run identity and public tool
+// settings. Store coordinates are delivered separately to admitted consumers.
+func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Request, secretSteps map[*wfv1.Template]bool) {
 	environment := []corev1.EnvVar{
 		{Name: "OBERTH_REPO", Value: request.Repo},
 		{Name: "OBERTH_REF", Value: request.Ref},
@@ -2020,24 +1838,24 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 			corev1.EnvVar{Name: "GONOSUMDB", Value: config.GoProxyModulePrefix},
 		)
 	}
-	if credentialed {
+	var secretEnvironment []corev1.EnvVar
+	if len(secretSteps) > 0 {
 		// The role matches the tier identityFor selected: the ci-secrets role
 		// on the CI trigger, the credentialed role on the release trigger.
 		// Advertising the release role to a CI pod would only name a login
 		// its ServiceAccount cannot complete, and every failure would blame
 		// the wrong tier.
-		environment = append(environment,
+		secretEnvironment = append(secretEnvironment,
 			corev1.EnvVar{Name: "VAULT_ADDR", Value: config.VaultAddress},
 			corev1.EnvVar{Name: "OBERTH_VAULT_ROLE", Value: config.vaultRoleForWithRepo(request.Trigger, request.UpstreamName, request.UpstreamOrg, request.Repo)},
 		)
 		if request.vaultCADelivered() {
-			// Deliver the trust-anchor path used by secretstore exec,
-			// alongside the server-selected VAULT_ADDR.
-			environment = append(environment, corev1.EnvVar{Name: "VAULT_CACERT", Value: VaultCACertPath})
+			secretEnvironment = append(secretEnvironment, corev1.EnvVar{Name: "VAULT_CACERT", Value: VaultCACertPath})
 		}
 	}
 	for index := range workflow.Spec.Templates {
 		injectTemplateEnvironment(&workflow.Spec.Templates[index], environment, 0)
+		injectGrantedSecretSettings(&workflow.Spec.Templates[index], secretSteps, nil, secretEnvironment, 0)
 	}
 }
 
@@ -2083,113 +1901,32 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 	}
 }
 
-// applyPerStepIdentities overrides ServiceAccountName and OBERTH_VAULT_ROLE
-// on templates that consume named-step-granted paths. This is a server-owned
-// post-Build pass: the document's own SA declarations were already cleared by
-// ForceIdentity, and the per-repo SA + role were already set by
-// identityForWithRepo and injectRunEnvironment. This pass narrows individual
-// templates to their per-step identity.
-//
-// A template receives a per-step identity when ALL of these hold:
-//  1. It is a top-level template (not inline)
-//  2. It has a stable name (not frag-* renamed)
-//  3. It uses `oberth secretstore exec` with --path flags
-//  4. At least one of its --path arguments has a named-step grant (not
-//     wildcard) for this template name
-//  5. A per-step identity exists in config.PerStepIdentities for this
-//     (repo, step) combination
-//
-// Templates with only wildcard grants keep the per-repo identity.
-//
-// Fail-closed (issue #623, finding 2): when a template consumes a
-// named-step-granted path but the per-step identity is not materialized
-// (missing from config.PerStepIdentities or SA is empty), admission is
-// DENIED. Silently keeping the per-repo union identity is the exact
-// residual this issue closes.
-func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Request) error {
-	// Build a set of top-level template pointers for stable-name detection.
-	topLevel := make(map[*wfv1.Template]bool, len(workflow.Spec.Templates))
-	for i := range workflow.Spec.Templates {
-		topLevel[&workflow.Spec.Templates[i]] = true
-	}
-
+// applyPerStepIdentities assigns each granted main its exact workflow-file
+// and step identity. Wildcard consumers use that file's wildcard identity;
+// missing materialization fails closed. The admitted set is reused unchanged.
+func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Request, granted map[*wfv1.Template]bool) error {
 	var problems []error
-
-	for i := range workflow.Spec.Templates {
-		template := &workflow.Spec.Templates[i]
-		if !topLevel[template] || template.Name == "" || strings.HasPrefix(template.Name, "frag-") {
-			continue
-		}
-		if !templateUsesOberthSecretstore(template) {
-			continue
-		}
-		execPaths := extractExecPaths(template)
-		if len(execPaths) == 0 {
-			continue
-		}
-
-		// Check if any of this template's paths has a named-step grant.
-		hasNamedGrant := false
-		var namedGrantPath string
-		for _, path := range execPaths {
-			if request.StepGrants == nil {
-				break
-			}
-			steps := request.StepGrants[path]
-			if steps == nil {
-				continue
-			}
-			// Check if this template has a named grant (not wildcard) for this path.
-			if steps[template.Name] && !steps["*"] {
-				hasNamedGrant = true
-				namedGrantPath = path
-				break
-			}
-			for step := range steps {
-				if step != "*" && step == template.Name {
-					hasNamedGrant = true
-					namedGrantPath = path
-					break
-				}
-			}
-			if hasNamedGrant {
+	repo := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo)
+	for template := range granted {
+		step := "*"
+		grantName := secretStepGrantName(workflow, template)
+		for _, p := range extractExecPaths(template) {
+			if grantName != "*" && request.StepGrants[p][grantName] {
+				step = grantName
 				break
 			}
 		}
-
-		if !hasNamedGrant {
+		key := repo + "/" + request.PipelineFile + "/" + step
+		identity, exists := config.PerStepIdentities[key]
+		if !exists || identity.ServiceAccountName == "" {
+			problems = append(problems, fmt.Errorf("secret grant denied: step %q in workflow %q per-step identity is not materialized; run `oberth secretstore sync` then `oberth install --install-secretstore --upgrade`", template.Name, request.PipelineFile))
 			continue
 		}
-
-		// Look up the per-step identity for this (repo, step).
-		stepKey := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) + "/" + template.Name
-		perStep, exists := config.PerStepIdentities[stepKey]
-
-		// Fail-closed (finding 2): if the per-step identity is not
-		// materialized, deny admission. The residual this closes is a
-		// template running under the per-repo union identity (which can
-		// read all the repo's granted paths, not just its own).
-		if !exists || perStep.ServiceAccountName == "" {
-			problems = append(problems, fmt.Errorf(
-				"secret grant denied: step %q has a named grant for path %q "+
-					"but its per-step identity is not materialized -- "+
-					"run `oberth secretstore sync` then `oberth install --install-secretstore --upgrade`",
-				template.Name, namedGrantPath))
-			continue
+		template.ServiceAccountName = identity.ServiceAccountName
+		if c := templateMainContainer(template); c != nil {
+			c.Env = overrideEnvironment(c.Env, []corev1.EnvVar{{Name: "OBERTH_VAULT_ROLE", Value: identity.ServiceAccountName}})
 		}
-
-		// Override the template's ServiceAccountName.
-		template.ServiceAccountName = perStep.ServiceAccountName
-
-		// Override OBERTH_VAULT_ROLE in the template's containers.
-		stepRole := []corev1.EnvVar{
-			{Name: "OBERTH_VAULT_ROLE", Value: perStep.ServiceAccountName},
-		}
-		templateContainers(template, func(c *corev1.Container) {
-			c.Env = overrideEnvironment(c.Env, stepRole)
-		})
 	}
-
 	return errors.Join(problems...)
 }
 

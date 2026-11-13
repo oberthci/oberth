@@ -41,9 +41,7 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	if resources, err := jobs.ResolvePipelineSource(t.Context(), request); err != nil || resources == nil {
 		t.Fatalf("resources=%+v err=%v", resources, err)
 	}
-	if credentialed, err := jobs.PipelineCredentialed(t.Context(), request); err != nil || credentialed {
-		t.Fatalf("credentialed=%v err=%v", credentialed, err)
-	}
+
 	request.Run.Ref = "v1"
 	if size, err := jobs.ResolvePipelineSource(t.Context(), request); err != nil {
 		t.Fatalf("default release changed: %v %v", size, err)

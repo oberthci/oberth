@@ -208,3 +208,11 @@ func TestInstallReviewShowsChosenUpstreamName(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallReviewAcceptsNativeArgoLimits(t *testing.T) {
+	var output bytes.Buffer
+	err := runInstall(t.Context(), []string{"--context", "chosen", "--argo-parallelism", "9", "--argo-namespace-parallelism", "2"}, strings.NewReader(""), &output)
+	if !errors.Is(err, errUsage) || !strings.Contains(output.String(), "controller.parallelism: 9 (requested)") || !strings.Contains(output.String(), "controller.namespaceParallelism: 2 (requested)") {
+		t.Fatal("review lost chosen Argo values", err, output.String())
+	}
+}

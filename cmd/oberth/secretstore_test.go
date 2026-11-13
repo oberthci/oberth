@@ -1004,9 +1004,9 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 
 	// Construct the same grant table that both sides would see.
 	grants := []store.SecretAccessGrant{
-		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
-		{Repo: "codeberg/oberthci/oberth", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
-		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 	}
 
 	// Server side: computeSecretStorePlan + ComputePlanDigest.
@@ -1019,13 +1019,14 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 	// hand. Per-repo identities carry wildcard grants only; the named grant
 	// lives on the per-step identity (issue #814).
 	type accessListRow struct {
-		Repo   string `json:"repo"`
-		Step   string `json:"step"`
-		Secret string `json:"secret"`
+		Workflow string `json:"workflow"`
+		Repo     string `json:"repo"`
+		Step     string `json:"step"`
+		Secret   string `json:"secret"`
 	}
 	rows := make([]accessListRow, 0, len(grants))
 	for _, g := range grants {
-		rows = append(rows, accessListRow{Repo: g.Repo, Step: g.Step, Secret: g.Secret})
+		rows = append(rows, accessListRow{Workflow: g.Workflow, Repo: g.Repo, Step: g.Step, Secret: g.Secret})
 	}
 	accessList, err := json.Marshal(rows)
 	if err != nil {
@@ -1036,7 +1037,7 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	cliStepIdentities := installer.DerivePerStepIdentities(cliRepoIdentities, rawGrants)
-	if len(cliRepoIdentities) != 2 || len(cliStepIdentities) != 1 {
+	if len(cliRepoIdentities) != 2 || len(cliStepIdentities) != 3 {
 		t.Fatalf("expected 2 per-repo and 1 per-step identity, got %d and %d", len(cliRepoIdentities), len(cliStepIdentities))
 	}
 	for _, id := range cliRepoIdentities {
@@ -1060,22 +1061,19 @@ func TestPlanDigestCLIEqualsServerWildcardOnly(t *testing.T) {
 	t.Parallel()
 
 	grants := []store.SecretAccessGrant{
-		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 	}
 
 	serverPlan := serverPlanForGrants(t, grants)
 	serverDigest := service.ComputePlanDigest(serverPlan.Repos)
 
-	cliRepoIdentities := []installer.PerRepoIdentity{
-		{
-			Upstream: "codeberg",
-			Org:      "oberthci",
-			Repo:     "oberth",
-			Grants:   []string{"oberth/data/release/cosign-secret"},
-		},
+	rows, _ := json.Marshal([]map[string]string{{"repo": grants[0].Repo, "workflow": grants[0].Workflow, "step": grants[0].Step, "secret": grants[0].Secret}})
+	cliRepoIdentities, rawGrants, err := installer.ParseAccessListJSONWithSteps(rows)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// No per-step identities for wildcard-only grants.
-	cliDigest := planDigestFromIdentities(cliRepoIdentities, nil)
+	cliSteps := installer.DerivePerStepIdentities(cliRepoIdentities, rawGrants)
+	cliDigest := planDigestFromIdentities(cliRepoIdentities, cliSteps)
 
 	if cliDigest != serverDigest {
 		t.Fatalf("CLI digest %q != server digest %q (wildcard-only)", cliDigest, serverDigest)

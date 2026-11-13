@@ -51,6 +51,29 @@ func oberthConfig() Config {
 	return config
 }
 
+// Render with file-scoped grants and identities from the test approval table.
+func buildOberthPipeline(config Config, request Request) (*wfv1.Workflow, error) {
+	if request.PipelineFile == "" {
+		request.PipelineFile, _ = argoworkflow.TriggerFile(request.Trigger)
+	}
+	if request.Trigger == pipeline.TriggerRelease {
+		if config.PerStepIdentities == nil {
+			config.PerStepIdentities = map[string]PerRepoIdentityConfig{}
+		}
+		key := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) + "/" + request.PipelineFile + "/*"
+		if _, exists := config.PerStepIdentities[key]; !exists {
+			config.PerStepIdentities[key] = PerRepoIdentityConfig{ServiceAccountName: config.vaultRoleForWithRepo(request.Trigger, request.UpstreamName, request.UpstreamOrg, request.Repo)}
+		}
+	}
+	if request.StepGrants == nil {
+		request.StepGrants = map[string]map[string]bool{}
+		for path := range request.ApprovedSecrets {
+			request.StepGrants[path] = map[string]bool{"*": true}
+		}
+	}
+	return Build(config, request)
+}
+
 // oberthReleaseApprovedSecrets returns the approval-table grants for
 // Oberth's own release pipeline. These are the paths release.yaml declares
 // in its oberth.ci/secret-paths annotation.
@@ -70,7 +93,7 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 // TestOberthBuildPipelineIsAdmissible proves the CI document decodes, clears
 // the structural gate, and produces a submission bound to the CI identity.
 func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
-	built, err := Build(oberthConfig(), Request{
+	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
@@ -182,7 +205,7 @@ func TestOberthBuildPipelineRunsChartRegressions(t *testing.T) {
 // same gate and binds the release identity, and that its declared secret paths
 // match the release.yaml declarations.
 func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
-	built, err := Build(oberthConfig(), Request{
+	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
@@ -246,7 +269,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 // This is the trust-tier boundary: a branch push must never reach release
 // credentials, regardless of how the document was authored.
 func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
-	_, err := Build(oberthConfig(), Request{
+	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
@@ -267,7 +290,7 @@ func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
 func TestOberthReleasePipelineOnBranchRefusedWithoutAllowlist(t *testing.T) {
 	// No approval-table grants: the release document's system paths are
 	// CI-ineligible regardless.
-	_, err := Build(oberthConfig(), Request{
+	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
@@ -351,7 +374,7 @@ func TestOberthReleasePipelineWrapsCredentialedStepsWithSecretstoreExec(t *testi
 // root, so each credentialed release leaf must create its own private child
 // inside the server-owned memory volume before fetching any secret.
 func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
-	built, err := Build(oberthConfig(), Request{
+	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
@@ -478,7 +501,7 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 			trigger = pipeline.TriggerRelease
 			approved = oberthReleaseApprovedSecrets()
 		}
-		built, err := Build(oberthConfig(), Request{
+		built, err := buildOberthPipeline(oberthConfig(), Request{
 			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 			Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/heads/main",
 			SHA: testSHA, Trigger: trigger, Source: loadPipeline(t, name),
@@ -644,7 +667,7 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 // chain (secretstore exec) and withholds it from non-credentialed
 // templates (setup, lint, test, scan, chart-test, build, package-chart).
 func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
-	workflow, err := Build(oberthConfig(), Request{
+	workflow, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
@@ -877,7 +900,7 @@ func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
 		t.Fatal("static musl build template missing")
 	}
 	request := Request{ApprovedSecrets: map[string]bool{}, RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml")}
-	if _, err := Build(config, request); err != nil {
+	if _, err := buildOberthPipeline(config, request); err != nil {
 		t.Fatal(err)
 	}
 }

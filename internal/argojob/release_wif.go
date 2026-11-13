@@ -294,13 +294,9 @@ func injectReleaseWIF(wf *wfv1.Workflow, leaves []*wfv1.Template, config *Releas
 		})
 	}
 	if len(leaves) > 0 {
-		// Selecting a per-repository identity normalized every template's
-		// automount field to true, including ordinary unselected siblings.
-		// Argo omits true from Pods, letting a live SA default mount its API
-		// token into every sibling container. Disable that ambient authority
-		// throughout this workflow, after all authored opt-out vetoes and
-		// explicit WIF/Vault projections have been applied. The executor's
-		// separate bookkeeping token remains unchanged.
+		// Reassert the ambient-token opt-out after explicit WIF setup,
+		// independently of live ServiceAccount defaults. The executor retains
+		// its separate bookkeeping token.
 		wf.Spec.AutomountServiceAccountToken = ptr.To(false)
 		walkTemplates(wf, func(t *wfv1.Template) {
 			t.AutomountServiceAccountToken = ptr.To(false)

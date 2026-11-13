@@ -123,11 +123,12 @@ expired wait fails with a policy-refresh deadline error and can be retried.
 
 ## Operators
 
-Set the Argo controller limit with `oberth install --argo-parallelism N`.
-Existing values are preserved unless explicitly changed. A fresh install keeps
-the existing default: half observed allocatable CPU, minimum 2, capped at the
-installer's maximum; if node CPU cannot be read, no default limit is installed.
-`0` means unlimited. It never means paused.
+Set Argo's native `controller.parallelism` and `controller.namespaceParallelism`
+with `oberth install --context <context> --argo-parallelism N
+--argo-namespace-parallelism N`, or the matching install answers. New managed
+releases use fixed defaults of 4 and 0 respectively. Review shows both values;
+existing releases preserve values unless explicitly changed. No CPU or node
+calculation chooses these settings. `0` means unlimited.
 
 Pause natively with `kubectl -n oberth-argo scale deployment
 argo-workflows-workflow-controller --replicas=0`, or `argo -n oberth-argo

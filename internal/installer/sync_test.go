@@ -299,7 +299,7 @@ func TestSyncGrantPoliciesRemovesOrphanPerStepIdentities(t *testing.T) {
 
 	name := PerRepoName("codeberg", "oberthci", "oberth")
 	ciName := PerRepoCIName("codeberg", "oberthci", "oberth")
-	orphanStepName := PerStepName("codeberg", "oberthci", "oberth", "old-step")
+	orphanStepName := PerStepName("codeberg", "oberthci", "oberth", ".oberth/release.yaml", "old-step")
 
 	// Pre-compute expected policies so the fake store returns matching shapes.
 	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
@@ -409,22 +409,19 @@ func TestComputeSyncReceiptNoSecretValues(t *testing.T) {
 func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 	t.Parallel()
 
-	accessList := `[
-	  {"repo":"codeberg/exampleorg/exampleorg-port","step":"*","secret":"oberth/data/release/cosign-secret"},
-	  {"repo":"codeberg/exampleorg/exampleorg-port","step":"release-publish-images","secret":"oberth/data/release/gar-image-key"}
-	]`
+	accessList := `[{"repo":"codeberg/exampleorg/exampleorg-port","step":"*","secret":"oberth/data/release/cosign-secret","workflow":".oberth/release.yaml"},{"repo":"codeberg/exampleorg/exampleorg-port","step":"release-publish-images","secret":"oberth/data/release/gar-image-key","workflow":".oberth/release.yaml"}]`
 	identities, grants, err := ParseAccessListJSONWithSteps([]byte(accessList))
 	if err != nil {
 		t.Fatal(err)
 	}
 	stepIdentities := DerivePerStepIdentities(identities, grants)
-	if len(identities) != 1 || len(stepIdentities) != 1 {
+	if len(identities) != 1 || len(stepIdentities) != 2 {
 		t.Fatalf("expected 1 per-repo and 1 per-step identity, got %d and %d", len(identities), len(stepIdentities))
 	}
 
 	name := PerRepoName("codeberg", "exampleorg", "exampleorg-port")
 	ciName := PerRepoCIName("codeberg", "exampleorg", "exampleorg-port")
-	stepName := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	stepName := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "release-publish-images")
 
 	// The policy a pre-#814 sync left behind: wildcard ∪ named.
 	unionPaths, err := credentialedPolicyPaths(defaultKVPrefix, []string{
@@ -449,6 +446,7 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 			`"token_max_ttl":1800}}`
 	}
 
+	wildcardName := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "*")
 	responses := map[string]fakeBaoResponse{
 		"policy read " + defaultCredentialedPolicy: {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)},
 		"policy read " + defaultCISecretsPolicy:    {out: OberthCISecretsPolicy(defaultKVPrefix, nil)},
@@ -467,6 +465,10 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 		"list -format=json auth/kubernetes/role":             {out: `[]`},
 		"policy list":                                        {out: "default\nroot\n" + name + "\n" + ciName + "\n" + stepName + "\n"},
 	}
+	responses["policy read "+wildcardName] = fakeBaoResponse{out: "No policy named: " + wildcardName, err: errors.New("exit status 2")}
+	responses["policy write "+wildcardName+" -"] = fakeBaoResponse{out: "Success!"}
+	responses["read -format=json auth/kubernetes/role/"+wildcardName] = fakeBaoResponse{out: "No value found", err: errors.New("exit status 2")}
+	responses["write auth/kubernetes/role/"+wildcardName+" -"] = fakeBaoResponse{out: "Success!"}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
 
@@ -483,8 +485,8 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 	if strings.Contains(perRepoWrite.stdin, "gar-image-key") {
 		t.Fatalf("per-repo policy must not carry the named-step path after sync (issue #814):\n%s", perRepoWrite.stdin)
 	}
-	if !strings.Contains(perRepoWrite.stdin, `path "oberth/data/release/cosign-secret"`) {
-		t.Fatalf("per-repo policy lost its wildcard grant:\n%s", perRepoWrite.stdin)
+	if strings.Contains(perRepoWrite.stdin, `path "oberth/data/release/cosign-secret"`) {
+		t.Fatalf("per-repo policy retained a workflow-scoped wildcard grant:\n%s", perRepoWrite.stdin)
 	}
 	perStepWrite, ok := byCommand["policy write "+stepName+" -"]
 	if !ok {

@@ -58,8 +58,8 @@ func TestReconcileConfigMapWithGrants(t *testing.T) {
 			ResourceVersion: "42",
 		},
 		Data: map[string]string{
-			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}
-- {repo: oberth, step: "*", secret: oberth/data/release/r2-upload-token}
+			secretAccessConfigMapKey: `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: terraform/credentials}
+- {workflow: .oberth/release.yaml, repo: oberth, step: "*", secret: oberth/data/release/r2-upload-token}
 `,
 		},
 	}
@@ -93,7 +93,7 @@ func TestReconcileConfigMapRemoved(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed a grant directly in sqlite.
-	if _, err := database.Grant(ctx, "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(ctx, "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,7 +125,7 @@ func TestReconcileUnparseableConfigMap(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed a grant directly.
-	if _, err := database.Grant(ctx, "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(ctx, "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -151,8 +151,8 @@ func TestReconcileDiff(t *testing.T) {
 			ResourceVersion: "10",
 		},
 		Data: map[string]string{
-			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}
-- {repo: oberth, step: "*", secret: cosign-secret}
+			secretAccessConfigMapKey: `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: terraform/credentials}
+- {workflow: .oberth/release.yaml, repo: oberth, step: "*", secret: cosign-secret}
 `,
 		},
 	}
@@ -160,10 +160,10 @@ func TestReconcileDiff(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed grants: one matching, one that should be revoked.
-	if _, err := database.Grant(ctx, "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := database.Grant(ctx, "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(ctx, "terraform", "*", "terraform/state", "admin@localhost"); err != nil {
+	if _, err := database.Grant(ctx, "terraform", ".oberth/release.yaml", "*", "terraform/state", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -215,7 +215,7 @@ func TestReconcileIdempotent(t *testing.T) {
 			ResourceVersion: "5",
 		},
 		Data: map[string]string{
-			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}`,
+			secretAccessConfigMapKey: `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: terraform/credentials}`,
 		},
 	}
 	reconciler, database := testAccessReconciler(t, cm)
@@ -241,7 +241,7 @@ func TestUpdateConfigMapAllow(t *testing.T) {
 	reconciler, database := testAccessReconciler(t, nil)
 	ctx := context.Background()
 
-	if err := reconciler.UpdateConfigMap(ctx, "", AddGrant("terraform", "*", "terraform/credentials")); err != nil {
+	if err := reconciler.UpdateConfigMap(ctx, "", AddGrant("terraform", ".oberth/release.yaml", "*", "terraform/credentials")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,8 +276,8 @@ func TestUpdateConfigMapRevoke(t *testing.T) {
 			ResourceVersion: "1",
 		},
 		Data: map[string]string{
-			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}
-- {repo: oberth, step: "*", secret: cosign-secret}
+			secretAccessConfigMapKey: `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: terraform/credentials}
+- {workflow: .oberth/release.yaml, repo: oberth, step: "*", secret: cosign-secret}
 `,
 		},
 	}
@@ -290,7 +290,7 @@ func TestUpdateConfigMapRevoke(t *testing.T) {
 	}
 
 	// Revoke one grant via ConfigMap update.
-	if err := reconciler.UpdateConfigMap(ctx, "", RemoveGrant("terraform", "*", "terraform/credentials")); err != nil {
+	if err := reconciler.UpdateConfigMap(ctx, "", RemoveGrant("terraform", ".oberth/release.yaml", "*", "terraform/credentials")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,24 +313,24 @@ func TestParseGrantsValidation(t *testing.T) {
 		ok   bool
 	}{
 		{name: "empty", data: "", ok: true},
-		{name: "valid wildcard step", data: `- {repo: a, step: "*", secret: c}`, ok: true},
-		{name: "dns1123 label step accepted", data: `- {repo: a, step: build, secret: c}`, ok: true},
-		{name: "invalid step uppercase rejected", data: `- {repo: a, step: Build, secret: c}`, ok: false},
-		{name: "wildcard secret", data: `- {repo: a, step: "*", secret: "*"}`, ok: false},
-		{name: "wildcard repo", data: `- {repo: "*", step: "*", secret: c}`, ok: false},
-		{name: "glob question in repo", data: `- {repo: "a?b", step: "*", secret: c}`, ok: false},
-		{name: "glob bracket in repo", data: `- {repo: "a[b]", step: "*", secret: c}`, ok: false},
-		{name: "hcl injection in repo", data: `- {repo: "x\" { capabilities = [\"sudo\"] }", step: "*", secret: c}`, ok: false},
-		{name: "backslash in repo", data: `- {repo: "repo\\evil", step: "*", secret: c}`, ok: false},
-		{name: "newline in repo", data: "- {repo: \"repo\\nevil\", step: \"*\", secret: c}", ok: false},
-		{name: "braces in repo", data: `- {repo: "repo{evil}", step: "*", secret: c}`, ok: false},
-		{name: "qualified repo valid", data: `- {repo: "codeberg/oberthci/oberth", step: "*", secret: c}`, ok: true},
-		{name: "glob star in secret", data: `- {repo: a, step: "*", secret: "c*d"}`, ok: false},
-		{name: "glob bracket in secret", data: `- {repo: a, step: "*", secret: "c[d]"}`, ok: false},
-		{name: "path-like secret", data: `- {repo: a, step: "*", secret: "terraform/credentials"}`, ok: true},
-		{name: "missing repo", data: `- {step: "*", secret: c}`, ok: false},
-		{name: "missing step", data: `- {repo: a, secret: c}`, ok: false},
-		{name: "missing secret", data: `- {repo: a, step: "*"}`, ok: false},
+		{name: "valid wildcard step", data: `- {workflow: .oberth/release.yaml, repo: a, step: "*", secret: c}`, ok: true},
+		{name: "dns1123 label step accepted", data: `- {workflow: .oberth/release.yaml, repo: a, step: build, secret: c}`, ok: true},
+		{name: "invalid step uppercase rejected", data: `- {workflow: .oberth/release.yaml, repo: a, step: Build, secret: c}`, ok: false},
+		{name: "wildcard secret", data: `- {workflow: .oberth/release.yaml, repo: a, step: "*", secret: "*"}`, ok: false},
+		{name: "wildcard repo", data: `- {workflow: .oberth/release.yaml, repo: "*", step: "*", secret: c}`, ok: false},
+		{name: "glob question in repo", data: `- {workflow: .oberth/release.yaml, repo: "a?b", step: "*", secret: c}`, ok: false},
+		{name: "glob bracket in repo", data: `- {workflow: .oberth/release.yaml, repo: "a[b]", step: "*", secret: c}`, ok: false},
+		{name: "hcl injection in repo", data: `- {workflow: .oberth/release.yaml, repo: "x\" { capabilities = [\"sudo\"] }", step: "*", secret: c}`, ok: false},
+		{name: "backslash in repo", data: `- {workflow: .oberth/release.yaml, repo: "repo\\evil", step: "*", secret: c}`, ok: false},
+		{name: "newline in repo", data: "- {workflow: .oberth/release.yaml, repo: \"repo\\nevil\", step: \"*\", secret: c}", ok: false},
+		{name: "braces in repo", data: `- {workflow: .oberth/release.yaml, repo: "repo{evil}", step: "*", secret: c}`, ok: false},
+		{name: "qualified repo valid", data: `- {workflow: .oberth/release.yaml, repo: "codeberg/oberthci/oberth", step: "*", secret: c}`, ok: true},
+		{name: "glob star in secret", data: `- {workflow: .oberth/release.yaml, repo: a, step: "*", secret: "c*d"}`, ok: false},
+		{name: "glob bracket in secret", data: `- {workflow: .oberth/release.yaml, repo: a, step: "*", secret: "c[d]"}`, ok: false},
+		{name: "path-like secret", data: `- {workflow: .oberth/release.yaml, repo: a, step: "*", secret: "terraform/credentials"}`, ok: true},
+		{name: "missing repo", data: `- {workflow: .oberth/release.yaml, step: "*", secret: c}`, ok: false},
+		{name: "missing step", data: `- {workflow: .oberth/release.yaml, repo: a, secret: c}`, ok: false},
+		{name: "missing secret", data: `- {workflow: .oberth/release.yaml, repo: a, step: "*"}`, ok: false},
 		{name: "invalid yaml", data: `[[[`, ok: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -353,7 +353,7 @@ func TestParseGrantsValidation(t *testing.T) {
 func TestParseGrantsValidatesStepGrammar(t *testing.T) {
 	// Accepted: wildcard and valid DNS-1123 labels.
 	for _, step := range []string{"*", "build", "release", "release-publish-images", "a", "test-1", "a1b2c3"} {
-		data := fmt.Sprintf(`- {repo: terraform, step: %q, secret: terraform/credentials}`, step)
+		data := fmt.Sprintf(`- {workflow: .oberth/release.yaml, repo: terraform, step: %q, secret: terraform/credentials}`, step)
 		if _, err := ParseGrants(data); err != nil {
 			t.Fatalf("step %q was rejected; expected acceptance: %v", step, err)
 		}
@@ -370,7 +370,7 @@ func TestParseGrantsValidatesStepGrammar(t *testing.T) {
 		strings.Repeat("a", 64), // exceeds 63-char limit
 		"release/images",        // slash
 	} {
-		data := fmt.Sprintf(`- {repo: terraform, step: %q, secret: terraform/credentials}`, step)
+		data := fmt.Sprintf(`- {workflow: .oberth/release.yaml, repo: terraform, step: %q, secret: terraform/credentials}`, step)
 		if _, err := ParseGrants(data); err == nil {
 			t.Fatalf("step %q was accepted; expected rejection", step)
 		}
@@ -391,7 +391,7 @@ func TestMalformedAllowPreservesExistingGrants(t *testing.T) {
 			ResourceVersion: "50",
 		},
 		Data: map[string]string{
-			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}`,
+			secretAccessConfigMapKey: `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: terraform/credentials}`,
 		},
 	}
 	reconciler, database := testAccessReconciler(t, cm)
@@ -410,13 +410,13 @@ func TestMalformedAllowPreservesExistingGrants(t *testing.T) {
 	}
 
 	// Attempt to add a grant with glob characters in repo — must be rejected.
-	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform*", "*", "terraform/credentials")); err == nil {
+	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform*", ".oberth/release.yaml", "*", "terraform/credentials")); err == nil {
 		t.Fatal("expected a glob-in-repo grant to be rejected")
 	}
 
 	// Attempt to add a grant with an invalid step (uppercase, not a DNS-1123
 	// label) — must be rejected.
-	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", "Build", "terraform/credentials")); err == nil {
+	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", ".oberth/release.yaml", "Build", "terraform/credentials")); err == nil {
 		t.Fatal("expected an invalid-step grant to be rejected")
 	}
 
@@ -444,7 +444,7 @@ func TestNamedStepGrantAcceptedAndReturned(t *testing.T) {
 			ResourceVersion: "100",
 		},
 		Data: map[string]string{
-			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}`,
+			secretAccessConfigMapKey: `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: terraform/credentials}`,
 		},
 	}
 	reconciler, database := testAccessReconciler(t, cm)
@@ -455,7 +455,7 @@ func TestNamedStepGrantAcceptedAndReturned(t *testing.T) {
 	}
 
 	// Add a grant with a named step.
-	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", "release-publish-images", "oberth/data/release/gar-image-key")); err != nil {
+	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", ".oberth/release.yaml", "release-publish-images", "oberth/data/release/gar-image-key")); err != nil {
 		t.Fatalf("named step grant was rejected: %v", err)
 	}
 	if err := reconciler.Reconcile(ctx); err != nil {
@@ -491,9 +491,9 @@ func TestNamedStepGrantAcceptedAndReturned(t *testing.T) {
 
 func TestRemoveGrantNotFound(t *testing.T) {
 	existing := []SecretAccessGrantEntry{
-		{Repo: "a", Step: "b", Secret: "c"},
+		{Workflow: ".oberth/release.yaml", Repo: "a", Step: "b", Secret: "c"},
 	}
-	_, err := RemoveGrant("x", "y", "z")(existing)
+	_, err := RemoveGrant("x", ".oberth/release.yaml", "y", "z")(existing)
 	if err == nil {
 		t.Fatal("expected error for missing grant")
 	}
@@ -508,7 +508,7 @@ func TestUpdateConfigMapAttribution(t *testing.T) {
 	ctx := context.Background()
 
 	// Allow with explicit actor — approved_by should carry the actor prefix.
-	if err := reconciler.UpdateConfigMap(ctx, "agent@example-node", AddGrant("terraform", "*", "terraform/credentials")); err != nil {
+	if err := reconciler.UpdateConfigMap(ctx, "agent@example-node", AddGrant("terraform", ".oberth/release.yaml", "*", "terraform/credentials")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -528,7 +528,7 @@ func TestUpdateConfigMapAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cm.Data[secretAccessConfigMapKey] += "- {repo: oberth, step: \"*\", secret: cosign-secret}\n"
+	cm.Data[secretAccessConfigMapKey] += "- {workflow: .oberth/release.yaml, repo: oberth, step: \"*\", secret: cosign-secret}\n"
 	if _, err := client.CoreV1().ConfigMaps("oberth").Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestResyncSurvivesBrokenWatch(t *testing.T) {
 			ResourceVersion: "7",
 		},
 		Data: map[string]string{
-			secretAccessConfigMapKey: `- {repo: terraform, step: "*", secret: terraform/credentials}`,
+			secretAccessConfigMapKey: `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: terraform/credentials}`,
 		},
 	}
 	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
@@ -603,9 +603,9 @@ func TestResyncSurvivesBrokenWatch(t *testing.T) {
 
 func TestAddGrantIdempotent(t *testing.T) {
 	existing := []SecretAccessGrantEntry{
-		{Repo: "a", Step: "b", Secret: "c"},
+		{Workflow: ".oberth/release.yaml", Repo: "a", Step: "b", Secret: "c"},
 	}
-	result, err := AddGrant("a", "b", "c")(existing)
+	result, err := AddGrant("a", ".oberth/release.yaml", "b", "c")(existing)
 	if err != nil {
 		t.Fatal(err)
 	}

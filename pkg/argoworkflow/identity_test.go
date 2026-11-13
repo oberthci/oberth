@@ -18,19 +18,17 @@ const (
 
 func testBranchIdentity() Identity {
 	return Identity{
-		Namespace:                    "oberth-argo",
-		ServiceAccountName:           branchServiceAccount,
-		ExecutorServiceAccountName:   executorServiceAccount,
-		AutomountServiceAccountToken: false,
+		Namespace:                  "oberth-argo",
+		ServiceAccountName:         branchServiceAccount,
+		ExecutorServiceAccountName: executorServiceAccount,
 	}
 }
 
 func testReleaseIdentity() Identity {
 	return Identity{
-		Namespace:                    "oberth-argo",
-		ServiceAccountName:           releaseServiceAccount,
-		ExecutorServiceAccountName:   executorServiceAccount,
-		AutomountServiceAccountToken: true,
+		Namespace:                  "oberth-argo",
+		ServiceAccountName:         releaseServiceAccount,
+		ExecutorServiceAccountName: executorServiceAccount,
 	}
 }
 
@@ -302,8 +300,8 @@ func TestReleaseTierReceivesTheReleaseIdentity(t *testing.T) {
 		}
 		if found.automount != nil {
 			seenAutomount++
-			if !*found.automount {
-				t.Errorf("%s does not automount a token on the release tier", found.path)
+			if *found.automount {
+				t.Errorf("%s automounts a token on the release tier", found.path)
 			}
 		}
 	}

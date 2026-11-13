@@ -612,33 +612,8 @@ func buildQuestions() []*question {
 				return nil
 			},
 		},
-		{
-			id: "cluster.network", step: stepCluster, heading: "Restrict CI network egress?",
-			explain: func(*WizardState) string {
-				return "A NetworkPolicy firewalls what CI jobs reach. auto enforces it on a fresh install, k3s included, and keeps the live setting on a rerun."
-			},
-			options: func(*WizardState) []option {
-				return []option{
-					{value: "auto", label: "auto", detail: "enforce where the network plugin supports it"},
-					{value: "true", label: "strict", detail: "always enforce"},
-					{value: "false", label: "off", detail: "never enforce"},
-				}
-			},
-			selected: func(st *WizardState) string {
-				if st.Config.NetworkPolicy == "" {
-					return "auto"
-				}
-				return st.Config.NetworkPolicy
-			},
-			save: func(st *WizardState, answer []string) error {
-				np, ok := canonicalNetworkPolicy(answer[0])
-				if !ok {
-					return errors.New("network policy must be auto, strict, or off")
-				}
-				st.Config.NetworkPolicy = np
-				return nil
-			},
-		},
+		networkPolicyQuestion(),
+		argoLimitsQuestion(),
 		{
 			id: "store.mode", step: stepStore, heading: "Where do release secrets live?",
 			explain: func(*WizardState) string {

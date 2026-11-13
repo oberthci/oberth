@@ -24,3 +24,13 @@ func TestValidateArgoLimitsRefusesAnUnmanagedController(t *testing.T) {
 		t.Fatal("negative parallelism accepted")
 	}
 }
+
+func TestArgoHelmArgsRenderTheRequestedLimits(t *testing.T) {
+	global, namespace := 9, 3
+	args := strings.Join(ArgoHelmArgs(Config{ArgoParallelism: &global, ArgoNamespaceParallelism: &namespace}), " ")
+	for _, want := range []string{"controller.parallelism=9", "controller.namespaceParallelism=3"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("missing native limit %s: %s", want, args)
+		}
+	}
+}

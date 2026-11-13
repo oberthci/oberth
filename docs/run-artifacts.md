@@ -129,8 +129,8 @@ persisting real key material to the server's disk.
 
 ## Collection is CI-tier only
 
-Only CI-trigger (branch) runs collect artifacts. Credentialed tiers — release,
-plan, apply — are excluded: their steps hold secret material under the
+Only CI-trigger (branch) runs collect artifacts. Release, plan, and apply
+triggers are excluded: their steps hold secret material under the
 memory-only contract, and a credential accidentally written into
 `$OBERTH_ARTIFACTS` must never be copied onto the server's `/data` volume.
 For those runs the directory still exists and is writable, but its contents

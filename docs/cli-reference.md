@@ -405,12 +405,14 @@ Flags:
         argo-workflows chart version
   -argo-namespace string
         namespace pipelines execute in; must differ from --namespace (default: oberth-argo)
+  -argo-namespace-parallelism int
+        Argo controller namespaceParallelism: Workflows running at once per namespace, 0 for no limit; default: 0 for a new release; preserve existing values unless explicitly chosen
   -argo-parallelism int
-        Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2) (default -1)
+        Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; default: 4 for a new release; preserve existing values unless explicitly chosen (default 4)
   -argo-vault-address string
-        OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)
+        OpenBao/Vault base URL injected into granted step containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
-        Kubernetes-auth role credentialed pipelines log in with; bind it to exactly (--argo-namespace, the credentialed ServiceAccount)
+        Kubernetes-auth role granted steps log in with; bind it to exactly (--argo-namespace, the credentialed ServiceAccount)
   -assist
         enable agent-assisted continuation (chart value assist.enabled, off by default; later: oberth upgrade --set assist.enabled=true); see docs/assisted-continuation.md
   -chart string
@@ -429,8 +431,6 @@ Flags:
         git SSH port clients reach the server on, when it is not the Service's (default: the NodePort 30022, or the Service port); client files, SSH config and printed commands use it
   -context string
         kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)
-  -credentialed-secret-path oberth access allow
-        full KV data path approved in the secret-access table (repeatable, exactly the string oberth access allow records, e.g. oberth/data/release/cosign-secret); synced into the RELEASE-tier credentialed Vault policy as an exact read grant when --install-secretstore reconciles the store — the branch-tier ci-secrets policy never receives grants
   -dry-run
         print plan without making changes
   -expected-host-fingerprint string
@@ -1627,13 +1627,13 @@ Flags:
   -argo-source-storage-class string
         storage class for per-run pipeline source volumes (empty: cluster default)
   -argo-vault-address string
-        OpenBao API base URL injected into credentialed Argo containers as VAULT_ADDR (HTTPS)
+        OpenBao API base URL injected into granted secret-consuming step containers as VAULT_ADDR (HTTPS)
   -argo-vault-ca-cert string
-        PEM file pinning the trust anchors credentialed pipeline containers verify --argo-vault-address against
+        PEM file pinning the trust anchors granted step containers verify --argo-vault-address against
   -argo-vault-ci-secrets-role string
-        OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)
+        OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI granted steps at admission)
   -argo-vault-credentialed-role string
-        OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace
+        OpenBao Kubernetes auth role for granted release step containers; bound to the credentialed ServiceAccount and namespace
   -argo-workflow-ttl int
         finished Workflow retention in seconds (default 3600)
   -artifact-retention duration

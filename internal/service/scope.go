@@ -667,18 +667,18 @@ func (access scopedSecretAccess) SecretAccessList(ctx context.Context, repo stri
 	return visible, nil
 }
 
-func (access scopedSecretAccess) Grant(ctx context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error) {
+func (access scopedSecretAccess) Grant(ctx context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error) {
 	if !access.scope.seesAccessKey(repo) {
 		return store.SecretAccessGrant{}, hiddenRepository(repo)
 	}
-	return access.inner.Grant(ctx, repo, step, secret, actor)
+	return access.inner.Grant(ctx, repo, workflow, step, secret, actor)
 }
 
-func (access scopedSecretAccess) Revoke(ctx context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error) {
+func (access scopedSecretAccess) Revoke(ctx context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error) {
 	if !access.scope.seesAccessKey(repo) {
 		return store.SecretAccessGrant{}, hiddenRepository(repo)
 	}
-	return access.inner.Revoke(ctx, repo, step, secret, actor)
+	return access.inner.Revoke(ctx, repo, workflow, step, secret, actor)
 }
 
 func (access scopedSecretAccess) QualifiedRepoName(ctx context.Context, repoID int64) (string, error) {
