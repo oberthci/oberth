@@ -19,8 +19,7 @@ type RetirementSource struct {
 }
 
 // RetirementSources requires a fresh upstream view and includes unpublished
-// public branch heads. Historical tags are inspected only when a live pipeline
-// pins them as fragments. Symlinks, submodules and incomplete inventories refuse.
+// public branch heads. Symlinks, submodules and incomplete inventories refuse.
 func (c *Cache) RetirementSources(ctx context.Context, input string) ([]RetirementSource, error) {
 	ready, err := c.Ensure(ctx, input)
 	if err != nil {

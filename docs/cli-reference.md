@@ -1649,8 +1649,6 @@ Flags:
         persistent data root (default "/data")
   -database string
         SQLite database path (default "/data/oberth.sqlite")
-  -fragment-allowlist string
-        comma-separated repositories usable as pipeline fragments; empty permits every registered repository
   -git-gc-interval duration
         periodic Git GC interval (default 24h0m0s)
   -git-timeout duration

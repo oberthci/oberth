@@ -1,13 +1,6 @@
 package gitcache
 
-// This file is extracted verbatim from upstream PR #13 (commit 1e010341,
-// "argoworkflow: resolve pinned cross-repo pipeline fragments before
-// admission", author Mikita Zhuikou): ReadBlob is the bounded git-cache blob
-// read the schedule feature depends on. Only the read primitive is taken;
-// the fragment-resolution feature itself (TagSHA, fragment.go) is not
-// integrated yet. When PR #13 lands, its copy of ReadBlob, validateBlobPath,
-// errBlobTooLarge duplicates this file and one side must be
-// dropped.
+// ReadBlob provides bounded reads of pipeline source from the git cache.
 
 import (
 	"context"

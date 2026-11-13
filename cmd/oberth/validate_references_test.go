@@ -71,4 +71,7 @@ func TestRemovedFragmentCLIIsUnavailable(t *testing.T) {
 	if err := runValidate(context.Background(), []string{"--allow-unresolved-fragments"}, &output); !errors.Is(err, errUsage) {
 		t.Fatalf("removed validation flag = %v", err)
 	}
+	if _, err := parseServeOptions([]string{"--fragment-allowlist", "shared/pipeline"}, &output); !errors.Is(err, errUsage) {
+		t.Fatalf("removed server flag = %v", err)
+	}
 }

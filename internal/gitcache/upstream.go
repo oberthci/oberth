@@ -106,10 +106,8 @@ func (c *Cache) ReleaseReachable(ctx context.Context, input, commit, admissionSH
 // ReachableFromUpstreamDefault checks whether a commit is an ancestor of the
 // cached upstream default branch. Unlike ReleaseReachable — which uses the
 // exact admission snapshot bound to a specific receive — this uses the latest
-// upstream tracking ref, refreshed at the last Ensure. It is the fragment
-// reachability gate (#213): a cross-repo pipeline fragment's tag commit must
-// be reachable from its source repository's upstream default branch before a
-// release-tier pipeline may inline it.
+// upstream tracking ref, refreshed at the last Ensure. Pinned sources require
+// their commits to be reachable from the source repository's default branch.
 //
 // Returns true if the commit is an ancestor, false if not, or an error if the
 // repository is not cached or the commit is not present.
@@ -143,7 +141,7 @@ func (c *Cache) ReachableFromUpstreamDefault(ctx context.Context, input, commit 
 		return false, err
 	}
 	if err := c.assertCommit(ctx, path, commit); err != nil {
-		return false, fmt.Errorf("fragment commit %s is not present in %s cache: %w", commit, repo, err)
+		return false, fmt.Errorf("commit %s is not present in %s cache: %w", commit, repo, err)
 	}
 	err = c.run(ctx, commandSpec{dir: path, args: []string{"merge-base", "--is-ancestor", commit, tipSHA}})
 	if err == nil {

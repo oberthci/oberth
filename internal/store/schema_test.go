@@ -1038,7 +1038,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"runs_active_ref_idx", "runs_admission_idx", "runs_counts_idx",
 		"runs_fifo_idx",
 		"runs_latest_ref_idx",
-		"runs_passed_tested_sha_idx",
 		"runs_ref_idx",
 		"runs_ref_prefix_idx",
 		"runs_sha_idx", "runs_terminal_end_idx",

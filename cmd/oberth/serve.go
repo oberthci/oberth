@@ -96,7 +96,6 @@ type serveOptions struct {
 	scheduleMinInterval   time.Duration
 	scheduleMaxEntries    int
 	sourceAllowlist       string
-	fragmentAllowlist     string
 	artifactsLimitBytes   int64
 	artifactsBudgetBytes  int64
 	logRetention          time.Duration
@@ -219,7 +218,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.DurationVar(&options.scheduleMinInterval, "schedule-min-interval", defaultScheduleMinInterval, "shortest interval a repository may schedule itself at")
 	flags.IntVar(&options.scheduleMaxEntries, "schedule-max-entries", defaultScheduleMaxEntries, "most schedule entries one repository may declare")
 	flags.StringVar(&options.sourceAllowlist, "source-allowlist", "{}", "JSON map of consumer upstream/org/repository to allowed pinned source repositories; empty denies all")
-	flags.StringVar(&options.fragmentAllowlist, "fragment-allowlist", "", "comma-separated repositories usable as pipeline fragments; empty permits every registered repository")
 	flags.Int64Var(&options.artifactsLimitBytes, "artifacts-limit-bytes", defaultArtifactsLimitBytes, "maximum total bytes of artifacts kept per run")
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.DurationVar(&options.logRetention, "log-retention", 0, "maximum age of terminal run logs (0 disables age retention)")
@@ -749,10 +747,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	fragmentLoader, err := app.NewGitFragmentLoader(git, database, splitRunnerImagePrefixes(options.fragmentAllowlist))
-	if err != nil {
-		return err
-	}
 	// Retirement inventory runs only through the authenticated admin route.
 	// Upstream availability and repository declarations must not gate startup.
 	artifactStore, err := artifacts.Open(filepath.Join(options.dataRoot, "artifacts"))
@@ -781,7 +775,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("per-step identities: %d (repo, step) pairs with named grants", len(perStepIdentities))
 	}
 	identityStore := argojob.NewIdentityStoreWithSteps(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities), perStepIdentities)
-	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, fragmentLoader,
+	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
 		options.artifactsLimitBytes, perRepoIdentities, identityStore)
 	if err != nil {

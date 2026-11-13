@@ -41,7 +41,6 @@ func buildArgoEngine(
 	kube kubernetes.Interface,
 	auditor service.Auditor,
 	secretAccess app.SecretAccessLoader,
-	fragments app.FragmentLoader,
 	artifactStore app.ArtifactStore,
 	artifactLimit int64,
 	perRepoIdentities map[string]argojob.PerRepoIdentityConfig,
@@ -126,7 +125,7 @@ func buildArgoEngine(
 	if seeder == nil {
 		return nil, errors.New("configure Argo source seeding: the in-cluster Kubernetes client is required")
 	}
-	jobs, err := app.NewArgoJobs(controller.WithSourceSeeder(seeder), config, auditor, secretAccess, fragments)
+	jobs, err := app.NewArgoJobs(controller.WithSourceSeeder(seeder), config, auditor, secretAccess, nil)
 	if err != nil {
 		return nil, err
 	}

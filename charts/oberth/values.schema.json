@@ -707,7 +707,6 @@
                   "not": {
                     "enum": [
                       ".oberth/build.yaml",
-                      ".oberth/fragment.yaml",
                       ".oberth/schedule.yaml",
                       ".oberth/tests.yaml"
                     ]
@@ -813,7 +812,6 @@
                           "not": {
                             "enum": [
                               ".oberth/build.yaml",
-                              ".oberth/fragment.yaml",
                               ".oberth/schedule.yaml",
                               ".oberth/tests.yaml"
                             ]

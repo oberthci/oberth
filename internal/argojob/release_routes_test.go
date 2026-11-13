@@ -38,8 +38,16 @@ func TestReleaseTagRoutesResolveAndRefuse(t *testing.T) {
 	}
 }
 
+func TestReleaseTagRouteFragmentPathIsOrdinaryFile(t *testing.T) {
+	routes := ReleaseTagRoutes{"forge/org/repo": {{Pattern: "deploy-*", File: ".oberth/fragment.yaml"}}}
+	file, err := routes.Resolve("forge/org/repo", model.RefTag, "deploy-1")
+	if err != nil || file != ".oberth/fragment.yaml" {
+		t.Fatalf("removed contract still reserves ordinary route file: %q %v", file, err)
+	}
+}
+
 func TestReleaseTagRoutesInvalidConfiguration(t *testing.T) {
-	for _, file := range []string{"../../outside.yaml", "/tmp/file.yaml", ".oberth/../file.yaml", ".oberth/build.yaml", ".oberth/fragment.yaml", ".oberth/schedule.yaml", ".oberth/tests.yaml", ".oberth/nested/release.yaml", ".oberth/Bad.yaml", ".oberth/file.go"} {
+	for _, file := range []string{"../../outside.yaml", "/tmp/file.yaml", ".oberth/../file.yaml", ".oberth/build.yaml", ".oberth/schedule.yaml", ".oberth/tests.yaml", ".oberth/nested/release.yaml", ".oberth/Bad.yaml", ".oberth/file.go"} {
 		if err := (ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: file}}}).Validate(); err == nil {
 			t.Errorf("unsafe file accepted: %q", file)
 		}
