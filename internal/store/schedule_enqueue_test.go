@@ -60,7 +60,7 @@ func TestScheduleOccurrenceCoalescesOnlySameEntryAndBranch(t *testing.T) {
 				t.Fatalf("overlap = %+v, %v", next, err)
 			}
 			retained, err := s.Run(t.Context(), first.Enqueued.ID)
-			if err != nil || !retained.Status.Active() || retained.SHA != strings.Repeat("a", 40) || retained.SupersededBy != "" {
+			if err != nil || !retained.Status.Active() || retained.SHA != strings.Repeat("a", 40) {
 				t.Fatalf("live run changed: %+v, %v", retained, err)
 			}
 			outcomes, err := s.ScheduleOutcomes(t.Context(), fire.Repo)
@@ -263,7 +263,7 @@ func TestScheduleOccurrenceCoalescesRegardlessOfStoredTrigger(t *testing.T) {
 		t.Fatalf("same-entry run with another trigger was not coalesced: %+v, %v", result, err)
 	}
 	retained, err := s.Run(t.Context(), active.ID)
-	if err != nil || retained.Status != model.RunQueued || retained.SupersededBy != "" {
+	if err != nil || retained.Status != model.RunQueued {
 		t.Fatalf("same-entry run was superseded: %+v, %v", retained, err)
 	}
 }

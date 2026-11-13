@@ -18,7 +18,7 @@ INSERT INTO run_cancellations_native
 -- only those exact outstanding Workflow observations until native Stop finishes.
 UPDATE runs SET status='running',phase='cancelled',finished_at=NULL,
  reason='cancelling by oberth: stop requested before upgrade'
- WHERE status='interrupted' AND EXISTS (
+ WHERE status='interrupted' AND (trigger!='promotion' OR NOT EXISTS (SELECT 1 FROM promotions p WHERE p.run_id=runs.id AND p.status!='pending')) AND EXISTS (
  SELECT 1 FROM run_cancellations_native c WHERE c.run_id=runs.id
  AND c.completed_at IS NULL AND c.job_name!='' AND c.reason='cancelled');
 DROP TABLE run_cancellations;

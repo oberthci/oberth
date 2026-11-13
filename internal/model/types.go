@@ -179,7 +179,6 @@ type Run struct {
 	Error         string
 	Status        RunStatus
 	Reason        string
-	SupersededBy  string `json:"-"`
 	QueuedAt      time.Time
 	StartedAt     *time.Time
 	FinishedAt    *time.Time
@@ -260,7 +259,7 @@ type RunCounts struct {
 type RunCancellation struct {
 	RunID        string
 	WorkflowName string `json:"JobName"`
-	SupersededBy string `json:"-"`
+	Terminate    bool
 	Reason       string
 	CreatedAt    time.Time
 	CompletedAt  *time.Time

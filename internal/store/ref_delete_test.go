@@ -71,7 +71,7 @@ func TestRefDeletionCancelsAllUnfinishedBranchPhases(t *testing.T) {
 	}
 	for _, before := range cancelled {
 		run, err := s.Run(t.Context(), before.ID)
-		if err != nil || !run.Cancelled() || run.Reason != "ref deleted" || run.SupersededBy != "" || (before.Status == model.RunQueued && run.FinishedAt == nil) || (before.Status == model.RunRunning && (run.Status != model.RunRunning || run.FinishedAt != nil)) {
+		if err != nil || !run.Cancelled() || run.Reason != "ref deleted" || (before.Status == model.RunQueued && run.FinishedAt == nil) || (before.Status == model.RunRunning && (run.Status != model.RunRunning || run.FinishedAt != nil)) {
 			t.Fatalf("run not cancelled: %+v %v", run, err)
 		}
 		if before.Phase == "infrastructure-pending" && run.Error != before.Error {
@@ -89,9 +89,6 @@ func TestRefDeletionCancelsAllUnfinishedBranchPhases(t *testing.T) {
 		t.Fatalf("cleanup obligations: %+v %v", pending, err)
 	}
 	for _, obligation := range pending {
-		if obligation.SupersededBy != "" {
-			t.Fatal("deletion invented successor", obligation)
-		}
 	}
 	// A name published after cancellation still acquires the existing obligation.
 	late := cancelled[1]

@@ -58,8 +58,20 @@ func seedDeferredReceive(t *testing.T, s *Store, id string, spec model.RunSpec) 
 }
 func applyNativeReceiveUpgrade(t *testing.T, s *Store) {
 	t.Helper()
-	for range 2 {
+	cut := len(migrations)
+	for i, m := range migrations {
+		if strings.Contains(m.id, "native-cancel-escalation") {
+			cut = i
+			break
+		}
+	}
+	t.Cleanup(func() {
 		if err := s.migrateWithMigrations(t.Context(), nil, migrations); err != nil {
+			t.Error(err)
+		}
+	})
+	for range 2 {
+		if err := s.migrateWithMigrations(t.Context(), nil, migrations[:cut]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -110,7 +122,7 @@ func TestNativeReceiveUpgradeSupersedesOnlyMatchingScheduleLane(t *testing.T) {
 	check := func(id, successor string) {
 		t.Helper()
 		run, err := s.Run(ctx, id)
-		if err != nil || run.Status != model.RunInterrupted || run.Phase != "interrupted" || run.Reason != "superseded by newer run" || run.SupersededBy != successor || run.FinishedAt == nil {
+		if err != nil || run.Status != model.RunInterrupted || run.Phase != "interrupted" || run.Reason != "superseded by newer run" || historicalSuccessor(t, s, id) != successor || run.FinishedAt == nil {
 			t.Fatalf("incorrect supersession: %+v %v", run, err)
 		}
 	}
@@ -241,10 +253,10 @@ func TestNativeReceiveUpgradePreservesExecutionAndPublicationCustody(t *testing.
 				t.Fatal(err)
 			}
 			if kind == "queued" {
-				if after.Status != model.RunInterrupted || after.SupersededBy != newer.ID || after.Reason != "superseded by newer run" {
+				if after.Status != model.RunInterrupted || historicalSuccessor(t, s, older.ID) != newer.ID || after.Reason != "superseded by newer run" {
 					t.Fatal("queued A not superseded by B", after, newer)
 				}
-			} else if after.Status != older.Status || after.SupersededBy != "" || after.FinishedAt != nil {
+			} else if after.Status != older.Status || historicalSuccessor(t, s, older.ID) != "" || after.FinishedAt != nil {
 				t.Fatal("migration changed existing custody", after)
 			}
 			if kind == "publication" {
@@ -258,4 +270,14 @@ func TestNativeReceiveUpgradePreservesExecutionAndPublicationCustody(t *testing.
 			}
 		})
 	}
+}
+
+// Historical migration provenance is inspected before the retirement migration.
+func historicalSuccessor(t *testing.T, s *Store, id string) string {
+	t.Helper()
+	var successor string
+	if err := s.db.QueryRowContext(t.Context(), `SELECT superseded_by FROM runs WHERE id=?`, id).Scan(&successor); err != nil {
+		t.Fatal(err)
+	}
+	return successor
 }

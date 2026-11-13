@@ -50,12 +50,22 @@ func (s *Store) CancelRun(ctx context.Context, request model.RunCancelRequest) (
 	}
 	if current.Cancelled() {
 		result := model.RunCancelResult{Run: current, PreviousState: current.Status}
-		row := tx.QueryRowContext(ctx, `SELECT run_id,job_name,superseded_by,reason,created_at,completed_at FROM run_cancellations WHERE run_id=? AND completed_at IS NULL`, current.ID)
-		if pending, err := scanRunCancellation(row); err == nil {
-			result.Cancellations = []model.RunCancellation{pending}
-		} else if !errors.Is(err, sql.ErrNoRows) {
+		if !current.Status.Active() {
+			return result, tx.Commit()
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO run_cancellations(run_id,job_name,reason,created_at,terminate) VALUES(?,?,'cancelled',?,1)
+ON CONFLICT(run_id) DO UPDATE SET terminate=1,created_at=excluded.created_at,completed_at=NULL`, current.ID, current.WorkflowName, now); err != nil {
 			return result, err
 		}
+		details, _ := json.Marshal(map[string]any{"run_id": current.ID, "shutdown": "Terminate", "escalated": true, "reason": request.Reason})
+		if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: request.Actor, Action: "run.cancel", ResourceType: "run", ResourceID: current.ID, Details: string(details)}, now); err != nil {
+			return result, err
+		}
+		pending, err := scanRunCancellation(tx.QueryRowContext(ctx, `SELECT run_id,job_name,reason,created_at,completed_at,terminate FROM run_cancellations WHERE run_id=?`, current.ID))
+		if err != nil {
+			return result, err
+		}
+		result.Cancellations = []model.RunCancellation{pending}
 		return result, tx.Commit()
 	}
 	if !current.Status.Active() {
@@ -90,6 +100,7 @@ RETURNING `+runColumns, model.PhaseCancelled, text, text, now, now, current.ID))
 		return model.RunCancelResult{}, fmt.Errorf("cancel run: %w", err)
 	}
 	result := model.RunCancelResult{Run: cancelled, PreviousState: previous}
+	terminate := current.Release || current.RefKind == model.RefTag || current.Trigger == "promotion" || current.Trigger == "release" || current.Trigger == "apply"
 	if current.Status == model.RunRunning {
 		cleanupReason := "cancelled"
 		if current.Phase == "infrastructure-pending" {
@@ -99,18 +110,17 @@ RETURNING `+runColumns, model.PhaseCancelled, text, text, now, now, current.ID))
 		// empty Job name means the owner has not published one yet; it does
 		// so through SetRunWorkflowName, or settles the obligation when it exits.
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-VALUES(?, ?, '', ?, ?)
+INSERT INTO run_cancellations(run_id, job_name, reason, created_at, terminate)
+VALUES(?, ?, ?, ?, ?)
 ON CONFLICT(run_id) DO UPDATE SET
     job_name = excluded.job_name,
-    superseded_by = '',
     reason = excluded.reason,
     created_at = excluded.created_at,
-    completed_at = NULL`, cancelled.ID, cancelled.WorkflowName, cleanupReason, now); err != nil {
+    completed_at = NULL, terminate=MAX(run_cancellations.terminate, excluded.terminate)`, cancelled.ID, cancelled.WorkflowName, cleanupReason, now, terminate); err != nil {
 			return model.RunCancelResult{}, fmt.Errorf("record run cancellation: %w", err)
 		}
 		result.Cancellations = []model.RunCancellation{{
-			RunID: cancelled.ID, WorkflowName: cancelled.WorkflowName, Reason: cleanupReason, CreatedAt: fromUnixNano(now),
+			RunID: cancelled.ID, WorkflowName: cancelled.WorkflowName, Reason: cleanupReason, CreatedAt: fromUnixNano(now), Terminate: terminate,
 		}}
 	}
 	if cancelled.Trigger == "promotion" {
@@ -130,7 +140,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 	details, err := json.Marshal(map[string]any{
 		"run_id": cancelled.ID, "repo_id": cancelled.RepoID, "ref_kind": cancelled.RefKind, "ref": cancelled.Ref,
 		"sha": cancelled.SHA, "trigger": cancelled.Trigger, "previous_state": previous, "job_name": cancelled.WorkflowName,
-		"reason": request.Reason, "force": request.Force,
+		"reason": request.Reason, "force": request.Force, "shutdown": map[bool]string{false: "Stop", true: "Terminate"}[terminate],
 		"warning": request.Warning, "promotion_id": result.PromotionID,
 	})
 	if err != nil {

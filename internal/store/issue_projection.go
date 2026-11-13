@@ -132,7 +132,7 @@ func transientNodeFailure(run model.Run) bool {
 		return false
 	}
 	message := strings.TrimPrefix(run.Error, "trusted preflight: trusted preflight infrastructure failure: ")
-	return message == "Evicted" || strings.HasPrefix(message, "Evicted: ") || model.IsStartupDeadlineReason(message)
+	return model.IsNodeRebootReason(message) || message == "Evicted" || strings.HasPrefix(message, "Evicted: ") || model.IsStartupDeadlineReason(message)
 }
 
 func runIssueBody(run model.Run, failureTail string) string {

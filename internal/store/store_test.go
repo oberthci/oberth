@@ -736,7 +736,7 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if noJobRecovered.Status != model.RunQueued || noJobRecovered.FinishedAt != nil || noJobRecovered.SupersededBy != "" {
+	if noJobRecovered.Status != model.RunQueued || noJobRecovered.FinishedAt != nil {
 		t.Fatalf("no-job recovered run = %#v, want queued under the same ID", noJobRecovered)
 	}
 	requeued, err := s.Run(ctx, noJobRun.ID)
@@ -790,7 +790,7 @@ func TestRestartRecoveryRequeuesTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" || recovered.Reason != RestartRequeueReason {
+	if recovered.Status != model.RunQueued || recovered.Reason != RestartRequeueReason {
 		t.Fatalf("recovered tag run = %#v, want queued under the same ID", recovered)
 	}
 }
@@ -838,7 +838,7 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	// A prior binary may already have left this obligation behind.
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at) VALUES(?, ?, '', 'owner_restart', ?)`, run.ID, "job-stranded", unixNano(now)); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO run_cancellations(run_id, job_name, reason, created_at) VALUES(?, ?, 'owner_restart', ?)`, run.ID, "job-stranded", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
 	requeued, err := s.RequeueStrandedRun(ctx, run.ID)
@@ -849,7 +849,7 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if old.Status != model.RunQueued || old.SupersededBy != "" || old.ID != requeued.ID {
+	if old.Status != model.RunQueued || old.ID != requeued.ID {
 		t.Fatalf("stranded run after requeue = %#v, want queued under original ID %s", old, requeued.ID)
 	}
 	if requeued.Status != model.RunQueued || requeued.Ref != run.Ref || requeued.SHA != run.SHA || requeued.Credentialed {
@@ -860,7 +860,7 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName != "job-stranded" ||
-		pending[0].Reason != "owner_restart" || pending[0].SupersededBy != "" {
+		pending[0].Reason != "owner_restart" {
 		t.Fatalf("pending obligations = %#v, want upserted owner-restart obligation for job-stranded", pending)
 	}
 
@@ -1891,7 +1891,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 	if _, err := s.MarkRunSubmissionStarted(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at) VALUES(?,?,'owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.RecoverOwnerState(context.Background()); err != nil {
@@ -1901,7 +1901,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 		t.Fatalf("legacy restart deletion retained: %#v %v", pending, err)
 	}
 	current, err := s.Run(context.Background(), run.ID)
-	if err != nil || current.Status != model.RunRunning || current.SupersededBy != "" {
+	if err != nil || current.Status != model.RunRunning {
 		t.Fatalf("legacy recovery = %#v %v", current, err)
 	}
 }

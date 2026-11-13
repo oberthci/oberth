@@ -41,7 +41,7 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 			if _, err = s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "workflow", unixNano(now)); err != nil {
+			if _, err = s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at) VALUES(?,?,'owner_restart',?)`, run.ID, "workflow", unixNano(now)); err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {
@@ -50,7 +50,7 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 				}
 			}
 			current, err := s.Run(ctx, run.ID)
-			if err != nil || current.Status != model.RunRunning || current.ID != run.ID || current.AdmissionSequence != run.AdmissionSequence || current.QueueSequence != run.QueueSequence || current.Credentialed != run.Credentialed || current.SupersededBy != "" {
+			if err != nil || current.Status != model.RunRunning || current.ID != run.ID || current.AdmissionSequence != run.AdmissionSequence || current.QueueSequence != run.QueueSequence || current.Credentialed != run.Credentialed {
 				t.Fatalf("recovery changed attempt: %+v %v", current, err)
 			}
 			if pending, err := s.PendingRunCancellations(ctx); err != nil || len(pending) != 0 {

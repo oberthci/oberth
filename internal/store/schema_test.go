@@ -1145,7 +1145,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"schema_migrations":         {"version", "applied_at", "id"},
 		"upstreams":                 {"id", "name", "kind", "base_url", "created_at", "updated_at", "key_name"},
 		"repositories":              {"id", "name", "upstream_id", "default_branch", "created_at", "updated_at"},
-		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group", "admission_sequence", "schedule_entry", "concurrency_limit", "issue_trailers", "failure_cause", "source_bindings", "assist_requested", "assisted", "assist_record"},
+		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group", "admission_sequence", "schedule_entry", "concurrency_limit", "issue_trailers", "failure_cause", "source_bindings", "assist_requested", "assisted", "assist_record"},
 		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "termination_json"},
 		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id", "train_json", "train_key", "branch_ci_skipped", "observed_target_sha"},
 		"promotion_train_grants":    {"promotion_id", "grant_id", "included"},
@@ -1158,7 +1158,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"uplink_client_pins":        {"pin", "uplink_id", "expires_at", "created_at"},
 		"uplink_invites":            {"id", "secret_digest", "identity", "server_url", "ca_pin", "scope_json", "issuer", "expires_at", "created_at", "redeemed_at"},
 		"uplinks":                   {"id", "fingerprint", "identity", "token_credential_id", "auth_actor", "created_at", "updated_at", "admin"},
-		"run_cancellations":         {"run_id", "job_name", "superseded_by", "reason", "created_at", "completed_at"},
+		"run_cancellations":         {"run_id", "job_name", "reason", "created_at", "completed_at", "terminate"},
 		"receive_events":            {"id", "actor", "repo_id", "ref_kind", "ref", "old_sha", "object_sha", "commit_sha", "outcome", "run_id", "created_at"},
 		"pending_token_credentials": {"token_credential_id", "created_at"},
 		"publications":              {"sequence", "id", "repo_id", "run_id", "promotion_id", "ref_kind", "ref", "previous_sha", "previous_known", "result_sha", "actor", "status", "error", "created_at", "updated_at", "attempts", "retry_after"},
@@ -1184,7 +1184,6 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	assertSchemaContains(t, store.db, "table", "promotions",
 		"status text not null default 'pending' check (status in ('pending', 'passed', 'failed', 'interrupted'))")
 	assertSchemaContains(t, store.db, "table", "run_cancellations",
-		"superseded_by text not null default ''",
 		"reason text not null check (reason in ('cancelled', 'owner_restart'))")
 	assertSchemaContains(t, store.db, "table", "publications",
 		"status text not null default 'pending' check (status in ('pending', 'delivered', 'failed', 'abandoned'))",

@@ -484,6 +484,8 @@ DELETE FROM schema_migrations WHERE id='20261113013336-remove-step-measurement-3
 // PostWorkflowStopDowngrade reconstructs the prior ledger only in disposable
 // historical-schema fixtures. Production migrations remain forward-only.
 const PostWorkflowStopDowngrade = `
+ALTER TABLE runs ADD COLUMN superseded_by TEXT NOT NULL DEFAULT '';
+DELETE FROM schema_migrations WHERE id='20261113211914-native-cancel-escalation-9842e2a107ff9a80b31de7956b93662f';
 CREATE TEMP TABLE stop_fixture AS SELECT * FROM run_cancellations;
 DROP TABLE run_cancellations;
 CREATE TABLE run_cancellations (
@@ -494,9 +496,44 @@ CREATE TABLE run_cancellations (
     created_at INTEGER NOT NULL,
     completed_at INTEGER
 );
-INSERT INTO run_cancellations SELECT run_id,job_name,superseded_by,
+INSERT INTO run_cancellations SELECT run_id,job_name,'',
  CASE WHEN reason='cancelled' THEN 'superseded' ELSE reason END,created_at,completed_at FROM stop_fixture;
 DROP TABLE stop_fixture;
 CREATE INDEX run_cancellations_pending_idx ON run_cancellations(completed_at, created_at, run_id);
 DELETE FROM schema_migrations WHERE id='20261113184359-native-workflow-stop-9ebb4e6c64856dd49504e94f638069ef';
+`
+
+// PredecessorRunSchema reconstructs an empty v1 run table in exact column order
+// for the predecessor-schema startup fixture. It is not used by migrations.
+const PredecessorRunSchema = `
+CREATE TABLE runs (
+    queue_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    repo_id INTEGER NOT NULL REFERENCES repositories(id),
+    ref_kind TEXT NOT NULL CHECK (ref_kind IN ('branch', 'tag')),
+    ref TEXT NOT NULL,
+    sha TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    release INTEGER NOT NULL DEFAULT 0 CHECK (release IN (0, 1)),
+    trigger TEXT NOT NULL,
+    phase TEXT NOT NULL DEFAULT 'queued',
+    job_name TEXT NOT NULL DEFAULT '',
+    tested_sha TEXT NOT NULL DEFAULT '',
+    base_sha TEXT NOT NULL DEFAULT '',
+    failed_burn TEXT NOT NULL DEFAULT '',
+    failed_step TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'passed', 'failed', 'interrupted')),
+    reason TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT NOT NULL DEFAULT '',
+    queued_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX runs_fifo_idx ON runs(status, queue_sequence);
+CREATE INDEX runs_ref_idx ON runs(repo_id, ref, queue_sequence DESC);
+CREATE INDEX runs_sha_idx ON runs(repo_id, sha, queue_sequence DESC);
+
 `

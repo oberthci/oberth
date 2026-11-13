@@ -67,9 +67,7 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 				requireRestartNoError(t, err)
 				if current.Status != model.RunQueued || current.ID != original.ID ||
 					current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence ||
-					!current.QueuedAt.Equal(original.QueuedAt) ||
-
-					current.SupersededBy != "" || current.StartedAt != nil || current.FinishedAt != nil || current.Error != "" {
+					!current.QueuedAt.Equal(original.QueuedAt) || current.StartedAt != nil || current.FinishedAt != nil || current.Error != "" {
 					t.Errorf("restart changed waiting identity/order/priority: before=%+v after=%+v", original, current)
 				}
 			}

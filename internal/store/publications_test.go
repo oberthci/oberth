@@ -197,7 +197,7 @@ func TestNewBranchRunWaitsForPendingPublicationOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if owner.Status != model.RunRunning || owner.Phase != "publishing" || owner.SupersededBy != "" {
+	if owner.Status != model.RunRunning || owner.Phase != "publishing" {
 		t.Fatalf("publication owner after newer enqueue = %#v", owner)
 	}
 	queued, err := s.Run(ctx, replacement.ID)

@@ -988,6 +988,15 @@ PRAGMA foreign_keys = ON;
 `); err != nil {
 		t.Fatal(err)
 	}
+	// The current schema dropped supersede data; ADD COLUMN in the rollback
+	// fixture cannot restore the predecessor's original physical column order.
+	var runs int
+	if err := raw.QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 0 {
+		t.Fatalf("predecessor run-table reconstruction requires an empty fixture: count=%d error=%v", runs, err)
+	}
+	if _, err := raw.Exec(`PRAGMA foreign_keys=OFF; DROP TABLE runs;` + testdb.PredecessorRunSchema + `PRAGMA foreign_keys=ON;`); err != nil {
+		t.Fatal(err)
+	}
 	assertLegacySchemaLedger(t, raw, 1)
 }
 
