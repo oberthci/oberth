@@ -104,6 +104,7 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 	}
 	result.HTTPS.Port, result.SSH.Port = https, ssh
 	defaultSSH, defaultHTTPS := clientPorts(Deps{ClientServiceType: cfg.ServiceType})
+	portsNeedAction := false
 	mappings := localPublishedPorts(ctx, plan, result.Host, deps)
 	for _, item := range []struct {
 		observation      *ClientPortObservation
@@ -125,6 +126,7 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 		}
 		if !item.observation.Reachable && !item.observation.Published {
 			result.NeedsAction = true
+			portsNeedAction = true
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -135,13 +137,26 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 		result.InstallFlags = append(result.InstallFlags, "--service-type", cfg.ServiceType)
 	}
 	result.Advice = "TCP reachability and published mappings do not prove Oberth readiness or TLS identity. Review these client ports before install; verify the server afterwards."
-	if result.NeedsAction {
-		result.Advice = "Planned client ports did not answer from this host and no unique local mapping was found. NodePorts are not reachable from this host; map them or use port-forward, then repeat this probe. Reachability by node IP depends on the network between client and node: NAT-isolated guests cannot reach each other. Use a name or IP routable from the client, or port-forward. A fresh server may not be listening yet; repeat the probe after install."
+	if portsNeedAction {
+		var missing []string
+		for _, item := range []struct {
+			name        string
+			observation ClientPortObservation
+		}{{"HTTPS", result.HTTPS}, {"SSH", result.SSH}} {
+			if !item.observation.Reachable && !item.observation.Published {
+				missing = append(missing, item.name+" port "+item.observation.Port)
+			}
+		}
+		observation := "TCP reachability is unverified for "
+		if deps.Dial != nil {
+			observation = "TCP probes did not answer for "
+		}
+		result.Advice += " " + observation + strings.Join(missing, ", ") + "; no unique local mapping was found for those ports. This does not establish a missing route. A fresh server may not be listening yet; repeat the probe after install. Reachability by node IP depends on the network between client and node: NAT-isolated guests cannot reach each other. If access still fails, review the network path and use a name or IP routable from the client, or port-forward."
 	}
 	if plan.Identity.Distribution == "kind" && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") && (!result.HTTPS.Published || !result.SSH.Published) {
 		result.KindRemedy = clientKindRemedy(result.HTTPS.Port, result.SSH.Port)
 	}
-	if result.NeedsAction && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") {
+	if portsNeedAction && deps.Dial != nil && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") {
 		nodeReachable := reachableProbeNode(ctx, plan, deps)
 		if !nodeReachable {
 			result.LoadBalancer = &ClientLoadBalancerProposal{InstallFlags: []string{"--service-type", "LoadBalancer", "--client-https-port", "443", "--client-ssh-port", "2222"}, Advice: "No node address answered the planned NodePorts from this client. Offer LoadBalancer in the same install Review, or map ports/use port-forward. After the approved install starts, wait for its Service address with --wait-load-balancer, then choose its routable IP or DNS name and re-probe. The server certificate must cover that choice; an IP needs a matching IP SAN."}

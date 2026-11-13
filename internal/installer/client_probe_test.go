@@ -85,7 +85,7 @@ func TestClientPortProbeNeedsNoClusterTypeOrDocker(t *testing.T) {
 		if err != nil || result.HTTPS.Port != "30443" || result.SSH.Port != "30022" || result.NeedsAction == reachable {
 			t.Fatalf("%+v %v", result, err)
 		}
-		if !reachable && !strings.Contains(result.Advice, "NodePorts are not reachable from this host; map them or use port-forward") {
+		if !reachable && !strings.Contains(result.Advice, "TCP probes did not answer for HTTPS port 30443, SSH port 30022") {
 			t.Fatal(result.Advice)
 		}
 	}
@@ -159,5 +159,44 @@ func TestClientPortProbeRefusesInvalidInputsBeforeInspection(t *testing.T) {
 	plan.Identity.Context = ""
 	if _, err := ProbeClientPorts(t.Context(), plan, Config{}, ClientPortProbeDeps{}); err == nil {
 		t.Fatal("accepted missing context")
+	}
+}
+
+func TestClientPortAdviceSeparatesDNSAndTCPObservations(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		https, ssh bool
+	}{
+		{"both reachable", true, true}, {"HTTPS only", true, false}, {"SSH only", false, true}, {"neither", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := ClientPortProbeDeps{EndpointAddress: "192.0.2.10", LookupHost: func(context.Context, string) ([]string, error) { return []string{"192.0.2.11"}, nil }, Dial: func(_ context.Context, address string) error {
+				if (strings.HasSuffix(address, ":30443") && tc.https) || (strings.HasSuffix(address, ":30022") && tc.ssh) {
+					return nil
+				}
+				return errors.New("not answering")
+			}}
+			result, err := ProbeClientPorts(t.Context(), probePlan(), Config{ClientHost: "oberth.test"}, deps)
+			if err != nil || !result.NeedsAction || result.DNS.Resolves || result.HTTPS.Reachable != tc.https || result.SSH.Reachable != tc.ssh {
+				t.Fatal(result, err)
+			}
+			if strings.Contains(result.Advice, "NodePorts are not reachable") || strings.Contains(result.Advice, "Planned client ports did not answer") {
+				t.Fatal("advice invents a network failure", result.Advice)
+			}
+			for _, item := range []struct {
+				reachable bool
+				phrase    string
+			}{{tc.https, "HTTPS port 30443"}, {tc.ssh, "SSH port 30022"}} {
+				if strings.Contains(result.Advice, item.phrase) == item.reachable {
+					t.Fatal("advice contradicts individual TCP observation", result.Advice)
+				}
+			}
+			if !strings.Contains(result.Advice, "Show the DNS remedy") {
+				t.Fatal("DNS action omitted", result)
+			}
+			if tc.https && tc.ssh && (result.LoadBalancer != nil || strings.Contains(result.Advice, "port-forward") || strings.Contains(result.Advice, "did not answer")) {
+				t.Fatal("DNS-only action invented a port remedy", result)
+			}
+		})
 	}
 }

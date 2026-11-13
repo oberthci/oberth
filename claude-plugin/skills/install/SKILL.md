@@ -77,9 +77,11 @@ Arguments given to the command: `$ARGUMENTS`
    follow the bounded address wait below after the approved install starts.
    For an IP or load-balancer address, offer the direct IP or optional DNS
    naming path below; preserve the user's choice.
-   Otherwise, if `needs_action` is true, explain: "NodePorts are not reachable from this
-   host; map them or use port-forward." Offer that network choice, then repeat
-   the probe with the resulting client ports. The probe is advisory: a fresh
+   `needs_action` can mean a DNS mismatch even when both TCP checks succeeded.
+   Explain the returned DNS remedy and individual TCP observations separately.
+   A failed TCP check means that port did not answer; it does not establish a
+   missing route. If access still fails after install, offer a routable name/IP
+   or port-forward and repeat the probe with the resulting client ports. The probe is advisory: a fresh
    server may not listen yet, and TCP or a mapping proves neither readiness
    nor TLS trust. Every cluster type uses the same install Review; this is
    not a local/remote or cluster-type gate.

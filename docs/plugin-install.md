@@ -44,9 +44,11 @@ override discovery. Pass the selected `--service-type` when it is not NodePort.
 Docker is optional. Other clusters get the same TCP probe of their chosen
 address; no cluster type controls install admission. Remote Docker daemon
 bindings, unrelated clusters, other host interfaces and ambiguous mappings
-are not silently selected. When `needs_action` is true, explain:
-"NodePorts are not reachable from this host; map them or use port-forward."
-Propose that network setup and repeat with its host ports. The helper never
+are not silently selected. `needs_action` can record a DNS mismatch while both
+TCP probes succeeded. Describe the DNS remedy and each TCP observation
+separately. A failed TCP probe means that port did not answer; it does not
+establish a missing route. If access still fails after install, review routing
+and offer a routable name/IP or port-forward, then repeat with its host ports. The helper never
 creates a port mapping or starts a port-forward itself.
 
 A fresh server may not be listening. A TCP connection or a published port
