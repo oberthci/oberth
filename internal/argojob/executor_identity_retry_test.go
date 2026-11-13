@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/clientcmd"
 	kexec "k8s.io/client-go/util/exec"
 	"k8s.io/utils/ptr"
 )
@@ -271,40 +273,68 @@ func TestExecutorIdentityWaitSurvivesTransientDelivery(t *testing.T) {
 	})
 }
 
+const testExecutorDirectory = "0123456789abcdef0123456789abcdef"
+
+var executorDirectoryName = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// executorDeliveryEnv is the Pod environment the delivery exec inherits from
+// the waiter container: kubelet always injects the API Service address.
+func executorDeliveryEnv() []string {
+	return append(os.Environ(), "KUBERNETES_SERVICE_HOST=10.43.0.1", "KUBERNETES_SERVICE_PORT=443")
+}
+
+// unsealExecutorDirectories restores owner access so t.TempDir can clean up.
+func unsealExecutorDirectories(t *testing.T, dir string) {
+	t.Helper()
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			_ = os.Chmod(filepath.Join(dir, entry.Name()), 0o700)
+		}
+	}
+}
+
 func TestExecutorIdentityDeliveryCommandIsAtomicAndReplaySafe(t *testing.T) {
 	command := strings.Replace(executorIdentityDeliveryCommand, executorTokenDir, ".", 1)
 	command = strings.Replace(command, `rm -rf "$stage"`, `find "$stage" -delete`, 1)
 	invoke := func(dir, payload string) error {
 		cmd := exec.Command("sh", "-c", command)
-		cmd.Dir, cmd.Stdin = dir, strings.NewReader(payload)
+		cmd.Dir, cmd.Stdin, cmd.Env = dir, strings.NewReader(payload), executorDeliveryEnv()
 		return cmd.Run()
 	}
+	ca := base64.StdEncoding.EncodeToString([]byte("public-ca"))
 	for name, payload := range map[string]string{
-		"token-cut":     "incomplete-token",
-		"namespace-cut": "token\nnamespace",
-		"ca-cut":        "token\nnamespace\ncHVibGlj",
-		"ca-empty-eof":  "token\nnamespace\n",
-		"ca-empty-line": "token\nnamespace\n\n",
-		"ca-invalid":    "token\nnamespace\n!invalid!\n",
+		"token-cut":       "incomplete-token",
+		"namespace-cut":   "token\nnamespace",
+		"ca-cut":          "token\nnamespace\ncHVibGlj",
+		"ca-empty-eof":    "token\nnamespace\n",
+		"ca-empty-line":   "token\nnamespace\n\n",
+		"ca-invalid":      "token\nnamespace\n!invalid!\n" + testExecutorDirectory + "\n",
+		"directory-cut":   "token\nnamespace\n" + ca + "\n" + testExecutorDirectory,
+		"directory-empty": "token\nnamespace\n" + ca + "\n\n",
+		"directory-short": "token\nnamespace\n" + ca + "\n0123\n",
+		"directory-path":  "token\nnamespace\n" + ca + "\n../../../../../../tmp/0123456789abcdef0123\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			incomplete := t.TempDir()
+			t.Cleanup(func() { unsealExecutorDirectories(t, incomplete) })
 			if err := invoke(incomplete, payload); err == nil {
 				t.Fatal("incomplete/invalid delivery succeeded")
 			}
-			for _, name := range []string{"token", "ca.crt", "namespace"} {
-				if _, err := os.Stat(filepath.Join(incomplete, name)); !errors.Is(err, os.ErrNotExist) {
+			for _, name := range []string{"token", "ca.crt", "namespace", "kubeconfig", testExecutorDirectory} {
+				if _, err := os.Lstat(filepath.Join(incomplete, name)); !errors.Is(err, os.ErrNotExist) {
 					t.Fatal("partial delivery published", name, err)
 				}
 			}
 		})
 	}
 	dir := t.TempDir()
+	t.Cleanup(func() { unsealExecutorDirectories(t, dir) })
 	var workers sync.WaitGroup
 	failures := make(chan error, 8)
 	for range 8 {
 		workers.Go(func() {
-			failures <- invoke(dir, "first-token\nnamespace\n"+base64.StdEncoding.EncodeToString([]byte("public-ca"))+"\n")
+			failures <- invoke(dir, "first-token\nnamespace\n"+ca+"\n"+testExecutorDirectory+"\n")
 		})
 	}
 	workers.Wait()
@@ -314,18 +344,104 @@ func TestExecutorIdentityDeliveryCommandIsAtomicAndReplaySafe(t *testing.T) {
 			t.Fatal("concurrent retry failed", err)
 		}
 	}
-	if err := invoke(dir, "replacement-token\nother-namespace\n"+base64.StdEncoding.EncodeToString([]byte("other-ca"))+"\n"); err != nil {
+	if err := invoke(dir, "replacement-token\nother-namespace\n"+base64.StdEncoding.EncodeToString([]byte("other-ca"))+"\nfedcba9876543210fedcba9876543210\n"); err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"token": "first-token", "namespace": "namespace", "ca.crt": "public-ca"} {
+	for name, want := range map[string]string{testExecutorDirectory + "/token": "first-token", "namespace": "namespace", "ca.crt": "public-ca"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || string(data) != want {
 			t.Fatalf("replay changed committed %s: %q %v", name, data, err)
 		}
 	}
+	// #1564: no token at the in-cluster default path, the token directory is
+	// unlistable, and only the kubeconfig names it.
+	if _, err := os.Lstat(filepath.Join(dir, "token")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("token published at the in-cluster default path", err)
+	}
+	if _, err := os.ReadDir(filepath.Join(dir, testExecutorDirectory)); err == nil && os.Geteuid() != 0 {
+		t.Fatal("token directory is listable")
+	}
+	info, err := os.Stat(filepath.Join(dir, testExecutorDirectory))
+	if err != nil || info.Mode().Perm() != 0o111 {
+		t.Fatalf("token directory mode = %v, %v", info, err)
+	}
+	kubeconfig, err := clientcmd.LoadFromFile(filepath.Join(dir, "kubeconfig"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	absolute, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := kubeconfig.Contexts[kubeconfig.CurrentContext]
+	if current == nil || current.Namespace != "namespace" {
+		t.Fatalf("kubeconfig context = %+v", current)
+	}
+	cluster, user := kubeconfig.Clusters[current.Cluster], kubeconfig.AuthInfos[current.AuthInfo]
+	if cluster == nil || cluster.Server != "https://10.43.0.1:443" || cluster.CertificateAuthority != filepath.Join(absolute, "ca.crt") {
+		t.Fatalf("kubeconfig cluster = %+v", cluster)
+	}
+	if user == nil || user.TokenFile != filepath.Join(absolute, testExecutorDirectory, "token") || user.Token != "" {
+		t.Fatalf("kubeconfig user = %+v", user)
+	}
 	stages, err := filepath.Glob(filepath.Join(dir, ".identity.*"))
 	if err != nil || len(stages) != 0 {
 		t.Fatal("staging files retained credentials", stages, err)
+	}
+}
+
+// A delivery killed before its trap runs may leave staging behind. Any staged
+// token copy must sit under a name carrying the payload's random directory.
+func TestExecutorIdentityKilledDeliveryLeavesNoNameableToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { unsealExecutorDirectories(t, dir) })
+	command := strings.Replace(executorIdentityDeliveryCommand, executorTokenDir, ".", 1)
+	command = strings.Replace(command, `trap 'rm -rf "$stage"' EXIT; `, "", 1)
+	killed := strings.Replace(command, `mkdir -p "$sealed"; `, `kill -9 $$; `, 1)
+	if killed == command {
+		t.Fatal("kill point not found")
+	}
+	cmd := exec.Command("sh", "-c", killed)
+	cmd.Dir, cmd.Env = dir, executorDeliveryEnv()
+	cmd.Stdin = strings.NewReader("killed-token\nnamespace\n" + base64.StdEncoding.EncodeToString([]byte("public-ca")) + "\n" + testExecutorDirectory + "\n")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("killed delivery reported success")
+	}
+	stages, err := filepath.Glob(filepath.Join(dir, ".identity.*"))
+	if err != nil || len(stages) != 1 {
+		t.Fatal("expected the killed delivery's staging", stages, err)
+	}
+	if !strings.HasSuffix(stages[0], "."+testExecutorDirectory) {
+		t.Fatalf("staged token is reachable without the random name: %s", filepath.Base(stages[0]))
+	}
+	if data, err := os.ReadFile(filepath.Join(stages[0], "token")); err != nil || string(data) != "killed-token" {
+		t.Fatal("kill point did not follow token staging", err)
+	}
+	for _, name := range []string{"token", "kubeconfig"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("killed delivery published", name, err)
+		}
+	}
+}
+
+func TestExecutorIdentityDeliveryBracketsIPv6APIServer(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { unsealExecutorDirectories(t, dir) })
+	command := strings.Replace(executorIdentityDeliveryCommand, executorTokenDir, ".", 1)
+	command = strings.Replace(command, `rm -rf "$stage"`, `find "$stage" -delete`, 1)
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader("token\nnamespace\n" + base64.StdEncoding.EncodeToString([]byte("public-ca")) + "\n" + testExecutorDirectory + "\n")
+	cmd.Env = append(os.Environ(), "KUBERNETES_SERVICE_HOST=fd00:10:96::1", "KUBERNETES_SERVICE_PORT=443")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	kubeconfig, err := clientcmd.LoadFromFile(filepath.Join(dir, "kubeconfig"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server := kubeconfig.Clusters[kubeconfig.Contexts[kubeconfig.CurrentContext].Cluster].Server; server != "https://[fd00:10:96::1]:443" {
+		t.Fatalf("server = %q", server)
 	}
 }
 

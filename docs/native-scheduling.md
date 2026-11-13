@@ -279,7 +279,17 @@ win name/path collisions; validated workspace opt-outs remain available.
   replaces Argo's executor Secret volume with a bounded 1 MiB memory EmptyDir
   and inserts `oberth-executor-token` before Argo's init. Oberth delivers
   a Pod-bound executor token over exec after verifying the exact Pod identity;
-  the waiter exposes no token in a Kubernetes object. The init/wait/waiter
+  the waiter exposes no token in a Kubernetes object. The token is written
+  under a random 128-bit directory name, fresh per delivery, never at the
+  in-cluster default `token` path; the unguessable name is the protection (a
+  root executor with default capabilities can still list the directory, and
+  nothing lists it today because artifacts, data templates and `archiveLocation`
+  are refused), and the patch sets `KUBECONFIG` on Argo's init and wait
+  containers (and the main container of resource and data templates) to the
+  delivered kubeconfig that names it (#1564). The same patch sets both Argo
+  progress ticks to `0` there, so Argo's self-reported step progress (`N/M`)
+  is disabled: its monitor would otherwise call the API, and re-read the
+  token, while wait reads a step's outputs. The init/wait/waiter
   helpers normally request 50m CPU and 64 MiB memory, with 500m/512 MiB limits.
   With helper-storage accounting they also request 256 MiB ephemeral storage;
   the 512 MiB helper storage limit is applied only when the step itself

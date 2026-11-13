@@ -184,7 +184,9 @@ func TestExecutorIdentityStdinRemainsImmutableAfterDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := io.ReadAll(retained)
-	if err != nil || string(data) != "private-token\n"+wf.Namespace+"\n"+base64.StdEncoding.EncodeToString([]byte("public-ca"))+"\n" {
+	prefix := "private-token\n" + wf.Namespace + "\n" + base64.StdEncoding.EncodeToString([]byte("public-ca")) + "\n"
+	sealed := strings.TrimSuffix(strings.TrimPrefix(string(data), prefix), "\n")
+	if err != nil || !strings.HasPrefix(string(data), prefix) || !strings.HasSuffix(string(data), "\n") || !executorDirectoryName.MatchString(sealed) {
 		t.Fatal("stale stdin copier sees cleared/changed bytes", err)
 	}
 }
@@ -202,7 +204,7 @@ func TestExecutorIdentityMarkerCreatedDuringDeliveryIsNotClobbered(t *testing.T)
 	defer reader.Close()
 	defer writer.Close()
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Dir, cmd.Stdin = dir, reader
+	cmd.Dir, cmd.Stdin, cmd.Env = dir, reader, executorDeliveryEnv()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -222,10 +224,11 @@ func TestExecutorIdentityMarkerCreatedDuringDeliveryIsNotClobbered(t *testing.T)
 		case <-time.After(time.Millisecond):
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "token"), []byte("already-committed"), 0600); err != nil {
+	t.Cleanup(func() { unsealExecutorDirectories(t, dir) })
+	if err := os.WriteFile(filepath.Join(dir, "kubeconfig"), []byte("already-committed"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.WriteString(writer, "later-token\nnamespace\n"+base64.StdEncoding.EncodeToString([]byte("public-ca"))+"\n"); err != nil {
+	if _, err := io.WriteString(writer, "later-token\nnamespace\n"+base64.StdEncoding.EncodeToString([]byte("public-ca"))+"\n"+testExecutorDirectory+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -234,7 +237,7 @@ func TestExecutorIdentityMarkerCreatedDuringDeliveryIsNotClobbered(t *testing.T)
 	if err := cmd.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "token"))
+	data, err := os.ReadFile(filepath.Join(dir, "kubeconfig"))
 	if err != nil || string(data) != "already-committed" {
 		t.Fatal("concurrent marker overwritten", err)
 	}
