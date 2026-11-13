@@ -154,8 +154,9 @@ func PlanInstall(ctx context.Context, cfg Config, host InstallDeps) InstallPlan 
 		plan.OK, plan.Checks = r.OK, r.Checks
 		return plan
 	}
+	cfg.policyProbePlan = true
 	run := host.RunCommand
-	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy}
+	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy, policyProbeCacheDir: host.policyProbeCacheDir}
 	inspectInstallPreflight(ctx, &cfg, deps, host, selected, &plan.Identity, &r)
 	plan.Review = Review(cfg)
 	plan.Review.Context = selected
@@ -249,11 +250,7 @@ func inspectCluster(ctx context.Context, cfg *Config, deps Deps, identity *Clust
 		r.Checks[len(r.Checks)-1].Reason = "unverified"
 		return
 	}
-	probe := deps.ProbeNetworkPolicy
-	if probe == nil {
-		probe = ProbeNetworkPolicy
-	}
-	enforcement := probe(ctx, *cfg, deps)
+	enforcement := networkPolicyForInstall(ctx, *cfg, deps, nodes.Items)
 	if maintenance {
 		r.Checks = append(r.Checks, CheckResult{Code: "network_policy", OK: enforcement.Status == "enforced", Warning: enforcement.Status != "enforced", Reason: enforcement.Status, Remedy: enforcement.Remedy, Evidence: enforcement.Evidence})
 		return

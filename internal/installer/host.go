@@ -42,15 +42,16 @@ type InteractiveRunner func(ctx context.Context, name string, args ...string) er
 // InstallDeps holds injectable host and cluster dependencies for the CLI-level
 // install orchestration.
 type InstallDeps struct {
-	installResolved    func(Config)
-	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
-	Output             io.Writer
-	Input              io.Reader
-	GOOS               string
-	LookPath           func(string) (string, error)
-	RunCommand         CommandRunner
-	RunInteractive     InteractiveRunner
-	IsTerminal         func() bool
+	policyProbeCacheDir func() (string, error)
+	installResolved     func(Config)
+	ProbeNetworkPolicy  func(context.Context, Config, Deps) NetworkPolicyProbeResult
+	Output              io.Writer
+	Input               io.Reader
+	GOOS                string
+	LookPath            func(string) (string, error)
+	RunCommand          CommandRunner
+	RunInteractive      InteractiveRunner
+	IsTerminal          func() bool
 	// OutputIsTerminal reports whether Output reaches a terminal (default:
 	// standard output is one). Credentials are shown only on a terminal;
 	// anywhere else they go to --secrets-file or the install refuses.
@@ -270,7 +271,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 		}
 		preflightConfig := cfg
 		// Preflight builds its own explicit kubeconfig arguments.
-		inspectInstallPreflight(ctx, &preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: preflightRun, ProbeNetworkPolicy: deps.ProbeNetworkPolicy}, deps, selectedContext, &ClusterIdentity{}, &preflight)
+		inspectInstallPreflight(ctx, &preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: preflightRun, ProbeNetworkPolicy: deps.ProbeNetworkPolicy, policyProbeCacheDir: deps.policyProbeCacheDir}, deps, selectedContext, &ClusterIdentity{}, &preflight)
 		cfg = preflightConfig
 		if !preflight.OK {
 			var failures []string
