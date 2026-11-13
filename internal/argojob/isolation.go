@@ -383,12 +383,6 @@ func protectExecutorWorkspaceMounts(wf *wfv1.Workflow) error {
 		if main != nil {
 			for _, m := range main.VolumeMounts {
 				mirrorPath := path.Join(argoMainFilesystem, m.MountPath)
-				if m.MountPath == VaultCAMountPath || m.MountPath == OberthBinMountPath {
-					// Keep the store trust-anchor and binary mirror boundary.
-					// Native secret and main-token mirrors remain present.
-					mounts = append(mounts, map[string]any{"mountPath": mirrorPath, "$patch": "delete"})
-					continue
-				}
 				// Source shares a claim with writable artifacts. Its claim-level
 				// readOnly flag stays unset, so every executor mirror must keep the
 				// source mount's own readOnly flag even without workspace controls.

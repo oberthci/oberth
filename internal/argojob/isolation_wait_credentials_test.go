@@ -32,6 +32,9 @@ func credentialWaitControllerShape(main corev1.Container) corev1.PodSpec {
 
 func applyCredentialWaitPatch(t *testing.T, before corev1.PodSpec, patch string) corev1.PodSpec {
 	t.Helper()
+	if patch == "" {
+		return before
+	}
 	raw, err := json.Marshal(before)
 	if err != nil {
 		t.Fatal(err)
@@ -88,8 +91,8 @@ func TestWaitRetainsNativeCredentialMirrorsAfterArgoMutation(t *testing.T) {
 				t.Fatal(err)
 			}
 			leaf := &wf.Spec.Templates[0]
-			if leaf.PodSpecPatch == "" {
-				t.Fatal("credentialed leaf has no server-only wait patch")
+			if strings.Contains(leaf.PodSpecPatch, `"$patch":"delete"`) {
+				t.Fatal("credentialed leaf strips native wait mirrors")
 			}
 			if got := len(credentialMounts(*leaf.Container)); got != 2 {
 				t.Fatalf("main has %d credential mounts, want secret root and release token", got)
@@ -196,9 +199,6 @@ func TestNativeWaitCredentialMirrorsSurviveWorkspacePatch(t *testing.T) {
 				t.Fatalf("patch stripped native wait or main credentials: %+v", after.Containers)
 			}
 			for _, original := range wait.VolumeMounts {
-				if original.MountPath == path.Join(argoMainFilesystem, VaultCAMountPath) || original.MountPath == path.Join(argoMainFilesystem, OberthBinMountPath) {
-					continue
-				}
 				kept := false
 				for _, current := range afterWait.VolumeMounts {
 					if original.Name == current.Name && original.MountPath == current.MountPath && original.SubPath == current.SubPath {

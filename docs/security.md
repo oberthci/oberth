@@ -211,3 +211,12 @@ flag must be treated as unverified. `oberth install`, `oberth upgrade` and
 `oberth restore` do not run cosign: they verify the signed record and the
 chart offline against the compiled-in key (the transparency-log entry is not
 consulted), so upgrading from v0.17.95 is unaffected.
+
+On steps receiving secret-store or cloud-identity mounts, output parameter file
+paths must stay outside every volume mount. Argo wait follows symlinks on mounted
+paths, so a previous step could otherwise plant a link that copies a credential
+into Workflow outputs. Paths are normalized before this check; paths containing
+unresolved substitutions are refused. A file written on the step's own root
+filesystem remains a supported output parameter. Native output artifacts remain
+refused. Argo wait retains its native mirrors, including CA and helper mounts;
+the executor-token delivery and read-only source protections remain in place.

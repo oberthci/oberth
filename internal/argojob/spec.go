@@ -65,10 +65,6 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
-	// ExecutorScratchSizeLimit bounds Argo emissary output and control files.
-	// Empty selects 1Gi; this is separate from the test container private scratch.
-	ExecutorScratchSizeLimit string
-
 	// Namespace is where every Workflow and its pods are created. It is
 	// deliberately separate from the namespace Oberth itself runs in: the
 	// Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, and
@@ -249,12 +245,6 @@ func (config Config) Validate() error {
 		return err
 	}
 
-	if config.ExecutorScratchSizeLimit != "" {
-		quantity, err := resource.ParseQuantity(config.ExecutorScratchSizeLimit)
-		if err != nil || quantity.Sign() <= 0 || quantity.Cmp(resource.MustParse("1Pi")) > 0 {
-			return errors.New("argojob: executor scratch size limit must be a positive Kubernetes quantity no larger than 1Pi")
-		}
-	}
 	if err := config.ReleaseTagRoutes.Validate(); err != nil {
 		return err
 	}
@@ -733,6 +723,9 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 	if err := injectReleaseWIF(workflow, wifLeaves, config.ReleaseWIF); err != nil {
 		return nil, err
+	}
+	if err := validateCredentialOutputPaths(workflow, secretSteps, wifLeaves); err != nil {
+		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
 	if err := protectExecutorWorkspaceMounts(workflow); err != nil {
 		return nil, err

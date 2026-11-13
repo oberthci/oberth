@@ -96,6 +96,7 @@ func TestAuthoredSecurityContextsPassThrough(t *testing.T) {
 		"privileged":       {Privileged: ptr.To(true)},
 		"added-capability": {Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}}},
 		"escalation":       {AllowPrivilegeEscalation: ptr.To(true)},
+		"localhost":        {SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: ptr.To("profiles/oberth.json")}},
 		"unconfined":       {SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}},
 		"run-as-user":      {RunAsUser: ptr.To(int64(1234))},
 		"writable-root":    {ReadOnlyRootFilesystem: ptr.To(false)},
@@ -145,6 +146,7 @@ func TestAuthoredSecurityContextsPassThrough(t *testing.T) {
 func TestAuthoredPodSecurityContextsPassThrough(t *testing.T) {
 	for _, shape := range []string{"workflow", "template", "template-defaults", "inline"} {
 		for name, security := range map[string]*corev1.PodSecurityContext{
+			"localhost":  {SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeLocalhost, LocalhostProfile: ptr.To("profiles/oberth.json")}},
 			"unconfined": {SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}},
 			"root":       {RunAsUser: ptr.To(int64(0)), RunAsNonRoot: ptr.To(false)},
 			"nonroot":    {RunAsUser: ptr.To(int64(1234)), RunAsGroup: ptr.To(int64(2345)), RunAsNonRoot: ptr.To(true), FSGroup: ptr.To(int64(3456))},
