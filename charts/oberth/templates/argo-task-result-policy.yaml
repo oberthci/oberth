@@ -1,0 +1,90 @@
+# Bound-Pod userInfo extras are authenticated by the API server. The companion
+# Pod policy reserves the identity-holder prefix against pipeline identities.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-task-results
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["argoproj.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["workflowtaskresults"]
+  matchConditions:
+    - name: pipeline-serviceaccounts
+      expression: {{ printf "request.namespace == %s && request.userInfo.username.startsWith(%s)" (.Values.argo.namespace | toJson) ((printf "system:serviceaccount:%s:" .Values.argo.namespace) | toJson) | quote }}
+  variables:
+    - name: ownerUID
+      expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 ? string(object.metadata.ownerReferences[0].uid) : ''"
+    - name: ownerName
+      expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 ? object.metadata.ownerReferences[0].name : ''"
+    - name: podName
+      expression: "has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-name' in request.userInfo.extra && size(request.userInfo.extra['authentication.kubernetes.io/pod-name']) == 1 ? request.userInfo.extra['authentication.kubernetes.io/pod-name'][0] : ''"
+    - name: holderPrefix
+      expression: "'oberth-executor.' + variables.ownerUID + '.'"
+    - name: holderRole
+      expression: "variables.ownerName != '' && variables.podName.startsWith(variables.holderPrefix) && variables.podName.endsWith('.' + variables.ownerName) && size(variables.podName) > size(variables.holderPrefix) + size(variables.ownerName) + 1 ? variables.podName.substring(size(variables.holderPrefix), size(variables.podName) - size(variables.ownerName) - 1) : ''"
+  validations:
+    - expression: "variables.podName != '' && has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-uid' in request.userInfo.extra && size(request.userInfo.extra['authentication.kubernetes.io/pod-uid']) == 1 && request.userInfo.extra['authentication.kubernetes.io/pod-uid'][0] != ''"
+      message: "task results require a Pod-bound executor identity"
+    - expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 && object.metadata.ownerReferences[0].apiVersion == 'argoproj.io/v1alpha1' && object.metadata.ownerReferences[0].kind == 'Workflow' && variables.ownerUID != '' && variables.ownerName != ''"
+      message: "task results require exactly one Workflow owner"
+    - expression: "variables.holderRole == 'executor' || variables.holderRole.matches('^[a-f0-9]{24}$')"
+      message: "task result Workflow name and UID must match the authenticated bound identity Pod"
+    - expression: "has(object.metadata.labels) && 'workflows.argoproj.io/workflow' in object.metadata.labels && object.metadata.labels['workflows.argoproj.io/workflow'] == variables.ownerName && (object.metadata.name == variables.ownerName || (object.metadata.name.startsWith(variables.ownerName + '-') && object.metadata.name.substring(size(variables.ownerName) + 1).matches('^[0-9]{1,10}$')))"
+      message: "task result name and workflow label must belong to its bound Workflow"
+    - expression: "request.operation != 'UPDATE' || (has(oldObject.metadata.ownerReferences) && size(oldObject.metadata.ownerReferences) == 1 && oldObject.metadata.ownerReferences[0].apiVersion == 'argoproj.io/v1alpha1' && oldObject.metadata.ownerReferences[0].kind == 'Workflow' && string(oldObject.metadata.ownerReferences[0].uid) == variables.ownerUID && oldObject.metadata.ownerReferences[0].name == variables.ownerName && has(oldObject.metadata.labels) && 'workflows.argoproj.io/workflow' in oldObject.metadata.labels && oldObject.metadata.labels['workflows.argoproj.io/workflow'] == variables.ownerName)"
+      message: "task results cannot be reassigned from another Workflow"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-task-results
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-task-results
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Values.argo.namespace | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-executor-holders
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchConditions:
+    - name: pipeline-serviceaccounts
+      expression: {{ printf "request.namespace == %s && request.userInfo.username.startsWith(%s)" (.Values.argo.namespace | toJson) ((printf "system:serviceaccount:%s:" .Values.argo.namespace) | toJson) | quote }}
+  validations:
+    - expression: "(!has(object.metadata.name) || !object.metadata.name.startsWith('oberth-executor.')) && (!has(object.metadata.generateName) || !object.metadata.generateName.startsWith('oberth-executor.'))"
+      message: "pipeline ServiceAccounts cannot create or alter reserved executor identity Pods"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-executor-holders
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-executor-holders
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Values.argo.namespace | quote }}
