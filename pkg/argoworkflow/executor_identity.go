@@ -15,6 +15,9 @@ const (
 )
 
 func admitExecutorContainerName(location, name string, main bool) []error {
+	if serverOwnedName(name) {
+		return []error{fmt.Errorf("argoworkflow: %s.name %q uses the reserved server-owned oberth- prefix", location, name)}
+	}
 	if strings.Contains(name, "{{") || name == "init" || name == "wait" || (name == "main" && !main) {
 		return []error{fmt.Errorf("argoworkflow: %s.name %q is reserved for the Argo executor; container names must be literal and helpers cannot use init, wait or main", location, name)}
 	}
@@ -22,8 +25,15 @@ func admitExecutorContainerName(location, name string, main bool) []error {
 }
 
 func admitExecutorVolumeName(location, name string) []error {
+	if serverOwnedName(name) {
+		return []error{fmt.Errorf("argoworkflow: %s.name %q uses the reserved server-owned oberth- prefix", location, name)}
+	}
 	if name == ExecutorTokenVolumeName || strings.Contains(name, "{{") {
 		return []error{fmt.Errorf("argoworkflow: %s.name %q can select the reserved executor identity volume and is not admitted", location, name)}
 	}
 	return nil
+}
+
+func serverOwnedName(name string) bool {
+	return strings.HasPrefix(name, "oberth-")
 }

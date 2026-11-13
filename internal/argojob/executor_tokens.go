@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -78,7 +79,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 		}
 		volumes, _ := patch["volumes"].([]any)
 		patch["volumes"] = append(volumes, map[string]any{"name": executorTokenVolume, "secret": nil, "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "1Mi"}})
-		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: helperResources(workflow, t), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
+		waiter := executorWaiterContainer(config.SourceSeedImage, helperResources(workflow, t))
 		initializers, _ := patch["initContainers"].([]any)
 		if len(initializers) == 0 {
 			initializers = []any{map[string]any{"name": "init"}}
@@ -369,6 +370,9 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 		return errors.New("executor token target is not memory-backed")
 	}
 	for _, container := range pod.Spec.EphemeralContainers {
+		if strings.HasPrefix(container.Name, "oberth-") {
+			return errors.New("ephemeral container uses a server-owned name")
+		}
 		for _, mount := range container.VolumeMounts {
 			if mount.Name == executorTokenVolume {
 				return errors.New("ephemeral container can access executor identity")
@@ -376,12 +380,16 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 		}
 	}
 	found := false
+	serverNames := map[string]bool{}
 	for position, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
 		initializer := position < len(pod.Spec.InitContainers)
-		if container.Name == executorTokenWaiter {
-			if !initializer || container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || container.Command[2] != executorTokenWaitCommand {
-				return errors.New("executor identity waiter was modified")
+		if strings.HasPrefix(container.Name, "oberth-") {
+			if serverNames[container.Name] || !validServerContainer(container, image, initializer) {
+				return errors.New("server-added container was modified or duplicated")
 			}
+			serverNames[container.Name] = true
+		}
+		if container.Name == executorTokenWaiter {
 			found = true
 		}
 		for _, mount := range container.VolumeMounts {

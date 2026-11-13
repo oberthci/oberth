@@ -58,7 +58,7 @@ func TestExecutorTokenWaiterRejectsChangedAndTokenPathCommands(t *testing.T) {
 	const tokenPathCommand = "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
 	pod := &corev1.Pod{Spec: corev1.PodSpec{
 		Volumes:        []corev1.Volume{{Name: executorTokenVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}}}},
-		InitContainers: []corev1.Container{{Name: executorTokenWaiter, Image: "fixed-image", Command: []string{"sh", "-c", executorTokenWaitCommand}}},
+		InitContainers: []corev1.Container{executorWaiterContainer("fixed-image", executorWaiterResources(false))},
 	}}
 	if err := validateExecutorTokenTarget(pod, "fixed-image", false); err != nil {
 		t.Fatalf("server-authored waiter rejected: %v", err)

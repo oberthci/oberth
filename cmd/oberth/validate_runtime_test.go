@@ -70,6 +70,9 @@ spec:
 		mutate  func(*wfv1.Workflow)
 		refusal string
 	}{
+		{"server-waiter-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].InitContainers = []wfv1.UserContainer{{Container: corev1.Container{Name: "oberth-executor-token", Image: wf.Spec.Templates[0].Container.Image, Env: []corev1.EnvVar{{Name: "LD_PRELOAD", Value: "/loot/x.so"}}}}}
+		}, "reserved server-owned oberth- prefix"},
 		{"executor-sidecar-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			wf.Spec.Templates[0].Sidecars = []wfv1.UserContainer{{Container: corev1.Container{Name: "wait", Image: wf.Spec.Templates[0].Container.Image}}}
 		}, "reserved for the Argo executor"},

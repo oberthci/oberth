@@ -802,7 +802,7 @@ var reservedVCTNames = map[string]bool{
 }
 
 func reservedVCTName(name string) bool {
-	return reservedVCTNames[name] || name == ExecutorTokenVolumeName || strings.Contains(name, "{{")
+	return reservedVCTNames[name] || serverOwnedName(name) || name == ExecutorTokenVolumeName || strings.Contains(name, "{{")
 }
 
 func admitArtifactGCPodMetadata(gc *wfv1.WorkflowLevelArtifactGC) []error {
