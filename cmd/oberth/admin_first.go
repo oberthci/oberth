@@ -18,9 +18,35 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
+// firstAdminConfig binds the private exec to its daemon and public trust files.
+// Production paths are fixed; tests use a real store and gate on private paths.
+type firstAdminConfig struct {
+	DatabasePath      string
+	SocketPath        string
+	StoreOptions      store.Options
+	Authority         *clientcert.Authority
+	ServerCA          string
+	ServerCertificate string
+}
+
+func loadFirstAdminConfig(ctx context.Context) (firstAdminConfig, error) {
+	authority, err := loadClientAuthority()
+	if err != nil {
+		return firstAdminConfig{}, err
+	}
+	var ca, certificate bytes.Buffer
+	if err := adminReadPublicFiles(ctx, []string{"/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt", "/etc/oberth/tls/tls.crt"}, &ca, adminPublicFiles); err != nil {
+		return firstAdminConfig{}, err
+	}
+	if err := adminReadPublicFiles(ctx, []string{"/run/oberth-identities/server/tls.crt", "/etc/oberth/tls/tls.crt"}, &certificate, adminPublicFiles); err != nil {
+		return firstAdminConfig{}, err
+	}
+	return firstAdminConfig{DatabasePath: "/data/oberth.sqlite", SocketPath: defaultAdminSocket, StoreOptions: configuredStoreOptions(ctx), Authority: authority, ServerCA: ca.String(), ServerCertificate: certificate.String()}, nil
+}
+
 // runCreateFirstAdmin is the sole installation-time server exec. Public CSRs
 // enter on stdin; private client keys remain on their originating machines.
-func runCreateFirstAdmin(ctx context.Context, input io.Reader, output io.Writer) error {
+func runCreateFirstAdmin(ctx context.Context, input io.Reader, output io.Writer, config firstAdminConfig) error {
 	body, err := io.ReadAll(io.LimitReader(input, api.AdminRequestBytes+1))
 	if err != nil || api.ValidateAdminObject(body) != nil {
 		return errors.New("first admin requires one bounded enrollment object")
@@ -38,10 +64,7 @@ func runCreateFirstAdmin(ctx context.Context, input io.Reader, output io.Writer)
 	if err != nil {
 		return err
 	}
-	authority, err := loadClientAuthority()
-	if err != nil {
-		return err
-	}
+	authority := config.Authority
 	if authority == nil {
 		return errors.New("client CA unavailable")
 	}
@@ -54,36 +77,27 @@ func runCreateFirstAdmin(ctx context.Context, input io.Reader, output io.Writer)
 			return errors.New("invalid first-admin CSR")
 		}
 	}
-	var publicCA, publicCertificate bytes.Buffer
-	if err := adminReadPublicFiles(ctx, []string{"/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt", "/etc/oberth/tls/tls.crt"}, &publicCA, adminPublicFiles); err != nil {
-		return err
+	// Each daemon gate takes a writer fence, so every request must finish
+	// before CreateFirstAdmin begins its immediate writer transaction.
+	for _, operation := range []string{"uplink.database.open", "uplink.token.create", "uplink.register", "uplink.token.activate", "uplink.cert.issue"} {
+		if err := requestAdminMutationGate(ctx, config.SocketPath, operation, config.DatabasePath); err != nil {
+			return err
+		}
 	}
-	if err := adminReadPublicFiles(ctx, []string{"/run/oberth-identities/server/tls.crt", "/etc/oberth/tls/tls.crt"}, &publicCertificate, adminPublicFiles); err != nil {
-		return err
-	}
-	gate := func(ctx context.Context, operation string) error {
-		return requestLiveAdminMutationGate(ctx, operation, "/data/oberth.sqlite")
-	}
-	if err := gate(ctx, "uplink.database.open"); err != nil {
-		return err
-	}
-	database, err := store.OpenAdminClient(ctx, "/data/oberth.sqlite", configuredStoreOptions(ctx))
+	database, err := store.OpenAdminClient(ctx, config.DatabasePath, config.StoreOptions)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = database.Close() }()
-	policy, err := requestLiveUplinkTokenPolicy(ctx, "/data/oberth.sqlite")
+	policy, err := requestUplinkTokenPolicy(ctx, config.SocketPath, config.DatabasePath)
 	if err != nil {
 		return err
 	}
-	result := api.FirstAdminResult{ServerCA: publicCA.String(), ServerCertificate: publicCertificate.String()}
+	result := api.FirstAdminResult{ServerCA: config.ServerCA, ServerCertificate: config.ServerCertificate}
 	err = database.CreateFirstAdmin(ctx, administrativeActor, request.Identity, fingerprint, clientcert.Pin(installerLeaf), request.CSR == "" || request.Bearer, policy, func(enrollment *store.FirstAdminEnrollment) error {
 		var token bytes.Buffer
 		defer func() { clear(token.Bytes()) }()
-		issuer := auth.Issuer{Tokens: gatedAdminTokens{FirstAdminEnrollment: enrollment, Gate: gate}, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-			if err := gate(ctx, "uplink.register"); err != nil {
-				return err
-			}
+		issuer := auth.Issuer{Tokens: enrollment, Bind: func(ctx context.Context, pending model.TokenCredential) error {
 			return enrollment.Register(ctx, pending)
 		}}
 		if _, err := issuer.Issue(ctx, request.Identity, &token); err != nil {
@@ -91,9 +105,6 @@ func runCreateFirstAdmin(ctx context.Context, input io.Reader, output io.Writer)
 		}
 		if request.CSR == "" || request.Bearer {
 			result.Token = strings.TrimSpace(token.String())
-		}
-		if err := gate(ctx, "uplink.cert.issue"); err != nil {
-			return err
 		}
 		certIssuer := &service.ClientCertIssuer{Authority: authority, Store: enrollment}
 		if request.CSR != "" {

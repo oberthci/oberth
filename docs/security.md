@@ -269,3 +269,10 @@ For `backup.completed`, audit detail keys are `archive_sha256`, `bytes`, `scope`
 `archive_sha256`, `history`, `secrets`, `from_audit_head_id`, and
 `from_audit_head_sha256`. For `upgrade.completed`, they are `from`, `to`, and
 `rollback`. Arrays, objects, null values and all other keys are refused.
+
+First-admin recovery requires the database to have no active unscoped admin.
+A lost credential that is still valid continues to count as active and prevents
+a different installer key from taking over. This route cannot recover such a
+credential until it expires or is revoked; a bearer without an expiry does not
+become recoverable by waiting. A retry with the original installer key remains
+eligible for credential redelivery.

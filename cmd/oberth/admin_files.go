@@ -27,7 +27,11 @@ func runAdmin(ctx context.Context, args []string, output io.Writer) error {
 		if len(args) != 1 {
 			return errors.New("create-first-admin accepts enrollment JSON on stdin only")
 		}
-		return runCreateFirstAdmin(ctx, os.Stdin, output)
+		config, err := loadFirstAdminConfig(ctx)
+		if err != nil {
+			return err
+		}
+		return runCreateFirstAdmin(ctx, os.Stdin, output, config)
 	}
 	flags, connection, parse := adminCLIFlags("admin "+args[0], args[1:])
 	waitFor := flags.String("wait-for", "all", "idle observation: all or critical")

@@ -108,3 +108,8 @@ for each Kubernetes target. Each contains the locally generated private installe
 key and CSR saved before the first-admin exec. An interrupted installation reuses
 that key to retrieve fresh credentials rather than creating another administrator.
 No bootstrap token is stored in a Kubernetes Secret.
+
+Losing a still-valid admin credential does not enable first-admin recovery with
+a new key. Until that credential expires or is revoked it remains active; an
+unexpiring bearer remains active indefinitely. Keep the original local installer
+key so an interrupted response can be retried with the same enrollment.

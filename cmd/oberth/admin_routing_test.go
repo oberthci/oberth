@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestRunAccessRoutesSubcommands(t *testing.T) {
@@ -77,22 +75,6 @@ func TestValidateAdminSocketAcceptsValidPaths(t *testing.T) {
 		if err := validateAdminSocket(path); err != nil {
 			t.Errorf("validateAdminSocket(%q) = %v", path, err)
 		}
-	}
-}
-
-func TestGatedAdminTokensCreateAndActivateErrorPaths(t *testing.T) {
-	t.Parallel()
-	gateErr := errors.New("gate blocked")
-	tokens := gatedAdminTokens{
-		Gate: func(context.Context, string) error { return gateErr },
-	}
-	if _, err := tokens.CreateTokenCredential(context.Background(), model.TokenCredentialSpec{
-		Name: "test", Digest: make([]byte, 32),
-	}); !errors.Is(err, gateErr) {
-		t.Fatalf("CreateTokenCredential error = %v, want gate error", err)
-	}
-	if _, err := tokens.ActivateTokenCredential(context.Background(), "test-id"); !errors.Is(err, gateErr) {
-		t.Fatalf("ActivateTokenCredential error = %v, want gate error", err)
 	}
 }
 
