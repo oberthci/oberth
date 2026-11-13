@@ -114,11 +114,6 @@ func (config Config) vaultRoleForPerRepoCI(upstreamName, org, repo string) strin
 // because its policy is an org-union of all registered orgs (issue #433).
 // The CI per-repo identity NEVER carries release-tier grants, preserving the
 // CI-to-release boundary (issue #200).
-//
-// For fragment runs, the caller must pass the HOST repo name (the repo that
-// declared the pipeline), not the fragment source's repo. This ensures the
-// fragment runs under the host's identity, because the host's pipeline is
-// what declared the secrets and the host's approval table is what was checked.
 func (config Config) identityForWithRepo(trigger pipeline.Trigger, hasSecretPaths bool, upstreamName, org, repo string) (argoworkflow.Identity, error) {
 	if !hasSecretPaths {
 		// No secrets: always the pipeline SA, regardless of per-repo config.

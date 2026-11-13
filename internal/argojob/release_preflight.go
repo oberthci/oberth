@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
@@ -44,7 +43,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 	if err != nil {
 		return result, err
 	}
-	if _, err = argoworkflow.Resolve(wf, request.Fragments); err != nil {
+	if err = argoworkflow.Admit(wf, argoworkflow.Policy{RunnerImagePrefixes: config.RunnerImagePrefixes, Capability: request.Capability}); err != nil {
 		return result, err
 	}
 	paths, err := argoworkflow.DeclaredSecretPaths(wf)
@@ -78,7 +77,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {
 		step := t.Name
-		if !top[t] || step == "" || strings.HasPrefix(step, "frag-") {
+		if !top[t] || step == "" {
 			step = "*"
 		}
 		if templateUsesOberthSecretstore(t) {
@@ -167,7 +166,7 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 	if err != nil {
 		return err
 	}
-	if _, err = argoworkflow.Resolve(wf, request.Fragments); err != nil {
+	if err = argoworkflow.Admit(wf, argoworkflow.Policy{RunnerImagePrefixes: config.RunnerImagePrefixes, Capability: request.Capability}); err != nil {
 		return err
 	}
 	var problems []error

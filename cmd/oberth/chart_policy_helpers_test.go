@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os/exec"
 	"slices"
@@ -19,6 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
+const chartTestDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+
 type chartPolicyEndpoint struct {
 	namespace string // Empty for a client outside the cluster.
 	labels    map[string]string
@@ -27,17 +28,12 @@ type chartPolicyEndpoint struct {
 
 // Render the whole chart so an allowance in any policy participates in the
 // union. Resolve named policy ports against the actual server container ports.
-func renderGoProxyPolicies(t *testing.T, proxyPort int32, extra ...string) ([]networkingv1.NetworkPolicy, chartPolicyEndpoint) {
+func renderChartPolicies(t *testing.T, extra ...string) ([]networkingv1.NetworkPolicy, chartPolicyEndpoint) {
 	t.Helper()
 	args := []string{"template", "policy-test", "../../charts/oberth",
 		"--namespace", "server-system",
-		"--set", "image.ref=example.invalid/oberth@" + goProxyDigest,
+		"--set", "image.ref=example.invalid/oberth@" + chartTestDigest,
 		"--set", "argo.namespace=pipeline-system",
-		"--set", "argo.goProxy.enabled=true",
-		"--set", fmt.Sprintf("argo.goProxy.port=%d", proxyPort),
-		"--set", "argo.goProxy.modulePrefix=go.example.test",
-		"--set", "argo.goProxy.upstream=forge",
-		"--set", "argo.goProxy.organization=example",
 	}
 	out, err := exec.CommandContext(t.Context(), "helm", append(args, extra...)...).CombinedOutput()
 	if err != nil {
@@ -84,7 +80,7 @@ func renderGoProxyPolicies(t *testing.T, proxyPort int32, extra ...string) ([]ne
 			}
 		}
 	}
-	if len(policies) == 0 || server.ports["ssh"] != 2222 || server.ports["https"] != 8443 || server.ports["goproxy"] != proxyPort {
+	if len(policies) == 0 || server.ports["ssh"] != 2222 || server.ports["https"] != 8443 {
 		t.Fatalf("missing policies or unexpected server listeners: policies=%d, server=%+v", len(policies), server)
 	}
 	return policies, server
@@ -181,77 +177,4 @@ func chartPolicyRuleAllows(t *testing.T, policyNamespace string, peers []network
 		}
 	}
 	return false
-}
-
-func TestChartGoProxyEffectiveIngressUnion(t *testing.T) {
-	for _, proxyPort := range []int32{8444, 9444} {
-		t.Run(fmt.Sprint(proxyPort), func(t *testing.T) {
-			policies, server := renderGoProxyPolicies(t, proxyPort)
-			for _, client := range []struct {
-				name     string
-				endpoint chartPolicyEndpoint
-				proxy    bool
-			}{
-				{"external", chartPolicyEndpoint{}, false},
-				{"ingress or tunnel pod", chartPolicyEndpoint{namespace: "ingress-system"}, false},
-				{"pipeline", chartPolicyEndpoint{namespace: "pipeline-system", labels: map[string]string{"oberth.ci/trigger": "branch"}}, true},
-				{"unlabeled pipeline pod", chartPolicyEndpoint{namespace: "pipeline-system"}, false},
-				{"trigger label in wrong namespace", chartPolicyEndpoint{namespace: "other-system", labels: map[string]string{"oberth.ci/trigger": "branch"}}, false},
-			} {
-				t.Run(client.name, func(t *testing.T) {
-					for _, listener := range []string{"ssh", "https", "goproxy"} {
-						want := listener != "goproxy" || client.proxy
-						if got := chartPolicyAllows(t, policies, networkingv1.PolicyTypeIngress, client.endpoint, server, server.ports[listener]); got != want {
-							t.Errorf("effective ingress to %s: got %v, want %v", listener, got, want)
-						}
-					}
-				})
-			}
-		})
-	}
-}
-
-func TestChartGoProxyEffectivePipelineAccess(t *testing.T) {
-	for _, proxyPort := range []int32{8444, 9444} {
-		t.Run(fmt.Sprint(proxyPort), func(t *testing.T) {
-			policies, server := renderGoProxyPolicies(t, proxyPort)
-			pipeline := chartPolicyEndpoint{namespace: "pipeline-system", labels: map[string]string{"oberth.ci/trigger": "branch"}}
-			for _, listener := range []string{"goproxy", "https", "ssh"} {
-				t.Run(listener, func(t *testing.T) {
-					port := server.ports[listener]
-					ingress := chartPolicyAllows(t, policies, networkingv1.PolicyTypeIngress, pipeline, server, port)
-					egress := chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, pipeline, server, port)
-					want := listener == "goproxy"
-					if !ingress || egress != want || (ingress && egress) != want {
-						t.Errorf("pipeline to %s on %d: ingress=%v, egress=%v, want connection=%v", listener, port, ingress, egress, want)
-					}
-				})
-			}
-			// The namespace and pod selectors must apply together, and the
-			// instance label must distinguish other releases in the same namespace.
-			for _, target := range []struct {
-				name     string
-				endpoint chartPolicyEndpoint
-			}{
-				{"matching labels in another namespace", chartPolicyEndpoint{namespace: "other-system", labels: server.labels}},
-				{"other release in server namespace", chartPolicyEndpoint{namespace: server.namespace, labels: map[string]string{"app.kubernetes.io/name": "oberth", "app.kubernetes.io/instance": "other-release"}}},
-				{"unrelated pod in server namespace", chartPolicyEndpoint{namespace: server.namespace}},
-			} {
-				t.Run(target.name, func(t *testing.T) {
-					if chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, pipeline, target.endpoint, proxyPort) {
-						t.Error("proxy egress escapes the configured server destination")
-					}
-				})
-			}
-			// Egress alone does not grant unlabeled pipeline pods proxy access.
-			unlabeled := chartPolicyEndpoint{namespace: pipeline.namespace}
-			if chartPolicyAllows(t, policies, networkingv1.PolicyTypeIngress, unlabeled, server, proxyPort) &&
-				chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, unlabeled, server, proxyPort) {
-				t.Error("unlabeled pipeline pod can reach the proxy")
-			}
-			if !chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, pipeline, chartPolicyEndpoint{}, 443) {
-				t.Error("ordinary outbound HTTPS was lost")
-			}
-		})
-	}
 }

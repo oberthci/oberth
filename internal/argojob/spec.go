@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -27,7 +26,6 @@ import (
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/oberthci/oberth/internal/containerimage"
-	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -42,7 +40,6 @@ const (
 	// value is a list of OpenBao paths; on this tier no secret value ever
 	// passes through the server at all.
 	secretPathsAnnotation = "oberth.ci/declared-secret-paths"
-	FragmentsAnnotation   = "oberth.ci/fragments"
 
 	// tierLabel classifies pipeline pods by trust tier so network policy,
 	// monitoring, and RBAC can scope rules to branch-tier (untrusted) or
@@ -142,28 +139,6 @@ type Config struct {
 	// Empty means the store presents a publicly trusted certificate and the
 	// container's own root store suffices.
 	VaultCACertPEM string
-
-	// GoProxyURL is the HTTPS URL of the read-only Go module proxy the server
-	// runs for configured private modules (#662). It is injected into every
-	// pipeline container as the first entry in GOPROXY, followed by
-	// proxy.golang.org and direct unless the Workflow declares mirror-only.
-	// Empty disables injection and refuses a mirror-only declaration.
-	//
-	// The URL must be https:// — the same TLS requirement the Vault address
-	// enforces, for the same reason: module source travels over the wire.
-	GoProxyURL string
-	// GoProxyModulePrefix is the administrator-owned private namespace.
-	GoProxyModulePrefix string
-
-	// GoProxyCACertPEM is the PEM-encoded CA certificate that signed the
-	// module proxy's TLS certificate. It is delivered into the source claim
-	// and mounted at /etc/ssl/certs/oberth-goproxy-ca.pem via a subPath
-	// mount, so Go's crypto/x509 cert directory scan picks it up alongside
-	// the runner image's system CAs — no SSL_CERT_FILE override needed.
-	//
-	// Public material only; Validate rejects a PEM carrying a private key.
-	// Required when GoProxyURL is set (the proxy uses a private CA by design).
-	GoProxyCACertPEM string
 
 	// CICacheRoot and ReleaseCacheRoot are the node-local directories that hold
 	// the persistent Go module and build caches pipeline steps reuse between
@@ -359,26 +334,6 @@ func (config Config) Validate() error {
 			config.VaultCISecretsRole))
 	}
 	problems = append(problems, validateCacheRoots(config.CICacheRoot, config.ReleaseCacheRoot)...)
-	if strings.TrimSpace(config.GoProxyURL) != "" {
-		if err := goproxy.ValidateModulePrefix(config.GoProxyModulePrefix); err != nil {
-			problems = append(problems, err)
-		}
-	}
-	if strings.TrimSpace(config.GoProxyURL) != "" && !strings.HasPrefix(config.GoProxyURL, "https://") {
-		problems = append(problems, fmt.Errorf("argojob: Go module proxy URL %q must be https://", config.GoProxyURL))
-	}
-	if err := validateVaultCACertPEM(config.GoProxyCACertPEM); err != nil {
-		problems = append(problems, fmt.Errorf("argojob: Go module proxy CA: %w", err))
-	}
-	if strings.TrimSpace(config.GoProxyURL) != "" && strings.TrimSpace(config.GoProxyCACertPEM) == "" {
-		problems = append(problems, errors.New(
-			"argojob: a Go module proxy URL without a CA certificate configures a proxy no pipeline container can verify; "+
-				"the proxy uses a cluster-internal name with a private CA by design"))
-	}
-	if strings.TrimSpace(config.GoProxyCACertPEM) != "" && strings.TrimSpace(config.GoProxyURL) == "" {
-		problems = append(problems, errors.New(
-			"argojob: a Go module proxy CA certificate without a URL pins trust for a proxy no pipeline is told to reach"))
-	}
 	return errors.Join(problems...)
 }
 
@@ -569,8 +524,6 @@ type Request struct {
 	// Issue #623.
 	StepGrants map[string]map[string]bool
 
-	Fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
-
 	// Identities overrides Config.PerRepoIdentities and Config.PerRepoCIIdentities
 	// when non-nil. The caller sets this from IdentityStore.Snapshot() to bind
 	// both Builds of one admission to the same identity version, so the audit
@@ -611,7 +564,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := request.validate(); err != nil {
 		return nil, err
 	}
-	resolved, err := argoworkflow.ResolveRunSource(request.Source, request.Fragments, argoworkflow.RunSourceBinding{
+	resolved, err := argoworkflow.ResolveRunSource(request.Source, argoworkflow.RunSourceBinding{
 		RunID: request.RunID, RepositoryID: request.RepositoryID, SHA: request.SHA,
 		File: request.PipelineFile, Trigger: request.RunTrigger, ScheduleEntry: request.ScheduleEntry,
 	})
@@ -621,11 +574,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	workflow := resolved.Workflow()
 	if err := validatePinnedSourceDelivery(workflow, request); err != nil {
 		return nil, err
-	}
-	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
-		return nil, &argoworkflow.AdmissionError{Cause: err}
-	} else if mirrorOnly && strings.TrimSpace(config.GoProxyURL) == "" {
-		return nil, fmt.Errorf("argojob: %s: mirror-only requires a configured Go module proxy", argoworkflow.GoProxyAnnotation)
 	}
 	delete(workflow.Annotations, capabilityAnnotation)
 	resourceSteps := argoworkflow.CapabilityUsage(workflow)
@@ -638,7 +586,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.Capability != nil && request.RepositoryID <= 0 {
 		return nil, errors.New("argojob: workflow capability requires a durable repository binding")
 	}
-	fragmentLock := resolved.Lock()
 	wifLeaves, err := authorizeReleaseWIF(workflow, config, request)
 	if err != nil {
 		return nil, err
@@ -752,7 +699,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 			}
 		}
 	}
-	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
+	applyServerMetadata(workflow, config, request, declaredPaths)
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
 	}
@@ -950,7 +897,7 @@ func tierFor(trigger pipeline.Trigger) string {
 	}
 }
 
-func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request, declaredPaths []string, fragmentLock argoworkflow.Lock) {
+func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request, declaredPaths []string) {
 	workflow.APIVersion = argoworkflow.APIVersion
 	workflow.Kind = argoworkflow.Kind
 	workflow.Name = request.Name
@@ -975,11 +922,6 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 		// Paths only, never values: this is the auditable statement of intent
 		// that the run's audit action records at submission time.
 		workflow.Annotations[secretPathsAnnotation] = strings.Join(declaredPaths, ",")
-	}
-	if len(fragmentLock) != 0 {
-		if encoded, err := json.Marshal(fragmentLock); err == nil {
-			workflow.Annotations[FragmentsAnnotation] = string(encoded)
-		}
 	}
 	if workflow.Spec.PodMetadata == nil {
 		workflow.Spec.PodMetadata = &wfv1.Metadata{}
@@ -1024,14 +966,6 @@ const (
 	// the same reason the source mount is.
 	VaultCAMountPath = "/run/oberth/vault-ca"
 	VaultCACertPath  = VaultCAMountPath + "/" + vaultCACertFile
-
-	// GoProxyCACertMountPath is where every pipeline container finds the Go
-	// module proxy's trust anchor. It lives inside /etc/ssl/certs/ so Go's
-	// crypto/x509 cert directory scan reads it alongside the runner image's
-	// system CAs — no SSL_CERT_FILE override needed, and no system CA is lost.
-	// The subPath mount adds one file to the existing directory without
-	// replacing anything.
-	GoProxyCACertMountPath = "/etc/ssl/certs/oberth-goproxy-ca.pem"
 
 	// ArtifactsVolumeName remains reserved so authored legacy aliases are stripped.
 	ArtifactsVolumeName = "oberth-artifacts"
@@ -1277,19 +1211,6 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 				ReadOnly:  true,
 			})
 		}
-		if request.goProxyCADelivered() {
-			// The goproxy CA rides the same source claim as another subPath.
-			// Mounted into /etc/ssl/certs/ so Go's cert directory scan picks
-			// it up alongside the runner image's system CAs. This mount is for
-			// Every Go consumer needs this trust anchor: go mod tidy -diff runs in
-			// CI pipelines.
-			mounts = append(mounts, corev1.VolumeMount{
-				Name:      SourceVolumeName,
-				MountPath: GoProxyCACertMountPath,
-				SubPath:   request.SourceVolume.GoProxyCASubPath,
-				ReadOnly:  true,
-			})
-		}
 		if len(secretSteps) > 0 && request.binaryDelivered() {
 			// The server binary rides the same claim as another subPath,
 			// enabling `oberth secretstore exec` in pipeline containers.
@@ -1411,12 +1332,6 @@ func (request Request) vaultCADelivered() bool {
 // into the source claim.
 func (request Request) binaryDelivered() bool {
 	return strings.TrimSpace(request.SourceVolume.BinarySubPath) != ""
-}
-
-// goProxyCADelivered reports whether this run's seeding wrote the Go module
-// proxy CA certificate into the source claim.
-func (request Request) goProxyCADelivered() bool {
-	return strings.TrimSpace(request.SourceVolume.GoProxyCASubPath) != ""
 }
 
 func (request Request) artifactsDelivered() bool {
@@ -1676,30 +1591,6 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 			corev1.EnvVar{Name: "GOMODCACHE", Value: ModuleCachePath},
 			corev1.EnvVar{Name: "GOCACHE", Value: BuildCachePath},
 			corev1.EnvVar{Name: "OBERTH_CACHE_DIR", Value: CacheMountPath},
-		)
-	}
-	// Go module proxy environment: injected into every pipeline container so
-	// go mod tidy -diff and go mod download resolve configured private
-	// modules through Oberth's credential-free mirror rather than failing on
-	// an unreachable upstream (#662).
-	//
-	// AI-CONTRACT: comma falls through only on 404/410. The private mirror
-	// returns neither for any private failure, including unknown modules,
-	// unsupported requests, pseudo-version policy denials and missing go.mod.
-	// These refusals are terminal 403. Public misses return 404; the pipe after the
-	// public proxy preserves its existing any-error direct fallback.
-	// GONOPROXY=none overrides ambient GOPRIVATE/GONOPROXY, keeping private
-	// modules on the mirror. GONOSUMDB excludes the entire private namespace
-	// (including its root) while retaining public checksum verification.
-	if strings.TrimSpace(config.GoProxyURL) != "" {
-		proxy := config.GoProxyURL + ",https://proxy.golang.org|direct"
-		if workflow.Annotations[argoworkflow.GoProxyAnnotation] == argoworkflow.GoProxyMirrorOnly {
-			proxy = config.GoProxyURL
-		}
-		environment = append(environment,
-			corev1.EnvVar{Name: "GOPROXY", Value: proxy},
-			corev1.EnvVar{Name: "GONOPROXY", Value: "none"},
-			corev1.EnvVar{Name: "GONOSUMDB", Value: config.GoProxyModulePrefix},
 		)
 	}
 	var secretEnvironment []corev1.EnvVar

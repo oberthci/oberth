@@ -334,37 +334,6 @@ classed default-branch, tag, unreachable or not-commit; with a selection it plan
 and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream).
 ```
 
-## oberth fragments
-
-```text
-Usage: oberth fragments <list|show> [flags]
-Use oberth fragments <command> --help for command flags.
-```
-
-## oberth fragments list
-
-```text
-Usage: oberth fragments list [flags]
-
-Flags:
-  -data-root string
-        Oberth data root holding the git cache (default "/data")
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
-## oberth fragments show
-
-```text
-Usage: oberth fragments show [flags]
-
-Flags:
-  -data-root string
-        Oberth data root holding the git cache (default "/data")
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
 ## oberth git-ssh
 
 ```text
@@ -1590,26 +1559,6 @@ Flags:
         per-Pod Argo executor scratch size limit (Kubernetes quantity) (default "1Gi")
   -argo-executor-serviceaccount string
         ServiceAccount for Argo's own executor containers; must differ from all pipeline identities (default "oberth-argo-executor")
-  -argo-goproxy-ca string
-        PEM CA certificate that signed the Go module proxy's TLS certificate; delivered to pipeline pods
-  -argo-goproxy-cert string
-        TLS certificate for the Go module proxy
-  -argo-goproxy-key string
-        TLS private key for the Go module proxy
-  -argo-goproxy-listen string
-        listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)
-  -argo-goproxy-module-prefix string
-        Administrator-owned private module namespace
-  -argo-goproxy-organization string
-        Exact organization owning private module repositories
-  -argo-goproxy-pseudo-non-default-branches
-        Allow pseudo-versions from non-default public branches and existing allowed tags; default is default-branch-only
-  -argo-goproxy-repository-prefix string
-        Repository-name prefix within the configured owner
-  -argo-goproxy-upstream string
-        Exact upstream owning private module repositories
-  -argo-goproxy-url string
-        HTTPS URL pipeline pods use to reach the module proxy (e.g. https://oberth-goproxy.oberth.svc:8444)
   -argo-namespace string
         namespace for Argo Workflow pipelines (required)
   -argo-pipeline-serviceaccount string
@@ -1682,8 +1631,6 @@ Flags:
         persistent data root (default "/data")
   -database string
         SQLite database path (default "/data/oberth.sqlite")
-  -fragment-allowlist string
-        comma-separated repositories usable as pipeline fragments; empty permits every registered repository
   -git-gc-interval duration
         periodic Git GC interval (default 24h0m0s)
   -git-timeout duration
@@ -2103,8 +2050,6 @@ Flags:
 Usage: oberth validate [flags]
 
 Flags:
-  -allow-unresolved-fragments
-        deprecated: unresolved fragments still fail validation because admission requires their pinned contents
   -runner-image-prefixes string
         comma-separated allowlist of permitted runner image prefixes
 ```

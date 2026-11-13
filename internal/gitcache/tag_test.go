@@ -11,7 +11,7 @@ func TestTagSHAResolvesALightweightTag(t *testing.T) {
 	cache := newTestCache(t, repository.upstream)
 	ctx := context.Background()
 
-	want := commitFragment(t, repository, "fragment", "kind: Workflow\n")
+	want := commitPipelineSource(t, repository, "source", "kind: Workflow\n")
 	runGit(t, repository.work, "tag", "v3")
 	runGit(t, repository.work, "push", "origin", "v3")
 	if _, err := cache.Ensure(ctx, "example"); err != nil {
@@ -33,7 +33,7 @@ func TestTagSHAResolvesAnAnnotatedTagToItsCommit(t *testing.T) {
 	cache := newTestCache(t, repository.upstream)
 	ctx := context.Background()
 
-	want := commitFragment(t, repository, "fragment", "kind: Workflow\n")
+	want := commitPipelineSource(t, repository, "source", "kind: Workflow\n")
 	runGit(t, repository.work, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
 		"tag", "-a", "v4", "-m", "release four")
 	runGit(t, repository.work, "push", "origin", "v4")
@@ -63,14 +63,14 @@ func TestTagSHARefusesAMissingTagAndABranchName(t *testing.T) {
 		t.Fatal("TagSHA resolved a tag that does not exist")
 	}
 	if _, err := cache.TagSHA(ctx, "example", "main"); err == nil {
-		t.Fatal("TagSHA resolved a branch name; a fragment must be pinned to a tag")
+		t.Fatal("TagSHA resolved a branch name; exact tag lookup must not resolve a branch")
 	}
 }
 
 func TestTagObjectSHAKeepsAnnotatedTagIdentity(t *testing.T) {
 	repository := newTestRepository(t)
 	cache := newTestCache(t, repository.upstream)
-	commit := commitFragment(t, repository, "fragment", "kind: Workflow\n")
+	commit := commitPipelineSource(t, repository, "source", "kind: Workflow\n")
 	runGit(t, repository.work, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "tag", "-a", "v-object", "-m", "first object")
 	object := runGit(t, repository.work, "rev-parse", "refs/tags/v-object")
 	runGit(t, repository.work, "push", "origin", "v-object")
@@ -83,7 +83,7 @@ func TestTagObjectSHAKeepsAnnotatedTagIdentity(t *testing.T) {
 	}
 	peeled, err := cache.TagSHA(t.Context(), "example", "v-object")
 	if err != nil || peeled != commit {
-		t.Fatalf("existing fragment resolution changed: %s %v", peeled, err)
+		t.Fatalf("peeled tag resolution changed: %s %v", peeled, err)
 	}
 	if _, err := cache.TagObjectSHA(t.Context(), "example", "missing"); err == nil {
 		t.Fatal("missing tag accepted")

@@ -408,9 +408,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				// The CA cert is auto-pinned because the defaulted address
 				// matches the installed store's ServiceAddress.
 				"--set-string", "argo.vault.caCert=" + caPEM,
-				// Go module proxy pins: --reuse-values discards new chart
-				// defaults; pinned unconditionally (#662).
-				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=https://openbao.openbao.svc:8200",
@@ -425,8 +422,6 @@ func TestOberthHelmArgs(t *testing.T) {
 			settings: []string{
 				"--set", "argo.vault.credentialedRole=oberth-argo-credentialed",
 				"--set", "argo.ciSecrets.vaultRole=oberth-argo-ci-secrets",
-				// Go module proxy pins (#662).
-				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=http://openbao.openbao.svc:8200",
@@ -462,8 +457,6 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 		"upgrade", "--install", "oberth", "<verified oberth-0.10.54.tgz>",
 		"-n", "oberth", "--create-namespace",
 		"--set", "argo.namespace=oberth-argo",
-		// Go module proxy pins (#662).
-		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
 		"--reuse-values",
 	}
@@ -488,8 +481,6 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		"upgrade", "--install", "oberth", "<verified oberth-0.10.54.tgz>",
 		"-n", "oberth", "--create-namespace",
 		"--set", "argo.namespace=oberth-argo",
-		// Go module proxy pins (#662).
-		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
@@ -1318,8 +1309,6 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				"-n", "oberth", "--create-namespace",
 				"--set-string", "image.ref=" + fakeChartImageRef,
 				"--set", "argo.namespace=oberth-argo",
-				// Go module proxy pins (#662).
-				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 				"--set", "auditAnchor.rekorInsecureHTTP=true",
@@ -1458,8 +1447,6 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		"-n", "oberth", "--create-namespace",
 		"--set-string", "image.ref=" + fakeChartImageRef,
 		"--set", "argo.namespace=oberth-argo",
-		// Go module proxy pins (#662).
-		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",

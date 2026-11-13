@@ -224,15 +224,6 @@ func bootstrapRuntimeIdentities(ctx context.Context, options *serveOptions) erro
 	options.sshHostKey = identityRoot + "/server/ssh_host_key"
 	options.upstreamKey = identityRoot + "/upstream/id_ed25519"
 	options.knownHosts = identityRoot + "/hosts/known_hosts"
-	if options.argoGoProxyCert != "" {
-		options.argoGoProxyCert = options.tlsCert
-		options.argoGoProxyKey = options.tlsKey
-		options.argoGoProxyCA = options.tlsCert
-		if pkiEnabled {
-			// Pipeline pods trust the stable CA, not the renewing leaf.
-			options.argoGoProxyCA = identityRoot + "/server/ca.crt"
-		}
-	}
 	return nil
 }
 

@@ -9,7 +9,7 @@ import (
 )
 
 func TestRefusalSupportedWorkflowAnnotations(t *testing.T) {
-	for key, value := range map[string]string{SecretPathsAnnotation: "", SourcesAnnotation: "[]", GoProxyAnnotation: GoProxyMirrorOnly, "example.test/note": "author"} {
+	for key, value := range map[string]string{SecretPathsAnnotation: "", SourcesAnnotation: "[]", "example.test/note": "author"} {
 		t.Run(key, func(t *testing.T) {
 			w, err := Decode([]byte(admissibleDocument))
 			if err != nil {

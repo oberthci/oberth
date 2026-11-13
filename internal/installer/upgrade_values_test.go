@@ -175,3 +175,29 @@ func TestUpgradeSchemaPreflightUsesOnlyStoredOverridesAndCleansFiles(t *testing.
 		})
 	}
 }
+
+func TestReuseValuesPathsRefuseRetiredGoProxy(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value any
+	}{
+		{"null", nil},
+		{"empty", map[string]any{}},
+		{"disabled", map[string]any{"enabled": false}},
+		{"enabled", map[string]any{"enabled": true, "port": 8444}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, command := range []string{"oberth install", "oberth restore"} {
+				installed := map[string]any{"argo": map[string]any{"goProxy": test.value}}
+				err := refuseRemovedReleaseValues(installed, command)
+				var schemaErr *ErrSchemaValidation
+				if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "argo.goProxy") || !strings.Contains(err.Error(), command+" changed nothing") || !strings.Contains(err.Error(), "Run oberth upgrade first: it automatically drops argo.goProxy") {
+					t.Fatalf("%s must refuse reused proxy defaults before writes: %v", command, err)
+				}
+				if _, present := installed["argo"].(map[string]any)["goProxy"]; !present {
+					t.Fatal("refusal must not mutate installed values")
+				}
+			}
+		})
+	}
+}

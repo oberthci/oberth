@@ -164,49 +164,6 @@
 - SQLite accepts only the immutable fresh-schema identity; incompatible or newer
   databases fail before startup recovery.
 
-## Private Go module resolution
-
-The enabled Go module mirror routes the complete administrator-configured private namespace
-locally. Private missing modules/versions and unsupported requests return 403;
-backend unavailability returns 503 with `Retry-After`; artifact integrity or
-generation failures return 500. Explicit pseudo-version commit/time/base/policy
-denials return terminal 403, including a pinned commit with no `go.mod`.
-No private failure returns 404/410 or authorizes fallback to another proxy. The listener avoids path
-redirects before namespace classification. `@latest` uses canonical tags only,
-preferring stable releases. Nested modules and bare branch names remain
-unsupported. Pseudo-versions require exact mirrored commit/time/base evidence
-and default-branch reachability; an administrator can opt into other public
-branches and already allowed tags. Warm artifacts recheck this authority.
-
-Pipeline containers receive `<mirror>,https://proxy.golang.org|direct`,
-`GONOPROXY=none`, and `GONOSUMDB=<configured namespace>`. Go's comma separator permits
-fallback only on 404/410; the pipe permits it on any error. Public misses
-therefore retain public-proxy and direct fallback. All private failures,
-including pseudo-version denials, and mirror transport/TLS failures stop. The explicit no-proxy override prevents an
-ambient `GOPRIVATE` from sending private coordinates directly upstream. Public
-checksum verification remains enabled. These settings configure the resolver;
-they are not an egress sandbox for repository code that replaces its environment.
-
-The namespace prefix and exact upstream/organization owner are explicit trusted
-server configuration. Repository names are discovered only within that owner;
-repository `go.mod` declarations cannot claim another namespace or disable
-public checksum verification. An enabled listener without a complete authority
-configuration is rejected. Existing deployments must carry their configured
-namespace through upgrades; no domain-name inference or permissive discovery
-fallback exists.
-
-Cached private module versions retain first-observed bytes after tag moves or
-deletion, including for clients without go.sum. Tag deletion or Go retraction
-alone is not revocation. Administrators can durably deny one mapped
-(repository, module, version) with `hack/goproxy-revoke.py` against the server
-volume; its `revoked/` marker overrides warm and cold reads with 403 without
-consulting Git. Live discovery filters those versions; `@latest` never selects a
-revoked version. The utility warns on unmatched coordinates; verify the exact
-repository mapping and a 403 response. Use a separate pinned Python maintenance
-pod for the scratch server image, as described below. Preserve these policy markers during cache maintenance. Already
-streaming responses and client caches cannot be recalled; see
-[revocation operations](goproxy-availability.md#tag-deletion-and-per-version-revocation).
-
 Host pressure admission reads only the fixed Linux `/proc/pressure/{io,cpu,memory}`
 files, with bounded parsing and no host mount or extra privilege. The observations
 are scheduling hints; malformed/unavailable PSI fails open and never changes

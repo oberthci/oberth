@@ -441,26 +441,6 @@ argo:
     # installer-managed OpenBao this is the same PEM as secretstore.caCert.
     caCert: ""
 
-  # Credential-free Go module proxy for private modules (#662).
-  # Serves the GOPROXY protocol read-only from Oberth's git cache, so pipeline
-  # pods can run `go mod tidy -diff` without git credentials for private modules.
-  # Private failures stop here; only public module misses fall through to the
-  # public proxy. Injected GONOPROXY=none prevents ambient private-proxy bypass.
-  # Enable only after selecting the administrator-owned module namespace and
-  # its exact upstream organization. Existing enabled installs must retain
-  # their mapping explicitly when upgrading.
-  goProxy:
-    enabled: false
-    # Default: pseudo-versions must be reachable from the default branch.
-    # Opt in to other public branches and tags already allowed by proxy policy.
-    allowNonDefaultBranchPseudoVersions: false
-    # Port for the HTTPS listener. ClusterIP-only — never exposed on a NodePort.
-    port: 8444
-    modulePrefix: ""
-    repositoryPrefix: ""
-    upstream: ""
-    organization: ""
-
 # Configure OpenBao once with scripts/setup-secretstore.sh.
 secretstore:
   enabled: true

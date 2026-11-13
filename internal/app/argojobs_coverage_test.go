@@ -25,7 +25,7 @@ import (
 
 func TestNewArgoJobs_NilController(t *testing.T) {
 	t.Parallel()
-	_, err := NewArgoJobs(nil, argojob.Config{}, &stubAuditor{}, nil, nil)
+	_, err := NewArgoJobs(nil, argojob.Config{}, &stubAuditor{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "controller is required") {
 		t.Fatalf("expected controller-required error, got: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestNewArgoJobs_NilController(t *testing.T) {
 
 func TestNewArgoJobs_NilAuditor(t *testing.T) {
 	t.Parallel()
-	_, err := NewArgoJobs(newBlockingController(), argojob.Config{}, nil, nil, nil)
+	_, err := NewArgoJobs(newBlockingController(), argojob.Config{}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "audit chain") {
 		t.Fatalf("expected auditor-required error, got: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestNewArgoJobs_NilAuditor(t *testing.T) {
 func TestNewArgoJobs_InvalidConfig(t *testing.T) {
 	t.Parallel()
 	// Config with empty namespace fails validation.
-	_, err := NewArgoJobs(newBlockingController(), argojob.Config{}, &stubAuditor{}, nil, nil)
+	_, err := NewArgoJobs(newBlockingController(), argojob.Config{}, &stubAuditor{}, nil)
 	if err == nil {
 		t.Fatal("expected config validation error")
 	}
@@ -57,7 +57,7 @@ func TestNewArgoJobs_ValidConstruction(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatalf("valid construction failed: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestSetReconcilerHealth(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestCreateRelease_Success(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, emptySecretAccess{}, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, emptySecretAccess{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestCreateRelease_TriggerMismatch(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, emptySecretAccess{}, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, emptySecretAccess{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestWait_Success(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestWait_NoIntent(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestWait_ControllerError(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +509,7 @@ func TestTerminalResult_Succeeded(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -539,7 +539,7 @@ func TestTerminalResult_NotTerminal(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestTerminalResult_NilCompletion(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestTerminalResult_ControllerError(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +617,7 @@ func TestOwns_Delegation(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -644,7 +644,7 @@ func TestOwns_NotOwned(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +671,7 @@ func TestForget_CleansMatchingIntent(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestForget_IgnoresDifferentRunID(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestResultMapping(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -868,7 +868,7 @@ func TestDelete_EmptyRunID(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -888,7 +888,7 @@ func TestDelete_WrongRunIDForIntent(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -914,7 +914,7 @@ func TestDelete_CreatedIntent(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -962,7 +962,7 @@ func TestDelete_NoIntent(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(controller, config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -987,7 +987,7 @@ func TestCreate_EmptyWorkflowName(t *testing.T) {
 		CISecretsServiceAccount:    "test-ci-secrets",
 		ExecutorServiceAccount:     "test-executor",
 	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil, nil)
+	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

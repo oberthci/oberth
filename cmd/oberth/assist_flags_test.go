@@ -30,7 +30,7 @@ func TestServeAssistDefaultOffAndValidated(t *testing.T) {
 
 func TestChartRendersAssistFlagsWithBinaryDefaults(t *testing.T) {
 	render := func(sets ...string) (string, error) {
-		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + goProxyDigest}
+		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + chartTestDigest}
 		for _, set := range sets {
 			args = append(args, "--set", set)
 		}
@@ -66,7 +66,7 @@ func TestChartRendersAssistFlagsWithBinaryDefaults(t *testing.T) {
 // Every accepted value parses as a flag.
 func TestChartAssistDurationValuesAreGoDurations(t *testing.T) {
 	render := func(set string) (string, error) {
-		output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", set).CombinedOutput()
+		output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+chartTestDigest, "--set", set).CombinedOutput()
 		return string(output), err
 	}
 	for set, flag := range map[string]string{

@@ -22,7 +22,7 @@ The single definition lives in `GrantedSecretSteps` in
 Container or Script must invoke a recognized store consumer and consume at
 least one static path. Every consumed path must be declared, approved for the
 selected repository/upstream and exact workflow file, and granted to the stable template name
-or `*`. Inline and fragment-renamed templates require wildcard grants. Missing
+or `*`. Inline and unnamed templates require wildcard grants. Missing
 step grants confer no authority. Token opt-outs receive no store settings.
 Admission and Build delivery use this same decision. The grant table is keyed by repository/upstream, exact repository-relative workflow file, template name, and path. The workflow field is required; no default, alias, or wildcard file selector is accepted. `*` grants cover steps only within that exact file. Pending declarations, revocation, policy names, and store identities retain the same file scope.
 

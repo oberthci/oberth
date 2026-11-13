@@ -46,9 +46,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	}
 	var problems []error
 	problems = append(problems, admitMetadata(workflow)...)
-	if _, err := DeclaredGoProxyMirrorOnly(workflow); err != nil {
-		problems = append(problems, err)
-	}
 	problems = append(problems, admitSpec(&workflow.Spec)...)
 	problems = append(problems, admitTemplates(workflow, policy)...)
 	return errors.Join(problems...)
@@ -85,7 +82,7 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 // namespace rule. Assist identity/hold markers are server-written, not opt-ins.
 func supportedWorkflowAnnotation(key string) bool {
 	switch key {
-	case SecretPathsAnnotation, SourcesAnnotation, GoProxyAnnotation:
+	case SecretPathsAnnotation, SourcesAnnotation:
 		return true
 	default:
 		return false
@@ -216,7 +213,7 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 			if len(template.InitContainers) != 0 || len(template.Sidecars) != 0 {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s: resource templates may not declare initContainers or sidecars", location))
 			}
-			if strings.HasPrefix(template.Name, "frag-") || strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
+			if strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.resource must be a named template in the consuming repository", location))
 			} else if err := admitCapabilityResource(location+".resource", template.Resource, policy.Capability); err != nil {
 				problems = append(problems, err)

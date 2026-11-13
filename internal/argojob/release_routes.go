@@ -41,7 +41,7 @@ func validReleaseRouteFile(file string) bool {
 		return false
 	}
 	name := strings.TrimSuffix(strings.TrimPrefix(file, ".oberth/"), ".yaml")
-	return len(k8svalidation.IsDNS1123Label(name)) == 0 && !slices.Contains([]string{argoworkflow.BuildFile, argoworkflow.FragmentFile, schedule.FileName, workflowpolicy.ContractFile}, file)
+	return len(k8svalidation.IsDNS1123Label(name)) == 0 && !slices.Contains([]string{argoworkflow.BuildFile, schedule.FileName, workflowpolicy.ContractFile}, file)
 }
 
 func (routes ReleaseTagRoutes) Validate() error {

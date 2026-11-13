@@ -120,7 +120,7 @@ func (config *ReleaseWIFConfig) Validate() error {
 	}
 	for repo, grant := range config.Repositories {
 		for leaf, sa := range grant.StepServiceAccounts {
-			if len(k8svalidation.IsDNS1123Label(leaf)) != 0 || strings.HasPrefix(leaf, "frag-") || grant.Templates[leaf] == "" || len(k8svalidation.IsDNS1123Subdomain(sa)) != 0 || subjects[sa] {
+			if len(k8svalidation.IsDNS1123Label(leaf)) != 0 || grant.Templates[leaf] == "" || len(k8svalidation.IsDNS1123Subdomain(sa)) != 0 || subjects[sa] {
 				return fmt.Errorf("argojob: release WIF requires a distinct dedicated ServiceAccount for %q template %q", repo, leaf)
 			}
 			route, ok := grant.StepRoutes[leaf]

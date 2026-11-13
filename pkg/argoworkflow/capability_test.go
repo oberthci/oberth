@@ -165,7 +165,7 @@ func TestCapabilityResourceEnvelopeRejectsAmbiguousKeys(t *testing.T) {
 	}
 }
 
-func TestCapabilityRefusesResourceTemplatesFromPinnedFragments(t *testing.T) {
+func TestCapabilityUsesAuthoredTemplateNames(t *testing.T) {
 	for _, name := range []string{"frag-deadbeef-task", "frag-0123456789abcdef-main", "local-task"} {
 		t.Run(name, func(t *testing.T) {
 			wf, err := Decode([]byte(capabilityResourceDocument))
@@ -175,11 +175,7 @@ func TestCapabilityRefusesResourceTemplatesFromPinnedFragments(t *testing.T) {
 			wf.Spec.Templates[0].Name = name
 			wf.Spec.Entrypoint = name
 			err = Admit(wf, capabilityPolicyForTest(t))
-			if strings.HasPrefix(name, "frag-") {
-				if err == nil || !strings.Contains(err.Error(), "consuming repository") {
-					t.Fatalf("foreign resource inherited consumer authority: %v", err)
-				}
-			} else if err != nil {
+			if err != nil {
 				t.Fatal(err)
 			}
 		})

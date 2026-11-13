@@ -150,9 +150,22 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	if access, exists := upgraded.Config["sourceAccess"]; !exists || access != nil {
 		t.Fatal("explicit null sourceAccess changed")
 	}
-	proxy := upgraded.Config["argo"].(map[string]any)["goProxy"].(map[string]any)
-	if proxy["enabled"] != false || upgraded.Config["pushBannerURL"] != "" {
-		t.Fatalf("explicit false/empty configuration changed: %+v", upgraded.Config)
+	if _, exists := upgraded.Config["argo"].(map[string]any)["goProxy"]; exists {
+		t.Fatal("retired proxy configuration survived actual upgrade")
+	}
+	if upgraded.Config["pushBannerURL"] != "" {
+		t.Fatal("explicit empty configuration changed")
+	}
+	// Proxy retirement is proved above. The remaining historical fixtures
+	// exercise retained settings independently of this removed subtree.
+	dropStoredGoProxy(values, nil)
+	dropStoredGoProxy(config, nil)
+	retained, err := json.Marshal(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(history, retained, 0600); err != nil {
+		t.Fatal(err)
 	}
 	fixture := historicalHelmUpgrade{cfg: cfg, deps: deps, values: values, config: config, release: release, history: history, chart: chart, image: image}
 	fixture.checkOperatorOverrides(t, applyCfg, compat)
@@ -383,7 +396,6 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 				want["image"].(map[string]any)["ref"] = image
 				argo := want["argo"].(map[string]any)
 				argo["namespace"] = DefaultArgoNamespace
-				argo["goProxy"].(map[string]any)["port"] = float64(8444)
 			}
 			if !reflect.DeepEqual(result.Config, want) {
 				t.Fatalf("stored user key set changed: got %#v, want %#v", result.Config, want)
@@ -394,7 +406,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 			if _, exists := result.Config["secretstore"].(map[string]any)["transit"]; exists {
 				t.Fatal("retired installer values survived", mode)
 			}
-			if result.Config["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] != false || result.Config["pushBannerURL"] != "" || result.Config["retention"].(map[string]any)["keepNewestPerRef"] != float64(0) {
+			if result.Config["pushBannerURL"] != "" || result.Config["retention"].(map[string]any)["keepNewestPerRef"] != float64(0) {
 				t.Fatal("live operator values changed", mode)
 			}
 			for _, forbidden := range []string{"--git-backend", "OBERTH_GITCACHE_SHADOW"} {

@@ -13,6 +13,12 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
+type sourceRegistryFixture map[string]bool
+
+func (f sourceRegistryFixture) RepositoryRegistered(_ context.Context, name string) (bool, error) {
+	return f[name], nil
+}
+
 type sourceGitFixture struct {
 	ensures, exports             int
 	stale, unreachable, oversize bool
@@ -48,7 +54,7 @@ func TestPinnedSourcesCreateRequiresReceiptAndWritesPublicRunLog(t *testing.T) {
 			if err := os.WriteFile(file, append([]byte(extension), body...), 0644); err != nil {
 				t.Fatal(err)
 			}
-			loader, err := NewPinnedSourceLoader(&sourceGitFixture{}, fakeRegistry{known: map[string]bool{"forge/acme/producer": true}}, `{"forge/acme/test-repo":["forge/acme/producer"]}`)
+			loader, err := NewPinnedSourceLoader(&sourceGitFixture{}, sourceRegistryFixture{"forge/acme/producer": true}, `{"forge/acme/test-repo":["forge/acme/producer"]}`)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +118,7 @@ func TestPinnedSourcesAuthorizeBeforeFetchAndFailClosed(t *testing.T) {
 			if mode == "wrong-upstream" {
 				consumer = "other/acme/consumer"
 			}
-			loader, err := NewPinnedSourceLoader(git, fakeRegistry{known: map[string]bool{producer: mode != "unregistered"}}, policy)
+			loader, err := NewPinnedSourceLoader(git, sourceRegistryFixture{producer: mode != "unregistered"}, policy)
 			if err != nil {
 				t.Fatal(err)
 			}

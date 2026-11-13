@@ -23,7 +23,6 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/argowatch"
 	"github.com/oberthci/oberth/internal/artifacts"
-	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
@@ -41,7 +40,6 @@ func buildArgoEngine(
 	kube kubernetes.Interface,
 	auditor service.Auditor,
 	secretAccess app.SecretAccessLoader,
-	fragments app.FragmentLoader,
 	artifactStore app.ArtifactStore,
 	artifactLimit int64,
 	perRepoIdentities map[string]argojob.PerRepoIdentityConfig,
@@ -57,10 +55,6 @@ func buildArgoEngine(
 	vaultCACertPEM, err := readArgoVaultCACert(options.argoVaultCACert)
 	if err != nil {
 		return nil, err
-	}
-	goProxyCACertPEM, err := readArgoVaultCACert(options.argoGoProxyCA)
-	if err != nil {
-		return nil, fmt.Errorf("serve: read --argo-goproxy-ca: %w", err)
 	}
 	routes, err := readArgoReleaseTagRoutes(options.argoReleaseTagRoutesConfig)
 	if err != nil {
@@ -85,9 +79,6 @@ func buildArgoEngine(
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
 		VaultCISecretsRole:         options.argoVaultCISecretsRole,
 		VaultCACertPEM:             vaultCACertPEM,
-		GoProxyURL:                 options.argoGoProxyURL,
-		GoProxyModulePrefix:        options.argoGoProxyNamespace.ModulePrefix,
-		GoProxyCACertPEM:           goProxyCACertPEM,
 		// Pipeline containers read this revision's checkout from a claim the
 		// server creates and fills in the pipeline namespace, because a Pod
 		// cannot mount the server's own claim across a namespace boundary.
@@ -126,7 +117,7 @@ func buildArgoEngine(
 	if seeder == nil {
 		return nil, errors.New("configure Argo source seeding: the in-cluster Kubernetes client is required")
 	}
-	jobs, err := app.NewArgoJobs(controller.WithSourceSeeder(seeder), config, auditor, secretAccess, fragments)
+	jobs, err := app.NewArgoJobs(controller.WithSourceSeeder(seeder), config, auditor, secretAccess)
 	if err != nil {
 		return nil, err
 	}
@@ -178,35 +169,6 @@ func validateArgoServeOptions(options serveOptions) error {
 		(!filepath.IsAbs(options.argoVaultCACert) || filepath.Clean(options.argoVaultCACert) != options.argoVaultCACert) {
 		return errors.New("serve: --argo-vault-ca-cert must be a clean absolute path")
 	}
-	// Go module proxy flags must come as a complete set or be absent entirely.
-	goProxyHasListener := strings.TrimSpace(options.argoGoProxyListen) != ""
-	goProxyHasCert := strings.TrimSpace(options.argoGoProxyCert) != ""
-	goProxyHasKey := strings.TrimSpace(options.argoGoProxyKey) != ""
-	goProxyHasCA := strings.TrimSpace(options.argoGoProxyCA) != ""
-	goProxyHasURL := strings.TrimSpace(options.argoGoProxyURL) != ""
-	goProxyHasNamespace := options.argoGoProxyNamespace != (goproxy.NamespaceConfig{})
-	goProxyAny := goProxyHasListener || goProxyHasCert || goProxyHasKey || goProxyHasCA || goProxyHasURL || goProxyHasNamespace
-	goProxyAll := goProxyHasListener && goProxyHasCert && goProxyHasKey && goProxyHasCA && goProxyHasURL
-	if goProxyAny && !goProxyAll {
-		return errors.New("serve: --argo-goproxy-listen, --argo-goproxy-cert, --argo-goproxy-key, --argo-goproxy-ca, and --argo-goproxy-url must all be set or all be empty")
-	}
-	if goProxyAll {
-		if err := options.argoGoProxyNamespace.Validate(); err != nil {
-			return fmt.Errorf("serve: %w", err)
-		}
-	}
-	if goProxyHasURL && !strings.HasPrefix(options.argoGoProxyURL, "https://") {
-		return errors.New("serve: --argo-goproxy-url must be https://")
-	}
-	for _, pathFlag := range []struct{ name, value string }{
-		{"--argo-goproxy-cert", options.argoGoProxyCert},
-		{"--argo-goproxy-key", options.argoGoProxyKey},
-		{"--argo-goproxy-ca", options.argoGoProxyCA},
-	} {
-		if pathFlag.value != "" && (!filepath.IsAbs(pathFlag.value) || filepath.Clean(pathFlag.value) != pathFlag.value) {
-			return fmt.Errorf("serve: %s must be a clean absolute path", pathFlag.name)
-		}
-	}
 	// Reading the file here as well as in buildArgoEngine is deliberate: a
 	// trust anchor that is missing, unreadable, or not a certificate should
 	// fail the process at startup, not the first release tag of the quarter.
@@ -217,9 +179,6 @@ func validateArgoServeOptions(options serveOptions) error {
 	// argojob.Config.Validate carries the rest: DNS-1123 names, all four
 	// ServiceAccounts distinct, an https:// Vault address, and a well-formed
 	// runner image allowlist. Running it here means a bad flag fails startup.
-	// Note: goproxy CA is not read here — the file only exists on the pod, not
-	// on the host where parseServeOptions runs for the chart-contract test.
-	// buildArgoEngine reads it at runtime.
 	routes, err := readArgoReleaseTagRoutes(options.argoReleaseTagRoutesConfig)
 	if err != nil {
 		return err
@@ -243,11 +202,6 @@ func validateArgoServeOptions(options serveOptions) error {
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
 		VaultCISecretsRole:         options.argoVaultCISecretsRole,
 		VaultCACertPEM:             vaultCACertPEM,
-		// GoProxyURL and GoProxyCACertPEM are validated in buildArgoEngine, not
-		// here: the CA PEM file only exists on the pod's Secret volume, and the
-		// Config.Validate pair check (URL ↔ CA) cannot run without both fields.
-		// The flag-syntax checks above (HTTPS, clean paths, all-or-none) catch
-		// the errors reachable from flag text alone.
 		// Carried here too so a cache root that is relative, unclean, or shared
 		// between the two tiers fails the process at startup rather than
 		// silently mounting one tier's writable state into the other's steps.

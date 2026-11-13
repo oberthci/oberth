@@ -41,7 +41,7 @@ path "%s/issue/%s" {
 }
 
 // serverPKINames are the names the CA permits and the role issues: the
-// server's in-cluster and goproxy names plus every operator-supplied address.
+// server's in-cluster names plus every operator-supplied address.
 func serverPKINames(cfg Config) (dnsNames, ips []string) {
 	ns := cfg.Namespace
 	if ns == "" {
