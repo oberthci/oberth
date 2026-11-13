@@ -242,6 +242,7 @@ type fakeBackupCluster struct {
 	helmUpgrade        []string
 	helmValues         map[string]any
 	scales             []int32
+	beforeServerStop   func()
 }
 
 func serverDeploymentFixture(compat backupCompatibility) *appsv1.Deployment {
@@ -320,6 +321,10 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 		c.scaleSubres = append(c.scaleSubres, action.GetSubresource())
 		c.mu.Unlock()
 		if patch.Spec.Replicas == 0 {
+			if c.beforeServerStop != nil {
+				c.beforeServerStop()
+				c.beforeServerStop = nil
+			}
 			_ = c.client.Tracker().Delete(pods, DefaultNamespace, "oberth-1")
 		} else {
 			_ = c.client.Tracker().Add(serverPodFixture("oberth-2"))
@@ -694,8 +699,6 @@ func seedSourceOpenBao(bao *fakeOpenBao) {
 	}
 }
 
-const testGrants = "- repo: codeberg/org/repo\n  workflow: .oberth/release.yaml\n  step: '*'\n  secret: oberth/data/release/cosign-secret\n"
-
 // backupFixtureArchive runs a full backup against a seeded source cluster.
 func backupFixtureArchive(t *testing.T, oldServer bool) (string, string, *fakeBackupCluster) {
 	t.Helper()
@@ -897,10 +900,13 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 		t.Fatal("helper pod left behind")
 	}
 
-	// The grants ConfigMap the server reconciles from is back.
-	cm, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1.GetOptions{})
-	if err != nil || !strings.Contains(cm.Data[secretAccessConfigMapKey], "codeberg/org/repo") {
-		t.Fatalf("secret-access ConfigMap = %v, %v", cm, err)
+	// Grants travel in the same verified database, with no mirror object.
+	keys := uploadedGrantKeys(t, target, sourceCompat)
+	if len(keys) != 1 || keys[0].Workflow != ".oberth/release.yaml" || keys[0].Path != "oberth/data/release/cosign-secret" {
+		t.Fatal("restored grants differ", keys)
+	}
+	if _, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(t.Context(), secretAccessConfigMapName, metav1.GetOptions{}); err == nil {
+		t.Fatal("grant mirror recreated")
 	}
 
 	// Only the Workflow unknown to the restored database receives native Terminate.
@@ -981,7 +987,7 @@ func TestRestoreDryRunChangesNothing(t *testing.T) {
 	assertSubstringsInOrder(t, out.String(), []string{"Verified: all", "History    1 run, ", "Secrets    2 KV secrets, 1 policies, 1 roles, 1 grants",
 		"What changes on this install:", "History    replaced, not merged: runs 0 -> 1", "Secrets    2 new, 0 replaced, 0 unchanged",
 		"new: release/cosign-secret, upstream/codeberg/org/ssh-key",
-		"policies 1 new, 0 replaced; roles 1 new, 0 replaced; grants (ConfigMap oberth-secret-access) 0 -> 1",
+		"policies 1 new, 0 replaced; roles 1 new, 0 replaced; database grants 0 -> 1",
 		"Unchanged  this install's identities, CA and Helm values",
 		"deploy/oberth stopped (1 -> 0)", "pre-restore-20261017T093000Z", "Helm       compatibility values the database needs",
 		"oberth-oberth-orphan", "No changes were made"})

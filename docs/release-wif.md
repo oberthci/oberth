@@ -105,7 +105,7 @@ the same pinned accounts; preflight checks them using existing ServiceAccount GE
 permission. Missing accounts refuse submission with a configuration recovery hint.
 
 A pinned step account must differ from every repository/shared/CI identity and
-any other step's account, including the current grant-reconciler snapshot.
+any other step's account, including the current database-derived identity snapshot.
 Its template must be a stable top-level container/script leaf explicitly mapped
 to a configured WIF role and must not consume the Oberth secret store. Ordinary
 siblings do not inherit it. Branch, promotion and schedule runs cannot receive
@@ -195,6 +195,6 @@ WIF role and full `system:serviceaccount:<namespace>:<account>` subject. A leaf
 combining a named-step grant with WIF emits an advisory that cloud trust must
 include that per-step subject; the repository subject alone is insufficient.
 This advisory does not claim to verify cloud IAM or block a correctly trusted
-per-step identity. The access reconciler derives per-step identities from active
-grants and publishes them in its identity snapshot; preflight uses that snapshot
+per-step identity. The server derives per-step identities from active database
+grants and refreshes them after grant mutations; preflight uses that snapshot
 and checks account existence rather than relying on a hand-maintained chart list.

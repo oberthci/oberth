@@ -3,8 +3,9 @@ package service
 import (
 	"encoding/json"
 	"errors"
-	"github.com/oberthci/oberth/internal/api"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/api"
 )
 
 func TestAccessToolsRequireAndPreserveWorkflowScope(t *testing.T) {

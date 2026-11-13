@@ -87,6 +87,21 @@ func (s *API) performAdministration(ctx context.Context, actor api.Actor, name s
 		return s.adminUplinkAdd(ctx, actor, raw)
 	case "uplink_scope":
 		return s.adminUplinkScope(ctx, actor, raw)
+	case "admin_access_allow", "admin_access_revoke":
+		var key model.SecretAccessKey
+		if err := decodeAdministration(raw, &key); err != nil {
+			return nil, err
+		}
+		if err := validateAdminRepo(key.Repo); err != nil {
+			return nil, err
+		}
+		if err := key.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
+		if name == "admin_access_allow" {
+			return s.accessAllow(ctx, actor, key.Repo, key.Workflow, key.Step, key.Path)
+		}
+		return s.accessRevoke(ctx, actor, key.Repo, key.Workflow, key.Step, key.Path)
 	case "admin_database_backup":
 		return s.stageAdminBackup(ctx, raw)
 	case "admin_public_identity":

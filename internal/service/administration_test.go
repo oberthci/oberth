@@ -91,6 +91,8 @@ func administrationCases(t *testing.T) []adminTestCase {
 		{"repo-add", "repo_add", `{"repo":"new-repo","upstream":"south"}`},
 		{"repo-verify", "repo_verify", `{"repo":"new-repo"}`},
 		{"access-list", "admin_access_list", `{}`},
+		{"access-allow", "admin_access_allow", `{"repo":"new-repo","workflow":".oberth/build.yaml","step":"build","secret":"oberth/upstream/team/new-repo/a"}`},
+		{"access-revoke", "admin_access_revoke", `{"repo":"new-repo","workflow":".oberth/build.yaml","step":"build","secret":"oberth/upstream/team/new-repo/a"}`},
 		{"public-identity", "admin_public_identity", `{"name":"server-ca"}`},
 		{"readiness", "admin_readiness", `{}`},
 		{"version", "admin_version", `{}`},

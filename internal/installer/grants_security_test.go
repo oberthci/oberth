@@ -84,7 +84,7 @@ func TestGrantBackupRestoreRoundTrip(t *testing.T) {
 		archive, _, _, target := reinstallFixture(t)
 		runFixtureRestore(t, archive, target, RestoreConfig{})
 		keys := uploadedGrantKeys(t, target, sourceCompat)
-		if len(keys) != 1 || keys[0].Workflow != ".oberth/release.yaml" || keys[0].Secret != "oberth/data/release/cosign-secret" {
+		if len(keys) != 1 || keys[0].Workflow != ".oberth/release.yaml" || keys[0].Path != "oberth/data/release/cosign-secret" {
 			t.Fatal("full restore lost exact grants", keys)
 		}
 	})
@@ -104,9 +104,37 @@ func TestGrantBackupRestoreRoundTrip(t *testing.T) {
 			t.Fatal("secrets-only restore uploaded a database")
 		}
 	})
+	t.Run("HistoryPreservesRevocationBeforeShutdown", func(t *testing.T) {
+		archive, _, _, target := reinstallFixture(t)
+		key := model.SecretAccessKey{Repo: "upstream/target/repo", Workflow: ".oberth/target.yaml", Step: "build", Path: "oberth/upstream/target/repo/own"}
+		if err := writeSecretAccess(t.Context(), target.deps(&bytes.Buffer{}).Deps, DefaultNamespace, secretAccessExport{Present: true, Grants: []model.SecretAccessKey{key}}); err != nil {
+			t.Fatal(err)
+		}
+		revoked := false
+		target.beforeServerStop = func() {
+			db, path, cleanup, err := target.openGrantDatabase(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = db.Revoke(t.Context(), key.Repo, key.Workflow, key.Step, key.Path, "admin@fixture")
+			closeErr := cleanup()
+			if err != nil || closeErr != nil {
+				t.Fatal(err, closeErr)
+			}
+			if err := target.captureGrantDatabase(t.Context(), path); err != nil {
+				t.Fatal(err)
+			}
+			revoked = true
+		}
+		runFixtureRestore(t, archive, target, RestoreConfig{Only: []string{RestorePartHistory}})
+		keys := uploadedGrantKeys(t, target, sourceCompat)
+		if !revoked || len(keys) != 0 {
+			t.Fatal("history restore resurrected a grant revoked after preflight", keys)
+		}
+	})
 	t.Run("HistoryPreservesStoppedTargetGrants", func(t *testing.T) {
 		archive, _, _, target := reinstallFixture(t)
-		key := model.SecretAccessKey{Repo: "upstream/target/repo", Workflow: ".oberth/target.yaml", Step: "build", Secret: "oberth/upstream/target/repo/own"}
+		key := model.SecretAccessKey{Repo: "upstream/target/repo", Workflow: ".oberth/target.yaml", Step: "build", Path: "oberth/upstream/target/repo/own"}
 		if err := writeSecretAccess(t.Context(), target.deps(&bytes.Buffer{}).Deps, DefaultNamespace, secretAccessExport{Present: true, Grants: []model.SecretAccessKey{key}}); err != nil {
 			t.Fatal(err)
 		}

@@ -110,30 +110,25 @@ func writeLegacyArchive(t *testing.T, dir string, manifest *backupManifest, memb
 	return writeFileForTest(output, append(fakeEnvelopeHeader(), plain.Bytes()...))
 }
 
-// v1 and v2 archives (Helm values, maybe step logs) still open; their extra
-// members are verified and ignored.
-func TestOpenBackupArchiveReadsOlderFormats(t *testing.T) {
+func TestOpenBackupArchiveRefusesPriorFormats(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		format string
-		extra  []string
-	}{{backupFormatV1, nil}, {backupFormatV2, nil}, {backupFormatV2, []string{backupMemberLogs}}} {
-		dir := t.TempDir()
-		members := append(slices.Clone(legacyMemberOrder), tc.extra...)
-		for _, name := range members {
-			if err := writeBackupFile(dir, name, []byte(`{}`)); err != nil {
+	for _, format := range []string{"oberth.backup/v1", "oberth.backup/v2", "oberth.backup/v3"} {
+		t.Run(format, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range backupMemberOrder {
+				if err := writeBackupFile(dir, name, []byte(`{}`)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			manifest := backupManifest{Format: format}
+			output := filepath.Join(t.TempDir(), "unsupported.cms")
+			if err := writeLegacyArchive(t, dir, &manifest, backupMemberOrder, output); err != nil {
 				t.Fatal(err)
 			}
-		}
-		manifest := backupManifest{Format: tc.format}
-		output := filepath.Join(t.TempDir(), "old.cms")
-		if err := writeLegacyArchive(t, dir, &manifest, members, output); err != nil {
-			t.Fatal(err)
-		}
-		opened, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, t.TempDir(), 0)
-		if err != nil || opened.Format != tc.format {
-			t.Fatalf("open %s %v: %+v, %v", tc.format, tc.extra, opened.Format, err)
-		}
+			if _, err := openBackupArchive(t.Context(), output, fakeEnvelopeCipher{}, t.TempDir(), 0); err == nil {
+				t.Fatal("prior format accepted", format)
+			}
+		})
 	}
 }
 

@@ -164,10 +164,9 @@ everything encrypted to it would be unrecoverable.
 | `openbao/policies.json` | yes | – | every ACL policy except `root`, `default` and the install's own (`oberth-ci`, `oberth-argo-credentialed`, `oberth-argo-ci-secrets`, also left out of `roles.json`), which every install writes for its own namespaces |
 | `openbao/roles.json` | yes | – | every `auth/kubernetes` role with every field OpenBao returns |
 | `openbao/reference.json` | yes | – | Kubernetes auth config, mount list, Transit key metadata, PKI CA certificate; for reference, never restored |
-| `database/oberth-database.tar` | yes | yes | verified database snapshot (`oberth.database-backup/v1`) |
-| `kubernetes/secret-access.json` | yes | – | the active server grant catalog (the grants) |
+| `database/oberth-database.tar` | yes | yes | verified database snapshot, including the grant table (`oberth.database-backup/v1`) |
 
-`manifest.json` comes first and records the format (`oberth.backup/v3`), the
+`manifest.json` comes first and records the format (`oberth.backup/v4`), the
 scope (`full` or `history`), the creation time, the CLI, server and chart
 versions, the source context, API server, namespaces and server image, the
 source cluster UID (the `kube-system` namespace UID), the database schema,
@@ -433,9 +432,12 @@ three times. Without a terminal it needs `--yes`.
    `/data/pre-restore-<UTC timestamp>/`, moves the restored files into place,
    and checks they are owned by the server user with mode 0600. A swap that
    fails midway puts the previous files back.
-6. With `secrets`: writes the active server grant catalog. The server
-   reconciles grants from it at startup, so it must be in place before the
-   server starts.
+6. With both history and secrets, the restored database already contains the
+   exact grants. With secrets only, authenticated admin API calls revoke excess
+   target grants and add the source snapshot's grants before stopping the server.
+   With history only, grants are read from the stopped target database and kept
+   in the restored database, so a revocation just before shutdown stays effective.
+   No ConfigMap is read or written.
 7. With `history`: lists the Argo Workflows again, now that no server can
    submit new ones, and deletes those whose `oberth.ci/run` label names a run
    the restored database does not know: they belong to the replaced database
@@ -643,3 +645,7 @@ running Pods, then retry `oberth upgrade --no-backup --context selected
 OpenBao namespace, values/set overrides, backup directory, timeout, TLS,
 chart/release source and downgrade consent are omitted from the printed retry.
 Dry runs perform the same backup and connection prerequisite checks.
+The v4 archive stores grants only in its verified database snapshot. It carries
+no separate grant file or ConfigMap. Earlier archive formats are refused; use
+the release that wrote one to inspect it. The v0.22.8 upgrade leaves the retired
+oberth-secret-access ConfigMap orphaned and ignored; operators may delete it.

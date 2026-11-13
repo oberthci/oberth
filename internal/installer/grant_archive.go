@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -36,21 +34,15 @@ func exportDatabaseGrants(ctx context.Context, db *store.Store) (secretAccessExp
 	}
 	export := secretAccessExport{Present: true, Grants: []model.SecretAccessKey{}}
 	for _, row := range rows {
-		export.Grants = append(export.Grants, model.SecretAccessKey{Repo: row.Repo, Workflow: row.Workflow, Step: row.Step, Secret: row.Secret})
+		export.Grants = append(export.Grants, model.SecretAccessKey{Repo: row.Repo, Workflow: row.Workflow, Step: row.Step, Path: row.Secret})
 	}
 	return export, nil
 }
 
-var exportedGrantPath = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-var exportedGrantStep = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
-
 func validateExportedGrants(keys []model.SecretAccessKey) error {
 	seen := map[model.SecretAccessKey]bool{}
 	for _, key := range keys {
-		if !exportedGrantPath.MatchString(key.Repo) || !exportedGrantPath.MatchString(key.Secret) || strings.TrimSpace(key.Step) == "" || (key.Step != "*" && (len(key.Step) > 63 || !exportedGrantStep.MatchString(key.Step))) {
-			return errors.New("invalid archived grant key")
-		}
-		if err := model.ValidateWorkflowFile(key.Workflow); err != nil {
+		if err := key.Validate(); err != nil {
 			return err
 		}
 		if seen[key] {

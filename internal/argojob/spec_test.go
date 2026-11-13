@@ -49,6 +49,8 @@ func testConfig() Config {
 		VaultCISecretsRole:         testVaultCISecretsRole,
 		VaultCACertPEM:             testVaultAnchorPEM,
 		PerStepIdentities: map[string]PerRepoIdentityConfig{
+			"oberth/.oberth/build.yaml/*":               {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
+			"github/acme/oberth/.oberth/build.yaml/*":   {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
 			"oberth/.oberth/release.yaml/*":             {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
 			"github/acme/oberth/.oberth/release.yaml/*": {ServiceAccountName: testCredentialedAcct, CIServiceAccountName: testCISecretsAcct},
 		},
@@ -1806,12 +1808,19 @@ spec:
 `
 	config := testConfig()
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/.oberth/release.yaml/publish": {ServiceAccountName: "oberth-step-release-publish", CIServiceAccountName: "oberth-step-ci-publish"},
+		"oberth/.oberth/build.yaml/publish": {ServiceAccountName: "oberth-step-release-publish", CIServiceAccountName: "oberth-step-ci-publish"},
 	}
 	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{upstreamPath: true}
 	request.StepGrants = map[string]map[string]bool{upstreamPath: {"publish": true}}
 
+	t.Run("MissingCIIdentityFailsClosed", func(t *testing.T) {
+		missing := config
+		missing.PerStepIdentities = map[string]PerRepoIdentityConfig{"oberth/.oberth/build.yaml/publish": {ServiceAccountName: "oberth-step-release-publish"}}
+		if _, err := Build(missing, request); err == nil || !strings.Contains(err.Error(), "not materialized") {
+			t.Fatal("CI fell back to a release identity", err)
+		}
+	})
 	workflow, err := Build(config, request)
 	if err != nil {
 		t.Fatalf("build branch CI: %v", err)

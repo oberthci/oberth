@@ -83,7 +83,7 @@ func TestPerStepNameDNS1123Safe(t *testing.T) {
 }
 
 func TestPerStepPolicyContainsGrantPaths(t *testing.T) {
-	policy := PerStepPolicy("oberth",[]string{"release/gar-image-key", "upstream/exampleorg/exampleorg-port/test-secret"})
+	policy := PerStepPolicy("oberth", []string{"release/gar-image-key", "upstream/exampleorg/exampleorg-port/test-secret"})
 
 	if !strings.Contains(policy, `path "oberth/data/release/gar-image-key"`) {
 		t.Fatal("policy must contain the first grant path")
@@ -93,16 +93,16 @@ func TestPerStepPolicyContainsGrantPaths(t *testing.T) {
 	}
 }
 
-func TestPerStepPolicyContainsUpstreamWildcard(t *testing.T) {
-	policy := PerStepPolicy("oberth",[]string{"release/gar-image-key"})
+func TestPerStepPolicyRefusesImplicitUpstreamWildcard(t *testing.T) {
+	policy := PerStepPolicy("oberth", []string{"release/gar-image-key"})
 
-	if !strings.Contains(policy, `path "oberth/data/upstream/exampleorg/exampleorg-port/*"`) {
-		t.Fatal("policy must contain the upstream org/repo wildcard")
+	if strings.Contains(policy, `path "oberth/data/upstream/`) {
+		t.Fatal("policy grants an implicit upstream read")
 	}
 }
 
 func TestPerStepPolicyContainsSelfRevoke(t *testing.T) {
-	policy := PerStepPolicy("oberth",[]string{"release/gar-image-key"})
+	policy := PerStepPolicy("oberth", []string{"release/gar-image-key"})
 
 	if !strings.Contains(policy, `path "auth/token/revoke-self"`) {
 		t.Fatal("policy must contain self-revoke path")
@@ -110,7 +110,7 @@ func TestPerStepPolicyContainsSelfRevoke(t *testing.T) {
 }
 
 func TestPerStepPolicyDeniesServerIdentities(t *testing.T) {
-	policy := PerStepPolicy("oberth",[]string{"release/gar-image-key"})
+	policy := PerStepPolicy("oberth", []string{"release/gar-image-key"})
 
 	if !strings.Contains(policy, `path "oberth/data/identities/*"`) {
 		t.Fatal("policy must deny server identities")
@@ -118,7 +118,7 @@ func TestPerStepPolicyDeniesServerIdentities(t *testing.T) {
 }
 
 func TestPerStepPolicyDeduplicatesPaths(t *testing.T) {
-	policy := PerStepPolicy("oberth",[]string{"release/gar-image-key", "release/gar-image-key"})
+	policy := PerStepPolicy("oberth", []string{"release/gar-image-key", "release/gar-image-key"})
 
 	count := strings.Count(policy, "gar-image-key")
 	if count != 1 {
@@ -128,10 +128,10 @@ func TestPerStepPolicyDeduplicatesPaths(t *testing.T) {
 
 func TestPerStepPolicyNarrowerThanPerRepo(t *testing.T) {
 	// Per-repo policy includes all grant paths.
-	perRepoPolicy := PerRepoPolicy("oberth",[]string{"release/gar-image-key", "release/cosign-secret", "release/r2-upload-token"})
+	perRepoPolicy := PerRepoPolicy("oberth", []string{"release/gar-image-key", "release/cosign-secret", "release/r2-upload-token"})
 
 	// Per-step policy includes only the step's paths.
-	perStepPolicy := PerStepPolicy("oberth",[]string{"release/gar-image-key"})
+	perStepPolicy := PerStepPolicy("oberth", []string{"release/gar-image-key"})
 
 	if !strings.Contains(perRepoPolicy, "cosign-secret") {
 		t.Fatal("per-repo policy should contain cosign-secret")
@@ -225,8 +225,8 @@ func TestPerStepIdentityNamesSorted(t *testing.T) {
 		{Workflow: ".oberth/release.yaml", Upstream: "codeberg", Org: "exampleorg", Repo: "aaa-repo", Step: "step-b"},
 	}
 	names := PerStepIdentityNames(identities)
-	if len(names) != 2 {
-		t.Fatalf("expected 2 names, got %d", len(names))
+	if len(names) != 4 {
+		t.Fatalf("expected release and CI names, got %d", len(names))
 	}
 	if names[0] > names[1] {
 		t.Fatalf("names not sorted: %v", names)

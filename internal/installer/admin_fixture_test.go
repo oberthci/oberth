@@ -178,7 +178,7 @@ func (f fixtureAdmin) Admin(ctx context.Context, action string, args, into any) 
 		if action == "access-revoke" {
 			verb = "revoke"
 		}
-		_, err := f.command(ctx, nil, "access", verb, key.Repo, key.Workflow, key.Step, key.Secret)
+		_, err := f.command(ctx, nil, "access", verb, key.Repo, key.Workflow, key.Step, key.Path)
 		return err
 	case "access-list":
 		raw, err := f.command(ctx, nil, "access", "list", "--json")
@@ -339,10 +339,3 @@ func withUpgradeAdminFixture(deps *Deps, version string) {
 
 const secretAccessConfigMapName = "oberth-secret-access"
 const secretAccessConfigMapKey = "grants"
-
-type grantEntry struct {
-	Workflow string `json:"workflow" yaml:"workflow"`
-	Repo     string `json:"repo"   yaml:"repo"`
-	Step     string `json:"step"   yaml:"step"`
-	Secret   string `json:"secret" yaml:"secret"`
-}

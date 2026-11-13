@@ -35,21 +35,15 @@ const promotionCompensationTimeout = 30 * time.Second
 // The server's own identity has no Vault policy-write capability, so the resync
 // must be triggered externally.
 const revokePolicySyncAdvisory = "Revocation is effective for new Oberth admissions immediately. " +
-	"The Vault credentialed policy still has this path until re-synced: " +
-	"run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to remove it from the Vault policy."
+	"The per-step OpenBao policy still has this path until re-synced: " +
+	"run `oberth secretstore sync` (or `oberth install --install-secretstore --upgrade`) to remove it from the OpenBao policy."
 
-// grantPolicySyncAdvisory is the warning returned by access_allow to inform
-// the caller that the new grant is recorded but not yet live. The server
-// refreshes its identity map on every successful reconciliation (issue #465),
-// so the identity appears without a restart — but the Vault policy and the
-// chart-managed ServiceAccount remain operator-gated: the server's own
-// identity has no Vault policy-write capability (issue #427), and a plain
-// `install --upgrade` without --install-secretstore skips the secret-store
-// leg entirely (no identity produce, no policy sync, no ServiceAccount).
-// Until both complete, admission fails closed: the grant exists in sqlite
-// but the Vault layer refuses the path.
-const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes automatically on the next reconcile — no restart needed. " +
-	"The Vault policy does not include this path yet: run `oberth secretstore sync` under your own BAO_TOKEN, " +
+// grantPolicySyncAdvisory names the remaining operator-controlled materialization.
+// The server refreshes identities after the database transaction; OpenBao policy
+// writes and chart-managed ServiceAccounts require the operator's credentials.
+// Admission fails closed until those exact identities and policies exist.
+const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes immediately — no restart needed. " +
+	"The per-step OpenBao policy does not include this path yet: run `oberth secretstore sync` under your own BAO_TOKEN, " +
 	"then `oberth install --install-secretstore --upgrade` if this repo's ServiceAccount does not exist yet. " +
 	"Until then, access fails closed."
 
@@ -407,7 +401,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
-	case "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record", "uplink_scope", "uplink_add":
+	case "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_access_allow", "admin_access_revoke", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record", "uplink_scope", "uplink_add":
 		return service.administrationTool(ctx, actor, name, raw)
 	// Credential and grant lifecycle (#1105).
 	case "uplink_invite":
@@ -3209,7 +3203,7 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, work
 		}
 	}
 	// Validate before the audited database mutation.
-	if err := ValidateGrantEntry(0, SecretAccessGrantEntry{Repo: repo, Workflow: workflow, Step: step, Secret: secret}); err != nil {
+	if err := (model.SecretAccessKey{Repo: repo, Workflow: workflow, Step: step, Path: secret}).Validate(); err != nil {
 		return api.AccessGrantResponse{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	grant, err := service.secretAccess.Grant(ctx, repo, workflow, step, secret, actor.Identity)

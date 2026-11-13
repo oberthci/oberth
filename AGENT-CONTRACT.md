@@ -677,19 +677,9 @@ trust assumptions and complete invalidation rules.
   fails — never a bare-key fallback write) and `secret_access` rows
   (admission loads grants by repository ID through the qualified key ONLY;
   a bare-keyed row is inert, never aliased onto same-name repositories).
-  The access reconciler canonicalizes ConfigMap entry spellings at the
-  converge boundary: resolvable entries key the diff by their qualified
-  form, an ambiguous bare entry is skipped fail-closed with a loud log,
-  and an entry for an unregistered repository stays verbatim and inert.
-  The `AddGrantCanonical` and `RemoveGrantCanonical` modify callbacks
-  apply the same resolution before comparing: a qualified revoke
-  (`codeberg/acme/acme-example-service`) matches a bare-spelled
-  ConfigMap entry (`acme-example-service`), removing all canonical
-  duplicates; `AddGrantCanonical` deduplicates against canonical
-  equivalents. Both preserve the original spelling of surviving entries.
-  An ambiguous bare entry is never matched (fail-closed). A truly absent
-  canonical tuple returns `ErrInvalidInput`, surfaced as a typed MCP
-  error rather than an internal error (#689).
+  API grant and revoke handlers resolve repository names to their canonical
+  upstream/org/repository identity before changing the database. Ambiguous names
+  are refused. A missing exact tuple returns ErrInvalidInput without mutation.
   Migration discipline: shipped migration bodies are append-only — v10 was
   released as a ledger-only no-op and is recorded on live databases, so
   the canonical-persistence rebuild lives at v11 (FK-safe rebuild +
@@ -1600,7 +1590,7 @@ trust assumptions and complete invalidation rules.
   credentialed step shares its trust; output-read refusals guard Argo reads.
   Run records carry no durable
   credential classification. Retry/rerun reload current grants, and granted
-  consumers require healthy access reconciliation. Step-level credential
+  consumers read the current database approvals. Step-level credential
   evidence remains part of replay safety.
 - Admission refuses everything that would reach the node or the cluster around
   the envelope: `podSpecPatch`, `hostNetwork`, `hostAliases`, `hostPath`,
@@ -1825,35 +1815,15 @@ trust assumptions and complete invalidation rules.
   and push resolve the path's upstream first and refuse anything else with one
   fixed message. A scope that cannot be read fails authentication instead of
   degrading to unscoped.
-- Secret-access grants are ConfigMap-driven: the `oberth-secret-access`
-  ConfigMap in the server namespace is the declarative source of truth for
-  the approval table. The server reconciles it into sqlite at startup and
-  from a watch with periodic resync (the resync ticker is hoisted to the
-  outer Watch loop so ConfigMap convergence survives a broken watch),
-  failing closed to zero grants when the ConfigMap is absent or
-  unparseable; `access allow|revoke` (CLI and MCP) mutate the ConfigMap
-  with resourceVersion-checked read-modify-write and never write the
-  approval table directly — the reconciler is the approval table's only
-  writer. Every grant and revocation mutation in sqlite is wrapped in a
-  single transaction with an `appendAuditAction` call
-  (`secret_access.grant` / `secret_access.revoke`), following the house
-  pattern from `RegisterUplink`. CLI `access allow|revoke` pass the live
-  daemon's fail-closed audit mutation gate (the same gate sibling admin
-  mutations use); no gate reachable means fail closed. Grant attribution
-  format: when an authenticated caller triggers UpdateConfigMap, the
-  reconciler stamps `<actor>+configmap@rv=N` in `approved_by`/`revoked_by`;
-  watcher-driven reconciles keep plain `configmap@rv=N`. Grant is
-  duplicate-tolerant via `INSERT ... ON CONFLICT(repo, workflow, step, secret) WHERE
-  revoked_at IS NULL DO NOTHING`; a concurrent race returns the existing
-  active row without error. Grant step values are `*` (wildcard: all
-  templates) or a DNS-1123 label (specific Argo template name, e.g.
-  `release-publish-images`); `*` and glob characters (`?`, `[`, `]`) in repo
-  or secret are rejected at parse. The
-  namespace Role carries collection `watch` on ConfigMaps for the reconciler
-  and `update` scoped by `resourceNames` to exactly
-  `oberth-secret-access`; unnamed ConfigMap update, patch, or delete stay
-  forbidden so audit-anchor continuity ConfigMaps remain unwritable by the
-  server's own identity.
+- Secret-access grants live only in the database, keyed by upstream repository,
+  exact workflow file, step and path. CLI and MCP grant/revoke operations use
+  authenticated server APIs, pass the live audit mutation gate and commit their
+  change with the acting identity in one audited transaction. Duplicate grants
+  return the existing active row. Every admission reads the current database;
+  no watch or resync is involved. The old oberth-secret-access ConfigMap is
+  orphaned and ignored: editing or recreating it confers no authority. Upgrade
+  output names it and gives an optional operator deletion command. Server RBAC
+  grants no ConfigMap watch or update for secret approvals.
 - Secret paths in `access_allow` and `access_revoke` are literal identities,
   copied exactly from pipeline declarations or `access_list`; no mount prefix,
   KV `data/` segment, slash cleanup, or short-path expansion is inferred.
@@ -1863,8 +1833,8 @@ trust assumptions and complete invalidation rules.
   wildcard grant, not its named-step neighbors. A missing tuple is refused
   without mutation. Repository-name canonicalization is unchanged.
 - Grant revocation is immediately effective for Oberth admission (the sqlite
-  approval table is updated atomically with ConfigMap reconciliation), but the
-  Vault credentialed policy retains the exact-path read entry until a policy
+  approval table changes in the audited mutation), but an already issued
+  OpenBao token retains its exact-path policy until a policy
   re-sync. Per-step grants (issue #623) scope a secret path to a named Argo
   template: `access_allow repo=X workflow=.oberth/release.yaml step=release-publish-images
   secret=oberth/data/release/gar-image-key` restricts the path to templates
@@ -1880,7 +1850,9 @@ trust assumptions and complete invalidation rules.
   hash the complete tuple. Named steps inherit wildcard paths only from the
   same file. Repository identities carry no explicit secret approvals.
   `applyPerStepIdentities` assigns the admitted main's scoped account and
-  role. Sidecars, init containers, helpers and ungranted steps receive none
+  role for its trigger tier. Each policy lists only exact granted paths; CI
+  policies include only that repository's upstream paths. No upstream subtree
+  wildcard is granted. Sidecars, init containers, helpers and ungranted steps receive none
   of its store settings or login token. Plan and sync digests include the
   exact workflow file. The chart creates the scoped accounts from
   `argo.perStepIdentities`.
@@ -1951,7 +1923,8 @@ trust assumptions and complete invalidation rules.
   usage sampler and its node metrics permissions are absent in v0.22.0.
   The remaining access Roles are namespaced.
 - The server-namespace Role grants only ConfigMap access: collection
-  create/get/list/watch and update of `oberth-secret-access` by exact name.
+  create/get/list for immutable audit witnesses. Grant-mirror watch and update
+  rules are absent.
   It grants no Pod, `pods/log` or `pods/exec` access. The separate pipeline
   namespace Role grants `pods/exec` create only for source seeding into
   run-scoped volumes. Pipeline secrets arrive through projected identity
@@ -3083,8 +3056,8 @@ adopting a Workflow. Admitted commands are preserved without interpreting
 server command wrappers.
 
 The v0.22.5 workflow-scoped approval migration clears all existing secret
-approvals with no backfill. Unscoped ConfigMap entries are rejected with an
-error. After a committed reset, install and upgrade output says: all secret approvals are cleared; re-approve.
+approvals with no backfill. Grant APIs require the workflow file. The retired
+grant ConfigMap is never imported. After a committed reset, install and upgrade output says: all secret approvals are cleared; re-approve.
 After re-approving, run `oberth secretstore sync` to prune old OpenBao roles and policies.
 `access_allow`, `access_revoke`, and `access_dismiss` require `workflow`; lists,
 pending observations, policy digests and generated step identities include it.

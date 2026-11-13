@@ -205,12 +205,8 @@ type SecretAccessStore interface {
 	// "upstream/org/repo" form. Used by access grant/revoke handlers to
 	// store grants with identity-safe keys (#245 BLOCKER B).
 	QualifiedRepoName(ctx context.Context, repoID int64) (string, error)
-	// RepositoryByName resolves any accepted repository spelling (bare,
-	// org/repo, upstream/org/repo) to the registered repository. The
-	// access reconciler uses it to canonicalize ConfigMap grant entries
-	// at the parse boundary, so a bare-spelled entry converges onto the
-	// same qualified persisted key the migrations and API handlers write
-	// instead of endlessly re-creating bare rows (#245 BLOCKER B).
+	// RepositoryByName resolves a supplied repository to its registered identity
+	// before a database grant mutation.
 	RepositoryByName(ctx context.Context, name string) (model.Repository, error)
 	// PendingGrantDeclarations returns declarations that have no matching
 	// active grant. A wildcard grant (step="*") covers any step's declaration.

@@ -24,8 +24,7 @@ func TestChartServerRoleOnlyConfigMaps(t *testing.T) {
 		t.Fatalf("unexpected role: %+v", role)
 	}
 	want := []map[string]any{
-		{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "verbs": []string{"create", "get", "list", "watch"}},
-		{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "resourceNames": []string{"oberth-secret-access"}, "verbs": []string{"update"}},
+		{"apiGroups": []string{""}, "resources": []string{"configmaps"}, "verbs": []string{"create", "get", "list"}},
 	}
 	if canonicalRules(t, role.Rules) != canonicalRules(t, want) {
 		t.Fatalf("server Role must only grant ConfigMap access, got:\n%s", canonicalRules(t, role.Rules))

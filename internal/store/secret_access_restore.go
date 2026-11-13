@@ -28,7 +28,7 @@ func (s *Store) ReplaceSecretAccess(ctx context.Context, actor string, keys []mo
 		return err
 	}
 	for _, key := range keys {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO secret_access(repo,workflow,step,secret,approved_by,approved_at) VALUES(?,?,?,?,?,?) ON CONFLICT(repo,workflow,step,secret) WHERE revoked_at IS NULL DO NOTHING`, key.Repo, key.Workflow, key.Step, key.Secret, actor, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO secret_access(repo,workflow,step,secret,approved_by,approved_at) VALUES(?,?,?,?,?,?) ON CONFLICT(repo,workflow,step,secret) WHERE revoked_at IS NULL DO NOTHING`, key.Repo, key.Workflow, key.Step, key.Path, actor, now); err != nil {
 			return err
 		}
 	}

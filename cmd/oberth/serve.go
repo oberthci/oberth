@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -1617,7 +1618,7 @@ func runComponents(
 		}
 		return err
 	})
-	startBackgroundLoops(runCtx, &workers, schedulerActivated, options, git, schedules, ciIssues, branchDeletions, accessReconciler, logger)
+	startBackgroundLoops(runCtx, &workers, schedulerActivated, options, git, schedules, ciIssues, branchDeletions, logger)
 	logger.Printf("ready for bootstrap: SSH %s, HTTPS %s", options.sshListen, options.httpsListen)
 
 	var componentErr error
@@ -1667,7 +1668,6 @@ func startBackgroundLoops(
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
 	branchDeletions *service.BranchDeletionPropagator,
-	accessReconciler *service.AccessReconciler,
 	logger *log.Logger,
 ) {
 	workers.Add(1)

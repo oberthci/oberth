@@ -181,8 +181,8 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 	// Verify that the terraform policy write included the upstream grant.
 	for _, call := range runner.calls {
 		if call.command == "policy write "+terraformName+" -" {
-			if !strings.Contains(call.stdin, `path "oberth/data/upstream/acme/terraform/*"`) {
-				t.Fatalf("terraform policy missing upstream grant path in written HCL:\n%s", call.stdin)
+			if strings.Contains(call.stdin, `path "oberth/data/upstream/`) {
+				t.Fatalf("repository policy grants an implicit upstream read:\n%s", call.stdin)
 			}
 			return
 		}

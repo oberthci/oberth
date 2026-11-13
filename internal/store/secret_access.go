@@ -6,30 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
-
-// grantRepoPattern matches valid characters for the repo field of a grant.
-// Grant repos are qualified names (upstream/org/repo) that flow into per-repo
-// Vault policy HCL construction; quotes, backslashes, newlines, and control
-// characters would escape the HCL string boundary and inject arbitrary policy
-// rules (issue #416, same class as #411 and #414).
-var grantRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-
-// grantSecretPattern matches valid characters for the secret field of a grant.
-// Grant secrets are eventually interpolated into Vault policy HCL path strings
-// by the installer; quotes, backslashes, newlines, and control characters
-// would escape the HCL string boundary and inject arbitrary policy rules
-// (issue #414).
-var grantSecretPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
-
-// Named steps use the same safe alphabet as grant paths; the standalone
-// wildcard retains its existing meaning of all steps.
-var grantStepPattern = regexp.MustCompile(`^(\*|[A-Za-z0-9._/-]+)$`)
 
 // SecretAccessGrant records an approval for a (repo, workflow, step, secret) tuple. If
 // a revoked grant already exists for the same tuple, a new active row is
@@ -95,7 +76,7 @@ func (s *Store) SecretAccessList(ctx context.Context, repo string, includeRevoke
 // concurrent CLI+reconciler race cannot surface a spurious constraint error
 // for a grant that is already durably in effect.
 func (s *Store) Grant(ctx context.Context, repo, workflow, step, secret, actor string) (SecretAccessGrant, error) {
-	if err := validateSecretAccessKey(model.SecretAccessKey{Repo: repo, Workflow: workflow, Step: step, Secret: secret}, actor); err != nil {
+	if err := validateSecretAccessKey(model.SecretAccessKey{Repo: repo, Workflow: workflow, Step: step, Path: secret}, actor); err != nil {
 		return SecretAccessGrant{}, err
 	}
 
@@ -399,21 +380,10 @@ func (s *Store) DismissGrantDeclaration(ctx context.Context, actor, repo, workfl
 }
 
 func validateSecretAccessKey(key model.SecretAccessKey, actor string) error {
-	repo, workflow, step, secret := key.Repo, key.Workflow, key.Step, key.Secret
-
-	if strings.TrimSpace(workflow) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" || strings.TrimSpace(actor) == "" {
-		return fmt.Errorf("%w: repo, workflow, step, secret, and actor are required", ErrInvalid)
+	if strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: actor is required", ErrInvalid)
 	}
-	if !grantRepoPattern.MatchString(repo) {
-		return fmt.Errorf("%w: repo %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, repo)
-	}
-	if !grantStepPattern.MatchString(step) {
-		return fmt.Errorf("%w: step must be * or contain only [A-Za-z0-9._/-]", ErrInvalid)
-	}
-	if !grantSecretPattern.MatchString(secret) {
-		return fmt.Errorf("%w: secret %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, secret)
-	}
-	if err := model.ValidateWorkflowFile(workflow); err != nil {
+	if err := key.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	return nil

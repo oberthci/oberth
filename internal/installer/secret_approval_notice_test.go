@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
 
-	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -65,7 +65,7 @@ func TestS6Round2Guards(t *testing.T) {
 		check(reflect.ValueOf(wf), "workflow")
 	})
 	t.Run("unscoped-grant-key", func(t *testing.T) {
-		if err := service.ValidateGrantEntry(0, service.SecretAccessGrantEntry{Repo: "upstream/org/repo", Step: "publish", Secret: "oberth/data/release/token"}); err == nil {
+		if err := (model.SecretAccessKey{Repo: "upstream/org/repo", Step: "publish", Path: "oberth/data/release/token"}).Validate(); err == nil {
 			t.Fatal("unscoped grant accepted")
 		}
 	})

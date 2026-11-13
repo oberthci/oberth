@@ -2,10 +2,11 @@ package service
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/store"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/store"
 )
 
 func testAccessStore(t *testing.T, now *time.Time) *store.Store {

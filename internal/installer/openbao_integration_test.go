@@ -328,15 +328,15 @@ func TestPolicyIsolation_RealOpenBao(t *testing.T) {
 		}
 	})
 
-	// 7. Upstream read: both per-repo and per-step can read upstream secrets.
-	t.Run("upstream-read", func(t *testing.T) {
+	// Upstream paths require an explicit per-step approval.
+	t.Run("ungranted-upstream-read-denied", func(t *testing.T) {
 		status, _ := baoHTTP(t, "GET", addr, "/v1/"+kvPrefix+"/data/upstream/"+org+"/"+repo+"/app-config", tokenStepA, nil)
-		if status != 200 {
-			t.Fatalf("step A reading upstream secret: expected 200, got %d", status)
+		if status != 403 {
+			t.Fatalf("step A reading ungranted upstream secret: expected 403, got %d", status)
 		}
 		status2, _ := baoHTTP(t, "GET", addr, "/v1/"+kvPrefix+"/data/upstream/"+org+"/"+repo+"/app-config", tokenCI, nil)
-		if status2 != 200 {
-			t.Fatalf("CI reading upstream secret: expected 200, got %d", status2)
+		if status2 != 403 {
+			t.Fatalf("CI reading ungranted upstream secret: expected 403, got %d", status2)
 		}
 	})
 

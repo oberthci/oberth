@@ -314,13 +314,8 @@ func PerRepoCIIdentityNames(identities []PerRepoIdentity) []string {
 	return names
 }
 
-// upstreamOrgsFromIdentities extracts a sorted, deduplicated list of upstream
-// org names from the per-repo identity set. This is used by the shared
-// credentialed and CI-secrets policies to enumerate exactly the registered
-// upstream subtrees instead of a static "upstream/*" wildcard (issue #246
-// design revision). Repos with active grants always have per-repo identities,
-// so their orgs are present; a fresh install with no identities produces an
-// empty list — fail closed.
+// upstreamOrgsFromIdentities provides the complete name set for validation before
+// policy writes. It adds no paths to a shared or repository policy.
 func upstreamOrgsFromIdentities(identities []PerRepoIdentity) []string {
 	seen := make(map[string]struct{}, len(identities))
 	var orgs []string
