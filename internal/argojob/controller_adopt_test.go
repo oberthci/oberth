@@ -46,7 +46,7 @@ func TestStartupAdoptionWaitsThroughCapabilityAPIOutage(t *testing.T) {
 	bindCapabilityLoader(t, controller, func(context.Context, int64) (*argoworkflow.Capability, error) { return grant, nil })
 	request := AdoptionRequest{Name: submission.Name, RunID: submission.RunID, Ref: submission.Ref, SHA: submission.SHA, Trigger: submission.Trigger, RunTrigger: argoworkflow.RunTriggerBranch, RepositoryID: submission.RepositoryID}
 	if _, found, err := controller.Adopt(t.Context(), request); err == nil || found || errors.Is(err, ErrAdoptionRefused) {
-		t.Fatal("temporary capability read became a permanent refusal", found, err)
+		t.Fatal("unavailable capability read changed adoption classification", found, err)
 	}
 	if _, found, err := controller.Adopt(t.Context(), request); err != nil || !found || client.reads != 0 || reads != 2 {
 		t.Fatal("capability recovery changed Workflow observation", found, err, client.reads, reads)
