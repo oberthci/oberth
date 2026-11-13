@@ -59,7 +59,7 @@ After `setup-secretstore.sh` (store side) and `helm upgrade --install` with
 `secretstore.enabled=true` (cluster side):
 
 ```sh
-kubectl exec -n oberth deploy/oberth -- oberth secretstore verify
+oberth mcp call secretstore_verify '{}'
 ```
 
 The verifier runs **inside the pod with only the pod's ServiceAccount
@@ -82,9 +82,7 @@ pass it as an argument (the verifier maps `oberth/upstream/...` onto the KV
 API path the way release admission does and prints the mapping):
 
 ```sh
-kubectl exec -n oberth deploy/oberth -- \
-  oberth secretstore verify oberth/data/new-secret \
-  oberth/upstream/<org>/<repo>/gh-token
+oberth mcp call secretstore_verify '{"paths":["oberth/data/new-secret","oberth/upstream/<org>/<repo>/gh-token"]}'
 ```
 
 A failure names the failing stage (login vs read) and prints the common

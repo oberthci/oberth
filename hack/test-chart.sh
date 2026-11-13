@@ -289,18 +289,10 @@ test "$rekor_checksum" != "$rotated_rekor_checksum"
 grep -q '^              ephemeral-storage: 256Mi$' "$manifest"
 grep -q '^              ephemeral-storage: 2Gi$' "$manifest"
 grep -q '^            sizeLimit: "2Gi"$' "$manifest"
-# NOTES contract, trimmed to the essential first steps by #838: namespaced
-# in-pod exec commands for the two bootstrap actions, the vault-like
-# not-ready explanation, and the docs pointer. The previous long-form
-# assertions (verbose flags, curl MCP walkthrough, log-label hints) pinned
-# content #838 deliberately removed and had left this gate red.
-# The exec-command pattern is concatenated from two shell words so this
-# script's own body stays free of cluster-dependent command text — the
-# fresh-tree contract asserts chart validation never runs such commands.
-grep -Fq -- 'kubectl'' exec -it -n default deploy/oberth' "$notes"
-grep -Fq -- 'oberth upstream add github ssh://git@github.com/your-org' "$notes"
-grep -Fq -- 'oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub' "$notes"
-grep -Fq -- 'stays Running but not ready (0/1)' "$notes"
+# NOTES directs all administration to the API after the single initial enrollment.
+grep -Fq -- 'installation exec creates that identity' "$notes"
+grep -Fq -- 'oberth upstream add --yes --no-wait github ssh://git@github.com/your-org' "$notes"
+grep -Fq -- 'Running but not ready' "$notes"
 grep -Fq -- 'https://github.com/oberthci/oberth#documentation' "$notes"
 if grep -Eq 'curl[[:space:]]+(-[^[:space:]]*[[:space:]]+)*-k([[:space:]]|$)' "$notes"; then
   exit 1

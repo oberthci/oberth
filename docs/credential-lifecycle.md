@@ -11,7 +11,7 @@ both SSH and bearer authentication for subsequent requests. Specify a fingerprin
 when the identity has several keys. The last active unscoped administrator
 credential is protected. Revoked registrations remain visible in the list.
 
-Rotation uses the existing in-pod `oberth uplink add` issuance path to provision
+Rotation uses the authenticated `oberth uplink add` API to provision
 and deliver the replacement token first. Then call:
 
 ```
@@ -25,7 +25,7 @@ MCP never issues or accepts a plaintext bearer or private key.
 
 Revocation retains the registration and reserves its fingerprint. In-pod
 `oberth uplink remove` deletes that registration and frees the fingerprint
-for reuse. Remove revoked registrations before using the in-pod rotate loop.
+for reuse. Remove revoked registrations before using the authenticated rotate operation.
 
 `access_list {"pending":true}` tracks both pipeline files at the latest admitted
 commit. Removed paths disappear on the next successful admission snapshot;

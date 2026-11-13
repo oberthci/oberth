@@ -112,7 +112,7 @@ without checking evidence that establishes that fact.
 ## Report the connected tool count
 
 <!-- BEGIN GENERATED MCP TOOL COUNT -->
-The full server registry contains **79 tools**, including administrator-only
+The full server registry contains **93 tools**, including administrator-only
 operations. The authenticated `tools/list` response is authoritative for the
 connected identity; non-admin clients do not receive administrator-only tools.
 <!-- END GENERATED MCP TOOL COUNT -->

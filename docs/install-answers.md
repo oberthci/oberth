@@ -168,3 +168,17 @@ change the host-derived name. Pass `--upstream-name project-forge` (answers fiel
 `UpstreamName`) before approving the install to choose another valid name.
 This controls the first component of repository names, such as
 `192-0-2-10/repos/project`; it does not rename existing registrations.
+
+## Non-interactive onboarding
+
+`oberth install --json` runs first-admin enrollment and upstream onboarding
+without terminal prompts. Installation uses one server exec to create its first
+admin. Subsequent identity, key, catalog and verification operations use the
+admin API. Public CSRs cross enrollment; private client keys stay local.
+
+A ready installation returns `ok: true`. An incomplete installation returns
+`ok: false` with `manual_steps`, an array naming the remaining commands and
+public forge-key registration instructions. `upstream` carries the public key
+and its verification command when authorization at the forge is pending.
+Run the listed steps, then `oberth install --verify --json` for the selected
+context. Credentials stay in the requested secrets file, never in JSON output.

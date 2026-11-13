@@ -57,9 +57,9 @@ command afterward; HTTPS alone cannot satisfy the SSH verification check.
 The database retains its upstream registrations, but deploy keys belong to the
 installation. Restore prints the current public deploy key: add it with write
 access in each restored repository's forge **Settings → Deploy keys**, then run
-the printed context-specific `oberth upstream list --check` command.
+the printed authenticated `oberth upstream list --check` command.
 
-If the key has not been created, run `oberth upstream add NAME BASE_URL` using the
+If the key has not been created, run `oberth upstream add --yes NAME BASE_URL` using the
 restored registration's exact name and URL. It creates or recovers the installation's
 key and keeps an identical database registration. Preserve `--dedicated-key` for
 upstreams configured with dedicated keys. Re-enroll certificate clients against the
@@ -79,3 +79,12 @@ patterns beginning with a wildcard have no literal range to narrow. `latest` kee
 the newest matching attempt in the caller's upstream scope. After adopting a
 workflow, a new retry attempt replays its own output from the start when an earlier
 attempt has a durable cursor, preserving the script's FAIL line for per-step logs.
+
+## Unchanged releases
+
+A resume with `--resume-secrets-file` compares Helm's rendered manifest and
+merged effective values with the deployed Oberth release. When both match, it
+continues onboarding without creating a Helm revision. A values change, local
+chart change or chart version change still applies. `--upgrade` explicitly
+requests reconciliation. An existing authenticated admin is reused during
+resume; later enrollment uses the admin API and never repeats first-admin exec.

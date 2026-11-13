@@ -6,7 +6,7 @@ A backup holds only what a fresh install cannot recreate:
   repositories, uplinks and their tokens, and the audit chain;
 - **the secrets pipelines use**: the OpenBao KV secrets you put in, the ACL
   policies, the `auth/kubernetes` roles, and the grants (the
-  `oberth-secret-access` ConfigMap).
+  active server grant catalog).
 
 Everything else belongs to the install and is made again by `oberth setup` /
 `oberth install`: see [What is not backed up](#what-is-not-backed-up).
@@ -14,7 +14,8 @@ Everything else belongs to the install and is made again by `oberth setup` /
 `oberth backup` writes this into one encrypted file; `oberth restore` puts it
 onto an installed (typically fresh) Oberth. Both run on an operator
 workstation, like `oberth install`: they need `kubectl`, `helm` and OpenSSL 3,
-and reach the cluster only through the Kubernetes API and `kubectl exec`.
+and reach the server through its authenticated admin API. OpenBao operations
+and restore utility Pods retain their narrowly scoped Kubernetes exec operations.
 
 For an air-gapped cluster, set the chart's `utilityImage` (or installer
 `--utility-image`) to the mirrored file-tool image. Database helpers inherit
@@ -115,7 +116,7 @@ copy. A directory lock serializes snapshots sharing the database parent through
 archive emission, preventing another backup from spending the measured reserve.
 
 A refusal names the volume, available bytes and required bytes. Grow/free the
-PVC or use a read-only compatibility copy on a larger workstation volume.
+PVC before retrying.
 Restore's live-target preview uses this same guard: it reports unavailable
 counts on refusal, without retrying or bypassing the guard. The reserve does
 not enlarge the PVC or reserve disk space for subsequent source preparation.
@@ -131,7 +132,7 @@ Encrypted outputs remain exclusive 0600 files; failed output streams are removed
 The separate source-built maintenance utility still pins its qualified private scratch
 private tmpfs and fixed 128 MiB bound; ambient TMPDIR cannot redirect it.
 
-Disconnected in-pod stdout returns a write error through deferred cleanup,
+Disconnected API downloads return a write error through deferred cleanup,
 rather than exiting via SIGPIPE. SIGINT/SIGTERM also unwind cleanup. After
 SIGKILL, server startup sweeps same-owner interrupted snapshot directories,
 including fresh ones, before identity/database startup I/O. Online backups also
@@ -140,21 +141,11 @@ symlink directories/markers are never followed. One bad entry is logged with its
 path for manual repair; other entries and later backups are still attempted,
 subject to the free-space guard.
 
-For the default limit the CLI omits the new flag, preserving the working in-pod
-backup path on older servers. For a custom limit, an unknown-flag response is
-retried without the flag only when the old server's fixed 128 MiB cap is no
-larger than the operator's limit. The CLI still bounds and verifies the archive
-locally. A server without the backup command, an old `backup size refused`
-response, or an unsupported custom limit below 128 MiB uses the existing
-compatibility utility pod: mount its PVC read-only on the same node, stream
-main/WAL separately, accept only stable before/after hashes, then take the
-online snapshot locally. No shell is executed in the server container.
-Compatibility staging has a separate absolute 4 GiB cap per source file, and
-source changes are retried at most three times. A busy old server may need to
-be drained for a stable copy; the new server does not. This fallback
-creates/deletes only its temporary helper pod using the operator's existing
-access, with no new server privileges or RBAC. Legacy two-member main/WAL
-backups remain readable within the selected aggregate database limit.
+The CLI downloads the fully staged verified archive through the authenticated
+admin API, with a positive size ceiling on the server and the client. It verifies
+the archive locally before encryption. A refused or interrupted download removes
+the partial owner-only file. Backup never execs into the server Pod and requires
+an unscoped admin identity. No server ServiceAccount permission is added.
 
 The backup also records the deployment's live compatibility values
 (`OBERTH_SCHEMA_IDENTITY`, `OBERTH_AUDIT_DOMAIN`, `OBERTH_WITNESS_KEY_INFO`).
@@ -174,7 +165,7 @@ everything encrypted to it would be unrecoverable.
 | `openbao/roles.json` | yes | – | every `auth/kubernetes` role with every field OpenBao returns |
 | `openbao/reference.json` | yes | – | Kubernetes auth config, mount list, Transit key metadata, PKI CA certificate; for reference, never restored |
 | `database/oberth-database.tar` | yes | yes | verified database snapshot (`oberth.database-backup/v1`) |
-| `kubernetes/secret-access.json` | yes | – | the `oberth-secret-access` ConfigMap (the grants) |
+| `kubernetes/secret-access.json` | yes | – | the active server grant catalog (the grants) |
 
 `manifest.json` comes first and records the format (`oberth.backup/v3`), the
 scope (`full` or `history`), the creation time, the CLI, server and chart
@@ -368,7 +359,7 @@ backup, `history` for a history-only one (where `--only secrets` is refused).
 | Part | What it restores |
 | --- | --- |
 | `history` | the database, replacing this install's rather than merging; the compatibility values the restored database must be opened under; and deletion of Argo Workflows whose runs the restored database does not know |
-| `secrets` | the OpenBao KV secrets (never `identities/`), ACL policies and `auth/kubernetes` roles, each verified by read-back; and the grants (`oberth-secret-access` ConfigMap). The per-repository roles bind the backup's namespaces, so this part restores only into the same namespaces; otherwise use `--only history` |
+| `secrets` | the OpenBao KV secrets (never `identities/`), ACL policies and `auth/kubernetes` roles, each verified by read-back; and the grants (active server grant catalog). The per-repository roles bind the backup's namespaces, so this part restores only into the same namespaces; otherwise use `--only history` |
 
 The compatibility values (`compatibility.schemaIdentity`, `auditDomain`,
 `witnessKeyInfo`) are the only Helm values a restore sets. Whatever the
@@ -442,7 +433,7 @@ three times. Without a terminal it needs `--yes`.
    `/data/pre-restore-<UTC timestamp>/`, moves the restored files into place,
    and checks they are owned by the server user with mode 0600. A swap that
    fails midway puts the previous files back.
-6. With `secrets`: writes the `oberth-secret-access` ConfigMap. The server
+6. With `secrets`: writes the active server grant catalog. The server
    reconciles grants from it at startup, so it must be in place before the
    server starts.
 7. With `history`: lists the Argo Workflows again, now that no server can

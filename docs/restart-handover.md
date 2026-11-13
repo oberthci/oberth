@@ -219,17 +219,15 @@ missing Workflows and applies retain their distinct interruption/recovery rules.
 The queue wait has its own positive `--wait-timeout`, default two hours. The
 separate `--timeout` (default five minutes) applies to Helm/rollout and version
 verification. An earlier caller deadline or SIGINT/SIGTERM cancels observation.
-The local kubectl process is explicitly bounded by the queue-wait context;
-joining inherited output pipes has a separate five-second cleanup bound.
-Timeout, cancellation, persistently unavailable queue state or a killed local
-child aborts before any Helm upgrade . The error identifies
-local `kubectl exec`, elapsed time, the configured limit and that the upgrade
-was not attempted. A failed local `kubectl exec` session is not retried, and
-an unreadable queue is never assumed idle.
+The authenticated admin API observation is bounded by the queue-wait context.
+Timeout, cancellation or persistently unavailable queue state aborts before any
+Helm upgrade. An unreadable queue is never
+assumed idle. Transient API failures are retried within the wait deadline;
+authorization and validation failures abort immediately.
 
-The command reads the selected context/namespace's live daemon through its
-private admin socket, without opening the database from another process or
-using a scoped API token. A single database observation counts the complete
+
+The command reads the selected install's live server through its admin API.
+A single database observation counts the complete
 nonterminal-run queue. Polling occurs once a second; queue size, branch/critical
 counts, selection and elapsed time are printed immediately and every 15 seconds
 while busy. Host progress is streamed as it arrives, with an elapsed heartbeat

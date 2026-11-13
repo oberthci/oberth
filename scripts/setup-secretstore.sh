@@ -489,6 +489,5 @@ Next steps:
    (ServiceAccount login, TokenReview, read policy, TLS — no credentials
    needed beyond the pod's own identity):
 
-     kubectl exec -n $NAMESPACE deploy/oberth -- \\
-       /usr/local/bin/oberth secretstore verify oberth/upstream/<org>/<repo>/github-token
+     oberth mcp call secretstore_verify '{}'  oberth/upstream/<org>/<repo>/github-token
 SUMMARY

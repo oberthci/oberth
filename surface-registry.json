@@ -562,7 +562,7 @@
     },
     "flag:no-wait": {
       "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
-      "test_ref": "cmd/oberth/upstream_pending_test.go TestNoWaitPendingGitHubIsReadyWithCertificateMCP"
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
     },
     "value:upstream_key_pending": {
       "doc_anchor": "docs/install-answers.md#pending-forge-authorization",
@@ -999,6 +999,14 @@
     "value:server-ca": {
       "doc_anchor": "README.md#mcp-tools",
       "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RejectsPaths"
+    },
+    "value:manual_steps": {
+      "doc_anchor": "docs/install-answers.md#non-interactive-onboarding",
+      "test_ref": "internal/installer/install_resume_test.go TestInstallJSONOnboardingAndResume"
+    },
+    "value:uplink_add": {
+      "doc_anchor": "docs/mcp-setup.md#1-create-an-uplink",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
     }
   }
 }

@@ -67,16 +67,11 @@ detect_language() {
  elif [ -f "$root/pyproject.toml" ] || [ -f "$root/setup.py" ]; then language=python; fi
 }
 manual() { if [ -n "$settings" ]; then printf 'manual_key_settings=%s\n' "$settings"; else echo 'manual_key_registration=Ask the forge administrator for the exact public-key registration page or authorized_keys location.'; fi; echo 'Add the public deploy key with write access, then verify through Oberth. Do not paste a private key or token.'; }
-run_kubectl() {
+api() {
  find_cli
- "$oberth_cli" client kubectl "$@"
+ "$oberth_cli" "$@"
 }
-server() {
- context=$1; namespace=$2; pod=$3; shift 3
- if ! { [ -n "$context" ] && [ -n "$namespace" ] && [ -n "$pod" ]; }; then fail 'explicit context, namespace and pod are required'; fi
- command -v kubectl >/dev/null 2>&1 || fail 'install kubectl yourself: https://kubernetes.io/docs/tasks/tools/'
- run_kubectl --context="$context" exec -n "$namespace" "$pod" -c oberth -- /usr/local/bin/oberth "$@"
-}
+
 workflow() {
  case "$language" in
  go) image='golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd'; task='go test ./...';;
@@ -138,7 +133,7 @@ YAML
 action=$1; shift
 case "$action" in
 prerequisites)
- for tool in git kubectl helm ssh ssh-keygen; do
+ for tool in git ssh ssh-keygen; do
   if ! command -v "$tool" >/dev/null 2>&1; then
    case "$tool" in kubectl) fail 'install kubectl yourself: https://kubernetes.io/docs/tasks/tools/';; helm) fail 'install Helm yourself: https://helm.sh/docs/intro/install/';; *) fail "install $tool before onboarding";; esac
   fi
@@ -149,35 +144,32 @@ inspect)
  detect "$1" "${2:-}"
  printf 'root=%s\nforge=%s\nhost=%s\norganization=%s\nrepository=%s\nroute_org=%s\nupstream_url=ssh://%s@%s/%s\nkey_settings=%s\nlanguage=%s\n' "$root" "$forge" "$host" "$organization" "$repository" "${organization##*/}" "$ssh_user" "$host${ssh_port:+:$ssh_port}" "$home_prefix$organization" "$settings" "$language"
  if [ -e "$root/.oberth" ] || [ -L "$root/.oberth" ]; then echo 'workflow=existing'; else echo 'workflow=missing'; fi;;
-contexts) run_kubectl config get-contexts;;
-pods)
- [ "$#" -eq 2 ] || fail 'pods <chosen-context> <namespace>'
- run_kubectl --context="$1" get pods -n "$2" -l app.kubernetes.io/name=oberth -o name;;
 upstreams)
- [ "$#" -eq 3 ] || fail 'upstreams <context> <namespace> <pod>'
- server "$1" "$2" "$3" upstream list --check;;
+ [ "$#" -eq 0 ] || fail 'upstreams uses the configured authenticated server'
+ api upstream list --check --json;;
 public-key)
- [ "$#" -eq 3 ] || fail 'public-key <context> <namespace> <pod>'
- server "$1" "$2" "$3" admin read-file /run/oberth-identities/upstream/id_ed25519.pub;;
+ [ "$#" -eq 0 ] || fail 'public-key uses the configured authenticated server'
+ api admin public-identity upstream-public-key;;
 prepare-upstream)
- if ! { [ "$#" -ge 8 ] && [ "$#" -le 9 ]; }; then fail 'prepare-upstream <context> <namespace> <pod> <name> <base-url> <repo> shared|dedicated --consent [authoritative-host-fingerprint]'; fi
- consent "$8"
- expected=${9:-}
+ if ! { [ "$#" -ge 5 ] && [ "$#" -le 6 ]; }; then fail 'prepare-upstream <name> <base-url> <repo> shared|dedicated --consent [authoritative-host-fingerprint]'; fi
+ consent "$5"
+ expected=${6:-}
  if [ -n "$expected" ]; then
   case "$expected" in SHA256:*[!A-Za-z0-9+/=:]*|*[!A-Za-z0-9+/=:]*) fail 'invalid authoritative host fingerprint';; SHA256:?*) :;; *) fail 'expected an authoritative SHA256 host fingerprint';; esac
  fi
- case "$7" in
- shared) if [ -n "$expected" ]; then server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --check-repo "$6" --expected-host-fingerprint "$expected" "$4" "$5"; else server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --check-repo "$6" "$4" "$5"; fi;;
- dedicated) if [ -n "$expected" ]; then server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --dedicated-key --check-repo "$6" --expected-host-fingerprint "$expected" "$4" "$5"; else server "$1" "$2" "$3" upstream add --namespace "$2" --yes --no-wait --dedicated-key --check-repo "$6" "$4" "$5"; fi;;
+ case "$4" in
+ shared) if [ -n "$expected" ]; then api upstream add --yes --no-wait --check-repo "$3" --expected-host-fingerprint "$expected" "$1" "$2"; else api upstream add --yes --no-wait --check-repo "$3" "$1" "$2"; fi;;
+ dedicated) if [ -n "$expected" ]; then api upstream add --yes --no-wait --dedicated-key --check-repo "$3" --expected-host-fingerprint "$expected" "$1" "$2"; else api upstream add --yes --no-wait --dedicated-key --check-repo "$3" "$1" "$2"; fi;;
  *) fail 'key mode must be shared or dedicated';;
  esac;;
 register)
- [ "$#" -eq 7 ] || fail 'register <context> <namespace> <pod> <repo> <upstream> <default-branch> --consent'
- consent "$7"
- server "$1" "$2" "$3" repo add --default-branch "$6" "$4" "$5";;
+ [ "$#" -eq 4 ] || fail 'register <repo> <upstream> <default-branch> --consent'
+ consent "$4"
+ api repo add --default-branch "$3" "$1" "$2";;
 verify)
- [ "$#" -eq 4 ] || fail 'verify <context> <namespace> <pod> <upstream/route-org/repo>'
- server "$1" "$2" "$3" repo verify "$4";;
+ [ "$#" -eq 1 ] || fail 'verify <upstream/route-org/repo>'
+ api repo verify "$1";;
+
 deploy-key)
  if ! { [ "$#" -ge 3 ] && [ "$#" -le 4 ]; }; then fail 'deploy-key <path> <public-key-file> --consent [forge]'; fi
  consent "$3"; detect "$1" "${4:-}"

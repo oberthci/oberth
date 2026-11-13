@@ -141,9 +141,8 @@ organization, repository, identity, and node address. Register the deploy key
 printed by `upstream add` at your forge when prompted.
 
 ```bash
-oberth upstream add github ssh://git@github.com/acme
-kubectl exec -i -n oberth deploy/oberth -- \
-  oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+oberth upstream add --yes github ssh://git@github.com/acme
+oberth uplink add ~/.ssh/id_ed25519.pub operator@host
 
 # Run in your existing local repository, with the changes committed.
 git remote add oberth ssh://git@oberth.example:30022/github/acme/my-repo.git
@@ -159,14 +158,13 @@ dashboard URL is configured.
 ### First promotion
 
 Green branch CI is the input to a promotion, which merges, tests and pushes a
-target branch such as `main`. The first uplink is not an admin, and a
+target branch such as `main`. The installer creates an admin identity. A
 non-admin promotes a commit only with a single-use grant an admin issued for
 that exact repository, SHA and target. Register an admin uplink for a person,
 with a key no agent holds, and issue the grant with it:
 
 ```bash
-kubectl exec -it -n oberth deploy/oberth -- \
-  oberth uplink add --admin - admin@host < admin.pub
+oberth uplink add --admin admin.pub admin@host
 # Store the printed token in admin-token (mode 0600), then:
 oberth mcp call --token-file admin-token promote_grant \
   '{"repo":"github/acme/my-repo","sha":"<green sha>","branch":"main"}'
@@ -414,13 +412,27 @@ Operators enforce namespace ResourceQuota and admission policy. See
 
 ## MCP tools
 
-The full server registry contains **79 tools**.
+The full server registry contains **93 tools**.
 The authenticated `tools/list` response is the authoritative registry.
 List it with `oberth mcp tools`. A non-admin token is not shown the admin-only
 tools (a call to one is still refused by the server); available operations are:
 
 | Tool | Description |
 |------|-------------|
+| `uplink_add` | Enroll an uplink under an existing unscoped admin. Public SSH key and optional CSR only; private keys stay local. CSR enrollment mints no bearer unless requested. Administrator grants are explicit; audited without credential material. |
+| `uplink_scope` | Set an uplink repository scope; an empty array clears it. Unscoped admin only; audited. Requires an existing admin identity. |
+| `upstream_add` | Register an upstream using the server identity store. Unscoped admin only; audited. Requires an existing admin identity. SSH bootstrap uses pinned host keys and fixed identity bundles. |
+| `upstream_list` | List registered upstreams, optionally checking authentication. Unscoped admin only; audited. |
+| `upstream_remove` | Remove an upstream and its repository mappings. Unscoped admin only; audited. |
+| `upstream_provide_key` | Import an SSH private key into the fixed upstream identity bundle. Unscoped admin only; audited without key material. Never accepts a key file path. |
+| `repo_add` | Register a repository mapping; the first push confirms its default branch. Unscoped admin only; audited. |
+| `repo_verify` | Probe a registered repository using the server's existing upstream identity. Unscoped admin only; audited. |
+| `admin_access_list` | Read all active grants for installer identity production. Unscoped admin only; audited. Returns path names only. |
+| `admin_public_identity` | Read named public identity material. Unscoped admin only; audited. Never accepts a filesystem path. |
+| `admin_readiness` | Read current readiness with a safe reason code. Unscoped admin only; audited. |
+| `admin_version` | Read server binary and database schema versions. Unscoped admin only; audited. |
+| `admin_idle` | Observe the all or critical queue; the installer owns waiting. Unscoped admin only; audited. This observation never freezes admission. |
+| `admin_audit_record` | Record a completed operator lifecycle action. Unscoped admin only; actor identity comes from authentication. |
 | `status` | Return concise CI status for a full SHA, short SHA, or branch, including the failed step. |
 | `logs` | Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: counts are lower bounds unless scan_complete is true; continue has_more pages with next_byte_offset as byte_offset and offset:0. |
 | `run_get` | Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default (summary): id/repo/ref/sha, superseded, status/phase/failed_burn/failed_step/error, display_status/display_reason and compact steps (burn, name, status, started_at, finished_at). display_status is one of queued, running, passed, failed, superseded or cancelled; display_reason names the cause. Set summary:false for the full record: step results with diagnostics, versioned retained Workflow/step timing without admission episodes (missing timing is unknown; unavailable=pruned once the run is older than the retained timing window), the repository record and Scheduling. |
