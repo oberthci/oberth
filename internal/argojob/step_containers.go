@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"context"
 	"sort"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -22,6 +23,7 @@ type StepContainer struct {
 // Pod names are opaque. Foreign or ambiguous Pod ownership never binds a node.
 // Inputs may be shared watch-cache pointers and are never changed.
 func StepContainers(workflow *wfv1.Workflow, pods []*corev1.Pod) []StepContainer {
+	workflow, _ = nativeNodeWorkflow(context.Background(), workflow)
 	if workflow == nil || workflow.UID == "" {
 		return nil
 	}

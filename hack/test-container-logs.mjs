@@ -4,9 +4,10 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const source=readFileSync(new URL('../internal/api/static/app.js',import.meta.url),'utf8');
 const streams=[];
+const indicator={textContent:""};
 const sandbox=vm.createContext({console,URLSearchParams,Map,Set,Date,AbortController,TextDecoder,ReadableStream,
  location:{pathname:'/runs/run'},localStorage:{getItem(){return 'valid-token';}},
- document:{getElementById(){return null;},querySelector(){return null;}},
+ document:{getElementById(){return null;},querySelector(){return indicator;}},
  setTimeout(){},clearTimeout(){},setInterval(){},clearInterval(){},
  fetch:async(url,options)=>{
   assert.equal(options.headers.Authorization,'Bearer valid-token');assert.ok(!url.includes('token='));
@@ -26,7 +27,7 @@ streams[0].controller.enqueue(bytes.slice(0,split));await settle();streams[0].co
 assert.equal(run('state.live.text'),'@@oberth:step plain\n::oberth-log:: plain\n[build/test] 🚀');
 await run(`containerLogContent({id:'run',status:'running'},'node')`);assert.equal(streams.length,1,'metadata refresh reuses the request');
 streams[0].controller.close();await settle();await run(`containerLogContent({id:'run',status:'running'},'node')`);
-assert.equal(streams.length,1,'EOF never reconnects or polls log bytes');assert.equal(run('state.live.done'),true);
+assert.equal(streams.length,1,'EOF never reconnects or polls log bytes');assert.equal(run('state.live.done'),true);assert.equal(indicator.textContent,'STREAM ENDED','a container stream ending never invents a run verdict');
 run(`state.containerKey=containerKey(entries[1])`);await run(`containerLogContent({id:'run',status:'running'},'node')`);await settle();assert.equal(streams.length,2);assert.equal(streams[0].options.signal.aborted,true);
 run('closeLiveLog()');await settle();assert.equal(streams[1].options.signal.aborted,true);assert.equal(streams[1].cancelled,true);
 run('entries[0].stored=true;state.containerKey=containerKey(entries[0])');result=await run(`containerLogContent({id:'run',status:'passed'},'node')`);

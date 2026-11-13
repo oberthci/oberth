@@ -1015,7 +1015,7 @@ function paintContainerLog(live) {
     if (stick) body.scrollTop = body.scrollHeight;
   }
   const indicator = document.querySelector?.(".term-live");
-  if (indicator) indicator.textContent = live.error ? "STREAM ENDED" : live.done ? "COMPLETE" : "LIVE";
+  if (indicator) indicator.textContent = live.error || live.done ? "STREAM ENDED" : "LIVE";
 }
 async function readContainerStream(live, entry) {
   let reader;
@@ -1150,7 +1150,7 @@ async function renderRunDetailView(detail, seq) {
       </div>
       <div class="logp">
         <div class="log-h" id="logHead"><label>Container <select id="containerLogSelect">${containerView.options}</select></label><button id="containerLogOpen">Open log</button>${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
-        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "STREAM ENDED" : state.live?.done ? "COMPLETE" : "LIVE"}</span>` : ""}</div><div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
+        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error || state.live?.done ? "STREAM ENDED" : "LIVE"}</span>` : ""}</div><div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
       </div>
     </div>
   </section>`;

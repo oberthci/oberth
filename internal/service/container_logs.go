@@ -72,7 +72,7 @@ func (service *API) RunContainerLogs(ctx context.Context, actor api.Actor, id st
 	if err != nil {
 		return nil, err
 	}
-	if run.Status.Active() && scoped.containerLogSource != nil {
+	if run.WorkflowName != "" && run.Status.Active() && scoped.containerLogSource != nil {
 		current, sourceErr := scoped.containerLogSource.ContainerLogs(ctx, run)
 		if sourceErr != nil && len(entries) == 0 {
 			return nil, fmt.Errorf("%w: native container observation is unavailable", ErrUnavailable)
@@ -124,6 +124,9 @@ func (service *API) OpenRunContainerLog(ctx context.Context, actor api.Actor, id
 }
 
 func (service *API) RunContainerLogFiltered(ctx context.Context, actor api.Actor, id, node, container string, filter runlog.Filter) (any, error) {
+	if strings.TrimSpace(node) == "" {
+		return nil, fmt.Errorf("%w: node_id is required", ErrInvalidInput)
+	}
 	ctx = withRunLogCaller(ctx, actor)
 	ctx, cancel := context.WithTimeout(ctx, runReadBudget)
 	defer cancel()

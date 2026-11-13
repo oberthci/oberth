@@ -130,7 +130,7 @@ func (store *Store) ReserveContainerLog(runID string, entry ContainerLog) (bool,
 	}
 	entry.Start, entry.End, entry.Body = info.Size(), info.Size(), nil
 	entry.Pending = true
-	entry.Reason = "oberth: log incomplete: container copy was interrupted"
+	entry.Reason = "oberth: log incomplete: container copy has not completed"
 	index.RunID, index.Format, index.Size = runID, "containers", info.Size()
 	if position >= 0 {
 		index.Containers[position] = entry

@@ -2,14 +2,17 @@ package argojob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	argofile "github.com/argoproj/argo-workflows/v4/util/file"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,9 +61,12 @@ func (reader *cutContainerLog) Read(out []byte) (int, error) {
 func (*cutContainerLog) Close() error { return nil }
 
 func TestContainerLogCaptureReadsOnceAndPreservesPartialBytes(t *testing.T) {
-	for _, mode := range []string{"complete", "cut", "limit", "missing", "foreign", "swapped-after-open"} {
+	for _, mode := range []string{"complete", "cut", "limit", "max-limit", "missing", "foreign", "swapped-after-open"} {
 		t.Run(mode, func(t *testing.T) {
 			controller, store, workflow, pod := nativeContainerLogFixture(t)
+			if mode == "max-limit" {
+				controller.config.MaxRunLogBytes = math.MaxInt64
+			}
 			calls, gets := 0, 0
 			controller.WithContainerLogSource(func(_ context.Context, namespace, name string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 				calls++
@@ -101,7 +107,7 @@ func TestContainerLogCaptureReadsOnceAndPreservesPartialBytes(t *testing.T) {
 			if err != nil || !entry.Captured {
 				t.Fatal(string(body), entry, err)
 			}
-			if mode == "complete" && string(body) != "@@oberth:step plain text\nbody\n" {
+			if (mode == "complete" || mode == "max-limit") && string(body) != "@@oberth:step plain text\nbody\n" {
 				t.Fatal("native bytes rewritten", string(body))
 			}
 			if mode == "cut" && (!strings.Contains(string(body), "retained partial") || !strings.Contains(string(body), "log incomplete")) {
@@ -169,5 +175,31 @@ func TestContainerLogLiveRequestCancellationClosesNativeStream(t *testing.T) {
 	_ = opened.Close()
 	if stream.closes.Load() != 1 {
 		t.Fatal("native stream closed more than once", stream.closes.Load())
+	}
+}
+
+func TestContainerLogCompressedNativeStatusDoesNotMutateCache(t *testing.T) {
+	controller, store, workflow, pod := nativeContainerLogFixture(t)
+	nodes, err := json.Marshal(workflow.Status.Nodes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow.Status.CompressedNodes = argofile.CompressEncodeString(t.Context(), string(nodes))
+	workflow.Status.Nodes = nil
+	compressed := workflow.Status.CompressedNodes
+	calls := 0
+	controller.WithContainerLogSource(func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
+		calls++
+		return io.NopCloser(strings.NewReader("compressed native output\n")), nil
+	}, func(context.Context, string, string) (*corev1.Pod, error) { return pod.DeepCopy(), nil })
+	if err := controller.ObserveContainerLogs(t.Context(), workflow, "run", []*corev1.Pod{pod}); err != nil {
+		t.Fatal(err)
+	}
+	body, _, _, err := store.ReadContainerLog(t.Context(), "run", "node", "main", runlog.Filter{})
+	if err != nil || string(body) != "compressed native output\n" || calls != 1 {
+		t.Fatal(string(body), err, calls)
+	}
+	if workflow.Status.CompressedNodes != compressed || len(workflow.Status.Nodes) != 0 {
+		t.Fatal("shared compressed status was changed")
 	}
 }

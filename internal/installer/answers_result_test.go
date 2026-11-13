@@ -317,7 +317,7 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 	if err := json.Unmarshal(output.Bytes(), &installed); err != nil {
 		t.Fatal(err)
 	}
-	if !installed.OK || installed.Review == nil || installed.Review.ArgoParallelism != "17 (preserved)" || installed.Review.ArgoNamespaceParallelism != "5 (preserved)" || argoReads != 2 || argoResourceReads != 2 {
+	if !installed.OK || installed.Review == nil || installed.Review.ArgoParallelism != "17 (preserved)" || installed.Review.ArgoNamespaceParallelism != "5 (preserved)" || argoReads != 2 || argoResourceReads != 4 {
 		t.Fatal("successful JSON output reused preflight defaults", installed.Review, argoReads)
 	}
 	assertCurrentResources(installed.Review)

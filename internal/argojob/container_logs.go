@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -73,6 +74,11 @@ func (controller *Controller) ObserveContainerLogs(ctx context.Context, workflow
 	if workflow.Namespace != controller.config.Namespace || workflow.UID == "" {
 		return errors.New("argojob: invalid Workflow log identity")
 	}
+	expanded, err := nativeNodeWorkflow(ctx, workflow)
+	if err != nil {
+		return err
+	}
+	workflow = expanded
 	var known []runlog.ContainerLog
 	for _, target := range StepContainers(workflow, pods) {
 		known = append(known, containerLogEntry(target))
@@ -141,7 +147,11 @@ func (controller *Controller) readContainerCopy(ctx context.Context, workflow *w
 			}
 			return nil, "oberth: log unavailable: container log could not be read"
 		}
-		body, readErr := io.ReadAll(io.LimitReader(reader, controller.config.MaxRunLogBytes+1))
+		readLimit := controller.config.MaxRunLogBytes
+		if readLimit < math.MaxInt64 {
+			readLimit++
+		}
+		body, readErr := io.ReadAll(io.LimitReader(reader, readLimit))
 		_ = reader.Close()
 		if readErr != nil {
 			if len(body) == 0 && attempt == 0 && retryExecutorIdentityRead(readErr) && readCtx.Err() == nil {
@@ -217,7 +227,7 @@ func (controller *Controller) logWorkflow(ctx context.Context, name, runID strin
 	if workflow.Namespace != controller.config.Namespace || workflow.UID == "" {
 		return nil, errors.New("argojob: invalid Workflow log identity")
 	}
-	return workflow, nil
+	return nativeNodeWorkflow(ctx, workflow)
 }
 
 func (controller *Controller) OpenContainerLog(ctx context.Context, name, runID, nodeID, container string, follow bool) (io.ReadCloser, error) {

@@ -103,7 +103,7 @@ func TestContainerLogReservationSurvivesRestartAndPreservesMarkers(t *testing.T)
 		t.Fatal("interrupted capture read twice", claimed, err)
 	}
 	body, _, _, err := reopened.ReadContainerLog(context.Background(), "run", "node", "main", Filter{})
-	if err != nil || !bytes.Contains(body, []byte("copy was interrupted")) {
+	if err != nil || !bytes.Contains(body, []byte("copy has not completed")) {
 		t.Fatal(string(body), err)
 	}
 	historical := []byte("@@oberth:step not a control record\nplain\n")
