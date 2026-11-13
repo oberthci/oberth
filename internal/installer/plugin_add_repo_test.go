@@ -239,10 +239,13 @@ func TestAddRepoWorkflowsAreNativeAndNeverCommittedOrOverwritten(t *testing.T) {
 			if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: []string{test.prefix}}); err != nil {
 				t.Fatal(err)
 			}
-			if test.language == "node" || test.language == "python" {
-				if err := argoworkflow.Admit(workflow, argoworkflow.Policy{}); err == nil {
-					t.Fatal("test must reflect the administrator image-policy gate")
-				}
+			// No built-in image list exists: an empty policy admits any
+			// image, and an administrator allowlist is still honoured.
+			if err := argoworkflow.Admit(workflow, argoworkflow.Policy{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: []string{"registry.invalid/other:"}}); err == nil {
+				t.Fatal("test must reflect the administrator image-policy gate")
 			}
 			if _, err := f.call(t, "workflow-write", f.root, "no"); err == nil {
 				t.Fatal("wrote without consent")
