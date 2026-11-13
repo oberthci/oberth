@@ -19,7 +19,7 @@ func TestAuthorPodLabelsAdmitted(t *testing.T) {
 
 func TestReservedPodMetadataKeysRefusedAtEveryScope(t *testing.T) {
 	keys := []string{"oberth.ci/run", "workflows.argoproj.io/workflow", "workflows.argoproj.io/unknown", "app.kubernetes.io/name", "app.kubernetes.io/instance", "app.kubernetes.io/component", "component", "openbao-active", "openbao-internal", "kubernetes.io/metadata.name", "kubectl.kubernetes.io/default-container", "{{workflow.parameters.key}}"}
-	for _, scope := range []string{"pod", "template", "defaults", "inline"} {
+	for _, scope := range []string{"pod", "template", "defaults", "inline", "artifactGC"} {
 		for _, field := range []string{"labels"} {
 			for _, key := range keys {
 				t.Run(scope+"/"+field+"/"+key, func(t *testing.T) {
@@ -31,6 +31,8 @@ func TestReservedPodMetadataKeysRefusedAtEveryScope(t *testing.T) {
 						metadata.Annotations = map[string]string{key: "other"}
 					}
 					switch scope {
+					case "artifactGC":
+						wf.Spec.ArtifactGC = &wfv1.WorkflowLevelArtifactGC{ArtifactGC: wfv1.ArtifactGC{PodMetadata: &metadata}}
 					case "pod":
 						wf.Spec.PodMetadata = &metadata
 					case "template":
@@ -53,12 +55,14 @@ func TestReservedPodMetadataKeysRefusedAtEveryScope(t *testing.T) {
 }
 
 func TestAuthorPodAnnotationBehaviorSwitchesRefused(t *testing.T) {
-	for _, scope := range []string{"pod", "template", "defaults", "inline"} {
+	for _, scope := range []string{"pod", "template", "defaults", "inline", "artifactGC"} {
 		for _, key := range []string{"container.apparmor.security.beta.kubernetes.io/main", "k8s.v1.cni.cncf.io/networks", "cni.projectcalico.org/ipAddrs", "sidecar.istio.io/inject", "vault.hashicorp.com/agent-inject", "io.kubernetes.cri-o.Devices", "kubernetes.io/egress-bandwidth", "example.test/note"} {
 			t.Run(scope+"/"+key, func(t *testing.T) {
 				wf := decodeAdmissible(t, nil)
 				metadata := wfv1.Metadata{Annotations: map[string]string{key: "unconfined"}}
 				switch scope {
+				case "artifactGC":
+					wf.Spec.ArtifactGC = &wfv1.WorkflowLevelArtifactGC{ArtifactGC: wfv1.ArtifactGC{PodMetadata: &metadata}}
 				case "pod":
 					wf.Spec.PodMetadata = &metadata
 				case "template":

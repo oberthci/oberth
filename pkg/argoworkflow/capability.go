@@ -187,15 +187,13 @@ func admitCapabilityResource(location string, r *wfv1.ResourceTemplate, capabili
 	// Decode by exact keys. encoding/json's struct matching folds both ASCII
 	// and Unicode (for example Kind and nameſpace), unlike Kubernetes.
 	var object, metadata map[string]json.RawMessage
-	if json.Unmarshal(encoded, &object) != nil || rejectEnvelopeCaseVariants(object, "apiVersion", "kind", "metadata") != nil || json.Unmarshal(object["metadata"], &metadata) != nil || rejectEnvelopeCaseVariants(metadata, "namespace", "name", "generateName") != nil {
-		return refuse("invalid or case-variant resource envelope keys")
+	if json.Unmarshal(encoded, &object) != nil || rejectEnvelopeCaseVariants(object, "apiVersion", "kind", "metadata") != nil || json.Unmarshal(object["metadata"], &metadata) != nil || rejectEnvelopeCaseVariants(metadata, "namespace", "name", "generateName") != nil || resourceMetadataOverride(metadata) {
+		return refuse("invalid or case-variant resource envelope keys, Pod annotations or reserved labels")
 	}
 	var apiVersion, kind, namespace, name, generateName string
-	var resourceSpec any
-	if raw := object["spec"]; len(raw) != 0 {
-		if json.Unmarshal(raw, &resourceSpec) != nil || resourcePriorityOverride(resourceSpec) {
-			return refuse("resource Pod priority overrides are not admitted")
-		}
+	var resourceObject any
+	if json.Unmarshal(encoded, &resourceObject) != nil || resourcePriorityOverride(resourceObject) {
+		return refuse("resource Pod metadata, patches and priority overrides are not admitted")
 	}
 	for _, field := range []struct {
 		raw         json.RawMessage
@@ -231,6 +229,16 @@ func resourcePriorityOverride(value any) bool {
 		switch node := value.(type) {
 		case map[string]any:
 			for key, child := range node {
+				if strings.EqualFold(key, "metadata") || strings.EqualFold(key, "podMetadata") {
+					raw, err := json.Marshal(child)
+					if err != nil {
+						return true
+					}
+					var metadata map[string]json.RawMessage
+					if json.Unmarshal(raw, &metadata) != nil || resourceMetadataOverride(metadata) {
+						return true
+					}
+				}
 				if (strings.EqualFold(key, "priorityClassName") || strings.EqualFold(key, "podPriorityClassName") || strings.EqualFold(key, "podSpecPatch")) && child != nil && child != "" {
 					return true
 				}
@@ -238,6 +246,26 @@ func resourcePriorityOverride(value any) bool {
 			}
 		case []any:
 			pending = append(pending, node...)
+		}
+	}
+	return false
+}
+
+// An opaque operator API may propagate its metadata onto a Pod. Apply the
+// same boundary to metadata envelopes rather than guessing each granted kind.
+func resourceMetadataOverride(metadata map[string]json.RawMessage) bool {
+	for name, raw := range metadata {
+		switch {
+		case strings.EqualFold(name, "annotations"):
+			var annotations map[string]string
+			if json.Unmarshal(raw, &annotations) != nil || len(annotations) != 0 {
+				return true
+			}
+		case strings.EqualFold(name, "labels"):
+			var labels map[string]string
+			if json.Unmarshal(raw, &labels) != nil || len(admitPodMetadataKeys("resource metadata labels", labels)) != 0 {
+				return true
+			}
 		}
 	}
 	return false

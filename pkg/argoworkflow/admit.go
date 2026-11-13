@@ -132,9 +132,7 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	if strings.TrimSpace(spec.PodSpecPatch) != "" {
 		problems = append(problems, errors.New("argoworkflow: spec.podSpecPatch is not admitted; it can override the server-assigned identity"))
 	}
-	if spec.ArtifactGC != nil && strings.TrimSpace(spec.ArtifactGC.PodSpecPatch) != "" {
-		problems = append(problems, errors.New("argoworkflow: spec.artifactGC.podSpecPatch is not admitted"))
-	}
+	problems = append(problems, admitArtifactGCPodMetadata(spec.ArtifactGC)...)
 	if spec.ArtifactRepositoryRef != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.artifactRepositoryRef resolves credentials from a Kubernetes Secret; use volumeClaimTemplates for step hand-off"))
 	}
@@ -792,4 +790,15 @@ var reservedVCTNames = map[string]bool{
 
 func reservedVCTName(name string) bool {
 	return reservedVCTNames[name]
+}
+
+func admitArtifactGCPodMetadata(gc *wfv1.WorkflowLevelArtifactGC) []error {
+	if gc == nil {
+		return nil
+	}
+	problems := admitPodMetadata("spec.artifactGC.podMetadata", gc.PodMetadata)
+	if strings.TrimSpace(gc.PodSpecPatch) != "" {
+		problems = append(problems, errors.New("argoworkflow: spec.artifactGC.podSpecPatch is not admitted"))
+	}
+	return problems
 }

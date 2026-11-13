@@ -49,6 +49,13 @@ with an enumerated deny-list. Existing validated template controls for workspace
 mounts/env and release WIF remain author-facing configuration, as before this
 change; there is no general author Pod-annotation allow-list.
 Oberth’s own run/trigger/tier labels remain server-assigned.
+The same Pod annotation and label rules apply to `artifactGC.podMetadata`,
+including artifact-GC Pods created for archived logs. Artifact-GC Pod patches
+remain refused. Hooks, exits and inline/default templates pass through the same
+recursive template admission. Opaque granted resource manifests also refuse
+metadata annotations, reserved label keys and nested Pod patches, since an
+operator API can propagate that metadata onto a Pod. Workflow-only metadata and
+PodGC label selectors do not write arbitrary Pod metadata.
 An author label can match selectors in the operator’s own policies in other
 namespaces (for example a NetworkPolicy admitting `role=backend` from any
 namespace); Oberth reserves only the keys its own installed charts select on.
