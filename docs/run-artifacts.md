@@ -75,6 +75,26 @@ but `--argo-workflow-ttl` is a real bound on this feature. A collection that
 misses its window is recorded in the audit chain as
 `ci.argo.artifacts` with `stored: false` and a reason, never dropped silently.
 
+The collector Pod is owned by the Workflow UID from creation, so Kubernetes
+collects it with the Workflow even if the server stops. Pod readiness and the
+archive stream share a two-minute deadline, with up to five more seconds for
+Pod cleanup. Expiry adds "artifact collection deadline exceeded" to the existing
+run reason line and audit evidence, while preserving Argo's verdict. The note
+survives publication and its retries; eviction and execution-deadline guidance
+still classify the original Workflow error.
+
+After a server crash, collection replaces a leftover canonical collector only
+when its owner matches the Workflow UID and it mounts the run's source claim.
+Deletion tests the old Pod UID and resource version, and collection waits for
+its disappearance before one new CREATE. Foreign or changed Pods are left alone.
+This replacement stays inside the same two-minute collection deadline.
+
+Claim adoption after Workflow creation is retried once. A persistent adoption
+failure leaves the live Workflow running; collection refuses an ownerless claim
+and records the ownership failure in the artifact audit. The orphan sweep and
+Workflow garbage collection retain their existing cleanup roles.
+
+
 One gap is known and not yet closed: a run whose in-process state did not
 survive a server restart finishes through a different path that has no claim
 left to collect from. It is recorded, not lost.

@@ -247,9 +247,14 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 
 // adoptClaimBestEffort binds the claim's lifetime to the Workflow's so
 // deleting the Workflow collects the storage. A failure leaves an unowned
-// claim for SweepOrphanedSourceClaims rather than breaking a live run.
+// claim for SweepOrphanedSourceClaims rather than breaking a live run. Retry
+// once so a transient ownership write cannot prevent later artifact collection.
 func (controller *Controller) adoptClaimBestEffort(ctx context.Context, claimName, workflowName, workflowUID string) {
-	_ = controller.seeder.AdoptClaim(ctx, claimName, workflowName, workflowUID)
+	for range 2 {
+		if controller.seeder.AdoptClaim(ctx, claimName, workflowName, workflowUID) == nil {
+			return
+		}
+	}
 }
 
 // verifyServiceAccount checks that a per-repo ServiceAccount exists in the

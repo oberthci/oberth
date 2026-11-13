@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -145,5 +148,31 @@ func TestCollectArtifactsRunsForTheCITrigger(t *testing.T) {
 	}
 	if collector.calls != 1 || store.calls != 1 {
 		t.Fatalf("CI-tier collection did not run (collector=%d store=%d)", collector.calls, store.calls)
+	}
+}
+
+func TestArtifactDeadlineReachesTerminalRunReasonWithoutChangingVerdict(t *testing.T) {
+	for _, succeeded := range []bool{true, false} {
+		completion := argojob.Completion{Name: "wf", Terminal: true, Succeeded: succeeded, Reason: "original workflow failure"}
+		jobs := &ArgoJobs{
+			controller: &configuredController{waitResult: completion},
+			intents:    map[string]argoIntent{"wf": {runID: "run-1", trigger: pipeline.TriggerCI}},
+			collector:  &fakeCollector{err: fmt.Errorf("artifact collection expired: %w", context.DeadlineExceeded)},
+			artifacts:  &fakeArtifactStore{},
+		}
+		result, err := jobs.Wait(context.Background(), "wf", io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := model.RunFailed
+		if succeeded {
+			want = model.RunPassed
+		}
+		if result.Status != want || !strings.HasSuffix(result.Error, model.ArtifactCollectionDeadlineReason) {
+			t.Fatal(result)
+		}
+		if !succeeded && !strings.HasPrefix(result.Error, "original workflow failure\n") {
+			t.Fatal("lost Workflow failure", result)
+		}
 	}
 }

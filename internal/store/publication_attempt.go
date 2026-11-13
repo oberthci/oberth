@@ -51,7 +51,11 @@ func (s *Store) UpdatePublicationAttempt(ctx context.Context, id string, expecte
 		return value, err
 	}
 	if value.RunID != "" {
-		if _, err = tx.ExecContext(ctx, `UPDATE runs SET error=?,updated_at=? WHERE id=? AND status='running' AND phase='publishing'`, message, now, value.RunID); err != nil {
+		runMessage, messageErr := publicationRunMessage(ctx, tx, value.RunID, message)
+		if messageErr != nil {
+			return value, messageErr
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE runs SET error=?,updated_at=? WHERE id=? AND status='running' AND phase='publishing'`, runMessage, now, value.RunID); err != nil {
 			return value, err
 		}
 	}

@@ -131,7 +131,8 @@ func transientNodeFailure(run model.Run) bool {
 	if run.Status != model.RunFailed || run.Phase != "infrastructure" || run.FailedStep != "" {
 		return false
 	}
-	message := strings.TrimPrefix(run.Error, "trusted preflight: trusted preflight infrastructure failure: ")
+	message, _ := model.SplitArtifactCollectionDeadline(run.Error)
+	message = strings.TrimPrefix(message, "trusted preflight: trusted preflight infrastructure failure: ")
 	return message == "Evicted" || strings.HasPrefix(message, "Evicted: ") || model.IsStartupDeadlineReason(message)
 }
 
