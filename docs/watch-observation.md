@@ -102,7 +102,8 @@ file and shared resident pages; see the [process status reference](https://www.k
 ```sh
 kubectl --context "$WATCH_CONTEXT" -n "$WATCH_SERVER_NAMESPACE" \
   exec "$WATCH_SERVER_POD" -c "$WATCH_SERVER_CONTAINER" -- \
-  cat "/proc/$WATCH_SERVER_PID/status" | awk '/^VmRSS:/ {print $2, $3}'
+  cat "/proc/$WATCH_SERVER_PID/status" > watch-server-status.txt
+awk '/^VmRSS:/ {print $2, $3}' watch-server-status.txt
 kubectl --context "$WATCH_CONTEXT" get --raw /metrics > watch-window.prom
 ```
 

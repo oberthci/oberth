@@ -541,44 +541,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 					confirmPending = true
 					break
 				}
-				completeRead := len(settled.Status.Nodes) >= len(workflow.Status.Nodes)
-				if !completeRead {
-					copy := settled.DeepCopy()
-					copy.Status.Nodes = workflow.DeepCopy().Status.Nodes
-					settled = copy
-				}
-				if binding.UID != "" && !binding.matches(settled) {
-					return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
-				}
-				controller.retainWorkflowTiming(ctx, settled)
-				completion := completionFor(settled)
-				completion.ObservationComplete = completion.ObservationComplete && completeRead
-				completion.Steps = reporter.order(completion.Steps)
-				preserveObservedExitCodes(&completion, workflow)
-				preserveRecordedExitCodes(&completion, events)
-				controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
-				if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
-					budgetBreachErr = publishErr
-				}
-				if live != nil {
-					live.drain(settled)
-					live.applyDiagnostics(&completion)
-					if err := live.failure(); err != nil && budgetBreachErr == nil {
-						budgetBreachErr = err
-					}
-				}
-				completion.classifyRestartCut()
-				reporter.finish(budget)
-				if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
-					return completion, fmt.Errorf("retire executor identity: %w", err)
-				}
-				if budgetBreachErr != nil {
-					return completion, budgetBreachErr
-				}
-				if progressErr := reporter.failure(); progressErr != nil {
-					return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
-				}
-				return completion, nil
+				return controller.finishWatchedWorkflow(ctx, workflow, settled, binding, events, reporter, budget, live, budgetBreachErr)
 			}
 			if controller.timings != nil && eventDriven {
 				if !boundTiming {
@@ -614,6 +577,56 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			eventDriven = false
 		}
 	}
+}
+
+func (controller *Controller) finishWatchedWorkflow(
+	ctx context.Context,
+	workflow, settled *wfv1.Workflow,
+	binding Adoption,
+	events []runprogress.Event,
+	reporter *progressReporter,
+	budget *runBudgetWriter,
+	live *stepLogFollowers,
+	budgetBreachErr error,
+) (Completion, error) {
+	completeRead := len(settled.Status.Nodes) >= len(workflow.Status.Nodes)
+	if !completeRead {
+		copy := settled.DeepCopy()
+		copy.Status.Nodes = workflow.DeepCopy().Status.Nodes
+		settled = copy
+	}
+	if binding.UID != "" && !binding.matches(settled) {
+		return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
+	}
+	controller.retainWorkflowTiming(ctx, settled)
+	completion := completionFor(settled)
+	completion.ObservationComplete = completion.ObservationComplete && completeRead
+	completion.Steps = reporter.order(completion.Steps)
+	preserveObservedExitCodes(&completion, workflow)
+	preserveRecordedExitCodes(&completion, events)
+	controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
+	if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
+		budgetBreachErr = publishErr
+	}
+	if live != nil {
+		live.drain(settled)
+		live.applyDiagnostics(&completion)
+		if err := live.failure(); err != nil && budgetBreachErr == nil {
+			budgetBreachErr = err
+		}
+	}
+	completion.classifyRestartCut()
+	reporter.finish(budget)
+	if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
+		return completion, fmt.Errorf("retire executor identity: %w", err)
+	}
+	if budgetBreachErr != nil {
+		return completion, budgetBreachErr
+	}
+	if progressErr := reporter.failure(); progressErr != nil {
+		return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
+	}
+	return completion, nil
 }
 
 // settle re-reads the Workflow once after it reports completion, preferring

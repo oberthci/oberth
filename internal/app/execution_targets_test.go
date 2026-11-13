@@ -664,7 +664,7 @@ func decodeCurrentTargetFixture(body []byte, selection *map[string]any) error {
 	return nil
 }
 
-// This legacy target fixture supplies the same required observation seam as
+// This target fixture supplies the same required observation seam as
 // native wait fixtures. A9 removes the target implementation and this test.
 type terminalTargetWatchSnapshot struct{ workflow *wfv1.Workflow }
 

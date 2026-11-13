@@ -1733,6 +1733,64 @@ func runComponents(
 			return err
 		})
 	}
+	startBackgroundMaintenance(runCtx, &workers, schedulerActivated, options, git, schedules, ciIssues, branchDeletions, accessReconciler, logger)
+	logger.Printf("ready for bootstrap: SSH %s, HTTPS %s", options.sshListen, options.httpsListen)
+
+	var componentErr error
+	select {
+	case <-ctx.Done():
+	case result := <-results:
+		if result.err != nil {
+			componentErr = fmt.Errorf("%s: %w", result.name, result.err)
+		}
+	}
+	if beginDrain != nil {
+		beginDrain()
+	}
+	cancel()
+	_ = sshListener.Close()
+	_ = adminListener.Close()
+	if goProxyListener != nil {
+		_ = goProxyListener.Close()
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
+	shutdownErr := shutdownHTTP(shutdownCtx, httpsServer)
+	adminShutdownErr := shutdownHTTP(shutdownCtx, adminServer)
+	var goProxyShutdownErr error
+	if goProxyServer != nil {
+		goProxyShutdownErr = shutdownHTTP(shutdownCtx, goProxyServer)
+	}
+	workers.Wait()
+	// The scheduler (a background task) can start API background work, an automatic
+	// moved-promotion retry, so the API shuts down after it has stopped.
+	// Shutdown refuses later background starts, cancels queued-promotion
+	// waits and waits, bounded, before the store closes.
+	if apiShutdown != nil {
+		apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if apiErr := apiShutdown(apiCtx); apiErr != nil {
+			logger.Printf("shutdown: %v", apiErr)
+		}
+		apiCancel()
+	}
+	if ctx.Err() != nil {
+		componentErr = nil
+	}
+	return errors.Join(componentErr, shutdownErr, adminShutdownErr, goProxyShutdownErr)
+}
+
+func startBackgroundMaintenance(
+	runCtx context.Context,
+	workers *sync.WaitGroup,
+	schedulerActivated <-chan struct{},
+	options serveOptions,
+	git *gitcache.Cache,
+	schedules *app.Schedules,
+	ciIssues *service.CIIssueReconciler,
+	branchDeletions *service.BranchDeletionPropagator,
+	accessReconciler *service.AccessReconciler,
+	logger *log.Logger,
+) {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
@@ -1785,49 +1843,6 @@ func runComponents(
 			}
 		}()
 	}
-	logger.Printf("ready for bootstrap: SSH %s, HTTPS %s", options.sshListen, options.httpsListen)
-
-	var componentErr error
-	select {
-	case <-ctx.Done():
-	case result := <-results:
-		if result.err != nil {
-			componentErr = fmt.Errorf("%s: %w", result.name, result.err)
-		}
-	}
-	if beginDrain != nil {
-		beginDrain()
-	}
-	cancel()
-	_ = sshListener.Close()
-	_ = adminListener.Close()
-	if goProxyListener != nil {
-		_ = goProxyListener.Close()
-	}
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer shutdownCancel()
-	shutdownErr := shutdownHTTP(shutdownCtx, httpsServer)
-	adminShutdownErr := shutdownHTTP(shutdownCtx, adminServer)
-	var goProxyShutdownErr error
-	if goProxyServer != nil {
-		goProxyShutdownErr = shutdownHTTP(shutdownCtx, goProxyServer)
-	}
-	workers.Wait()
-	// The scheduler (a background task) can start API background work, an automatic
-	// moved-promotion retry, so the API shuts down after it has stopped.
-	// Shutdown refuses later background starts, cancels queued-promotion
-	// waits and waits, bounded, before the store closes.
-	if apiShutdown != nil {
-		apiCtx, apiCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if apiErr := apiShutdown(apiCtx); apiErr != nil {
-			logger.Printf("shutdown: %v", apiErr)
-		}
-		apiCancel()
-	}
-	if ctx.Err() != nil {
-		componentErr = nil
-	}
-	return errors.Join(componentErr, shutdownErr, adminShutdownErr, goProxyShutdownErr)
 }
 
 func waitForAuditIntegrity(ctx context.Context, gate func(context.Context) error) error {
