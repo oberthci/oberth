@@ -21,6 +21,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/argojob"
+	"github.com/oberthci/oberth/internal/argowatch"
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/installer"
@@ -118,6 +119,11 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
+	hub, err := argowatch.New(kube, argoClient, options.argoNamespace, nil)
+	if err != nil {
+		return nil, err
+	}
+	controller.WithWatchHub(hub)
 	if recorder, ok := auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}
@@ -132,6 +138,7 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
+	jobs.SetWatchHub(hub)
 	if artifactStore != nil {
 		jobs.SetArtifacts(seeder, artifactStore, artifactLimit)
 	}

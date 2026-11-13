@@ -60,7 +60,7 @@ func TestPendingSourceSchedulingUsesExactSeedWithoutWorkflow(t *testing.T) {
 			deadline := time.Now().Add(5 * time.Second)
 			for {
 				var err error
-				observation, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+				observation, err = withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -76,7 +76,7 @@ func TestPendingSourceSchedulingUsesExactSeedWithoutWorkflow(t *testing.T) {
 			if !strings.Contains(observation.Message, want) || strings.Contains(observation.Message, "PRIVATE") {
 				t.Fatal("seed waiting reason missing or leaked raw text", observation)
 			}
-			if _, err := controller.ObserveScheduling(t.Context(), "wf", "other-run", "sha"); err == nil {
+			if _, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "other-run", "sha"); err == nil {
 				t.Fatal("foreign run observed seed")
 			}
 			pod, err := client.CoreV1().Pods(config.Namespace).Get(t.Context(), sourceClaimName("wf"), metav1.GetOptions{})
@@ -88,7 +88,7 @@ func TestPendingSourceSchedulingUsesExactSeedWithoutWorkflow(t *testing.T) {
 			if _, err = client.CoreV1().Pods(config.Namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha"); err == nil {
+			if _, err = withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha"); err == nil {
 				t.Fatal("foreign Pod UID observed")
 			}
 			pod.UID = original

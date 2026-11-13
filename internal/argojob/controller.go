@@ -71,6 +71,7 @@ type Controller struct {
 	restartedAt  time.Time
 	timings      TimingRecorder
 	nodeBoots    NodeBootRecorder
+	hub          ObservationHub
 	workflows    WorkflowClient
 	kube         kubernetes.Interface
 	logs         PodLogReader
@@ -123,6 +124,10 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 // that would fail on its first step with an empty working directory.
 func (controller *Controller) WithSourceSeeder(seeder *SourceSeeder) *Controller {
 	controller.seeder = seeder
+	if seeder != nil {
+		seeder.hub = controller.hub
+		seeder.workflows = controller.workflows
+	}
 	return controller
 }
 
@@ -698,6 +703,12 @@ func (controller *Controller) terminalState(ctx context.Context, name, wantedRun
 // The dispatcher uses it to route a name back to its engine after a restart,
 // when no in-process routing table survives.
 func (controller *Controller) Owns(ctx context.Context, name string) (bool, error) {
+	if controller.hub != nil && controller.hub.Healthy() {
+		if workflow, ok := controller.hub.Workflow(name); ok {
+			_, _, owned := WorkflowMeta(workflow)
+			return owned, nil
+		}
+	}
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return false, nil
