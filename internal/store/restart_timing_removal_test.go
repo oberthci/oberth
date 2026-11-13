@@ -19,7 +19,7 @@ func historicalRestartTimingSQL(t *testing.T) string {
 	t.Helper()
 	for _, migration := range legacyMigrations {
 		if migration.version == 44 {
-			return testdb.PostExecutionTargetRemovalDowngrade + testdb.PostFragmentIndexDowngrade + migration.sql
+			return testdb.PostFragmentIndexDowngrade + migration.sql
 		}
 	}
 	t.Fatal("missing frozen v44 migration")
