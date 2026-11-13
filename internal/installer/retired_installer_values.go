@@ -26,7 +26,7 @@ func dropRetiredInstallerValues(values map[string]any, output io.Writer) bool {
 	}
 	transitRemoved := len(removed) > 0
 	argo, _ := values["argo"].(map[string]any)
-	for _, key := range []string{"controllerProfile", "controllerProfileConfigMap"} {
+	for _, key := range []string{"controllerProfile", "controllerProfileConfigMap", "executionPlacementConfigMap", "executionTargetConfigMap", "executionTargetCredentialsSecret"} {
 		if _, exists := argo[key]; exists {
 			delete(argo, key)
 			removed = append(removed, "argo."+key)

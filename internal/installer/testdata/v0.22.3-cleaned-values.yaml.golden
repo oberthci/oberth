@@ -122,9 +122,6 @@ argo:
   executorScratchSizeLimit: 1Gi
   releaseWIF: {}
   releaseTagRoutes: {}
-  executionPlacementConfigMap: ''
-  executionTargetConfigMap: ''
-  executionTargetCredentialsSecret: ''
   namespace: oberth-argo
   podPolicy:
     enabled: true

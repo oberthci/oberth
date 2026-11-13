@@ -67,6 +67,9 @@
     "namespace": "oberth-argo",
     "controllerProfile": "nonroot-static-v1",
     "controllerProfileConfigMap": "",
+    "executionPlacementConfigMap": "retired-placement",
+    "executionTargetConfigMap": "retired-targets",
+    "executionTargetCredentialsSecret": "retired-credentials",
     "vault": {
       "address": "https://openbao.store.svc:8200",
       "credentialedRole": "oberth-release",
