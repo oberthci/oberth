@@ -97,11 +97,14 @@ func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, wor
 	if values == nil {
 		values = make(map[string]any)
 	}
-	values["compatibility"] = map[string]any{
-		"schemaIdentity": compat.SchemaIdentity,
-		"auditDomain":    compat.AuditDomain,
-		"witnessKeyInfo": compat.WitnessKeyInfo,
+	identities, _ := values["compatibility"].(map[string]any)
+	if identities == nil {
+		identities = make(map[string]any)
+		values["compatibility"] = identities
 	}
+	identities["schemaIdentity"] = compat.SchemaIdentity
+	identities["auditDomain"] = compat.AuditDomain
+	identities["witnessKeyInfo"] = compat.WitnessKeyInfo
 	path, err := writeStoredValuesSnapshot(work, values)
 	if err != nil {
 		return nil, err

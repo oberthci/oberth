@@ -2436,7 +2436,9 @@ old chart defaults. Restore overrides only its database compatibility values.
 When retired installer keys are present in stored values or installed defaults,
 install and restore to a chart without Transit instead apply a cleaned snapshot
 of stored USER values with --reset-values. Installed compatibility identities
-are pinned explicitly; other chart defaults never become operator settings.
+are preserved inside the initial stored-user snapshot, below operator files and
+the restore overlay; restored archive identities win. Other chart defaults never
+become operator settings.
 Restore to a chart that still declares secretstore.transit retains its values.
 The v0.22.3 fixture and real Helm tests assert the exact stored user key set and
 cover both target-chart paths.

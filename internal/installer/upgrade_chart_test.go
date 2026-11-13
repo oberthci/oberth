@@ -156,9 +156,9 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	}
 	fixture := historicalHelmUpgrade{cfg: cfg, deps: deps, values: values, config: config, release: release, history: history, chart: chart, image: image}
 	fixture.checkOperatorOverrides(t, applyCfg, compat)
-	fixture.checkInstallRestore(t, compat)
+	fixture.checkInstallRestore(t)
 	fixture.checkHistoricalRestore(t)
-	fixture.checkDefaultTransit(t, compat)
+	fixture.checkDefaultTransit(t)
 	fixture.checkUnknownStoredValues(t)
 
 }
@@ -290,7 +290,7 @@ func (f historicalHelmUpgrade) checkOperatorOverrides(t *testing.T, applyCfg Upg
 
 }
 
-func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCompatibility) {
+func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T) {
 	t.Helper()
 	values := f.values
 	chart, image, deps := f.chart, f.image, f.deps
@@ -379,7 +379,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCo
 
 }
 
-func (f historicalHelmUpgrade) checkDefaultTransit(t *testing.T, compat backupCompatibility) {
+func (f historicalHelmUpgrade) checkDefaultTransit(t *testing.T) {
 	t.Helper()
 	t.Run("transit-only-in-chart-defaults", func(t *testing.T) {
 		store := f.config["secretstore"].(map[string]any)
@@ -393,7 +393,7 @@ func (f historicalHelmUpgrade) checkDefaultTransit(t *testing.T, compat backupCo
 		if err := os.WriteFile(f.history, body, 0600); err != nil {
 			t.Fatal(err)
 		}
-		f.checkInstallRestore(t, compat)
+		f.checkInstallRestore(t)
 	})
 }
 
