@@ -687,8 +687,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		"--set-string", "compatibility.schemaIdentity="+compatibility.SchemaIdentity,
 		"--set-string", "compatibility.auditDomain="+compatibility.AuditDomain,
 		"--set-string", "compatibility.witnessKeyInfo="+compatibility.WitnessKeyInfo,
-		// Keep the existing proxy enablement and mapping from reused values.
-		"--set", "argo.goProxy.port=8444",
 	)
 	args = append(args, cfg.defaultPins...)
 	// User values files come after pins. Pinned-key conflicts have already

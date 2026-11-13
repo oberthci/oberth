@@ -353,10 +353,5 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	for i, name := range PerStepIdentityNames(cfg.PerStepIdentities) {
 		values = append(values, "--set", fmt.Sprintf("argo.perStepIdentities[%d]=%s", i, name))
 	}
-	// Preserve proxy enablement and its administrator-selected namespace in
-	// reused values. Fresh installs leave it disabled until a mapping is supplied.
-	values = append(values,
-		"--set", "argo.goProxy.port=8444",
-	)
 	return values
 }

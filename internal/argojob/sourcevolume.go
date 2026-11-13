@@ -85,12 +85,6 @@ const (
 	binaryFileName = "oberth"
 
 	artifactsSubPath = "artifacts"
-
-	// goProxyCASubPath holds the Go module proxy TLS trust anchor. Unlike
-	// vaultCASubPath this is written for ALL runs (CI and release) because
-	// go mod tidy and go mod download need it in CI pipelines.
-	goProxyCASubPath  = "goproxy-ca"
-	goProxyCACertFile = "ca.crt"
 )
 
 // SourceVolume describes the per-run claim a Workflow's containers mount.
@@ -114,12 +108,6 @@ type SourceVolume struct {
 	// secretstore execution. Neither use fetches a binary
 	// from a registry or requires baking it into a pipeline image.
 	BinarySubPath string
-	// GoProxyCASubPath is the path inside the claim holding the Go module
-	// proxy CA certificate, and is empty unless this run's seeding actually
-	// wrote it. When set, Build mounts it at /etc/ssl/certs/ so Go's cert
-	// directory scan trusts it alongside the system CAs. Unlike VaultCASubPath,
-	// this is set for ALL runs (CI and release) because go mod tidy runs in CI.
-	GoProxyCASubPath string
 }
 
 // SourceSeeder populates a per-run source claim in the pipeline namespace.
@@ -298,9 +286,6 @@ func (seeder *SourceSeeder) fill(
 	if err := seeder.fillVaultCA(ctx, volume, podName, deliverStoreAssets); err != nil {
 		return err
 	}
-	if err := seeder.fillGoProxyCA(ctx, volume, podName); err != nil {
-		return err
-	}
 	if deliverStoreAssets || assistHelper {
 		return seeder.fillServerBinary(ctx, volume, podName)
 	}
@@ -362,37 +347,6 @@ func (seeder *SourceSeeder) fillVaultCA(
 			volume.ClaimName, err, strings.TrimSpace(stderr.String()))
 	}
 	volume.VaultCASubPath = vaultCASubPath
-	return nil
-}
-
-// fillGoProxyCA streams the Go module proxy's TLS trust anchor into the same
-// claim. Unlike fillVaultCA this is for ALL runs (CI and release), because
-// go mod tidy -diff runs in CI pipelines and needs to verify the proxy's
-// certificate.
-//
-// The certificate is public material — the CA that signed the goproxy's
-// TLS certificate. It is mounted into /etc/ssl/certs/ so Go's crypto/x509
-// cert directory scan trusts it alongside the runner image's system CAs.
-func (seeder *SourceSeeder) fillGoProxyCA(
-	ctx context.Context, volume *SourceVolume, podName string,
-) error {
-	pem := seeder.config.GoProxyCACertPEM
-	if strings.TrimSpace(pem) == "" {
-		return nil
-	}
-	target := path.Join(seedMountPath, goProxyCASubPath)
-	file := path.Join(target, goProxyCACertFile)
-	command := []string{"/bin/sh", "-c", fmt.Sprintf(
-		"mkdir -p %s && cat > %s && chmod 0444 %s && [ \"$(wc -c < %s)\" -eq %d ]",
-		target, file, file, file, len(pem))}
-
-	var stdout, stderr strings.Builder
-	if err := seeder.exec(ctx, seeder.config.Namespace, podName, seedContainer, command,
-		strings.NewReader(pem), &stdout, &stderr); err != nil {
-		return fmt.Errorf("argojob: stream the Go module proxy CA into %s: %w: %s",
-			volume.ClaimName, err, strings.TrimSpace(stderr.String()))
-	}
-	volume.GoProxyCASubPath = goProxyCASubPath + "/" + goProxyCACertFile
 	return nil
 }
 

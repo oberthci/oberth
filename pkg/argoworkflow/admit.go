@@ -49,9 +49,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	}
 	var problems []error
 	problems = append(problems, admitMetadata(workflow)...)
-	if _, err := DeclaredGoProxyMirrorOnly(workflow); err != nil {
-		problems = append(problems, err)
-	}
 	problems = append(problems, admitSpec(&workflow.Spec)...)
 	problems = append(problems, admitTemplates(workflow, policy)...)
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {

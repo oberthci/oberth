@@ -30,18 +30,6 @@ would render a pod the server refuses to start, so fail at template time. */}}
 {{- if and .Values.auditAnchor.acceptWitnessGenesis .Values.auditAnchor.acceptWitnessChainReset }}
 {{- fail "auditAnchor.acceptWitnessGenesis and auditAnchor.acceptWitnessChainReset are mutually exclusive" }}
 {{- end }}
-{{- /* Go module proxy guard: an explicitly zero or empty port with enabled=true
-would render a containerPort: 0 and a Service targeting port 0, so fail at
-template time rather than producing a broken deployment (#662). */}}
-{{- $gpGuard := .Values.argo.goProxy | default dict -}}
-{{- if and $gpGuard.enabled (hasKey $gpGuard "port") (not $gpGuard.port) }}
-{{- fail "argo.goProxy.port must be a positive integer when argo.goProxy.enabled is true" }}
-{{- end }}
-{{- if $gpGuard.enabled -}}
-{{- $_ := required "argo.goProxy.modulePrefix is required when enabled" $gpGuard.modulePrefix -}}
-{{- $_ := required "argo.goProxy.upstream is required when enabled" $gpGuard.upstream -}}
-{{- $_ := required "argo.goProxy.organization is required when enabled" $gpGuard.organization -}}
-{{- end -}}
 {{- $compatibility := .Values.compatibility | default dict -}}
 {{- $schemaIdentity := required "compatibility.schemaIdentity must preserve the existing database identity on upgrade" $compatibility.schemaIdentity -}}
 {{- $auditDomain := required "compatibility.auditDomain must preserve the existing audit-chain domain on upgrade" $compatibility.auditDomain -}}
@@ -337,23 +325,6 @@ spec:
             - --argo-vault-ca-cert=/etc/oberth/argo-vault-ca/ca.crt
             {{- end }}
             {{- end }}
-            {{- $goProxy := .Values.argo.goProxy | default dict -}}
-            {{- if $goProxy.enabled }}
-            {{- $goProxyPort := $goProxy.port | default 8444 }}
-            {{- $goProxySvc := printf "%s-goproxy" (include "oberth.fullname" .) }}
-            - --argo-goproxy-listen=:{{ $goProxyPort }}
-            - --argo-goproxy-cert=/run/oberth-identities/server/tls.crt
-            - --argo-goproxy-key=/run/oberth-identities/server/tls.key
-            - --argo-goproxy-ca=/run/oberth-identities/server/tls.crt
-            - --argo-goproxy-url=https://{{ $goProxySvc }}.{{ .Release.Namespace }}.svc:{{ $goProxyPort }}
-            - --argo-goproxy-module-prefix={{ $goProxy.modulePrefix }}
-            - --argo-goproxy-repository-prefix={{ $goProxy.repositoryPrefix | default "" }}
-            - --argo-goproxy-upstream={{ $goProxy.upstream }}
-            - --argo-goproxy-organization={{ $goProxy.organization }}
-            {{- if $goProxy.allowNonDefaultBranchPseudoVersions }}
-            - --argo-goproxy-pseudo-non-default-branches=true
-            {{- end }}
-            {{- end }}
             {{- $promotion := .Values.promotion | default dict -}}
             {{- $grantMaxLifetime := $promotion.grantMaxLifetime | default "24h" -}}
             {{- if $grantMaxLifetime }}
@@ -399,11 +370,6 @@ spec:
               containerPort: 2222
             - name: https
               containerPort: 8443
-            {{- $goProxyCfg := .Values.argo.goProxy | default dict -}}
-            {{- if $goProxyCfg.enabled }}
-            - name: goproxy
-              containerPort: {{ $goProxyCfg.port | default 8444 }}
-            {{- end }}
           readinessProbe:
             httpGet:
               scheme: HTTPS

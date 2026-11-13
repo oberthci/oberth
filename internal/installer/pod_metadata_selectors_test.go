@@ -34,7 +34,7 @@ func TestInstalledSelectorsCannotBeAcquiredWithAuthorPodMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	renders := [][]string{
-		{"template", "oberth", "../../charts/oberth", "--set", "argo.goProxy.enabled=true", "--set", "argo.goProxy.upstream=forge", "--set", "argo.goProxy.modulePrefix=go.example.test", "--set", "argo.goProxy.organization=example", "--set", "metrics.serviceMonitor.enabled=true", "--set", "metrics.serviceMonitor.bearerTokenSecretName=metrics-token", "--set", "metrics.serviceMonitor.bearerTokenSecretKey=token", "--set", "metrics.serviceMonitor.caConfigMapName=metrics-ca", "--set", "metrics.serviceMonitor.caConfigMapKey=ca.crt"},
+		{"template", "oberth", "../../charts/oberth", "--set", "metrics.serviceMonitor.enabled=true", "--set", "metrics.serviceMonitor.bearerTokenSecretName=metrics-token", "--set", "metrics.serviceMonitor.bearerTokenSecretKey=token", "--set", "metrics.serviceMonitor.caConfigMapName=metrics-ca", "--set", "metrics.serviceMonitor.caConfigMapKey=ca.crt"},
 		{"template", "argo-workflows", "testdata/argo-workflows-1.0.24.tgz", "--set", "crds.install=false", "--set", "controller.metricsConfig.enabled=true", "--set", "controller.metricsConfig.serviceMonitor.enabled=true", "--set", "controller.pdb.enabled=true"},
 		{"template", "openbao", "testdata/openbao-0.28.6.tgz", "--set", "server.networkPolicy.enabled=true", "--set", "serverTelemetry.serviceMonitor.enabled=true"},
 		{"template", "openbao", "testdata/openbao-0.28.6.tgz", "--set", "server.ha.enabled=true", "--set", "injector.enabled=true", "--set", "injector.networkPolicy.enabled=true", "--set", "serverTelemetry.serviceMonitor.enabled=true"},
@@ -57,7 +57,7 @@ func TestInstalledSelectorsCannotBeAcquiredWithAuthorPodMetadata(t *testing.T) {
 			auditPodMetadataSelectors(t, object, keys)
 		}
 	}
-	for _, key := range []string{"app.kubernetes.io/name", "app.kubernetes.io/instance", "app.kubernetes.io/component", "component", "openbao-active", "openbao-internal", "kubernetes.io/metadata.name", "oberth.ci/trigger"} {
+	for _, key := range []string{"app.kubernetes.io/name", "app.kubernetes.io/instance", "app.kubernetes.io/component", "component", "openbao-active", "openbao-internal", "kubernetes.io/metadata.name"} {
 		if !keys[key] {
 			t.Errorf("selector audit did not exercise %s", key)
 		}

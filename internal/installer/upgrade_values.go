@@ -128,7 +128,8 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 		return preparedUpgradeValues{}, err
 	}
 	var storedSnapshot map[string]any
-	if dropRetiredInstallerValues(values, deps.Output) {
+	droppedProxy := dropStoredGoProxy(values, deps.Output)
+	if dropRetiredInstallerValues(values, deps.Output) || droppedProxy {
 		storedSnapshot = values
 	}
 	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
@@ -204,7 +205,8 @@ func prepareUpgradeDryRunValues(ctx context.Context, cfg *UpgradeConfig, deps De
 	if err != nil {
 		return err
 	}
-	if dropRetiredInstallerValues(values, deps.Output) {
+	droppedProxy := dropStoredGoProxy(values, deps.Output)
+	if dropRetiredInstallerValues(values, deps.Output) || droppedProxy {
 		cfg.storedValuesFile = "<cleaned-stored-values>"
 	}
 	if err := checkUpgradePKIKeyConflicts(*cfg, values); err != nil {
