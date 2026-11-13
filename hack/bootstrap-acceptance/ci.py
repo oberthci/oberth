@@ -50,37 +50,15 @@ def assert_no_mutations(requests):
         raise Refused('plan attempted to mutate the API fixture', check='api-mutation')
 
 
-def assert_restricted_probe_requests(requests):
-    # The read-only fixture rejects this one expected live-probe attempt before
-    # reading its body. Every other attempted mutation remains an error.
-    if any(method != 'GET' and (method, path) != ('POST', '/api/v1/namespaces')
-           for method, path in requests):
-        raise Refused('unexpected API mutation attempt', check='api-mutation')
-
-
-def require_maintenance_policy(result):
+def require_deferred_policy(result, policy):
     checks = [check for check in result.get('checks', [])
               if check.get('code') == 'network_policy']
-    if (result.get('review', {}).get('network_policy') != 'true' or len(checks) != 1
+    if (result.get('review', {}).get('network_policy') != policy or len(checks) != 1
             or checks[0].get('ok') is not False or checks[0].get('warning') is not True
-            or checks[0].get('reason') != 'unverified'):
-        raise Refused('restricted maintenance policy was misrepresented',
-                      check='maintenance-policy')
-
-
-def require_fresh_policy_refusal(probe, args):
-    try:
-        verify_plan(probe, 'plan-fresh-policy-refusal',
-                    args + ['--context', 'selected', '--plan', '--json'], 'selected')
-    except Refused as error:
-        if error.check != 'network_policy':
-            raise
-        if (error.stage != 'plan-fresh-policy-refusal' or error.package != CLI_PACKAGE
-                or probe.last_returncode != 1):
-            raise Refused('fresh policy failure was not identified',
-                          check='fresh-policy-diagnostic') from None
-    else:
-        raise Refused('unverified fresh policy was accepted', check='fresh-policy-refusal')
+            or checks[0].get('reason') != 'unverified'
+            or 'first at install, after approval' not in checks[0].get('remedy', '')
+            or checks[0].get('evidence')):
+        raise Refused('plan did not defer enforcement honestly', check='deferred-policy')
 
 
 def json_result(raw, check):
@@ -168,8 +146,8 @@ shift 2
 [ "$*" = "get --raw /api/v1/nodes/$context-node/proxy/stats/summary" ]
 cat "$(dirname "$0")/node-stats.json"
 ''')
-        # This models a readable existing release on a cluster that refuses
-        # scratch writes. A fresh install must still fail the actual live probe.
+        # Both fresh and maintenance plans must succeed using reads alone.
+        # The loopback API refuses every attempted mutation before its body.
         (tools / 'release-state').write_text('existing')
         (tools / 'helm').write_text("#!/usr/bin/python3\nimport json\nfrom pathlib import Path\nimport sys\nargs = sys.argv[1:]\nflags = {}\nfor key in ('--kubeconfig', '--kube-context'):\n    if args.count(key) != 1:\n        sys.exit(98)\n    index = args.index(key)\n    if index + 1 == len(args):\n        sys.exit(98)\n    flags[key] = args[index + 1]\n    del args[index:index + 2]\nif flags['--kube-context'] not in ('selected', 'other') or not Path(flags['--kubeconfig']).is_file():\n    sys.exit(98)\nexisting = Path(__file__).with_name('release-state').read_text() == 'existing'\nif args == ['list', '-n', 'oberth', '-o', 'json', '--deployed', '--failed', '--pending', '--superseded', '--uninstalling', '--uninstalled']:\n    print(json.dumps([{'name': 'oberth', 'namespace': 'oberth', 'status': 'deployed', 'chart': 'oberth-0.21.10'}] if existing else []))\nelif existing and args == ['get', 'values', 'oberth', '-n', 'oberth', '--all', '-o', 'json']:\n    print(json.dumps({'networkPolicy': {'enabled': True}}))\nelse:\n    sys.exit(99)\n")
         for tool in tools.iterdir():
@@ -190,11 +168,9 @@ cat "$(dirname "$0")/node-stats.json"
                 raise Refused('plan did not retain the selected API identity', check='api-identity')
             if len(requests[context]) <= counts[context] or any(len(items) != counts[name] for name, items in requests.items() if name != context):
                 raise Refused('plan contacted the wrong context endpoint', check='context-endpoint')
-            require_maintenance_policy(result)
+            require_deferred_policy(result, 'true')
             observed = requests[context][counts[context]:]
-            if observed.count(('POST', '/api/v1/namespaces')) != 1:
-                raise Refused('live probe did not reach scratch permission check', check='probe-attempt')
-            assert_restricted_probe_requests(observed)
+            assert_no_mutations(observed)
         # Exercise the production CLI's nonzero failed-plan path, not only a
         # synthetic result dictionary. Its hard disk check must survive capture.
         stats.write_text('{"node":{"fs":{"availableBytes":0}}}')
@@ -205,9 +181,12 @@ cat "$(dirname "$0")/node-stats.json"
         (tools / 'release-state').write_text('fresh')
         before = len(requests['selected'])
         try:
-            require_fresh_policy_refusal(probe, args)
-            if requests['selected'][before:].count(('POST', '/api/v1/namespaces')) != 1:
-                raise Refused('fresh plan skipped the live probe', check='fresh-probe-attempt')
+            result = verify_plan(probe, 'plan-fresh',
+                                 args + ['--context', 'selected', '--plan', '--json'], 'selected')
+            require_deferred_policy(result, 'true')
+            if len(requests['selected']) <= before:
+                raise Refused('fresh plan did not inspect the cluster', check='fresh-reads')
+            assert_no_mutations(requests['selected'][before:])
         finally:
             (tools / 'release-state').write_text('existing')
         for name, extra in [('missing-context', ['--context', 'missing']), ('ambiguous-context', [])]:
@@ -218,7 +197,7 @@ cat "$(dirname "$0")/node-stats.json"
             if json_result(raw, 'context-refusal-json').get('ok') is not False or counts != {name: len(items) for name, items in requests.items()}:
                 raise Refused('invalid context was accepted or contacted an API', check='context-refusal')
         for items in requests.values():
-            assert_restricted_probe_requests(items)
+            assert_no_mutations(items)
         if config.read_bytes() != original:
             raise Refused('plan rewrote fixture kubeconfig', check='kubeconfig-preserved')
 

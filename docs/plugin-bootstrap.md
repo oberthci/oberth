@@ -35,6 +35,12 @@ install without an explicit nonempty `--secrets-file`. Other shell operations in
 Code's normal permission checks. The Review confirmation remains the
 explicit gate for installing into the context the user chose.
 
+Install planning only reads the selected cluster. Review explains that the live
+NetworkPolicy enforcement check runs first after approval, before release
+changes. It creates and cleans up temporary probe Pods and their scratch namespace; fresh installs
+refuse absent or unverified enforcement. A successful plan does not establish
+network isolation, and install always measures enforcement.
+
 ## Release verification
 
 The release pipeline packages the chart before signing `SHA256SUMS`.
@@ -145,7 +151,7 @@ reinstalled. Linux retains the installation links.
 
 ### Live NetworkPolicy enforcement check
 
-Plan, install preflight and verification use a bounded traffic measurement on
+Install preflight (after approval) and verification use a bounded traffic measurement on
 the operator's cluster against Oberth's own server Pod. They do not identify CNI
 brands or try to defend against a hostile server. A server and two differently
 labelled sources per Ready, schedulable, untainted node run in an owned scratch
@@ -206,11 +212,14 @@ finds ownership-labelled leftovers and removes only an expired object with the
 same listed UID, rechecking its expiry and binding deletion to UID/resource
 version. Replacements, renewed lifetimes and missing/malformed expiry metadata
 are preserved and reported as unverified. Recent or active probes stay until expiry. Foreign ownership
-is reported and left untouched. Disclose these scratch writes before plan;
-Review remains the approval for installing the release.
+is reported and left untouched. Plan makes no cluster mutations and reports
+enforcement as unverified. Disclose these scratch writes in Review; the
+enforcement check is the first cluster mutation after approval, before release
+changes. No measurement receipt is written or reused.
 
 Capability is separate from configuration. Plan/install discover the existing
-release and stored values before probing. Existing-release maintenance preserves
+release and stored values before applying. Plan only reads those values; install
+then runs a fresh probe before release changes. Existing-release maintenance preserves
 that choice and needs no new scratch-probe privileges: an unverified observation
 remains unverified, shown as information, and does not block maintenance. Review
 shows true, false or unspecified (preserved), with disabled/unknown warnings.

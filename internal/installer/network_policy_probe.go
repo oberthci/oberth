@@ -43,7 +43,7 @@ func probeNetworkPolicy(ctx context.Context, cfg Config, deps Deps, timing polic
 func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming, random io.Reader) (result NetworkPolicyProbeResult) {
 	result.Status = "unverified"
 	phase := "preparation"
-	remedy := "Allow namespaces create/get/list/delete, Pods create/get, pods/exec get/create and NetworkPolicies create/delete; ensure the pinned utility image can be pulled. Repeat plan after repairing the reported phase."
+	remedy := "Allow namespaces create/get/list/delete, Pods create/get, pods/exec get/create and NetworkPolicies create/delete; ensure the pinned utility image can be pulled. Retry install or verification after repairing the reported phase."
 	started := time.Now()
 	defer func() {
 		elapsed := time.Since(started).Round(time.Millisecond)
@@ -100,7 +100,7 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 		defer stop()
 		if err := cleanupObservedPolicyProbe(cleanupCtx, deps, namespace, token, createdUID, false, timing.interval); err != nil {
 			result.Status = "unverified"
-			result.Remedy += " Cleanup is unverified; inspect ownership and remove only scratch namespace " + namespace + " in context " + deps.ContextName + ", then repeat plan."
+			result.Remedy += " Cleanup is unverified; inspect ownership and remove only scratch namespace " + namespace + " in context " + deps.ContextName + ", then retry install or verification."
 		}
 	}()
 	phase = "scratch namespace creation"
