@@ -753,12 +753,12 @@ func TestWorkKeyImportWaitsForAuditGate(t *testing.T) {
 		}
 		return nil, refusal
 	}})
-	if err := applyProvidedDeployKey(t.Context(), Config{}, deps, key); !errors.Is(err, refusal) || calls != 1 {
+	if err := applyProvidedDeployKey(t.Context(), Config{ForgeURL: "ssh://git@forge.example.test/acme"}, deps, key); !errors.Is(err, refusal) || calls != 1 {
 		t.Fatalf("mutation refusal must not retry: %v attempts=%d", err, calls)
 	}
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) { calls++; return nil, nil }
 	refreshFixtureAdmin(&deps)
-	if err := applyProvidedDeployKey(t.Context(), Config{}, deps, key); err != nil || calls != 2 {
+	if err := applyProvidedDeployKey(t.Context(), Config{ForgeURL: "ssh://git@forge.example.test/acme"}, deps, key); err != nil || calls != 2 {
 		t.Fatal("explicit retry failed", err, calls)
 	}
 }

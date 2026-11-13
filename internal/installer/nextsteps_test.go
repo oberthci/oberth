@@ -113,7 +113,7 @@ func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 		"git clone git@oberth:github/oberthci/<repo>.git",
 		"Finish codeberg (codeberg.org/exampleorg)",
 		"oberth upstream add --yes codeberg ssh://git@codeberg.org/exampleorg",
-		"oberth upstream add --yes github ssh://git@github.com/<org>",
+		"oberth upstream add --yes github 'ssh://git@github.com/<org>'",
 		"oberth uplink invite you@laptop --out invitation.json",
 		"OBERTH_BASE_URL=https://192.0.2.5:30443",
 		"oberth runs --ref my-branch",

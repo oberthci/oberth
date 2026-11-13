@@ -2751,7 +2751,7 @@ func TestFinishInstallInteractiveOnboarding(t *testing.T) {
 		t.Fatalf("uplink add must receive the public key on stdin, got %q", host.uplinkStdin)
 	}
 	joinedUplink := strings.Join(host.uplinkArgv, " ")
-	if !strings.Contains(joinedUplink, "oberth uplink add - tester@box") || !strings.Contains(joinedUplink, "exec -i") {
+	if !strings.Contains(joinedUplink, "oberth uplink add --admin - tester@box") || !strings.Contains(joinedUplink, "exec -i") {
 		t.Fatalf("uplink argv wrong: %s", joinedUplink)
 	}
 

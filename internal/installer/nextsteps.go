@@ -94,7 +94,7 @@ func NextSteps(in NextStepsInput) []string {
 	}
 	for _, u := range pending {
 		add("", "Finish "+u.Name+" ("+hostnameFromURL(u.BaseURL)+"/"+orgFromBaseURL(u.BaseURL)+"): add the upstream public key to that account, then:",
-			"   "+command("upstream", "add", "--yes", "--no-wait", u.Name, u.BaseURL))
+			"   "+command("upstream", "add", "--yes", u.Name, u.BaseURL))
 	}
 
 	other, otherURL := "codeberg", "ssh://git@codeberg.org/<org>"

@@ -22,10 +22,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 )
 
 // fakeClaude stands in for the claude CLI's plugin commands: list, install,
@@ -660,9 +656,11 @@ func TestInstallConfiguresClaudeCodeThroughClientSetup(t *testing.T) {
 	deps, out, home := clientAccessDeps(t, "m\n")
 	claude := &fakeClaude{t: t}
 	authority := testCAPEM(t)
-	deps.KubeClient = fake.NewSimpleClientset(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"},
-		Data:       map[string][]byte{"tls.crt": authority},
+	deps.Admin = idleAdminFunc(func(_ context.Context, action string, args, into any) error {
+		if action != "public-identity" {
+			t.Fatal(action)
+		}
+		return fixtureDecode(map[string]string{"content": string(authority)}, into)
 	})
 	deps.LookPath = claude.deps().LookPath
 	deps.RunCommand = claude.run

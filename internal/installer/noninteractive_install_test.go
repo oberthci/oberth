@@ -247,7 +247,7 @@ func TestNonInteractiveOnboardingFromFlags(t *testing.T) {
 	if len(host.addArgv) == 0 || !slices.Contains(host.addArgv[0], "--expected-host-fingerprint") || !slices.Contains(host.addArgv[0], cfg.ExpectedHostFingerprint) {
 		t.Fatalf("upstream add argv %q", host.addArgv)
 	}
-	if !strings.Contains(strings.Join(host.uplinkArgv, " "), "uplink add - ") {
+	if !strings.Contains(strings.Join(host.uplinkArgv, " "), "uplink add --admin - ") {
 		t.Fatalf("uplink argv %q", host.uplinkArgv)
 	}
 	generated := filepath.Join(home, ".ssh", generatedUplinkKeyName)
@@ -260,12 +260,11 @@ func TestNonInteractiveOnboardingFromFlags(t *testing.T) {
 	if !slices.Contains(delivered, "Bearer token") || strings.Contains(buf.String(), testOnceCredential) {
 		t.Fatalf("token delivery %v; output:\n%s", delivered, buf.String())
 	}
-	// The command printed for later names the install's kubeconfig and
-	// context: it must not reach whatever the current context is by then.
+	// The printed API command carries the same host pin and upstream target.
 	if deps.ContextName == "" {
 		t.Fatal("the fixture names no context")
 	}
-	want := "kubectl --kubeconfig '/srv/kube/lab config' exec --context " + deps.ContextName + " -c oberth -n oberth deploy/oberth -- /usr/local/bin/oberth upstream add --yes --expected-host-fingerprint " + cfg.ExpectedHostFingerprint
+	want := "oberth upstream add --yes --expected-host-fingerprint " + cfg.ExpectedHostFingerprint
 	if !strings.Contains(buf.String(), want) {
 		t.Fatalf("the printed upstream add lacks the install's target (%s):\n%s", want, buf.String())
 	}
