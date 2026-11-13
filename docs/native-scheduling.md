@@ -448,3 +448,10 @@ of the granted kind, including directly named `podAnnotations`/`podLabels`-style
 maps (field names ending in `Annotations` or `Labels`, case-insensitively). Operator APIs remain opaque: a controller that synthesizes
 Pod metadata from differently named scalar fields or transforms arbitrary data
 still requires operator review when granting that API.
+
+Block PVCs use ordinary Kubernetes fields: a container may declare
+`volumeDevices` backed by a per-Workflow `volumeClaimTemplates` entry with
+`volumeMode: Block`. Admission preserves the device path and claim mode.
+This does not grant host device access or permission to mount an existing PVC;
+those volume sources remain refused. Device paths follow the same absolute-path
+and reserved-helper-path rules as volume mounts.
