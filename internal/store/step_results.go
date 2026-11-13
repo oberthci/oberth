@@ -23,11 +23,52 @@ const stepAdmissionSourceSQL = ` FROM audit_actions a JOIN runs r ON r.id=a.reso
  AND json_extract(a.details,'$.engine')='argo'
  AND json_extract(a.details,'$.workflow')=r.job_name`
 
-const stepAdmissionSQL = stepAdmissionSourceSQL + `
- AND json_extract(e.value,'$.template')=?
- AND json_type(e.value,'$.credentialed') IN ('true','false')
- AND json_type(e.value,'$.grants')='array'
- ORDER BY CASE WHEN json_type(e.value,'$.known')='true' THEN 1 ELSE 0 END, json_extract(e.value,'$.credentialed') DESC,a.id ASC LIMIT 1`
+type stepAdmission struct {
+	templates map[string]stepAdmissionTemplate
+	complete  bool
+}
+
+type stepAdmissionTemplate struct {
+	credentialed sql.NullBool
+	grants       sql.NullString
+}
+
+// Read the run's receipts once per snapshot, never once per native node.
+// Unknown classifications sort first, then positive credential evidence;
+// graph completeness includes every receipt, including malformed entries.
+func (s *Store) stepAdmission(ctx context.Context, runID string) (stepAdmission, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT
+ json_extract(e.value,'$.template'),
+ CASE WHEN json_type(e.value,'$.known')='true' THEN json_extract(e.value,'$.credentialed') END,
+ json_extract(e.value,'$.grants'),
+ json_type(e.value,'$.credentialed') IN ('true','false') AND json_type(e.value,'$.grants')='array',
+ CASE WHEN json_type(e.value,'$.complete')='true' THEN 1 ELSE 0 END`+stepAdmissionSourceSQL+`
+ ORDER BY CASE WHEN json_type(e.value,'$.known')='true' THEN 1 ELSE 0 END, json_extract(e.value,'$.credentialed') DESC,a.id ASC`, runID)
+	if err != nil {
+		return stepAdmission{}, fmt.Errorf("read step admission: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	result := stepAdmission{templates: map[string]stepAdmissionTemplate{}, complete: true}
+	seen := false
+	for rows.Next() {
+		var template sql.NullString
+		var fact stepAdmissionTemplate
+		var valid sql.NullBool
+		var complete bool
+		if err := rows.Scan(&template, &fact.credentialed, &fact.grants, &valid, &complete); err != nil {
+			return stepAdmission{}, err
+		}
+		seen = true
+		result.complete = result.complete && complete
+		if template.Valid && valid.Valid && valid.Bool {
+			if _, exists := result.templates[template.String]; !exists {
+				result.templates[template.String] = fact
+			}
+		}
+	}
+	result.complete = result.complete && seen
+	return result, rows.Err()
+}
 
 func validateStepResult(result model.StepResult) error {
 	field := ""
@@ -51,7 +92,11 @@ func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (mod
 	if err := validateStepResult(result); err != nil {
 		return model.StepResult{}, err
 	}
-	return s.putStepResult(ctx, s.db, result)
+	admission, err := s.stepAdmission(ctx, result.RunID)
+	if err != nil {
+		return model.StepResult{}, err
+	}
+	return s.putStepResult(ctx, s.db, result, admission)
 }
 
 // PutStepResults has no node-count ceiling. Each transaction writes at most
@@ -66,22 +111,23 @@ func (s *Store) PutStepResults(ctx context.Context, runID string, results []mode
 			return err
 		}
 	}
-	if len(results) == 1 {
-		result := results[0]
-		result.RunID = runID
-		_, err := s.PutStepResult(ctx, result)
+	if len(results) == 0 {
+		return nil
+	}
+	admission, err := s.stepAdmission(ctx, runID)
+	if err != nil {
 		return err
 	}
 	const batchSize = 128
 	for start := 0; start < len(results); start += batchSize {
-		if err := s.putStepBatch(ctx, runID, results[start:min(start+batchSize, len(results))]); err != nil {
+		if err := s.putStepBatch(ctx, runID, results[start:min(start+batchSize, len(results))], admission); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Store) putStepBatch(ctx context.Context, runID string, results []model.StepResult) error {
+func (s *Store) putStepBatch(ctx context.Context, runID string, results []model.StepResult, admission stepAdmission) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin step snapshot batch: %w", err)
@@ -89,7 +135,7 @@ func (s *Store) putStepBatch(ctx context.Context, runID string, results []model.
 	defer func() { _ = tx.Rollback() }()
 	for _, result := range results {
 		result.RunID = runID
-		if _, err := s.putStepResult(ctx, tx, result); err != nil {
+		if _, err := s.putStepResult(ctx, tx, result, admission); err != nil {
 			return err
 		}
 	}
@@ -101,16 +147,13 @@ func (s *Store) putStepBatch(ctx context.Context, runID string, results []model.
 
 func (s *Store) putStepResult(ctx context.Context, database interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, result model.StepResult) (model.StepResult, error) {
-	credentialTemplate := ""
+}, result model.StepResult, admission stepAdmission) (model.StepResult, error) {
+	var fact stepAdmissionTemplate
 	if result.LocalTemplate {
-		credentialTemplate = result.Template
+		fact = admission.templates[result.Template]
 	}
 	row := database.QueryRowContext(ctx, `INSERT INTO step_results (`+stepResultColumns+`)
-SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
- (SELECT CASE WHEN json_type(e.value,'$.known')='true' THEN json_extract(e.value,'$.credentialed') ELSE NULL END`+stepAdmissionSQL+`),
- (SELECT json_extract(e.value,'$.grants')`+stepAdmissionSQL+`),
- (SELECT COALESCE(MIN(CASE WHEN json_type(e.value,'$.complete')='true' THEN 1 ELSE 0 END),0)`+stepAdmissionSourceSQL+`)
+SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 WHERE EXISTS (SELECT 1 FROM runs WHERE id=? AND status IN ('queued','running'))
 ON CONFLICT(run_id,node_id) DO UPDATE SET
  display_name=excluded.display_name,template=excluded.template,node_type=excluded.node_type,
@@ -124,7 +167,7 @@ ON CONFLICT(run_id,node_id) DO UPDATE SET
 RETURNING `+stepResultColumns,
 		result.RunID, result.NodeID, result.DisplayName, result.Template, result.NodeType, result.BoundaryID, result.Phase, result.Message, result.PodName,
 		result.Stage, result.Step, result.Ordinal, result.Status, result.ExitCode,
-		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), unixNano(s.now()), stepDiagnosticJSON(result.Termination, result.RunID), result.RunID, credentialTemplate, result.RunID, credentialTemplate, result.RunID, result.RunID)
+		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), unixNano(s.now()), stepDiagnosticJSON(result.Termination, result.RunID), fact.credentialed, fact.grants, admission.complete, result.RunID)
 	value, err := scanStepResult(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.StepResult{}, fmt.Errorf("%w: terminal or missing run cannot accept step evidence", ErrInvalidState)
