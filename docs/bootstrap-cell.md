@@ -1,19 +1,28 @@
 # Bootstrap acceptance
 
-Branch and release CI now block on the deterministic bootstrap contract cell in
-an ordinary rest-test Pod. It verifies signed fetch behavior, the source CLI's
-JSON plan and context selection against local TLS/API fixtures, answers/recovery
-validation, pinned connect and CA/settings merge, certificate/invite/add-repo
-contracts, and scanning of all captured output. It uses no cluster or VM.
+Bootstrap acceptance has two parts: the automated contract cell in branch and
+release CI, and the [manual fresh-machine procedure](fresh-machine-acceptance.md)
+run on each release candidate before tagging. Record the candidate identity and
+manual report alongside the CI result before accepting the candidate.
 
-The separate fresh-machine entry point installs pinned, verified k3s and Helm,
-uses the current certificate-based plugin install/connect path, exercises a held
-run in a local disposable Git forge, and performs reboot/unseal verification.
-It is intentionally outside CI until a runner can provision a fresh VM and
-return authenticated results across reboot. Its VM path has fixture/contract
-coverage but has not been qualified on a live fresh machine.
+The deterministic contract cell blocks in an ordinary rest-test Pod. It verifies
+signed fetch behavior, the source CLI's JSON plan and context selection against
+local TLS/API fixtures, answers/recovery validation, pinned connect and
+CA/settings merge, certificate/invite/add-repo contracts, and captured-output
+secret scanning. It uses no cluster or VM. See the
+[cell instructions](../hack/bootstrap-acceptance/README.md) for commands and
+output custody.
 
-See [the cell instructions](../hack/bootstrap-acceptance/README.md) for exact
-commands, provisional host resources, tool pins, output custody and the remaining
-runner contract. A green deterministic cell must not be described as successful
-end-to-end zero-to-Oberth acceptance.
+The manual procedure starts from a fresh macOS or Linux machine with a working
+local `~/.kube/config` pointing at any suitable Kubernetes cluster. The operator
+supplies the cluster and dependencies. It exercises plugin installation,
+install/connect over mTLS, a smoke run, a held-run patch/continue round trip,
+reboot/unseal recovery, kubeconfig integrity and install re-run, then scans
+captured output for secrets before reporting. A macOS VM with colima k3s is one
+example; a Linux host and a remote cluster follow the same procedure.
+
+The unused root/systemd fresh-machine harness has been removed in favor of this
+manual release check. No disposable runner or additional CI infrastructure is
+required. A green deterministic cell is evidence for its contracts; successful
+fresh-machine acceptance also requires the completed manual report for that
+candidate.

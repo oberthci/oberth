@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private capture, strict verification and selected-CA mTLS for both cells."""
+"""Private capture, strict verification and selected-CA mTLS for the contract cell."""
 import base64
 import json
 import os
