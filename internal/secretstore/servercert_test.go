@@ -8,6 +8,8 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,5 +70,70 @@ func TestConstrainedServerCertificateAnchorsOnlyItsOwnNames(t *testing.T) {
 		if _, err := parsed.Verify(x509.VerifyOptions{DNSName: host, Roots: roots}); err == nil {
 			t.Errorf("a certificate for %s signed by the server key must be rejected", host)
 		}
+	}
+}
+
+func TestConstrainedServerCertificateExactIPRanges(t *testing.T) {
+	for _, addresses := range [][]string{nil, {"192.0.2.193"}, {"2001:db8::193"}, {"127.0.0.1", "::1"}} {
+		t.Run(strings.Join(addresses, ","), func(t *testing.T) {
+			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			template := &x509.Certificate{
+				SerialNumber: big.NewInt(1), DNSNames: []string{"oberth", "localhost"},
+				NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour),
+			}
+			for _, address := range addresses {
+				template.IPAddresses = append(template.IPAddresses, net.ParseIP(address))
+			}
+			ConstrainSelfSignedServerCertificate(template)
+			der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ca, err := x509.ParseCertificate(der)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ca.PermittedDNSDomainsCritical || !slices.Equal(ca.PermittedDNSDomains, template.DNSNames) || len(ca.PermittedIPRanges) != len(addresses) {
+				t.Fatalf("constraints do not match SANs: DNS=%v IP=%v", ca.PermittedDNSDomains, ca.PermittedIPRanges)
+			}
+			for index, address := range addresses {
+				range_ := ca.PermittedIPRanges[index]
+				bits := 128
+				if net.ParseIP(address).To4() != nil {
+					bits = 32
+				}
+				ones, size := range_.Mask.Size()
+				if !range_.IP.Equal(net.ParseIP(address)) || ones != bits || size != bits {
+					t.Fatalf("IP constraint %v does not cover exactly %s", range_, address)
+				}
+			}
+			roots := x509.NewCertPool()
+			roots.AddCert(ca)
+			// Exercise constraints on signed leaves, not just SAN matching on
+			// the directly pinned anchor. DNS-only issuance stays unchanged.
+			for _, host := range append([]string{"oberth", "outside.example"}, addresses...) {
+				leaf := &x509.Certificate{SerialNumber: big.NewInt(2), NotBefore: template.NotBefore, NotAfter: template.NotAfter, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+				if ip := net.ParseIP(host); ip != nil {
+					leaf.IPAddresses = []net.IP{ip}
+				} else {
+					leaf.DNSNames = []string{host}
+				}
+				der, err := x509.CreateCertificate(rand.Reader, leaf, ca, &key.PublicKey, key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parsed, err := x509.ParseCertificate(der)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = parsed.Verify(x509.VerifyOptions{Roots: roots, DNSName: host})
+				if (err == nil) != (host != "outside.example") {
+					t.Fatalf("leaf %s verification = %v", host, err)
+				}
+			}
+		})
 	}
 }
