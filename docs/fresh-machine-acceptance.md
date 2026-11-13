@@ -117,11 +117,22 @@ check leaves fresh-machine acceptance incomplete for that candidate.
    and push through the server-bound Oberth remote. Record the pushed SHA,
    run ID, whether the run passed and how Claude reported it. Inspect the step
    Pod with `kubectl --context '<context>' -n '<namespace>' get pod '<pod>' -o yaml`;
-   keep the capture private and compare scheduling fields with the authored
-   YAML. Record priority, resource requests and placement selectors/affinity,
-   including any cluster admission defaults and their source. Oberth must not
-   inject priority, extra requests or placement. A passing run alone does not
-   establish this principle check.
+   keep the capture private. Compare the authored containers' requests and
+   the authored placement (including selectors/affinity) and priority with the
+   submitted YAML; require Oberth to preserve those fields unchanged.
+
+   Separately inventory generated helpers: Argo's `wait` and `init`,
+   `oberth-executor-token`, and `oberth-prepare-nonroot` when that profile is
+   selected. Compare each helper's fixed requests and limits, including the
+   conditional ephemeral-storage budget, with the
+   [documented helper resource contract](native-scheduling.md#what-oberth-writes-into-the-users-workflow-and-pods).
+   Report their CPU, memory and storage requests and their scheduling cost in
+   the Pod's effective requests, accounting for Kubernetes' init/steady-state
+   aggregation. The documented helper budgets are expected and must be
+   reported. Flag unexpected generated helpers or changes to their documented
+   budgets, and any Oberth mutation of authored requests, placement or priority.
+   Attribute cluster admission defaults separately, recording each field,
+   value and source. A passing run alone does not establish these checks.
 
 7. **Held-run round trip.** In the same credential-free branch build, add a
    committed file such as `expect.txt` containing `broken` and a step whose
@@ -218,7 +229,11 @@ requires all steps, principle checks, restart/unseal and the final scan to
 complete for the identified candidate. PASS WITH ISSUES records nonblocking
 findings with all required checks completed; FAIL names the blocked or failed
 step and distinguishes environment from product causes. Record skipped checks
-explicitly and do not claim acceptance for them.
+explicitly and do not claim acceptance for them. Report documented helper
+budgets and their scheduling cost as expected behavior. Scheduling findings are
+Oberth mutations of authored requests, placement or priority, or unexpected
+generated helpers or helper-budget changes. Attribute cluster defaults
+separately.
 
 ```markdown
 # Oberth fresh-machine acceptance — <date time and timezone>
@@ -262,9 +277,20 @@ Total time from step 3 to step 6 green: <min>   Total scenario time: <min>
 ## Kubeconfig comparison
 <"identical" before and after re-run, or sanitized diff; never raw kubeconfig>
 
+## Smoke Pod scheduling
+- Authored container requests, placement and priority: <authored/observed values; require no Oberth mutations>
+
+| Generated helper | Kind (init/regular) | CPU request | Memory request | Ephemeral-storage request | Limits | Matches documented budget? |
+|---|---|---|---|---|---|---|
+| <wait/init/oberth-executor-token; nonroot preparation if selected> | <kind> | <value> | <value> | <value/absent, per documented condition> | <values> | <yes/no, detail> |
+
+- Helper scheduling cost: <contribution to effective Pod requests using Kubernetes init/steady-state aggregation; include CPU, memory and storage>
+- Cluster admission defaults: <fields, values and their source, attributed separately>
+
 ## Principle checks
 - Oberth installed or created a dependency or cluster itself: yes/no (<detail>)
-- Oberth changed scheduling (priority, extra requests, node selectors/affinity) in the smoke run's Pod: yes/no (<comparison with authored YAML; explain cluster defaults>)
+- Oberth mutated authored container requests, placement or priority: yes/no (<comparison above>)
+- Unexpected generated helpers or changes to documented helper budgets: yes/no (<inventory comparison above; documented budgets are expected>)
 - Oberth wrote ~/.kube/config: yes/no
 
 ## Secrets scan
