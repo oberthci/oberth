@@ -985,6 +985,9 @@ deadline is 630 seconds; `run_hold_exec` allows for the longest configurable
 long-poll timeouts above 600 seconds. Tools without a timeout argument keep the
 60-second deadline. A reconnect after a server restart shrinks the long poll's
 timeout argument to the client deadline left.
+For read-only calls, `--reconnect-window` accepts a positive duration bounding
+reconnect attempts across a restart; the original client deadline still applies.
+Mutation calls and unknown tools are not replayed.
 
 ```bash
 oberth mcp call --token-file ~/.config/oberth/token run_wait \
