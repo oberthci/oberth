@@ -420,6 +420,7 @@ Operators enforce namespace ResourceQuota and admission policy. See
 
 ## MCP tools
 
+The full server registry contains **79 tools**.
 The authenticated `tools/list` response is the authoritative registry.
 List it with `oberth mcp tools`. A non-admin token is not shown the admin-only
 tools (a call to one is still refused by the server); available operations are:

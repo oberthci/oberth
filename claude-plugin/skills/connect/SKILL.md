@@ -115,3 +115,20 @@ For a certificate expiring within 30 days, run
 connection settings, generates a new local key/CSR, authenticates renewal with
 the current certificate and atomically switches the `current` identity. No
 restart is needed; an expired certificate requires admin enrollment again.
+
+
+## Report the connected tool count
+
+<!-- BEGIN GENERATED MCP TOOL COUNT -->
+The full server registry contains **79 tools**, including administrator-only
+operations. The authenticated `tools/list` response is authoritative for the
+connected identity; non-admin clients do not receive administrator-only tools.
+<!-- END GENERATED MCP TOOL COUNT -->
+
+When asked how many tools are available, report the number the client currently
+shows for the Oberth server. If the client offers a tool inventory, count that
+inventory. Say when the client shows only a combined count for several servers;
+do not attribute that total to Oberth. If the visible inventory is unavailable,
+say the connected count is unknown. Do not substitute this checkout's registry
+count: permissions, client filtering and server versions can change the visible
+inventory.
