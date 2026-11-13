@@ -526,20 +526,18 @@ func TestTerminalCancellationHandoffDoesNotRearmStop(t *testing.T) {
 			if err != nil || run.ID != enqueued.ID {
 				t.Fatal(run, err)
 			}
-			var grant *submissionOwner
 			if hasOwner {
-				grant, err = f.scheduler.submissions.adopt(run)
+				_, err = f.scheduler.submissions.adopt(run)
 				if err != nil {
 					t.Fatal(err)
 				}
-				grant.retain()
 			}
 			if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "native terminal verdict"}); err != nil {
 				t.Fatal(err)
 			}
 			// A cancellation snapshot can hand off after the observer finalized.
 			// A failed local owner restore must also drain without a nil dereference.
-			f.scheduler.createPending = map[string]*pendingCreate{run.ID: {runID: run.ID, grant: grant}}
+			f.scheduler.createPending = map[string]*pendingCreate{run.ID: {runID: run.ID}}
 			f.scheduler.settleOneCreate(t.Context())
 			pending, err := f.store.PendingRunCancellations(t.Context())
 			if err != nil || len(pending) != 0 || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {

@@ -769,7 +769,7 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 		// Keep the queue in the same effective-priority and FIFO order as ClaimNextRun.
 		rows, err := tx.QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
-WHERE (`+queuedRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
+WHERE (`+queuedRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 		queued, err := collect("queued", rows, err)
 		if err != nil {

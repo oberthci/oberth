@@ -411,6 +411,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err := scheduler.database().CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
 		}
+		scheduler.submissions.releaseTerminalRun(cancellation.RunID)
 		scheduler.pruneDeferredPodJournal(ctx, cancellation.RunID)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
 		cleanupErr := scheduler.workspaces.cleanupRunDeferred(cleanupCtx, cancellation.RunID)

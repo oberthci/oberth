@@ -84,3 +84,14 @@ func (r *submissionOwner) markSubmitted() {
 	defer r.gate.mu.Unlock()
 	r.submitted = true
 }
+
+// Terminal store evidence releases any leftover in-process submission owner.
+func (g *submissionRegistry) releaseTerminalRun(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, owner := range g.owners {
+		if owner.runID == id {
+			g.withdrawLocked(owner)
+		}
+	}
+}

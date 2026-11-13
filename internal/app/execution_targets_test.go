@@ -677,3 +677,32 @@ func (terminalTargetWatchSnapshot) UnhealthySince() (time.Time, bool)        { r
 func (terminalTargetWatchSnapshot) Subscribe(string) (<-chan struct{}, func()) {
 	return make(chan struct{}, 1), func() {}
 }
+
+func (w *targetWorkflowFake) Patch(_ context.Context, _ string, kind types.PatchType, data []byte, _ metav1.PatchOptions, _ ...string) (*wfv1.Workflow, error) {
+	if w.err != nil {
+		return nil, w.err
+	}
+	if w.object == nil {
+		return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "workflows"}, "missing")
+	}
+	var patch struct {
+		Metadata struct {
+			UID             types.UID `json:"uid"`
+			ResourceVersion string    `json:"resourceVersion"`
+		} `json:"metadata"`
+		Spec struct {
+			Shutdown wfv1.ShutdownStrategy `json:"shutdown"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(data, &patch); err != nil {
+		return nil, err
+	}
+	if kind != types.MergePatchType || patch.Metadata.UID != w.object.UID || patch.Metadata.ResourceVersion != "" && patch.Metadata.ResourceVersion != w.object.ResourceVersion {
+		return nil, errors.New("missing Workflow UID/resourceVersion fence")
+	}
+	if patch.Spec.Shutdown != wfv1.ShutdownStrategyStop {
+		return nil, errors.New("expected Stop")
+	}
+	w.object.Spec.Shutdown = patch.Spec.Shutdown
+	return w.object.DeepCopy(), nil
+}

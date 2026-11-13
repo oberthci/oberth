@@ -247,6 +247,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			}
 		}
 		if !stillPending {
+			scheduler.submissions.releaseTerminalRun(run.ID)
 			scheduler.pruneDeferredPodJournal(ctx, run.ID)
 			if err := scheduler.workspaces.cleanupRun(ctx, run.ID); err != nil {
 				return false, err
@@ -354,7 +355,8 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			return false, nil
 		}
 	}
-	// Exact external absence and the durable verdict are established. Scratch
+	scheduler.submissions.releaseTerminalRun(run.ID)
+	// External settlement and the durable verdict are established. Scratch
 	// cleanup can retry independently.
 	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
 	err = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
