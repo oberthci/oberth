@@ -44,16 +44,6 @@ func kubectlTarget(st *WizardState) []string {
 	return args
 }
 
-// kubectlLine renders a kubectl argv as a copyable command line.
-func kubectlLine(args []string) string {
-	parts := []string{"kubectl"}
-	for _, a := range args {
-		a = shellArg(a)
-		parts = append(parts, a)
-	}
-	return strings.Join(parts, " ")
-}
-
 // recoveryCommands are the exact commands that finish a pending forge
 // authorization by hand (#002, #012).
 func recoveryCommands(st *WizardState) []string {
@@ -90,16 +80,17 @@ type verifyResult struct {
 	tokenText    string
 }
 
-// upstreamCheck is one row of `oberth upstream list --check`.
+// upstreamCheck is one structured upstream authentication result.
 type upstreamCheck struct {
 	name, url, auth string
 }
 
-func (u upstreamCheck) ok() bool { return u.auth == "ok" }
+func (u upstreamCheck) ok() bool {
+	return u.auth == "ok" || (strings.HasPrefix(u.auth, "ok (read ") && strings.HasSuffix(u.auth, ")"))
+}
 
-// unchecked is a row the server did not authenticate: no AUTH column (an
-// older server) or "-" (a kind of upstream without a key check).
-func (u upstreamCheck) unchecked() bool { return u.auth == "" || u.auth == "-" }
+// A non-SSH upstream has no SSH authentication check.
+func (u upstreamCheck) unchecked() bool { return u.auth == "-" }
 
 // orgOf is the organization (last path segment) of an upstream URL.
 func orgOf(baseURL string) string {
@@ -151,49 +142,10 @@ var dialPort = func(ctx context.Context, address string) error {
 	return conn.Close()
 }
 
-// parseUpstreamCheck reads `oberth upstream list --check`: an aligned table
-// whose header names the columns ("KEY NAME" and "KEY FINGERPRINT" are two
-// words each), then one row per upstream. AUTH is the last column and may
-// hold an error with spaces, so it is read from the header's offset; it is
-// empty when the server did not check.
-func parseUpstreamCheck(out []byte) []upstreamCheck {
-	authAt := -1
-	header := false
-	var rows []upstreamCheck
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if !header {
-			if fields[0] == "NAME" {
-				header = true
-				authAt = strings.Index(line, "AUTH")
-			}
-			continue
-		}
-		row := upstreamCheck{name: fields[0]}
-		for _, f := range fields[1:] {
-			if strings.Contains(f, "://") {
-				row.url = f
-				break
-			}
-		}
-		if authAt >= 0 && len(line) > authAt {
-			row.auth = strings.TrimSpace(line[authAt:])
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}
-
 type verifyDoneMsg struct {
 	result     verifyResult
 	reRegister bool
 }
-
-// upstreamListHasRows reads `oberth upstream list`: a table whose header
-// starts with NAME; any further non-empty line is a configured upstream.
 
 func lastLine(out []byte, err error) string {
 	text := strings.TrimSpace(string(out))

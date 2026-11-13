@@ -13,7 +13,6 @@ import (
 	"net"
 	"os"
 	"slices"
-	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -382,35 +381,4 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 		return err
 	}
 	return installResultError(result)
-}
-
-// The CLI's tabwriter aligns AUTH with its header. Require a recognized
-// successful probe; registration alone does not prove the forge still works.
-func verifiedUpstreams(raw []byte) bool { return upstreamsVerifiedOrPending(raw, false) }
-
-func upstreamsVerifiedOrPending(raw []byte, allowPending bool) bool {
-	authAt, rows := -1, 0
-	for _, line := range strings.Split(string(raw), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if authAt < 0 {
-			if fields[0] == "NAME" {
-				authAt = strings.Index(line, "AUTH")
-			}
-			continue
-		}
-		if len(fields) < 2 || len(line) <= authAt {
-			return false
-		}
-		status := strings.TrimSpace(line[authAt:])
-		healthy := status == "ok" || (strings.HasPrefix(status, "ok (read ") && strings.HasSuffix(status, ")")) || (fields[1] != "ssh" && status == "-")
-		pending := allowPending && status == "pending: the forge has not accepted this deploy key"
-		if !healthy && !pending {
-			return false
-		}
-		rows++
-	}
-	return rows > 0
 }

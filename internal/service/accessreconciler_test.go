@@ -242,6 +242,7 @@ func TestUpdateConfigMapAllow(t *testing.T) {
 	ctx := context.Background()
 
 	if err := reconciler.UpdateConfigMap(ctx, "", AddGrant("terraform", ".oberth/release.yaml", "*", "terraform/credentials")); err != nil {
+
 		t.Fatal(err)
 	}
 
@@ -291,6 +292,7 @@ func TestUpdateConfigMapRevoke(t *testing.T) {
 
 	// Revoke one grant via ConfigMap update.
 	if err := reconciler.UpdateConfigMap(ctx, "", RemoveGrant("terraform", ".oberth/release.yaml", "*", "terraform/credentials")); err != nil {
+
 		t.Fatal(err)
 	}
 
@@ -411,12 +413,14 @@ func TestMalformedAllowPreservesExistingGrants(t *testing.T) {
 
 	// Attempt to add a grant with glob characters in repo — must be rejected.
 	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform*", ".oberth/release.yaml", "*", "terraform/credentials")); err == nil {
+
 		t.Fatal("expected a glob-in-repo grant to be rejected")
 	}
 
 	// Attempt to add a grant with an invalid step (uppercase, not a DNS-1123
 	// label) — must be rejected.
 	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", ".oberth/release.yaml", "Build", "terraform/credentials")); err == nil {
+
 		t.Fatal("expected an invalid-step grant to be rejected")
 	}
 
@@ -456,6 +460,7 @@ func TestNamedStepGrantAcceptedAndReturned(t *testing.T) {
 
 	// Add a grant with a named step.
 	if err := reconciler.UpdateConfigMap(ctx, "admin", AddGrant("terraform", ".oberth/release.yaml", "release-publish-images", "oberth/data/release/gar-image-key")); err != nil {
+
 		t.Fatalf("named step grant was rejected: %v", err)
 	}
 	if err := reconciler.Reconcile(ctx); err != nil {
@@ -494,6 +499,7 @@ func TestRemoveGrantNotFound(t *testing.T) {
 		{Workflow: ".oberth/release.yaml", Repo: "a", Step: "b", Secret: "c"},
 	}
 	_, err := RemoveGrant("x", ".oberth/release.yaml", "y", "z")(existing)
+
 	if err == nil {
 		t.Fatal("expected error for missing grant")
 	}
@@ -509,6 +515,7 @@ func TestUpdateConfigMapAttribution(t *testing.T) {
 
 	// Allow with explicit actor — approved_by should carry the actor prefix.
 	if err := reconciler.UpdateConfigMap(ctx, "agent@example-node", AddGrant("terraform", ".oberth/release.yaml", "*", "terraform/credentials")); err != nil {
+
 		t.Fatal(err)
 	}
 
@@ -606,6 +613,7 @@ func TestAddGrantIdempotent(t *testing.T) {
 		{Workflow: ".oberth/release.yaml", Repo: "a", Step: "b", Secret: "c"},
 	}
 	result, err := AddGrant("a", ".oberth/release.yaml", "b", "c")(existing)
+
 	if err != nil {
 		t.Fatal(err)
 	}

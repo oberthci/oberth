@@ -13,12 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/model"
-
 	"golang.org/x/crypto/ssh"
-
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // ---------------------------------------------------------------------------
@@ -91,29 +90,6 @@ func TestSSHPublicKeyFingerprint_InvalidPath(t *testing.T) {
 // ---------------------------------------------------------------------------
 // UpstreamKind (upstream.go, 62.5% coverage)
 // ---------------------------------------------------------------------------
-
-func TestUpstreamKind_Local(t *testing.T) {
-	t.Parallel()
-	kind, err := UpstreamKind(filepath.Join(t.TempDir(), "forge"))
-	if err != nil || kind != "local" {
-		t.Fatalf("kind = %q, err = %v", kind, err)
-	}
-}
-
-func TestUpstreamKind_HTTPSRefused(t *testing.T) {
-	t.Parallel()
-	if _, err := UpstreamKind("https://forge.example.net/acme"); err == nil || !strings.Contains(err.Error(), "built without curl") {
-		t.Fatalf("HTTPS registration accepted: %v", err)
-	}
-}
-
-func TestUpstreamKind_InvalidBase(t *testing.T) {
-	t.Parallel()
-	_, err := UpstreamKind("ssh://git@forge.example/org/repo.git")
-	if err == nil {
-		t.Fatal("expected error for .git base URL")
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Upstreams.timeout (upstream.go, 66.7% coverage)

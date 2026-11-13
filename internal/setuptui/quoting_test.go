@@ -16,7 +16,4 @@ func TestWizardQuotesEveryShellValue(t *testing.T) {
 			t.Errorf("unquoted %s in %s", flag, line)
 		}
 	}
-	if got := kubectlLine([]string{"exec", "line\nbreak"}); !strings.Contains(got, shellQuote("line\nbreak")) {
-		t.Fatal(got)
-	}
 }

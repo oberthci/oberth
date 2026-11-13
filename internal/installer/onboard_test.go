@@ -102,21 +102,6 @@ func TestValidateUplinkIdentityRejectsInvalid(t *testing.T) {
 
 // --- sanitizeExecOutput tests ---
 
-func TestSanitizeExecOutputStripsTokenLines(t *testing.T) {
-	t.Parallel()
-	input := "Uplink token for tester@box (shown once):\noberth_secret_token_value\nDone.\n"
-	got := sanitizeExecOutput(input)
-	if strings.Contains(got, "oberth_") {
-		t.Fatalf("token line should be stripped, got: %q", got)
-	}
-	if !strings.Contains(got, "Uplink token for tester@box") {
-		t.Fatalf("non-token lines should be preserved, got: %q", got)
-	}
-	if !strings.Contains(got, "Done.") {
-		t.Fatalf("trailing non-token lines should be preserved, got: %q", got)
-	}
-}
-
 // --- selectOption tests ---
 
 // selectorDeps builds a Deps with the given input, an output buffer, and an

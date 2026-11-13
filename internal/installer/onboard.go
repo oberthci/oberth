@@ -382,32 +382,6 @@ func listUpstreams(ctx context.Context, cfg Config, deps Deps) ([]NextStepsUpstr
 	return rows, nil
 }
 
-// upstreamListRows reads the rows upstreamListHasRows counts: the first
-// column is the name, the field holding "://" the base URL.
-
-// upstreamListHasRows parses `oberth upstream list` output: a tab-separated
-// table whose header starts with NAME; any further non-empty line is a
-// configured upstream. Lines before the header are ignored — they are kubectl
-// stderr noise (e.g., "Defaulted container..." from multi-container pods)
-// merged by CombinedOutput.
-func upstreamListHasRows(out []byte) bool {
-	headerSeen := false
-	for _, line := range strings.Split(string(out), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "NAME") {
-			headerSeen = true
-			continue
-		}
-		if headerSeen {
-			return true
-		}
-	}
-	return false
-}
-
 // runOnboarding drives the interactive first-run setup. Results are appended
 // to the table via tw.AppendRow so the table grows in place while prompts
 // appear below the bottom border.
@@ -963,10 +937,6 @@ type upstreamRegistration struct {
 	reusedKey bool
 }
 
-// persistedDeployKeyMarker is how the pod-side bootstrap introduces a key it
-// loaded rather than generated (app.UpstreamSSHBootstrap.printPersistedIdentity).
-const persistedDeployKeyMarker = "Persisted upstream deploy public key"
-
 // appendDeployKeyRow reports the upstream identity the server used: a reused
 // key with its fingerprint, or a freshly generated one to register.
 func appendDeployKeyRow(tw *tableWriter, registration upstreamRegistration) {
@@ -1005,17 +975,6 @@ func terseInstallError(err error) string {
 		text = "..." + string(runes[len(runes)-157:])
 	}
 	return text
-}
-
-// extractDeployPublicKey finds the first SSH public key line in command output.
-func extractDeployPublicKey(output string) string {
-	for _, line := range strings.Split(output, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "ssh-") {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 // hostnameFromURL extracts the hostname from a URL string, falling back to the
@@ -1258,29 +1217,10 @@ func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *table
 	return nil
 }
 
-// extractUplinkToken parses the token value from the uplink add command output.
-// The output format is "Uplink token for ...(shown once):\n<token>\n".
-func extractUplinkToken(output string) string {
-	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "Uplink token for ") && i+1 < len(lines) {
-			return strings.TrimSpace(lines[i+1])
-		}
-	}
-	// Fallback: if only one non-empty line that looks like a token
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "oberth_") {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 // validatePublicKeyFile checks that the file content is an SSH public key (in
 // authorized_keys format), not a private key. A common operator mistake is
 // pointing the public-key prompt at id_ed25519 instead of id_ed25519.pub;
-// without this check the private key is sent to the pod via kubectl exec stdin.
+// The check prevents private material from entering public enrollment.
 func validatePublicKeyFile(data []byte) error {
 	// Check for private key material first — ssh.ParsePrivateKey accepts PEM
 	// private keys, so if it succeeds this is a private key, not a public one.
@@ -1296,21 +1236,6 @@ func validatePublicKeyFile(data []byte) error {
 		return errors.New("file must contain exactly one SSH public key and no other material")
 	}
 	return nil
-}
-
-// sanitizeExecOutput strips lines containing bearer tokens (oberth_*) from
-// kubectl exec output before embedding it in error messages or non-credential
-// display, so tokens are never leaked through error strings or log lines.
-func sanitizeExecOutput(output string) string {
-	var cleaned []string
-	for _, line := range strings.Split(output, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "oberth_") {
-			continue
-		}
-		cleaned = append(cleaned, line)
-	}
-	return strings.Join(cleaned, "\n")
 }
 
 func defaultUplinkIdentity() string {

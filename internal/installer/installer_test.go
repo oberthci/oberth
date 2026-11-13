@@ -2522,7 +2522,7 @@ func (f *fakeOberthHost) run(ctx context.Context, input []byte, name string, arg
 		if e != nil {
 			return nil, e
 		}
-		result := api.FirstAdminResult{Token: extractUplinkToken(string(raw)), InstallerCertificate: string(installer), ServerCA: testServerCAPEM, ServerCertificate: testServerCAPEM}
+		result := api.FirstAdminResult{Token: fixtureUplinkToken(string(raw)), InstallerCertificate: string(installer), ServerCA: testServerCAPEM, ServerCertificate: testServerCAPEM}
 		if len(raw) == 0 && request.CSR == "" {
 			result.Token = "fixture-first-admin-token"
 		}
@@ -3031,28 +3031,6 @@ func TestReadLineReturnsErrInterruptedOnCancelledContext(t *testing.T) {
 	_, err := readLine(ctx, r)
 	if !errors.Is(err, ErrInterrupted) {
 		t.Fatalf("readLine with cancelled context: got err=%v, want ErrInterrupted", err)
-	}
-}
-
-func TestUpstreamListHasRows(t *testing.T) {
-	t.Parallel()
-	if upstreamListHasRows([]byte("NAME   KIND   URL   KEY FINGERPRINT\n")) {
-		t.Fatal("header-only output must report no upstreams")
-	}
-	if upstreamListHasRows([]byte("")) {
-		t.Fatal("empty output must report no upstreams")
-	}
-	if !upstreamListHasRows([]byte("NAME   KIND   URL   KEY FINGERPRINT\ncodeberg   ssh   ssh://git@codeberg.org/x   SHA256:y\n")) {
-		t.Fatal("a data row must report a configured upstream")
-	}
-	// kubectl stderr noise before the header (e.g., "Defaulted container..."
-	// from multi-container pods merged by CombinedOutput) must not trigger a
-	// false positive.
-	if upstreamListHasRows([]byte("Defaulted container \"oberth\" out of: oberth, runner\nNAME   KIND   URL   KEY FINGERPRINT\n")) {
-		t.Fatal("kubectl stderr noise before header-only output must report no upstreams")
-	}
-	if !upstreamListHasRows([]byte("Defaulted container \"oberth\" out of: oberth, runner\nNAME   KIND   URL   KEY FINGERPRINT\ncodeberg   ssh   ssh://git@codeberg.org/x   SHA256:y\n")) {
-		t.Fatal("a data row after kubectl stderr noise and header must report a configured upstream")
 	}
 }
 

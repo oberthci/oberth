@@ -116,7 +116,7 @@ func (f fixtureAdmin) Admin(ctx context.Context, action string, args, into any) 
 			return err
 		}
 		pending := strings.Contains(string(raw), "pending")
-		return fixtureDecode(map[string]any{"identity": api.UpstreamIdentity{PublicKey: extractDeployPublicKey(string(raw)), Generated: !strings.Contains(string(raw), persistedDeployKeyMarker), Pending: pending}}, into)
+		return fixtureDecode(map[string]any{"identity": api.UpstreamIdentity{PublicKey: fixtureDeployPublicKey(string(raw)), Generated: !strings.Contains(string(raw), persistedDeployKeyMarker), Pending: pending}}, into)
 	case "upstream-provide-key":
 		var request api.UpstreamKeyRequest
 		if err := fixtureRequest(args, &request); err != nil {
@@ -248,3 +248,32 @@ type streamingFixtureAdmin struct {
 func (f streamingFixtureAdmin) DownloadAdminBackup(ctx context.Context, limit int64, out io.Writer) error {
 	return f.download(ctx, limit, out)
 }
+
+func fixtureDeployPublicKey(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "ssh-") {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func fixtureUplinkToken(output string) string {
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "Uplink token for ") && i+1 < len(lines) {
+			return strings.TrimSpace(lines[i+1])
+		}
+	}
+	// Fallback: if only one non-empty line that looks like a token
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "oberth_") {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+const persistedDeployKeyMarker = "Persisted upstream deploy public key"

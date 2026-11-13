@@ -226,9 +226,8 @@ func TestValidateUpstreamBaseRejectsRepositoryAndCredentials(t *testing.T) {
 			t.Fatalf("base %q passed validation", value)
 		}
 	}
-	kind, err := UpstreamKind("ssh://git@codeberg.org/acme")
-	if err != nil || kind != "ssh" {
-		t.Fatalf("kind = %q, %v", kind, err)
+	if err := ValidateUpstreamBase("ssh://git@codeberg.org/acme"); err != nil {
+		t.Fatal(err)
 	}
 }
 

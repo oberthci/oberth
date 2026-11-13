@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -189,14 +190,13 @@ func TestVerifyRequiresUpstreamAuthentication(t *testing.T) {
 	for _, test := range []struct {
 		raw string
 		ok  bool
-	}{
-		{"NAME  KIND URL                           AUTH\nforge ssh  ssh://git@forge.example/acme   ok\n", true},
-		{"NAME  KIND URL                           AUTH\nforge ssh  ssh://git@forge.example/acme   REJECTED\n", false},
-		{"NAME KIND URL\nforge ssh ssh://git@forge.example/acme\n", false},
-		{"NAME KIND URL AUTH\n", false},
-	} {
-		if verifiedUpstreams([]byte(test.raw)) != test.ok {
-			t.Fatal("upstream authentication result was misclassified")
+	}{{`{"upstreams":[{"upstream":{"name":"forge"},"auth":"ok"}]}`, true}, {`{"upstreams":[{"upstream":{"name":"forge"},"auth":"REJECTED"}]}`, false}, {`{"upstreams":[{"upstream":{"name":"forge"}}]}`, false}, {`{"upstreams":[]}`, false}} {
+		var result upstreamCheckResult
+		if json.Unmarshal([]byte(test.raw), &result) != nil {
+			t.Fatal("bad fixture")
+		}
+		if verifiedUpstreamAPI(result, false) != test.ok {
+			t.Fatal("upstream authentication was misclassified")
 		}
 	}
 }

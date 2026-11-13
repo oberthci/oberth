@@ -561,6 +561,7 @@ func RemoveGrant(repo, workflow, step, secret string) func([]SecretAccessGrantEn
 	}
 }
 
+
 // AddGrantCanonical returns a modify function that adds one grant entry,
 // deduplicating against existing entries by canonical repository identity. A
 // qualified add beside an existing bare entry of the same canonical repo is a
