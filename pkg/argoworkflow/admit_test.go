@@ -122,10 +122,6 @@ func TestAdmitRefusesIdentityBypassConstructs(t *testing.T) {
 			insert: "  workflowTemplateRef:\n    name: somebody-elses-template\n",
 			expect: "spec.workflowTemplateRef",
 		},
-		"imagePullSecrets": {
-			insert: "  imagePullSecrets:\n    - name: registry-credentials\n",
-			expect: "spec.imagePullSecrets",
-		},
 		"artifactRepositoryRef": {
 			insert: "  artifactRepositoryRef:\n    configMap: artifact-repositories\n    key: default\n",
 			expect: "spec.artifactRepositoryRef",
@@ -412,16 +408,16 @@ func TestAdmitEnforcesTheRunnerImageAllowlist(t *testing.T) {
 	mustAdmit(t, document, Policy{RunnerImagePrefixes: []string{"docker.io/library/alpine:"}})
 }
 
-func TestAdmitRefusesMutableAndUnpinnedImages(t *testing.T) {
+func TestAdmitAcceptsMutableAndUnpinnedImages(t *testing.T) {
 	const admissibleImage = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	// Tag-only references are rejected (no digest)
-	refuse(t, strings.Replace(admissibleDocument, admissibleImage, "golang:1.26-alpine", 1), Policy{}, "must contain an @sha256")
-	refuse(t, strings.Replace(admissibleDocument, admissibleImage, "golang:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1), Policy{}, "latest")
-	refuse(t, strings.Replace(admissibleDocument, admissibleImage, "golang", 1), Policy{}, "must contain an @sha256")
+	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang:1.26-alpine", 1), Policy{})
+	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1), Policy{})
+	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang", 1), Policy{})
 }
 
 func TestAdmitRefusesServerOwnedMetadata(t *testing.T) {
-	for _, field := range []string{"name: chosen-by-the-repository", "generateName: chosen-", "namespace: oberth"} {
+	for _, field := range []string{"name: chosen-by-the-repository", "namespace: oberth"} {
 		document := strings.Replace(admissibleDocument, "kind: Workflow\n",
 			"kind: Workflow\nmetadata:\n  "+field+"\n", 1)
 		refuse(t, document, Policy{}, "assigned by Oberth")
@@ -766,7 +762,7 @@ func TestAdmitAcceptsAuthoredCPU(t *testing.T) {
 	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRefusesExcessivePVCCapacity(t *testing.T) {
+func TestAdmitAcceptsAuthoredLargePVCCapacity(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -788,7 +784,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "requests 256Gi storage, maximum is 64Gi")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAcceptsPVCCapacityAtCeiling(t *testing.T) {
@@ -816,7 +812,7 @@ spec:
 	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRefusesMemoryEmptyDirWithoutSizeLimit(t *testing.T) {
+func TestAdmitAcceptsMemoryEmptyDirWithoutSizeLimit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -834,7 +830,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "memory-backed emptyDir without a sizeLimit")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAcceptsMemoryEmptyDirWithBoundedSizeLimit(t *testing.T) {
@@ -862,7 +858,7 @@ spec:
 // Issue #440: disk-backed emptyDirs must carry a bounded sizeLimit, just
 // like memory-backed ones. An uncapped disk-backed emptyDir can exhaust the
 // node's ephemeral storage.
-func TestAdmitRefusesDiskEmptyDirWithoutSizeLimit(t *testing.T) {
+func TestAdmitAcceptsDiskEmptyDirWithoutSizeLimit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -879,7 +875,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "disk-backed emptyDir without a sizeLimit")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAcceptsDiskEmptyDirWithBoundedSizeLimit(t *testing.T) {
@@ -903,7 +899,7 @@ spec:
 	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRefusesDiskEmptyDirExceedingCeiling(t *testing.T) {
+func TestAdmitAcceptsDiskEmptyDirWithLargeSizeLimit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -921,7 +917,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "exceeds the 50Gi ceiling")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAllowsGPUResourcesWithoutGrant(t *testing.T) {

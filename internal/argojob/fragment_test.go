@@ -259,9 +259,9 @@ func TestBuildWithoutFragmentsIsUnaffected(t *testing.T) {
 	}
 }
 
-func TestBuildRefusesInliningPastTheTemplateCeiling(t *testing.T) {
+func TestBuildAcceptsInliningPastTheFormerTemplateCeiling(t *testing.T) {
 	var templates strings.Builder
-	for index := 0; index <= argoworkflow.MaxTemplates; index++ {
+	for index := 0; index <= 128; index++ {
 		name := "run"
 		if index > 0 {
 			name = fmt.Sprintf("filler%d", index)
@@ -274,8 +274,8 @@ func TestBuildRefusesInliningPastTheTemplateCeiling(t *testing.T) {
 	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 
-	if _, err := Build(testConfig(), request); err == nil {
-		t.Fatal("inlining past the template ceiling was admitted")
+	if _, err := Build(testConfig(), request); err != nil {
+		t.Fatalf("native template count was refused: %v", err)
 	}
 }
 

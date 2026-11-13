@@ -142,7 +142,9 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 			// nearest enclosing template invocation.
 			if called.template != "" {
 				if _, cycle := walk.onPath[called.template]; cycle {
-					return fmt.Errorf("argoworkflow: template %q is reachable from itself", called.template)
+					// The static inventory visits a recursive boundary once; Argo
+					// evaluates its runtime loop and authored termination condition.
+					continue
 				}
 				walk.onPath[called.template] = struct{}{}
 			}

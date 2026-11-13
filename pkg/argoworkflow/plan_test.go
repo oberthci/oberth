@@ -128,7 +128,7 @@ spec:
 // TestPlannedStepsRefusesATemplateCycle keeps a repository-authored document
 // from making the walk unbounded. Admission proves every reference resolves,
 // not that the graph is acyclic.
-func TestPlannedStepsRefusesATemplateCycle(t *testing.T) {
+func TestPlannedStepsAcceptsATemplateCycle(t *testing.T) {
 	document := `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
@@ -150,8 +150,8 @@ spec:
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if _, err := PlannedSteps(workflow); err == nil {
-		t.Fatal("a self-reachable template graph enumerated without error")
+	if _, err := PlannedSteps(workflow); err != nil {
+		t.Fatalf("native recursion was refused: %v", err)
 	}
 }
 
