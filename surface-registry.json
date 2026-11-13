@@ -120,14 +120,6 @@
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
     },
-    "annotation:oberth.ci/concurrency-group": {
-      "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/concurrency-limit": {
-      "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
     "value:releases": {
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",
       "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
@@ -135,18 +127,6 @@
     "value:serialize": {
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",
       "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
-    },
-    "annotation:oberth.ci/size": {
-      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/size-by-trigger": {
-      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/exclusive": {
-      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
-      "test_ref": "internal/argojob/fragment_test.go TestBuildRefusesRemovedExclusiveAnnotationInFragments"
     },
     "annotation:oberth.ci/trigger": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
@@ -847,38 +827,6 @@
     "annotation:workflows.argoproj.io/controller-instanceid": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
-    },
-    "annotation:oberth.ci/cpu-requests": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/request-defaults": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/declared-pod-demand": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/resource-admission-fallback": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-deadline-seconds": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-start-allowance-seconds": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-usage-memory-policy": {
-      "doc_anchor": "docs/releases/v0.22.0.md#step-usage-figures-removed",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-usage-memory-warning": {
-      "doc_anchor": "docs/releases/v0.22.0.md#step-usage-figures-removed",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
     },
     "flag:status-upstream-probe-interval": {
       "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",

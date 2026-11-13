@@ -110,27 +110,3 @@ func UsesReleaseWIF(template *wfv1.Template) bool {
 	_, present := template.Metadata.Annotations[ReleaseWIFRoleAnnotation]
 	return present
 }
-
-// removedAnnotations are pipeline annotations Oberth no longer reads. A
-// document that carries one is refused, naming what replaced it, instead of
-// running as if it took effect.
-var removedAnnotations = map[string]string{
-	"oberth.ci/step-usage-memory-policy":     "per-step measurement is absent in v0.22.0",
-	"oberth.ci/step-usage-memory-warning":    "per-step measurement is absent in v0.22.0",
-	"oberth.ci/cpu-requests":                 "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/request-defaults":             "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/declared-pod-demand":          "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/resource-admission-fallback":  "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/step-start-allowance-seconds": "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
-	"oberth.ci/step-deadline-seconds":        "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
-
-	"oberth.ci/size":              "Kubernetes places each Pod by its authored resources block; delete the annotation",
-	"oberth.ci/size-by-trigger":   "Kubernetes places each Pod by its authored resources block; delete the annotation",
-	"oberth.ci/concurrency-group": "declare a native Argo mutex or semaphore (spec.synchronization) instead",
-	"oberth.ci/concurrency-limit": "declare a native Argo mutex or semaphore (spec.synchronization) instead",
-	"oberth.ci/exclusive":         "declare a native Argo semaphore (template synchronization, configMapKeyRef oberth-sync-limits) instead",
-}
-
-func removedAnnotation(location, name string) error {
-	return fmt.Errorf("argoworkflow: %s annotation %s is removed: %s", location, name, removedAnnotations[name])
-}

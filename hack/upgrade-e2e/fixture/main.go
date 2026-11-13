@@ -194,7 +194,7 @@ spec:
 		"apiVersion": "argoproj.io/v1alpha1", "kind": "Workflow",
 		"metadata": map[string]any{"name": "oberth-e2e-running", "namespace": "oberth-argo",
 			"labels":      map[string]string{"oberth.ci/run": running.ID, "oberth.ci/sha": sha, "oberth.ci/trigger": "ci"},
-			"annotations": map[string]string{"oberth.ci/run-id": running.ID, "oberth.ci/ref": running.Ref, "oberth.ci/spec-identity": hex.EncodeToString(identity[:]), "oberth.ci/size": "M"}},
+			"annotations": map[string]string{"oberth.ci/run-id": running.ID, "oberth.ci/ref": running.Ref, "oberth.ci/spec-identity": hex.EncodeToString(identity[:]), "example.com/tier": "M"}},
 		"spec": map[string]any{"entrypoint": "hold", "serviceAccountName": "oberth-argo-executor", "templates": []any{map[string]any{"name": "hold", "suspend": map[string]any{"duration": "3600s"}}}},
 	}
 	must(json.NewEncoder(os.Stdout).Encode(workflow))

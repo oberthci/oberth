@@ -1248,13 +1248,8 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		result.CACertPEM = caPEM
 	}
 
-	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "openbao", ns, "server", controlPlanePriority(cfg), exists)
-	if err != nil {
-		return result, err
-	}
-	defer cleanupDependency()
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
-	if action == actionSkip && (requiresTLSMigration || dependencyChanged) {
+	if action == actionSkip && (requiresTLSMigration) {
 		// Listener TLS is a values-only reconciliation. Pin that reconciliation
 		// to the installed chart so an older installer cannot downgrade a newer
 		// OpenBao release while hardening its transport.
@@ -1284,7 +1279,7 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		_, _ = fmt.Fprintln(deps.Output, "Installing OpenBao...")
 	}
 
-	if _, err := deps.RunHelm(ctx, withDependencyValues(OpenBaoHelmArgs(cfg), dependencyFile)); err != nil {
+	if _, err := deps.RunHelm(ctx, OpenBaoHelmArgs(cfg)); err != nil {
 		return result, fmt.Errorf("helm install OpenBao: %w", err)
 	}
 	if requiresTLSMigration {

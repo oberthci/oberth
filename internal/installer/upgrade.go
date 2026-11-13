@@ -267,12 +267,6 @@ func validateUserSetAgainstValues(valuesYAML []byte, userSet []string) error {
 		if err != nil {
 			return err
 		}
-		if clearsRemovedValue(kv) {
-			continue
-		}
-		if removed, ok := removedChartValue(key); ok {
-			return removedValuesError(map[string]string{removed: "--set " + key})
-		}
 		if !keyPathExists(values, key) {
 			return &ErrSchemaValidation{Detail: fmt.Sprintf("key %q does not exist in the chart values; check for typos", key)}
 		}
@@ -368,9 +362,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 		values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
 		if err != nil {
-			return result, err
-		}
-		if err := checkRemovedUpgradeValues(cfg, values); err != nil {
 			return result, err
 		}
 		if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {

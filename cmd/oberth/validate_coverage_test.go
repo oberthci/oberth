@@ -193,9 +193,8 @@ func TestValidateWithoutReleaseYAMLShowsOptionalMessage(t *testing.T) {
 	}
 }
 
-// The removed concurrency-group annotation fails validation, naming the
-// native Argo synchronization that replaced it.
-func TestValidateRefusesTheRemovedConcurrencyGroupAnnotation(t *testing.T) {
+// A retired Workflow annotation is inert metadata and passes validation.
+func TestValidateIgnoresTheRemovedConcurrencyGroupAnnotation(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	oberthDir := filepath.Join(root, ".oberth")
@@ -208,7 +207,7 @@ func TestValidateRefusesTheRemovedConcurrencyGroupAnnotation(t *testing.T) {
 	}
 	var output bytes.Buffer
 	err := runValidate(context.Background(), []string{root}, &output)
-	if err == nil || !strings.Contains(output.String(), "oberth.ci/concurrency-group is removed") || !strings.Contains(output.String(), "result: FAIL") {
+	if err != nil || !strings.Contains(output.String(), "result: PASS") {
 		t.Fatalf("removed group annotation = %v\n%s", err, output.String())
 	}
 }

@@ -24,11 +24,11 @@ import (
 
 // Use the same old-release render gate as chart/release CI, checking its
 // utility fallback against the server maintenance helper's shared pin too.
-func TestUpgradeChartFromV01753Values(t *testing.T) {
+func TestUpgradeChartUsesCurrentValues(t *testing.T) {
 	requireHelmForUpgradeTest(t)
 	out, err := exec.CommandContext(t.Context(), "../../hack/test-chart-upgrade.sh", "../../charts/oberth", containerimage.Utility).CombinedOutput()
 	if err != nil {
-		t.Fatalf("v0.17.53 values upgrade render: %v\n%s", err, out)
+		t.Fatalf("chart upgrade render: %v\n%s", err, out)
 	}
 }
 
@@ -43,18 +43,9 @@ func TestUpgradeMergesNewChartDefaults(t *testing.T) {
 // Exercise Helm's real upgrade merge against a saved prior release, without a
 // live cluster or a dependency on Helm's Go SDK. Its memory driver substitutes
 // a nonmutating kube client; HTTP supplies discovery metadata only.
-func TestUpgradeActualHelmPreservesOldValuesAndAddsDefaults(t *testing.T) {
-	for _, version := range []string{"0.17.53", "0.17.62"} {
-		t.Run(version, func(t *testing.T) { testUpgradeActualHelmPreservesOldValues(t, version, false) })
-	}
-	t.Run("0.17.62-stored-removed-values", func(t *testing.T) {
-		testUpgradeActualHelmPreservesOldValues(t, "0.17.62", true)
-	})
-}
-
-func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, storedRemoved bool) {
+func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	requireHelmForUpgradeTest(t)
-	old, err := os.ReadFile("../../hack/testdata/chart-values-v" + oldVersion + ".yaml")
+	old, err := os.ReadFile("../../charts/oberth/values.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,23 +53,9 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, st
 	if err := yaml.Unmarshal(old, &values); err != nil {
 		t.Fatal(err)
 	}
-	// The old chart defaults carry values the target chart removed; the
-	// target schema refuses them, so a release whose chart defaults still
-	// hold them cannot be reused raw (install, restore). Upgrades reset to
-	// the target defaults and never read them.
-	cleared := UpgradeConfig{}
-	for _, removed := range removedChartValues {
-		cleared.UserSet = append(cleared.UserSet, removed+"=null")
-	}
-	dropClearedRemovedValues(cleared, values)
 	values["removedOldDefault"] = "not user configuration"
 	values["compatibility"] = map[string]any{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}
 	config := map[string]any{"image": map[string]any{"ref": "example.invalid/old@sha256:" + strings.Repeat("2", 64)}, "argo": map[string]any{"goProxy": map[string]any{"enabled": false}}, "pushBannerURL": "", "retention": map[string]any{"keepNewestPerRef": 0}, "podAnnotations": map[string]any{"round17.example/stored": "kept"}}
-	if storedRemoved {
-		config["trustedTests"] = map[string]any{"runtime": "old"}
-		config["maxConcurrentJobs"] = 3
-		config["admission"] = map[string]any{"sizeWeights": map[string]any{"XL": 8}}
-	}
 	values["pushBannerURL"] = ""
 	values["retention"].(map[string]any)["keepNewestPerRef"] = 0
 	values["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] = false
@@ -88,7 +65,7 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, st
 		"name": "oberth", "namespace": "oberth", "version": 1,
 		"info": map[string]any{"status": "deployed"},
 		"chart": map[string]any{
-			"metadata": map[string]any{"apiVersion": "v2", "name": "oberth", "version": oldVersion},
+			"metadata": map[string]any{"apiVersion": "v2", "name": "oberth", "version": "0.22.2"},
 			"values":   values,
 		},
 		"config": config,
@@ -111,9 +88,6 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, st
 	deps := Deps{RunHelm: runHelm}
 	if err := requireUpgradeHelmVersion(t.Context(), deps); err != nil {
 		t.Fatal(err)
-	}
-	if storedRemoved {
-		cfg.UserSet = requireRemovedValuesRefusal(t, cfg, deps, chart, image)
 	}
 	prepared, err := prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
 	if err != nil {
@@ -159,19 +133,6 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, st
 		if !strings.Contains(upgraded.Manifest, want) {
 			t.Errorf("render dropped installed identity %q", want)
 		}
-	}
-	if storedRemoved {
-		admission, _ := upgraded.Config["admission"].(map[string]any)
-		_, weights := admission["sizeWeights"]
-		_, ceiling := upgraded.Config["maxConcurrentJobs"]
-		_, tests := upgraded.Config["trustedTests"]
-		if weights || ceiling || tests {
-			t.Fatalf("cleared removed values survived the actual Helm upgrade: %+v", upgraded.Config)
-		}
-		delete(config, "trustedTests")
-		delete(config, "maxConcurrentJobs")
-		delete(config, "admission")
-		cfg.UserSet = nil
 	}
 	proxy := upgraded.Config["argo"].(map[string]any)["goProxy"].(map[string]any)
 	if proxy["enabled"] != false || upgraded.Config["pushBannerURL"] != "" {
@@ -252,28 +213,6 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, st
 // requireRemovedValuesRefusal checks the stored removed values are refused
 // with their names and clearing flags, and returns those flags: the
 // refusal's own instruction is the way through.
-func requireRemovedValuesRefusal(t *testing.T, cfg UpgradeConfig, deps Deps, chart, image string) []string {
-	t.Helper()
-	_, err := prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
-	var schemaErr *ErrSchemaValidation
-	want := "admission (stored release values), maxConcurrentJobs (stored release values), trustedTests (stored release values); no upgrade applied. " +
-		"Delete them from any --values file and re-run the upgrade with --set admission=null --set maxConcurrentJobs=null --set trustedTests=null"
-	if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), want) {
-		t.Fatalf("stored removed values not refused clearly: %v", err)
-	}
-	clears := []string{"admission=null", "maxConcurrentJobs=null", "trustedTests=null"}
-	chartValues, err := os.ReadFile(filepath.Join(chart, "values.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateUserSetAgainstValues(chartValues, clears); err != nil {
-		t.Fatal(err)
-	}
-	return clears
-}
-
-var testUpgradeCompatibility = backupCompatibility{SchemaIdentity: "legacy-schema-v1", AuditDomain: "legacy-audit-v1", WitnessKeyInfo: "legacy-witness-v1"}
-
 func requireHelmForUpgradeTest(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
@@ -353,3 +292,5 @@ func upgradeTestHelm(t *testing.T, dir, history string) func(context.Context, []
 		return out, err
 	}
 }
+
+var testUpgradeCompatibility = backupCompatibility{SchemaIdentity: "legacy-schema-v1", AuditDomain: "legacy-audit-v1", WitnessKeyInfo: "legacy-witness-v1"}

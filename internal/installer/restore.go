@@ -649,13 +649,6 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 // Newly introduced chart keys require template fallbacks, covered by the
 // v0.17.53 raw-values render and actual Helm restore tests.
 func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, target restoreTarget, work string) ([]string, error) {
-	installed, err := readHelmValuesMap(ctx, deps.Deps, cfg.Namespace)
-	if err != nil {
-		return nil, err
-	}
-	if err := refuseRemovedReleaseValues(installed, "oberth restore"); err != nil {
-		return nil, err
-	}
 	body, err := json.Marshal(target.Overlay)
 	if err != nil {
 		return nil, err

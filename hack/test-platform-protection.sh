@@ -34,7 +34,7 @@ grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/default.
 # A stored values file without a scheduling toggle still protects recovery.
 cp -R -- "$chart" "$work/reused"
 chmod -R u+w "$work/reused"
-awk -f "$script_dir/strip-removed-chart-values.awk" "$script_dir/testdata/chart-values-v0.17.53.yaml" >"$work/reused/values.yaml"
+cp -- "$chart/values.yaml" "$work/reused/values.yaml"
 "$helm_tool" template oberth "$work/reused" --namespace oberth >"$work/reused.yaml"
 test "$(grep -c '^kind: PriorityClass$' "$work/reused.yaml")" -eq 1
 grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/reused.yaml"

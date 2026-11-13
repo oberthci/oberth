@@ -348,6 +348,11 @@ class ContractGuards(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertIn('law5-residue', [r for r, _, _ in self.scan('a.md', source)])
 
+    def test_test_annotation_literals_are_not_product_surfaces(self):
+        source = 'const archivedAnnotation = "' + 'oberth.ci/' + 'retired-fixture"'
+        self.assertNotIn('law3-surface', [r for r, _, _ in self.scan('a_test.go', source)])
+        self.assertIn('law3-surface', [r for r, _, _ in self.scan('a.go', source)])
+
     def test_build_annotation_requires_registration(self):
         self.assertIn('law3-surface', [r for r, _, _ in self.scan('a.go', '"oberth.ci/new-mode"')])
 

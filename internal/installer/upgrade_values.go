@@ -122,10 +122,6 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
-	if err := checkRemovedUpgradeValues(cfg, values); err != nil {
-		return preparedUpgradeValues{}, err
-	}
-	dropClearedRemovedValues(cfg, values)
 	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 		return preparedUpgradeValues{}, err
 	}
@@ -160,11 +156,7 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 			}
 			i++
 		case "--set", "--set-string", "--set-json", "--version":
-			// A cleared removed value is already gone from the snapshot;
-			// rendering its null would keep the key Helm's merge drops.
-			if flags[i] != "--set" || !clearsRemovedValue(flags[i+1]) {
-				args = append(args, flags[i], flags[i+1])
-			}
+			args = append(args, flags[i], flags[i+1])
 			i++
 		default:
 			return preparedUpgradeValues{}, fmt.Errorf("unexpected generated upgrade flag %q", flags[i])
