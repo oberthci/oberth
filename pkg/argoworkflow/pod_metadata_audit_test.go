@@ -218,3 +218,44 @@ func TestGrantedResourceMetadataAndPatchRoutes(t *testing.T) {
 		t.Fatal("ordinary resource Pod label refused", err)
 	}
 }
+
+// Unknown operator APIs may put metadata under arbitrary parent names. The
+// boundary follows annotations/labels maps through both objects and arrays.
+func TestGrantedResourceMetadataUnderArbitraryParents(t *testing.T) {
+	policy := capabilityPolicyForTest(t)
+	for _, kind := range []ResourceKindCapability{
+		{APIVersion: "batch/v1", Kind: "Job", Actions: []string{"create"}},
+		{APIVersion: "apps/v1", Kind: "Deployment", Actions: []string{"create"}},
+		{APIVersion: "operator.example/v1", Kind: "Worker", Actions: []string{"create"}},
+	} {
+		policy.Capability.ResourceKinds = []ResourceKindCapability{kind}
+		for _, parent := range []string{"template", "workerSettings", "replicas"} {
+			for _, metadata := range []string{
+				`{"annotations":{"sidecar.istio.io/inject":"true"}}`,
+				`{"labels":{"component":"server"}}`,
+				`{"Annotations":{"example.test/hook":"enabled"}}`,
+				`{"podAnnotations":{"sidecar.istio.io/inject":"true"}}`,
+				`{"workerLabels":{"component":"server"}}`,
+				`{"podAnnotations":{}}`,
+				`{"labels":{"app":"worker"}}`,
+			} {
+				t.Run(kind.Kind+"/"+parent+"/"+metadata, func(t *testing.T) {
+					payload := metadata
+					switch parent {
+					case "template":
+						payload = `{"metadata":` + metadata + `}`
+					case "replicas":
+						payload = `[{"settings":` + metadata + `}]`
+					}
+					wf := decodeAdmissible(t, nil)
+					wf.Spec.Templates[0].Container = nil
+					wf.Spec.Templates[0].Resource = &wfv1.ResourceTemplate{Action: "create", Manifest: fmt.Sprintf(`{"apiVersion":%q,"kind":%q,"metadata":{"name":"worker"},"spec":{%q:%s}}`, kind.APIVersion, kind.Kind, parent, payload)}
+					err := Admit(wf, policy)
+					if (err == nil) != (metadata == `{"labels":{"app":"worker"}}` || metadata == `{"podAnnotations":{}}`) {
+						t.Fatalf("metadata admission = %v", err)
+					}
+				})
+			}
+		}
+	}
+}

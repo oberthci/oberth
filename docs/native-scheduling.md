@@ -441,6 +441,10 @@ Workflows.
 A Kubernetes ResourceQuota applies to the whole pipeline namespace and cannot
 separate repositories within that namespace.
 
-When an operator grants a resource kind, annotations that its controller
-propagates to Pods under field names other than metadata are the operator's
-responsibility.
+Granted resource manifests are checked recursively for annotation and label
+maps under any parent field, including nested templates and list entries.
+Nonempty `annotations` maps and reserved `labels` keys are refused regardless
+of the granted kind, including directly named `podAnnotations`/`podLabels`-style
+maps (field names ending in `Annotations` or `Labels`, case-insensitively). Operator APIs remain opaque: a controller that synthesizes
+Pod metadata from differently named scalar fields or transforms arbitrary data
+still requires operator review when granting that API.

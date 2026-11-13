@@ -137,7 +137,7 @@ func admitCapabilityResource(location string, r *wfv1.ResourceTemplate, capabili
 	// Decode by exact keys. encoding/json's struct matching folds both ASCII
 	// and Unicode (for example Kind and nameſpace), unlike Kubernetes.
 	var object, metadata map[string]json.RawMessage
-	if json.Unmarshal(encoded, &object) != nil || rejectEnvelopeCaseVariants(object, "apiVersion", "kind", "metadata") != nil || json.Unmarshal(object["metadata"], &metadata) != nil || rejectEnvelopeCaseVariants(metadata, "namespace", "name", "generateName") != nil || resourceMetadataOverride(metadata) {
+	if json.Unmarshal(encoded, &object) != nil || rejectEnvelopeCaseVariants(object, "apiVersion", "kind", "metadata") != nil || json.Unmarshal(object["metadata"], &metadata) != nil || rejectEnvelopeCaseVariants(metadata, "namespace", "name", "generateName") != nil {
 		return refuse("invalid or case-variant resource envelope keys, Pod annotations or reserved labels")
 	}
 	var apiVersion, kind, namespace, name, generateName string
@@ -178,14 +178,15 @@ func resourcePriorityOverride(value any) bool {
 		value, pending = pending[len(pending)-1], pending[:len(pending)-1]
 		switch node := value.(type) {
 		case map[string]any:
+			// A controller can copy metadata from any parent field, including
+			// list entries. Inspect its shape at every depth, not its parent's
+			// spelling or the granted resource kind.
+			if resourceMetadataOverride(node) {
+				return true
+			}
 			for key, child := range node {
 				if strings.EqualFold(key, "metadata") || strings.EqualFold(key, "podMetadata") {
-					raw, err := json.Marshal(child)
-					if err != nil {
-						return true
-					}
-					var metadata map[string]json.RawMessage
-					if json.Unmarshal(raw, &metadata) != nil || resourceMetadataOverride(metadata) {
+					if _, object := child.(map[string]any); child != nil && !object {
 						return true
 					}
 				}
@@ -203,19 +204,34 @@ func resourcePriorityOverride(value any) bool {
 
 // An opaque operator API may propagate its metadata onto a Pod. Apply the
 // same boundary to metadata envelopes rather than guessing each granted kind.
-func resourceMetadataOverride(metadata map[string]json.RawMessage) bool {
-	for name, raw := range metadata {
-		switch {
-		case strings.EqualFold(name, "annotations"):
-			var annotations map[string]string
-			if json.Unmarshal(raw, &annotations) != nil || len(annotations) != 0 {
+func resourceMetadataOverride(metadata map[string]any) bool {
+	for name, value := range metadata {
+		// APIs also expose direct podAnnotations/podLabels-style maps.
+		// This is independent of the resource kind and parent field name.
+		name = strings.ToLower(name)
+		if !strings.HasSuffix(name, "annotations") && !strings.HasSuffix(name, "labels") {
+			continue
+		}
+		if value == nil {
+			continue
+		}
+		entries, ok := value.(map[string]any)
+		if !ok {
+			return true
+		}
+		if strings.HasSuffix(name, "annotations") && len(entries) != 0 {
+			return true
+		}
+		labels := make(map[string]string, len(entries))
+		for key, value := range entries {
+			text, ok := value.(string)
+			if !ok {
 				return true
 			}
-		case strings.EqualFold(name, "labels"):
-			var labels map[string]string
-			if json.Unmarshal(raw, &labels) != nil || len(admitPodMetadataKeys("resource metadata labels", labels)) != 0 {
-				return true
-			}
+			labels[key] = text
+		}
+		if len(admitPodMetadataKeys("resource metadata labels", labels)) != 0 {
+			return true
 		}
 	}
 	return false
