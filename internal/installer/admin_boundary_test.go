@@ -4,17 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/httpstream"
+	streamspdy "k8s.io/apimachinery/pkg/util/httpstream/spdy"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -22,6 +29,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/clientcert"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestAdminHostBoundary(t *testing.T) {
@@ -79,6 +87,93 @@ func TestAdminHostBoundary(t *testing.T) {
 		}
 		if calls["database-backup"] != 1 || len(kube.Actions()) != 0 {
 			t.Fatal(calls, kube.Actions())
+		}
+	})
+	t.Run("AuthenticatedKubernetesUpgrade", func(t *testing.T) {
+		stop := make(chan struct{})
+		defer close(stop)
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer fixture-kube-token" {
+				t.Error("Kubernetes credential missing")
+			}
+			if _, err := httpstream.Handshake(r, w, []string{"portforward.k8s.io"}); err != nil {
+				t.Error(err)
+				return
+			}
+			connection := streamspdy.NewResponseUpgrader().UpgradeResponse(w, r, httpstream.NoOpNewStreamHandler)
+			if connection == nil {
+				return
+			}
+			defer func() { _ = connection.Close() }()
+			select {
+			case <-connection.CloseChan():
+			case <-stop:
+			}
+		}))
+		defer server.Close()
+		endpoint, err := url.Parse(server.URL + "/portforward")
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := &rest.Config{Host: server.URL, BearerToken: "fixture-kube-token", TLSClientConfig: rest.TLSClientConfig{CAData: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})}}
+		dialer, err := newAdminPortForwardDialer(t.Context(), config, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connection, protocol, err := dialer.Dial("portforward.k8s.io")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if protocol != "portforward.k8s.io" {
+			t.Error(protocol)
+		}
+		_ = connection.Close()
+	})
+	t.Run("PortForwardCancellationBoundsHandshake", func(t *testing.T) {
+		entered := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"apiVersion":"v1","kind":"PodList","items":[{"metadata":{"name":"server"},"status":{"phase":"Running"}}]}`)
+				return
+			}
+			if !strings.HasSuffix(r.URL.Path, "/portforward") {
+				t.Error("unexpected Kubernetes operation", r.URL.Path)
+			}
+			close(entered)
+			<-r.Context().Done()
+		}))
+		defer server.Close()
+		defer server.CloseClientConnections()
+		config := &rest.Config{Host: server.URL}
+		kube, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, cleanup, err := adminAPI(ctx, Config{enrollment: &installerEnrollment{result: api.FirstAdminResult{InstallerCertificate: "public fixture"}}}, Deps{KubeClient: kube, RestConfig: config})
+			cleanup()
+			done <- err
+		}()
+		select {
+		case <-entered:
+		case <-time.After(testtimeout.Start(5 * time.Second)):
+			cancel()
+			server.CloseClientConnections()
+			t.Fatal("port-forward handshake not started")
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal("cancellation lost", err)
+			}
+		case <-time.After(testtimeout.Start(5 * time.Second)):
+			server.CloseClientConnections()
+			t.Fatal("port-forward handshake ignored caller cancellation")
 		}
 	})
 	t.Run("FailedDownloadRemovesPartial", func(t *testing.T) {

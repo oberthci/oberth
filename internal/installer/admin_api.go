@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +19,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/transport/spdy"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/client"
@@ -116,12 +114,12 @@ func adminAPI(ctx context.Context, cfg Config, deps Deps) (AdminAPI, func(), err
 		if pod == nil {
 			return nil, closeConnection, errors.New("no running server Pod for admin API")
 		}
-		transport, upgrader, err := spdy.RoundTripperFor(deps.RestConfig)
+		endpoint := deps.KubeClient.CoreV1().RESTClient().Post().Namespace(ns).Resource("pods").Name(pod.Name).SubResource("portforward").URL()
+		dialer, err := newAdminPortForwardDialer(ctx, deps.RestConfig, endpoint)
 		if err != nil {
 			return nil, closeConnection, err
 		}
-		endpoint := deps.KubeClient.CoreV1().RESTClient().Post().Namespace(ns).Resource("pods").Name(pod.Name).SubResource("portforward").URL()
-		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, endpoint)
+
 		stop, ready, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 		forwarder, err := portforward.NewOnAddresses(dialer, []string{"127.0.0.1"}, []string{"0:8443"}, stop, ready, io.Discard, io.Discard)
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/recordjson"
 )
 
@@ -22,7 +23,23 @@ func fixtureWizardAdmin(ctx context.Context, st WizardState, action string, args
 		}
 		result = map[string]any{"upstreams": rows}
 	case "upstream-add":
-		_, err := runKubectl(ctx, append(kubectlTarget(&st), "upstream", "add", st.ForgeType, "ssh://git@"+forgeUpstreamURL(st.ForgeType, st.ForgeOrg))...)
+		raw, err := json.Marshal(args)
+		if err != nil {
+			return err
+		}
+		var request api.UpstreamAddRequest
+		if err := json.Unmarshal(raw, &request); err != nil {
+			return err
+		}
+		words := []string{"upstream", "add", "--yes"}
+		if request.NoWait {
+			words = append(words, "--no-wait")
+		}
+		if request.ExpectedHostFingerprint != "" {
+			words = append(words, "--expected-host-fingerprint", request.ExpectedHostFingerprint)
+		}
+		words = append(words, request.Name, request.BaseURL)
+		_, err = runKubectl(ctx, append(kubectlTarget(&st), words...)...)
 		return err
 	case "public-identity":
 		raw, err := runKubectl(ctx, append(kubectlTarget(&st), "admin", "public-identity", "upstream-public-key", "id_ed25519.pub")...)
