@@ -85,6 +85,35 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 		if len(initializers) == 0 {
 			initializers = []any{map[string]any{"name": "init"}}
 		}
+		// Argo installs its runtime/template before authored initContainers,
+		// and adds their runtime mount before strategic merge. They never run
+		// emissary and must not alter the template wait will load with authority.
+		for _, authored := range t.InitContainers {
+			var initializer map[string]any
+			for _, item := range initializers {
+				if value, ok := item.(map[string]any); ok && value["name"] == authored.Name {
+					initializer = value
+					break
+				}
+			}
+			if initializer == nil {
+				initializer = map[string]any{"name": authored.Name}
+				initializers = append(initializers, initializer)
+			}
+			mounts, _ := initializer["volumeMounts"].([]any)
+			mount := map[string]any{"name": "var-run-argo", "mountPath": "/var/run/argo", "readOnly": true}
+			replaced := false
+			for i, item := range mounts {
+				if value, ok := item.(map[string]any); ok && value["mountPath"] == "/var/run/argo" {
+					mounts[i] = mount
+					replaced = true
+				}
+			}
+			if !replaced {
+				mounts = append(mounts, mount)
+			}
+			initializer["volumeMounts"] = mounts
+		}
 		merged := make([]any, 0, len(initializers)+1)
 		order := []map[string]string{}
 		inserted := false
@@ -548,7 +577,8 @@ func validArgoScratchMount(c corev1.Container, mount corev1.VolumeMount, initial
 	executor := c.Image == argoworkflow.ExecutorImage && ((initializer && c.Name == "init") || (!initializer && c.Name == "wait") || (!initializer && resourcePod && c.Name == "main"))
 	switch mount.Name {
 	case "var-run-argo":
-		return (!resourcePod || executor) && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "var-run-argo", MountPath: "/var/run/argo"})
+		expected := corev1.VolumeMount{Name: "var-run-argo", MountPath: "/var/run/argo", ReadOnly: initializer && !executor}
+		return (!resourcePod || executor) && apiequality.Semantic.DeepEqual(mount, expected)
 	case "argo-staging":
 		return executor || (!initializer && !resourcePod && c.Name == "main" && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "argo-staging", MountPath: "/argo/staging"}))
 	default:
