@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -89,8 +91,8 @@ func TestPromotionPruneSourceOnlyAfterVerifiedPromotion(t *testing.T) {
 		t.Fatalf("give up = %+v", got)
 	}
 
-	git.head, git.err = f.unmerged, nil
-	unmerged, request := f.promotion(t, "feature/unmerged", f.unmerged, model.PromotionPassed, f.unmerged)
+	git.head, git.err = f.initial, nil
+	unmerged, request := f.promotion(t, "feature/unmerged", f.unmerged, model.PromotionPassed, f.initial)
 	if got := settle(unmerged, request); got.Status != model.PromotionPruneKept || !strings.Contains(got.Reason, "not merged") || !f.mirrorHas(t, "feature/unmerged") {
 		t.Fatalf("unmerged source = %+v", got)
 	}
@@ -199,5 +201,99 @@ func TestPromotionPruneSourceNeverPrunesDefaultOrReservedBranches(t *testing.T) 
 	}
 	if f.queued != 0 {
 		t.Fatalf("deletion queued %d times", f.queued)
+	}
+}
+
+// A real publication passes before pruning, while the mirror's forge tracking
+// ref deliberately still points at the pre-promotion target (#1562).
+func TestPromotionPruneUsesPublishedTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name                         string
+		merge, fresh, moved, missing bool
+	}{
+		{name: "fast-forward stale target"},
+		{name: "fast-forward refreshed target", fresh: true},
+		{name: "merge commit stale target", merge: true},
+		{name: "source advanced after promotion", moved: true},
+		{name: "missing cached target", missing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _ := newPrunePromotionFixture(t)
+			f.git(t, f.work, "checkout", "feature/unmerged")
+			if err := os.WriteFile(filepath.Join(f.work, "promoted.txt"), []byte("promoted work\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f.git(t, f.work, "add", "promoted.txt")
+			f.git(t, f.work, "commit", "-m", "source work")
+			source := f.git(t, f.work, "rev-parse", "HEAD")
+			result := source
+			if tc.merge {
+				f.git(t, f.work, "checkout", "main")
+				f.git(t, f.work, "merge", "--no-ff", "--no-edit", source)
+				result = f.git(t, f.work, "rev-parse", "HEAD")
+			}
+			// Seed immutable objects without refreshing the forge tracking ref or
+			// moving mirror main: even the mirror target may still be stale.
+			f.git(t, f.mirror, "fetch", "--no-tags", f.work, result)
+			f.git(t, f.mirror, "update-ref", "refs/heads/feature/unmerged", source)
+			cachedTarget := "refs/oberth/upstream/heads/main"
+			if tc.fresh {
+				f.git(t, f.mirror, "update-ref", cachedTarget, result)
+			}
+			if tc.missing {
+				f.git(t, f.mirror, "update-ref", "-d", cachedTarget)
+			}
+
+			promotion, err := f.store.AppendPromotion(t.Context(), model.PromotionSpec{
+				RepoID: f.repo.ID, SourceBranch: "feature/unmerged", SourceSHA: source,
+				TargetRef: "main", PreviousSHA: f.initial, ResultSHA: result, Actor: "dev@host",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.RequestPromotionPrune(t.Context(), promotion.ID, promotion.Actor); err != nil {
+				t.Fatal(err)
+			}
+			publication, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{
+				RepoID: f.repo.ID, PromotionID: promotion.ID, RefKind: model.RefBranch,
+				Ref: "main", PreviousSHA: f.initial, ResultSHA: result, Actor: promotion.Actor,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.controlFixture.git.setRemoteRefLocked("refs/heads/main", f.initial)
+			forge := &confirmationGit{controlGit: f.controlFixture.git, after: result}
+			f.service.git = forge
+			if _, err := deliverPublication(t.Context(), f.store, forge, f.store, f.repo, f.input, publication); err != nil {
+				t.Fatal(err)
+			}
+			promotion, err = f.store.Promotion(t.Context(), promotion.ID)
+			if err != nil || promotion.Status != model.PromotionPassed || promotion.ObservedTargetSHA != result || forge.pushed != 1 {
+				t.Fatalf("publication did not pass: %+v, %v", promotion, err)
+			}
+			if tc.moved {
+				f.git(t, f.work, "checkout", "feature/unmerged")
+				f.git(t, f.work, "commit", "--allow-empty", "-m", "later work")
+				head := f.git(t, f.work, "rev-parse", "HEAD")
+				f.git(t, f.mirror, "fetch", "--no-tags", f.work, head)
+				f.git(t, f.mirror, "update-ref", "refs/heads/feature/unmerged", head)
+			}
+			request, err := f.store.PromotionPrune(t.Context(), promotion.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := f.service.settlePromotionPrune(t.Context(), f.store, promotion, request, time.Now())
+			if tc.moved {
+				if got.Status != model.PromotionPruneKept || !strings.Contains(got.Reason, "head moved") || !f.mirrorHas(t, "feature/unmerged") || f.queued != 0 {
+					t.Fatalf("moved source = %+v, queued=%d", got, f.queued)
+				}
+			} else if got.Status != model.PromotionPrunePruned || got.BatchID == "" || f.mirrorHas(t, "feature/unmerged") || f.queued != 1 {
+				t.Fatalf("published source = %+v, queued=%d", got, f.queued)
+			}
+			// Pruning must not manufacture a new cached observation of the forge.
+			if !tc.fresh && !tc.missing && f.git(t, f.mirror, "rev-parse", cachedTarget) != f.initial {
+				t.Fatal("pruning changed the cached target ref")
+			}
+		})
 	}
 }

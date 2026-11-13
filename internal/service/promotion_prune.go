@@ -114,12 +114,14 @@ func (service *API) decidePromotionPrune(ctx context.Context, promotion model.Pr
 	if promotion.SourceBranch == repository.DefaultBranch || promotion.SourceBranch == target {
 		return kept("source branch %s is the default or target branch; never pruned", promotion.SourceBranch)
 	}
-	if reserved, err := service.reservedSourceBranch(ctx, input, promotion.SourceBranch); err != nil {
+	if reserved, err := service.reservedSourceBranch(ctx, input, promotion.SourceBranch, promotion.ResultSHA); err != nil {
 		return model.PromotionPruneKept, "branch inventory unavailable", "", true
 	} else if reserved {
 		return kept("source branch %s is reserved; never pruned by prune_source", promotion.SourceBranch)
 	}
-	args := branchPruneArguments{Repo: input, Branches: []struct {
+	// The live target above equals ResultSHA. The cached upstream tracking
+	// ref may predate that publication, so classify against the verified SHA.
+	args := branchPruneArguments{Repo: input, targetSHA: promotion.ResultSHA, Branches: []struct {
 		Branch      string `json:"branch"`
 		ExpectedSHA string `json:"expected_sha"`
 	}{{Branch: promotion.SourceBranch, ExpectedSHA: promotion.SourceSHA}}}
@@ -160,8 +162,8 @@ func publicPruneError(err error) string {
 }
 
 // reservedSourceBranch reports whether the mirror marks branch reserved.
-func (service *API) reservedSourceBranch(ctx context.Context, input, branch string) (bool, error) {
-	inventory, err := service.branchPrune.BranchInventory(ctx, input, "")
+func (service *API) reservedSourceBranch(ctx context.Context, input, branch, targetSHA string) (bool, error) {
+	inventory, err := service.branchPrune.BranchInventory(ctx, input, "", targetSHA)
 	if err != nil {
 		return false, err
 	}
