@@ -8,7 +8,7 @@ import (
 // New admission reserves the helper namespace. Recheck the actual main
 // container too: a retained Pod can predate that admission rule.
 func assistHelperShadow(value string) bool {
-	if strings.Contains(value, "{{") || strings.Contains(value, "}}") {
+	if !path.IsAbs(value) || strings.Contains(value, "{{") || strings.Contains(value, "}}") {
 		return true
 	}
 	value = path.Clean(value)
