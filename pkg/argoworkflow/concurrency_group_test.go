@@ -13,7 +13,7 @@ func groupedDocument(annotations string) string {
 
 // Unknown ownership keys use the same general refusal, without retired-name messages.
 func TestAdmitRefusesRemovedAnnotations(t *testing.T) {
-	for _, name := range []string{"oberth.ci/concurrency-group", "oberth.ci/size"} {
+	for _, name := range []string{"oberth.ci/concurrency-group", "oberth.ci/size", "oberth.ci/go-proxy"} {
 		workflow, err := Decode([]byte(groupedDocument("    " + name + ": \"2\"\n")))
 		if err != nil {
 			t.Fatal(err)

@@ -136,11 +136,10 @@ func (issued IssuedServerCertificate) RenewAt() time.Time {
 }
 
 // ServerTLSNames are the names the server certificate covers: the in-cluster
-// service names, the goproxy service names, and operator-supplied extras.
+// service names and operator-supplied extras.
 func ServerTLSNames(namespace string, extra []string) (dnsNames, ips []string) {
 	names := []string{
 		"oberth", "oberth." + namespace, "oberth." + namespace + ".svc", "oberth." + namespace + ".svc.cluster.local",
-		"oberth-goproxy", "oberth-goproxy." + namespace, "oberth-goproxy." + namespace + ".svc", "oberth-goproxy." + namespace + ".svc.cluster.local",
 	}
 	seen := map[string]bool{}
 	for _, name := range append(names, extra...) {

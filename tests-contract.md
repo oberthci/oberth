@@ -95,21 +95,6 @@ despite caller-file replacement, exercise stdout/stderr bounds with actual
 subprocesses, reject malformed first PEM blocks even before valid certificates,
 and detect drift in already-owned objects during partial forward repair.
 
-Private routing #764: `TestPrivateRoutingAllShapes` and
-`TestPrivateRoutingCacheFailures` cover private root/unknown/nested modules,
-malformed requests, unsupported and missing versions, and every cache fault.
-`TestLatestAndListUseSupportedTags` checks canonical tag-only resolution.
-`TestGoResolverPrivateRouting`, `TestGoResolverLatestEndpoint`,
-`TestGoResolverPublicFallback`, `TestGoResolverOriginal404Control` and
-`TestGoResolverUntrustedMirrorStops` run actual Go subprocesses with cold caches
-against verified TLS loopback mirror/public endpoints and a non-forwarding TLS
-CONNECT trap: private coordinates never reach either fallback, the original
-404 control reaches both, and public availability behavior is preserved. The
-fixture disables public sumdb and VCS access to prohibit external traffic; the
-production environment test separately verifies public sumdb is untouched.
-`TestGoProxyEnvironmentPreventsAmbientBypass` checks CI/release and inline
-containers override ambient proxy values while preserving public checksum policy.
-
 `TestClientRejectsAmbientAuthorityOnEveryRequest` (#770) asserts actual verified
 TLS 1.3 seal-status, login, KV read and revoke requests under hostile synthetic
 Vault environment metadata, set both before and after client construction.

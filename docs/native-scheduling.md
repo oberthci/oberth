@@ -219,8 +219,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   `TRIVY_CACHE_DIR` and `GOLANGCI_LINT_CACHE`; workspace annotations can omit
   these defaults. A configured persistent cache overrides `GOMODCACHE` and
   `GOCACHE` and adds `OBERTH_CACHE_DIR`, pointing to that cache instead of the
-  work-volume fallbacks. A configured private module proxy sets `GOPROXY`,
-  `GONOPROXY` and `GONOSUMDB`, including the authored mirror-only option.
+  work-volume fallbacks. Repositories configure their own module access.
   Credentialed leaves receive `VAULT_ADDR`, `OBERTH_VAULT_ROLE` and, when
   delivered, `VAULT_CACERT`; approved per-repository/per-step identities
   specialize the role. Approved release WIF adds
@@ -261,9 +260,9 @@ win name/path collisions; validated workspace opt-outs remain available.
   read-only at `/work/src`; an omitted working directory defaults there.
   Approved pinned sources get additional read-only subpaths at their declared
   paths. `/work/artifacts` is a writable subpath of the same claim when
-  collected artifacts are enabled. Public Vault/proxy trust anchors and the
+  collected artifacts are enabled. Public OpenBao trust anchors and the
   authenticated server binary are additional read-only source-claim subpaths
-  where required (`/run/oberth/vault-ca`, `/etc/ssl/certs/oberth-goproxy-ca.pem`,
+  where required (`/run/oberth/vault-ca`,
   `/run/oberth/bin`). The claim is already bound by source seeding:
   **its RWO/node/storage topology constrains subsequent Pods**, including
   collection. The source deviation above describes the extra pre-Workflow
@@ -416,7 +415,7 @@ No new label was added for this release.
 | `oberth.ci/executor-identity-retry-at` | Owned step Pod on identity retry | Issuance retry timestamp, not a workload-start deadline |
 
 Author-facing annotations for source/workspace declarations, secret paths,
-Go-proxy choice, nonroot templates and release-WIF roles remain documented in
+nonroot templates and release-WIF roles remain documented in
 their respective feature documents; they are not new scheduling syntax.
 Removed CPU/request-default/demand/startup-allowance annotations are not emitted
 and do not restore admission on old running Workflows.

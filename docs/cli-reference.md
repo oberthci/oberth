@@ -1559,26 +1559,6 @@ Flags:
         per-Pod Argo executor scratch size limit (Kubernetes quantity) (default "1Gi")
   -argo-executor-serviceaccount string
         ServiceAccount for Argo's own executor containers; must differ from all pipeline identities (default "oberth-argo-executor")
-  -argo-goproxy-ca string
-        PEM CA certificate that signed the Go module proxy's TLS certificate; delivered to pipeline pods
-  -argo-goproxy-cert string
-        TLS certificate for the Go module proxy
-  -argo-goproxy-key string
-        TLS private key for the Go module proxy
-  -argo-goproxy-listen string
-        listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)
-  -argo-goproxy-module-prefix string
-        Administrator-owned private module namespace
-  -argo-goproxy-organization string
-        Exact organization owning private module repositories
-  -argo-goproxy-pseudo-non-default-branches
-        Allow pseudo-versions from non-default public branches and existing allowed tags; default is default-branch-only
-  -argo-goproxy-repository-prefix string
-        Repository-name prefix within the configured owner
-  -argo-goproxy-upstream string
-        Exact upstream owning private module repositories
-  -argo-goproxy-url string
-        HTTPS URL pipeline pods use to reach the module proxy (e.g. https://oberth-goproxy.oberth.svc:8444)
   -argo-namespace string
         namespace for Argo Workflow pipelines (required)
   -argo-pipeline-serviceaccount string

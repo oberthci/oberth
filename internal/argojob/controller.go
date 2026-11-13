@@ -393,7 +393,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		live.steps = controller.observedStepAttempts
 		live.identity = controller.logIdentity
 		live.pod = controller.logPod
-		live.goProxyURL = controller.config.GoProxyURL
 		defer live.close()
 	}
 	reporter := newProgressReporter(budget)
@@ -637,7 +636,7 @@ func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.
 	if step.Attempt != "" {
 		writeLine(destination, step, "oberth: Argo retry attempt "+step.Attempt)
 	}
-	if err := copyPrefixed(destination, step, io.LimitReader(stream, maxStepLogBytes), controller.config.GoProxyURL); err != nil {
+	if err := copyPrefixed(destination, step, io.LimitReader(stream, maxStepLogBytes)); err != nil {
 		if errors.Is(err, errRunLogBudget) {
 			// Best-effort banner -- the budget is exhausted so this write
 			// will likely fail, but writeLine silently drops write errors.
@@ -993,8 +992,7 @@ func (writer *runBudgetWriter) Write(body []byte) (int, error) {
 // line, which is the marker internal/runlog indexes on. It returns an error on
 // the first destination write failure or when the transformed output exceeds
 // the per-step budget, and stops reading immediately in either case.
-func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyURL string) error {
-	var diagnostic goProxyDiagnostic
+func copyPrefixed(destination io.Writer, step StepResult, body io.Reader) error {
 	prefix := []byte("[" + step.Stage + "/" + step.Step + "] ")
 	buffered := make([]byte, 0, 8192)
 	chunk := make([]byte, 4096)
@@ -1004,11 +1002,6 @@ func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyU
 		assembled = append(assembled, prefix...)
 		assembled = append(assembled, line...)
 		assembled = append(assembled, '\n')
-		if hint := diagnostic.observe(string(line), proxyURL); hint != "" {
-			assembled = append(assembled, prefix...)
-			assembled = append(assembled, hint...)
-			assembled = append(assembled, '\n')
-		}
 		written += int64(len(assembled))
 		if written > maxStepLogBytes {
 			return fmt.Errorf("step log exceeds the %d byte budget", maxStepLogBytes)

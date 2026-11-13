@@ -198,6 +198,10 @@ func inspectInstallPreflight(ctx context.Context, cfg *Config, deps Deps, host I
 		return
 	}
 	if cfg.existingRelease {
+		if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
+			r.check("installed_values", false, err.Error())
+			return
+		}
 		cfg.NetworkPolicy = "auto"
 	}
 

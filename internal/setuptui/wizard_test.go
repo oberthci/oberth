@@ -703,7 +703,7 @@ func TestTLSDescribesServerPKI(t *testing.T) {
 		t.Fatal("missing TLS question")
 	}
 	explain := tls.explain(st)
-	for _, want := range []string{"ECDSA P-256", "oberth.oberth.svc.cluster.local", "oberth-goproxy"} {
+	for _, want := range []string{"ECDSA P-256", "oberth.oberth.svc.cluster.local"} {
 		if !strings.Contains(explain, want) {
 			t.Errorf("tls explanation missing %q: %s", want, explain)
 		}

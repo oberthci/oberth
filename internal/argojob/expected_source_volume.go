@@ -5,9 +5,6 @@ func (controller *Controller) expectedSourceVolume(request Request) SourceVolume
 	if request.Assist {
 		volume.BinarySubPath = binarySubPath
 	}
-	if controller.config.GoProxyCACertPEM != "" {
-		volume.GoProxyCASubPath = goProxyCASubPath + "/" + goProxyCACertFile
-	}
 	if requestNeedsSecretStore(request) {
 		volume.BinarySubPath = binarySubPath
 		if controller.config.VaultCACertPEM != "" {

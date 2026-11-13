@@ -23,7 +23,7 @@ func TestServerPKIFromEnvironment(t *testing.T) {
 	if request.Mount != "oberth-pki" || request.Role != "oberth-server" || request.TTL != "720h" {
 		t.Fatalf("request = %+v", request)
 	}
-	if request.DNSNames[0] != "oberth" || !slices.Contains(request.DNSNames, "example-node") || !slices.Contains(request.DNSNames, "oberth-goproxy.oberth.svc") {
+	if request.DNSNames[0] != "oberth" || !slices.Contains(request.DNSNames, "example-node") {
 		t.Fatalf("dns names = %v", request.DNSNames)
 	}
 	if !slices.Equal(request.IPs, []string{"127.0.0.1", "192.0.2.193"}) {

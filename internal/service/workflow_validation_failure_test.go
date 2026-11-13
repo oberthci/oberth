@@ -131,7 +131,7 @@ spec:
       image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: [/bin/true]
 `
-	for _, kind := range []string{"document", "configuration", "vault-address", "ci-role", "mirror", "identity"} {
+	for _, kind := range []string{"document", "configuration", "vault-address", "ci-role", "identity"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newControlFixture(t)
 			config := argojob.Config{Namespace: "pipeline", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor", VaultAddress: "https://vault.example.test:8200", VaultCISecretsRole: "ci", VaultCredentialedRole: "release"}
@@ -141,8 +141,6 @@ spec:
 				request.Source = []byte(strings.Replace(source, "spec:", "spec:\n  hostNetwork: true", 1))
 			case "configuration":
 				config.Namespace = "NOT VALID"
-			case "mirror":
-				request.Source = []byte(strings.Replace(source, "spec:", "metadata:\n  annotations:\n    oberth.ci/goproxy: mirror-only\nspec:", 1))
 			case "identity":
 				config.ExecutorServiceAccount = ""
 			default:

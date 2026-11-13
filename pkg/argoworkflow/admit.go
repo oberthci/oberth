@@ -49,9 +49,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	}
 	var problems []error
 	problems = append(problems, admitMetadata(workflow)...)
-	if _, err := DeclaredGoProxyMirrorOnly(workflow); err != nil {
-		problems = append(problems, err)
-	}
 	problems = append(problems, admitSpec(&workflow.Spec)...)
 	problems = append(problems, admitTemplates(workflow, policy)...)
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
@@ -91,7 +88,7 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 // namespace rule. Assist identity/hold markers are server-written, not opt-ins.
 func supportedWorkflowAnnotation(key string) bool {
 	switch key {
-	case SecretPathsAnnotation, SourcesAnnotation, GoProxyAnnotation, NonrootTemplatesAnnotation:
+	case SecretPathsAnnotation, SourcesAnnotation, NonrootTemplatesAnnotation:
 		return true
 	default:
 		return false

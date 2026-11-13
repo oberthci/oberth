@@ -83,7 +83,7 @@ class ArgoSchemaTests(unittest.TestCase):
         cases = [
             {'enabled': 'false'},
             {'vault': {'adress': 'https://bao.example.com'}},
-            {'goProxy': {'enabeld': True}},
+            {'goProxy': {'enabled': False}},
             {'ciSecrets': 17},
             {'ciSecrets': {'serviceAccount': 17}},
             {'ciSecrets': {'vaultRole': []}},

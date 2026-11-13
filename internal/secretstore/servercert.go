@@ -9,7 +9,7 @@ import (
 // self-signed server certificate to be its own trust anchor.
 //
 // Clients pin that certificate directly: the CLI and MCP clients through
-// OBERTH_CA_CERT / NODE_EXTRA_CA_CERTS, pipeline pods through the goproxy CA.
+// OBERTH_CA_CERT / NODE_EXTRA_CA_CERTS.
 // BoringSSL-based clients (Claude Code's runtime among them) accept a
 // self-signed certificate as an anchor only when it may sign certificates, so
 // a plain CA:FALSE leaf can never be trusted there.

@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildTypesDocumentRefusalsButNotOperatorConfiguration(t *testing.T) {
-	for _, kind := range []string{"decode", "admit", "document-isolation", "config", "vault-address", "ci-role", "mirror", "identity"} {
+	for _, kind := range []string{"decode", "admit", "document-isolation", "config", "vault-address", "ci-role", "identity"} {
 		t.Run(kind, func(t *testing.T) {
 			config := testConfig()
 			request := testRequest(pipeline.TriggerCI, greedyDocument)
@@ -24,10 +24,6 @@ func TestBuildTypesDocumentRefusalsButNotOperatorConfiguration(t *testing.T) {
 				request.Source = []byte(strings.Replace(greedyDocument, "spec:", "spec:\n  templateDefaults:\n    metadata:\n      annotations:\n        oberth.ci/workspace-mounts: none", 1))
 			case "config":
 				config.Namespace = "INVALID namespace"
-				doc = false
-			case "mirror":
-				request.Source = []byte(strings.Replace(greedyDocument, "    example.com/tier: L", "    example.com/tier: L\n    oberth.ci/goproxy: mirror-only", 1))
-				config.GoProxyURL = ""
 				doc = false
 			default:
 				request.Source = []byte(strings.Replace(greedyDocument, "    example.com/tier: L", "    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret", 1))

@@ -30,7 +30,7 @@ func TestServeAgentEventFlagsBounded(t *testing.T) {
 
 func TestChartRendersAgentEventFlagsWithBinaryDefaults(t *testing.T) {
 	render := func(sets ...string) (string, error) {
-		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + goProxyDigest}
+		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + chartTestDigest}
 		for _, set := range sets {
 			args = append(args, "--set", set)
 		}
