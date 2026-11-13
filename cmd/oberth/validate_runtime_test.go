@@ -137,7 +137,7 @@ spec:
 		{"mounts-on-defaults", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			wf.Spec.TemplateDefaults = &wfv1.Template{Container: wf.Spec.Templates[0].Container.DeepCopy()}
 			wf.Spec.TemplateDefaults.Container.VolumeMounts = []corev1.VolumeMount{{Name: "work", MountPath: "/work"}}
-		}, "templateDefaults volumeMounts are not admitted"},
+		}, "templateDefaults volumeMounts or volumeDevices are not admitted"},
 		{"trivy-unordered-shared", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			trivy(wf, "cache", argojob.CacheMountPath+"/trivy", "", false)
 		}, "but have no ordering edge between them"},
