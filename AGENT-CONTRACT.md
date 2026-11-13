@@ -1081,6 +1081,12 @@ trust assumptions and complete invalidation rules.
   refuses extra runtime files or a changed SSH alias at assembly/readback.
   Local runtime qualification runs the complete CLI cache suite, host-key
   mismatch refusal and cancellation/reaping checks without a shell/OpenSSH.
+- Releases also publish an optional helper index for `linux/amd64` and
+  `linux/arm64`. Each child has one flattened layer containing only the exact
+  static Oberth release binary and the CA bundle, with no Git executable,
+  SSH alias or static-Git component labels. Steps select the helper digest
+  from signed `release.json`; the five-file binary/chart checksum contract
+  stays unchanged.
 - There is no runner image artifact: Job substrates are public standard
   golang images selected per repository under the administrator prefix
   allowlist.
