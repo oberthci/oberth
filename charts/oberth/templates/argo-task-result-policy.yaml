@@ -1,5 +1,5 @@
 # Bound-Pod userInfo extras are authenticated by the API server. The companion
-# Pod policy reserves the identity-holder prefix against pipeline identities.
+# Pod policy reserves the identity-holder prefix against other Pod creators.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -69,11 +69,11 @@ spec:
         operations: ["CREATE", "UPDATE"]
         resources: ["pods"]
   matchConditions:
-    - name: pipeline-serviceaccounts
-      expression: {{ printf "request.namespace == %s && request.userInfo.username.startsWith(%s)" (.Values.argo.namespace | toJson) ((printf "system:serviceaccount:%s:" .Values.argo.namespace) | toJson) | quote }}
+    - name: argo-namespace
+      expression: {{ printf "request.namespace == %s" (.Values.argo.namespace | toJson) | quote }}
   validations:
-    - expression: "(!has(object.metadata.name) || !object.metadata.name.startsWith('oberth-executor.')) && (!has(object.metadata.generateName) || !object.metadata.generateName.startsWith('oberth-executor.'))"
-      message: "pipeline ServiceAccounts cannot create or alter reserved executor identity Pods"
+    - expression: {{ printf "((!has(object.metadata.name) || !object.metadata.name.startsWith('oberth-executor.')) && (!has(object.metadata.generateName) || !object.metadata.generateName.startsWith('oberth-executor.'))) || request.userInfo.username == %s || authorizer.group('').resource('serviceaccounts').namespace(%s).name(%s).check('impersonate').allowed()" ((printf "system:serviceaccount:%s:%s" .Release.Namespace (include "oberth.serviceAccountName" .)) | toJson) (.Release.Namespace | toJson) ((include "oberth.serviceAccountName" .) | toJson) | quote }}
+      message: "reserved executor identity Pods require the server identity or permission to impersonate it"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

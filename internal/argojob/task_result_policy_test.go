@@ -9,6 +9,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/ext"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -48,7 +49,9 @@ func renderNativeAdmissionProbe(t *testing.T, file, suffix string) nativeAdmissi
 	if p.policy.Spec.FailurePolicy == nil || *p.policy.Spec.FailurePolicy != admissionv1.Fail {
 		t.Fatal("policy must fail closed")
 	}
-	env, err := cel.NewEnv(cel.Variable("object", cel.DynType), cel.Variable("oldObject", cel.DynType), cel.Variable("request", cel.DynType), cel.Variable("variables", cel.DynType), ext.Strings())
+	options := []cel.EnvOption{cel.Variable("object", cel.DynType), cel.Variable("oldObject", cel.DynType), cel.Variable("request", cel.DynType), cel.Variable("variables", cel.DynType), ext.Strings()}
+	options = append(options, admissionAuthorizerDenyStub()...)
+	env, err := cel.NewEnv(options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +79,16 @@ func renderNativeAdmissionProbe(t *testing.T, file, suffix string) nativeAdmissi
 	return p
 }
 
+// The rendered CEL runs unchanged. Only its external RBAC service is stubbed
+// to deny; the live API test covers the actual authorizer and administrator.
+func admissionAuthorizerDenyStub() []cel.EnvOption {
+	options := []cel.EnvOption{cel.Variable("authorizer", cel.DynType)}
+	for _, name := range []string{"group", "resource", "namespace", "name", "check"} {
+		options = append(options, cel.Function(name, cel.MemberOverload("admission_authz_"+name, []*cel.Type{cel.DynType, cel.StringType}, cel.DynType, cel.BinaryBinding(func(receiver, _ ref.Val) ref.Val { return receiver }))))
+	}
+	return append(options, cel.Function("allowed", cel.MemberOverload("admission_authz_allowed", []*cel.Type{cel.DynType}, cel.BoolType, cel.UnaryBinding(func(ref.Val) ref.Val { return types.False }))))
+}
+
 func (p nativeAdmissionProbe) accepts(t *testing.T, request map[string]any, object, old any) bool {
 	t.Helper()
 	jsonValue := func(value any) any {
@@ -90,7 +103,7 @@ func (p nativeAdmissionProbe) accepts(t *testing.T, request map[string]any, obje
 		return result
 	}
 	variables := map[string]any{}
-	activation := map[string]any{"request": request, "object": jsonValue(object), "oldObject": jsonValue(old), "variables": variables}
+	activation := map[string]any{"request": request, "object": jsonValue(object), "oldObject": jsonValue(old), "variables": variables, "authorizer": map[string]any{}}
 	for _, program := range p.conditions {
 		value, _, err := program.Eval(activation)
 		if err != nil {
@@ -217,9 +230,21 @@ func TestExecutorIdentityPodNamesAreReserved(t *testing.T) {
 		}
 	}
 	server := taskResultRequest("server", "")
-	server["userInfo"].(map[string]any)["username"] = "system:serviceaccount:oberth:server"
+	server["userInfo"].(map[string]any)["username"] = "system:serviceaccount:default:oberth"
 	if !policy.accepts(t, server, pod, nil) {
 		t.Fatal("trusted server holder refused")
+	}
+	for _, actor := range []string{"system:serviceaccount:controller-namespace:argo", "pod-author"} {
+		for _, operation := range []string{"CREATE", "UPDATE"} {
+			t.Run(actor+"/"+operation, func(t *testing.T) {
+				request := taskResultRequest("", "")
+				request["operation"] = operation
+				request["userInfo"].(map[string]any)["username"] = actor
+				if policy.accepts(t, request, pod, pod) {
+					t.Fatal("another Pod creator can forge the holder binding")
+				}
+			})
+		}
 	}
 }
 

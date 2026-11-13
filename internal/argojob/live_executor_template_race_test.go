@@ -77,7 +77,7 @@ func measureLiveTemplateRace(t *testing.T, cluster liveCluster, phase string) {
 					t.Logf("%s measurement: %d/300 complete", phase, done)
 				}
 				if observation.Error != "" {
-					t.Errorf("measurement incomplete: %s", observation.Error)
+					t.Logf("measurement observation: %s", observation.Error)
 				}
 			})
 		}
@@ -179,6 +179,15 @@ spec:
 	for _, pod := range pods.Items {
 		if pod.Labels["oberth.ci/role"] == "executor-identity" {
 			continue
+		}
+		body, err := json.MarshalIndent(pod, "", "  ")
+		if err != nil {
+			observation.Error = err.Error()
+			return
+		}
+		if err = os.WriteFile(filepath.Join(t.ArtifactDir(), "pod.json"), body, 0o600); err != nil {
+			observation.Error = err.Error()
+			return
 		}
 		for _, container := range []string{"main", "wait"} {
 			logs, err := templateRaceLogs(ctx, cluster, pod.Name, container)

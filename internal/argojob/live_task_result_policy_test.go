@@ -271,3 +271,84 @@ func TestLiveWorkflowTaskResultPolicy(t *testing.T) {
 		t.Run(account, func(t *testing.T) { liveTaskResultCases(t, cluster, workflows[0], workflows[1], account, i) })
 	}
 }
+
+// Impersonation lets the cluster administrator exercise real RBAC and CEL
+// authorization for a controller in another namespace and a namespace user.
+func TestLiveExecutorHolderCreatorBoundary(t *testing.T) {
+	cluster := requireLiveCluster(t)
+	installLiveTaskResultPolicy(t, cluster)
+	roleName := "r6-holder-creators"
+	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: roleName}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"create", "patch"}}}}
+	if _, err := cluster.kube.RbacV1().Roles(cluster.namespace).Create(t.Context(), role, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cluster.kube.RbacV1().Roles(cluster.namespace).Delete(context.Background(), roleName, metav1.DeleteOptions{})
+	})
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "oberth-executor.boundary.executor.run"}, Spec: corev1.PodSpec{AutomountServiceAccountToken: ptr.To(false), RestartPolicy: corev1.RestartPolicyNever, SchedulingGates: []corev1.PodSchedulingGate{{Name: "oberth.ci/executor-identity"}}, Containers: []corev1.Container{{Name: "main", Image: defaultSourceSeedImage}}}}
+	if _, err := cluster.kube.CoreV1().Pods(cluster.namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("administrator cannot create holder: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cluster.kube.CoreV1().Pods(cluster.namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})
+	})
+	for index, actor := range []struct {
+		user, kind, namespace, name string
+		trusted                     bool
+	}{
+		{"system:serviceaccount:controller-namespace:argo", "ServiceAccount", "controller-namespace", "argo", false},
+		{"r6-pod-author", "User", "", "r6-pod-author", false},
+		{"system:serviceaccount:oberth:oberth", "ServiceAccount", "oberth", "oberth", true},
+	} {
+		t.Run(actor.name, func(t *testing.T) {
+			name := fmt.Sprintf("%s-%d", roleName, index)
+			binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}, RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: roleName}, Subjects: []rbacv1.Subject{{Kind: actor.kind, Name: actor.name, Namespace: actor.namespace}}}
+			if _, err := cluster.kube.RbacV1().RoleBindings(cluster.namespace).Create(t.Context(), binding, metav1.CreateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = cluster.kube.RbacV1().RoleBindings(cluster.namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+			})
+			config := rest.CopyConfig(cluster.restConfig)
+			config.Impersonate = rest.ImpersonationConfig{UserName: actor.user, Groups: []string{"system:authenticated"}}
+			client, err := kubernetes.NewForConfig(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dry := metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
+			ordinary := pod.DeepCopy()
+			ordinary.Name = "r6-ordinary-pod"
+			if _, err := client.CoreV1().Pods(cluster.namespace).Create(t.Context(), ordinary, dry); err != nil {
+				t.Fatalf("ordinary Pod RBAC control: %v", err)
+			}
+			reserved := pod.DeepCopy()
+			reserved.Name = "oberth-executor.creator.executor.run"
+			_, err = client.CoreV1().Pods(cluster.namespace).Create(t.Context(), reserved, dry)
+			if actor.trusted {
+				if err != nil {
+					t.Fatalf("server cannot create its holder: %v", err)
+				}
+			} else {
+				livePolicyDenies(t, err, "argo-executor-holders")
+			}
+			reserved.Name = ""
+			reserved.GenerateName = "oberth-executor.creator-"
+			_, err = client.CoreV1().Pods(cluster.namespace).Create(t.Context(), reserved, dry)
+			if actor.trusted {
+				if err != nil {
+					t.Fatalf("server holder prefix refused: %v", err)
+				}
+			} else {
+				livePolicyDenies(t, err, "argo-executor-holders")
+			}
+			_, err = client.CoreV1().Pods(cluster.namespace).Patch(t.Context(), pod.Name, types.MergePatchType, []byte(`{"metadata":{"annotations":{"r6":"creator"}}}`), metav1.PatchOptions{DryRun: []string{metav1.DryRunAll}})
+			if actor.trusted {
+				if err != nil {
+					t.Fatalf("server cannot update holder: %v", err)
+				}
+			} else {
+				livePolicyDenies(t, err, "argo-executor-holders")
+			}
+		})
+	}
+}
