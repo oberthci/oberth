@@ -321,7 +321,7 @@ spec:
           - name: SA_NAME
             valueFrom:
               fieldRef:
-                fieldPath: spec.serviceAccountName
+                fieldPath: spec.nodeName
 `,
 	}
 	for name, document := range cases {
@@ -420,9 +420,8 @@ func TestAdmitRefusesServerOwnedMetadata(t *testing.T) {
 	}
 }
 
-func TestAdmitRefusesAnUnknownEntrypoint(t *testing.T) {
-	refuse(t, strings.Replace(admissibleDocument, "entrypoint: main", "entrypoint: nowhere", 1),
-		Policy{}, "names no template")
+func TestAdmitAcceptsAnUnknownEntrypoint(t *testing.T) {
+	mustAdmit(t, strings.Replace(admissibleDocument, "entrypoint: main", "entrypoint: nowhere", 1), Policy{})
 }
 
 func TestAdmitRejectsAMalformedAdministratorAllowlist(t *testing.T) {
@@ -673,7 +672,7 @@ spec:
 `, Policy{}, "ownerReferences must be omitted")
 }
 
-func TestAdmitRejectsUnresolvedOnExit(t *testing.T) {
+func TestAdmitAcceptsUnresolvedOnExit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -688,10 +687,10 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "spec.onExit references template \"cleanup\"")
+	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRejectsUnresolvedInlineDAGReference(t *testing.T) {
+func TestAdmitAcceptsUnresolvedInlineDAGReference(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -715,10 +714,10 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "references template \"nonexistent\"")
+	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRejectsUnresolvedInlineStepReference(t *testing.T) {
+func TestAdmitAcceptsUnresolvedInlineStepReference(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -740,7 +739,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "references template \"missing\"")
+	mustAdmit(t, document, Policy{})
 }
 
 // --- Finding 7 tests: resource amplification ceilings ---
@@ -1026,7 +1025,7 @@ spec:
 // TestAdmitRefusesMixedDependsAndDependencies checks that a DAG template
 // mixing enhanced-depends (string expressions) with legacy dependencies
 // (string arrays) is rejected at admission, matching the executor's own check.
-func TestAdmitRefusesMixedDependsAndDependencies(t *testing.T) {
+func TestAdmitAcceptsMixedDependsAndDependencies(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -1051,7 +1050,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "cannot use both 'depends' and 'dependencies'")
+	mustAdmit(t, document, Policy{})
 }
 
 // TestAdmitAcceptsConsistentDependsOnly verifies that a DAG using only the

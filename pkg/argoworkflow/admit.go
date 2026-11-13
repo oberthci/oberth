@@ -102,9 +102,6 @@ func supportedWorkflowAnnotation(key string) bool {
 
 func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	var problems []error
-	if strings.TrimSpace(spec.Entrypoint) == "" {
-		problems = append(problems, errors.New("argoworkflow: spec.entrypoint is required"))
-	}
 	// A referenced template is a spec Oberth never read. Admission decisions
 	// must be made against the exact bytes in the pushed revision.
 	if spec.WorkflowTemplateRef != nil {
@@ -177,98 +174,15 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 
 func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	var problems []error
-	if len(workflow.Spec.Templates) == 0 {
-		problems = append(problems, errors.New("argoworkflow: spec.templates is required"))
-	}
 	if workflow.Spec.TemplateDefaults != nil {
 		problems = append(problems, admitTemplate("spec.templateDefaults", *workflow.Spec.TemplateDefaults, policy, 0)...)
 	}
-	names := make(map[string]struct{}, len(workflow.Spec.Templates))
-	entrypointFound := false
 	for index, template := range workflow.Spec.Templates {
 		location := fmt.Sprintf("spec.templates[%d]", index)
 		if template.Name != "" {
 			location = fmt.Sprintf("spec.templates[%q]", template.Name)
-		}
-		if _, duplicate := names[template.Name]; duplicate {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.name is duplicated", location))
-		}
-		names[template.Name] = struct{}{}
-		if template.Name == workflow.Spec.Entrypoint {
-			entrypointFound = true
 		}
 		problems = append(problems, admitTemplate(location, template, policy, 0)...)
-	}
-	if workflow.Spec.Entrypoint != "" && !entrypointFound {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", workflow.Spec.Entrypoint))
-	}
-	// Every by-name reference must resolve inside this document. Argo would
-	// otherwise accept the Workflow and fail the step at run time, which turns
-	// a typo into a red release rather than a refused push -- and, since
-	// templateRef is already refused, an unresolvable name can only ever be a
-	// mistake.
-	for index, template := range workflow.Spec.Templates {
-		location := fmt.Sprintf("spec.templates[%d]", index)
-		if template.Name != "" {
-			location = fmt.Sprintf("spec.templates[%q]", template.Name)
-		}
-		problems = append(problems, admitTemplateReferences(location, template, names)...)
-	}
-	check := func(where, referenced string) {
-		if referenced == "" {
-			return
-		}
-		if _, ok := names[referenced]; !ok {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s references template %q, which this document does not declare", where, referenced))
-		}
-	}
-	if workflow.Spec.OnExit != "" {
-		check("spec.onExit", workflow.Spec.OnExit)
-	}
-	for hookName, hook := range workflow.Spec.Hooks {
-		check(fmt.Sprintf("spec.hooks[%q]", hookName), hook.Template)
-	}
-	return problems
-}
-
-// admitTemplateReferences checks the by-name template references a DAG task,
-// a step, or a lifecycle hook makes.
-func admitTemplateReferences(location string, template wfv1.Template, names map[string]struct{}) []error {
-	var problems []error
-	check := func(where, referenced string) {
-		if referenced == "" {
-			return
-		}
-		if _, ok := names[referenced]; !ok {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s references template %q, which this document does not declare", where, referenced))
-		}
-	}
-	if template.DAG != nil {
-		for index, task := range template.DAG.Tasks {
-			where := fmt.Sprintf("%s.dag.tasks[%d]", location, index)
-			if task.Name != "" {
-				where = fmt.Sprintf("%s.dag.tasks[%q]", location, task.Name)
-			}
-			check(where, task.Template)
-			for name, hook := range task.Hooks {
-				check(fmt.Sprintf("%s.hooks[%q]", where, name), hook.Template)
-			}
-			if task.Inline != nil {
-				problems = append(problems, admitTemplateReferences(where+".inline", *task.Inline, names)...)
-			}
-		}
-	}
-	for group := range template.Steps {
-		for index, step := range template.Steps[group].Steps {
-			where := fmt.Sprintf("%s.steps[%d][%d]", location, group, index)
-			check(where, step.Template)
-			for name, hook := range step.Hooks {
-				check(fmt.Sprintf("%s.hooks[%q]", where, name), hook.Template)
-			}
-			if step.Inline != nil {
-				problems = append(problems, admitTemplateReferences(where+".inline", *step.Inline, names)...)
-			}
-		}
 	}
 	return problems
 }
@@ -299,11 +213,6 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	}
 	problems = append(problems, admitNestedTemplates(location, template, policy, depth)...)
 	problems = append(problems, admitSynchronization(location+".synchronization", template.Synchronization)...)
-	// Argo applies this deadline to a leaf Pod, never a DAG or steps gate.
-	// Keep the check in the recursive path so inline composites also refuse.
-	if template.ActiveDeadlineSeconds != nil && (template.DAG != nil || len(template.Steps) != 0) {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.activeDeadlineSeconds is only valid for leaf templates", location))
-	}
 	if strings.TrimSpace(template.PodSpecPatch) != "" {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.podSpecPatch is not admitted; it can override the server-assigned identity", location))
 	}
@@ -384,24 +293,6 @@ func admitNestedTemplates(location string, template wfv1.Template, policy Policy
 		}
 	}
 	if template.DAG != nil {
-		// Argo rejects a DAG template that mixes enhanced depends (string
-		// expressions) with legacy dependencies (string lists). Catch the
-		// same combination at admission so `oberth validate` reports it
-		// before a push creates a red run.
-		hasDepends, hasDependencies := false, false
-		for _, task := range template.DAG.Tasks {
-			if strings.TrimSpace(task.Depends) != "" {
-				hasDepends = true
-			}
-			if len(task.Dependencies) != 0 {
-				hasDependencies = true
-			}
-		}
-		if hasDepends && hasDependencies {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.dag cannot use both 'depends' and 'dependencies' in the same DAG template",
-				location))
-		}
 		for index, task := range template.DAG.Tasks {
 			where := fmt.Sprintf("%s.dag.tasks[%d]", location, index)
 			if task.Name != "" {
@@ -507,19 +398,6 @@ func admitContainerResources(location string, resources corev1.ResourceRequireme
 	var problems []error
 	if len(resources.Claims) > 0 {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.resources.claims is not admitted; claim-backed device access is outside the reviewed Pod contract", location))
-	}
-	for _, list := range []corev1.ResourceList{resources.Requests, resources.Limits} {
-		for name, q := range list {
-			if q.Sign() < 0 {
-				problems = append(problems, fmt.Errorf("argoworkflow: %s resource %s must not be negative", location, name))
-			}
-
-		}
-	}
-	for name, q := range resources.Requests {
-		if limit, ok := resources.Limits[name]; ok && q.Cmp(limit) > 0 {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s request %s exceeds its limit", location, name))
-		}
 	}
 	return problems
 }

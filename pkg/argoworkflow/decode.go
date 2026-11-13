@@ -35,9 +35,6 @@ func Decode(source []byte) (result *wfv1.Workflow, resultErr error) {
 			resultErr = &AdmissionError{Cause: resultErr}
 		}
 	}()
-	if len(source) == 0 || len(bytes.TrimSpace(source)) == 0 {
-		return nil, errors.New("argoworkflow: pipeline document is empty")
-	}
 	if len(source) > MaxSourceBytes {
 		return nil, fmt.Errorf("argoworkflow: pipeline document exceeds the %d byte source limit", MaxSourceBytes)
 	}

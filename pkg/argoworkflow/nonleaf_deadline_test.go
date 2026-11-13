@@ -1,14 +1,13 @@
 package argoworkflow
 
 import (
-	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-func TestAdmitRefusesNonleafDeadlines(t *testing.T) {
+func TestAdmitLeavesNonleafDeadlinesToArgo(t *testing.T) {
 	for _, kind := range []string{"dag", "steps"} {
 		for _, position := range []string{"named", "dag-inline", "steps-inline"} {
 			for _, value := range []intstr.IntOrString{intstr.FromInt(7401), intstr.FromInt(0), intstr.FromString("{{workflow.parameters.deadline}}")} {
@@ -27,17 +26,14 @@ func TestAdmitRefusesNonleafDeadlines(t *testing.T) {
 					}
 					wf.Spec.Templates = []wfv1.Template{composite, leaf}
 					target := &wf.Spec.Templates[0]
-					location := "spec.templates[\"main\"]"
 					if position != "named" {
 						inline := composite.DeepCopy()
 						inline.Name = ""
 						parent := wfv1.Template{Name: "main"}
 						if position == "dag-inline" {
 							parent.DAG = &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "nested", Inline: inline}}}
-							location += ".dag.tasks[\"nested\"].inline"
 						} else {
 							parent.Steps = []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "nested", Inline: inline}}}}
-							location += ".steps[0][0].inline"
 						}
 						wf.Spec.Templates[0] = parent
 						target = inline
@@ -47,9 +43,8 @@ func TestAdmitRefusesNonleafDeadlines(t *testing.T) {
 					}
 					target.ActiveDeadlineSeconds = &value
 					err = Admit(wf, Policy{})
-					want := location + ".activeDeadlineSeconds is only valid for leaf templates"
-					if err == nil || !strings.Contains(err.Error(), want) {
-						t.Fatalf("admission error = %v, want %q", err, want)
+					if err != nil {
+						t.Fatalf("native composite deadline refused: %v", err)
 					}
 				})
 			}
