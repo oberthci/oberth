@@ -45,15 +45,15 @@ type InstallDeps struct {
 
 	Admin AdminAPI
 
-	installResolved     func(Config)
-	ProbeNetworkPolicy  func(context.Context, Config, Deps) NetworkPolicyProbeResult
-	Output              io.Writer
-	Input               io.Reader
-	GOOS                string
-	LookPath            func(string) (string, error)
-	RunCommand          CommandRunner
-	RunInteractive      InteractiveRunner
-	IsTerminal          func() bool
+	installResolved    func(Config)
+	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
+	Output             io.Writer
+	Input              io.Reader
+	GOOS               string
+	LookPath           func(string) (string, error)
+	RunCommand         CommandRunner
+	RunInteractive     InteractiveRunner
+	IsTerminal         func() bool
 
 	// OutputIsTerminal reports whether Output reaches a terminal (default:
 	// standard output is one). Credentials are shown only on a terminal;

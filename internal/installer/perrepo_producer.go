@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oberthci/oberth/internal/model"
 	"sort"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 const (
@@ -17,27 +18,6 @@ const (
 	// every template of a repository. Any other value names one Argo template.
 	wildcardStep = "*"
 )
-
-// appendPerRepoGrant adds secret to a per-repo identity's grant list only when
-// the grant is a wildcard grant. A named-step grant belongs to the per-step
-// identity alone (DerivePerStepIdentities): the per-repo ServiceAccount is the
-// workflow default for every template without a named grant, so a path it can
-// read is a path every such template can read from Vault with its own token.
-// Carrying named-step paths here made the per-step boundary of issue #623
-// exist only at admission, not at the Vault layer, and meant revoking a
-// wildcard grant could never narrow the per-repo policy while a named grant
-// for the same path remained (issue #814).
-//
-// The caller assigns the result back into its map even when nothing was
-// appended, so a repository whose grants are all named still produces a
-// per-repo identity (with an empty grant list): its ServiceAccount is still
-// the workflow default and the chart's SA list depends on it.
-func appendPerRepoGrant(grants []string, step, secret string) []string {
-	if step != wildcardStep {
-		return grants
-	}
-	return append(grants, secret)
-}
 
 // grantEntry mirrors service.SecretAccessGrantEntry for ConfigMap parsing
 // without importing the service package (which would pull in transitive

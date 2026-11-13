@@ -254,10 +254,10 @@ func runAccess(ctx context.Context, args []string, output io.Writer) error {
 		}
 		return callExistingAdminTool(ctx, connection, "access_list", map[string]any{"repo": *repo, "revoked": *revoked}, output)
 	case "allow", "revoke":
-		if len(positional) != 3 {
-			return fmt.Errorf("%w: access %s <repo> <step> <secret>", errUsage, args[0])
+		if len(positional) != 4 {
+			return fmt.Errorf("%w: access %s <repo> <workflow-file> <step> <secret>", errUsage, args[0])
 		}
-		return callExistingAdminTool(ctx, connection, "access_"+args[0], map[string]string{"repo": positional[0], "step": positional[1], "secret": positional[2]}, output)
+		return callExistingAdminTool(ctx, connection, "access_"+args[0], map[string]string{"repo": positional[0], "workflow": positional[1], "step": positional[2], "secret": positional[3]}, output)
 	default:
 		return fmt.Errorf("%w: access list|allow|revoke", errUsage)
 	}

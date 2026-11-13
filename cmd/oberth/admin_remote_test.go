@@ -77,7 +77,7 @@ func TestAdminRemoteCommands(t *testing.T) {
 		{[]string{"admin", "readiness"}, "/api/admin/readiness"},
 		{[]string{"uplink", "add", "-", "operator@host"}, "/api/admin/uplink-add"},
 		{[]string{"uplink", "scope", "--clear", "operator@host"}, "/api/admin/uplink-scope"},
-		{[]string{"access", "allow", "repository", "build", "oberth/data/path"}, "access_allow"},
+		{[]string{"access", "allow", "repository", ".oberth/build.yaml", "build", "oberth/data/path"}, "access_allow"},
 		{[]string{"repo", "remove", "repository"}, "repo_remove"},
 	} {
 		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
