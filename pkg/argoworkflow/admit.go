@@ -317,6 +317,17 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 		return []error{fmt.Errorf("argoworkflow: %s nests inline templates deeper than %d levels", location, MaxIdentityWalkDepth)}
 	}
 	var problems []error
+	// Argo can merge default tasks/steps into a graph after the server has
+	// protected its concrete templates. Their inline leaves would bypass that
+	// protection. DAG and Steps are the schema's two nested-template carriers.
+	if location == "spec.templateDefaults" {
+		if template.DAG != nil {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.dag is not admitted; declare tasks in concrete templates so their inline containers receive server protection", location))
+		}
+		if len(template.Steps) != 0 {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.steps is not admitted; declare steps in concrete templates so their inline containers receive server protection", location))
+		}
+	}
 	problems = append(problems, admitNestedTemplates(location, template, policy, depth)...)
 	problems = append(problems, admitSynchronization(location+".synchronization", template.Synchronization)...)
 	// Argo applies this deadline to a leaf Pod, never a DAG or steps gate.
