@@ -193,8 +193,8 @@ func TestValidateWithoutReleaseYAMLShowsOptionalMessage(t *testing.T) {
 	}
 }
 
-// A retired Workflow annotation is inert metadata and passes validation.
-func TestValidateIgnoresTheRemovedConcurrencyGroupAnnotation(t *testing.T) {
+// Unknown ownership annotations fail the generic metadata guard.
+func TestValidateRefusesTheRemovedConcurrencyGroupAnnotation(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	oberthDir := filepath.Join(root, ".oberth")
@@ -207,7 +207,7 @@ func TestValidateIgnoresTheRemovedConcurrencyGroupAnnotation(t *testing.T) {
 	}
 	var output bytes.Buffer
 	err := runValidate(context.Background(), []string{root}, &output)
-	if err != nil || !strings.Contains(output.String(), "result: PASS") {
+	if err == nil || !strings.Contains(output.String(), "metadata.annotations") || !strings.Contains(output.String(), "result: FAIL") {
 		t.Fatalf("removed group annotation = %v\n%s", err, output.String())
 	}
 }

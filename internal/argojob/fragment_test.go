@@ -357,8 +357,7 @@ func exclusiveFragment(t *testing.T) (argoworkflow.FragmentKey, argoworkflow.Fra
 `)}
 }
 
-// A fragment carrying the removed oberth.ci/exclusive annotation is refused,
-// naming the native Argo semaphore that replaced it.
+// A fragment carrying an unsupported Pod annotation is refused generically.
 func TestBuildRefusesRemovedExclusiveAnnotationInFragments(t *testing.T) {
 	key, fragment := exclusiveFragment(t)
 	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
