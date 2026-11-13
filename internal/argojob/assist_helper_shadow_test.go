@@ -58,15 +58,15 @@ func TestBuildProtectsHeldPodHelperFromAuthoredShadows(t *testing.T) {
 }
 
 func TestExistingHeldPodShadowIsNotPatchCapable(t *testing.T) {
-	for _, target := range []string{holdfs.HelperPath, "/run/oberth", "/var/run/oberth/assist/oberth", "/run/oberth-other"} {
+	for _, target := range []string{holdfs.HelperPath, "/run/oberth", "/var/run/oberth/assist/oberth", "/run/oberth-other", "/run", "/var/run", "/var", "/"} {
 		t.Run(target, func(t *testing.T) {
 			pod := heldPodFixture("wf-test-1", "wf", "test", time.Minute, true)
 			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{Name: "authored-shadow", MountPath: target, ReadOnly: true})
 			hold, ok := assistHoldOf(pod)
-			if !ok || hold.PatchCapable != (target == "/run/oberth-other") {
+			if !ok || hold.PatchCapable != (target == "/run/oberth-other" || target == "/run" || target == "/var/run" || target == "/var" || target == "/") {
 				t.Fatalf("existing shadow trusted as helper: %+v", hold)
 			}
-			if target == "/run/oberth-other" {
+			if hold.PatchCapable {
 				return
 			}
 			kube := fake.NewClientset(pod)

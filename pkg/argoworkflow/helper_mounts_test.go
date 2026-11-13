@@ -55,7 +55,7 @@ func helperMountWorkflow(t *testing.T, kind, target string) *wfv1.Workflow {
 func TestAuthoredMountsCannotShadowServerHelpers(t *testing.T) {
 	kinds := []string{"container", "script", "set-member", "set-common", "init", "sidecar", "defaults", "inline-dag", "inline-steps"}
 	for _, kind := range kinds {
-		for _, target := range []string{"/", "/run", "/run/oberth", "/run/oberth/assist", "/run/oberth/assist/oberth", "/run/oberth/assist/oberth/nested", "/run/oberth/another-helper", "/tmp/../run/oberth/assist/oberth", "//run/oberth/assist/", "/var", "/var/run", "/var/run/oberth/assist/oberth", "{{inputs.parameters.path}}", "/work/{{inputs.parameters.path}}"} {
+		for _, target := range []string{"/run/oberth", "/run/oberth/assist", "/run/oberth/assist/oberth", "/run/oberth/assist/oberth/nested", "/run/oberth/another-helper", "/tmp/../run/oberth/assist/oberth", "//run/oberth/assist/", "/var/run/oberth/assist/oberth", "{{inputs.parameters.path}}", "/work/{{inputs.parameters.path}}"} {
 			t.Run(kind+target, func(t *testing.T) {
 				err := Admit(helperMountWorkflow(t, kind, target), Policy{})
 				if err == nil || !strings.Contains(err.Error(), "server helper") {
@@ -63,7 +63,7 @@ func TestAuthoredMountsCannotShadowServerHelpers(t *testing.T) {
 				}
 			})
 		}
-		for _, target := range []string{"/run/oberth-other", "/run/oberth-gar", "/var/run/oberth-other", "/work/input"} {
+		for _, target := range []string{"/", "/run", "/var/run", "/var", "/run/oberth-other", "/run/oberth-gar", "/var/run/oberth-other", "/work/input"} {
 			t.Run(kind+"allowed"+target, func(t *testing.T) {
 				if err := Admit(helperMountWorkflow(t, kind, target), Policy{}); err != nil {
 					t.Fatal("unrelated mount refused", err)
@@ -89,5 +89,14 @@ func TestAuthoredBlockDeviceCannotShadowServerHelper(t *testing.T) {
 		} else if err == nil || !strings.Contains(err.Error(), "server helper") {
 			t.Fatalf("helper device shadow admitted at %q: %v", target, err)
 		}
+	}
+}
+
+func TestAuthoredTmpfsAtRunIsAdmitted(t *testing.T) {
+	wf := helperMountWorkflow(t, "container", "/run")
+	wf.Spec.Volumes[0].EmptyDir.Medium = corev1.StorageMediumMemory
+	wf.Spec.Templates[0].Container.VolumeMounts[0].ReadOnly = false
+	if err := Admit(wf, Policy{}); err != nil {
+		t.Fatal("writable tmpfs at /run refused", err)
 	}
 }

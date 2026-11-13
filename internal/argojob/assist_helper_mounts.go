@@ -3,8 +3,6 @@ package argojob
 import (
 	"path"
 	"strings"
-
-	"github.com/oberthci/oberth/internal/holdfs"
 )
 
 // New admission reserves the helper namespace. Recheck the actual main
@@ -14,8 +12,8 @@ func assistHelperShadow(value string) bool {
 		return true
 	}
 	value = path.Clean(value)
-	for _, root := range []string{holdfs.HelperMountPath, "/var" + holdfs.HelperMountPath} {
-		if value == "/" || value == root || strings.HasPrefix(value, root+"/") || strings.HasPrefix(root, value+"/") {
+	for _, root := range []string{"/run/oberth", "/var/run/oberth"} {
+		if value == root || strings.HasPrefix(value, root+"/") {
 			return true
 		}
 	}
