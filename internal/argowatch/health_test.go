@@ -139,9 +139,9 @@ func TestHealthWatchFailureGraceAndRecovery(t *testing.T) {
 				return !h.attempts[kind].failureSince.IsZero()
 			}, "watch health failure recorded")
 			if !h.Healthy() {
-				t.Fatal("no grace after a recent success")
+				t.Fatal("no grace after the first failure")
 			}
-			clock.Step(5 * time.Second)
+			clock.Step(5*time.Second + time.Nanosecond)
 			if h.Healthy() {
 				t.Fatal("outage beyond grace remains healthy")
 			}
@@ -232,7 +232,44 @@ func TestOverlappingOutagesKeepOriginalUnhealthySince(t *testing.T) {
 	clock.Step(time.Minute)
 	secondFailure := clock.Now()
 	h.recordAttempt(podKind, errors.New("Pod API unavailable again"))
+	clock.Step(healthGrace + time.Nanosecond)
 	if since, unhealthy := h.UnhealthySince(); !unhealthy || !since.Equal(secondFailure) {
 		t.Fatalf("new outage retained old timestamp: %v, %v", since, unhealthy)
+	}
+}
+
+func TestHealthGraceAfterQuietWatch(t *testing.T) {
+	for _, kind := range []resourceKind{workflowKind, podKind} {
+		t.Run(resourceName(kind), func(t *testing.T) {
+			h := newTestHub(t, kubefake.NewSimpleClientset(), fakeArgo())
+			clock := clocktesting.NewFakeClock(time.Now())
+			h.now = clock.Now
+			runHub(t, h)
+			syncHub(t, h)
+			clock.Step(time.Hour)
+			failureStart := clock.Now()
+			h.recordAttempt(kind, errors.New("API unavailable after quiet watch"))
+			if !h.Healthy() {
+				t.Fatal("quiet watch failure skipped the grace period")
+			}
+			if since, unhealthy := h.UnhealthySince(); unhealthy || !since.IsZero() {
+				t.Fatal("grace reported an outage")
+			}
+			clock.Step(healthGrace)
+			if !h.Healthy() {
+				t.Fatal("grace ended before more than five seconds elapsed")
+			}
+			clock.Step(time.Nanosecond)
+			if h.Healthy() {
+				t.Fatal("failure beyond grace remained healthy")
+			}
+			if since, unhealthy := h.UnhealthySince(); !unhealthy || !since.Equal(failureStart) {
+				t.Fatalf("outage timestamp = %v, %v; want %v", since, unhealthy, failureStart)
+			}
+			h.recordAttempt(kind, nil)
+			if !h.Healthy() {
+				t.Fatal("successful attempt did not recover health")
+			}
+		})
 	}
 }

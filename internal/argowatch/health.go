@@ -18,7 +18,6 @@ const (
 )
 
 type attemptHealth struct {
-	lastSuccess  time.Time
 	failureSince time.Time
 }
 
@@ -30,7 +29,6 @@ func (h *Hub) recordAttempt(kind resourceKind, err error) {
 	h.healthSinceLocked()
 	state := &h.attempts[kind]
 	if err == nil {
-		state.lastSuccess = h.now()
 		state.failureSince = time.Time{}
 	} else if state.failureSince.IsZero() {
 		state.failureSince = h.now()
@@ -64,7 +62,7 @@ func (h *Hub) healthSinceLocked() time.Time {
 	}
 	now := h.now()
 	for _, state := range h.attempts {
-		if state.failureSince.IsZero() || (!state.lastSuccess.IsZero() && now.Sub(state.lastSuccess) <= healthGrace) {
+		if state.failureSince.IsZero() || now.Sub(state.failureSince) <= healthGrace {
 			continue
 		}
 		if since.IsZero() || state.failureSince.Before(since) {

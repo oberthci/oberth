@@ -66,20 +66,16 @@ func (h *Hub) listWatch(kind resourceKind, selectOptions func(*metav1.ListOption
 
 func transformWorkflow(obj any) (any, error) {
 	if workflow, ok := obj.(*wfv1.Workflow); ok {
-		copy := workflow.DeepCopy()
-		copy.ManagedFields = nil
-		copy.Status.StoredTemplates = nil
-		copy.Status.StoredWorkflowSpec = nil
-		return copy, nil
+		workflow.ManagedFields = nil
+		workflow.Status.StoredTemplates = nil
+		workflow.Status.StoredWorkflowSpec = nil
 	}
 	return obj, nil
 }
 
 func transformPod(obj any) (any, error) {
 	if pod, ok := obj.(*corev1.Pod); ok {
-		copy := pod.DeepCopy()
-		copy.ManagedFields = nil
-		return copy, nil
+		pod.ManagedFields = nil
 	}
 	return obj, nil
 }

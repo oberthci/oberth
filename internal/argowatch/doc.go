@@ -34,8 +34,8 @@
 // never establish run identity. Pods can arrive before their Workflow.
 //
 // Healthy is false before both caches sync, after shutdown, or if a resource's
-// latest list/watch attempt failed and its last success is over five seconds
-// old. UnhealthySince returns the beginning of the current failure episode
+// list/watch attempts have been failing for more than five seconds.
+// UnhealthySince returns the beginning of the current failure episode
 // (startup, first failed attempt, or shutdown), with true only while unhealthy.
 // A successful attempt clears that resource's failure episode. Overlapping
 // outages retain their original timestamp until both resources recover; an idle,
