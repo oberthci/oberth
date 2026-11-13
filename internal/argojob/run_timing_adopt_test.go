@@ -102,6 +102,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	terminal, first, pod, at := diagnosticFixtureAt(time.Now().UTC().Add(-time.Minute))
 	terminal.CreationTimestamp = metav1.NewTime(at.Add(-10 * time.Minute))
 	terminal.Annotations[runIDAnnotation] = run.ID
+	terminal.Annotations[helperStorageAnnotation] = helperStoragePolicy
 	terminal.Annotations[identityAnnotation] = strings.Repeat("a", 64)
 	terminal.Annotations[refAnnotation] = "feature/adopt"
 	terminal.Labels = map[string]string{"oberth.ci/sha": sha, "oberth.ci/trigger": string(pipeline.TriggerCI)}

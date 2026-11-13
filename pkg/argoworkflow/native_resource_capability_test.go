@@ -6,19 +6,7 @@ import (
 	"testing"
 )
 
-func TestRetiredDeclarationsRequireWorkflowCapability(t *testing.T) {
-	for _, policy := range []Policy{{}, capabilityPolicyForTest(t)} {
-		for _, annotation := range []string{"oberth.ci/kvm-templates", "oberth.ci/guest-test-templates", "oberth.ci/trusted-tests-entrypoint", "oberth.ci/vmi-quota"} {
-			wf, err := Decode([]byte(admissibleDocument))
-			if err != nil {
-				t.Fatal(err)
-			}
-			wf.Annotations = map[string]string{annotation: "main"}
-			if err := Admit(wf, policy); !errors.Is(err, ErrWorkflowCapabilityRequired) {
-				t.Fatalf("%s: %v", annotation, err)
-			}
-		}
-	}
+func TestNativeResourcesRequireWorkflowCapability(t *testing.T) {
 	resource := strings.ReplaceAll(strings.ReplaceAll(capabilityResourceDocument, "tasks.example.test/v1", "kubevirt.io/v1"), "kind: Task", "kind: VirtualMachineInstance")
 	wf, err := Decode([]byte(resource))
 	if err != nil {

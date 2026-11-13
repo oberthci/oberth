@@ -304,7 +304,7 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 					t.Fatal("Git-cache gate must retain its package contract and race group launcher")
 				}
 			}
-			if container == nil || !reflect.DeepEqual(legacySecurityCommand(container.Command), wantCommand) || !reflect.DeepEqual(container.Args, wantArgs) {
+			if container == nil || !reflect.DeepEqual(container.Command, wantCommand) || !reflect.DeepEqual(container.Args, wantArgs) {
 				t.Fatalf("%s does not invoke its race group", template.Name)
 			}
 			var cgo, procs string

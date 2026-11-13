@@ -533,13 +533,6 @@ type Request struct {
 	BranchAuthority *workflowpolicy.BranchAuthority `json:"-"`
 	Capability      *argoworkflow.Capability
 	DemandReceipt   *argoworkflow.DemandReceipt
-	// Preserve helper resources in already-submitted Workflow identities.
-	legacyHelperStorage          bool
-	legacyProfileHelperResources bool
-	// legacyHelperStorageLimits keeps the v2 helper limit on undeclared steps.
-	legacyHelperStorageLimits bool
-	// legacyStepLimitHelperStorage keeps the v3 "step declares a limit" decision.
-	legacyStepLimitHelperStorage bool
 
 	RunID        string
 	RepositoryID int64
@@ -841,11 +834,8 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := resolved.BindParameters(workflow, request.effectiveRunTrigger()); err != nil {
 		return nil, err
 	}
-	delete(workflow.Annotations, helperStorageAnnotation)
-	if policy := request.helperStoragePolicy(); policy != "" {
-		workflow.Annotations[helperStorageAnnotation] = policy
-	}
-	if err := projectExecutorTokens(workflow, config, !request.legacyHelperStorage); err != nil {
+	workflow.Annotations[helperStorageAnnotation] = helperStoragePolicy
+	if err := projectExecutorTokens(workflow, config); err != nil {
 		return nil, err
 	}
 
@@ -1797,7 +1787,6 @@ func ExtractExecPaths(template *wfv1.Template) []string {
 // invocation in a template's container command+args.
 func extractExecPaths(template *wfv1.Template) []string {
 	extract := func(command, args []string) []string {
-		command = legacySecurityCommand(command)
 		// Combine command and args into one slice for scanning.
 		all := append(command, args...)
 		var paths []string

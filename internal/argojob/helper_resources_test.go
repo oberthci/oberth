@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -46,7 +47,7 @@ func assertBoundedControlContainer(t *testing.T, container corev1.Container) {
 	assertControlContainer(t, container, true)
 }
 
-// A v3 helper of a step without its own ephemeral-storage limit reserves
+// A helper of a step without its own ephemeral-storage limit reserves
 // storage but must not add a limit: the kubelet Pod total would become a cap.
 func assertControlContainer(t *testing.T, container corev1.Container, storageLimit bool) {
 	t.Helper()
@@ -91,43 +92,40 @@ func TestInjectedControlBudgetsCoverUnpinnedExecutorContainers(t *testing.T) {
 		wantWait bool
 		wantMain bool
 	}{name: "container-declared", leaf: wfv1.Template{Container: declared.DeepCopy()}, wantWait: true})
-	for _, policy := range []string{cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy} {
-		for _, profile := range []string{"", "verified-fixture"} {
-			for _, tc := range cases {
-				t.Run(policy+"/"+profile+"/"+tc.name, func(t *testing.T) {
-					leaf := tc.leaf
-					leaf.Name = "step"
-					workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{helperStorageAnnotation: policy}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{leaf}}}
-					if err := projectExecutorTokens(workflow, testConfig(), true); err != nil {
-						t.Fatal(err)
+	for _, policy := range []string{helperStoragePolicy} {
+		for _, tc := range cases {
+			t.Run(policy+"/"+tc.name, func(t *testing.T) {
+				leaf := tc.leaf
+				leaf.Name = "step"
+				workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{helperStorageAnnotation: policy}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{leaf}}}
+				if err := projectExecutorTokens(workflow, testConfig()); err != nil {
+					t.Fatal(err)
+				}
+				var patch corev1.PodSpec
+				if err := json.Unmarshal([]byte(workflow.Spec.Templates[0].PodSpecPatch), &patch); err != nil {
+					t.Fatal(err)
+				}
+				// Helpers add a storage limit only when the step declares one.
+				limited := tc.name == "container-declared"
+				seen := map[string]bool{}
+				for _, container := range append(patch.InitContainers, patch.Containers...) {
+					assertControlContainer(t, container, limited)
+					if seen[container.Name] {
+						t.Errorf("duplicate helper %s", container.Name)
 					}
-					var patch corev1.PodSpec
-					if err := json.Unmarshal([]byte(workflow.Spec.Templates[0].PodSpecPatch), &patch); err != nil {
-						t.Fatal(err)
+					seen[container.Name] = true
+				}
+				for _, name := range []string{executorTokenWaiter, "init"} {
+					if !seen[name] {
+						t.Errorf("missing explicit %s budget", name)
 					}
-					// v2 limits every helper; v3/v4 only when the step declares a limit.
-					limited := policy == cappedHelperStoragePolicy || tc.name == "container-declared"
-					seen := map[string]bool{}
-					for _, container := range append(patch.InitContainers, patch.Containers...) {
-						assertControlContainer(t, container, limited)
-						if seen[container.Name] {
-							t.Errorf("duplicate helper %s", container.Name)
-						}
-						seen[container.Name] = true
-					}
-					for _, name := range []string{executorTokenWaiter, "init"} {
-						if !seen[name] {
-							t.Errorf("missing explicit %s budget", name)
-						}
-					}
-					if seen["wait"] != tc.wantWait || seen["main"] != tc.wantMain {
-						t.Errorf("executor shape has wait=%t main=%t, want wait=%t main=%t", seen["wait"], seen["main"], tc.wantWait, tc.wantMain)
-					}
-				})
-			}
+				}
+				if seen["wait"] != tc.wantWait || seen["main"] != tc.wantMain {
+					t.Errorf("executor shape has wait=%t main=%t, want wait=%t main=%t", seen["wait"], seen["main"], tc.wantWait, tc.wantMain)
+				}
+			})
 		}
 	}
-
 }
 
 // The live ordinary Argo v4.0.8 wait container had resources={}. Compile the
@@ -186,8 +184,8 @@ func TestDefaultCompiledPodStorageIncludesSharedArgoHelper(t *testing.T) {
 	}
 }
 
-func TestHelperStorageUpgradePreservesSubmittedWorkflow(t *testing.T) {
-	for _, policy := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy} {
+func TestCurrentHelperStorageRecoveryPreservesSubmittedWorkflow(t *testing.T) {
+	for _, policy := range []string{helperStoragePolicy} {
 		t.Run(policy, func(t *testing.T) {
 			config := seedTestConfig()
 			kube := fake.NewClientset()
@@ -201,18 +199,14 @@ func TestHelperStorageUpgradePreservesSubmittedWorkflow(t *testing.T) {
 			c.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seeds), config))
 			r := isolationControllerRequest(t, "sidecars")
 			r.SourceDir = writeCheckout(t)
-			if err := recoverHelperStorage(&wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{helperStorageAnnotation: policy}}}, &r); err != nil {
-				t.Fatal(err)
-			}
 			if _, err := c.Create(t.Context(), r); err != nil {
 				t.Fatal(err)
 			}
 			before := client.stored.DeepCopy()
 			if before.Annotations[helperStorageAnnotation] != policy {
-				t.Fatal("not a legacy fixture")
+				t.Fatal("not the current helper policy")
 			}
 			seedCount := len(seeds)
-			r.legacyHelperStorage, r.legacyProfileHelperResources, r.legacyHelperStorageLimits, r.legacyStepLimitHelperStorage = false, false, false, false
 			if _, err := c.Create(t.Context(), r); err != nil {
 				t.Fatal("upgrade changed submitted workflow", err)
 			}
@@ -220,7 +214,7 @@ func TestHelperStorageUpgradePreservesSubmittedWorkflow(t *testing.T) {
 				t.Fatal("recovery rewrote workflow or source")
 			}
 			client.stored.Annotations[helperStorageAnnotation] = "unknown-policy"
-			if _, err := c.Create(t.Context(), r); err == nil || !strings.Contains(err.Error(), "unknown helper-storage") {
+			if _, err := c.Create(t.Context(), r); err == nil || !strings.Contains(err.Error(), "unsupported helper-storage") {
 				t.Fatalf("unknown policy accepted: %v", err)
 			}
 		})
@@ -263,9 +257,8 @@ func podStorageLimit(spec corev1.PodSpec) int64 {
 	return max(sum, initMax)
 }
 
-// #1491: v2 gave every helper a 512Mi limit, so a step without its own limit
-// ran in a Pod capped at 512Mi in total, including its /cache and /tmp
-// emptyDirs. v3 must leave such a Pod uncapped and keep the declared sum.
+// #1491: helpers must not cap a Pod whose step has no storage limit,
+// including its /cache and /tmp emptyDirs. Preserve the declared sum.
 func TestHelperStorageAddsNoPodCapToUndeclaredStep(t *testing.T) {
 	undeclared := "      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi}\n"
 	declared := "      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi, ephemeral-storage: 128Mi}\n"
@@ -275,11 +268,6 @@ func TestHelperStorageAddsNoPodCapToUndeclaredStep(t *testing.T) {
 	}{
 		{"undeclared/v4", undeclared, helperStoragePolicy, 0},
 		{"declared/v4", declared, helperStoragePolicy, (128 + 512) << 20},
-		{"undeclared/v3", undeclared, stepLimitHelperStoragePolicy, 0},
-		{"declared/v3", declared, stepLimitHelperStoragePolicy, (128 + 512) << 20},
-		// Recovered v2 Workflows keep their submitted shape, including the cap.
-		{"undeclared/v2", undeclared, cappedHelperStoragePolicy, 512 << 20},
-		{"declared/v2", declared, cappedHelperStoragePolicy, (128 + 512) << 20},
 	}
 	for _, placement := range []bool{false, true} {
 		for _, tc := range cases {
@@ -290,9 +278,6 @@ func TestHelperStorageAddsNoPodCapToUndeclaredStep(t *testing.T) {
 				}
 				config.RunnerImagePrefixes = []string{"example.invalid/"}
 				request := resourceBoundsRequest(resourceBoundsSource(tc.resources))
-				if err := recoverHelperStorage(&wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{helperStorageAnnotation: tc.policy}}}, &request); err != nil {
-					t.Fatal(err)
-				}
 				wf, err := Build(config, request)
 				if err != nil {
 					t.Fatal(err)
@@ -330,9 +315,8 @@ func TestHelperStorageAddsNoPodCapToUndeclaredStep(t *testing.T) {
 
 // Argo v4.0.8 merges spec.templateDefaults into each template before it builds
 // the Pod: main fields merge, container-set lists replace, and sidecars and
-// init containers merge by name, so default-only entries run too. v4 decides
-// "declared" from that merged Pod. v3 keeps its historical decision so adopted
-// v3 Workflows rebuild exactly; the rows where they differ are marked.
+// init containers merge by name, so default-only entries run too. The helper
+// policy decides "declared" from that merged Pod.
 func TestStepDeclaresStorageLimitCoversStepContainers(t *testing.T) {
 	limit := corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("1Gi")}}
 	requestOnly := corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("1Gi")}}
@@ -346,21 +330,21 @@ func TestStepDeclaresStorageLimitCoversStepContainers(t *testing.T) {
 		name      string
 		defaults  *wfv1.Template
 		leaf      wfv1.Template
-		want, v3  bool
+		want      bool
 		container string // the step container that carries the limit
 	}{
-		{name: "container", leaf: wfv1.Template{Container: withLimit.DeepCopy()}, want: true, v3: true, container: "main"},
+		{name: "container", leaf: wfv1.Template{Container: withLimit.DeepCopy()}, want: true, container: "main"},
 		{name: "container-request-only", leaf: wfv1.Template{Container: &corev1.Container{Resources: requestOnly}}},
-		{name: "script", leaf: wfv1.Template{Script: &wfv1.ScriptTemplate{Container: withLimit}}, want: true, v3: true, container: "main"},
-		{name: "containerset", leaf: wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "a"}}, {Container: withLimit}}}}, want: true, v3: true, container: "main"},
-		{name: "sidecar", leaf: wfv1.Template{Container: &corev1.Container{}, Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, want: true, v3: true, container: "proxy"},
-		{name: "template-defaults", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true, v3: true, container: "main"},
+		{name: "script", leaf: wfv1.Template{Script: &wfv1.ScriptTemplate{Container: withLimit}}, want: true, container: "main"},
+		{name: "containerset", leaf: wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "a"}}, {Container: withLimit}}}}, want: true, container: "main"},
+		{name: "sidecar", leaf: wfv1.Template{Container: &corev1.Container{}, Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, want: true, container: "proxy"},
+		{name: "template-defaults", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true, container: "main"},
 		{name: "template-defaults-other-kind", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Script: &wfv1.ScriptTemplate{}}},
 		// An explicit zero overrides the default in the merged map.
-		{name: "template-defaults-zero-override", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Container: &corev1.Container{Resources: zero}}, v3: true},
+		{name: "template-defaults-zero-override", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Container: &corev1.Container{Resources: zero}}},
 		// Container-set lists replace defaults, so the default limit never runs.
-		{name: "containerset-defaults-only", defaults: &wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: withLimit}}}}, leaf: wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "main"}}}}}, v3: true},
-		{name: "sidecar-inherits-by-name", defaults: &wfv1.Template{Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, leaf: wfv1.Template{Container: &corev1.Container{}, Sidecars: []wfv1.UserContainer{named("proxy", requestOnly, nil)}}, want: true, v3: true, container: "proxy"},
+		{name: "containerset-defaults-only", defaults: &wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: withLimit}}}}, leaf: wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "main"}}}}}},
+		{name: "sidecar-inherits-by-name", defaults: &wfv1.Template{Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, leaf: wfv1.Template{Container: &corev1.Container{}, Sidecars: []wfv1.UserContainer{named("proxy", requestOnly, nil)}}, want: true, container: "proxy"},
 		{name: "sidecar-defaults-only", defaults: &wfv1.Template{Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true, container: "proxy"},
 		{name: "native-sidecar", leaf: wfv1.Template{Container: &corev1.Container{}, InitContainers: []wfv1.UserContainer{named("proxy", limit, &always)}}, want: true, container: "proxy"},
 		{name: "native-sidecar-defaults-only", defaults: &wfv1.Template{InitContainers: []wfv1.UserContainer{named("proxy", limit, &always)}}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true, container: "proxy"},
@@ -376,20 +360,64 @@ func TestStepDeclaresStorageLimitCoversStepContainers(t *testing.T) {
 			if got := stepDeclaresStorageLimit(wf, &tc.leaf); got != tc.want {
 				t.Fatalf("declared=%t, want %t", got, tc.want)
 			}
-			if got := stepDeclaresStorageLimitV3(wf, &tc.leaf); got != tc.v3 {
-				t.Fatalf("v3 declared=%t, want %t", got, tc.v3)
-			}
 			limits := stepStorageLimits(wf, &tc.leaf)
 			if _, ok := limits[tc.container]; ok != (tc.container != "") || len(limits) > 1 {
 				t.Fatalf("step storage limits %v, want only %q", limits, tc.container)
 			}
 			// Each policy limits helpers exactly when its own decision says so.
-			for policy, declared := range map[string]bool{helperStoragePolicy: tc.want, stepLimitHelperStoragePolicy: tc.v3, cappedHelperStoragePolicy: true} {
+			for policy, declared := range map[string]bool{helperStoragePolicy: tc.want} {
 				wf.Annotations[helperStorageAnnotation] = policy
-				_, limited := helperResources(wf, &tc.leaf, true).Limits[corev1.ResourceEphemeralStorage]
+				_, limited := helperResources(wf, &tc.leaf).Limits[corev1.ResourceEphemeralStorage]
 				if limited != declared {
 					t.Fatalf("%s helper limit=%t, want %t", policy, limited, declared)
 				}
+			}
+		})
+	}
+}
+
+func TestRemovedExecutionFormatsRefusedWithoutReseeding(t *testing.T) {
+	config := seedTestConfig()
+	kube := fake.NewClientset()
+	runningSeedPods(kube)
+	client := &createRetryWorkflowClient{}
+	controller, err := NewController(client, kube, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seeds []seedExecCall
+	controller.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seeds), config))
+	request := isolationControllerRequest(t, "sidecars")
+	request.SourceDir = writeCheckout(t)
+	if _, err := controller.Create(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	current := client.stored.DeepCopy()
+	seedCount := len(seeds)
+	for _, policy := range []string{"", "argo-256Mi-512Mi-v1", "argo-256Mi-512Mi-v2", "argo-256Mi-512Mi-v3", "unknown-policy", "observer-wrapper"} {
+		t.Run(policy, func(t *testing.T) {
+			client.stored = current.DeepCopy()
+			if policy == "observer-wrapper" {
+				c := client.stored.Spec.Templates[0].Container
+				c.Command = append([]string{"/run/oberth/usage/oberth", "internal-step-exec", "--"}, c.Command...)
+			} else {
+				client.stored.Annotations[helperStorageAnnotation] = policy
+			}
+			if _, err := controller.Create(t.Context(), request); err == nil {
+				t.Fatal("removed execution format recovered")
+			}
+			if len(seeds) != seedCount || len(client.posts) != 1 {
+				t.Fatal("refused recovery reseeded or recreated the Workflow")
+			}
+			adopted, binding := adoptionWorkflow()
+			adopted.Annotations[helperStorageAnnotation] = policy
+			if policy == "observer-wrapper" {
+				adopted.Annotations[helperStorageAnnotation] = helperStoragePolicy
+				adopted.Spec.Templates[0].Container = client.stored.Spec.Templates[0].Container.DeepCopy()
+			}
+			observer := &Controller{workflows: &staticWorkflowClient{workflow: adopted}, config: Config{Namespace: adopted.Namespace}}
+			if _, found, err := observer.Adopt(t.Context(), binding); found || !errors.Is(err, ErrAdoptionRefused) {
+				t.Fatalf("removed format adopted: %v %v", found, err)
 			}
 		})
 	}

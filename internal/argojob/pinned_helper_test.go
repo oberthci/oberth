@@ -6,9 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -50,7 +48,7 @@ func TestNonrootNewHelpersHaveBudgets(t *testing.T) {
 
 // Re-enter Create through a fresh controller and the persisted API object.
 func TestNonrootHelperPolicyRecovery(t *testing.T) {
-	for _, policy := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy} {
+	for _, policy := range []string{helperStoragePolicy} {
 		t.Run(policy, func(t *testing.T) {
 			kube := fake.NewClientset()
 			runningSeedPods(kube)
@@ -69,9 +67,6 @@ func TestNonrootHelperPolicyRecovery(t *testing.T) {
 			controller := newController()
 			request := testRequest(pipeline.TriggerCI, nonrootTestDocument)
 			request.SourceDir = writeCheckout(t)
-			if err := recoverHelperStorage(&wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{helperStorageAnnotation: policy}}}, &request); err != nil {
-				t.Fatal(err)
-			}
 			if _, err := controller.Create(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +75,6 @@ func TestNonrootHelperPolicyRecovery(t *testing.T) {
 				t.Fatal("fixture policy mismatch")
 			}
 			count := len(seeds)
-			request.legacyHelperStorage, request.legacyProfileHelperResources, request.legacyHelperStorageLimits, request.legacyStepLimitHelperStorage = false, false, false, false
 
 			controller = newController()
 			if _, err := controller.Create(t.Context(), request); err != nil {
@@ -112,7 +106,7 @@ func TestNonrootHelperPolicyRecovery(t *testing.T) {
 }
 
 func TestNonrootNewBuildCannotSelectHistoricalBudgets(t *testing.T) {
-	for _, authored := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy, "unknown-policy"} {
+	for _, authored := range []string{"", "argo-256Mi-512Mi-v1", "argo-256Mi-512Mi-v2", "argo-256Mi-512Mi-v3", helperStoragePolicy, "unknown-policy"} {
 		source := strings.Replace(nonrootTestDocument, "    oberth.ci/nonroot-templates: test", "    oberth.ci/nonroot-templates: test\n    oberth.ci/helper-storage: "+authored, 1)
 		request := testRequest(pipeline.TriggerCI, source)
 		config := testConfig()

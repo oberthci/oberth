@@ -23,6 +23,7 @@ import (
 func restartCutFixture(t *testing.T, change func(*wfv1.Workflow, *wfv1.NodeStatus, *corev1.Pod)) (*Controller, *wfv1.Workflow, Adoption, []runprogress.Event) {
 	t.Helper()
 	wf, node, pod, _ := diagnosticFixture()
+	wf.Annotations[helperStorageAnnotation] = helperStoragePolicy
 	wf.Annotations[identityAnnotation] = strings.Repeat("b", 64)
 	wf.Annotations[refAnnotation] = "feature/restart"
 	wf.Labels = map[string]string{"oberth.ci/sha": strings.Repeat("c", 40), "oberth.ci/trigger": "ci"}

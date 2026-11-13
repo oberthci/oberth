@@ -17,6 +17,9 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// ErrWorkflowCapabilityRequired marks missing authority for native resource templates.
+var ErrWorkflowCapabilityRequired = errors.New("removed or ungranted execution feature; migrate to a workflow capability grant with allowlisted resource kinds")
+
 // Capability is operator-owned, never decoded from repository YAML. The
 // operator owns this account's RBAC and namespace ResourceQuota outside Oberth.
 type Capability struct {

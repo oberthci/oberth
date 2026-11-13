@@ -187,16 +187,19 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 			before := nonrootControllerFixture(t, shape+"-before-patch.json")
 			observed := nonrootControllerFixture(t, shape+"-submitted.json")
 			assertHistoricalPipelinePriority(t, observed)
-			// Replay the historical administrator limit and v1 helper policy
-			// without changing the authenticated observation. New v2 budgets
-			// are covered by the current helper regression.
-			wf := nonrootBuiltWithHelperPolicy(t, shape == "script", "128Mi", legacyHelperStoragePolicy)
-			historicalNonrootHelpers(t, wf)
+			// Apply the current policy to authenticated upstream Pod input.
+			// Compare all fields except helper budgets, which deliberately changed.
+			wf := nonrootBuiltWithScratch(t, shape == "script", "128Mi")
 			historicalSchedulingInput(t, wf, false)
 			nonrootHistoricalMeasurementInput(t, wf, shape)
 			current := nonrootApplyControllerFixture(t, before, wf)
-			canonicalizeExecutorTemplate(t, current)
-			canonicalizeExecutorTemplate(t, observed)
+			for _, c := range append(current.Spec.InitContainers, current.Spec.Containers...) {
+				if c.Name == "init" || c.Name == "wait" || c.Name == executorTokenWaiter {
+					assertControlContainer(t, c, false)
+				}
+			}
+			withoutCapturedHelperBudgets(t, current)
+			withoutCapturedHelperBudgets(t, observed)
 			got, err := json.MarshalIndent(current, "", "  ")
 			if err != nil {
 				t.Fatal(err)
@@ -289,6 +292,42 @@ func TestNonrootContextReplacementCoversEverySecurityField(t *testing.T) {
 	}
 }
 
+func TestNonrootRecoveryRefusesHistoricalControllerPersistedSpec(t *testing.T) {
+	for _, shape := range []string{"container", "script"} {
+		// Authentic module, checksum and fixture-integrity guards apply here too.
+		_ = nonrootControllerFixture(t, shape+"-before-patch.json")
+		file := shape + "-persisted-workflow.json"
+		data, err := os.ReadFile(filepath.Join(nonrootControllerFixtureDirectory, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var provenance struct {
+			Files map[string]string `json:"files"`
+		}
+		encoded, err := os.ReadFile(filepath.Join(nonrootControllerFixtureDirectory, "provenance.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(encoded, &provenance); err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256(data)
+		if provenance.Files[file] != hex.EncodeToString(digest[:]) {
+			t.Fatal("persisted Workflow fixture integrity mismatch")
+		}
+		var existing wfv1.Workflow
+		if err := json.Unmarshal(data, &existing); err != nil {
+			t.Fatal(err)
+		}
+		if existing.Status.Phase != wfv1.WorkflowRunning || len(existing.Status.Nodes) == 0 {
+			t.Fatal("fixture did not undergo actual supported reconciliation")
+		}
+		if err := validateHelperStorage(&existing); err == nil {
+			t.Fatal("historical persisted Workflow accepted for recovery")
+		}
+	}
+}
+
 // Read only authenticated frozen input, never rewrite captured observations.
 func nonrootHistoricalMeasurementInput(t *testing.T, wf *wfv1.Workflow, shape string) {
 	t.Helper()
@@ -301,75 +340,4 @@ func nonrootHistoricalMeasurementInput(t *testing.T, wf *wfv1.Workflow, shape st
 		t.Fatal(err)
 	}
 	historicalMeasurementInput(t, wf, &captured)
-}
-
-// The captured nonroot Pods predate helper budgets. Restore that input only for
-// immutable controller observations; production Build always uses current budgets.
-func historicalNonrootHelpers(t *testing.T, workflow *wfv1.Workflow) {
-	t.Helper()
-	for i := range workflow.Spec.Templates {
-		var patch map[string]any
-		if err := json.Unmarshal([]byte(workflow.Spec.Templates[i].PodSpecPatch), &patch); err != nil {
-			t.Fatal(err)
-		}
-		for _, group := range []string{"initContainers", "containers"} {
-			containers, _ := patch[group].([]any)
-			retained := make([]any, 0, len(containers))
-			for _, item := range containers {
-				container := item.(map[string]any)
-				if container["name"] == "init" || container["name"] == "wait" {
-					delete(container, "resources")
-				}
-				if container["name"] == executorTokenWaiter {
-					container["resources"] = map[string]any{}
-				}
-				if container["name"] == "wait" && len(container) == 1 {
-					continue
-				}
-				retained = append(retained, container)
-			}
-			if len(retained) == 0 {
-				delete(patch, group)
-			} else {
-				patch[group] = retained
-			}
-		}
-		encoded, err := json.Marshal(patch)
-		if err != nil {
-			t.Fatal(err)
-		}
-		workflow.Spec.Templates[i].PodSpecPatch = string(encoded)
-	}
-}
-
-// PodSpecPatch is serialized JSON inside ARGO_TEMPLATE. Its object key order
-// carries no policy meaning, including when a typed Container becomes a map.
-func canonicalizeExecutorTemplate(t *testing.T, pod *corev1.Pod) {
-	t.Helper()
-	for i := range pod.Spec.InitContainers {
-		for j := range pod.Spec.InitContainers[i].Env {
-			env := &pod.Spec.InitContainers[i].Env[j]
-			if env.Name != "ARGO_TEMPLATE" {
-				continue
-			}
-			var template wfv1.Template
-			if err := json.Unmarshal([]byte(env.Value), &template); err != nil {
-				t.Fatal(err)
-			}
-			var patch map[string]any
-			if err := json.Unmarshal([]byte(template.PodSpecPatch), &patch); err != nil {
-				t.Fatal(err)
-			}
-			encoded, err := json.Marshal(patch)
-			if err != nil {
-				t.Fatal(err)
-			}
-			template.PodSpecPatch = string(encoded)
-			encoded, err = json.Marshal(template)
-			if err != nil {
-				t.Fatal(err)
-			}
-			env.Value = string(encoded)
-		}
-	}
 }

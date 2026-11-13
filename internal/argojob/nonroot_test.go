@@ -44,11 +44,6 @@ func nonrootBuiltFixture(t *testing.T, script bool) *wfv1.Workflow {
 
 func nonrootBuiltWithScratch(t *testing.T, script bool, scratch string) *wfv1.Workflow {
 	t.Helper()
-	return nonrootBuiltWithHelperPolicy(t, script, scratch, helperStoragePolicy)
-}
-
-func nonrootBuiltWithHelperPolicy(t *testing.T, script bool, scratch, policy string) *wfv1.Workflow {
-	t.Helper()
 	document := nonrootTestDocument
 	if script {
 		wf, err := argoworkflow.Decode([]byte(document))
@@ -71,11 +66,6 @@ func nonrootBuiltWithHelperPolicy(t *testing.T, script bool, scratch, policy str
 	config.ReleaseCacheRoot = "/server/cache/release"
 	request := testRequest(pipeline.TriggerCI, document)
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
-	historical := &wfv1.Workflow{}
-	historical.Annotations = map[string]string{helperStorageAnnotation: policy}
-	if err := recoverHelperStorage(historical, &request); err != nil {
-		t.Fatal(err)
-	}
 	wf, err := Build(config, request)
 	if err != nil {
 		t.Fatal(err)

@@ -3393,3 +3393,6 @@ checks with an explicit unverified warning that enforcement runs first at
 install after approval; maintenance preserves its stored policy choice. Plans
 provide no enforcement evidence. Fresh install apply and explicit verification
 retain their enforcement gates.
+
+Recovery supports only the current helper-storage policy and server command
+format. Removed formats are refused before reseeding or adopting a Workflow.

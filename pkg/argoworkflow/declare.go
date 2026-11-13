@@ -59,7 +59,6 @@ func DeclaredSecretPaths(workflow *wfv1.Workflow) ([]string, error) {
 // stripping, and redaction in a single binary.
 func UsesOberthSecretstore(template *wfv1.Template) bool {
 	isOberthSecretstore := func(command, args []string) bool {
-		command = legacyCredentialCommand(command)
 		if len(command) == 0 {
 			return false
 		}
@@ -110,15 +109,6 @@ func UsesReleaseWIF(template *wfv1.Template) bool {
 	}
 	_, present := template.Metadata.Annotations[ReleaseWIFRoleAnnotation]
 	return present
-}
-
-// Read the original argv of already-submitted Workflows when checking
-// credential access. New submissions do not add this retired wrapper.
-func legacyCredentialCommand(command []string) []string {
-	if len(command) > 3 && command[0] == "/run/oberth/usage/oberth" && command[1] == "internal-step-exec" && command[2] == "--" {
-		return command[3:]
-	}
-	return command
 }
 
 // removedAnnotations are pipeline annotations Oberth no longer reads. A

@@ -377,6 +377,7 @@ func TestUsesSecrets(t *testing.T) {
 		{"oberth without secretstore", container([]string{"oberth", "version"}), false},
 		{"secretstore under another binary", container([]string{"sh"}, "secretstore", "exec"), false},
 		{"secretstore subcommand alone", container([]string{"oberth"}, "secretstore"), false},
+		{"retired observer does not unwrap", container([]string{"/run/oberth/usage/oberth", "internal-step-exec", "--", "oberth", "secretstore", "exec"}), false},
 		{"plain shell", container([]string{"/bin/sh", "-c", "true"}), false},
 		{"no pod", &wfv1.Template{}, false},
 	}
