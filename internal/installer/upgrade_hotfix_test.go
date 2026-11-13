@@ -43,11 +43,14 @@ func hotfixHelm(t *testing.T, values map[string]any, output *bytes.Buffer) (Deps
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps := Deps{Output: output, RunHelm: func(ctx context.Context, args []string) ([]byte, error) {
+	deps := Deps{KubeClient: argoSecurityTestClient(), Output: output, RunHelm: func(ctx context.Context, args []string) ([]byte, error) {
 		switch args[0] {
 		case "version":
 			return []byte("v4.2.3"), nil
 		case "list":
+			if slices.Contains(args, DefaultArgoNamespace) {
+				return []byte(`[]`), nil
+			}
 			return []byte(`[{"name":"oberth","chart":"oberth-0.22.4","status":"deployed"}]`), nil
 		case "history":
 			return []byte(`[{"revision":1,"status":"deployed"}]`), nil
@@ -89,6 +92,7 @@ func TestUpgradeStoredInstallerValuesRenderAfterCleanup(t *testing.T) {
 	delete(argo, "controllerProfile")
 	delete(argo, "controllerProfileConfigMap")
 	delete(argo, "executorScratchSizeLimit")
+	delete(argo, "goProxy")
 	want, _ := json.Marshal(values)
 	got, _ := json.Marshal(prepared.storedSnapshot)
 	if !bytes.Equal(got, want) {
@@ -124,8 +128,12 @@ func TestUpgradeDryRunValidatesCleanedStoredValues(t *testing.T) {
 
 func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
 	values := hotfixStoredValues(t)
+	delete(values["argo"].(map[string]any), "goProxy")
 	before, _ := json.Marshal(values)
 	deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		if args[0] == "get" {
+			return before, nil
+		}
 		if args[0] != "show" {
 			t.Fatalf("old target must retain stored values: %v", args)
 		}

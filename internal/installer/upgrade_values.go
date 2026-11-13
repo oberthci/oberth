@@ -175,6 +175,11 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
 	}
+	if cfg.DryRun {
+		if _, err := planUpgradeArgoSecurity(ctx, deps, values, cfg.ArgoSecurityDefaults); err != nil {
+			return preparedUpgradeValues{}, err
+		}
+	}
 	return preparedUpgradeValues{pki: pki, revision: revision, compatibility: compat, storedSnapshot: storedSnapshot}, nil
 }
 

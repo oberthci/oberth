@@ -236,7 +236,8 @@ func TestOrdinaryMountsAtCredentialPathsNeedNoWaitPatch(t *testing.T) {
 func nativeWaitCredentialMirror(m corev1.VolumeMount) bool {
 	roots := map[string]string{SecretsVolumeName: SecretsMountPath, ReleaseTokenVolumeName: ReleaseTokenMountPath, releaseWIFVolume: releaseWIFPath}
 	root, ok := roots[m.Name]
-	return ok && m.MountPath == path.Join(argoMainFilesystem, root)
+	return (ok && m.MountPath == path.Join(argoMainFilesystem, root)) ||
+		(m.Name == SourceVolumeName && (m.MountPath == path.Join(argoMainFilesystem, VaultCAMountPath) || m.MountPath == path.Join(argoMainFilesystem, OberthBinMountPath)))
 }
 
 func withoutNativeWaitCredentialMirrors(c corev1.Container) corev1.Container {
