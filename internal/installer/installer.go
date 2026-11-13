@@ -1618,6 +1618,17 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		cfg.ImageRef = cfg.verifiedImage
 	}
 
+	if exists && action == actionUpgrade {
+		unchanged, err := resumedOberthUnchanged(ctx, cfg, deps, release, openbao, rekor)
+		if err != nil {
+			return result, err
+		}
+		if unchanged {
+			result.AlreadyInstalled = true
+			result.Upgraded = false
+			return result, nil
+		}
+	}
 	switch action {
 	case actionUpgrade:
 		result.Upgraded = true

@@ -72,6 +72,7 @@ func PrintReviewJSON(w io.Writer, cfg Config) error {
 }
 
 type InstallResult struct {
+	ManualSteps   []string         `json:"manual_steps,omitempty"`
 	Upstream      *InstallUpstream `json:"upstream,omitempty"`
 	Cluster       *ClusterIdentity `json:"cluster,omitempty"`
 	SecretsValues []string         `json:"secrets_values,omitempty"`
@@ -376,6 +377,7 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 			result.SecretsFile, result.SecretsSHA256 = cfg.SecretsFile, hex.EncodeToString(sum[:])
 		}
 	}
+	result.ManualSteps = installManualSteps(cfg, result, installErr)
 	if err := json.NewEncoder(output).Encode(result); err != nil {
 		return err
 	}
