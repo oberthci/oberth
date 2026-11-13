@@ -1090,37 +1090,22 @@ trust assumptions and complete invalidation rules.
   golang images selected per repository under the administrator prefix
   allowlist.
 
-### Runner result
+### Argo node results
 
-- The binding step results are a JSON array of step objects with `burn`,
-  `step`, `status`, `exit_code`, `started_at`, and `finished_at` fields,
-  emitted as one final `[runner/summary] oberth-summary <array>` marker line
-  on the run's log stream after every burn has finished. The server reads the
-  final line-start match from the verified authoritative Pod log; only the
-  runner can start a physical log line, so subprocess output can never
-  outrank the genuine record. Decoding is strict and fail-closed: an invalid
-  or empty record fails the run, and a green run without a record is an
-  error, never a silent pass.
-- The Kubernetes termination message carries only a minimal JSON status
-  object (`version`, `trigger`, `status`, optional `error`, timestamps,
-  bounded to the platform's 4096-byte limit) for `kubectl describe`
-  diagnostics. During transition the server still decodes a legacy
-  array-shaped termination message from older runner images; the summary
-  step array is therefore no longer budgeted at pipeline admission.
-- Step status is one of `passed`, `failed`, `skipped`, or `timed_out`. These
-  are the only values a *durable* step result can carry: `PutStepResult`
-  refuses anything else and the `step_results` CHECK constraint does not admit
-  it, so a half-finished run can never be recorded as a result.
+- Step history comes from Argo `status.nodes`, keyed by run ID and native node
+  ID. Display names and template names do not establish identity. Every retry,
+  loop and recursive invocation retains its own row, including Skipped and
+  Omitted nodes. Native phase, message and start/finish times are retained;
+  Pod names come from owned native Pod observations, never a naming algorithm.
+- Native Pending maps to `queued`, Running to `running`, Succeeded to `passed`,
+  Failed/Error to `failed`, and Skipped/Omitted to `skipped`. Existing historical
+  `timed_out` rows remain readable. Status is not parsed from retained log text.
+- Writes have no node-count ceiling and commit at most 128 rows per transaction.
+  Marker-derived log offset columns are removed. A forward migration preserves
+  historical rows without inventing missing native status or grant facts.
 
-### Planned steps
+### Step observations
 
-- A run's step list describes the pipeline it was admitted with, not only the
-  part of it that has already executed. Engines that can enumerate their own
-  pipeline format statically (`service.PipelinePlanner`; the Argo engine via
-  `argoworkflow.PlannedSteps`) record the declared burn/step inventory once,
-  immediately after the pipeline object is submitted and before its first Pod
-  exists. The record lives beside the run's log and progress journal, never in
-  the durable results table.
 - MCP `status` (including ref fallback and `wait`) adds optional `scheduling`;
   MCP `run_get` and `GET /api/runs/{run}` add optional `Scheduling`, preserving
   the detail response's existing capitalized fields. It appears only for active
@@ -1247,33 +1232,20 @@ trust assumptions and complete invalidation rules.
   RBAC or credentials are needed. Observer failure preserves durable status and
   reports unavailable observation. Terminal/progressed runs perform no live
   scheduling reads.
-- The projections that serve a run's steps (`/api/runs/{run}`, MCP `status`
-  and its `burns` map) merge three records in increasing order of authority —
-  plan, progress journal, durable results — and only ever forward, so a
-  less-informed source can never walk a step backwards. The step count is
-  therefore the planned count for the whole life of the run, including a run
-  that was interrupted before recording any result.
-- Argo retry attempts share the ordinal of their logical burn/step's first
-  attempt. Dropping superseded attempts cannot renumber the final rows or
-  move a retried step behind a parallel sibling. A resumed reporter retains
-  journaled key/ordinal assignments and assigns newly observed keys only
-  unused ordinals. Legacy DAG-attempt burns such as `address(0)/check` are
-  ignored by the journal projection only when `address/check` is known from
-  the plan or journal and the suffixed name is not explicitly planned.
-  Without a known canonical key, the historical row is retained and its
-  ordinal remains reserved on resume. Conflicting ordinals for genuine keys
-  still fail journal validation; historical log bytes are not rewritten.
-- Consequently a step status in an API projection may additionally be
-  `pending` (declared, not reached) or the existing in-flight `queued` and
-  `running`. `pending` is a projection state only; it is never persisted and
-  can never make a run green. A run whose engine cannot enumerate its pipeline
-  reports exactly what it always did, and says so in its own log: a plan is a
-  visibility record, never a gate.
-- The static enumeration and the runtime projection derive burn and step names
-  through one shared rule (`argoworkflow.BurnAndStep`), so a document cannot
-  plan one set of names and record another. Constructs whose step count is a
-  runtime property (`withItems`, `withParam`, `withSequence`) are deliberately
-  left out of the plan rather than given a fabricated count.
+- Step-list readers use stored node rows directly. The list grows as Argo
+  observes nodes; declarations do not create synthetic pending/skipped results.
+  UI selection and MCP step identity use `node_id`, so repeated display names
+  never collapse retries, fan-out branches or recursive calls.
+- Before Workflow creation, the append-only submission binding records each
+  admitted template's credential/grant evidence. Node rows copy matching local
+  template facts from that receipt. Any credentialed admission is retained;
+  referenced templates cannot borrow a same-name inline template's facts.
+- Automatic tag/release replay requires the complete stored native node set,
+  matching the terminal node-ID receipt, and proof that no credentialed node
+  executed. Missing nodes or grant facts remain unknown. Display plans and old
+  marker text supply no replay authority. Older rows are read as stored; missing
+  safety facts require the existing explicit forced replay. Admin, current-tag,
+  publication, newest-source and complete-chain checks remain in force.
 - Step measurement is absent in v0.22.0: commands and arguments stay authored,
   no measurement executable or mount or architecture selector is injected,
   and per-step usage figures and resource reports are absent. The forward
@@ -1285,9 +1257,8 @@ trust assumptions and complete invalidation rules.
   per step (32 MiB) and per run (64 MiB), enforced at two points of one write
   path: the engine's step-log replay writer (step-attributed) and the
   scheduler's run-log writer. On breach the run fails with an error naming the
-  offending step instead of filling the PVC unchecked. Progress-marker write
-  failures are surfaced rather than swallowed: a run whose durable progress
-  record is degraded is never reported as green.
+  offending step instead of filling the PVC unchecked. Step status is stored
+  separately from the plain retained log.
 - Job CPU, memory, and ephemeral storage are bounded. Private scratch uses a size-limited
   `emptyDir`; persistent source state and the split CI/release caches retain the
   fixed PVC and node-path topology.
@@ -1426,15 +1397,14 @@ trust assumptions and complete invalidation rules.
   it does not enqueue a replacement or allocate a new admission order.
   Shutdown leaves a non-terminal Workflow and its run/workspace intact,
   including an active promotion workspace.
-  The successor appends to the same run log, restores the progress journal,
-  skips already-recorded step transitions/logs, and enforces the remaining
-  aggregate log budget. Executor-token delivery resumes only for Pods still
+  The successor retains stored node rows and the existing run log, with the
+  configured remaining log budget. New step state comes from Argo observations. Executor-token delivery resumes only for Pods still
   running the token waiter. A Workflow that finished while the owner was down
   uses the same observation, artifact collection, step persistence and normal
   publication/issue finalization as a newly submitted Workflow.
   Verified adoption distinguishes a missing process exit from the legacy
-  synthetic exit-code-1 display fallback. New progress markers omit unknown
-  exit codes rather than persisting the synthetic 1. A failed Pod attempt that
+  synthetic exit-code-1 display fallback. Native node rows do not manufacture
+  a process exit from a log marker. A failed Pod attempt that
   started before this server process initialized, without durable exit evidence,
   becomes `interrupted` / phase `interrupted`, with no failed-step
   attribution only when a complete Pod snapshot confirms `pod-absent`, or an

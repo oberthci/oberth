@@ -25,7 +25,7 @@ func TestStepDiagnosticMigrationAndDurableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	step := model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 137}
+	step := model.StepResult{NodeID: "test.unit", RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 137}
 	if _, err = s.PutStepResult(ctx, step); err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +44,7 @@ DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence; 
 	if err != nil || len(got) != 1 || got[0].Status != model.StepFailed || got[0].ExitCode != 137 || got[0].Termination.Unavailable != "not-recorded" {
 		t.Fatalf("legacy preservation %#v %v", got, err)
 	}
+	step.NodeID = got[0].NodeID
 	step.Termination = &model.StepDiagnostic{Available: true, ObservedAt: &now, Container: &model.StepTermination{RunID: run.ID, Namespace: "pipelines", WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", NodeID: "workflow-test-1234", PodName: "workflow-test-main-1234", PodUID: "22222222-2222-4222-8222-222222222222", ContainerName: "main", ContainerID: "containerd://" + strings.Repeat("c", 64), Reason: "OOMKilled", PodReason: "none", ExitCode: 137, StartedAt: now.Add(-time.Minute), FinishedAt: now.Add(-time.Second)}}
 	if _, err = s.PutStepResult(ctx, step); err != nil {
 		t.Fatal(err)

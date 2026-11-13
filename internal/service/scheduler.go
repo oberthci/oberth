@@ -704,15 +704,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("load run repository upstream: %w", err))
 	}
-	// Only fresh execution initializes empty evidence. Recovery/adoption and
-	// create settlement never manufacture an empty journal for missing history.
-	if run.WorkflowName == "" && run.StartedAt == nil {
-		if initializer, ok := scheduler.logs.(interface{ InitializeStepProgress(string) error }); ok {
-			if err := initializer.InitializeStepProgress(run.ID); err != nil {
-				return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-			}
-		}
-	}
 	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
@@ -939,7 +930,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		}
 	}
 	observation.retained = retained
-	progressLog := newStepProgressLogWriter(newRunLogWriter(logDestination, scheduler.maxRunLogBytes-retained), func(event runprogress.Event) error { return scheduler.logs.AppendStepProgress(run.ID, event) })
+	progressLog := newStepProgressLogWriter(newRunLogWriter(logDestination, scheduler.maxRunLogBytes-retained))
 	progressLog.logFile = logFile
 	progressLog.onContinuityLost = func() {
 		if scheduler.auditor == nil {
@@ -968,18 +959,6 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		scheduler.settlePodJournal(ctx, run.ID, logFile.Name(), projectionReady, workflowSettled, journalDeferred)
 	}()
 
-	// The plan is recorded here: after the pipeline object exists, so a run
-	// that never reached submission carries no claim about work it would have
-	// done, and before the engine's first observation, so the step list is
-	// complete from the first poll rather than growing one row per Pod.
-	if observation.request != nil {
-		if planErr := scheduler.recordStepPlan(ctx, *observation.request); planErr != nil {
-			// Plan visibility is an observability record, never a gate. A run
-			// whose plan cannot be enumerated still executes, and says so in its
-			// own log rather than failing a build over a display concern.
-			_, _ = fmt.Fprintf(progressLog, "oberth: step plan unavailable: %v\n", planErr)
-		}
-	}
 	var jobResult JobResult
 	var waitErr error
 	if observation.adopted {
@@ -1165,81 +1144,9 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	return nil
 }
 
-// recordStepPlan enumerates the run's declared steps from the immutable
-// checkout and writes them to the run's durable plan record. An engine that
-// cannot enumerate its own pipeline format reports no plan and no error: its
-// runs keep the behaviour they have always had.
-func (scheduler *Scheduler) recordStepPlan(ctx context.Context, request WorkflowRequest) error {
-	planner, ok := scheduler.plannerFor(request)
-	if !ok {
-		return nil
-	}
-	planned, err := planner.PlannedSteps(ctx, request)
-	if err != nil {
-		return err
-	}
-	if len(planned) == 0 {
-		return nil
-	}
-	return scheduler.logs.WriteStepPlan(request.Run.ID, planned)
-}
-
-func (scheduler *Scheduler) plannerFor(request WorkflowRequest) (PipelinePlanner, bool) {
-	if request.Run.Release {
-		if planner, ok := scheduler.releaseJobs.(PipelinePlanner); ok {
-			return planner, true
-		}
-	}
-	planner, ok := scheduler.jobs.(PipelinePlanner)
-	return planner, ok
-}
-
-// persistSteps writes the run's durable results, keyed by burn and step so a
-// step that was planned is updated in place rather than recorded twice.
-//
-// Ordinals come from the plan, not from this loop's index. Plan order and
-// observation order are different orderings -- a DAG declares its tasks in one
-// order and runs them in another, and a failed run observes a prefix of the
-// second -- and the plan's is the stable one. Renumbering by observation would
-// make a run's step list reorder itself as it progressed, and would contradict
-// the ordinals the plan record already published for the same steps.
-func (scheduler *Scheduler) persistSteps(ctx context.Context, runID string, steps []model.StepResult, index runlog.Index) error {
-	ordinals := scheduler.plannedOrdinals(runID)
-	next := len(ordinals)
-	for observed, result := range steps {
-		result.RunID = runID
-		if ordinal, planned := ordinals[result.Stage+"\x00"+result.Step]; planned {
-			result.Ordinal = ordinal
-		} else if len(ordinals) == 0 {
-			result.Ordinal = observed
-		} else {
-			// Observed but never planned: a withItems expansion, or a step
-			// whose document Oberth could not enumerate. It sorts after every
-			// planned step rather than displacing one.
-			result.Ordinal = next
-			next++
-		}
-		result.LogStart, result.LogEnd = logOffsets(index, result.Stage, result.Step)
-		if _, err := scheduler.database().PutStepResult(ctx, result); err != nil {
-			return fmt.Errorf("persist step result %s/%s: %w", result.Stage, result.Step, err)
-		}
-	}
-	return nil
-}
-
-// plannedOrdinals reads the run's plan for its stable ordering. An absent or
-// unreadable plan yields an empty map, and persistSteps falls back to the
-// observation order it has always used.
-func (scheduler *Scheduler) plannedOrdinals(runID string) map[string]int {
-	planned, err := scheduler.logs.StepPlan(runID)
-	if err != nil {
-		return map[string]int{}
-	}
-	ordinals := make(map[string]int, len(planned))
-	for _, step := range planned {
-		ordinals[step.Stage+"\x00"+step.Step] = step.Ordinal
-	}
-	return ordinals
+// persistSteps stores native node rows without plan renumbering or log offsets.
+func (scheduler *Scheduler) persistSteps(ctx context.Context, runID string, steps []model.StepResult, _ runlog.Index) error {
+	return scheduler.database().PutStepResults(ctx, runID, steps)
 }
 
 func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) (model.Promotion, error) {
@@ -1751,24 +1658,6 @@ func queueEmpty(err error) bool {
 
 func validJobRunStatus(status model.RunStatus) bool {
 	return status == model.RunPassed || status == model.RunFailed || status == model.RunInterrupted
-}
-
-func logOffsets(index runlog.Index, stage, step string) (int64, int64) {
-	var start, end int64
-	found := false
-	for _, value := range index.Ranges {
-		if value.Stage != stage || value.Step != step {
-			continue
-		}
-		if !found || value.Start < start {
-			start = value.Start
-		}
-		if !found || value.End > end {
-			end = value.End
-		}
-		found = true
-	}
-	return start, end
 }
 
 func pathWithin(root, path string) bool { return gitoid.PathWithin(root, path) }

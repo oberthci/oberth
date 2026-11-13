@@ -419,7 +419,7 @@ DELETE FROM schema_migrations WHERE id='20261113054824-bind-workflow-capability-
 `
 
 // PostStepMeasurementDowngrade restores empty telemetry tables and historical columns only in disposable old-schema fixtures.
-const PostStepMeasurementDowngrade = PostWorkflowCapabilityUIDDowngrade + `
+const PostStepMeasurementDowngrade = PostNativeNodeStepsDowngrade + PostWorkflowCapabilityUIDDowngrade + `
 CREATE TABLE step_results_measurement_fixture (
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     burn TEXT NOT NULL,
@@ -583,4 +583,25 @@ CREATE TRIGGER execution_target_quarantine_immutable BEFORE UPDATE OF quarantine
  SELECT RAISE(ABORT,'immutable execution target quarantine');
 END;
 DELETE FROM schema_migrations WHERE id='20261113211418-drop-execution-targets-0c8c62c219d8b3115aa50e87dde3701f';
+`
+
+// PostNativeNodeStepsDowngrade reconstructs the old step surface only in
+// disposable migration fixtures. Production migrations are forward-only.
+const PostNativeNodeStepsDowngrade = `
+CREATE TABLE step_results_pre_nodes (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ burn TEXT NOT NULL,step TEXT NOT NULL,ordinal INTEGER NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('passed','failed','skipped','timed_out')),
+ exit_code INTEGER NOT NULL,log_start INTEGER NOT NULL CHECK(log_start>=0),
+ log_end INTEGER NOT NULL CHECK(log_end>=log_start),started_at INTEGER,finished_at INTEGER,
+ recorded_at INTEGER NOT NULL,termination_json TEXT CHECK(termination_json IS NULL OR length(termination_json)<=4096),
+ PRIMARY KEY(run_id,burn,step)
+);
+INSERT OR IGNORE INTO step_results_pre_nodes
+ SELECT run_id,burn,step,ordinal,status,exit_code,0,0,started_at,finished_at,recorded_at,termination_json
+ FROM step_results WHERE status IN ('passed','failed','skipped','timed_out') ORDER BY ordinal;
+DROP TABLE step_results;
+ALTER TABLE step_results_pre_nodes RENAME TO step_results;
+CREATE INDEX step_results_order_idx ON step_results(run_id,ordinal,burn,step);
+DELETE FROM schema_migrations WHERE id='20261113214401-native-node-steps-c477a88045b8945eb269fade9eb006e2';
 `

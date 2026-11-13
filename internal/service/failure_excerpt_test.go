@@ -50,9 +50,9 @@ func TestCIIssueExcerptIsTheFailedStepSliceNotSiblingTail(t *testing.T) {
 		Status: model.RunFailed, Phase: "security", FailedStage: "security", FailedStep: "security",
 		Error: "step security/security failed with exit code 2",
 		Steps: []model.StepResult{
-			{Stage: "security", Step: "security", Status: model.StepFailed, ExitCode: 2},
-			{Stage: "test", Step: "test", Status: model.StepPassed},
-			{Stage: "build-amd64", Step: "build-amd64", Status: model.StepPassed},
+			{NodeID: "security.security", Stage: "security", Step: "security", Status: model.StepFailed, ExitCode: 2},
+			{NodeID: "test.test", Stage: "test", Step: "test", Status: model.StepPassed},
+			{NodeID: "build-amd64.build-amd64", Stage: "build-amd64", Step: "build-amd64", Status: model.StepPassed},
 		},
 	})
 	transcript := siblingInterleavedTranscript()

@@ -12,7 +12,7 @@ import (
 
 func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing.T) {
 	server, backend := testServer(t)
-	detail := RunDetailResponse{Run: model.Run{ID: "run-1"}, Timing: &model.RunTiming{}, Steps: []model.StepResult{{Stage: "test", Step: "unit", Termination: &model.StepDiagnostic{}}}}
+	detail := RunDetailResponse{Run: model.Run{ID: "run-1"}, Timing: &model.RunTiming{}, Steps: []model.StepResult{{NodeID: "test.unit", Stage: "test", Step: "unit", Termination: &model.StepDiagnostic{}}}}
 	backend.runResult = detail
 	request := httptest.NewRequest(http.MethodGet, "/api/runs/run-1?view=dashboard", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")

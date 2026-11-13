@@ -359,8 +359,8 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 
 	body := log.String()
 	// Progress markers drive the dashboard and the step index.
-	if !strings.Contains(body, runprogress.MarkerPrefix) {
-		t.Error("no step progress markers were written")
+	if strings.Contains(body, "@@oberth-step-progress@@") {
+		t.Error("step control marker was written")
 	}
 	// Real pod output reached the run log, prefixed for the log index.
 	if !strings.Contains(body, "hello-from-setup") {

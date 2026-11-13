@@ -15,7 +15,6 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
@@ -63,7 +62,7 @@ func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
 				if succeeded {
 					delete(wf.Status.Nodes, "failed")
 				}
-				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: "Failed", Reason: "original workflow failure", Steps: argojob.StepResults(wf)}
+				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: "Failed", Reason: "original workflow failure", Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, nil)}
 				if !succeeded {
 					completion.FailedStage, completion.FailedStep = "verify", "verify"
 				}
@@ -98,34 +97,18 @@ func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := 2
-				if succeeded {
-					want = 1
-				}
-				if len(rows) != want {
-					t.Fatalf("results=%+v, want %d terminal rows", rows, want)
+				if len(rows) != len(wf.Status.Nodes) {
+					t.Fatalf("results=%+v, want every native node", rows)
 				}
 				for _, row := range rows {
-					if row.Step == "tools-dir" || !row.Status.Terminal() {
-						t.Fatalf("invented outcome: %+v", row)
+					if row.NodeID == "unfinished" && (row.Phase != string(phase) || row.FinishedAt != nil) {
+						t.Fatalf("unfinished native state changed: %+v", row)
 					}
-					if row.Step == "verify" && (row.ExitCode != 42 || row.Status != model.StepFailed) {
+					if row.NodeID == "failed" && (row.ExitCode != 42 || row.Status != model.StepFailed) {
 						t.Fatalf("lost failed exit: %+v", row)
 					}
 				}
-				events, err := logs.StepProgress(run.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				found := false
-				for _, e := range events {
-					if e.Step == "tools-dir" && e.Status == runprogress.Status(map[wfv1.NodePhase]string{wfv1.NodePending: "queued", wfv1.NodeRunning: "running"}[phase]) {
-						found = true
-					}
-				}
-				if !found {
-					t.Fatalf("unfinished evidence lost: %+v", events)
-				}
+
 			})
 		}
 	}
@@ -151,11 +134,7 @@ type collectJobs struct {
 
 func (j *collectJobs) CreateWorkflow(_ context.Context, r service.WorkflowRequest) error {
 	j.adapter.intents[r.WorkflowName] = argoIntent{runID: r.Run.ID, created: true}
-	for _, step := range j.completion.Steps {
-		if err := j.logs.AppendStepProgress(r.Run.ID, runprogress.Event{Version: 1, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }
 

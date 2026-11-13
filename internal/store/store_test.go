@@ -836,7 +836,7 @@ func TestAdminClientOpenDoesNotRecoverOwnerRuns(t *testing.T) {
 	}
 }
 
-func TestStepResultsRetainLogByteOffsets(t *testing.T) {
+func TestStepResultsRetainNativeNodeIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -844,32 +844,24 @@ func TestStepResultsRetainLogByteOffsets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := s.PutStepResult(context.Background(), model.StepResult{
+	result, err := s.PutStepResult(context.Background(), model.StepResult{NodeID: "test.unit",
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 2,
-		Status: model.StepTimedOut, ExitCode: -1, LogStart: 128, LogEnd: 4096,
+		Status: model.StepTimedOut, ExitCode: -1, Phase: "Failed", Message: "native deadline", Template: "leaf",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.LogStart != 128 || result.LogEnd != 4096 || result.RecordedAt.IsZero() {
+	if result.NodeID != "test.unit" || result.Message != "native deadline" || result.RecordedAt.IsZero() {
 		t.Fatalf("step result = %#v", result)
 	}
 	steps, err := s.StepResults(context.Background(), run.ID)
-	if err != nil || len(steps) != 1 || steps[0].Step != "unit" || steps[0].Status != model.StepTimedOut || steps[0].LogStart != 128 || steps[0].LogEnd != 4096 {
+	if err != nil || len(steps) != 1 || steps[0].Step != "unit" || steps[0].Status != model.StepTimedOut || steps[0].NodeID != "test.unit" || steps[0].Template != "leaf" {
 		t.Fatalf("steps = %#v, %v", steps, err)
 	}
 }
 
-// TestPutStepResultRefusesEveryNonTerminalStatus is the guard that keeps a
-// plan out of the results table.
-//
-// step_results is the durable record of what a run *did*, and its CHECK
-// constraint admits only terminal statuses. A seeded plan entry is by
-// definition not one, so the plan lives beside the run log instead and this
-// guard stays exactly as strict as it was: a half-finished run can never be
-// recorded as a result, and a pending row can never reach the store to be
-// mistaken for one.
-func TestPutStepResultRefusesEveryNonTerminalStatus(t *testing.T) {
+// Pending plan projections are not native node observations.
+func TestPutStepResultRefusesPlanAndUnknownStatuses(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -877,8 +869,8 @@ func TestPutStepResultRefusesEveryNonTerminalStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []model.StepStatus{model.StepPending, model.StepQueued, model.StepRunning, "invented"} {
-		if _, err := s.PutStepResult(context.Background(), model.StepResult{
+	for _, status := range []model.StepStatus{model.StepPending, "invented"} {
+		if _, err := s.PutStepResult(context.Background(), model.StepResult{NodeID: "setup.tools-dir",
 			RunID: run.ID, Stage: "setup", Step: "tools-dir", Ordinal: 0,
 			Status: status,
 		}); !errors.Is(err, ErrInvalid) {

@@ -74,86 +74,18 @@ html = run(`renderLogLines(splitAttributedLogText('[build/two] progress\\r[build
 assert.equal((html.match(/log-hdr/g) || []).length, 1, 'CR updates cannot forge combined-view step headers');
 assert.ok(html.includes('── build / two ──'));
 
-// API/plan order need not be execution order. Equal-time parallel steps use a
-// stable ordinal tie-breaker; pending steps remain after all started steps.
-run(`const orderedFixture = [
-  {burn:'ci', step:'pending', ordinal:0, status:'pending'},
-  {burn:'ci', step:'late', ordinal:1, started_at:'2026-10-23T01:00:02Z'},
-  {burn:'ci', step:'parallel-b', ordinal:3, started_at:'2026-10-23T01:00:01Z'},
-  {burn:'ci', step:'early', ordinal:99, started_at:'2026-10-23T01:00:00Z'},
-  {burn:'ci', step:'parallel-a', ordinal:2, started_at:'2026-10-23T01:00:01Z'}
+// Equal display names from fan-out and retries retain separate selection keys.
+run(`const nativeRows = [
+ {node_id:'attempt-1',display_name:'check',template:'shared',phase:'Succeeded',status:'passed',ordinal:1},
+ {node_id:'branch-0',display_name:'check',template:'shared',phase:'Failed',message:'native detail',status:'failed',ordinal:0},
+ {node_id:'omitted',display_name:'check',template:'shared',phase:'Omitted',status:'skipped',ordinal:2}
 ];`);
-assert.equal(run(`orderSteps(orderedFixture).map(row => row.step.step).join(',')`), 'early,parallel-a,parallel-b,late,pending');
-run(`const legacyRetryFixture = [
-  {burn:'build(2)', step:'compile', ordinal:3, started_at:'2026-10-23T01:00:03Z'},
-  {burn:'lint', step:'lint', ordinal:1, started_at:'2026-10-23T01:00:01Z'},
-  {burn:'build', step:'compile', ordinal:0, started_at:'2026-10-23T01:00:00Z'},
-  {burn:'build(1)', step:'compile', ordinal:2, started_at:'2026-10-23T01:00:02Z'}
-];`);
-assert.equal(run(`orderSteps(legacyRetryFixture).map(row => row.step.burn).join(',')`), 'build,build(1),build(2),lint');
-// #1196: run 02609902 at 22:38Z, before vpt-verify starts. Argo start
-// times have one-second resolution; parallel siblings must not split burns.
-run(`const burnOrderFixture = [
-  {"burn":"setup","step":"tools-dir","ordinal":0,"status":"passed","started_at":"2026-10-23T22:32:46Z"},
-  {"burn":"setup","step":"link-go","ordinal":1,"status":"passed","started_at":"2026-10-23T22:33:06Z"},
-  {"burn":"setup","step":"install-golangci-lint","ordinal":2,"status":"passed","started_at":"2026-10-23T22:33:16Z"},
-  {"burn":"setup","step":"install-helm","ordinal":3,"status":"passed","started_at":"2026-10-23T22:33:36Z"},
-  {"burn":"setup","step":"fetch-shellcheck","ordinal":4,"status":"passed","started_at":"2026-10-23T22:33:56Z"},
-  {"burn":"setup","step":"verify-shellcheck","ordinal":5,"status":"passed","started_at":"2026-10-23T22:34:06Z"},
-  {"burn":"setup","step":"decompress-shellcheck","ordinal":6,"status":"passed","started_at":"2026-10-23T22:34:17Z"},
-  {"burn":"setup","step":"install-shellcheck","ordinal":7,"status":"passed","started_at":"2026-10-23T22:34:27Z"},
-  {"burn":"lint","step":"vet","ordinal":8,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
-  {"burn":"lint","step":"golangci-lint-run","ordinal":9,"status":"passed","started_at":"2026-10-23T22:35:07Z"},
-  {"burn":"test-store","step":"test-store","ordinal":10,"status":"running","started_at":"2026-10-23T22:37:32Z"},
-  {"burn":"test-service","step":"test-service","ordinal":11,"status":"running","started_at":"2026-10-23T22:37:32Z"},
-  {"burn":"test-rest","step":"test-rest","ordinal":12,"status":"running","started_at":"2026-10-23T22:37:32Z"},
-  {"burn":"test-openbao","step":"test-openbao","ordinal":13,"status":"running","started_at":"2026-10-23T22:34:37Z"},
-  {"burn":"security","step":"security","ordinal":14,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
-  {"burn":"shellcheck","step":"shellcheck","ordinal":15,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
-  {"burn":"chart","step":"chart","ordinal":16,"status":"passed","started_at":"2026-10-23T22:37:32Z"},
-  {"burn":"release-diagnostic","step":"release-diagnostic","ordinal":17,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
-  {"burn":"verify-publisher-tools","step":"vpt-build-and-fetch","ordinal":18,"status":"running","started_at":"2026-10-23T22:34:37Z"},
-  {"burn":"verify-publisher-tools","step":"vpt-copy-trivy","ordinal":19,"status":"passed","started_at":"2026-10-23T22:34:37Z"},
-  {"burn":"verify-publisher-tools","step":"vpt-verify","ordinal":20,"status":"pending","started_at":""},
-  {"burn":"build-amd64","step":"build-amd64","ordinal":21,"status":"pending","started_at":""},
-  {"burn":"build-arm64","step":"build-arm64","ordinal":22,"status":"pending","started_at":""},
-  {"burn":"build-darwin-amd64","step":"build-darwin-amd64","ordinal":23,"status":"pending","started_at":""},
-  {"burn":"build-darwin-arm64","step":"build-darwin-arm64","ordinal":24,"status":"pending","started_at":""},
-];`);
-assert.equal(run(`burnOrderFixture.length`), 25);
-const expectedBurnOrder = [
-  'tools-dir', 'link-go', 'install-golangci-lint', 'install-helm',
-  'fetch-shellcheck', 'verify-shellcheck', 'decompress-shellcheck', 'install-shellcheck',
-  'vet', 'golangci-lint-run', 'test-openbao', 'security', 'shellcheck',
-  'release-diagnostic', 'vpt-build-and-fetch', 'vpt-copy-trivy', 'vpt-verify',
-  'test-store', 'test-service', 'test-rest', 'chart',
-  'build-amd64', 'build-arm64', 'build-darwin-amd64', 'build-darwin-arm64'
-].join(',');
-assert.equal(run(`orderSteps(burnOrderFixture).map(row => row.step.step).join(',')`), expectedBurnOrder);
-// Finishing a step cannot move it or its burn across polls.
-assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.status === 'running' ? {...step, status:'passed', finished_at:'2026-10-23T22:38:01Z'} : step)).map(row => row.step.step).join(',')`), expectedBurnOrder);
-// Starting the last sibling of an active burn keeps it inside that block.
-assert.equal(run(`orderSteps(burnOrderFixture.map(step => step.step === 'vpt-verify' ? {...step, status:'running', started_at:'2026-10-23T22:38:52Z'} : step)).map(row => row.step.step).join(',')`), expectedBurnOrder);
-// Reversing the API rows does not change unique plan-ordinal tie breaks.
-assert.equal(run(`orderSteps([...burnOrderFixture].reverse()).map(row => row.step.step).join(',')`), expectedBurnOrder);
-assert.equal(run(`orderSteps([]).length`), 0);
-assert.equal(run(`orderSteps(null).length`), 0);
-
-// Equal burn ordinals still form contiguous blocks; invalid starts are pending.
-run(`const tiedBurnFixture = [
-  {burn:'second', step:'a', ordinal:1, started_at:'invalid'},
-  {burn:'first', step:'original', ordinal:0},
-  {burn:'third', step:'a', ordinal:1},
-  {burn:'first', step:'original(1)', ordinal:0},
-  {burn:'second', step:'b', ordinal:2},
-  {burn:'third', step:'b', ordinal:2},
-  {burn:'first', step:'last', ordinal:0}
-];`);
-assert.equal(run(`orderSteps(tiedBurnFixture).map(row => row.label).join(',')`),
-  'first/original,first/last,first/original,second/a,second/b,third/a,third/b');
-// A newly started burn moves ahead of wholly unstarted burns.
-assert.equal(run(`orderSteps(tiedBurnFixture.map(step => step.burn === 'third' && step.step === 'a' ? {...step, started_at:'2026-10-23T22:38:00Z'} : step)).map(row => row.identity.burn).join(',')`),
-  'third,third,first,first,first,second,second');
+assert.equal(run(`orderSteps(nativeRows).map(row => row.key).join(',')`),'branch-0,attempt-1,omitted');
+html = run(`orderSteps(nativeRows).map(row => stepRow(row,'attempt-1')).join('')`);
+assert.equal((html.match(/data-select-step=/g)||[]).length,3);
+assert.ok(html.includes('data-select-step="attempt-1"') && html.includes('native detail') && html.includes('Omitted'));
+assert.equal(run(`orderSteps([]).length`),0);
+assert.equal(run(`orderSteps(null).length`),0);
 
 // An oversized partial record keeps its original attribution. Trimming its
 // head would make its continuation look like a fresh record from another step.

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +22,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -1923,159 +1921,10 @@ func matchesFailedStep(step model.StepResult, run model.Run) bool {
 	return stageMatch && stepMatch
 }
 
-// stepsForRun assembles the run's step list from the three records that each
-// know a different amount about it: the plan knows which steps exist, the
-// progress journal knows which ones started, and the durable results know how
-// they ended.
-//
-// All three are read for terminal runs too, not just active ones. A run that
-// was interrupted mid-flight records no results at all -- persistSteps only
-// ever runs from a completed Job's result -- so reading only the store gave it
-// an empty step list, discarding both the plan it was admitted with and the
-// progress it had visibly made. Its honest record is the plan, with the steps
-// that reached a state filled in and unreached declarations marked skipped.
-func (service *API) stepsForRun(ctx context.Context, run model.Run) (result []model.StepResult, resultErr error) {
-
-	steps, err := service.history.StepResults(ctx, run.ID)
-	if err != nil {
-		return nil, err
-	}
-	if service.logs == nil {
-		return steps, nil
-	}
-	planned, err := service.logs.StepPlan(run.ID)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		// A run submitted before plans existed, or by an engine that cannot
-		// enumerate its document, simply has none.
-		planned = nil
-	}
-	events, err := service.logs.StepProgress(run.ID)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		events = nil
-	case err != nil && run.Status.Active():
-		// While a run is live the journal is the primary record of in-flight
-		// state, so failing to read it is a real failure.
-		return nil, fmt.Errorf("load active step progress: %w", err)
-	case err != nil:
-		// For a terminal run the journal only supplements durable results.
-		// Degrading to those beats failing the request for a finished run.
-		events = nil
-	}
-	if len(planned) == 0 && len(events) == 0 {
-		return steps, nil
-	}
-	return mergeSteps(run, planned, events, steps), nil
-}
-
-// mergeSteps overlays the plan, progress journal, and durable results in
-// increasing order of authority. A source advances a step's state; legacy
-// retry aliases first select the highest attempt, which may restart that
-// state. Declared rows retain their planned names and ordinals throughout.
-func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runprogress.Event, persisted []model.StepResult) []model.StepResult {
-	order := make(map[string]int, len(planned))
-	secrets := make(map[string]bool, len(planned))
-	for _, step := range planned {
-		order[step.Stage+"\x00"+step.Step] = step.Ordinal
-		secrets[step.Stage+"\x00"+step.Step] = step.Secrets
-	}
-	canonicalObserved := make(map[string]bool)
-	for _, event := range events {
-		canonicalObserved[event.Stage+"\x00"+event.Step] = true
-	}
-	for _, result := range persisted {
-		canonicalObserved[result.Stage+"\x00"+result.Step] = true
-	}
-	merged := make([]model.StepResult, 0, len(planned)+len(events)+len(persisted))
-	position := make(map[string]int, cap(merged))
-	latestLegacy := make(map[string]int)
-	advance := func(candidate model.StepResult) {
-		key := candidate.Stage + "\x00" + candidate.Step
-		newAttempt := false
-		if _, isPlanned := order[key]; !isPlanned {
-			canonical := runlog.LegacyRetryStage(candidate.Stage)
-			canonicalKey := canonical + "\x00" + candidate.Step
-			if _, planned := order[canonicalKey]; planned && canonical != candidate.Stage {
-				// A modern canonical observation supersedes the legacy alias,
-				// as it does when the journal is restored for adoption.
-				if canonicalObserved[canonicalKey] {
-					return
-				}
-				attempt, err := strconv.Atoi(candidate.Stage[len(canonical)+1 : len(candidate.Stage)-1])
-				if err == nil {
-					// Old durable results used the attempt as their burn. Select
-					// by attempt number, not result order or timestamps, and keep
-					// the declaration's ordinal and the attempt's other evidence.
-					previous, seen := latestLegacy[canonicalKey]
-					if seen && attempt < previous {
-						return
-					}
-					newAttempt = !seen || attempt > previous
-					latestLegacy[canonicalKey] = attempt
-					candidate.Stage, key = canonical, canonicalKey
-				}
-			}
-		}
-		if ordinal, isPlanned := order[key]; isPlanned {
-			// Only the plan knows whether the step runs a credential chain;
-			// observations and durable results never carry it.
-			candidate.Ordinal, candidate.Secrets = ordinal, secrets[key]
-		} else if len(order) != 0 {
-			// Observed but never planned. It sorts after every planned step
-			// rather than displacing one, keeping the plan's own order intact.
-			candidate.Ordinal += len(order)
-		}
-		index, seen := position[key]
-		if !seen {
-			position[key] = len(merged)
-			merged = append(merged, candidate)
-			return
-		}
-		if newAttempt || candidate.Status.Progress() >= merged[index].Status.Progress() {
-			merged[index] = candidate
-		}
-	}
-	for _, step := range planned {
-		advance(model.StepResult{
-			RunID: run.ID, Stage: step.Stage, Step: step.Step,
-			Ordinal: step.Ordinal, Status: model.StepPending, Secrets: step.Secrets,
-		})
-	}
-	for _, event := range events {
-		advance(progressStepResult(run.ID, event))
-	}
-	for _, result := range persisted {
-		advance(result)
-	}
-	if run.Status.Terminal() {
-		for index := range merged {
-			// Resolve only untouched plan rows, after applying real outcomes.
-			// A terminal run cannot reach these steps later (for example a
-			// false when-condition or an untaken DAG branch). Keep the plan's
-			// ordinal and leave execution timestamps and log ranges absent.
-			if merged[index].Status == model.StepPending {
-				merged[index].Status = model.StepSkipped
-			}
-		}
-	}
-	sort.SliceStable(merged, func(left, right int) bool {
-		if merged[left].Ordinal != merged[right].Ordinal {
-			return merged[left].Ordinal < merged[right].Ordinal
-		}
-		if merged[left].Stage != merged[right].Stage {
-			return merged[left].Stage < merged[right].Stage
-		}
-		return merged[left].Step < merged[right].Step
-	})
-	return merged
-}
-
-func progressStepResult(runID string, event runprogress.Event) model.StepResult {
-	return model.StepResult{
-		RunID: runID, Stage: event.Stage, Step: event.Step, Ordinal: event.Ordinal,
-		Status: model.StepStatus(event.Status), ExitCode: event.ExitCode,
-		StartedAt: event.StartedAt, FinishedAt: event.FinishedAt,
-	}
+// stepsForRun reads observed native nodes, including retained historical rows.
+// Plans and log text do not manufacture, merge or override execution state.
+func (service *API) stepsForRun(ctx context.Context, run model.Run) ([]model.StepResult, error) {
+	return service.history.StepResults(ctx, run.ID)
 }
 
 func toolLogFilter(pattern string, context, offset, limit int, tail bool) (runlog.Filter, error) {
@@ -2121,12 +1970,19 @@ func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []
 			continue
 		}
 		// A workflow can fail before this step ever gets a pod or writes a
-		// log marker. Its durable diagnostic explains the absent file/range;
+		// output. Its durable diagnostic explains an absent file/range;
 		// do not turn that expected absence into a storage failure.
-		if run.Status.Terminal() && result.LogStart == 0 && result.LogEnd == 0 &&
+		if run.Status.Terminal() &&
 			result.Termination != nil && !result.Termination.Available && result.Termination.Unavailable == "not-executed" {
 			if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
 				return LogResponse{}, err
+			}
+			retained, meta, readErr := service.readStepLogFiltered(ctx, run, stage, step, filter)
+			if readErr == nil {
+				return newLogResponse(run.ID, stage, step, retained, meta), nil
+			}
+			if !errors.Is(readErr, os.ErrNotExist) {
+				return LogResponse{}, fmt.Errorf("read bounded run log: %w", readErr)
 			}
 			body, meta, err := runlog.FilterBytes(nil, filter)
 			if err != nil {

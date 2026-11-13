@@ -193,7 +193,7 @@ func TestSkippedNodeDoesNotEmitRunningProgress(t *testing.T) {
 	var output bytes.Buffer
 	reporter := newProgressReporter(&output)
 	reporter.observe(&output, StepResult{Stage: "publish", Step: "push", Status: runprogress.StepSkipped})
-	if strings.Contains(output.String(), `"status":"running"`) || !strings.Contains(output.String(), `"status":"skipped"`) {
+	if output.Len() != 0 {
 		t.Fatalf("skipped progress: %s", output.String())
 	}
 }

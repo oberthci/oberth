@@ -1037,93 +1037,6 @@ ORDER BY queue_sequence DESC`, perRepo)
 	return runs, nil
 }
 
-func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
-	// Report only a fixed field name, never result values or diagnostics.
-	// Keep the store's terminal, identity and bounds checks at this boundary.
-	invalidField := ""
-	switch {
-	case strings.TrimSpace(result.RunID) == "":
-		invalidField = "run_id"
-	case strings.TrimSpace(result.Stage) == "":
-		invalidField = "stage"
-	case strings.TrimSpace(result.Step) == "":
-		invalidField = "step"
-	case result.Ordinal < 0:
-		invalidField = "ordinal"
-	case !result.Status.Terminal():
-		invalidField = "status"
-	case result.LogStart < 0:
-		invalidField = "log_start"
-	case result.LogEnd < result.LogStart:
-		invalidField = "log_end"
-
-	}
-	if invalidField != "" {
-		return model.StepResult{}, fmt.Errorf("%w: step result invalid field %s", ErrInvalid, invalidField)
-	}
-
-	recorded := unixNano(s.now())
-	row := s.db.QueryRowContext(ctx, `
-INSERT INTO step_results(
-    run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-    started_at, finished_at, recorded_at, termination_json
-)
-SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-WHERE EXISTS (SELECT 1 FROM runs WHERE id = ? AND status IN ('queued','running'))
-ON CONFLICT(run_id, burn, step) DO UPDATE SET
-    ordinal = excluded.ordinal,
-    status = excluded.status,
-    exit_code = excluded.exit_code,
-    log_start = excluded.log_start,
-    log_end = excluded.log_end,
-    started_at = excluded.started_at,
-    finished_at = excluded.finished_at,
-    recorded_at = excluded.recorded_at,
-    termination_json = excluded.termination_json
-RETURNING run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-		  started_at, finished_at, recorded_at, termination_json`,
-		result.RunID, result.Stage, result.Step, result.Ordinal, result.Status,
-		result.ExitCode, result.LogStart, result.LogEnd,
-		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), recorded, stepDiagnosticJSON(result.Termination, result.RunID), result.RunID)
-	value, err := scanStepResult(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return model.StepResult{}, fmt.Errorf("%w: terminal or missing run cannot accept step evidence", ErrInvalidState)
-	}
-	if err != nil {
-		return model.StepResult{}, fmt.Errorf("put step result: %w", err)
-	}
-	return value, nil
-}
-
-func (s *Store) StepResults(ctx context.Context, runID string) ([]model.StepResult, error) {
-	return stepResultsFrom(ctx, s.reader(), runID)
-}
-
-func stepResultsFrom(ctx context.Context, database interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, runID string) ([]model.StepResult, error) {
-	rows, err := database.QueryContext(ctx, `
-SELECT run_id, burn, step, ordinal, status, exit_code, log_start, log_end,
-	   started_at, finished_at, recorded_at, termination_json
-FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
-	if err != nil {
-		return nil, fmt.Errorf("list step results: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var results []model.StepResult
-	for rows.Next() {
-		value, err := scanStepResult(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan step result: %w", err)
-		}
-		results = append(results, value)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list step results: %w", err)
-	}
-	return results, nil
-}
-
 func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var value model.Run
 	var issueTrailers, sourceBindings, assistRecord string
@@ -1174,22 +1087,6 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	value.QueuedAt = fromUnixNano(queued)
 	value.StartedAt, value.FinishedAt = nullableTime(started), nullableTime(finished)
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
-	return value, nil
-}
-
-func scanStepResult(row rowScanner) (model.StepResult, error) {
-	var value model.StepResult
-	var started, finished sql.NullInt64
-	var recorded int64
-	var diagnostic sql.NullString
-	if err := scanRowNotFound(row, "StepResult", &value.RunID, &value.Stage, &value.Step, &value.Ordinal,
-		&value.Status, &value.ExitCode, &value.LogStart, &value.LogEnd,
-		&started, &finished, &recorded, &diagnostic); err != nil {
-		return model.StepResult{}, err
-	}
-	value.Termination = readStepDiagnostic(diagnostic, value.RunID)
-	value.StartedAt, value.FinishedAt = nullableTime(started), nullableTime(finished)
-	value.RecordedAt = fromUnixNano(recorded)
 	return value, nil
 }
 

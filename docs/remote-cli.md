@@ -103,12 +103,12 @@ run` prints `rerun of`), and `status`, `wait` and `promote` on the SHA follow
 it. A non-admin uplink may rerun branch-push runs; a tag/release rerun needs
 an admin. Force-free tag replay requires the newest run, an unchanged exact tag
 object, and safe evidence for every run of that tag. Submitted attempts need a
-version 2 credential-aware plan and a durable complete terminal Workflow
-observation. Secret-store and release WIF steps both count as credentialed.
-A started credentialed step, incomplete observation (including observation
-outages or synthesized interruption), legacy plan, missing evidence, older
-source or moved tag requires `--force`. A missing journal is unknown unless
-an observed terminal Workflow explicitly had zero nodes. Pre-intent attempts
+complete stored Argo node rows and a matching terminal node-ID observation.
+Credential facts come from the admitted template/grant snapshot, including
+secret-store and release WIF access. A started credentialed node, incomplete
+observation, missing node/grant facts, older source or moved tag requires
+`--force`. Old marker text and display plans are not replay evidence. Historical
+rows are read as stored; missing facts remain unknown. Pre-intent attempts
 with no step evidence can be replayed without a plan. These rules also apply
 to tag infrastructure failures.
 Pending Workflow deletion blocks retry and rerun even with force, until cleanup

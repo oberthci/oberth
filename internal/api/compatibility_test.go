@@ -201,7 +201,7 @@ func TestRemovedResourceReportsHaveNoHTTPRoute(t *testing.T) {
 func TestRunGetMCPPayloadSendsRecordsOnce(t *testing.T) {
 	steps := make([]model.StepResult, 41)
 	for i := range steps {
-		steps[i] = model.StepResult{Stage: "ci", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed}
+		steps[i] = model.StepResult{NodeID: ("ci") + "." + (fmt.Sprintf("step-%d", i)), Stage: "ci", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed}
 	}
 	payload := RunDetailResponse{Run: model.Run{ID: "aaaaaaaa", RepoID: 1, Status: model.RunPassed, SHA: strings.Repeat("a", 40)}, Steps: steps, Timing: &model.RunTiming{}}
 	size := func() map[string]json.RawMessage {

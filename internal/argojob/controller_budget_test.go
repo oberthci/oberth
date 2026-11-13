@@ -12,6 +12,8 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 // budgetTestWorkflow returns a terminal workflow with two burns, each
@@ -176,30 +178,14 @@ func (brokenWriter) Write([]byte) (int, error) {
 	return 0, errors.New("destination unreachable")
 }
 
-// TestProgressWriterFailurePropagatesFromWait proves that progress-marker
-// write failures (stored in reporter.failed) surface as an error from
-// Controller.Wait, so a run with a degraded evidence trail is never reported
-// as green.
-func TestProgressWriterFailurePropagatesFromWait(t *testing.T) {
-	t.Parallel()
-	workflow := singleStepWorkflow()
-	client := &staticWorkflowClient{workflow: workflow}
-
-	config := testConfig()
-	controller, err := NewController(client, fixtureKube(workflow), config)
-	if err != nil {
-		t.Fatalf("NewController: %v", err)
+// Native status observations never write a control protocol into the run log.
+func TestStatusObservationDoesNotUseRunLogWriter(t *testing.T) {
+	reporter := newProgressReporter(brokenWriter{})
+	if !reporter.observe(brokenWriter{}, StepResult{Stage: "test", Step: "unit", Status: runprogress.StepPassed}) {
+		t.Fatal("terminal step lost log eligibility")
 	}
-	controller.WithPodLogReader(func(_ context.Context, _, _, _ string) (io.ReadCloser, error) {
-		return io.NopCloser(strings.NewReader("log output\n")), nil
-	})
-
-	_, waitErr := controller.Wait(context.Background(), "wf", "run-single", brokenWriter{})
-	if waitErr == nil {
-		t.Fatal("expected Wait to return an error when progress writes fail")
-	}
-	if !strings.Contains(waitErr.Error(), "progress") {
-		t.Fatalf("error should mention progress degradation: %v", waitErr)
+	if err := reporter.failure(); err != nil {
+		t.Fatal("status wrote into run log", err)
 	}
 }
 

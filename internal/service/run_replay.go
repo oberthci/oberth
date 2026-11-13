@@ -2,12 +2,8 @@ package service
 
 import (
 	"context"
-	"errors"
-	"os"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 // prepareReplayTagCheck resolves DB scope before entering the single writer.
@@ -58,124 +54,59 @@ func (service *API) releaseReplayDecision(run model.Run, evidence model.RunRepla
 	return audit, true
 }
 
-// These bounded file reads run inside the IMMEDIATE writer transaction for
-// atomic evidence/queue/audit decisions; a slow disk can delay other writers.
+// releaseAttemptSafe uses only stored native node/grant evidence. Marker text
+// and old journals cannot grant authority to re-execute credentialed work.
 func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, bool) {
-	run := attempt.Run
-	if !run.Status.Terminal() || attempt.PublicationStarted || run.Phase == "publishing" || service.logs == nil {
+	run, rows := attempt.Run, attempt.Steps
+	if !run.Status.Terminal() || attempt.PublicationStarted || run.Phase == "publishing" {
 		return 0, false
 	}
-	events, progressErr := service.logs.StepProgressHistory(run.ID)
 	if run.WorkflowName == "" {
-		return 0, (progressErr == nil || errors.Is(progressErr, os.ErrNotExist)) && len(events) == 0 && len(attempt.Steps) == 0 && run.FailedStep == ""
+		return 0, len(rows) == 0 && run.FailedStep == ""
 	}
 	observation := attempt.Observation
-	if observation == nil || observation.Version != 1 || observation.WorkflowName != run.WorkflowName || observation.Nodes < len(observation.Steps) {
+	if observation == nil || observation.NodeIDs == nil || observation.Version != 1 || observation.WorkflowName != run.WorkflowName || observation.Nodes < len(observation.Steps) || observation.Nodes != len(rows) || len(observation.NodeIDs) != observation.Nodes {
+		return len(rows), false
+	}
+	if observation.Nodes == 0 {
 		return 0, false
 	}
-	if observation.Nodes == 0 && (len(attempt.Steps) > 0 || len(events) > 0 || run.FailedStep != "") {
-		return 0, false
-	}
-	plan, planErr := service.logs.StepPlanRecord(run.ID)
-	planned := plan.Steps
-	if planErr != nil || plan.Version != runprogress.PlanVersion || len(planned) == 0 {
-		return 0, false
-	}
-	if progressErr != nil {
-		if !errors.Is(progressErr, os.ErrNotExist) || observation.Nodes != 0 || len(observation.Steps) != 0 {
-			return len(planned), false
+	// Every final Argo node must have its own stored row. This also rejects
+	// a partial batch, a lost retry attempt or historical rows lacking IDs.
+	expected := make(map[string]bool, len(observation.NodeIDs))
+	for _, id := range observation.NodeIDs {
+		if id == "" || expected[id] {
+			return len(rows), false
 		}
+		expected[id] = true
 	}
-	labels := make(map[string]bool, len(planned))
-	for _, step := range planned {
-		labels[step.Stage+"\x00"+step.Step] = step.Secrets || step.Credentialed
-	}
-	// A skipped Argo node has timestamps and can have a synthesized running
-	// marker, but no Pod ever ran. Require both the complete all-attempt tree
-	// and the owned non-execution diagnostic before resolving that ambiguity.
-	allSkipped, seen := map[string]bool{}, map[string]bool{}
-	for _, observed := range observation.Steps {
-		key := observed.Stage + "\x00" + observed.Step
-		if !seen[key] {
-			allSkipped[key] = true
-			seen[key] = true
+	executions := 0
+	for _, step := range rows {
+		if !expected[step.NodeID] {
+			return len(rows), false
 		}
-		allSkipped[key] = allSkipped[key] && observed.Status == model.StepSkipped
-	}
-	unexecuted := map[string]bool{}
-	for _, step := range attempt.Steps {
-		key := step.Stage + "\x00" + step.Step
-		if allSkipped[key] && step.Status == model.StepSkipped && step.Termination != nil && !step.Termination.Available && step.Termination.Unavailable == "not-executed" {
-			unexecuted[key] = true
+		delete(expected, step.NodeID)
+		if !step.ReplayEvidenceComplete || !step.Status.Terminal() {
+			// An unfinished node on a terminal Workflow cannot prove that
+			// credentialed work did not start.
+			return len(rows), false
 		}
-	}
-	started := func(step model.StepResult) bool {
-		if step.Status == model.StepSkipped && step.Termination != nil && !step.Termination.Available && step.Termination.Unavailable == "not-executed" {
-			return false
-		}
-		if step.StartedAt != nil || step.LogEnd > step.LogStart {
-			return true
-		}
-		if step.Termination != nil && !step.Termination.Available && step.Termination.Unavailable == "not-executed" {
-			return false
-		}
-		switch step.Status {
-		case model.StepRunning, model.StepPassed, model.StepFailed, model.StepTimedOut:
-			return true
-		}
-		return false
-	}
-	check := func(step model.StepResult) bool {
-		secret, known := labels[step.Stage+"\x00"+step.Step]
-		if !known {
-			secret, known = labels[runlog.LegacyRetryStage(step.Stage)+"\x00"+step.Step]
-		}
-		return !started(step) || (known && !secret)
-	}
-	for _, event := range events {
-		// The progress protocol requires timestamps even for skipped nodes;
-		// those timestamps and the marker's log bytes are not execution.
-		// Running events without non-execution proof and all terminal execution
-		// events remain checked.
-		if event.Status == runprogress.StepSkipped {
+		switch step.NodeType {
+		case "DAG", "Steps", "StepGroup", "Retry", "TaskGroup":
+			// These nodes group execution; their children carry authority.
 			continue
-		}
-		if event.Status == runprogress.StepRunning && unexecuted[event.Stage+"\x00"+event.Step] {
-			continue
-		}
-		if !check(progressStepResult(run.ID, event)) {
-			return len(planned), false
-		}
-	}
-	for _, step := range attempt.Steps {
-		if !check(step) {
-			return len(planned), false
-		}
-	}
-	for _, observed := range observation.Steps {
-		if unexecuted[observed.Stage+"\x00"+observed.Step] {
-			continue
-		}
-		result := model.StepResult{Stage: observed.Stage, Step: observed.Step, Status: observed.Status}
-		// Started is retained independently of the final/latest attempt status.
-		if observed.Started {
-			result.Status = model.StepRunning
-		}
-		if !check(result) {
-			return len(planned), false
-		}
-	}
-	if run.FailedStep != "" {
-		failed := model.StepResult{Stage: run.FailedStage, Step: run.FailedStep, Status: model.StepFailed}
-		for _, step := range attempt.Steps {
-			if step.Stage == run.FailedStage && step.Step == run.FailedStep {
-				failed = step
-				break
+		case "Skipped":
+			executions++
+			if step.Phase == "Skipped" || step.Phase == "Omitted" {
+				continue
 			}
 		}
-		if !check(failed) {
-			return len(planned), false
+		if step.NodeType != "Skipped" {
+			executions++
+		}
+		if step.Template == "" || !step.CredentialEvidenceKnown || step.Credentialed {
+			return len(rows), false
 		}
 	}
-	return len(planned), true
+	return len(rows), len(expected) == 0 && executions >= len(observation.Steps) && (executions > 0 || run.FailedStep == "")
 }

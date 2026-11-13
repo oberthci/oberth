@@ -39,9 +39,9 @@ func TestRunLogDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			run := enqueued.Run
-			steps := []model.StepResult{{Stage: "test", Step: "unit"}, {Stage: "setup", Step: "prepare"}}
+			steps := []model.StepResult{{NodeID: "test.unit", Stage: "test", Step: "unit"}, {NodeID: "setup.prepare", Stage: "setup", Step: "prepare"}}
 			if test.multi {
-				steps = append(steps, model.StepResult{Stage: "test", Step: "integration"})
+				steps = append(steps, model.StepResult{NodeID: "test.integration", Stage: "test", Step: "integration"})
 			}
 			for i, step := range steps {
 				step.RunID, step.Status, step.Ordinal = run.ID, model.StepPassed, i

@@ -107,6 +107,9 @@ func buildArgoEngine(
 		return nil, err
 	}
 	controller.WithWatchHub(hub)
+	if writer, ok := auditor.(argojob.StepResultWriter); ok {
+		controller.WithStepResultWriter(writer)
+	}
 	if recorder, ok := auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}

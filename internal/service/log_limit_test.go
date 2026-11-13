@@ -8,11 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 func TestRunLogWriterRetainsExactBoundAndFailsClosed(t *testing.T) {
@@ -33,40 +30,23 @@ func TestRunLogWriterRetainsExactBoundAndFailsClosed(t *testing.T) {
 	}
 }
 
-func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *testing.T) {
-	logs, err := runlog.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := time.Now().UTC()
-	event := runprogress.Event{
-		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
-		Status: runprogress.StepRunning, StartedAt: &started,
-	}
-	marker, err := runprogress.MarshalMarker(event)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestRunLogProjectionKeepsAllBytesPlain(t *testing.T) {
 	var retained bytes.Buffer
-	writer := newStepProgressLogWriter(&retained, func(event runprogress.Event) error {
-		return logs.AppendStepProgress("r-live", event)
-	})
-	input := append([]byte("[test/unit] command output\n"), marker...)
-	input = append(input, []byte("[test/unit] still running")...)
-	for _, fragment := range [][]byte{input[:7], input[7:31], input[31:]} {
-		if _, err := writer.Write(fragment); err != nil {
+	writer := newStepProgressLogWriter(&retained)
+	input := "command output\n@@oberth-step-progress@@ invalid json " + strings.Repeat("x", 20000) + "\nunterminated"
+	for _, fragment := range []string{input[:7], input[7:31], input[31:]} {
+		if _, err := writer.Write([]byte(fragment)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if retained.String() != "[test/unit] command output\n[test/unit] still running" || strings.Contains(retained.String(), runprogress.MarkerPrefix) {
-		t.Fatalf("retained log = %q", retained.String())
+	if retained.String() != input {
+		t.Fatal("plain log bytes changed")
 	}
-	events, err := logs.StepProgress("r-live")
-	if err != nil || len(events) != 1 || events[0].Status != runprogress.StepRunning {
-		t.Fatalf("journaled progress = %#v, %v", events, err)
+	if _, err := writer.Write([]byte("closed")); err == nil {
+		t.Fatal("write after close succeeded")
 	}
 }
 

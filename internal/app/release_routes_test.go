@@ -35,9 +35,6 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	if size, err := jobs.ResolvePipelineSource(t.Context(), request); err != nil {
 		t.Fatalf("routed size=%v err=%v", size, err)
 	}
-	if plan, err := jobs.PlannedSteps(t.Context(), request); err != nil || len(plan) != 1 || plan[0].Step != "deploy" {
-		t.Fatalf("plan=%+v err=%v", plan, err)
-	}
 	if resources, err := jobs.ResolvePipelineSource(t.Context(), request); err != nil || resources == nil {
 		t.Fatalf("resources=%+v err=%v", resources, err)
 	}

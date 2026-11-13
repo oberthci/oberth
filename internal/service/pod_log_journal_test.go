@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 func TestStepProgressPodJournalKeepsControlsAndRecoverySeparate(t *testing.T) {
@@ -23,18 +22,9 @@ func TestStepProgressPodJournalKeepsControlsAndRecoverySeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := 0
-	writer := newStepProgressLogWriter(newRunLogWriter(f, 1<<20), func(runprogress.Event) error { events++; return nil })
+	writer := newStepProgressLogWriter(newRunLogWriter(f, 1<<20))
 	writer.journal = journal
 	now := time.Now().UTC()
-	event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now}
-	marker, err := runprogress.MarshalMarker(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writer.Write(marker); err != nil {
-		t.Fatal(err)
-	}
 	cursor := runlog.PodLogCursor{Key: "workflow/node/pod", WorkflowUID: "workflow", Node: "node", Pod: "pod", Container: "main", At: now, Count: 2, Bytes: 41}
 	body := []byte("[test/unit] repeat\n[test/unit] repeat\n")
 	if err := writer.CommitPodLog(cursor, body); err != nil {
@@ -50,8 +40,8 @@ func TestStepProgressPodJournalKeepsControlsAndRecoverySeparate(t *testing.T) {
 	}
 	defer recovered.Close()
 	raw, _ := os.ReadFile(f.Name())
-	if events != 1 || !bytes.Equal(raw, body) || recovered.Cursors()[cursor.Key].Count != 2 {
-		t.Fatalf("controls/cursor/output changed: events=%d bytes=%q", events, raw)
+	if !bytes.Equal(raw, body) || recovered.Cursors()[cursor.Key].Count != 2 {
+		t.Fatalf("cursor/output changed: bytes=%q", raw)
 	}
 }
 
@@ -65,7 +55,7 @@ func TestStepProgressPodJournalFailureFallsBackOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := newStepProgressLogWriter(newRunLogWriter(f, 1<<20), nil)
+	writer := newStepProgressLogWriter(newRunLogWriter(f, 1<<20))
 	writer.journal = journal
 	writer.logFile = f
 	// A failed journal descriptor models a runtime WAL error before projection.
@@ -112,7 +102,7 @@ func TestStepProgressPodProjectionFailureKeepsWALWithoutDuplicateAppend(t *testi
 		t.Fatal(err)
 	}
 	dest := &partialPodProjection{file: f}
-	writer := newStepProgressLogWriter(dest, nil)
+	writer := newStepProgressLogWriter(dest)
 	writer.journal = journal
 	writer.logFile = f
 	c := runlog.PodLogCursor{Key: "workflow/node/pod", WorkflowUID: "workflow", Node: "node", Pod: "pod", Container: "main", At: time.Now().UTC(), Count: 1, Bytes: 20}
@@ -148,7 +138,7 @@ func TestStepProgressFailedRecoveryAppendsGapAfterRepairedPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := newStepProgressLogWriter(&partialPodProjection{file: f}, nil)
+	writer := newStepProgressLogWriter(&partialPodProjection{file: f})
 	writer.journal = j
 	writer.logFile = f
 	c := runlog.PodLogCursor{Key: "workflow/node/pod", WorkflowUID: "workflow", Node: "node", Pod: "pod", Container: "main", At: time.Now().UTC(), Count: 1, Bytes: 20}

@@ -27,7 +27,7 @@ func (store verdictUnreadableStore) Run(ctx context.Context, id string) (model.R
 // finished silently unpublished: the read error is returned, the run stays
 // unfinished for the next finalization, and nothing is published.
 func TestFinalizeReturnsUnreadableAssistedVerdict(t *testing.T) {
-	result := JobResult{Status: model.RunPassed, Phase: "test", Steps: []model.StepResult{{Stage: "ci", Step: "unit", Status: model.StepPassed}}}
+	result := JobResult{Status: model.RunPassed, Phase: "test", Steps: []model.StepResult{{NodeID: "ci.unit", Stage: "ci", Step: "unit", Status: model.StepPassed}}}
 	f := newControlFixture(t, result)
 	source, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "verdict", Repository: f.repo, Branch: "feature/verdict", SHA: strings.Repeat("e", 40), Actor: "pusher"})
 	if err != nil {

@@ -32,6 +32,9 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 			ctx := t.Context()
 			now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 			s := testStore(t, &now)
+			if _, err := s.db.Exec(testdb.PostNativeNodeStepsDowngrade); err != nil {
+				t.Fatal(err)
+			}
 			repo := createRepo(t, s)
 			run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/timing", strings.Repeat("a", 40)))
 			requireRestartNoError(t, err)

@@ -141,7 +141,7 @@ func TestEvidenceRemovalDoesNotBlockSchedulerWrites(t *testing.T) {
 		if err != nil || claimed.ID != queued.ID {
 			t.Fatalf("claim during removal: %#v %v", claimed, err)
 		}
-		if _, err := writer.PutStepResult(ctx, model.StepResult{RunID: queued.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
+		if _, err := writer.PutStepResult(ctx, model.StepResult{NodeID: "test.unit", RunID: queued.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 			t.Fatalf("step result during removal: %v", err)
 		}
 		return 10, nil

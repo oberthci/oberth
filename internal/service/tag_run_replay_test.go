@@ -20,7 +20,7 @@ func tagReplayPlan() []runprogress.PlannedStep {
 	return []runprogress.PlannedStep{{Stage: "test", Step: "unit", Ordinal: 0}, {Stage: "publish", Step: "push", Ordinal: 1, Secrets: true, Credentialed: true}}
 }
 func skippedPublisher() model.StepResult {
-	return model.StepResult{Stage: "publish", Step: "push", Ordinal: 1, Status: model.StepSkipped}
+	return model.StepResult{NodeID: "publish.push", Stage: "publish", Step: "push", Ordinal: 1, Status: model.StepSkipped}
 }
 
 func TestTagRunRerunBeforeCredentialedStepsNeedsNoForce(t *testing.T) {
@@ -54,7 +54,7 @@ func TestTagRunRerunBeforeCredentialedStepsNeedsNoForce(t *testing.T) {
 }
 
 func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
-	for _, kind := range []string{"running journal", "passed", "failed", "skipped after start", "failed step without result", "legacy attempt", "started then queued"} {
+	for _, kind := range []string{"running native node", "passed", "failed", "skipped after start", "failed step without result", "stored attempt", "queued native node"} {
 		t.Run(kind, func(t *testing.T) {
 			result := infraFailure
 			if kind == "failed step without result" {
@@ -65,17 +65,17 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 			failed := admitRerunTag(t, harness)
 			now := time.Now()
 			switch kind {
-			case "running journal":
-				if err := harness.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepRunning, StartedAt: &now}); err != nil {
+			case "running native node", "queued native node":
+				row := skippedPublisher()
+				row.RunID = failed.ID
+				row.Status = model.StepRunning
+				if kind == "queued native node" {
+					row.Status = model.StepQueued
+				}
+				if _, err := storetest.PutHistoricalStepResult(harness.fixture.store, t.Context(), row); err != nil {
 					t.Fatal(err)
 				}
-			case "failed step without result": // source's failed-step identity is evidence, too.
-			case "started then queued":
-				for _, event := range []runprogress.Event{{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepRunning, StartedAt: &now}, {Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepQueued}} {
-					if err := harness.fixture.logs.AppendStepProgress(failed.ID, event); err != nil {
-						t.Fatal(err)
-					}
-				}
+			case "failed step without result":
 
 			default:
 				result := skippedPublisher()
@@ -86,7 +86,7 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 					result.Status = model.StepFailed
 				case "skipped after start":
 					result.StartedAt = &now
-				case "legacy attempt":
+				case "stored attempt":
 					result.Stage = "publish(0)"
 					result.Status = model.StepPassed
 				}
@@ -151,7 +151,7 @@ func TestTagRunRerunUnknownEvidenceStillNeedsForce(t *testing.T) {
 			failed := admitRerunTag(t, harness)
 			switch kind {
 			case "missing plan":
-				if err := os.Remove(filepath.Join(harness.fixture.root, "logs", failed.ID+".plan.json")); err != nil {
+				if err := os.Remove(filepath.Join(harness.fixture.root, "logs", failed.ID+".plan.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 					t.Fatal(err)
 				}
 			case "corrupt plan":
@@ -208,11 +208,15 @@ func TestTagRunPublicationFailureStillNeedsForce(t *testing.T) {
 }
 
 func observedTagResult(result JobResult) JobResult {
-	observation := &model.RunTerminalObservation{Version: 1, Nodes: 0}
-	if len(result.Steps) > 0 {
-		observation.Nodes = len(result.Steps) + 1
+	if len(result.Steps) == 0 {
+		result.Steps = []model.StepResult{{NodeID: "workflow-root", NodeType: "DAG", Phase: "Failed", Status: model.StepFailed}}
 	}
+	observation := &model.RunTerminalObservation{Version: 1, Nodes: len(result.Steps), NodeIDs: []string{}}
 	for _, step := range result.Steps {
+		observation.NodeIDs = append(observation.NodeIDs, step.NodeID)
+		if step.NodeType == "DAG" {
+			continue
+		}
 		observation.Steps = append(observation.Steps, model.RunObservedStep{Stage: step.Stage, Step: step.Step, Status: step.Status, Started: step.StartedAt != nil || step.Status != model.StepSkipped})
 	}
 	result.TerminalObservation = observation

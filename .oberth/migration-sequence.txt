@@ -44,3 +44,4 @@
 20261113193519-scope-secret-approvals-to-workflow-4e48838f64a9b32ddba9d914280daa25
 20261113211418-drop-execution-targets-0c8c62c219d8b3115aa50e87dde3701f
 20261113213557-remove-fragment-run-index-8c4f9bbfa3c091b95cecdb689775370b
+20261113214401-native-node-steps-c477a88045b8945eb269fade9eb006e2

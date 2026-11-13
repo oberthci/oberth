@@ -12,8 +12,8 @@ func TestAPILatencyQueries(t *testing.T) {
 	s := latestRefLargeFixture(t)
 	ctx := t.Context()
 	// Historical steps must not turn page enrichment into a join over all steps.
-	_, err := s.db.ExecContext(ctx, `INSERT INTO step_results(run_id,burn,step,ordinal,status,exit_code,log_start,log_end,started_at,finished_at,recorded_at)
- SELECT id,'build','test',0,'passed',0,0,100,1,2,2 FROM runs`)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO step_results(run_id,node_id,burn,step,ordinal,status,exit_code,started_at,finished_at,recorded_at)
+ SELECT id,'node-test','build','test',0,'passed',0,1,2,2 FROM runs`)
 	if err != nil {
 		t.Fatal(err)
 	}

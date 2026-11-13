@@ -67,6 +67,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
+	stepResults  StepResultWriter
 	capabilities func(context.Context, int64) (*argoworkflow.Capability, error)
 	restartedAt  time.Time
 	timings      TimingRecorder
@@ -859,15 +860,6 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 			return false
 		}
 	}
-	if !seen && terminal(step.Status) && step.Status != runprogress.StepSkipped {
-		// A step observed for the first time already finished (a fast step
-		// between two polls). Emit its running event first so the log reads
-		// as a sequence rather than a jump.
-		reporter.emit(destination, StepResult{
-			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal,
-			Status: runprogress.StepRunning, StartedAt: step.StartedAt,
-		})
-	}
 	reporter.reported[key] = step.Status
 	if step.NodeID != "" {
 		reporter.node[key] = step.NodeID
@@ -875,7 +867,6 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 			reporter.done[step.NodeID] = true
 		}
 	}
-	reporter.emit(destination, step)
 	return terminal(step.Status)
 }
 
@@ -894,54 +885,11 @@ func rank(status runprogress.Status) int {
 	}
 }
 
-func (reporter *progressReporter) emit(destination io.Writer, step StepResult) {
-	event := runprogress.Event{
-		Version: runprogress.Version,
-		Stage:   step.Stage, Step: step.Step, Ordinal: step.Ordinal,
-		Status: step.Status, ExitCode: step.ExitCode,
-		StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
-	}
-	// Unknown Argo exits use a display-only synthetic 1. Omit that exit from
-	// durable progress so a second restart cannot promote it to real evidence.
-	if !step.ExitCodeKnown {
-		event.ExitCode = 0
-	}
-	// The progress contract requires timestamps consistent with the status.
-	// Argo can report a terminal node before its timestamps settle, so fill
-	// what is missing rather than dropping the transition.
-	now := time.Now().UTC()
-	if event.Status != runprogress.StepQueued && event.StartedAt == nil {
-		event.StartedAt = &now
-	}
-	if terminal(event.Status) && event.FinishedAt == nil {
-		event.FinishedAt = &now
-	}
-	if event.Status == runprogress.StepQueued {
-		event.StartedAt, event.FinishedAt = nil, nil
-	}
-	if event.Status == runprogress.StepRunning {
-		event.FinishedAt = nil
-	}
-	if event.FinishedAt != nil && event.StartedAt != nil && event.FinishedAt.Before(*event.StartedAt) {
-		event.FinishedAt = event.StartedAt
-	}
-	marker, err := runprogress.MarshalMarker(event)
-	if err != nil {
-		reporter.failed = errors.Join(reporter.failed, err)
-		return
-	}
-	if _, err := destination.Write(marker); err != nil {
-		reporter.failed = errors.Join(reporter.failed, err)
-	}
-}
-
 func (reporter *progressReporter) finish(destination io.Writer) {
 	_ = destination
 }
 
-// failure returns the accumulated write/marshal errors from progress marker
-// emission. A non-nil value means the run's durable progress record is
-// degraded and the run must not report green.
+// failure is retained for the log follower until its observation loop is replaced.
 func (reporter *progressReporter) failure() error {
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()

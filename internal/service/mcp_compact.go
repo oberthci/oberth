@@ -125,11 +125,17 @@ type RunSummaryResponse struct {
 }
 
 type RunStepSummary struct {
-	Stage      string           `json:"burn"`
-	Name       string           `json:"name"`
-	Status     model.StepStatus `json:"status"`
-	StartedAt  *time.Time       `json:"started_at"`
-	FinishedAt *time.Time       `json:"finished_at"`
+	NodeID      string           `json:"node_id"`
+	DisplayName string           `json:"display_name"`
+	Template    string           `json:"template"`
+	Phase       string           `json:"phase"`
+	Message     string           `json:"message"`
+	PodName     string           `json:"pod_name"`
+	Stage       string           `json:"burn"`
+	Name        string           `json:"name"`
+	Status      model.StepStatus `json:"status"`
+	StartedAt   *time.Time       `json:"started_at"`
+	FinishedAt  *time.Time       `json:"finished_at"`
 }
 
 func summarizeRun(run model.Run, steps []model.StepResult) RunSummaryResponse {
@@ -143,6 +149,7 @@ func summarizeRun(run model.Run, steps []model.StepResult) RunSummaryResponse {
 	}
 	for i, step := range steps {
 		response.Steps[i] = RunStepSummary{
+			NodeID: step.NodeID, DisplayName: step.DisplayName, Template: step.Template, Phase: step.Phase, Message: step.Message, PodName: step.PodName,
 			Stage: step.Stage, Name: step.Step, Status: step.Status,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 		}

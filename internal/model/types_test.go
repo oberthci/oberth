@@ -25,28 +25,6 @@ func TestRunStatusClassification(t *testing.T) {
 	}
 }
 
-// TestStepStatusProgressOrdersTheLifecycle is what lets three records of the
-// same step -- a plan entry, a live marker, a durable result -- be merged in
-// any order without a later, less-informed source walking the step backwards.
-func TestStepStatusProgressOrdersTheLifecycle(t *testing.T) {
-	t.Parallel()
-
-	ordered := []StepStatus{StepPending, StepQueued, StepRunning, StepPassed}
-	for index := 1; index < len(ordered); index++ {
-		if ordered[index].Progress() <= ordered[index-1].Progress() {
-			t.Fatalf("%q does not advance beyond %q", ordered[index], ordered[index-1])
-		}
-	}
-	for _, terminal := range []StepStatus{StepPassed, StepFailed, StepSkipped, StepTimedOut} {
-		if terminal.Progress() != StepPassed.Progress() {
-			t.Fatalf("terminal status %q ranks apart from the other terminal states", terminal)
-		}
-	}
-	if StepStatus("invented").Progress() >= StepPending.Progress() {
-		t.Fatal("an unknown status can displace a planned one")
-	}
-}
-
 func TestIssueAndRefEnums(t *testing.T) {
 	t.Parallel()
 

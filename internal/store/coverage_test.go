@@ -3213,9 +3213,9 @@ func TestPutStepResultWithTimes(t *testing.T) {
 	}
 	startedAt := now
 	finishedAt := now.Add(5 * time.Second)
-	result, err := s.PutStepResult(ctx, model.StepResult{
+	result, err := s.PutStepResult(ctx, model.StepResult{NodeID: "test.unit",
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
-		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
+		Status: model.StepPassed, ExitCode: 0,
 		StartedAt: &startedAt, FinishedAt: &finishedAt,
 	})
 	if err != nil {
@@ -3385,22 +3385,22 @@ func TestPutStepResultUpsert(t *testing.T) {
 		t.Fatal(err)
 	}
 	// First insert.
-	if _, err := s.PutStepResult(ctx, model.StepResult{
+	if _, err := s.PutStepResult(ctx, model.StepResult{NodeID: "test.unit",
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
-		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
+		Status: model.StepPassed, ExitCode: 0,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// Upsert: same burn+step, different data.
 	now = now.Add(time.Second)
-	result, err := s.PutStepResult(ctx, model.StepResult{
+	result, err := s.PutStepResult(ctx, model.StepResult{NodeID: "test.unit",
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 1,
-		Status: model.StepFailed, ExitCode: 1, LogStart: 0, LogEnd: 200,
+		Status: model.StepFailed, ExitCode: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != model.StepFailed || result.ExitCode != 1 || result.LogEnd != 200 {
+	if result.Status != model.StepFailed || result.ExitCode != 1 || result.NodeID != "test.unit" {
 		t.Fatalf("upserted step result = %#v", result)
 	}
 	// Only one step result for the burn+step.
