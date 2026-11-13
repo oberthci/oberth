@@ -126,7 +126,8 @@ type APIConfig struct {
 }
 
 type API struct {
-	administration Administration
+	administration  Administration
+	adminBackupLock *sync.Mutex
 
 	tags                   *PushIngestor
 	branchPrune            BranchPruneGit
@@ -256,8 +257,9 @@ func NewAPI(config APIConfig) (*API, error) {
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
 	created := &API{
-		administration: config.Administration,
-		branchPrune:    config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
+		administration:  config.Administration,
+		adminBackupLock: &sync.Mutex{},
+		branchPrune:     config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
 		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
 		releasePreflight:   config.ReleasePreflight,
 		clientCertificates: config.ClientCertificates,

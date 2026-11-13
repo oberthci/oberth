@@ -3,21 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
-	"os"
+	"sync"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/store"
 )
 
-// adminBackupFile removes its private staging file when the response closes.
-type adminBackupFile struct{ *os.File }
-
-func (f *adminBackupFile) Close() error { return errors.Join(f.File.Close(), os.Remove(f.Name())) }
-
-// PrepareAdminBackup stages the complete verified archive before sending HTTP
-// headers. Failed audit persistence or an interrupted snapshot exposes no bytes.
+// PrepareAdminBackup verifies the snapshot and persists the audit outcome before
+// HTTP headers. A failed audit closes the snapshot without exposing its bytes.
 func (s *API) PrepareAdminBackup(ctx context.Context, actor api.Actor, raw json.RawMessage) (io.ReadCloser, error) {
 	value, err := s.administrationTool(ctx, actor, "admin_database_backup", raw)
 	if err != nil {
@@ -40,37 +34,25 @@ func (s *API) stageAdminBackup(ctx context.Context, raw json.RawMessage) (any, e
 	if s.administration.DatabaseBackup == nil {
 		return nil, refuse(ErrUnavailable, "verified database backup")
 	}
-	file, err := os.CreateTemp("", "oberth-admin-backup-")
+	if !s.adminBackupLock.TryLock() {
+		return nil, api.ErrAdminBackupBusy
+	}
+	archive, err := s.administration.DatabaseBackup(ctx, limit)
 	if err != nil {
+		s.adminBackupLock.Unlock()
 		return nil, err
 	}
-	archive := &adminBackupFile{file}
-	keep := false
-	defer func() {
-		if !keep {
-			_ = archive.Close()
-		}
-	}()
-	if err := s.administration.DatabaseBackup(ctx, &adminBackupWriter{writer: file, remaining: limit + (64 << 10)}, limit); err != nil {
-		return nil, err
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return nil, err
-	}
-	keep = true
-	return archive, nil
+	return &lockedAdminBackup{ReadCloser: archive, lock: s.adminBackupLock}, nil
 }
 
-type adminBackupWriter struct {
-	writer    io.Writer
-	remaining int64
+type lockedAdminBackup struct {
+	io.ReadCloser
+	lock *sync.Mutex
+	once sync.Once
+	err  error
 }
 
-func (w *adminBackupWriter) Write(p []byte) (int, error) {
-	if int64(len(p)) > w.remaining {
-		return 0, refuse(ErrInvalidInput, "database backup archive exceeds size bound")
-	}
-	n, err := w.writer.Write(p)
-	w.remaining -= int64(n)
-	return n, err
+func (b *lockedAdminBackup) Close() error {
+	b.once.Do(func() { b.err = b.ReadCloser.Close(); b.lock.Unlock() })
+	return b.err
 }

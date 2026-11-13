@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -27,7 +26,7 @@ import (
 // adapter accepts command arguments, filesystem paths or a Kubernetes context.
 type Administration struct {
 	TokenPolicy       model.UplinkTokenPolicy
-	DatabaseBackup    func(context.Context, io.Writer, int64) error
+	DatabaseBackup    func(context.Context, int64) (io.ReadCloser, error)
 	Version           string
 	EnsureUpstream    func(context.Context, api.UpstreamAddRequest) (api.UpstreamIdentity, error)
 	ImportUpstreamKey func(context.Context, api.UpstreamKeyRequest) (api.UpstreamIdentity, error)
@@ -151,14 +150,11 @@ func (s *API) performAdministration(ctx context.Context, actor api.Actor, name s
 		if err := decodeAdministration(raw, &args); err != nil {
 			return nil, err
 		}
-		if args.Action != "backup.completed" && args.Action != "restore.completed" && args.Action != "upgrade.completed" {
-			return nil, refuse(ErrInvalidInput, "unknown lifecycle action")
-		}
 		if len(args.Details) == 0 {
 			args.Details = json.RawMessage("{}")
 		}
-		if !bytes.HasPrefix(bytes.TrimSpace(args.Details), []byte("{")) {
-			return nil, refuse(ErrInvalidInput, "details must be an object")
+		if err := validateLifecycleAuditDetails(args.Action, args.Details); err != nil {
+			return nil, err
 		}
 		return s.auditor.AppendAuditAction(ctx, model.AuditActionSpec{Actor: actor.Identity, Action: args.Action, ResourceType: "system", ResourceID: "oberth", Details: string(args.Details)})
 	case "upstream_provide_key":
@@ -399,7 +395,7 @@ func (s *API) adminAccessList(ctx context.Context) (any, error) {
 	rows := make([]map[string]string, 0, len(grants))
 	for _, grant := range grants {
 		repo := grant.Repo
-		rows = append(rows, map[string]string{"repo": repo, "step": grant.Step, "secret": grant.Secret})
+		rows = append(rows, map[string]string{"repo": repo, "workflow": grant.Workflow, "step": grant.Step, "secret": grant.Secret})
 	}
 	return map[string]any{"grants": rows}, nil
 }

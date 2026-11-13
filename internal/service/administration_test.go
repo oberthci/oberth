@@ -95,7 +95,7 @@ func administrationCases(t *testing.T) []adminTestCase {
 		{"readiness", "admin_readiness", `{}`},
 		{"version", "admin_version", `{}`},
 		{"idle", "admin_idle", `{"wait_for":"all"}`},
-		{"audit-record", "admin_audit_record", `{"action":"upgrade.completed","details":{"version":"test"}}`},
+		{"audit-record", "admin_audit_record", `{"action":"upgrade.completed","details":{"to":"test"}}`},
 		{"database-backup", "admin_database_backup", `{}`},
 	}
 }
@@ -137,9 +137,8 @@ func newAdministrationFixture(t *testing.T) (*API, *administrationAudit, http.Ha
 		},
 		CheckUpstream:    func(context.Context, model.Upstream) (string, error) { return "ok", nil },
 		VerifyRepository: func(context.Context, string) (any, error) { return map[string]any{"verified": true}, nil },
-		DatabaseBackup: func(_ context.Context, w io.Writer, _ int64) error {
-			_, err := io.WriteString(w, "verified archive fixture")
-			return err
+		DatabaseBackup: func(_ context.Context, _ int64) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader("verified archive fixture")), nil
 		},
 	}
 	server, err := api.New(administrationAuth{}, control, control, "test", api.WithErrorClassifier(func(err error) (int, string) {

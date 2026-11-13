@@ -94,11 +94,10 @@ func serverAdministration(options serveOptions, database *store.Store, cache *gi
 			}
 			return map[string]any{"repo": repository, "verified": true}, nil
 		},
-		DatabaseBackup: func(ctx context.Context, output io.Writer, limit int64) error {
+		DatabaseBackup: func(ctx context.Context, limit int64) (io.ReadCloser, error) {
 			configured := configuredStoreOptions(ctx)
 			configured.BackupMaxBytes = limit
-			_, err := store.WriteVerifiedBackup(ctx, options.database, store.LatestMigrationVersion(), configured, output)
-			return err
+			return store.OpenVerifiedBackup(ctx, options.database, store.LatestMigrationVersion(), configured)
 		},
 	}
 }

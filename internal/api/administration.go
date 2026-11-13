@@ -9,6 +9,9 @@ import (
 	"net/http"
 )
 
+// ErrAdminBackupBusy refuses another download until the current one closes.
+var ErrAdminBackupBusy = errors.New("database backup already in progress; close the current download before retrying")
+
 // AdminRequestBytes also bounds direct MCP calls to administrative tools.
 const AdminRequestBytes = 128 << 10
 
@@ -101,6 +104,10 @@ func (s *Server) handleAdministration(w http.ResponseWriter, r *http.Request, na
 			return
 		}
 		archive, err := backend.PrepareAdminBackup(r.Context(), actor, body)
+		if errors.Is(err, ErrAdminBackupBusy) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": ErrAdminBackupBusy.Error()})
+			return
+		}
 		if err != nil {
 			s.writeView(w, nil, err)
 			return
@@ -109,7 +116,7 @@ func (s *Server) handleAdministration(w http.ResponseWriter, r *http.Request, na
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", `attachment; filename="oberth-database-backup.tar"`)
 		w.Header().Set("Cache-Control", "no-store")
-		if _, err := io.Copy(w, archive); err != nil {
+		if err := streamAdminBackup(w, archive); err != nil {
 			panic(http.ErrAbortHandler)
 		}
 		return
