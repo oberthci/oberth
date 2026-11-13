@@ -40,7 +40,7 @@ func containerStreamRequest(ctx context.Context, query string) *http.Request {
 	return request
 }
 func TestContainerLogHTTPPassesPlainBytes(t *testing.T) {
-	body := "@@oberth:step plain\n::oberth-log:: plain\n[build/test] command\n"
+	body := "@@oberth-step-progress@@ " + `{"version":1,"burn":"test","step":"one","ordinal":0,"status":"queued"}` + "\n" + "::oberth-log:: plain\n[build/test] command\n"
 	calls := 0
 	backend := &containerStreamBackend{open: func(_ context.Context, actor Actor, id, node, container string, follow bool) (io.ReadCloser, error) {
 		calls++

@@ -13,6 +13,8 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 )
 
+const retainedLogMarkerFixture = "@@oberth-step-progress@@ " + `{"version":1,"burn":"test","step":"one","ordinal":0,"status":"queued"}` + "\n"
+
 type fakeContainerLogSource struct {
 	opened  int
 	context context.Context
@@ -33,7 +35,7 @@ func TestContainerLogServiceStoredSelectionAndMCPDiscovery(t *testing.T) {
 	actor := api.Actor{Identity: "operator"}
 	logs := f.retention.Logs
 	for _, container := range []string{"main", "wait"} {
-		if err := logs.StoreContainerLog(run.ID, runlog.ContainerLog{NodeID: "node", PodUID: "uid", PodName: "opaque", ContainerName: container, Body: []byte("@@oberth:step plain\n" + container + " body\n")}, 1024); err != nil {
+		if err := logs.StoreContainerLog(run.ID, runlog.ContainerLog{NodeID: "node", PodUID: "uid", PodName: "opaque", ContainerName: container, Body: []byte(retainedLogMarkerFixture + container + " body\n")}, 1024); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -46,7 +48,7 @@ func TestContainerLogServiceStoredSelectionAndMCPDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := value.(ContainerLogResponse)
-	if response.Output != "@@oberth:step plain\nwait body\n" || response.Container != "wait" {
+	if response.Output != retainedLogMarkerFixture+"wait body\n" || response.Container != "wait" {
 		t.Fatal(response)
 	}
 	reader, err := f.api.OpenRunContainerLog(t.Context(), actor, run.ID, "node", "main", true)
@@ -88,7 +90,7 @@ func TestContainerLogServiceHistoricMarkersArePlain(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "main", "ci", true)
 	actor := api.Actor{Identity: "operator"}
-	body := "@@oberth:step arbitrary text\n::oberth-log:: arbitrary text\n[build/test] retained\n"
+	body := retainedLogMarkerFixture + "::oberth-log:: arbitrary text\n[build/test] retained\n"
 	if _, err := f.retention.Logs.AppendRunLog(run.ID, []byte(body)); err != nil {
 		t.Fatal(err)
 	}

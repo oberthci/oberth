@@ -106,7 +106,7 @@ func TestContainerLogReservationSurvivesRestartAndPreservesMarkers(t *testing.T)
 	if err != nil || !bytes.Contains(body, []byte("copy has not completed")) {
 		t.Fatal(string(body), err)
 	}
-	historical := []byte("@@oberth:step not a control record\nplain\n")
+	historical := []byte("@@oberth-step-progress@@ " + `{"version":1,"burn":"test","step":"one","ordinal":0,"status":"queued"}` + "\n" + "plain\n")
 	if _, err := store.AppendRunLog("old-run", historical); err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,8 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 )
 
+const nativeLogMarkerFixture = "@@oberth-step-progress@@ " + `{"version":1,"burn":"test","step":"one","ordinal":0,"status":"queued"}` + "\n" + "body\n"
+
 type containerLogCache struct {
 	workflow *wfv1.Workflow
 	pods     []*corev1.Pod
@@ -79,7 +81,7 @@ func TestContainerLogCaptureReadsOnceAndPreservesPartialBytes(t *testing.T) {
 				if mode == "limit" {
 					return io.NopCloser(strings.NewReader(strings.Repeat("x", 256))), nil
 				}
-				return io.NopCloser(strings.NewReader("@@oberth:step plain text\nbody\n")), nil
+				return io.NopCloser(strings.NewReader(nativeLogMarkerFixture)), nil
 			}, func(context.Context, string, string) (*corev1.Pod, error) {
 				gets++
 				if mode == "missing" {
@@ -107,7 +109,7 @@ func TestContainerLogCaptureReadsOnceAndPreservesPartialBytes(t *testing.T) {
 			if err != nil || !entry.Captured {
 				t.Fatal(string(body), entry, err)
 			}
-			if (mode == "complete" || mode == "max-limit") && string(body) != "@@oberth:step plain text\nbody\n" {
+			if (mode == "complete" || mode == "max-limit") && string(body) != nativeLogMarkerFixture {
 				t.Fatal("native bytes rewritten", string(body))
 			}
 			if mode == "cut" && (!strings.Contains(string(body), "retained partial") || !strings.Contains(string(body), "log incomplete")) {
