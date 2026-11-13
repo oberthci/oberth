@@ -49,10 +49,6 @@ func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 	calls := 0
 	service.schedulingObserver = schedulingObserverFunc(func(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
 		calls++
-		deadline, ok := ctx.Deadline()
-		if !ok || time.Until(deadline) > 2*time.Second {
-			t.Fatal("missing bounded deadline")
-		}
 		return nil, errors.New("SECRET error")
 	})
 	if result, _ := service.observeScheduling(t.Context(), run, nil, true); result.State != "startup" || calls != 0 {
@@ -249,9 +245,6 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	}
 	service := fixture.api(t)
 	service.schedulingObserver = schedulingObserverFunc(func(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
-		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 2*time.Second {
-			t.Fatal("unbounded observation")
-		}
 		return &model.ExecutionObservation{State: "deadline_exceeded", Reason: "DeadlineExceeded", Phase: "Failed", Message: model.ExecutionDeadlineMessage, ReconciliationLagSeconds: ptr.To(int64(3080))}, nil
 	})
 	status, err := service.status(ctx, fixture.repo.Name, run.SHA, "")

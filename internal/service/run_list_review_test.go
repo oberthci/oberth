@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	clocktesting "k8s.io/utils/clock/testing"
-
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -101,8 +99,6 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 			service := f.api(t)
-			fake := clocktesting.NewFakeClock(time.Now())
-			service.waitClock = fake
 			calls := map[string]int{}
 			var callsMu sync.Mutex
 			service.schedulingObserver = schedulingObserverFunc(func(_ context.Context, run model.Run) (*model.ExecutionObservation, error) {
@@ -128,37 +124,23 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 					t.Errorf("missing live observations: %v", calls)
 				}
 				for _, run := range runs {
-					want := 1
-					if poll == 3 {
-						want = 2
-					}
+					want := poll
 					if calls[run.ID] != want {
 						t.Errorf("native state cache calls: %v", calls)
 					}
 				}
 				callsMu.Unlock()
-				if poll == 2 {
-					fake.Step(executionDiagnosticTTL)
-				}
 			}
 			event.Status, event.StartedAt = runprogress.StepRunning, &now
 			if err := f.logs.AppendStepProgress(runs[0].ID, event); err != nil {
 				t.Fatal(err)
 			}
-			service.listDiagnostics.mu.Lock()
-			for _, element := range service.listDiagnostics.entries {
-				entry := element.Value.(listDiagnosticEntry)
-				entry.checkedAt = time.Now().Add(-time.Minute)
-				element.Value = entry
-			}
-			service.listDiagnostics.mu.Unlock()
 			if _, err := service.Runs(t.Context(), api.Actor{Identity: "owner"}, api.RunFilter{View: view}); err != nil {
 				t.Fatal(err)
 			}
-			drainListDiagnostics(t, service)
 			callsMu.Lock()
 			defer callsMu.Unlock()
-			if calls[runs[0].ID] != 3 {
+			if calls[runs[0].ID] != 4 {
 				t.Fatal("progress hid native suspension/queue observations", calls)
 			}
 		})

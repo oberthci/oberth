@@ -78,8 +78,6 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 		result.State = "startup"
 		return result, "starting"
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
 	execution, err := s.schedulingObserver.ObserveScheduling(ctx, run)
 	if err != nil || execution == nil {
 		result.Execution = &model.ExecutionObservation{State: "unavailable", Message: "Execution observation is unavailable."}
@@ -105,6 +103,10 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	if scheduling.Execution.Phase == "Pending" || scheduling.Execution.Message == model.ParallelismWaitMessage {
 		run.DisplayStatus = model.DisplayQueued
 		run.DisplayReason = queuedDisplayReason(scheduling)
+	}
+	if scheduling.Execution.State == "unavailable" && strings.HasPrefix(scheduling.Execution.Message, "status unknown: cluster API unreachable since ") {
+		run.DisplayReason = scheduling.Execution.Message
+		return
 	}
 	if strings.HasPrefix(scheduling.Execution.Reason, "SourceSeed") {
 		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(scheduling.Execution.Message))

@@ -26,10 +26,9 @@ import (
 
 type latencyObserver struct{ calls atomic.Int32 }
 
-func (o *latencyObserver) ObserveScheduling(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
+func (o *latencyObserver) ObserveScheduling(_ context.Context, _ model.Run) (*model.ExecutionObservation, error) {
 	o.calls.Add(1)
-	<-ctx.Done()
-	return nil, ctx.Err()
+	return &model.ExecutionObservation{State: "unavailable", Message: "Execution observation is unavailable."}, nil
 }
 
 type apiLatencyFixture struct {
@@ -145,7 +144,8 @@ func (f apiLatencyFixture) request(tb testing.TB, path string) *httptest.Respons
 }
 
 // Cold, stale and inflight snapshots all share the same request latency bound.
-// External dependencies deliberately stay blocked until their contexts end.
+// External health probes stay blocked; native execution observation reads the
+// unavailable watch cache immediately.
 func TestAPIHandlersLargeHistoryLatency(t *testing.T) {
 	f := newAPILatencyFixture(t)
 	for _, phase := range []string{"cold", "inflight", "stale"} {

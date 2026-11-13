@@ -130,7 +130,6 @@ type API struct {
 	deletionQueued         func()
 	receiveOutbox          ReceiveOutbox
 	receiveHandler         gitcache.ReceiveHandler
-	listDiagnostics        *listDiagnosticCache
 	branchCounts           *branchCountCache
 	issueStaleAfter        time.Duration
 	issueActiveStaleAfter  time.Duration
@@ -259,7 +258,6 @@ func NewAPI(config APIConfig) (*API, error) {
 		uplinkLifecycle:    config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver,
-		listDiagnostics:    &listDiagnosticCache{},
 		branchCounts:       &branchCountCache{},
 		runs:               config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
@@ -1108,8 +1106,6 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
-	var pending []<-chan struct{}
-	var observed []int
 	for i := range runs {
 		if service.scope != nil {
 			runs[i].QueuePosition = 0
@@ -1119,24 +1115,15 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		}
 		switch runs[i].DisplayStatus {
 		case model.DisplayRunning:
-			value := service.cachedRunListExecution(runs[i])
-			runs[i].Scheduling = value.scheduling
-			observed = append(observed, i)
-			if value.ready != nil {
-				pending = append(pending, value.ready)
+			runs[i].Scheduling = service.observeRunListExecution(ctx, runs[i])
+			applyExecutionDisplay(&runs[i], runs[i].Scheduling)
+			if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
+				runs[i].DisplayReason = "awaiting Argo state"
 			}
 		case model.DisplayQueued:
 			var reason string
 			runs[i].Scheduling, reason = service.observeScheduling(ctx, runs[i], nil, false)
 			applyQueuedDisplay(&runs[i], runs[i].Scheduling, reason)
-		}
-	}
-	waitListExecution(ctx, pending)
-	for _, i := range observed {
-		runs[i].Scheduling = service.listDiagnostic(runs[i], "execution", nil).scheduling
-		applyExecutionDisplay(&runs[i], runs[i].Scheduling)
-		if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
-			runs[i].DisplayReason = "awaiting Argo state"
 		}
 	}
 	return service.stripScopedSequences(runs), nil
