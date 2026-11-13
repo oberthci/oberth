@@ -497,7 +497,7 @@ DELETE FROM schema_migrations WHERE id='20261113013336-remove-step-measurement-3
 // PostFragmentIndexDowngrade restores the lookup index only in disposable historical fixtures.
 const PostFragmentIndexDowngrade = `
 CREATE INDEX IF NOT EXISTS runs_passed_tested_sha_idx ON runs(repo_id,tested_sha) WHERE status='passed';
-DELETE FROM schema_migrations WHERE id='20261113190159-remove-fragment-run-index-fd3598ddc6d77fe8696ac7faf75c31db';
+DELETE FROM schema_migrations WHERE id='20261113213557-remove-fragment-run-index-8c4f9bbfa3c091b95cecdb689775370b';
 `
 
 // Historical schema reconstruction for disposable migration fixtures only.

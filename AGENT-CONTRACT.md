@@ -2518,7 +2518,7 @@ and v2 backup-and-replace semantics are unchanged. See
 | `20261111200000-canonical-priorities` | Canonical priorities | Rewrite stored priority classes and constrain new values | Database restore |
 | `YYYYMMDDHHMMSS-<slug>-<random>` | Future migrations | Per-file `Purpose` and `Rollback` contract in `internal/store/migrations/`; no shared number allocation | Per-file contract (database restore by default) |
 
-Timestamp migration `20261113190159-remove-fragment-run-index-fd3598ddc6d77fe8696ac7faf75c31db`: remove the obsolete fragment passed-run lookup index; retain runs and audit history. Rollback restores the pre-upgrade database backup.
+Timestamp migration `20261113213557-remove-fragment-run-index-8c4f9bbfa3c091b95cecdb689775370b`: remove the obsolete fragment passed-run lookup index; retain runs and audit history. Rollback restores the pre-upgrade database backup.
 
 Timestamp migration `20261104190000-priority-four-classes`: extend execution-priority vocabulary while preserving legacy receipts; rollback restores the pre-upgrade backup.
 
