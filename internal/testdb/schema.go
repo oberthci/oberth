@@ -427,6 +427,8 @@ CREATE TABLE step_resource_usage (
 );
 CREATE INDEX step_resource_usage_repo_idx ON step_resource_usage(repo_id,last_observed_at DESC,run_id,node_id,pod_uid,container_id);
 CREATE INDEX step_resource_usage_step_idx ON step_resource_usage(repo_id,burn,step,last_observed_at DESC);
+-- The v37 receipt remains present: reconstruct its index rather than replay it.
+CREATE INDEX step_resource_usage_retention_idx ON step_resource_usage(last_observed_at);
 
 -- Purpose: Persist bounded Pod resource dispositions independently of runtime IDs.
 -- Rollback: Restore the pre-upgrade database backup.
