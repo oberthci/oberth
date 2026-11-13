@@ -88,23 +88,25 @@ func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, wor
 			return args, nil
 		}
 	}
-	// These identities may exist only in the installed chart defaults. Pin
-	// them explicitly without copying any other old defaults into user config.
+	// These identities may exist only in the installed chart defaults. Keep
+	// them in the initial snapshot, below operator files and the restore overlay.
 	compat, err := readUpgradeCompatibility(ctx, namespace, "", deps)
 	if err != nil {
 		return nil, err
+	}
+	if values == nil {
+		values = make(map[string]any)
+	}
+	values["compatibility"] = map[string]any{
+		"schemaIdentity": compat.SchemaIdentity,
+		"auditDomain":    compat.AuditDomain,
+		"witnessKeyInfo": compat.WitnessKeyInfo,
 	}
 	path, err := writeStoredValuesSnapshot(work, values)
 	if err != nil {
 		return nil, err
 	}
-	args = storedSnapshotHelmArgs(args, path)
-	pins := []string{
-		"--set-string", "compatibility.schemaIdentity=" + compat.SchemaIdentity,
-		"--set-string", "compatibility.auditDomain=" + compat.AuditDomain,
-		"--set-string", "compatibility.witnessKeyInfo=" + compat.WitnessKeyInfo,
-	}
-	return append(append(args[:4:4], pins...), args[4:]...), nil
+	return storedSnapshotHelmArgs(args, path), nil
 }
 
 // Restore targets the installed chart, which can still own Transit flags.

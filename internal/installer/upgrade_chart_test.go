@@ -301,10 +301,14 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCo
 		t.Run(mode, func(t *testing.T) {
 			var args []string
 			var err error
+			identities := values["compatibility"]
 			if mode == "install" {
 				args = OberthHelmArgs(Config{Namespace: "oberth", ChartPath: chart, ImageRef: image}, OpenBaoResult{}, RekorResult{})
 			} else {
-				args, err = restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: chart}, backupDeps{Deps: deps}, restoreTarget{Overlay: map[string]any{"compatibility": values["compatibility"]}}, t.TempDir())
+				// The restored database can have entirely different identities.
+				// Helm --set-string pins would beat this later values overlay.
+				identities = map[string]any{"schemaIdentity": "archive-schema-v1", "auditDomain": "archive-audit-v1", "witnessKeyInfo": "archive-witness-v1"}
+				args, err = restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: chart}, backupDeps{Deps: deps}, restoreTarget{Overlay: map[string]any{"compatibility": identities}}, t.TempDir())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -340,7 +344,7 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCo
 				t.Fatal(err)
 			}
 			dropRetiredInstallerValues(want, nil)
-			want["compatibility"] = values["compatibility"]
+			want["compatibility"] = identities
 			if mode == "install" {
 				want["image"].(map[string]any)["ref"] = image
 				argo := want["argo"].(map[string]any)
@@ -364,7 +368,8 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCo
 					t.Fatalf("legacy field reactivated %s", forbidden)
 				}
 			}
-			for _, want := range []string{containerimage.Utility, compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo} {
+			expectedIdentities := identities.(map[string]any)
+			for _, want := range []string{containerimage.Utility, expectedIdentities["schemaIdentity"].(string), expectedIdentities["auditDomain"].(string), expectedIdentities["witnessKeyInfo"].(string)} {
 				if !strings.Contains(result.Manifest, want) {
 					t.Errorf("%s raw-reuse render lacks %q", mode, want)
 				}

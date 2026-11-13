@@ -31,8 +31,8 @@ Workflow parallelism and Kubernetes controls Pod scheduling.
 The source resolver pins the exact source and fragment set in a source receipt.
 Submission checks that binding again. Admission validates dangerous content and
 credential boundaries while preserving admitted native Argo fields. Trusted
-upstream policy refresh and controller-profile verification can delay
-submission; neither counts capacity or rewrites requests.
+upstream policy refresh can delay submission; it counts no capacity and rewrites
+no requests.
 
 The server creates a per-run source claim in the pipeline namespace and fills
 it with the resolved checkout through a short-lived seed Pod. Containers receive
@@ -82,8 +82,11 @@ SQLite stores repository/run history, step results, grants, publications and
 audit records on the server volume. Forward-only migrations have a strict
 sequence and ledger. Existing deployments preserve their schema identity,
 audit domain and witness-key derivation context. Upgrade preflight checks
-stored values against the target chart schema. Unknown values are refused by
-the schema; there is no retired-key cleanup layer.
+stored user values against the target chart schema. When moving to a chart
+without Transit, the installer omits only its retired `secretstore.transit.enabled`,
+`.mount` and `.key` leaves. Other unknown values are refused by the schema.
+Installed compatibility identities remain in the initial stored-user snapshot,
+below requested overlays; restore uses the restored archive's identities.
 
 Mutations pass the audit integrity gate. The local hash chain is verified on
 startup and during operation. Optional timestamp and Rekor anchoring add
