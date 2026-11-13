@@ -1029,10 +1029,6 @@ func (jobs *ArgoJobs) SetWatchHub(hub *argowatch.Hub) { jobs.watchHub = hub }
 
 // RunWatch ties the informers to the server lifetime.
 func (jobs *ArgoJobs) RunWatch(ctx context.Context) {
-	if jobs.routes != nil {
-		jobs.routes.local.RunWatch(ctx)
-		return
-	}
 	if jobs.watchHub != nil {
 		jobs.watchHub.Run(ctx)
 	}
@@ -1040,9 +1036,6 @@ func (jobs *ArgoJobs) RunWatch(ctx context.Context) {
 
 // WaitForWatchSync gates recovery and dispatch, but never the API or Git.
 func (jobs *ArgoJobs) WaitForWatchSync(ctx context.Context) error {
-	if jobs.routes != nil {
-		return jobs.routes.local.WaitForWatchSync(ctx)
-	}
 	if jobs.watchHub == nil {
 		return errors.New("app: Workflow watch hub is required")
 	}

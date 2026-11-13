@@ -15,7 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/argowatch"
 )
 
-func TestArgoJobsWatchSyncIsShutdownBoundedAndDelegatesLocalLifecycle(t *testing.T) {
+func TestArgoJobsWatchSyncIsShutdownBoundedAndRunsTheLocalCache(t *testing.T) {
 	kube := kubefake.NewClientset()
 	argo := argofake.NewSimpleClientset()
 	argo.PrependWatchReactor("workflows", func(action clienttesting.Action) (bool, watch.Interface, error) {
@@ -29,8 +29,7 @@ func TestArgoJobsWatchSyncIsShutdownBoundedAndDelegatesLocalLifecycle(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	local := &ArgoJobs{watchHub: hub}
-	jobs := &ArgoJobs{routes: &executionTargets{local: local}}
+	jobs := &ArgoJobs{watchHub: hub}
 	// Before the informer starts, a caller waits until its own shutdown.
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -44,6 +43,6 @@ func TestArgoJobsWatchSyncIsShutdownBoundedAndDelegatesLocalLifecycle(t *testing
 	wait, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
 	if err := jobs.WaitForWatchSync(wait); err != nil || !hub.Healthy() {
-		t.Fatal("local cache lifecycle not delegated", err)
+		t.Fatal("local cache lifecycle not started", err)
 	}
 }
