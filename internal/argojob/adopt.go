@@ -19,7 +19,7 @@ import (
 )
 
 // Adoption pins observation to the exact Workflow found during owner recovery.
-// Resource size comes from that submission, never from the current default branch.
+// Source and execution identity come from that submission.
 type Adoption struct {
 	Sources     string
 	RestartedAt time.Time
@@ -104,14 +104,25 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	return Adoption{Sources: workflow.Annotations[argoworkflow.SourcesAnnotation], RestartedAt: controller.restartedAt, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
-// Argo's status and API metadata change while it runs. Its live spec must stay
-// fixed, even if a replacement keeps the original identity annotation.
+// Pinned Argo's SuspendWorkflow/ResumeWorkflow change only spec.suspend;
+// StopWorkflow/TerminateWorkflow change spec.shutdown (workflow/util/util.go).
+// Their other changes are status and API metadata. All execution fields remain
+// bound, even if a replacement keeps the original identity annotation.
 func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
+	spec := workflow.Spec
+	switch spec.Shutdown {
+	case "", wfv1.ShutdownStrategyStop, wfv1.ShutdownStrategyTerminate:
+	default:
+		return "", errors.New("argojob: invalid native Workflow shutdown strategy")
+	}
+	spec.Suspend = nil
+	spec.Shutdown = ""
+
 	if binding := workflow.Annotations[capabilityAnnotation]; binding != "" {
 		body, err := json.Marshal(struct {
 			Spec       wfv1.WorkflowSpec
 			Capability string
-		}{workflow.Spec, binding})
+		}{spec, binding})
 		if err != nil {
 			return "", err
 		}
@@ -120,7 +131,7 @@ func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 	}
 	body, err := json.Marshal(struct {
 		Spec wfv1.WorkflowSpec `json:"spec"`
-	}{workflow.Spec})
+	}{spec})
 	if err != nil {
 		return "", fmt.Errorf("argojob: encode adopted Workflow spec: %w", err)
 	}
