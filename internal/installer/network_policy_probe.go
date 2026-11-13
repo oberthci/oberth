@@ -24,6 +24,7 @@ import (
 	"github.com/oberthci/oberth/internal/containerimage"
 )
 
+const policyProbeContainer = "probe"
 const policyProbeLabel = "oberth.ci/network-policy-probe"
 const policyProbeExpiry = "oberth.ci/probe-expires-at"
 const policyProbeRounds = 6
@@ -488,7 +489,7 @@ func policyProbeTraffic(ctx context.Context, cfg Config, deps Deps, namespace, p
 }
 
 func policyProbeExec(ctx context.Context, cfg Config, deps Deps, namespace, pod, script string, values ...string) (string, error) {
-	args := []string{"--context", deps.ContextName, "--namespace", namespace, "exec", pod, "--", "sh", "-c", script, "sh"}
+	args := []string{"--context", deps.ContextName, "--namespace", namespace, "exec", pod, "--container", policyProbeContainer, "--", "sh", "-c", script, "sh"}
 	args = append(args, values...)
 	if cfg.KubeconfigPath != "" {
 		args = append([]string{"--kubeconfig", cfg.KubeconfigPath}, args...)
@@ -528,7 +529,7 @@ func policyProbePod(namespace, token, role, image string) *corev1.Pod {
 		AutomountServiceAccountToken: ptr.To(false), RestartPolicy: corev1.RestartPolicyNever, ActiveDeadlineSeconds: ptr.To[int64](180), TerminationGracePeriodSeconds: ptr.To[int64](0),
 		SecurityContext: &corev1.PodSecurityContext{RunAsNonRoot: ptr.To(true), RunAsUser: ptr.To[int64](65534), RunAsGroup: ptr.To[int64](65534), FSGroup: ptr.To[int64](65534), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
 		Volumes:         []corev1.Volume{{Name: "probe", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: ptr.To(resource.MustParse("8Mi"))}}}},
-		Containers:      []corev1.Container{{Name: "probe", Image: image, Command: command, VolumeMounts: []corev1.VolumeMount{{Name: "probe", MountPath: "/probe"}}, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("32Mi")}}}},
+		Containers:      []corev1.Container{{Name: policyProbeContainer, Image: image, Command: command, VolumeMounts: []corev1.VolumeMount{{Name: "probe", MountPath: "/probe"}}, SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr.To(false), ReadOnlyRootFilesystem: ptr.To(true), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}}, Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("32Mi")}}}},
 	}}
 }
 
