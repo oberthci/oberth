@@ -54,6 +54,9 @@ namespaces (for example a NetworkPolicy admitting `role=backend` from any
 namespace); Oberth reserves only the keys its own installed charts select on.
 Affinity namespace selectors are explicitly permitted despite other namespace
 reference restrictions.
+Mutex and semaphore names are shared by all repositories in the pipeline
+namespace, as Argo defines them. One repository can hold a lock that another
+repository uses; Oberth imposes no repository prefix rule.
 A repository semaphore may read only the `oberth-sync-limits` ConfigMap in the
 run's namespace, using a key of the author's choice. Other ConfigMap references
 remain refused because Argo's failure text can expose their data. Oberth no
