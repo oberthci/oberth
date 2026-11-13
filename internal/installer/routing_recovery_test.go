@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,9 @@ func TestPrintedRoutingRemedyRestoresBothVerifiedEndpoints(t *testing.T) {
 			return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: ca}}, "chosen", nil
 		},
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			if slices.Contains(args, "create-first-admin") {
+				return (&fakeOberthHost{t: t}).run(ctx, input, name, args...)
+			}
 			joined := strings.Join(args, " ")
 			if strings.Contains(joined, "port-forward") || strings.Contains(joined, "config set") {
 				t.Fatalf("user routing/config action executed: %s", joined)

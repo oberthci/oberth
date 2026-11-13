@@ -384,7 +384,7 @@ func TestPreflightOpenBaoCertMismatchRefuses(t *testing.T) {
 		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"}, Data: map[string][]byte{"tls.crt": podCertPEM}}),
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 			if slices.Contains(args, "deploy/oberth") {
-				return nil, fmt.Errorf(`unknown command "admin"`)
+				return podCertPEM, nil
 			}
 			return pr.run(ctx, input, name, args...)
 		},
@@ -852,6 +852,7 @@ func TestPreflightCertWithOnlySvcNameNoRotation(t *testing.T) {
 		}
 		return baoRunner.run(ctx, input, name, args...)
 	}
+	refreshFixtureAdmin(&deps)
 
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(context.Background(), &cfg, deps, false)

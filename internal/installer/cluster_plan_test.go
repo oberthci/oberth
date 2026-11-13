@@ -51,6 +51,7 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return nil, errors.New("private diagnostic")
 	}
+	refreshFixtureAdmin(&deps)
 	result = InstallResult{OK: true}
 	inspectCluster(context.Background(), &Config{}, deps, &ClusterIdentity{}, &result, false, true)
 	failed := map[string]bool{}

@@ -258,6 +258,11 @@ func TestHelpIncludesRegisteredFlags(t *testing.T) {
 			if !ok || function.Body == nil {
 				continue
 			}
+			// This parser is a server callback implementation, reached through the typed
+			// secretstore_verify request; its connection/path overrides are not CLI flags.
+			if function.Name.Name == "runSecretStoreVerifyWithSources" {
+				continue
+			}
 			var commands, names []string
 			ast.Inspect(function.Body, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)

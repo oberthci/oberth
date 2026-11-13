@@ -60,6 +60,7 @@ func TestUnsealKeepsRecoveryOutOfOutputAndArgv(t *testing.T) {
 				body, _ := json.Marshal(SealStatus{Initialized: true, Sealed: sealed})
 				return body, nil
 			}
+			refreshFixtureAdmin(&deps)
 			status, err := unsealWithDeps(t.Context(), UnsealConfig{OpenBaoNamespace: "openbao", SecretsFile: path}, deps)
 			if (err != nil) != fail || writes != 1 {
 				t.Fatal("unexpected unseal result")

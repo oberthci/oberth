@@ -313,7 +313,7 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		return fmt.Errorf("rollback applied but the running version is unverified: %w", err)
 	}
 	// upgrade.completed is the lifecycle action every server version accepts.
-	recordServerAudit(ctx, deps, record.Namespace, "deploy/oberth", "upgrade.completed", map[string]any{"from": record.To, "to": record.From, "rollback": true})
+	recordServerAudit(ctx, deps, record.Namespace, "upgrade.completed", map[string]any{"from": record.To, "to": record.From, "rollback": true})
 	_, _ = fmt.Fprintf(w, "\nRolled back: Oberth %s in namespace %s (context %s)\n", running, record.Namespace, deps.ContextName)
 	return nil
 }

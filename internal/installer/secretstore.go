@@ -48,6 +48,7 @@ const (
 
 // openBaoExec runs bao commands inside one OpenBao pod via `kubectl exec`.
 type openBaoExec struct {
+	adminDeps   Deps
 	run         CommandRunner
 	contextName string
 	namespace   string
@@ -59,7 +60,7 @@ func newOpenBaoExec(deps Deps, namespace, pod string) openBaoExec {
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	return openBaoExec{run: run, contextName: deps.ContextName, namespace: namespace, pod: pod}
+	return openBaoExec{adminDeps: deps, run: run, contextName: deps.ContextName, namespace: namespace, pod: pod}
 }
 
 // kubectlExecArgs builds the `kubectl exec` argv for one in-pod command.

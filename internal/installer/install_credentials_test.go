@@ -52,6 +52,7 @@ func TestInstallRecoveryFileSuppliesEveryPKICheck(t *testing.T) {
 				}
 				return run(ctx, input, name, args...)
 			}
+			refreshFixtureAdmin(&deps)
 			if err := cfg.Validate(); err != nil {
 				t.Fatal(err)
 			}

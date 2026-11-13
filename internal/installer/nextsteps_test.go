@@ -86,8 +86,8 @@ func TestAlsoUpstreamNameAvoidsNamesAndOrganizations(t *testing.T) {
 // reach the cluster that was installed on.
 func TestNextStepsNameTheKubeconfig(t *testing.T) {
 	t.Parallel()
-	text := strings.Join(NextSteps(NextStepsInput{Kubeconfig: "/srv/kube/lab config", Context: "lab", Namespace: "oberth"}), "\n")
-	if want := "kubectl --kubeconfig '/srv/kube/lab config' --context lab exec -i -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth uplink add - you@laptop"; !strings.Contains(text, want) {
+	text := strings.Join(NextSteps(NextStepsInput{Kubeconfig: "/srv/kube/lab config", Context: "lab", Namespace: "oberth", ServiceType: "ClusterIP"}), "\n")
+	if want := "kubectl --kubeconfig '/srv/kube/lab config' --context lab -n oberth port-forward service/oberth"; !strings.Contains(text, want) {
 		t.Fatalf("next steps lack %q:\n%s", want, text)
 	}
 	if strings.Contains(text, "kubectl --context lab") {
@@ -112,9 +112,9 @@ func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 		"git clone ssh://git@192.0.2.5:30022/github/oberthci/<repo>.git",
 		"git clone git@oberth:github/oberthci/<repo>.git",
 		"Finish codeberg (codeberg.org/exampleorg)",
-		"kubectl --context default exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth upstream add --yes --no-wait codeberg ssh://git@codeberg.org/exampleorg",
+		"oberth upstream add --yes codeberg ssh://git@codeberg.org/exampleorg",
 		"oberth upstream add --yes github ssh://git@github.com/<org>",
-		"kubectl --context default exec -i -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth uplink add - you@laptop < you@laptop.pub",
+		"oberth uplink invite you@laptop --out invitation.json",
 		"OBERTH_BASE_URL=https://192.0.2.5:30443",
 		"oberth runs --ref my-branch",
 	} {

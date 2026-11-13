@@ -254,6 +254,7 @@ func TestClientAccessInstallsThePluginWhenClaudeCodeIsPresent(t *testing.T) {
 		}
 		return claude.run(ctx, input, name, args...)
 	}
+	refreshFixtureAdmin(&deps)
 	tw := newTableWriter(deps.Output, false)
 
 	if err := offerClientAccess(context.Background(), Config{}, deps, tw, testToken); err != nil {
@@ -285,6 +286,7 @@ func TestClientAccessDoesNotInventAClientThatIsNotInstalled(t *testing.T) {
 		ran++
 		return nil, nil
 	}
+	refreshFixtureAdmin(&deps)
 	tw := newTableWriter(deps.Output, false)
 
 	if err := offerClientAccess(context.Background(), Config{}, deps, tw, testToken); err != nil {

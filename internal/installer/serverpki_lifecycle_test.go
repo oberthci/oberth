@@ -28,6 +28,7 @@ func TestServerPKIRemovalRefusesServedSANsBeforeAnyWrite(t *testing.T) {
 			}
 			return leaf, nil
 		}}
+		store.adminDeps = testAdminDeps(Deps{RunCommand: store.run})
 		_, _, err := ensureServerPKI(t.Context(), cfg, store, "test-token", nil)
 		if err == nil || !strings.Contains(err.Error(), "currently served") || !strings.Contains(err.Error(), "--tls-extra-") {
 			t.Fatalf("served SAN removal: %v", err)
@@ -58,6 +59,7 @@ func pkiLifecycleDeps(t *testing.T, dns, ips []string) (Deps, *fakeBaoRunner) {
 		}
 		return runner.run(ctx, stdin, name, args...)
 	}
+	refreshFixtureAdmin(&deps)
 	return deps, runner
 }
 
@@ -123,6 +125,7 @@ func TestPKIPreflightWarnsWhenServedCertificateIsUnreadable(t *testing.T) {
 						}
 						return runner.run(ctx, stdin, name, args...)
 					}
+					refreshFixtureAdmin(&deps)
 					cfg := Config{Namespace: DefaultNamespace, serverPKI: true, InstallSecretStore: repair,
 						TLSExtraDNSNames: []string{"ci.example.com"}, TLSExtraIPs: []string{"192.0.2.1"}}
 					err := preflightServerIdentities(t.Context(), &cfg, deps, true)
@@ -162,6 +165,7 @@ func TestServerPKIRemovalFailsClosedWhenServedCertificateIsUnreadable(t *testing
 				}
 				return nil, errors.New("server is crash looping")
 			}}
+			store.adminDeps = testAdminDeps(Deps{RunCommand: store.run})
 			if _, _, err := ensureServerPKI(t.Context(), cfg, store, "test-token", nil); err == nil {
 				t.Fatal("removal accepted without checking the served certificate")
 			}

@@ -177,7 +177,7 @@ func TestRunAccessHelpPaths(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			var output bytes.Buffer
-			err := runAccess(context.Background(), test.args, &output)
+			err := runCLI(context.Background(), append([]string{"access"}, test.args...), nil, &output)
 			if err != nil {
 				t.Fatalf("runAccess(%q) = %v", test.args, err)
 			}

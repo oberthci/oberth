@@ -113,11 +113,14 @@ func newCertificateResumeHost(t *testing.T, onboard func(context.Context, []byte
 			if strings.Contains(joined, " get values ") {
 				return []byte(`{"tls":{"pki":{"enabled":true},"extraDNSNames":["ci.example.com"]},"secretstore":{"address":"https://openbao.openbao.svc:8200"},"networkPolicy":{"enabled":true}}`), nil
 			}
+			if strings.Contains(joined, " get manifest ") {
+				return []byte("kind: Deployment"), nil
+			}
 			if strings.Contains(joined, " show ") {
 				return []byte(fakeChartValuesYAML), nil
 			}
 			if strings.Contains(joined, "--dry-run=server") {
-				return []byte(`{"config":{}}`), nil
+				return []byte(`{"config":{},"manifest":"kind: Deployment","chart":{"values":{"tls":{"pki":{"enabled":true},"extraDNSNames":["ci.example.com"]},"secretstore":{"address":"https://openbao.openbao.svc:8200"},"networkPolicy":{"enabled":true}}}}`), nil
 			}
 			if strings.Contains(joined, " upgrade ") && strings.Contains(joined, " oberth ") {
 				h.applied = true
@@ -199,7 +202,7 @@ func TestIssuedAdminCertificateSurvivesRegistrationFailureAndResume(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pod.addCalls != firstAdds+1 || !host.applied || !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) || !bytes.Equal(mustRead(t, cfg.AdminCSRPath+".crt"), cert) {
+	if pod.addCalls != firstAdds+1 || host.applied || !os.SameFile(before, after) || !before.ModTime().Equal(after.ModTime()) || !bytes.Equal(mustRead(t, cfg.AdminCSRPath+".crt"), cert) {
 		t.Fatal("resume did not finish registration while preserving the certificate")
 	}
 	if !bytes.Equal(mustRead(t, cfg.ResumeSecretsFile), recovery) || strings.Contains(host.output.String(), token) {

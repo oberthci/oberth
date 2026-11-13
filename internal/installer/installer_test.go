@@ -2074,7 +2074,10 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 			}
 			return nil, nil
 		},
-		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+			if slices.Contains(args, "create-first-admin") {
+				return (&fakeOberthHost{t: t}).run(ctx, input, name, args...)
+			}
 			return []byte("NAME\tKIND\tURL\nrepo\tgit\tssh://git@example.test/repo\n"), nil
 		},
 		IsTerminal:   func() bool { return true },
@@ -2561,6 +2564,9 @@ func (f *fakeOberthHost) run(ctx context.Context, input []byte, name string, arg
 		if out == "" {
 			out = fakeDeployKeyLine + "\n"
 		}
+		if !result.registers && result.err == nil {
+			out += "pending\n"
+		}
 		return []byte(out), result.err
 	case strings.HasSuffix(joined, "oberth admin read-file /run/oberth-identities/server/ca.crt"):
 		f.caReads++
@@ -2723,11 +2729,11 @@ func TestFinishInstallInteractiveOnboarding(t *testing.T) {
 	// 3. keyPath → uplink public-key path prompt
 	// 4. "tester@box" → uplink identity prompt
 	// 5. "n" → SSH config prompt (decline)
-	input := strings.NewReader("codeberg.org/acme\ng\n" + keyPath + "\ntester@box\nn\n")
+	input := strings.NewReader("codeberg.org/acme\ng\nn\n")
 
 	var buf bytes.Buffer
 	deps := onboardingDeps(t, host, &buf, input, true)
-	cfg := Config{}
+	cfg := Config{SSHPublicKeyPath: keyPath, UplinkIdentity: "tester@box"}
 	_ = cfg.Validate()
 
 	if err := finishInstallTest(context.Background(), cfg, deps, &buf); err != nil {
@@ -2738,7 +2744,7 @@ func TestFinishInstallInteractiveOnboarding(t *testing.T) {
 		t.Fatalf("expected exactly one upstream add, got %d", host.addCalls)
 	}
 	assertSliceEqual(t, host.addArgv[0], []string{
-		"kubectl", "exec", "--context", "test-ctx", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--",
+		"kubectl", "exec", "-i", "-c", "oberth", "--context", "test-ctx", "-n", "oberth", "deploy/oberth", "--",
 		"/usr/local/bin/oberth", "upstream", "add", "--yes", "--no-wait", "codeberg", "ssh://git@codeberg.org/acme",
 	})
 	if host.uplinkStdin != pubKey {
@@ -2819,7 +2825,7 @@ func TestFinishInstallPendingKeyDoesNotWaitForForge(t *testing.T) {
 
 func TestFinishInstallOnboardingSurfacesHostPinFailure(t *testing.T) {
 	t.Parallel()
-	host := &fakeOberthHost{t: t, addResults: []fakeAddResult{{out: fakeDeployKeyLine + "\nknownhosts: key mismatch", err: errors.New("host pin rejected")}}}
+	host := &fakeOberthHost{t: t, addResults: []fakeAddResult{{out: fakeDeployKeyLine + "\nknownhosts: key mismatch", err: errors.New("knownhosts: key mismatch")}}}
 	var output bytes.Buffer
 	deps := onboardingDeps(t, host, &output, strings.NewReader("codeberg.org/acme\ng\n"), true)
 	cfg := Config{}
@@ -2832,31 +2838,18 @@ func TestFinishInstallOnboardingSurfacesHostPinFailure(t *testing.T) {
 	}
 }
 
-func TestFinishInstallOnboardingPrintsRawOutputWhenTokenUnrecognized(t *testing.T) {
+func TestFinishInstallRejectsUnrecognizedFirstAdminCredential(t *testing.T) {
 	t.Parallel()
-	// The bearer token is shown exactly once and never recoverable; when the
-	// pod output format is unrecognized the sanitized output must still be
-	// printed rather than silently discarded.
-	host := &fakeOberthHost{
-		t:            t,
-		uplinkOutput: "Registered uplink tester@box; retrieve the credential from your terminal above.\n",
-	}
-	keyPath, _ := stageUplinkKeyPair(t)
-	input := strings.NewReader("codeberg.org/acme\ng\n" + keyPath + "\ntester@box\nn\n")
-	var buf bytes.Buffer
-	deps := onboardingDeps(t, host, &buf, input, true)
+	host := &fakeOberthHost{t: t, uplinkOutput: "Registered uplink; unrecognized credential protocol"}
+	var output bytes.Buffer
+	deps := onboardingDeps(t, host, &output, strings.NewReader(""), false)
 	cfg := Config{}
 	_ = cfg.Validate()
-
-	if err := finishInstallTest(context.Background(), cfg, deps, &buf); err != nil {
-		t.Fatal(err)
+	if err := finishInstallTest(t.Context(), cfg, deps, &output); err == nil {
+		t.Fatal("unrecognized credential accepted")
 	}
-	output := buf.String()
-	if strings.Contains(output, "Credentials (save now, shown once)") {
-		t.Fatalf("no token was extracted, the credential box must not render:\n%s", output)
-	}
-	if !strings.Contains(output, "Registered uplink tester@box") {
-		t.Fatalf("unrecognized uplink output must be printed, not discarded:\n%s", output)
+	if strings.Contains(output.String(), host.uplinkOutput) {
+		t.Fatal("unrecognized credentials disclosed")
 	}
 }
 
@@ -2887,7 +2880,7 @@ func TestRegisterUpstreamQuietClassifiesOutcomes(t *testing.T) {
 			wantErr: "unable to authenticate",
 			result: fakeAddResult{
 				out: fakeDeployKeyLine + "\nupstream SSH identity is not ready: " + authRejection + "\n",
-				err: errors.New("exit status 1"),
+				err: errors.New(authRejection),
 			},
 			wantRegistered: false,
 			wantKey:        true,
@@ -2896,7 +2889,7 @@ func TestRegisterUpstreamQuietClassifiesOutcomes(t *testing.T) {
 			name: "knownhosts mismatch is surfaced",
 			result: fakeAddResult{
 				out: fakeDeployKeyLine + "\nupstream SSH identity is not ready: ssh: handshake failed: knownhosts: key mismatch\n",
-				err: errors.New("exit status 1"),
+				err: errors.New("knownhosts: key mismatch"),
 			},
 			wantErr: "knownhosts: key mismatch",
 		},
@@ -2904,7 +2897,7 @@ func TestRegisterUpstreamQuietClassifiesOutcomes(t *testing.T) {
 			name: "failure without a key is surfaced",
 			result: fakeAddResult{
 				out: "app: --yes cannot trust unauthenticated SSH host keys for unknown forge\n",
-				err: errors.New("exit status 1"),
+				err: errors.New("cannot trust unauthenticated SSH host keys"),
 			},
 			wantErr: "cannot trust unauthenticated SSH host keys",
 		},

@@ -359,6 +359,20 @@ one with a non-admin token is still answered with the server's refusal.
 
 | Tool | Description |
 |------|-------------|
+| `uplink_add` | Enroll an uplink under an existing unscoped admin. Public SSH key and optional CSR only; private keys stay local. CSR enrollment mints no bearer unless requested. Administrator grants are explicit; audited without credential material. |
+| `uplink_scope` | Set an uplink repository scope; an empty array clears it. Unscoped admin only; audited. Requires an existing admin identity. |
+| `upstream_add` | Register an upstream using the server identity store. Unscoped admin only; audited. Requires an existing admin identity. SSH bootstrap uses pinned host keys and fixed identity bundles. |
+| `upstream_list` | List registered upstreams, optionally checking authentication. Unscoped admin only; audited. |
+| `upstream_remove` | Remove an upstream and its repository mappings. Unscoped admin only; audited. |
+| `upstream_provide_key` | Import an SSH private key into the fixed upstream identity bundle. Unscoped admin only; audited without key material. Never accepts a key file path. |
+| `repo_add` | Register a repository mapping; the first push confirms its default branch. Unscoped admin only; audited. |
+| `repo_verify` | Probe a registered repository using the server's existing upstream identity. Unscoped admin only; audited. |
+| `admin_access_list` | Read all active grants for installer identity production. Unscoped admin only; audited. Returns path names only. |
+| `admin_public_identity` | Read named public identity material. Unscoped admin only; audited. Never accepts a filesystem path. |
+| `admin_readiness` | Read current readiness with a safe reason code. Unscoped admin only; audited. |
+| `admin_version` | Read server binary and database schema versions. Unscoped admin only; audited. |
+| `admin_idle` | Observe the all or critical queue; the installer owns waiting. Unscoped admin only; audited. This observation never freezes admission. |
+| `admin_audit_record` | Record a completed operator lifecycle action. Unscoped admin only; actor identity comes from authentication. |
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
 | `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, run context, superseded status, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained Workflow/step timing, without admission episodes |

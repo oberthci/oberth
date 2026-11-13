@@ -191,7 +191,7 @@ func TestUpstreamAddHelpNeedsNoKubeconfig(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
 	var output bytes.Buffer
-	err := runUpstream(context.Background(), []string{"add", "--help"}, &output)
+	err := runCLI(context.Background(), []string{"upstream", "add", "--help"}, nil, &output)
 	if err != nil {
 		t.Fatalf("upstream add --help with no kubeconfig = %v", err)
 	}

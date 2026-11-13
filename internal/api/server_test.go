@@ -16,10 +16,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/runlog"
-
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/recordjson"
+	"github.com/oberthci/oberth/internal/runlog"
 )
 
 type fakeBackend struct {
@@ -924,6 +923,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 	want := []string{
+		"uplink_add", "uplink_scope", "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record",
 		"status", "logs", "run_get", "run_retry", "publication_abandon", "run_cancel", "run_rerun", "run_hold_list", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
 		"issue_create", "issue_get", "issue_get_many", "issue_update", "issue_append", "issue_close", "issue_reopen",
 		"issue_delete", "issue_list", "issue_unlock", "issue_close_many", "issue_lock",

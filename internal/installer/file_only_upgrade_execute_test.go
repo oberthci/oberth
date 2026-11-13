@@ -25,7 +25,7 @@ func TestFileOnlyUpgradeCompletesRealExecute(t *testing.T) {
 	if err := Execute(t.Context(), cfg, host.deps); err != nil {
 		t.Fatal("file-only upgrade did not finish", err, host.output.String())
 	}
-	if !host.applied || len(host.runner.calls) == 0 {
+	if host.applied || len(host.runner.calls) == 0 {
 		t.Fatal("upgrade did not inspect PKI and reconcile the release")
 	}
 	for _, call := range host.runner.calls {

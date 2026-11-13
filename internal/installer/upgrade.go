@@ -504,7 +504,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	result.Upgraded = true
 	deps.Output = w
 	details := map[string]any{"from": currentVersion, "to": targetVersion}
-	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
+	recordServerAudit(ctx, deps, cfg.Namespace, "upgrade.completed", details)
 	_, _ = fmt.Fprintf(w, "\nReady — Oberth deployment in namespace %s (context %s)\n", cfg.Namespace, deps.ContextName)
 	return result, nil
 }
@@ -783,13 +783,7 @@ func getOberthDeployment(ctx context.Context, deps Deps, namespace string) (*app
 	return &deployments.Items[0], nil
 }
 
-// queryRunningSchemaVersion execs into the Oberth pod and runs
-// `oberth version --schema` to obtain the integer schema version.
-// Returns 0 on any error; the caller warns loudly that migration/backup
-// safety is unknown rather than silently omitting backup guidance.
-//
-// Old binaries that do not support --schema return a usage error;
-// the caller falls through to the unknown-schema warning path.
+// queryRunningSchemaVersion reads the authenticated server API.
 func queryRunningSchemaVersion(ctx context.Context, deps Deps, cfg UpgradeConfig) (int, error) {
 	_, schema, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
 	return schema, err
@@ -807,28 +801,33 @@ func printRecoveryGuidance(w io.Writer, namespace string) {
 		"(the rollback record printed above), which also restores the pre-upgrade backup when a migration ran.\n")
 }
 
-// verifyRunningVersion execs into the Oberth pod, runs `oberth version`,
-// parses the reported version, and compares it against the expected target.
-// Returns the running version on match, or an error on mismatch or parse
-// failure.
-//
-// The exec subresource can lag right after rollout, so transient exec errors
-// are retried up to verifyMaxAttempts times with pollInterval delays (the same
-// pattern as upstreamConfigured in onboard.go). Version-mismatch and
-// unparseable-output results are definitive and are NOT retried.
-//
-// verifyMaxAttempts is the number of exec attempts before giving up.
+// Read-only version observations retry transient API failures after rollout.
 const verifyMaxAttempts = 3
 
 func verifyRunningVersion(ctx context.Context, deps Deps, cfg UpgradeConfig, targetVersion string) (string, error) {
-	running, _, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
-	if err != nil {
-		return "", err
+	for attempt := 1; attempt <= verifyMaxAttempts; attempt++ {
+		running, _, err := adminVersion(ctx, Config{Namespace: cfg.Namespace}, deps)
+		if err != nil {
+			var status *client.AdminError
+			var network net.Error
+			transient := (errors.As(err, &status) && (status.StatusCode >= 500 || status.StatusCode == 429)) || errors.As(err, &network)
+			if !transient || attempt == verifyMaxAttempts {
+				return "", fmt.Errorf("server API version unavailable; verify manually: %w", err)
+			}
+			if err := sleepContext(ctx, pollInterval(deps)); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if !semver.IsValid(running) {
+			return "", fmt.Errorf("could not parse server API version %q", running)
+		}
+		if semver.Compare(running, canonicalChartVersion(targetVersion)) != 0 {
+			return "", fmt.Errorf("expected %s but server API reports %s", displayVersion(targetVersion), running)
+		}
+		return running, nil
 	}
-	if !semver.IsValid(running) || semver.Compare(running, canonicalChartVersion(targetVersion)) != 0 {
-		return "", fmt.Errorf("expected %s but server API reports %s", displayVersion(targetVersion), running)
-	}
-	return running, nil
+	return "", errors.New("server API version unavailable")
 }
 
 func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, retryFailed bool) (UpgradeResult, error) {

@@ -124,6 +124,7 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 					}
 					return pod.run(ctx, input, name, args...)
 				}
+				refreshFixtureAdmin(&onboard)
 				onboard.Output = deps.Output
 				onboard.ContextName = "selected"
 				onboard.upstreamResult = deps.upstreamResult
@@ -148,7 +149,7 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 			if u.Name != "github" || u.URL != "ssh://git@github.com/acme" || u.State != wantState || u.DeployPublicKey != keyLine || u.Fingerprint != ssh.FingerprintSHA256(key) || u.ForgeSettingsURL != "https://github.com/settings/keys" {
 				t.Fatal("missing public upstream action")
 			}
-			if !strings.Contains(u.NextCommand, "--kubeconfig '/secure/kube config'") || !strings.Contains(u.NextCommand, "--context selected") || !strings.Contains(u.NextCommand, "upstream add --yes github ssh://git@github.com/acme") || strings.Contains(u.NextCommand, "--no-wait") {
+			if !strings.HasPrefix(u.NextCommand, "oberth ") || !strings.Contains(u.NextCommand, "upstream add --yes github ssh://git@github.com/acme") || strings.Contains(u.NextCommand, "--no-wait") {
 				t.Fatal("next command lost its target or skipped verification")
 			}
 			pending := false

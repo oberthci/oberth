@@ -434,6 +434,7 @@ func TestUpstreamRecoverySavedBeforeImport(t *testing.T) {
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return ssh.MarshalAuthorizedKey(key), nil
 	}
+	refreshFixtureAdmin(&deps)
 	saved = false
 	provided, err = prepareUpstreamRecovery(context.Background(), Config{SecretsFile: "/secure/recovery"}, deps, &creds, false)
 	if err != nil || provided || saved {

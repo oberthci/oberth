@@ -22,12 +22,14 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -375,7 +377,7 @@ func (c *fakeBackupCluster) deps(output *bytes.Buffer) backupDeps {
 	}
 }
 
-func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
+func (c *fakeBackupCluster) run(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 	c.t.Helper()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -429,7 +431,18 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 	joined := strings.Join(command, " ")
 	switch {
 	case joined == "oberth access list --json":
-		return []byte(`[{"repo":"codeberg/org/repo","step":"*","secret":"oberth/data/release/cosign-secret"}]`), nil
+		cm, err := c.client.CoreV1().ConfigMaps(DefaultNamespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return []byte("[]"), nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		var entries []accessListJSONEntry
+		if err := yaml.Unmarshal([]byte(cm.Data[secretAccessConfigMapKey]), &entries); err != nil {
+			return nil, err
+		}
+		return json.Marshal(entries)
 	case joined == "oberth version --schema":
 		if c.schemaExecErr != nil {
 			return nil, c.schemaExecErr

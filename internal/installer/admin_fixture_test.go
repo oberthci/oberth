@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -213,7 +214,7 @@ func fixtureClientRoot() func() (string, error) {
 	return func() (string, error) { return root, nil }
 }
 func testAdminDeps(deps Deps) Deps {
-	if deps.ClientConfigRoot == nil {
+	if deps.ClientConfigRoot == nil && os.Getenv("HOME") == filepath.Dir(fixtureAdminRoot) && os.Getenv("XDG_CONFIG_HOME") == filepath.Join(filepath.Dir(fixtureAdminRoot), ".config") {
 		deps.ClientConfigRoot = fixtureClientRoot()
 	}
 	if deps.Admin == nil && deps.RunCommand != nil {
@@ -222,7 +223,7 @@ func testAdminDeps(deps Deps) Deps {
 	return deps
 }
 func testAdminInstallDeps(deps InstallDeps) InstallDeps {
-	if deps.ClientConfigRoot == nil {
+	if deps.ClientConfigRoot == nil && os.Getenv("HOME") == filepath.Dir(fixtureAdminRoot) && os.Getenv("XDG_CONFIG_HOME") == filepath.Join(filepath.Dir(fixtureAdminRoot), ".config") {
 		deps.ClientConfigRoot = fixtureClientRoot()
 	}
 	if deps.Admin == nil && deps.RunCommand != nil {
@@ -277,3 +278,24 @@ func fixtureUplinkToken(output string) string {
 }
 
 const persistedDeployKeyMarker = "Persisted upstream deploy public key"
+
+func refreshFixtureAdmin(deps any) {
+	switch d := deps.(type) {
+	case *Deps:
+		if d.Admin == nil && d.RunCommand != nil {
+			d.Admin = fixtureAdmin{run: d.RunCommand, context: d.ContextName}
+		}
+		if f, ok := d.Admin.(fixtureAdmin); ok {
+			f.run = d.RunCommand
+			d.Admin = f
+		}
+	case *InstallDeps:
+		if d.Admin == nil && d.RunCommand != nil {
+			d.Admin = fixtureAdmin{run: d.RunCommand}
+		}
+		if f, ok := d.Admin.(fixtureAdmin); ok {
+			f.run = d.RunCommand
+			d.Admin = f
+		}
+	}
+}

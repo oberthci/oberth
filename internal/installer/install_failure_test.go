@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,6 +39,9 @@ func TestInstallUnreachableClientEndpoint(t *testing.T) {
 					return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 				},
 				RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
+					if slices.Contains(args, "create-first-admin") {
+						return (&fakeOberthHost{t: t}).run(ctx, input, name, args...)
+					}
 					if strings.Contains(strings.Join(args, " "), "upstream list") {
 						return []byte("NAME KIND URL KEY FINGERPRINT\nforge ssh ssh://git@forge.example.test/repos SHA256:public\n"), nil
 					}
@@ -145,6 +149,7 @@ func TestFreshInstallChecksEndpointAfterRegistrationMakesServiceReady(t *testing
 		}
 		return out, err
 	}
+	refreshFixtureAdmin(&deps)
 	cfg := Config{ForgeType: "github", ForgeOrg: "acme", SSHPublicKeyPath: key, UplinkIdentity: "admin@workstation", ClientAccess: "none", ClientHost: "127.0.0.1", ClientHTTPSPort: port, Timeout: time.Second}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)

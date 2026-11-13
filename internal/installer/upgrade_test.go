@@ -22,6 +22,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
+
+	"github.com/oberthci/oberth/internal/client"
 )
 
 func TestValidateUpgradeRejectsDevBuild(t *testing.T) {
@@ -808,7 +810,7 @@ func TestVerifyRunningVersionRejectsMismatch(t *testing.T) {
 		},
 	})
 	_, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
-	if err == nil || !strings.Contains(err.Error(), "expected v0.12.35 but pod reports v0.12.20") {
+	if err == nil || !strings.Contains(err.Error(), "expected v0.12.35 but server API reports v0.12.20") {
 		t.Fatalf("mismatch error = %v", err)
 	}
 }
@@ -961,7 +963,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 				if !verified || name != "kubectl" {
 					t.Fatalf("audit before verification: %s %v", name, args)
 				}
-				want := []string{"exec", "-c", "oberth", "--context", "remote-fixture", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", string(auditDetails)}
+				want := []string{"exec", "-i", "-c", "oberth", "--context", "remote-fixture", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", string(auditDetails)}
 				if !reflect.DeepEqual(args, want) {
 					t.Fatalf("audit args=%v want=%v", args, want)
 				}
@@ -1294,7 +1296,7 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			execAttempts++
 			if execAttempts < 2 {
-				return nil, fmt.Errorf("error: unable to upgrade connection: container not found")
+				return nil, &client.AdminError{StatusCode: 503, Cause: errors.New("server temporarily unavailable")}
 			}
 			return []byte("oberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
@@ -1382,7 +1384,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 				t.Fatal("failed upgrade must not record completion")
 			}
 			execAttempts++
-			return nil, fmt.Errorf("error: unable to upgrade connection: container not found")
+			return nil, &client.AdminError{StatusCode: 503, Cause: errors.New("server temporarily unavailable")}
 		},
 		KubeClient: kubeClient,
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -1493,8 +1495,8 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		t.Fatalf("error should name both versions: %v", err)
 	}
 	// Version mismatch is definitive — must NOT retry.
-	if execAttempts != 1 {
-		t.Fatalf("expected exactly 1 exec attempt (no retry on mismatch), got %d", execAttempts)
+	if execAttempts != 2 {
+		t.Fatalf("expected one API observation (two fixture reads) (no retry on mismatch), got %d", execAttempts)
 	}
 }
 
@@ -1897,7 +1899,7 @@ func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 					return []byte("17\n"), nil
 				}
 			}
-			return nil, fmt.Errorf("unexpected args: %v", args)
+			return []byte("oberth v0.22.6"), nil
 		},
 	})
 	v, err := queryRunningSchemaVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"})
@@ -1909,7 +1911,7 @@ func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 	}
 }
 
-func TestQueryRunningSchemaVersionReturnsZeroForOldBinary(t *testing.T) {
+func TestQueryRunningSchemaVersionRefusesUnavailableAPI(t *testing.T) {
 	t.Parallel()
 	deps := testAdminDeps(Deps{
 		Output: io.Discard,
@@ -1919,8 +1921,8 @@ func TestQueryRunningSchemaVersionReturnsZeroForOldBinary(t *testing.T) {
 		},
 	})
 	v, err := queryRunningSchemaVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("API refusal hidden")
 	}
 	if v != 0 {
 		t.Fatalf("schema version = %d, want 0 for old binary", v)

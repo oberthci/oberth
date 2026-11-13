@@ -66,7 +66,7 @@ func ensureServerPKI(ctx context.Context, cfg Config, store openBaoExec, token s
 	if err := validateServerTLSFlags(&cfg); err != nil {
 		return "", false, err
 	}
-	if err := checkServerPKIRemovals(ctx, cfg, Deps{RunCommand: store.run, ContextName: store.contextName}); err != nil {
+	if err := checkServerPKIRemovals(ctx, cfg, store.adminDeps); err != nil {
 		return "", false, err
 	}
 	if mount, exists := mounts[defaultServerPKIMount+"/"]; exists {

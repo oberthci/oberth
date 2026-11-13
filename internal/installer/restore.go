@@ -631,7 +631,7 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		_, _ = fmt.Fprintln(w, "  ✓ server ready")
 		if pod, err := runningServerPod(ctx, deps.Deps, cfg.Namespace, target.Server.Selector); err == nil && pod != "" {
 			target.DeployPublicKey = readRestoreDeployPublicKey(ctx, deps.Deps, cfg.Namespace)
-			recordServerAudit(ctx, deps.Deps, cfg.Namespace, pod, "restore.completed", map[string]any{
+			recordServerAudit(ctx, deps.Deps, cfg.Namespace, "restore.completed", map[string]any{
 				"archive_sha256": archive.CipherSHA, "history": parts.History, "secrets": parts.Secrets,
 				"from_audit_head_id": archive.restoredHeadID(), "from_audit_head_sha256": archive.restoredHeadSHA256(),
 			})

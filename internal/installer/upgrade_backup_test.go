@@ -91,6 +91,7 @@ func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return nil, errors.New("container not found")
 	}
+	refreshFixtureAdmin(&deps)
 	_, err = RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "could not be read") {
 		t.Fatalf("downgrade on an unknown schema: %v", err)
