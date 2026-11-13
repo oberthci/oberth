@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net"
 	"slices"
 	"strings"
@@ -71,21 +70,13 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 	if err != nil || len(nodes) == 0 {
 		return
 	}
-	phase = "pipeline namespace labels"
 	target := cfg.ArgoNamespace
 	if target == "" {
 		target = DefaultArgoNamespace
 	}
-	labels := map[string]string{}
-	existing, err := deps.KubeClient.CoreV1().Namespaces().Get(ctx, target, metav1.GetOptions{})
-	coverage := "pipeline namespace not yet present; namespace-specific exclusions and installed allow rules are not tested"
-	if err == nil {
-		labels = maps.Clone(existing.Labels)
-		coverage = "pipeline namespace labels copied except kubernetes.io/metadata.name; name-specific exclusions and installed allow rules are not tested"
-	} else if !apierrors.IsNotFound(err) {
-		return
-	}
-	delete(labels, "kubernetes.io/metadata.name")
+	// The owned default-deny policy selects only probe Pod labels. Copying
+	// arbitrary namespace labels can enable injection or weaken admission.
+	coverage := "only generated ownership and restricted Pod Security namespace labels; pipeline labels not copied; name-specific exclusions, namespace-label-specific exclusions and installed allow rules are not tested"
 	tokenBytes := make([]byte, 8)
 	if _, err = io.ReadFull(random, tokenBytes); err != nil {
 		return
@@ -97,9 +88,10 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 	}
 	token := hex.EncodeToString(tokenBytes)
 	namespace := "oberth-policy-probe-" + token
-	labels[policyProbeLabel] = token
-	if _, exists := labels["pod-security.kubernetes.io/enforce"]; !exists {
-		labels["pod-security.kubernetes.io/enforce"] = "restricted"
+	labels := map[string]string{policyProbeLabel: token}
+	for _, mode := range []string{"enforce", "audit", "warn"} {
+		labels["pod-security.kubernetes.io/"+mode] = "restricted"
+		labels["pod-security.kubernetes.io/"+mode+"-version"] = "latest"
 	}
 	result.Evidence = fmt.Sprintf("Bounded TCP egress measurement: %d randomized selection rounds, %d denial samples per node per round; scratch namespace %s; pipeline namespace %s; client/control nodes %s; server node %s; %s. Ingress enforcement is not tested. Traffic measurements cannot prove causality; coincident faults can match the samples.", policyProbeRounds, policyProbeSamples, namespace, target, strings.Join(nodes, ","), nodes[0], coverage) + " " + leftovers
 	var createdUID types.UID

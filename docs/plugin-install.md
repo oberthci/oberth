@@ -224,9 +224,12 @@ remedies describe observed failures. Elapsed measurement time includes owned
 cleanup.
 
 The public check's `evidence` states the scratch and pipeline namespaces,
-client/control nodes and server node. Existing pipeline namespace labels are
-copied except Kubernetes' immutable namespace-name label; the probe adds its
-ownership label. Namespace-name-specific exclusions, other node-pair routes,
+client/control nodes and server node. The scratch namespace keeps only its
+generated `oberth.ci/network-policy-probe` ownership label and restricted Pod
+Security enforce/audit/warn labels with their versions set to latest. No
+pipeline labels, including injection or privileged admission labels, are copied.
+The owned policy selects the probe Pod label; no pipeline namespace label is
+needed for that selection. Namespace-name/label-specific exclusions, other node-pair routes,
 ingress enforcement and the installed policy's selectors/allow rules are not
 covered by this TCP default-deny capability measurement. Read that scope with
 the result; do not present it as proof of every installed isolation rule.

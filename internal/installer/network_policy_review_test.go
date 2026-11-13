@@ -39,7 +39,7 @@ func TestProbeEvidenceRequiresEgressControlAndConvergence(t *testing.T) {
 			deps := Deps{KubeClient: kube, ContextName: "fixture", RunCommand: model.run}
 			result := probeNetworkPolicy(t.Context(), Config{ArgoNamespace: "pipelines"}, deps, policyModelTiming())
 			want := "unverified"
-			if mode == "egress-only" {
+			if mode == "egress-only" || mode == "namespace-exclusion" {
 				want = "enforced"
 			}
 			if result.Status != want {
@@ -50,6 +50,9 @@ func TestProbeEvidenceRequiresEgressControlAndConvergence(t *testing.T) {
 			}
 			if mode == "programming-slower-than-window" && (!strings.Contains(result.Remedy, "convergence") || !strings.Contains(result.Remedy, "after")) {
 				t.Fatal("missing delay remedy", result)
+			}
+			if mode == "namespace-exclusion" && !strings.Contains(result.Evidence, "namespace-label-specific exclusions") {
+				t.Fatal("omitted pipeline label scope was not disclosed", result)
 			}
 			t.Logf("%s -> %s", mode, result.Status)
 		})

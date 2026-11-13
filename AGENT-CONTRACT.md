@@ -3421,6 +3421,10 @@ its own server Pod, with explicit node/namespace scope. Six randomized selection
 rounds include both sources; each requires two consecutive paired denials per
 node. The unselected source must complete a fresh connection before and after
 the selected attempt while a token-matched held response spans the observation.
+Scratch namespaces copy no pipeline labels. Only the generated ownership label
+and restricted enforce/audit/warn Pod Security labels (version latest) are set;
+the owned policy uses the probe Pod label. Namespace-name/label-specific
+exemptions and installed allow rules are outside this measurement's scope.
 Both sources connect twice at baseline and after each policy removal. Failed
 fresh connections, overlap or recovery remain unverified. The `enforced` wire
 status means the measurement completed: traffic cannot prove causality, and
