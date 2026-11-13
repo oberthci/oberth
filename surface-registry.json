@@ -4,6 +4,10 @@
       "doc_anchor": "docs/remote-cli.md",
       "test_ref": "cmd/oberth/remote_test.go TestRunsActivePreservesOrderAndReasons"
     },
+    "flag:probe": {
+      "doc_anchor": "docs/install-verification.md#install-verification",
+      "test_ref": "internal/installer/verify_read_only_test.go TestVerifyCreatesNoObjectsUnlessProbeRequested"
+    },
     "flag:upstream-name": {
       "doc_anchor": "docs/install-answers.md#upstream-name",
       "test_ref": "internal/installer/upstream_name_test.go TestInstallUpstreamHostNames"

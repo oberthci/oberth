@@ -607,3 +607,10 @@ immutable security evidence; current helper budgets are tested independently.
 `TestAdmittedUsageCommandSurvivesCreateRetryAndAdoption` compiles an admitted
 command under `/run/oberth/usage/`, reconciles a lost create acknowledgement,
 then retries and adopts without reseeding, recreating or changing the command.
+
+Install verification #1585: `TestVerifyCreatesNoObjectsUnlessProbeRequested`
+counts fake Kubernetes mutations and probe invocations. Default verification
+creates no objects and reports `not-retested`; explicit verification with
+`--probe` invokes the live measurement. CLI tests refuse `--probe` outside
+verification and alongside `--plan` or `--dry-run`. Existing install refusal
+and real probe cleanup tests remain in place.

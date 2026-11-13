@@ -79,3 +79,11 @@ patterns beginning with a wildcard have no literal range to narrow. `latest` kee
 the newest matching attempt in the caller's upstream scope. After adopting a
 workflow, a new retry attempt replays its own output from the start when an earlier
 attempt has a durable cursor, preserving the script's FAIL line for per-step logs.
+
+An owner-only empty `--secrets-file` left by an interrupted install can be reused
+at the same path. Group- or world-readable empty files are refused; changing
+their permissions cannot revoke another process's already-open descriptor.
+A non-empty conflicting file is refused. Existing recovery input is never
+overwritten; use `--resume-secrets-file` for input and a separate output path.
+While the live NetworkPolicy probe runs, install prints its start and a progress
+heartbeat every ten seconds, including owned cleanup.

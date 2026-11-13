@@ -140,6 +140,9 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 			if json.Unmarshal(output.Bytes(), &result) != nil || result.OK != wantOK || result.Upstream == nil {
 				t.Fatal("invalid JSON partial result")
 			}
+			if result.ClientAccess == nil || result.ClientAccess.Authentication != "mutual_tls" || result.ClientAccess.TokenRequired || !strings.Contains(result.ClientAccess.NextStep, "/oberth:connect") {
+				t.Fatal("JSON result lacks certificate connection guidance", result.ClientAccess)
+			}
 			u := result.Upstream
 			wantState := "pending"
 			if tc.authorized {

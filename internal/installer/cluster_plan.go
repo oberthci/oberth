@@ -283,11 +283,7 @@ func inspectCluster(ctx context.Context, cfg *Config, deps Deps, identity *Clust
 		r.Checks[len(r.Checks)-1].Reason = "unverified"
 		return
 	}
-	probe := deps.ProbeNetworkPolicy
-	if probe == nil {
-		probe = ProbeNetworkPolicy
-	}
-	enforcement := probe(ctx, *cfg, deps)
+	enforcement := measureNetworkPolicy(ctx, *cfg, deps)
 	if maintenance {
 		r.Checks = append(r.Checks, CheckResult{Code: "network_policy", OK: enforcement.Status == "enforced", Warning: enforcement.Status != "enforced", Reason: enforcement.Status, Remedy: enforcement.Remedy, Evidence: enforcement.Evidence})
 		return

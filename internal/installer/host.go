@@ -42,6 +42,8 @@ type InteractiveRunner func(ctx context.Context, name string, args ...string) er
 // InstallDeps holds injectable host and cluster dependencies for the CLI-level
 // install orchestration.
 type InstallDeps struct {
+	// VerifyProbe opts verification into the mutating live policy measurement.
+	VerifyProbe        bool
 	installResolved    func(Config)
 	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
 	Output             io.Writer
@@ -187,7 +189,7 @@ func executeWithCredentials(ctx context.Context, cfg Config, deps InstallDeps) (
 			if cfg.secretsFileInput {
 				outputPath += ".new-" + rand.Text()
 			}
-			secrets, err := createSecretsFile(outputPath)
+			secrets, err := openSecretsFile(outputPath, true)
 			if err != nil {
 				return err
 			}
@@ -270,7 +272,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 		}
 		preflightConfig := cfg
 		// Preflight builds its own explicit kubeconfig arguments.
-		inspectInstallPreflight(ctx, &preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: preflightRun, ProbeNetworkPolicy: deps.ProbeNetworkPolicy}, deps, selectedContext, &identity, &preflight, true)
+		inspectInstallPreflight(ctx, &preflightConfig, Deps{KubeClient: kubeClient, RestConfig: restConfig, ContextName: selectedContext, RunCommand: preflightRun, ProbeNetworkPolicy: deps.ProbeNetworkPolicy, Output: deps.Output}, deps, selectedContext, &identity, &preflight, true)
 		cfg = preflightConfig
 		if !preflight.OK {
 			return &installPreflightError{checks: preflight.Checks, cluster: identity, review: Review(cfg)}
@@ -346,6 +348,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 
 	return Run(ctx, cfg, Deps{
 		checkClientReachability: true,
+		installResolved:         deps.installResolved,
 		Output:                  deps.Output,
 		Input:                   deps.Input,
 		RunHelm:                 runHelm,
@@ -370,13 +373,16 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) error {
 	// An existing --secrets-file is recovery input. Never overwrite it: any
 	// fresh credentials get a separately reserved owner-only sibling file.
-	if !cfg.DryRun && cfg.SecretsFile != "" && (cfg.InstallSecretStore || cfg.Upgrade) {
-		if _, err := os.Lstat(cfg.SecretsFile); err == nil {
-			if cfg.ResumeSecretsFile != "" && cfg.ResumeSecretsFile != cfg.SecretsFile {
-				return errors.New("existing --secrets-file conflicts with --resume-secrets-file; choose a new --secrets-file output path")
+	if cfg.SecretsFile != "" && (cfg.InstallSecretStore || cfg.Upgrade) {
+		if info, err := os.Lstat(cfg.SecretsFile); err == nil {
+			// Empty output contains no recovery input.
+			if !info.Mode().IsRegular() || info.Size() != 0 {
+				if cfg.ResumeSecretsFile != "" && cfg.ResumeSecretsFile != cfg.SecretsFile {
+					return errors.New("existing --secrets-file conflicts with --resume-secrets-file; choose a new --secrets-file output path")
+				}
+				cfg.ResumeSecretsFile = cfg.SecretsFile
+				cfg.secretsFileInput = true
 			}
-			cfg.ResumeSecretsFile = cfg.SecretsFile
-			cfg.secretsFileInput = true
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return errors.New("cannot inspect --secrets-file")
 		}
@@ -388,13 +394,11 @@ func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) er
 		if !cfg.InstallSecretStore && !cfg.Upgrade {
 			return errors.New("--resume-secrets-file requires --install-secretstore or --upgrade")
 		}
-		if !cfg.DryRun {
-			token, err := readResumeRootToken(ctx, cfg.ResumeSecretsFile, cfg.ResumeAgeIdentity)
-			if err != nil {
-				return &installStepError{check: CheckResult{Code: "secret_store_credentials", Reason: err.Error(), Remedy: recoveryInputRemedy}}
-			}
-			cfg.resumeRootToken = token
+		token, err := readResumeRootToken(ctx, cfg.ResumeSecretsFile, cfg.ResumeAgeIdentity)
+		if err != nil {
+			return &installStepError{check: CheckResult{Code: "secret_store_credentials", Reason: err.Error(), Remedy: recoveryInputRemedy}}
 		}
+		cfg.resumeRootToken = token
 	}
 
 	if cfg.AdminCSRPath != "" {

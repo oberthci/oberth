@@ -22,11 +22,9 @@ import (
 	"github.com/oberthci/oberth/internal/client"
 )
 
-// Client access is offered here, immediately after the uplink is registered,
-// because this is the only moment the bearer token exists in this process.
-// Every other placement has to ask the operator to paste back a credential the
-// install just printed, and a credential that gets pasted is a credential that
-// ends up in a shell history.
+// Certificate clients finish through connect with their local certificate and
+// key. An explicitly requested bearer can use the setup offer immediately after
+// registration, while that once-only credential is still held privately.
 //
 // Nothing in this file may fail an install. A cluster that will not answer for
 // its OpenBao TLS identity, a home directory that will not accept a write, a refused
@@ -51,9 +49,7 @@ func offerClientAccess(ctx context.Context, cfg Config, deps Deps, tw *tableWrit
 	// untestable on its own and would skip silently in a session that could in
 	// fact answer. A choice made in advance needs no terminal at all.
 	if strings.TrimSpace(token) == "" {
-		// No token means no uplink was registered, so there is nothing either
-		// client could authenticate with.
-		tw.AppendRow("Client access", "no uplink token", "⚠ manual", false)
+		tw.AppendRow("Client access", "mutual TLS; no token needed. Run /oberth:connect.", "next step", false)
 		return nil
 	}
 	return runClientAccessOffer(ctx, cfg, deps, tw, true)

@@ -15,6 +15,7 @@ type installFlagOptions struct {
 	answersPath              *string
 	yes                      *bool
 	verify                   *bool
+	probe                    *bool
 	plan                     *bool
 	jsonOutput               *bool
 	timeout                  *time.Duration
@@ -40,7 +41,8 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	options.answersPath = flags.String("answers", "", "version 1 YAML/JSON install answers; explicit flags override scalar answers")
 	options.yes = flags.Bool("yes", false, "confirm the reviewed install on the selected kubeconfig context")
 	options.plan = flags.Bool("plan", false, "inspect the selected cluster and preflight checks without installing")
-	options.verify = flags.Bool("verify", false, "check an existing installation without changing it")
+	options.verify = flags.Bool("verify", false, "read an existing installation; add --probe to measure NetworkPolicy enforcement")
+	options.probe = flags.Bool("probe", false, "with --verify, run the live NetworkPolicy enforcement probe (creates a scratch namespace and Pods)")
 	options.jsonOutput = flags.Bool("json", false, "emit public install result/checks as JSON (exit 0: passed, 3: installed/action needed, 1: failure)")
 	flags.StringVar(&cfg.AdminCSRPath, "admin-csr", "", "local client CSR for the first admin; certificate written to <CSR>.crt, no bearer by default")
 	flags.BoolVar(&cfg.AdminBearer, "admin-bearer", false, "also mint a bearer token with --admin-csr")
@@ -222,6 +224,10 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	if *options.answersPath != "" {
 		deps.IsTerminal = func() bool { return false }
 	}
+	if *options.probe && (!*options.verify || *options.plan || cfg.DryRun) {
+		return usageError(errors.New("--probe requires --verify and cannot be combined with --plan or --dry-run"))
+	}
+	deps.VerifyProbe = *options.probe
 	if *options.plan && *options.verify {
 		return usageError(errors.New("choose --plan or --verify"))
 	}

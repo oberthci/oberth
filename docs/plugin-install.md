@@ -216,8 +216,11 @@ a preserved Review value into a command-line override.
 
 ### Live NetworkPolicy enforcement check
 
-Install preflight (after approval) and verification use a bounded traffic measurement on
-the operator's cluster against Oberth's own server Pod. They do not identify CNI
+Install preflight (after approval) and explicit `install --verify --probe` use a
+bounded traffic measurement on the operator's cluster against Oberth's own server
+Pod. Default verification is read-only: enforcement was measured at install;
+this verification did not re-test it. It creates no probe resources. The live
+measurement does not identify CNI
 brands or try to defend against a hostile server. A server and two differently
 labelled sources per Ready, schedulable, untainted node run in an owned scratch
 namespace. Both sources connect at baseline and after every policy removal.

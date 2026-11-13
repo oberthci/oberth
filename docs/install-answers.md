@@ -72,6 +72,12 @@ contains `ok`, `context`, `server_url`, `mcp_url`, `git_url`, `ca_sha256`
 and the secrets path and digest when written. `checks` contains stable `code`,
 boolean `ok`, and `remedy` for failures.
 
+Clients use mutual TLS and need no uplink token. The result's `client_access`
+object reports `authentication: mutual_tls`, `token_required: false`, and a
+`next_step` directing the user to `/oberth:connect` with the server CA pin and
+local client certificate/key paths. The interactive Client access row gives
+the same next step; a missing bearer token does not prevent certificate access.
+
 ### Pending forge authorization
 
 When onboarding a forge, `upstream` contains `name`, `url`, `deploy_public_key`,
@@ -153,8 +159,11 @@ never claim enforcement. The probe has a 120-second bound and always attempts
 cleanup with its own 30-second bound, including after cancellation. Cleanup
 failure names the exact scratch namespace and refuses a successful check.
 Plan makes no cluster mutations and reports that enforcement will be checked
-first at install, after approval. Install and explicit verification create and
-clean up short-lived probe resources. They do not change the selected kubeconfig.
+first at install, after approval. Verify is read-only by default and reports
+that enforcement was measured at install; this verification did not re-test it. Use
+`oberth install --verify --probe` to create and clean up short-lived probe
+resources for a new measurement. Install still probes after approval and
+refuses absent or unverified enforcement on fresh installs. They do not change the selected kubeconfig.
 
 ## Upstream name
 
