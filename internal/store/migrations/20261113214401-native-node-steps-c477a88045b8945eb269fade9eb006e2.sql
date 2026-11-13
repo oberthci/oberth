@@ -28,7 +28,7 @@ CREATE TABLE step_results_nodes (
 -- recorded. Give each retained row an opaque database identity without replay
 -- or log parsing. Do not synthesize native phases, messages or template names.
 INSERT INTO step_results_nodes(run_id,node_id,display_name,burn,step,ordinal,status,exit_code,started_at,finished_at,recorded_at,termination_json)
-SELECT run_id,'stored:' || rowid,step,burn,step,ordinal,status,exit_code,started_at,finished_at,recorded_at,termination_json
+SELECT run_id,'stored:' || rowid,step,burn,step,max(ordinal,0),status,exit_code,started_at,finished_at,recorded_at,termination_json
 FROM step_results;
 DROP TABLE step_results;
 ALTER TABLE step_results_nodes RENAME TO step_results;

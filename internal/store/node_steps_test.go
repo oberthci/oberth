@@ -77,7 +77,7 @@ func TestNativeNodeStepsMigrationRetainsPopulatedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO step_results(run_id,burn,step,ordinal,status,exit_code,log_start,log_end,started_at,finished_at,recorded_at) VALUES(?,'build','compile',3,'failed',17,12,42,100,200,300)`, run.ID); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO step_results(run_id,burn,step,ordinal,status,exit_code,log_start,log_end,started_at,finished_at,recorded_at) VALUES(?,'build','compile',-3,'failed',17,12,42,100,200,300)`, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -90,7 +90,7 @@ func TestNativeNodeStepsMigrationRetainsPopulatedHistory(t *testing.T) {
 		t.Fatal(rows, err)
 	}
 	row := rows[0]
-	if row.NodeID == "" || row.Step != "compile" || row.Stage != "build" || row.Ordinal != 3 || row.Status != model.StepFailed || row.ExitCode != 17 || row.StartedAt.UnixNano() != 100 || row.FinishedAt.UnixNano() != 200 || row.RecordedAt.UnixNano() != 300 || row.Phase != "" || row.Message != "" {
+	if row.NodeID == "" || row.Step != "compile" || row.Stage != "build" || row.Ordinal != 0 || row.Status != model.StepFailed || row.ExitCode != 17 || row.StartedAt.UnixNano() != 100 || row.FinishedAt.UnixNano() != 200 || row.RecordedAt.UnixNano() != 300 || row.Phase != "" || row.Message != "" {
 		t.Fatalf("retained history changed or native data invented: %+v", row)
 	}
 	var columns int
