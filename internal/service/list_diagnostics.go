@@ -73,7 +73,21 @@ func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Conte
 		if kind == "execution" {
 			ttl = executionDiagnosticTTL
 		}
-		if load == nil || now.Sub(entry.checkedAt) < ttl {
+		age := now.Sub(entry.checkedAt)
+		fresh := age >= 0 && age < ttl
+		if kind == "execution" {
+			if result.scheduling != nil && !result.scheduling.ObservedAt.IsZero() {
+				observedAge := now.Sub(result.scheduling.ObservedAt)
+				fresh = fresh && observedAge >= 0 && observedAge < ttl
+			}
+			// Execution assertions expire even when refresh is pending, the
+			// queue is full, or a reader has no loader. Backlog cannot extend
+			// the lifetime of a suspended or Pending reason.
+			if !fresh {
+				result = listDiagnosticValue{}
+			}
+		}
+		if load == nil || fresh {
 			return result
 		}
 	}
