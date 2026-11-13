@@ -77,7 +77,7 @@ class ResourceGuardTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             guard.yaml.load("kind: Workflow\nkind: WorkflowTemplate\n", Loader=guard.UniqueLoader)
 
-    def test_fragments_and_cron(self):
+    def test_templates_and_cron(self):
         for kind in ("WorkflowTemplate", "ClusterWorkflowTemplate", "CronWorkflow"):
             workflow = self.workflow()
             workflow["kind"] = kind

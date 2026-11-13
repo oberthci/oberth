@@ -32,7 +32,7 @@ more than one entry is refused; list order never decides authority. An unmatched
 tag uses the usual release file; an unmatched non-version tag uses build CI. Repository keys include upstream, organization
 and repository; another upstream or sibling repository cannot inherit a route.
 
-Files must be clean `.oberth/<DNS-label>.yaml` paths. Build, fragment, schedule and tests contract
+Files must be clean `.oberth/<DNS-label>.yaml` paths. Build, schedule and tests contract
 files, nested paths, traversal and absolute paths are refused. The existing
 bounded source-root reader reads the selected file at the tag's immutable tested
 commit. A missing, unreadable or invalid selected file fails the run, with no

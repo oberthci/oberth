@@ -1,4 +1,4 @@
-"""Validate explicit CPU and memory budgets in Argo workflows and fragments."""
+"""Validate explicit CPU and memory budgets in Argo workflows and templates."""
 import argparse
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
