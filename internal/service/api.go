@@ -54,6 +54,8 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	Administration Administration
+
 	Tags                   *PushIngestor
 	IssueStaleAfter        time.Duration
 	IssueActiveStaleAfter  time.Duration
@@ -124,6 +126,8 @@ type APIConfig struct {
 }
 
 type API struct {
+	administration Administration
+
 	tags                   *PushIngestor
 	branchPrune            BranchPruneGit
 	branchDeletions        BranchDeletionRecords
@@ -252,7 +256,8 @@ func NewAPI(config APIConfig) (*API, error) {
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
 	created := &API{
-		branchPrune: config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
+		administration: config.Administration,
+		branchPrune:    config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
 		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
 		releasePreflight:   config.ReleasePreflight,
 		clientCertificates: config.ClientCertificates,
@@ -404,6 +409,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
+	case "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record", "uplink_scope":
+		return service.administrationTool(ctx, actor, name, raw)
 	// Credential and grant lifecycle (#1105).
 	case "uplink_invite":
 		return service.uplinkInviteTool(ctx, actor, raw)

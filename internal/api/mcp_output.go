@@ -7,6 +7,10 @@ func toolOutputSchema(name string) map[string]any {
 	schema := map[string]any{"type": "object"}
 	collection := ""
 	switch name {
+	case "upstream_list":
+		collection = "upstreams"
+	case "admin_access_list":
+		collection = "grants"
 	case "promote_grant_list":
 		collection = "grants"
 	case "run_list":

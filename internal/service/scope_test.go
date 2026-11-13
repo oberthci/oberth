@@ -678,6 +678,10 @@ func (bareRunResolver) ResolveWaitRun(context.Context, int64, string, string) (m
 // refused outside the scope; "refused": installation-wide, never for a
 // scoped uplink.
 var toolScopeBehaviour = map[string]string{
+	"uplink_scope": "refused",
+	"upstream_add": "refused", "upstream_list": "refused", "upstream_remove": "refused", "upstream_provide_key": "refused",
+	"repo_add": "refused", "repo_verify": "refused", "admin_access_list": "refused", "admin_public_identity": "refused",
+	"admin_readiness": "refused", "admin_version": "refused", "admin_idle": "refused", "admin_audit_record": "refused",
 	"uplink_invite": "refused", "uplink_cert": "refused", "client_renew": "refused", "uplink_list": "refused", "uplink_revoke": "refused", "uplink_rotate": "refused", "access_dismiss": "refused",
 	"issue_unlock": "mutation", "issue_close_many": "mutation",
 	"status": "lookup", "logs": "lookup", "run_get": "lookup",

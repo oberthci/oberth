@@ -931,6 +931,74 @@
     "flag:argo-vault-credentialed-role": {
       "doc_anchor": "docs/argo-secret-delivery.md",
       "test_ref": "internal/argojob/spec_test.go TestBuildInjectsRunIdentityAndVaultCoordinates"
+    },
+    "value:uplink_scope": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RequiresAdmin"
+    },
+    "value:upstream-public-key": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RejectsPaths"
+    },
+    "value:repo_add": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_database_backup": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_idle": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_public_identity": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:server-certificate": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RejectsPaths"
+    },
+    "value:upstream_add": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_readiness": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_version": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_access_list": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:upstream_provide_key": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:upstream_remove": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:admin_audit_record": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:upstream_list": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:repo_verify": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "value:server-ca": {
+      "doc_anchor": "README.md#mcp-tools",
+      "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/RejectsPaths"
     }
   }
 }
