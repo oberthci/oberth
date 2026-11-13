@@ -692,14 +692,24 @@ func TestReport(t *testing.T) {
 // The TLS step describes the certificate the store will issue (#007).
 func TestTLSDescribesServerPKI(t *testing.T) {
 	st := newWizardState(Options{})
-	explain := buildQuestions()[8].explain(st)
+	var tls *question
+	for _, q := range buildQuestions() {
+		if q.id == "tls.names" {
+			tls = q
+			break
+		}
+	}
+	if tls == nil {
+		t.Fatal("missing TLS question")
+	}
+	explain := tls.explain(st)
 	for _, want := range []string{"ECDSA P-256", "oberth.oberth.svc.cluster.local", "oberth-goproxy"} {
 		if !strings.Contains(explain, want) {
 			t.Errorf("tls explanation missing %q: %s", want, explain)
 		}
 	}
 	st.setStoreMode(storeInstallDev)
-	if !strings.Contains(buildQuestions()[8].explain(st), "self-signed") {
+	if !strings.Contains(tls.explain(st), "self-signed") {
 		t.Error("a dev store keeps the self-signed certificate")
 	}
 }

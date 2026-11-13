@@ -24,6 +24,7 @@ func TestPlainModeListsExistingContexts(t *testing.T) {
 		"2",        // cluster: staging
 		"", "", "", // namespaces
 		"",     // network policy
+		"", "", // native Argo limits: preserve existing or use fresh defaults
 		"",     // store
 		"",     // anchoring
 		"",     // tls names
@@ -58,7 +59,7 @@ func TestPlainModeRejectsAndReasks(t *testing.T) {
 	answers := strings.Join([]string{
 		"9", "1", // an out-of-range choice, then a valid one
 		"same", "same", "x", "", "", "", // duplicate namespaces, then defaults
-		"", "", "", "", "", "",
+		"", "", "", "", "", "", "", "",
 		"acme/repo", "acme", // an invalid organization, then a valid one
 		"", "", "", "", "",
 	}, "\n") + "\n"
@@ -80,7 +81,7 @@ func TestPlainModeInstallAndVerify(t *testing.T) {
 	newTestHost(t)
 	stubInstaller(t, keyPendingInstall)
 	kubectl := stubKubectl(t, &fakeKubectl{pubKey: testPublicKey(t)})
-	answers := strings.Repeat("\n", 10) + "acme\n" + strings.Repeat("\n", 5) + "yes\n"
+	answers := strings.Repeat("\n", 12) + "acme\n" + strings.Repeat("\n", 5) + "yes\n"
 	var out bytes.Buffer
 	err := Run(context.Background(), Options{Plain: true}, strings.NewReader(answers), &out)
 	if !errors.Is(err, installer.ErrOnboardingPartial) || !strings.Contains(out.String(), "oberth upstream add --yes --no-wait github") {

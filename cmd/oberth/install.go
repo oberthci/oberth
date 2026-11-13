@@ -12,13 +12,14 @@ import (
 )
 
 type installFlagOptions struct {
-	answersPath     *string
-	yes             *bool
-	verify          *bool
-	plan            *bool
-	jsonOutput      *bool
-	timeout         *time.Duration
-	argoParallelism *int
+	answersPath              *string
+	yes                      *bool
+	verify                   *bool
+	plan                     *bool
+	jsonOutput               *bool
+	timeout                  *time.Duration
+	argoParallelism          *int
+	argoNamespaceParallelism *int
 
 	alsoUpstreams           stringList
 	credentialedSecretPaths stringList
@@ -131,9 +132,11 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags.StringVar(&cfg.ArgoVaultCredentialedRole, "argo-vault-credentialed-role", "",
 		"Kubernetes-auth role credentialed pipelines log in with; bind it to exactly "+
 			"(--argo-namespace, the credentialed ServiceAccount)")
-	options.argoParallelism = flags.Int("argo-parallelism", -1,
+	options.argoParallelism = flags.Int("argo-parallelism", installer.DefaultArgoParallelism,
 		"Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; "+
-			"the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2)")
+			"default: 4 for a new release; preserve existing values unless explicitly chosen")
+	options.argoNamespaceParallelism = flags.Int("argo-namespace-parallelism", installer.DefaultArgoNamespaceParallelism,
+		"Argo controller namespaceParallelism: Workflows running at once per namespace, 0 for no limit; default: 0 for a new release; preserve existing values unless explicitly chosen")
 	flags.Var(&options.credentialedSecretPaths, "credentialed-secret-path",
 		"full KV data path approved in the secret-access table (repeatable, exactly the string "+
 			"`oberth access allow` records, e.g. oberth/data/release/cosign-secret); synced into the "+
@@ -218,6 +221,8 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		switch f.Name {
 		case "argo-parallelism":
 			cfg.ArgoParallelism = options.argoParallelism
+		case "argo-namespace-parallelism":
+			cfg.ArgoNamespaceParallelism = options.argoNamespaceParallelism
 		}
 	})
 

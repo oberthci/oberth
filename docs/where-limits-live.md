@@ -12,11 +12,26 @@ floor, admin hold or startup-stall policy. The [native model](native-scheduling.
 describes source retention, security boundaries, metadata selectors and the
 native retry policy.
 
-`0` parallelism is unlimited. Pause by scaling the workflow-controller to zero
-replicas or using `argo suspend WORKFLOW`. The fresh-install default is
-unchanged: half observed node allocatable CPU, minimum 2, within the installer's
-maximum; no limit is installed if capacity cannot be observed. On an existing
-install, explicit settings change the value and omission preserves it.
+## How many Workflows run at once
+
+Argo owns `controller.parallelism` and `controller.namespaceParallelism`.
+New managed releases use fixed defaults of **4** globally and **0** per
+namespace; `0` means unlimited. These defaults do not depend on node CPU or
+capacity. Existing releases keep both values unless the operator chooses a
+replacement. The installer reads stored Argo values for Review and reuses
+them during upgrades. Existing profile rendering preserves both limits.
+
+Choose values in setup's cluster review, with `ArgoParallelism` and
+`ArgoNamespaceParallelism` in the answers file, or with explicit flags:
+
+```sh
+oberth install --context <context> --argo-parallelism 8 --argo-namespace-parallelism 3
+```
+
+Review distinguishes fresh defaults, requested values and preserved settings.
+An omitted input remains omitted during upgrade; reading a value for Review
+does not turn it into an override. Pause by scaling the workflow-controller to
+zero replicas or using `argo suspend WORKFLOW`.
 
 The managed installer uses Argo Helm values directly. Changing the cap does
 not require a content-addressed ConfigMap or a second Oberth release. Existing

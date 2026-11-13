@@ -150,10 +150,12 @@ type savedSetup struct {
 	NodeName      string `json:"nodeName,omitempty"`
 	NodeIP        string `json:"nodeIP,omitempty"`
 
-	Namespace        string `json:"namespace,omitempty"`
-	ArgoNamespace    string `json:"argoNamespace,omitempty"`
-	OpenBaoNamespace string `json:"openbaoNamespace,omitempty"`
-	NetworkPolicy    string `json:"networkPolicy,omitempty"`
+	Namespace                string `json:"namespace,omitempty"`
+	ArgoNamespace            string `json:"argoNamespace,omitempty"`
+	OpenBaoNamespace         string `json:"openbaoNamespace,omitempty"`
+	NetworkPolicy            string `json:"networkPolicy,omitempty"`
+	ArgoParallelism          *int   `json:"argoParallelism,omitempty"`
+	ArgoNamespaceParallelism *int   `json:"argoNamespaceParallelism,omitempty"`
 
 	StoreMode    string `json:"storeMode,omitempty"`
 	StoreAddress string `json:"storeAddress,omitempty"`
@@ -193,34 +195,36 @@ var setupStatePath = func() (string, error) {
 func (st *WizardState) toSaved() savedSetup {
 	c := st.Config
 	s := savedSetup{
-		Version:            setupStateFileVersion,
-		ClusterChoice:      st.ClusterChoice,
-		KubeconfigPath:     c.KubeconfigPath,
-		ContextName:        c.ContextName,
-		ClusterServer:      st.ClusterInfo.server,
-		NodeName:           st.ClusterInfo.nodeName,
-		NodeIP:             st.ClusterInfo.nodeIP,
-		Namespace:          c.Namespace,
-		ArgoNamespace:      c.ArgoNamespace,
-		OpenBaoNamespace:   c.OpenBaoNamespace,
-		NetworkPolicy:      c.NetworkPolicy,
-		StoreMode:          st.StoreMode,
-		StoreAddress:       st.StoreAddress,
-		InstallRekor:       c.InstallRekor,
-		TLSExtraDNSNames:   c.TLSExtraDNSNames,
-		TLSExtraIPs:        c.TLSExtraIPs,
-		ForgeType:          st.ForgeType,
-		ForgeOrg:           st.ForgeOrg,
-		ForgeAuth:          st.ForgeAuth,
-		UpstreamPrivateKey: c.UpstreamPrivateKeyPath,
-		UpstreamKeyPick:    st.UpstreamKeyPick,
-		AlsoUpstreams:      c.AlsoUpstreams,
-		ClientHost:         c.ClientHost,
-		UplinkIdentity:     st.UplinkIdentity,
-		UplinkKey:          st.UplinkKey,
-		SSHKeyPath:         st.SSHKeyPath,
-		ClientAccess:       st.ClientAccess,
-		Install:            st.Install,
+		Version:                  setupStateFileVersion,
+		ClusterChoice:            st.ClusterChoice,
+		KubeconfigPath:           c.KubeconfigPath,
+		ContextName:              c.ContextName,
+		ClusterServer:            st.ClusterInfo.server,
+		NodeName:                 st.ClusterInfo.nodeName,
+		NodeIP:                   st.ClusterInfo.nodeIP,
+		Namespace:                c.Namespace,
+		ArgoNamespace:            c.ArgoNamespace,
+		OpenBaoNamespace:         c.OpenBaoNamespace,
+		NetworkPolicy:            c.NetworkPolicy,
+		ArgoParallelism:          c.ArgoParallelism,
+		ArgoNamespaceParallelism: c.ArgoNamespaceParallelism,
+		StoreMode:                st.StoreMode,
+		StoreAddress:             st.StoreAddress,
+		InstallRekor:             c.InstallRekor,
+		TLSExtraDNSNames:         c.TLSExtraDNSNames,
+		TLSExtraIPs:              c.TLSExtraIPs,
+		ForgeType:                st.ForgeType,
+		ForgeOrg:                 st.ForgeOrg,
+		ForgeAuth:                st.ForgeAuth,
+		UpstreamPrivateKey:       c.UpstreamPrivateKeyPath,
+		UpstreamKeyPick:          st.UpstreamKeyPick,
+		AlsoUpstreams:            c.AlsoUpstreams,
+		ClientHost:               c.ClientHost,
+		UplinkIdentity:           st.UplinkIdentity,
+		UplinkKey:                st.UplinkKey,
+		SSHKeyPath:               st.SSHKeyPath,
+		ClientAccess:             st.ClientAccess,
+		Install:                  st.Install,
 	}
 	for i, done := range st.done {
 		if done {
@@ -247,6 +251,7 @@ func (st *WizardState) fromSaved(s savedSetup) {
 	c.ArgoNamespace = s.ArgoNamespace
 	c.OpenBaoNamespace = s.OpenBaoNamespace
 	c.NetworkPolicy = s.NetworkPolicy
+	c.ArgoParallelism, c.ArgoNamespaceParallelism = s.ArgoParallelism, s.ArgoNamespaceParallelism
 	if s.StoreMode != "" {
 		st.setStoreMode(s.StoreMode)
 	}

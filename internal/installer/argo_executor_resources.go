@@ -63,11 +63,17 @@ func resolveArgoExecutorResources(ctx context.Context, cfg *Config, deps Deps) e
 	if namespace == "" {
 		namespace = DefaultArgoNamespace
 	}
-	_, exists, err := findHelmRelease(ctx, deps, "argo-workflows", namespace)
-	if err != nil {
-		return err
+	exists := cfg.existingArgoRelease
+	if !cfg.argoReleaseRead {
+		_, found, err := findHelmRelease(ctx, deps, "argo-workflows", namespace)
+		if err != nil {
+			return err
+		}
+		exists = found
+		cfg.existingArgoRelease, cfg.argoReleaseRead = exists, true
 	}
-	cfg.argoExecutorResources, err = readArgoExecutorResources(ctx, deps, namespace, exists)
+	resources, err := readArgoExecutorResources(ctx, deps, namespace, exists)
+	cfg.argoExecutorResources = resources
 	return err
 }
 
