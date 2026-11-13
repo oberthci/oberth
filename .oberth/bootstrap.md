@@ -151,3 +151,11 @@ verifies its private executable before running dashboard JavaScript tests.
 The artifact publisher has no Node tooling or site deployment authority.
 
 Scheduling is authored in these Workflows: CI has `spec.priority: 0`; release has `spec.priority: 1` and the Workflow mutex `oberth-release`. The chart-index and finalization mutexes still protect their specific mutations. Oberth does not inject priority or release locks.
+
+
+Validate these `.oberth/*.yaml` files with the previous released server using
+`hack/check-bootstrap-admission.sh [candidate-root] [validator-ref]`. The default
+validator is the deployed v0.22.0 revision `fa47f577`; an explicit Git ref selects
+another validator without changing the runner. The check archives that exact
+revision locally and reports every joined decoder/admission refusal without
+modifying a worktree. The default never substitutes the candidate's validator for the released server.
