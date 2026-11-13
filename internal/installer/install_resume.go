@@ -18,10 +18,21 @@ func resumedOberthUnchanged(ctx context.Context, cfg Config, deps Deps, release 
 	if target := canonicalChartVersion(cfg.ChartVersion); (cfg.ChartPath == "" && (installed == "" || target == "")) || (installed != "" && target != "" && installed != target) {
 		return false, nil
 	}
-	args := append(OberthHelmArgs(cfg, openbao, rekor), "--dry-run=server", "--no-hooks", "--output=json")
+	return resumedReleaseUnchanged(ctx, cfg, deps, release, "oberth", cfg.Namespace, cfg.ChartVersion, OberthHelmArgs(cfg, openbao, rekor))
+}
+
+func resumedReleaseUnchanged(ctx context.Context, cfg Config, deps Deps, release helmRelease, name, namespace, target string, args []string) (bool, error) {
+	if cfg.ResumeSecretsFile == "" || release.Status != "deployed" {
+		return false, nil
+	}
+	installed := canonicalChartVersion(chartVersionFromRelease(release.Chart, name))
+	if wanted := canonicalChartVersion(target); installed != "" && wanted != "" && installed != wanted {
+		return false, nil
+	}
+	args = append(append([]string{}, args...), "--dry-run=server", "--no-hooks", "--output=json")
 	raw, err := deps.RunHelm(ctx, args)
 	if err != nil {
-		return false, errors.New("cannot preview resumed Oberth release")
+		return false, errors.New("cannot preview resumed release")
 	}
 	defer clear(raw)
 	var preview struct {
@@ -41,7 +52,19 @@ func resumedOberthUnchanged(ctx context.Context, cfg Config, deps Deps, release 
 		planned = map[string]any{}
 	}
 	mergePlannedValues(planned, *preview.Config)
-	live, err := readHelmValuesMap(ctx, deps, cfg.Namespace)
+	liveRaw, err := deps.RunHelm(ctx, []string{"get", "values", name, "-n", namespace, "--all", "-o", "json"})
+	defer clear(liveRaw)
+	var live map[string]any
+	if err == nil {
+		decoder := json.NewDecoder(bytes.NewReader(liveRaw))
+		decoder.UseNumber()
+		if !json.Valid(liveRaw) || decoder.Decode(&live) != nil {
+			err = errors.New("cannot decode installed resume values")
+		}
+	}
+	if live == nil {
+		live = map[string]any{}
+	}
 	if err != nil {
 		return false, err
 	}
@@ -50,9 +73,9 @@ func resumedOberthUnchanged(ctx context.Context, cfg Config, deps Deps, release 
 	if len(changed) > 0 {
 		return false, nil
 	}
-	manifest, err := deps.RunHelm(ctx, []string{"get", "manifest", "oberth", "-n", cfg.Namespace})
+	manifest, err := deps.RunHelm(ctx, []string{"get", "manifest", name, "-n", namespace})
 	if err != nil {
-		return false, errors.New("cannot read installed Oberth manifest for resume")
+		return false, errors.New("cannot read installed manifest for resume")
 	}
 	defer clear(manifest)
 	return strings.TrimSpace(string(manifest)) == strings.TrimSpace(preview.Manifest), nil

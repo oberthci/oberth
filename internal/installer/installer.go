@@ -1280,7 +1280,20 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		_, _ = fmt.Fprintln(deps.Output, "Installing OpenBao...")
 	}
 
-	if _, err := deps.RunHelm(ctx, OpenBaoHelmArgs(cfg)); err != nil {
+	args := OpenBaoHelmArgs(cfg)
+	if exists {
+		unchanged, err := resumedReleaseUnchanged(ctx, cfg, deps, release, "openbao", ns, result.TargetVersion, args)
+		if err != nil {
+			return result, err
+		}
+		if unchanged {
+			result.AlreadyInstalled = true
+			result.Upgraded = false
+			return result, nil
+		}
+	}
+	if _, err := deps.RunHelm(ctx, args); err != nil {
+
 		return result, fmt.Errorf("helm install OpenBao: %w", err)
 	}
 	if requiresTLSMigration {
@@ -1434,6 +1447,17 @@ func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult,
 	args := RekorHelmArgs(cfg, valuesFile.Name())
 	args[3] = filepath.Join(dir, "rekorchart")
 	args = append(args, "-f", connectionPath, "--timeout", cfg.Timeout.String())
+	if exists {
+		unchanged, err := resumedReleaseUnchanged(ctx, cfg, deps, release, "rekor", ns, result.TargetVersion, args)
+		if err != nil {
+			return result, err
+		}
+		if unchanged {
+			result.AlreadyInstalled = true
+			result.Upgraded = false
+			return result, nil
+		}
+	}
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Rekor: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,58 @@ func TestInstallJSONOnboardingAndResume(t *testing.T) {
 			}
 		})
 	}
+	for _, name := range []string{"openbao", "argo-workflows"} {
+		for _, changed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("DependencyResume/%s/changed=%t", name, changed), func(t *testing.T) {
+				version := DefaultOpenBaoChartVersion
+				if name == "argo-workflows" {
+					version = DefaultArgoChartVersion
+				}
+				applies, previews := 0, 0
+				deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+					switch args[0] {
+					case "list":
+						return json.Marshal([]helmRelease{{Name: name, Status: "deployed", Chart: name + "-" + version}})
+					case "get":
+						if args[1] == "manifest" {
+							return []byte("kind: Deployment"), nil
+						}
+						return []byte(`{}`), nil
+					case "upgrade":
+						if slices.Contains(args, "--dry-run=server") {
+							previews++
+							manifest := "kind: Deployment"
+							if changed {
+								manifest = "kind: StatefulSet"
+							}
+							return json.Marshal(map[string]any{"config": map[string]any{}, "manifest": manifest})
+						}
+						applies++
+					}
+					return nil, nil
+				}}
+				cfg := Config{Upgrade: true, ResumeSecretsFile: "/private/recovery", InstallSecretStoreDev: true}
+				var already bool
+				if name == "openbao" {
+					result, err := InstallOpenBao(t.Context(), cfg, deps)
+					if err != nil {
+						t.Fatal(err)
+					}
+					already = result.AlreadyInstalled
+				} else {
+					result, err := InstallArgoWorkflows(t.Context(), cfg, deps)
+					if err != nil {
+						t.Fatal(err)
+					}
+					already = result.AlreadyInstalled
+				}
+				if previews != 1 || already == changed || applies != map[bool]int{false: 0, true: 1}[changed] {
+					t.Fatal("resume revision", previews, applies, already)
+				}
+			})
+		}
+	}
+
 	for _, change := range []string{"none", "values", "manifest", "force", "resume-upgrade"} {
 		t.Run("HelmResume/"+change, func(t *testing.T) {
 			chart := t.TempDir()
