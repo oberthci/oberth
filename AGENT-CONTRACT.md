@@ -3425,6 +3425,10 @@ Scratch namespaces copy no pipeline labels. Only the generated ownership label
 and restricted enforce/audit/warn Pod Security labels (version latest) are set;
 the owned policy uses the probe Pod label. Namespace-name/label-specific
 exemptions and installed allow rules are outside this measurement's scope.
+Creation-response Pod UIDs are fixed for the run and checked at readiness,
+before/after explicitly container-selected execs and at traffic stage completion.
+A changed identity invalidates the measurement. Exec has no atomic UID condition;
+these bracketing observations reject results from a detected replacement.
 Both sources connect twice at baseline and after each policy removal. Failed
 fresh connections, overlap or recovery remain unverified. The `enforced` wire
 status means the measurement completed: traffic cannot prove causality, and

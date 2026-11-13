@@ -119,6 +119,7 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 	for i := range nodes {
 		names = append(names, fmt.Sprintf("client-%d", i), fmt.Sprintf("control-%d", i))
 	}
+	pods := policyProbePods{namespace: namespace, names: names, uids: map[string]types.UID{}}
 	for _, name := range names {
 		role := "client"
 		node := nodes[0]
@@ -141,15 +142,21 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 		if name == "server" {
 			pod.Labels[policyProbeLabel] = token + "-server"
 		}
-		if _, err = deps.KubeClient.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		createdPod, err := deps.KubeClient.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
+		if err != nil {
 			result.Remedy = policyProbeFailure(err)
 			return
 		}
+		if createdPod.UID == "" {
+			result.Remedy = "Created probe Pod has no verified UID."
+			return
+		}
+		pods.uids[name] = createdPod.UID
 	}
 	readyCtx, stop := context.WithTimeout(ctx, timing.ready)
 	serverIP := ""
 	err = pollPolicyProbe(readyCtx, timing.interval, func(ctx context.Context) (bool, error) {
-		ready, ip, err := policyProbeHealthy(ctx, deps, namespace, names)
+		ready, ip, err := policyProbeHealthy(ctx, deps, pods)
 		serverIP = ip
 		return ready, err
 	})
@@ -160,7 +167,7 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 	}
 	url := "http://" + net.JoinHostPort(serverIP, "8080") + "/"
 	phase = "baseline traffic"
-	if err = waitPolicyTraffic(ctx, cfg, deps, timing, namespace, names, url, ""); err != nil {
+	if err = waitPolicyTraffic(ctx, cfg, deps, timing, pods, url, ""); err != nil {
 		result.Remedy = policyProbeFailure(err)
 		return
 	}
@@ -178,7 +185,7 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 			return
 		}
 		phase = "egress convergence (a bounded delay does not prove absence)"
-		if err = waitPolicyTraffic(ctx, cfg, deps, timing, namespace, names, url, selected); err != nil {
+		if err = waitPolicyTraffic(ctx, cfg, deps, timing, pods, url, selected); err != nil {
 			result.Remedy = policyProbeFailure(err)
 			return
 		}
@@ -189,7 +196,7 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 			return
 		}
 		phase = "traffic recovery"
-		if err = waitPolicyTraffic(ctx, cfg, deps, timing, namespace, names, url, ""); err != nil {
+		if err = waitPolicyTraffic(ctx, cfg, deps, timing, pods, url, ""); err != nil {
 			result.Remedy = policyProbeFailure(err)
 			return
 		}
@@ -246,10 +253,10 @@ func policyProbeNodes(ctx context.Context, deps Deps) ([]string, error) {
 	return nodes, nil
 }
 
-func policyProbeHealthy(ctx context.Context, deps Deps, namespace string, names []string) (bool, string, error) {
+func policyProbeHealthy(ctx context.Context, deps Deps, pods policyProbePods) (bool, string, error) {
 	ip := ""
-	for _, name := range names {
-		pod, err := deps.KubeClient.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	for _, name := range pods.names {
+		pod, err := pods.get(ctx, deps, name)
 		if err != nil {
 			return false, "", err
 		}
@@ -267,13 +274,13 @@ func policyProbeHealthy(ctx context.Context, deps Deps, namespace string, names 
 	return true, ip, nil
 }
 
-func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming, namespace string, names []string, url string, selected string) error {
+func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming, pods policyProbePods, url string, selected string) error {
 	stage, stop := context.WithTimeout(ctx, timing.traffic)
 	defer stop()
 	counts := map[string]int{}
 	last := ""
 	err := pollPolicyProbe(stage, timing.interval, func(ctx context.Context) (bool, error) {
-		ready, _, err := policyProbeHealthy(ctx, deps, namespace, names)
+		ready, _, err := policyProbeHealthy(ctx, deps, pods)
 		if err != nil {
 			return false, err
 		}
@@ -281,7 +288,7 @@ func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policy
 			return false, errors.New("probe Pod health changed")
 		}
 		all := true
-		for _, name := range names {
+		for _, name := range pods.names {
 			if !strings.HasPrefix(name, "client-") {
 				continue
 			}
@@ -292,7 +299,7 @@ func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policy
 			var state string
 			if selected == "" {
 				for _, peer := range []string{name, control} {
-					state, err = policyProbeTraffic(ctx, cfg, deps, namespace, peer, url)
+					state, err = policyProbeTraffic(ctx, cfg, deps, pods, peer, url)
 					if err != nil {
 						return false, err
 					}
@@ -302,7 +309,7 @@ func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policy
 					}
 				}
 			} else {
-				state, err = policyProbePair(ctx, cfg, deps, timing, namespace, name, control, url)
+				state, err = policyProbePair(ctx, cfg, deps, timing, pods, name, control, url)
 				if err != nil {
 					return false, err
 				}
@@ -323,6 +330,15 @@ func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policy
 			}
 			all = all && counts[name] >= policyProbeSamples
 		}
+		if all {
+			ready, _, err := policyProbeHealthy(ctx, deps, pods)
+			if err != nil {
+				return false, err
+			}
+			if !ready {
+				return false, errors.New("probe Pod health changed")
+			}
+		}
 		return all, nil
 	})
 	if err != nil && last != "" {
@@ -334,7 +350,7 @@ func waitPolicyTraffic(ctx context.Context, cfg Config, deps Deps, timing policy
 // A partial HTTP response is the start handshake, not a goroutine-start signal.
 // Its end marker must still be absent after the selected attempt. Only then can
 // the successful full response corroborate that attempt. Every worker is joined.
-func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming, namespace, client, control, url string) (string, error) {
+func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyProbeTiming, pods policyProbePods, client, control, url string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	nonce := rand.Text()
 	finished := make(chan struct{})
@@ -343,12 +359,12 @@ func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyPr
 	var completed time.Time
 	go func() {
 		defer close(finished)
-		controlState, controlErr = policyProbeExec(ctx, cfg, deps, namespace, control, policyOverlapScript, url, nonce)
+		controlState, controlErr = policyProbeExec(ctx, cfg, deps, pods, control, policyOverlapScript, url, nonce)
 		completed = time.Now()
 	}()
 	defer func() { cancel(); <-finished }()
 	checkOpen := func(ctx context.Context) (bool, error) {
-		state, err := policyProbeExec(ctx, cfg, deps, namespace, control, policyOverlapReadyScript, nonce)
+		state, err := policyProbeExec(ctx, cfg, deps, pods, control, policyOverlapReadyScript, nonce)
 		if err != nil {
 			return false, err
 		}
@@ -381,7 +397,7 @@ func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyPr
 	// Each ordinary wget invocation opens a fresh connection. Successful
 	// established traffic alone does not measure acceptance of new connections.
 	fresh := func(phase string) error {
-		state, err := policyProbeTraffic(ctx, cfg, deps, namespace, control, url)
+		state, err := policyProbeTraffic(ctx, cfg, deps, pods, control, url)
 		if err != nil || state != "allowed" {
 			return &policyTrafficError{"Fresh unselected connection " + phase + " selected attempt: " + policyTrafficDescription(state) + ". " + policyProbeFailure(err), err}
 		}
@@ -391,7 +407,7 @@ func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyPr
 		return "", err
 	}
 	attemptStarted := time.Now()
-	state, err := policyProbeTraffic(ctx, cfg, deps, namespace, client, url)
+	state, err := policyProbeTraffic(ctx, cfg, deps, pods, client, url)
 	attemptCompleted := time.Now()
 	if err != nil {
 		return "", err
@@ -405,9 +421,9 @@ func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyPr
 	if err != nil || !open {
 		return "", &policyTrafficError{"Selected client " + client + ": " + policyTrafficDescription(state) + "; unselected HTTP response did not span the selected attempt and both fresh connections.", err}
 	}
-	released, err := policyProbeExec(ctx, cfg, deps, namespace, "server", policyOverlapReleaseScript, nonce)
+	released, err := policyProbeExec(ctx, cfg, deps, pods, "server", policyOverlapReleaseScript, nonce)
 	if err != nil || released != "released" {
-		return "", &policyTrafficError{"Unselected HTTP response could not be released after the selected attempt.", err}
+		return "", &policyTrafficError{"Unselected HTTP response could not be released after the selected attempt. " + policyProbeFailure(err), err}
 	}
 	select {
 	case <-finished:
@@ -415,7 +431,7 @@ func policyProbePair(ctx context.Context, cfg Config, deps Deps, timing policyPr
 		return "", &policyTrafficError{"Unselected HTTP response did not complete within the overlap budget.", ctx.Err()}
 	}
 	if controlErr != nil || controlState != "allowed" || !handshakeStarted.Before(attemptStarted) || !completed.After(attemptCompleted) {
-		return "", &policyTrafficError{"Selected client " + client + ": " + policyTrafficDescription(state) + "; unselected client " + control + ": " + policyTrafficDescription(controlState) + "; HTTP overlap was not verified.", controlErr}
+		return "", &policyTrafficError{"Selected client " + client + ": " + policyTrafficDescription(state) + "; unselected client " + control + ": " + policyTrafficDescription(controlState) + "; HTTP overlap was not verified. " + policyProbeFailure(controlErr), controlErr}
 	}
 	return state, nil
 }
@@ -465,12 +481,12 @@ elif grep -Ei 'connection.*reset|reset by peer' /probe/error >/dev/null; then pr
 elif grep -i 'timed out' /probe/error >/dev/null; then printf timeout
 else printf invalid; fi`
 
-func policyProbeTraffic(ctx context.Context, cfg Config, deps Deps, namespace, pod, url string) (string, error) {
+func policyProbeTraffic(ctx context.Context, cfg Config, deps Deps, pods policyProbePods, pod, url string) (string, error) {
 	attempt, stop := context.WithTimeout(ctx, 4*time.Second)
 	defer stop()
-	state, err := policyProbeExec(attempt, cfg, deps, namespace, pod, policyTrafficScript, url)
+	state, err := policyProbeExec(attempt, cfg, deps, pods, pod, policyTrafficScript, url)
 	if err != nil {
-		return "", &policyTrafficError{"Traffic observation unavailable: kubectl exec did not complete.", err}
+		return "", &policyTrafficError{"Traffic observation unavailable: kubectl exec did not complete. " + policyProbeFailure(err), err}
 	}
 	switch state {
 	case "allowed", "timeout", "refused", "reset":
@@ -480,13 +496,21 @@ func policyProbeTraffic(ctx context.Context, cfg Config, deps Deps, namespace, p
 	return state, nil
 }
 
-func policyProbeExec(ctx context.Context, cfg Config, deps Deps, namespace, pod, script string, values ...string) (string, error) {
-	args := []string{"--context", deps.ContextName, "--namespace", namespace, "exec", pod, "--container", policyProbeContainer, "--", "sh", "-c", script, "sh"}
+func policyProbeExec(ctx context.Context, cfg Config, deps Deps, pods policyProbePods, pod, script string, values ...string) (string, error) {
+	if _, err := pods.get(ctx, deps, pod); err != nil {
+		return "", err
+	}
+	args := []string{"--context", deps.ContextName, "--namespace", pods.namespace, "exec", pod, "--container", policyProbeContainer, "--", "sh", "-c", script, "sh"}
 	args = append(args, values...)
 	if cfg.KubeconfigPath != "" {
 		args = append([]string{"--kubeconfig", cfg.KubeconfigPath}, args...)
 	}
 	raw, err := deps.RunCommand(ctx, nil, "kubectl", args...)
+	// Exec has no UID precondition. Never credit a response if the Pod was
+	// replaced between the identity observations bracketing that command.
+	if _, identityErr := pods.get(ctx, deps, pod); identityErr != nil {
+		return "", identityErr
+	}
 	return strings.TrimSpace(string(raw)), err
 }
 

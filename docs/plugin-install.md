@@ -211,7 +211,12 @@ continuity of an established one. Any failed fresh connection is ambiguous.
 A token-matched start chunk must arrive before the attempts, and the end chunk
 must remain absent until after them. The probe then releases the held response
 through its server Pod and requires successful completion. Missing overlap,
-HTTP errors, changed Pod health and failed peers are unverified. Baseline and
+HTTP errors, changed Pod health/UID and failed peers are unverified. Pod UIDs
+are captured from creation and checked during readiness, around every exec and
+at completed traffic stages. A same-name replacement cannot supply credited
+measurement results. Exec explicitly names the probe container; kubectl exec
+has no atomic UID precondition, so a replacement can race the command but its
+result is rejected when the UID observations differ. Baseline and
 recovery each require two consecutive successful samples from both sources.
 
 The result is **measured enforcement** on the reported nodes for these six

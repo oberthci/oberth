@@ -104,6 +104,7 @@ func probeNamespaceUIDFixture(kube *fake.Clientset) {
 
 func readyPolicyModelPod(action k8stesting.Action) (bool, runtime.Object, error) {
 	pod := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+	pod.UID = types.UID(pod.Name + "-uid")
 	pod.Status = corev1.PodStatus{PodIP: "192.0.2.10", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
 	return false, nil, nil
 }
@@ -194,7 +195,9 @@ func TestReview1548DuringSampleCanHappenOnlyAfter(t *testing.T) {
 			return []byte("refused"), nil
 		}
 	}}
-	state, err := policyProbePair(ctx, Config{}, deps, policyProbeTiming{interval: time.Millisecond}, "scratch", "client-0", "control-0", "http://192.0.2.10:8080")
+	pods := policyPairPods(t)
+	deps.KubeClient = pods.kube
+	state, err := policyProbePair(ctx, Config{}, deps, policyProbeTiming{interval: time.Millisecond}, pods.identities, "client-0", "control-0", "http://192.0.2.10:8080")
 	if err == nil || state != "" || clients.Load() != 0 {
 		t.Fatal("attempt ran before a real overlap handshake", state, err, clients.Load())
 	}
@@ -234,7 +237,9 @@ func TestPolicyOverlapRejectsEarlyCompletionAndControlFailure(t *testing.T) {
 					return []byte("refused"), nil
 				}
 			}}
-			state, err := policyProbePair(t.Context(), Config{}, deps, policyProbeTiming{interval: time.Millisecond}, "scratch", "client-0", "control-0", "http://192.0.2.10:8080")
+			pods := policyPairPods(t)
+			deps.KubeClient = pods.kube
+			state, err := policyProbePair(t.Context(), Config{}, deps, policyProbeTiming{interval: time.Millisecond}, pods.identities, "client-0", "control-0", "http://192.0.2.10:8080")
 			if err == nil || state != "" {
 				t.Fatal("missing overlap/control success accepted", state, err)
 			}
@@ -254,6 +259,7 @@ func TestPolicyRecoveryConvergesAfterTransientSourceFailures(t *testing.T) {
 	for _, name := range names {
 		pod := policyProbePod(namespace, "token", "client", "image")
 		pod.Name = name
+		pod.UID = types.UID(name + "-uid")
 		pod.Status = corev1.PodStatus{PodIP: "192.0.2.10", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
 		if _, err := kube.CoreV1().Pods(namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
@@ -265,7 +271,7 @@ func TestPolicyRecoveryConvergesAfterTransientSourceFailures(t *testing.T) {
 		}
 		return ""
 	}}
-	if err := waitPolicyTraffic(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming(), namespace, names, "http://192.0.2.10/", ""); err != nil {
+	if err := waitPolicyTraffic(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming(), policyProbePods{namespace: namespace, names: names, uids: map[string]types.UID{"server": "server-uid", "client-0": "client-0-uid", "control-0": "control-0-uid"}}, "http://192.0.2.10/", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -285,7 +291,8 @@ func TestPolicyFreshUnselectedFailureBeforeAndAfter(t *testing.T) {
 				}
 				return ""
 			}}
-			state, err := policyProbePair(t.Context(), Config{}, Deps{RunCommand: model.run}, policyModelTiming(), "scratch", "client-0", "control-0", "http://192.0.2.10/")
+			pods := policyPairPods(t)
+			state, err := policyProbePair(t.Context(), Config{}, Deps{KubeClient: pods.kube, RunCommand: model.run}, policyModelTiming(), pods.identities, "client-0", "control-0", "http://192.0.2.10/")
 			if err == nil || state != "" || !strings.Contains(policyProbeFailure(err), "Fresh unselected connection "+tc.phase) || !strings.Contains(policyProbeFailure(err), "connection refused") {
 				t.Fatal(state, err)
 			}
@@ -294,4 +301,25 @@ func TestPolicyFreshUnselectedFailureBeforeAndAfter(t *testing.T) {
 			}
 		})
 	}
+}
+
+type policyPairFixture struct {
+	kube       *fake.Clientset
+	identities policyProbePods
+}
+
+func policyPairPods(t *testing.T) policyPairFixture {
+	t.Helper()
+	kube := fake.NewClientset()
+	pods := policyProbePods{namespace: "scratch", names: []string{"server", "client-0", "control-0"}, uids: map[string]types.UID{}}
+	for _, name := range pods.names {
+		pod := policyProbePod(pods.namespace, "token", "client", "image")
+		pod.Name = name
+		pod.UID = types.UID(name + "-uid")
+		if _, err := kube.CoreV1().Pods(pods.namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		pods.uids[name] = pod.UID
+	}
+	return policyPairFixture{kube, pods}
 }
