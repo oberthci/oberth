@@ -252,6 +252,10 @@ func TestExecutorIdentityResourceManifestAdmission(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "reserved executor identity volume") {
 						t.Fatalf("resource-manifest scratch alias admitted: %v", err)
 					}
+				} else if shape == "resource" {
+					if err == nil || !strings.Contains(err.Error(), "resource templates may not declare initContainers or sidecars") {
+						t.Fatalf("resource helper admitted: %v", err)
+					}
 				} else if err != nil {
 					t.Fatalf("admission control failed: %v", err)
 				}
