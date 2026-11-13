@@ -125,16 +125,11 @@ func readCLIProcess(pid int) (cliProcess, error) {
 
 func reapCLIGroup(group int, deadline time.Time) error {
 	for {
-		// The unreaped group leader pins this ID throughout the loop. Repeat
-		// the signal for any child fork already in flight at the first kill.
-		if err := unix.Kill(-group, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
-			return fmt.Errorf("stop git process group: %w", err)
-		}
 		entries, err := os.ReadDir("/proc")
 		if err != nil {
 			return fmt.Errorf("inspect git descendants: %w", err)
 		}
-		remaining := false
+		remaining, live := false, false
 		for _, entry := range entries {
 			pid, err := strconv.Atoi(entry.Name())
 			if err != nil || pid == group {
@@ -161,6 +156,9 @@ func reapCLIGroup(group int, deadline time.Time) error {
 				continue
 			}
 			remaining = true
+			if process.state != 'Z' && process.state != 'X' {
+				live = true
+			}
 			if process.parent == os.Getpid() && process.state == 'Z' {
 				if err := reapCLIChild(pid, group); err != nil {
 					return fmt.Errorf("reap git descendant: %w", err)
@@ -169,6 +167,15 @@ func reapCLIGroup(group int, deadline time.Time) error {
 		}
 		if !remaining {
 			return nil
+		}
+		// The held, exited leader pins the group ID. Only living descendants
+		// need a signal; an empty group or zombies cannot fork. Some container
+		// policies refuse group signals even when the forge probe has exited
+		// successfully. Do not make that unnecessary syscall a probe failure.
+		if live {
+			if err := unix.Kill(-group, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+				return fmt.Errorf("stop git process group: %w", err)
+			}
 		}
 		if time.Now().After(deadline) {
 			return errors.New("git descendant cleanup exceeded five seconds")
