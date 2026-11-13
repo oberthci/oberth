@@ -12,6 +12,9 @@ func queuedDisplayReason(scheduling *model.RunScheduling) string {
 	if scheduling == nil {
 		return "in line"
 	}
+	if scheduling.Execution != nil && lockWaitReason(scheduling.Execution) != "" {
+		return lockWaitReason(scheduling.Execution)
+	}
 	if scheduling.Execution != nil && scheduling.Execution.Message != "" {
 		return displayFailureText(scheduling.Execution.Message)
 	}

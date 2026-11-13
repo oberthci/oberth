@@ -123,7 +123,7 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		}
 		reason := podSchedulingReason(pod)
 		result.Pods = append(result.Pods, reason)
-		if reason.Reason == "Unschedulable" && podCapacityPending(&pod) {
+		if reason.Reason == "Unschedulable" && (podCapacityPending(&pod) || schedulerPlacementReason(pod) != "") {
 			result.Message = reason.Message
 		}
 		if reason.Reason == "DeadlineExceeded" && deadlineNodes[pod.Annotations["workflows.argoproj.io/node-id"]] {
@@ -192,6 +192,13 @@ func podSchedulingReason(pod corev1.Pod) (result model.SchedulingReason) {
 					result.Message = "too many pods; waiting for a pod slot"
 				case strings.Contains(condition.Message, "unbound immediate PersistentVolumeClaims"):
 					result.Message = "unbound persistent volume claim"
+				}
+				if placement := schedulerPlacementReason(pod); placement != "" {
+					if result.Message == "not scheduled" {
+						result.Message = placement
+					} else {
+						result.Message += "; " + placement
+					}
 				}
 			}
 			return result

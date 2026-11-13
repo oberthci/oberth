@@ -273,7 +273,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   server copies, PVC and seed Pod; these remain unchanged and unbounded.
 - **Executor-token init container and helper resources.** A server patch
   replaces Argo's executor Secret volume with a bounded 1 MiB memory EmptyDir
-  and inserts `oberth-wait-executor-token` before Argo's init. Oberth delivers
+  and inserts `oberth-executor-token` before Argo's init. Oberth delivers
   a Pod-bound executor token over exec after verifying the exact Pod identity;
   the waiter exposes no token in a Kubernetes object. The init/wait/waiter
   helpers normally request 50m CPU and 64 MiB memory, with 500m/512 MiB limits.
@@ -286,6 +286,16 @@ win name/path collisions; validated workspace opt-outs remain available.
   The separate token-identity holder Pod deliberately carries a scheduling
   gate and never executes; it has its own ServiceAccount, 1m/1 MiB requests
   and 10m/8 MiB limits, and is retired with its owned Workflow identity.
+
+  Generated helper container names (including Argo's patched executors):
+
+  | Container name | Role |
+  | --- | --- |
+  | `init` | Argo executor initialization |
+  | `wait` | Argo executor wait container |
+  | `oberth-executor-token` | Pod-bound executor-token delivery waiter |
+  | `oberth-prepare-nonroot` | Preparation for an opted-in nonroot template |
+
 - **Post-run collect Pod.** When collecting artifacts, Oberth creates a
   helper outside the Workflow using the source-seed Pod shape,
   mounting the same source PVC at `/seed`, and streams the artifact archive

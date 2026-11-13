@@ -1049,9 +1049,15 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **81 tools**, including administrator-only
-`publication_abandon`; a non-admin token's `tools/list` omits the
-administrator-only ones.
+<!-- BEGIN GENERATED MCP TOOL COUNT -->
+The full server registry contains **79 tools**, including administrator-only
+operations. The authenticated `tools/list` response is authoritative for the
+connected identity; non-admin clients do not receive administrator-only tools.
+<!-- END GENERATED MCP TOOL COUNT -->
+
+When reporting a connected server's tool count, use the number this client
+shows for Oberth. A client may expose a different server version or identity,
+filter tools, or show a combined count for several MCP servers.
 
 The CLI uses `--url` (the base address or the `/mcp` endpoint),
 `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with `/mcp` appended), then the client

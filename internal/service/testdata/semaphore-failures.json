@@ -1,0 +1,13 @@
+{
+  "argo_version": "v4.0.8",
+  "cases": [
+    {
+      "message": "Failed to acquire the synchronization lock. failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/build with limit",
+      "missing": "configmap"
+    },
+    {
+      "message": "Failed to acquire the synchronization lock. failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/build with limit",
+      "missing": "key"
+    }
+  ]
+}

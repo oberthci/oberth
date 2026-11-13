@@ -153,3 +153,46 @@ func TestListDiagnosticsRefreshWholePageWithoutAnotherRead(t *testing.T) {
 		t.Fatalf("later rows starved or duplicated: %d", calls.Load())
 	}
 }
+
+func TestExecutionDiagnosticTTLRetainsAgeAndAttemptIsolation(t *testing.T) {
+	f := newControlFixture(t)
+	s := f.api(t)
+	fake := clocktesting.NewFakeClock(time.Now())
+	s.waitClock = fake
+	run := model.Run{ID: "attempt", SHA: "sha", WorkflowName: "workflow", UpdatedAt: fake.Now()}
+	var calls atomic.Int32
+	load := func(context.Context) listDiagnosticValue {
+		calls.Add(1)
+		return listDiagnosticValue{scheduling: &model.RunScheduling{ObservedAt: fake.Now(), Message: "Observed."}}
+	}
+	s.listDiagnostic(run, "execution", load)
+	drainListDiagnostics(t, s)
+	fake.Step(time.Second)
+	got := s.listDiagnostic(run, "execution", load)
+	if calls.Load() != 1 || got.ready != nil || got.scheduling.AgeSeconds != 1 {
+		t.Fatal("fresh execution observation reloaded or age lost", calls.Load(), got)
+	}
+	// Callers receive their own scheduling projection.
+	got.scheduling.Message = "caller mutation"
+	if s.listDiagnostic(run, "execution", nil).scheduling.Message != "Observed." {
+		t.Fatal("caller mutated cached projection")
+	}
+	fake.Step(executionDiagnosticTTL - time.Second)
+	s.listDiagnostic(run, "execution", load)
+	drainListDiagnostics(t, s)
+	if calls.Load() != 2 {
+		t.Fatal("expired observation not refreshed", calls.Load())
+	}
+	for _, change := range []func(*model.Run){
+		func(r *model.Run) { r.WorkflowName = "replacement" },
+		func(r *model.Run) { r.SHA = "new-sha" },
+		func(r *model.Run) { r.UpdatedAt = fake.Now() },
+	} {
+		other := run
+		change(&other)
+		if s.listDiagnostic(other, "execution", load).scheduling != nil {
+			t.Fatal("new durable identity reused old observation")
+		}
+		drainListDiagnostics(t, s)
+	}
+}

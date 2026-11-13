@@ -52,6 +52,13 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 	if run.Status == model.RunQueued {
 		result.State = "queued"
 		result.Message = "Accepted; preparing Workflow submission."
+		if s.repositories != nil {
+			repository, err := s.repositories.Repository(ctx, run.RepoID)
+			if err == nil && repository.ArchivedAt != nil {
+				result.Message = "Repository is archived; Workflow submission is paused until an operator unarchives it."
+				return result, "repository archived"
+			}
+		}
 		return result, "in line"
 	}
 	if run.ClaimedUnstarted() {

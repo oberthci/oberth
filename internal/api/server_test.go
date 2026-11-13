@@ -854,13 +854,7 @@ func TestMCPIssueResponsesUseMinimalWireShapes(t *testing.T) {
 
 func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
-	// The documented count in docs/mcp-setup.md must match the registered
-	// tool count. A mismatch means the table drifted from the code.
-	const documented = 79
 	definitions := toolDefinitions()
-	if len(definitions) != documented {
-		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
-	}
 
 	doc, err := os.ReadFile("../../docs/mcp-setup.md")
 	if err != nil {

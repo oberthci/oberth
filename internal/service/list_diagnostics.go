@@ -13,6 +13,7 @@ import (
 const listDiagnosticLimit = 512
 const listDiagnosticWorkers = 4
 const listDiagnosticTTL = 10 * time.Second
+const executionDiagnosticTTL = 2 * time.Second
 
 type listDiagnosticKey struct {
 	id, sha, testedSHA, workflow, scope, kind string
@@ -68,7 +69,25 @@ func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Conte
 			result.scheduling = &copy
 		}
 		cache.recent.MoveToFront(element)
-		if load == nil || (kind != "execution" && now.Sub(entry.checkedAt) < listDiagnosticTTL) {
+		ttl := listDiagnosticTTL
+		if kind == "execution" {
+			ttl = executionDiagnosticTTL
+		}
+		age := now.Sub(entry.checkedAt)
+		fresh := age >= 0 && age < ttl
+		if kind == "execution" {
+			if result.scheduling != nil && !result.scheduling.ObservedAt.IsZero() {
+				observedAge := now.Sub(result.scheduling.ObservedAt)
+				fresh = fresh && observedAge >= 0 && observedAge < ttl
+			}
+			// Execution assertions expire even when refresh is pending, the
+			// queue is full, or a reader has no loader. Backlog cannot extend
+			// the lifetime of a suspended or Pending reason.
+			if !fresh {
+				result = listDiagnosticValue{}
+			}
+		}
+		if load == nil || fresh {
 			return result
 		}
 	}

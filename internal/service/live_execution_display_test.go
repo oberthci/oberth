@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	clocktesting "k8s.io/utils/clock/testing"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -39,6 +41,8 @@ func TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory(t *te
 			queued := submittedDisplayRun(t, f, "queue")
 			suspended := submittedDisplayRun(t, f, "suspended")
 			s := f.api(t)
+			fake := clocktesting.NewFakeClock(time.Now())
+			s.waitClock = fake
 			var resumed atomic.Bool
 			s.schedulingObserver = schedulingObserverFunc(func(_ context.Context, run model.Run) (*model.ExecutionObservation, error) {
 				observation := &model.ExecutionObservation{State: "observed", Phase: "Running", Message: "Workflow execution is running."}
@@ -78,13 +82,14 @@ func TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory(t *te
 				t.Fatal("detail missed suspension", detail, err)
 			}
 			resumed.Store(true)
+			fake.Step(executionDiagnosticTTL)
 			value, err = s.Runs(t.Context(), actor, api.RunFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, run := range value.([]model.Run) {
 				if run.DisplayStatus != model.DisplayRunning || strings.Contains(strings.ToLower(run.DisplayReason), "suspend") || strings.Contains(run.DisplayReason, "workflow slot") {
-					t.Fatal("native state stayed cached after resume", run)
+					t.Fatal("native state stayed cached beyond TTL after resume", run)
 				}
 				durable, err := f.store.Run(t.Context(), run.ID)
 				if err != nil || durable.Status != model.RunRunning {
@@ -158,6 +163,48 @@ func TestSeedPendingReasonPrecedesArgoStateOnAllReadSurfaces(t *testing.T) {
 			kept, err := f.store.Run(t.Context(), run.ID)
 			if err != nil || kept.Status != model.RunRunning || kept.Error != "" {
 				t.Fatal("observation changed lifecycle", kept, err)
+			}
+		})
+	}
+}
+
+func TestArgoSlotReasonMatchesOnEveryRunRead(t *testing.T) {
+	for _, scoped := range []bool{false, true} {
+		t.Run(fmt.Sprint(scoped), func(t *testing.T) {
+			f := newControlFixture(t)
+			run := submittedDisplayRun(t, f, "slot-wait")
+			s := f.api(t)
+			s.schedulingObserver = schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
+				return &model.ExecutionObservation{State: "observed", Phase: "Pending", Message: model.ParallelismWaitMessage}, nil
+			})
+			actor := api.Actor{Identity: "owner"}
+			if scoped {
+				actor.Scope = []string{"codeberg"}
+			}
+			const want = "waiting for an Argo workflow slot (controller parallelism)"
+			listed, err := s.Runs(t.Context(), actor, api.RunFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := listed.([]model.Run)
+			if len(rows) != 1 || rows[0].DisplayReason != want {
+				t.Fatalf("list: %+v", rows)
+			}
+			detail, err := s.Run(t.Context(), actor, run.ID)
+			if err != nil || detail.(RunDetailResponse).Run.DisplayReason != want {
+				t.Fatal("detail", detail, err)
+			}
+			scopedAPI, err := s.forActor(t.Context(), actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := scopedAPI.status(t.Context(), f.repo.Name, run.SHA, "")
+			if err != nil || status.Run.DisplayReason != want {
+				t.Fatal("status", status, err)
+			}
+			kept, err := f.store.Run(t.Context(), run.ID)
+			if err != nil || kept.Status != model.RunRunning {
+				t.Fatal("display changed durable status", kept, err)
 			}
 		})
 	}

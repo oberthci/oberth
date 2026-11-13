@@ -108,7 +108,7 @@ func FragmentRefs(workflow *wfv1.Workflow) ([]FragmentKey, error) {
 	for _, site := range templateRefSites(workflow) {
 		key, err := ParseFragmentRef(site.ref.Name)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", site.where, err)
+			return nil, &AdmissionError{Cause: fmt.Errorf("%s: %w", site.where, err)}
 		}
 		if seen[key] {
 			continue
@@ -117,7 +117,7 @@ func FragmentRefs(workflow *wfv1.Workflow) ([]FragmentKey, error) {
 		keys = append(keys, key)
 	}
 	if len(keys) > MaxFragments {
-		return nil, fmt.Errorf("argoworkflow: document references %d fragments, the limit is %d", len(keys), MaxFragments)
+		return nil, &AdmissionError{Cause: fmt.Errorf("argoworkflow: document references %d fragments, the limit is %d", len(keys), MaxFragments)}
 	}
 	return keys, nil
 }

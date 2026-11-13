@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -190,4 +191,50 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 		t.Fatalf("refused access_allow was recorded: %+v", accessGrants)
 	}
 
+}
+
+func TestQueuedArchivedRepositoryReasonOnEveryReadSurface(t *testing.T) {
+	f := newControlFixture(t)
+	run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a retained anomalous row. Normal archive writes refuse active runs.
+	if _, err = f.store.AppendAuditAction(t.Context(), model.AuditActionSpec{Actor: "owner", Action: "repository.archive", ResourceType: "repository", ResourceID: fmt.Sprint(f.repo.ID), Details: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+	s := f.api(t)
+	s.schedulingObserver = schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
+		t.Error("queued archived run polled Argo")
+		return nil, nil
+	})
+	for _, actor := range []api.Actor{{Identity: "owner"}, {Identity: "reader", Scope: []string{"codeberg"}}} {
+		value, err := s.Runs(t.Context(), actor, api.RunFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := value.([]model.Run)
+		if len(rows) != 1 || rows[0].DisplayReason != "repository archived" || rows[0].Status != model.RunQueued {
+			t.Fatal("list lost archive reason or changed status", rows)
+		}
+		detail, err := s.Run(t.Context(), actor, run.ID)
+		if err != nil || detail.(RunDetailResponse).Run.DisplayReason != "repository archived" {
+			t.Fatal("detail lost archive reason", detail, err)
+		}
+		scoped, err := s.forActor(t.Context(), actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := scoped.status(t.Context(), f.repo.Name, run.SHA, "")
+		if err != nil || status.DisplayReason != "repository archived" || status.Scheduling == nil || !strings.Contains(status.Scheduling.Message, "operator unarchives") {
+			t.Fatal("status lost archive remedy", status, err)
+		}
+	}
+	if _, err = f.store.SetRepositoryArchived(t.Context(), "owner", f.repo.Name, false); err != nil {
+		t.Fatal(err)
+	}
+	value, err := s.Run(t.Context(), api.Actor{Identity: "owner"}, run.ID)
+	if err != nil || value.(RunDetailResponse).Run.DisplayReason != "in line" {
+		t.Fatal("unarchived repository retained stale reason", value, err)
+	}
 }

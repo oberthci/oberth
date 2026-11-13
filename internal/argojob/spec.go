@@ -935,7 +935,7 @@ func authorizeWithApprovalTable(paths []string, request Request) error {
 		if !request.ApprovedSecrets[declared] {
 			problems = append(problems, fmt.Errorf(
 				"argojob: unapproved secret path %q for repo %q; "+
-					"approve with: oberth access allow %s '*' %s",
+					"correct the Workflow secret path, or ask an operator to approve with: oberth access allow %s '*' %s",
 				declared, request.Repo, request.Repo, declared))
 		}
 	}

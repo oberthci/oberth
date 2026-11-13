@@ -36,6 +36,13 @@ func prepareCLIWait() error {
 			cliReaper.err = fmt.Errorf("git descendant reaping requires pidfds: %w", err)
 			return
 		}
+		// Prove individual signaling is available before starting a child.
+		// It is also the ownership-safe fallback when group signals are denied.
+		if err := unix.PidfdSendSignal(fd, 0, nil, 0); err != nil {
+			_ = unix.Close(fd)
+			cliReaper.err = fmt.Errorf("git descendant cleanup requires pidfd signaling: %w", err)
+			return
+		}
 		var info unix.Siginfo
 		probeErr := unix.Waitid(unix.P_PIDFD, fd, &info, unix.WEXITED|unix.WNOHANG, nil)
 		_ = unix.Close(fd)
@@ -67,21 +74,30 @@ func waitCLICommand(ctx context.Context, cmd *exec.Cmd) (error, error) {
 		}
 	}()
 	stopped := false
-	var observationErr error
+	var observationErr, signalErr error
 	select {
 	case observationErr = <-leader:
 	case <-ctx.Done():
 		stopped = true
 		// The leader has not been reaped, including when the exit notification
 		// and cancellation are simultaneously ready.
-		_ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL)
+		signalErr = stopCLIGroup(cmd.Process.Pid)
+		if signalErr != nil {
+			// The unreaped direct child still pins its own PID, so a positive
+			// PID signal cannot target a replacement even if pidfd signaling
+			// failed for another group member. Never discard a stop failure.
+			err := unix.Kill(cmd.Process.Pid, unix.SIGKILL)
+			if err != nil && !errors.Is(err, unix.ESRCH) {
+				signalErr = errors.Join(signalErr, err)
+			}
+		}
 		observationErr = <-leader
 	}
 	if observationErr != nil {
 		// Without the held leader, do not risk signaling a reused group ID.
 		waitErr := errors.Join(fmt.Errorf("observe git process: %w", observationErr), cmd.Wait())
 		if stopped {
-			return waitErr, errors.Join(context.Cause(ctx), observationErr)
+			return waitErr, errors.Join(context.Cause(ctx), signalErr, observationErr)
 		}
 		return waitErr, nil
 	}
@@ -90,7 +106,7 @@ func waitCLICommand(ctx context.Context, cmd *exec.Cmd) (error, error) {
 	cleanupErr := reapCLIGroup(cmd.Process.Pid, time.Now().Add(5*time.Second))
 	waitErr := errors.Join(cleanupErr, cmd.Wait())
 	if stopped {
-		return waitErr, errors.Join(context.Cause(ctx), cleanupErr)
+		return waitErr, errors.Join(context.Cause(ctx), signalErr, cleanupErr)
 	}
 	return waitErr, nil
 }
@@ -125,16 +141,11 @@ func readCLIProcess(pid int) (cliProcess, error) {
 
 func reapCLIGroup(group int, deadline time.Time) error {
 	for {
-		// The unreaped group leader pins this ID throughout the loop. Repeat
-		// the signal for any child fork already in flight at the first kill.
-		if err := unix.Kill(-group, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
-			return fmt.Errorf("stop git process group: %w", err)
-		}
 		entries, err := os.ReadDir("/proc")
 		if err != nil {
 			return fmt.Errorf("inspect git descendants: %w", err)
 		}
-		remaining := false
+		remaining, live := false, false
 		for _, entry := range entries {
 			pid, err := strconv.Atoi(entry.Name())
 			if err != nil || pid == group {
@@ -161,6 +172,9 @@ func reapCLIGroup(group int, deadline time.Time) error {
 				continue
 			}
 			remaining = true
+			if process.state != 'Z' && process.state != 'X' {
+				live = true
+			}
 			if process.parent == os.Getpid() && process.state == 'Z' {
 				if err := reapCLIChild(pid, group); err != nil {
 					return fmt.Errorf("reap git descendant: %w", err)
@@ -169,6 +183,15 @@ func reapCLIGroup(group int, deadline time.Time) error {
 		}
 		if !remaining {
 			return nil
+		}
+		// The held, exited leader pins the group ID. Only living descendants
+		// need a signal; an empty group or zombies cannot fork. Some container
+		// policies refuse group signals even when the forge probe has exited
+		// successfully. Do not make that unnecessary syscall a probe failure.
+		if live {
+			if err := stopCLIGroup(group); err != nil {
+				return err
+			}
 		}
 		if time.Now().After(deadline) {
 			return errors.New("git descendant cleanup exceeded five seconds")
@@ -206,6 +229,80 @@ func reapCLIChild(pid, group int) error {
 		}
 	}
 	if errors.Is(err, unix.ECHILD) || errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+// The unreaped leader pins group throughout this call. Confinement may deny
+// negative-PID kill while permitting individual signals. Open a pidfd, recheck
+// membership, then signal that exact process: a recycled /proc PID cannot kill
+// an unrelated process. Cleanup repeats this scan for forks already in flight.
+func stopCLIGroup(group int) error {
+	err := unix.Kill(-group, unix.SIGKILL)
+	if err == nil || errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	if !errors.Is(err, unix.EACCES) && !errors.Is(err, unix.EPERM) {
+		return fmt.Errorf("stop git process group: %w", err)
+	}
+	entries, readErr := os.ReadDir("/proc")
+	if readErr != nil {
+		return errors.Join(err, fmt.Errorf("inspect git group for individual signals: %w", readErr))
+	}
+	var failures error
+	for _, entry := range entries {
+		pid, parseErr := strconv.Atoi(entry.Name())
+		if parseErr != nil {
+			continue
+		}
+		process, inspectErr := readCLIProcess(pid)
+		if os.IsNotExist(inspectErr) || errors.Is(inspectErr, unix.ESRCH) {
+			continue
+		}
+		if inspectErr != nil {
+			failures = errors.Join(failures, inspectErr)
+			continue
+		}
+		if process.group != group || process.state == 'Z' || process.state == 'X' {
+			continue
+		}
+		if signalErr := stopCLIProcess(pid, group); signalErr != nil {
+			failures = errors.Join(failures, signalErr)
+		}
+	}
+	if failures != nil {
+		return fmt.Errorf("stop git group members: %w", failures)
+	}
+	return nil
+}
+
+func stopCLIProcess(pid, group int) error {
+	fd, err := unix.PidfdOpen(pid, 0)
+	if errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	process, err := readCLIProcess(pid)
+	if os.IsNotExist(err) || errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if process.group != group || process.state == 'Z' || process.state == 'X' {
+		return nil
+	}
+	for {
+		err = unix.PidfdSendSignal(fd, unix.SIGKILL, nil, 0)
+		if !errors.Is(err, unix.EINTR) {
+			break
+		}
+	}
+	if errors.Is(err, unix.ESRCH) {
 		return nil
 	}
 	return err
