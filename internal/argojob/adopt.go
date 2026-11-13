@@ -66,6 +66,9 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 }
 
 func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request AdoptionRequest) (Adoption, error) {
+	if err := validateWorkflowRecovery(workflow); err != nil {
+		return Adoption{}, err
+	}
 	if err := verifyDeliveredPinnedSources(workflow, request.PinnedSources); err != nil {
 		return Adoption{}, err
 	}
@@ -82,9 +85,6 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	}
 	if !argoworkflow.ScheduleEntryMatches(workflow, request.RunTrigger, request.ScheduleEntry) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption schedule entry mismatch", request.Name)
-	}
-	if err := argoworkflow.RefuseRetiredWorkflow(workflow); err != nil {
-		return Adoption{}, err
 	}
 	if workflow.Annotations[capabilityAnnotation] == "" {
 		for _, template := range workflow.Spec.Templates {

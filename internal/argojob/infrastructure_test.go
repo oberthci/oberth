@@ -157,27 +157,15 @@ func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 		{name: "v4/pod-only", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: total, reason: totalReason},
 		// The kubelet prints Quantity.String(), which keeps exponent form.
 		{name: "v4/exponent", policy: helperStoragePolicy, template: declared, nodeMsg: "Pod ephemeral local storage usage exceeds the total limit of containers 1e9. ", reason: "the total container limit 1e9"},
-		{name: "v3/node", policy: stepLimitHelperStoragePolicy, template: undeclared, nodeMsg: total, reason: totalReason},
-		{name: "v3/declared", policy: stepLimitHelperStoragePolicy, template: declared, nodeMsg: total, reason: totalReason},
-		// v3 limited the helpers of this shape although no step limit runs:
-		// the total is helper limits alone, so it stays infrastructure.
-		{name: "v3/containerset-defaults", policy: stepLimitHelperStoragePolicy, defaults: setDefaults, template: set, nodeMsg: total},
+		// Container-set default lists do not contribute the step limit.
 		{name: "v4/containerset-defaults", policy: helperStoragePolicy, defaults: setDefaults, template: set, nodeMsg: total, reason: totalReason},
-		{name: "v2/declared-template", policy: cappedHelperStoragePolicy, template: declared, nodeMsg: total, reason: totalReason},
-		{name: "v2/default-sidecar", policy: cappedHelperStoragePolicy, defaults: sidecarDefaults, template: undeclared, nodeMsg: total, reason: totalReason},
-		// v2 limited every helper: an undeclared step's 512Mi total was not its
-		// own budget. It stays infrastructure with at most one auto-retry.
-		{name: "v2/undeclared-template", policy: cappedHelperStoragePolicy, template: undeclared, nodeMsg: total},
-		{name: "v2/unresolved-template", policy: cappedHelperStoragePolicy, template: wfv1.Template{Name: "other", Container: declared.Container}, nodeMsg: total},
-		{name: "v1/undeclared-pod", policy: legacyHelperStoragePolicy, template: undeclared, nodeMsg: "Evicted", podMsg: total},
-		// A step container's own limit, under any policy.
+
+		// A step container's own limit.
 		{name: "v4/container", policy: helperStoragePolicy, template: declared, nodeMsg: mainOver, reason: "container main's own limit 640Mi"},
 		{name: "v4/container-pod-only", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: mainOver, reason: "container main's own limit 640Mi"},
-		{name: "v2/container", policy: cappedHelperStoragePolicy, template: declared, nodeMsg: "Evicted: " + mainOver, reason: "container main's own limit 640Mi"},
 		{name: "v4/default-sidecar", policy: helperStoragePolicy, defaults: sidecarDefaults, template: undeclared, nodeMsg: `Container proxy exceeded its local ephemeral storage limit "640Mi". `, reason: "container proxy's own limit 640Mi"},
 		// A server helper's limit is not the step's budget.
 		{name: "v4/helper-container", policy: helperStoragePolicy, template: declared, nodeMsg: `Container wait exceeded its local ephemeral storage limit "512Mi". `},
-		{name: "v2/helper-container-pod-only", policy: cappedHelperStoragePolicy, template: undeclared, nodeMsg: "Evicted", podMsg: `Container wait exceeded its local ephemeral storage limit "512Mi". `},
 		{name: "v4/container-undeclared", policy: helperStoragePolicy, template: undeclared, nodeMsg: mainOver},
 		{name: "v4/container-unresolved-template", policy: helperStoragePolicy, template: wfv1.Template{Name: "other", Container: declared.Container}, nodeMsg: mainOver},
 		{name: "v4/containerset-defaults-container", policy: helperStoragePolicy, defaults: setDefaults, template: set, nodeMsg: mainOver},

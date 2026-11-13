@@ -373,10 +373,6 @@ trust assumptions and complete invalidation rules.
     server-owned patch removes `wait` mirrors of both the secret volume and
     main release token after Argo adds them (#621); the effective admitted Pod
     must still be checked for those absent mounts.
-  - **Transitional:** `oberth secretstore materialize` absorbs the old
-    `oberth-secret-materialize` shim, reading from envconsul-set env vars.
-    `envconsul` remains the legacy path. Both chains produce the same
-    `$OBERTH_SECRETSTORE_DIR` file layout and the same env stripping.
   Values and value-derived digests never appear in etcd, Job annotations,
   node disk (on swapless nodes or verified RAM-only zram), or server-side
   logs; only names and paths are annotated. `secretstore exec` exempts active
@@ -433,12 +429,9 @@ Original object UID and intent continue to fence recovery and cleanup. See
   when per-repo isolation exists for other repos would leak cross-repo or
   cross-org secrets. The CI system-path prohibition (branch pipelines may
   not declare system-namespace paths) and the approval-table grant check
-  are enforced as defense in depth on top of the identity switch. Secret paths a repository-authored envconsul
-  configuration (`secret {}` stanzas in `-config` files, `-secret` flags) or
-  an `oberth secretstore exec --path` invocation would fetch are
-  admission-checked against the declared annotation, with envconsul
-  configuration read from the immutable run workspace; a config file outside
-  the source checkout is refused. The YAML must not declare
+  are enforced as defense in depth on top of the identity switch. Secret paths an
+  `oberth secretstore exec --path` invocation would fetch are
+  admission-checked against the declared annotation. The YAML must not declare
   `serviceAccountName`.
 - **AI-CONTRACT:** Explicit `automountServiceAccountToken: false` remains false
   through forced identity assignment, including workflow/default opt-outs and
@@ -2060,7 +2053,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   It grants no Pod, `pods/log` or `pods/exec` access. The separate pipeline
   namespace Role grants `pods/exec` create only for source seeding into
   run-scoped volumes. Pipeline secrets arrive through projected identity
-  tokens and envconsul, not through the exec stream. The optional
+  tokens and secretstore exec, not through the exec stream. The optional
   `secretstore.createAuthDelegatorBinding` ClusterRoleBinding lets OpenBao
   validate login tokens through TokenReview without a stored reviewer JWT.
   Argo-authored workflows
@@ -2151,28 +2144,6 @@ MCP tools: `promote_grant` (admin, creates a time-bounded grant),
 
 Maximum grant lifetime is a documented knob
 (`PromotionGrantMaxLifetime`, default 24 h, hard ceiling 168 h / 7 days).
-
-### Trivy cache guard (#655)
-
-Admission refuses an Argo DAG with two Trivy leaves that are UNORDERED (no DAG
-path between them) and whose `--cache-dir` resolves to the SAME shared volume.
-The predicate keys on the resolved shared volume, not the string alone: a
-template with `oberth.ci/workspace-mounts: none` or `cache` uses a per-Pod
-emptyDir, so two such templates sharing the same `--cache-dir` string are
-accepted. A `--cache-dir` inside the persistent cache (`/work/cache`) is shared
-on every leaf that keeps that mount (`cache`, `readonly` or no annotation).
-
-Accepted shapes:
-- Single Trivy leaf (no pair).
-- Two Trivy leaves with an ordering edge (direct or transitive).
-- Two unordered Trivy leaves whose caches are private (`workspace-mounts: none`
-  or `cache`, no VCT mount at the cache path, and not inside `/work/cache`).
-
-Rejected shape: two unordered Trivy leaves where both have `--cache-dir` at a
-path backed by the workspace VCT (when `workspace-mounts` is absent or
-`readonly` and a `work` VCT is declared), by the persistent cache (`--cache-dir`
-inside `/work/cache` and `workspace-mounts != none`), or by a repo-declared VCT
-mount at the same path.
 
 ### secretstore_plan MCP tool (#611)
 
@@ -3422,3 +3393,6 @@ checks with an explicit unverified warning that enforcement runs first at
 install after approval; maintenance preserves its stored policy choice. Plans
 provide no enforcement evidence. Fresh install apply and explicit verification
 retain their enforcement gates.
+
+Recovery supports only the current helper-storage policy and server command
+format. Removed formats are refused before reseeding or adopting a Workflow.

@@ -192,7 +192,7 @@ func TestValidateExamplesPassAdmission(t *testing.T) {
 
 // TestReleaseExampleArtifactsOnSharedVolume validates that the go-project
 // release example writes build artifacts to a shared volume (not private scratch),
-// and that the envconsul config file exists.
+// and that the current secretstore exec command is used.
 func TestReleaseExampleArtifactsOnSharedVolume(t *testing.T) {
 	t.Parallel()
 	releaseYAML, err := os.ReadFile(filepath.Join("..", "..", "examples", "go-project", ".oberth", "release.yaml"))

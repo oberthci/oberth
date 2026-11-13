@@ -68,7 +68,7 @@ func applyReleaseWIFStepIdentities(leaves []*wfv1.Template, config Config, reque
 		if !config.releaseWIFStepRouteMatches(canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo), leaf.Name, request) {
 			return fmt.Errorf("argojob: WIF-only identity for template %q is not approved for this route", leaf.Name)
 		}
-		if templateUsesOberthSecretstore(leaf) || templateUsesEnvconsul(leaf) {
+		if templateUsesOberthSecretstore(leaf) {
 			return fmt.Errorf("argojob: pinned WIF-only identity for template %q cannot consume the secret store", leaf.Name)
 		}
 		leaf.ServiceAccountName = sa

@@ -173,13 +173,12 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
-		if err := recoverHelperStorage(existing, &request); err != nil {
+		if err := validateWorkflowRecovery(existing); err != nil {
 			return "", err
 		}
 		request.SourceVolume = controller.expectedSourceVolume(request)
-		// Reconstruct the original delivery footprint without reseeding. Legacy
-		// workflows retain their source and executor security policy. No command
-		// instrumentation or measurement executable is added.
+		// Reconstruct the current delivery footprint without reseeding.
+		// Removed execution formats have already been refused.
 		intended, buildErr := Build(controller.config, request)
 		if buildErr != nil {
 			return "", buildErr
@@ -1108,7 +1107,6 @@ func normalizeSourceVolume(workflow *wfv1.Workflow) {
 		return kept
 	}
 	normalizeContainer := func(c *corev1.Container) {
-		c.Command = legacySecurityCommand(c.Command)
 		c.VolumeMounts = removeMounts(c.VolumeMounts)
 		c.Env = removeVaultCACertEnv(c.Env)
 	}

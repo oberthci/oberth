@@ -53,10 +53,10 @@ automountServiceAccountToken: false
 # Templates with approved secrets. The bound Vault role's policy is derived
 # from the approval table via `oberth access allow`.
 #
-# automountServiceAccountToken is false here too, deliberately. envconsul does
+# automountServiceAccountToken is false here too, deliberately. secretstore exec does
 # NOT depend on the automount: the server injects a projected, ten-minute
 # ServiceAccount token volume at the default path on exactly the templates
-# whose command is envconsul (internal/argojob/spec.go, releaseTokenVolume).
+# whose command is secretstore exec (internal/argojob/spec.go, releaseTokenVolume).
 # With the automount enabled, every OTHER step container of a credentialed
 # Workflow — setup, test, build, package — also carried a live token for this
 # identity while executing repository-controlled code, letting a compromised

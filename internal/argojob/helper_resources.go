@@ -23,81 +23,22 @@ func executorControlResources() corev1.ResourceRequirements {
 }
 
 const helperStorageAnnotation = "oberth.ci/helper-storage"
-const legacyHelperStoragePolicy = "argo-256Mi-512Mi-v1"
 
-// v2 applies the same budgets to nonroot producer helpers too. Every helper carries
-// the 512Mi limit, so a step without its own limit gets a 512Mi Pod total.
-const cappedHelperStoragePolicy = "argo-256Mi-512Mi-v2"
-
-// v3 keeps the v2 helpers and requests. The kubelet Pod total sums only the
-// limits that are declared, so a helper limit is added only when the step's own
-// containers declare an ephemeral-storage limit (#1491). Its decision counted
-// template-default container-set limits, which Argo replaces, and missed
-// default-only and restartable-init sidecars. It stays for exact recovery.
-const stepLimitHelperStoragePolicy = "argo-256Mi-512Mi-v3"
-
-// v4 decides "declared" from the containers Argo actually runs after merging
-// spec.templateDefaults (stepStorageLimits).
+// The sole supported helper policy; older submissions must be drained before upgrade.
 const helperStoragePolicy = "argo-256Mi-512Mi-v4"
 
-// Reconstruct the immutable resources of already-submitted Workflows. This
-// switch is private to recovery; authored annotations cannot opt new runs out.
-func recoverHelperStorage(wf *wfv1.Workflow, request *Request) error {
-	policy := wf.Annotations[helperStorageAnnotation]
-	switch policy {
-	case "", legacyHelperStoragePolicy, cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy:
-	default:
-		return fmt.Errorf("argojob: existing workflow has an unknown helper-storage policy")
+func validateHelperStorage(wf *wfv1.Workflow) error {
+	if wf.Annotations[helperStorageAnnotation] != helperStoragePolicy {
+		return fmt.Errorf("argojob: existing workflow has an unsupported helper-storage policy; only %s can be recovered", helperStoragePolicy)
 	}
-	request.legacyHelperStorage = policy == ""
-	request.legacyProfileHelperResources = policy == "" || policy == legacyHelperStoragePolicy
-	request.legacyHelperStorageLimits = policy == cappedHelperStoragePolicy
-	request.legacyStepLimitHelperStorage = policy == stepLimitHelperStoragePolicy
 	return nil
 }
 
-// The policy Build stamps for a request; recovery selects a historical one.
-func (request Request) helperStoragePolicy() string {
-	switch {
-	case request.legacyHelperStorage:
-		return ""
-	case request.legacyProfileHelperResources:
-		return legacyHelperStoragePolicy
-	case request.legacyHelperStorageLimits:
-		return cappedHelperStoragePolicy
-	case request.legacyStepLimitHelperStorage:
-		return stepLimitHelperStoragePolicy
-	}
-	return helperStoragePolicy
-}
-
-func executorResourcesWithStorage(enabled bool) corev1.ResourceRequirements {
+// Helpers reserve storage and add a limit only when the step declares one.
+func helperResources(workflow *wfv1.Workflow, t *wfv1.Template) corev1.ResourceRequirements {
 	resources := executorControlResources()
-	if !enabled {
-		delete(resources.Requests, corev1.ResourceEphemeralStorage)
+	if !stepDeclaresStorageLimit(workflow, t) {
 		delete(resources.Limits, corev1.ResourceEphemeralStorage)
-	}
-	return resources
-}
-
-// helperResources is the budget of one server-owned helper (init, the token
-// waiter, wait, or a resource/data executor main) in template t. Since v3 a
-// helper reserves storage but adds a limit only when the step itself declares
-// one: an undeclared step must not inherit a Pod-level cap.
-func helperResources(workflow *wfv1.Workflow, t *wfv1.Template, storage bool) corev1.ResourceRequirements {
-	resources := executorResourcesWithStorage(storage)
-	if !storage {
-		return resources
-	}
-	switch workflow.Annotations[helperStorageAnnotation] {
-	case stepLimitHelperStoragePolicy:
-		if !stepDeclaresStorageLimitV3(workflow, t) {
-			delete(resources.Limits, corev1.ResourceEphemeralStorage)
-		}
-	case helperStoragePolicy:
-		if !stepDeclaresStorageLimit(workflow, t) {
-			delete(resources.Limits, corev1.ResourceEphemeralStorage)
-		}
 	}
 	return resources
 }
@@ -165,54 +106,4 @@ func stepStorageLimits(workflow *wfv1.Workflow, t *wfv1.Template) map[string]res
 		}
 	})
 	return limits
-}
-
-// stepDeclaresStorageLimitV3 is the v3 decision, kept byte-for-byte so that
-// adopted v3 Workflows rebuild with the helper limits they were submitted with.
-// New Workflows use stepDeclaresStorageLimit.
-func stepDeclaresStorageLimitV3(workflow *wfv1.Workflow, t *wfv1.Template) bool {
-	if t == nil {
-		return false
-	}
-	limited := func(c *corev1.Container) bool {
-		if c == nil {
-			return false
-		}
-		q, ok := c.Resources.Limits[corev1.ResourceEphemeralStorage]
-		return ok && q.Sign() > 0
-	}
-	defaults := workflow.Spec.TemplateDefaults
-	if t.Container != nil && (limited(t.Container) || defaults != nil && limited(defaults.Container)) {
-		return true
-	}
-	if t.Script != nil && (limited(&t.Script.Container) || defaults != nil && defaults.Script != nil && limited(&defaults.Script.Container)) {
-		return true
-	}
-	if t.ContainerSet != nil {
-		for i := range t.ContainerSet.Containers {
-			if limited(&t.ContainerSet.Containers[i].Container) {
-				return true
-			}
-			if defaults != nil && defaults.ContainerSet != nil {
-				for j := range defaults.ContainerSet.Containers {
-					if defaults.ContainerSet.Containers[j].Name == t.ContainerSet.Containers[i].Name && limited(&defaults.ContainerSet.Containers[j].Container) {
-						return true
-					}
-				}
-			}
-		}
-	}
-	for i := range t.Sidecars {
-		if limited(&t.Sidecars[i].Container) {
-			return true
-		}
-		if defaults != nil {
-			for j := range defaults.Sidecars {
-				if defaults.Sidecars[j].Name == t.Sidecars[i].Name && limited(&defaults.Sidecars[j].Container) {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }

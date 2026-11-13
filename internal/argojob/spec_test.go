@@ -664,9 +664,8 @@ func containerEnv(container *corev1.Container) map[string]string {
 
 // The release tier gets the anchor as a file and its path as VAULT_CACERT.
 //
-// This is the whole delivery: envconsul is a release step's first process and
-// logs in before any Oberth-authored process exists in that container, so the
-// anchor has to be mounted, not materialised by something running inside.
+// The release step needs the trust anchor before it can log in, so the
+// server delivers the anchor as a mounted file.
 func TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
@@ -702,7 +701,7 @@ func TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {
 		t.Fatalf("anchor mount = %+v", *anchor)
 	}
 	// The login token is scoped to credentialed templates (those whose command
-	// is envconsul). This template's command is /bin/true, so it must not
+	// is secretstore exec). This template's command is /bin/true, so it must not
 	// carry the token even though the projected volume exists at the workflow
 	// level (verified below). Per-template scoping is tested in
 	// TestBuildMountsReleaseTokenOnlyInCredentialedTemplates.
@@ -1027,7 +1026,7 @@ func TestReleaseWithNoPathsGetsPipelineIdentityAndNoVaultWiring(t *testing.T) {
 
 // TestBuildMountsReleaseTokenOnlyInCredentialedContainer proves the projected
 // ServiceAccount token is mounted ONLY on the container whose command is
-// envconsul, not on init containers or sidecars in the same template. This
+// secretstore exec, not on init containers or sidecars in the same template. This
 // prevents a repository-selected init image from exfiltrating the credential.
 // Issue #27, finding 2.
 func TestBuildMountsReleaseTokenOnlyInCredentialedContainer(t *testing.T) {
@@ -1044,8 +1043,8 @@ spec:
     - name: main
       container:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        command: [envconsul]
-        args: ["-config", "/work/src/.oberth/envconsul.hcl", "make", "release"]
+        command: [oberth, secretstore, exec]
+        args: ["--path", "oberth/data/release/r2-upload-token", "--", "make", "release"]
       initContainers:
         - name: hostile-init
           image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -1057,20 +1056,13 @@ spec:
 `
 	request := releaseRequestWithAnchor(documentWithInitAndSidecar)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
-	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
-		".oberth/envconsul.hcl": `secret {
-  no_prefix = true
-  path      = "oberth/data/release/r2-upload-token"
-}
-`,
-	})
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	template := workflow.Spec.Templates[0]
 
-	// The main container (envconsul) MUST have the token mount.
+	// The main container (secretstore exec) MUST have the token mount.
 	if template.Container == nil {
 		t.Fatal("main container is nil")
 	}
@@ -1081,7 +1073,7 @@ spec:
 		}
 	}
 	if !mainHasToken {
-		t.Fatal("the envconsul main container is missing the release token mount")
+		t.Fatal("the secretstore exec main container is missing the release token mount")
 	}
 
 	// Init containers MUST NOT have the token mount.

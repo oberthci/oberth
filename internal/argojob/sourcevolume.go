@@ -350,7 +350,7 @@ func (seeder *SourceSeeder) fillPinnedSource(ctx context.Context, podName string
 // fillVaultCA streams the OpenBao TLS trust anchor into the same claim, over
 // the same exec, while the seeding Pod is still up.
 //
-// A credentialed step's first process is envconsul, which logs in to OpenBao
+// A credentialed step's first process is secretstore exec, which logs in to OpenBao
 // before any Oberth-authored process exists in that container: the anchor has
 // to be a file the kubelet can already mount, not content some later process
 // writes. The claim is the only filesystem the server can put a file on before

@@ -166,8 +166,8 @@ credentialed release leaves, Pod-leaf placement and every container shape;
 leaf on the release tier.
 `TestAdmitWorkspaceMountsValues` refuses unknown values;
 `TestAdmitNonrootRefusesWorkspaceCache` refuses `cache` on leaves that take no
-host cache; `TestTrivyGuardWorkspaceCache` isolates scratch storage per Pod and
-`/work/cache` as shared for cache leaves.
+host cache. `TestValidateRuntimeAdmissionParity` admits unordered Trivy steps
+sharing a cache through both CLI validation and Build.
 
 Parallel CI race groups: `TestOberthRaceGroupsCoverEveryPackageExactlyOnce`
 compares the store/service/gitcache/remainder partition with the actual `go list ./...`
@@ -592,3 +592,8 @@ path, including source seeding and the actual Workflow API post for both strateg
 `TestOperatorShutdownRetainsReasonWithoutInfrastructureHint` covers the durable
 reason, cancelled display and agent event without an infrastructure retry hint.
 The isolated real-Argo B1/B2 race proofs retain their classification protections.
+
+`TestRemovedExecutionFormatsRefusedWithoutReseeding` exercises Create and Adopt
+with removed helper policies and observer wrappers, proving that refusal does
+not seed source or create another Workflow. Captured controller Pods remain
+immutable security evidence; current helper budgets are tested independently.

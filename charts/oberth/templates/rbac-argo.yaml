@@ -31,7 +31,7 @@ rules:
   # checkout on the server's volume cannot be handed to a pipeline that runs
   # here. The server instead creates a claim per run and fills it through a
   # short-lived Pod over the exec stream. Pipeline secrets instead use
-  # projected identity tokens and envconsul.
+  # projected identity tokens and secretstore exec.
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["create", "get", "list", "update", "delete"]

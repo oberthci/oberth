@@ -84,6 +84,8 @@ longer creates or manages this ConfigMap. Upgrade preserves an existing object
 and its data with Helm ownership removed; new installs create none. Operators
 apply and maintain semaphore limits themselves.
 
+Order Trivy steps that share a cache with `depends`, or use a synchronization mutex.
+
 An administrator-selected execution target still authenticates its approved
 cluster, namespace, controller and service identity, but adds no nodeSelector or
 tolerations and refuses no authored placement because of a target. Repository
@@ -388,7 +390,7 @@ No new label was added for this release.
 | `oberth.ci/sources` | Workflow with pinned sources | Canonical immutable pinned-source record |
 | `oberth.ci/fragments` | Workflow, when fragments used | Immutable fragment-resolution record |
 | `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator API-kind/action capability binding |
-| `oberth.ci/helper-storage` | Workflow | Versioned server-helper footprint binding |
+| `oberth.ci/helper-storage` | Workflow | Current server-helper footprint binding; older policies are refused on recovery |
 | `oberth.ci/execution-placement` | Workflow, approved target | Approved execution authority digest; no node placement policy |
 | `oberth.ci/execution-target` | Custody-tracked target objects | Exact durable target binding digest |
 | `oberth.ci/release-wif-policy-sha256` | Workflow, WIF release | Public role/policy binding digest |

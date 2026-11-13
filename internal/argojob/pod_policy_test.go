@@ -168,7 +168,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 		}
 	}
 	for _, shape := range []string{"container", "script"} {
-		wf := nonrootBuiltWithHelperPolicy(t, shape == "script", "128Mi", legacyHelperStoragePolicy)
+		wf := nonrootBuiltWithScratch(t, shape == "script", "128Mi")
 		pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), wf)
 		if !accepts(pod) {
 			t.Fatalf("current %s controller shape refused", shape)

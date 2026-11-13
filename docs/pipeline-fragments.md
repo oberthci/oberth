@@ -126,10 +126,9 @@ skipping a fragment could also skip checks on the consumer's own templates,
 including resource allowlists and workspace isolation.
 
 For documents without fragments, local validation also runs the server's
-document-only isolation and Trivy cache checks. This includes refusing a
-credential chain with a CI cache mount, token opt-outs with credential chains,
-and unordered Trivy steps sharing a cache. Release pipelines use the release
-tier's isolation rules. These checks do not need server access; approvals,
+document-only isolation checks. This includes refusing a credential chain with
+a CI cache mount and token opt-outs with credential chains. Release pipelines
+use the release tier's isolation rules. These checks do not need server access; approvals,
 grants, Kubernetes namespace policies, identities and admission receipts still
 require server admission.
 

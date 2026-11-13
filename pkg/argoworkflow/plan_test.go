@@ -316,7 +316,7 @@ spec:
   - name: push
     script:
       image: "golang:1.26"
-      command: ["/usr/local/bin/envconsul", "-config", "/src/.oberth/envconsul.hcl"]
+      command: ["oberth", "secretstore", "exec", "--path", "kv/ci/token", "--", "/bin/true"]
       source: "true"
   - name: version
     container:
@@ -370,13 +370,14 @@ func TestUsesSecrets(t *testing.T) {
 		template *wfv1.Template
 		want     bool
 	}{
-		{"bare envconsul", container([]string{"envconsul", "-config", "x.hcl"}), true},
-		{"envconsul by path", script([]string{"/usr/local/bin/envconsul"}), true},
+		{"envconsul receives no credential token", container([]string{"envconsul", "-config", "x.hcl"}), false},
+		{"envconsul by path receives no credential token", script([]string{"/usr/local/bin/envconsul"}), false},
 		{"secretstore exec in args", container([]string{"/run/oberth/bin/oberth"}, "secretstore", "exec", "--path", "kv/a"), true},
 		{"retired materialize gets no credential token", script([]string{"oberth", "secretstore", "materialize"}), false},
 		{"oberth without secretstore", container([]string{"oberth", "version"}), false},
 		{"secretstore under another binary", container([]string{"sh"}, "secretstore", "exec"), false},
 		{"secretstore subcommand alone", container([]string{"oberth"}, "secretstore"), false},
+		{"retired observer does not unwrap", container([]string{"/run/oberth/usage/oberth", "internal-step-exec", "--", "oberth", "secretstore", "exec"}), false},
 		{"plain shell", container([]string{"/bin/sh", "-c", "true"}), false},
 		{"no pod", &wfv1.Template{}, false},
 	}

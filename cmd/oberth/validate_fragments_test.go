@@ -70,15 +70,15 @@ func TestValidateRefusesUncheckedFragmentsEvenWhenAllowed(t *testing.T) {
 }
 
 // A fragment reference used to skip all admission, even for consumer-owned
-// leaves. The same KVM cache mount must never pass just by adding a fragment.
-func TestValidateRefusesRetiredExecution(t *testing.T) {
+// fields. Host access must never pass just by adding a fragment.
+func TestValidateFragmentsDoNotBypassHostAccessAdmission(t *testing.T) {
 	const document = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
     example.com/tier: S
-    oberth.ci/kvm-templates: kernel-test
 spec:
+  hostNetwork: true
   entrypoint: main
   activeDeadlineSeconds: 600
   templates:
@@ -114,12 +114,12 @@ spec:
 			var output bytes.Buffer
 			err := runValidate(context.Background(), []string{"--allow-unresolved-fragments", root}, &output)
 			if err == nil {
-				t.Fatalf("validate passed retired execution:\n%s", output.String())
+				t.Fatalf("validate passed host access:\n%s", output.String())
 			}
-			want := "workflow capability grant"
+			want := "hostNetwork"
 			if withFragment {
 				// Without pinned contents available offline the entire document
-				// must fail, rather than claiming the KVM check ran.
+				// must fail, rather than claiming the host-access check ran.
 				want = "cannot be resolved offline"
 			}
 			if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "result: FAIL") {

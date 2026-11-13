@@ -24,6 +24,7 @@ import (
 func adoptionWorkflow() (*wfv1.Workflow, AdoptionRequest) {
 	wf := budgetTestWorkflow()
 	wf.UID = "workflow-uid"
+	wf.Annotations[helperStorageAnnotation] = helperStoragePolicy
 	wf.Annotations[identityAnnotation] = strings.Repeat("a", 64)
 	wf.Annotations[refAnnotation] = "feature/adopt"
 	wf.Labels = map[string]string{"oberth.ci/sha": strings.Repeat("b", 40), "oberth.ci/trigger": string(pipeline.TriggerCI)}

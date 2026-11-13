@@ -241,44 +241,6 @@ func TestWorkspaceCacheRefusedOnNonLeaf(t *testing.T) {
 	}
 }
 
-func trivyLeafWithMode(name, cacheDir, mode string) wfv1.Template {
-	tmpl := trivyTemplate(name, cacheDir, false)
-	if mode != "" {
-		tmpl.Metadata.Annotations = map[string]string{argoworkflow.WorkspaceMountsAnnotation: mode}
-	}
-	return tmpl
-}
-
-// cache leaves do not receive the work-VCT trivy mount, so private scratch caches are
-// private; but a --cache-dir inside the persistent cache is shared by every
-// leaf that keeps it (cache, readonly, or default) and needs an edge.
-func TestTrivyGuardWorkspaceCache(t *testing.T) {
-	for _, test := range []struct {
-		name, cacheDir, mode string
-		refused              bool
-	}{
-		{"cache-private-tmp", WorkspaceTrivyCacheMountPath, "cache", false},
-		{"cache-persistent", CacheMountPath + "/trivy", "cache", true},
-		{"cache-persistent-root", CacheMountPath, "cache", true},
-		{"cache-persistent-unclean", "/work/./cache//trivy/", "cache", true},
-		{"cache-persistent-relative", "../cache/trivy", "cache", true},
-		{"default-persistent", CacheMountPath + "/trivy", "", true},
-		{"none-persistent-unmounted", CacheMountPath + "/trivy", "none", false},
-		{"cache-sibling-path", "/work/cachefoo", "cache", false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			a := trivyLeafWithMode("a", test.cacheDir, test.mode)
-			b := trivyLeafWithMode("b", test.cacheDir, test.mode)
-			a.Container.WorkingDir, b.Container.WorkingDir = SourceMountPath, SourceMountPath
-			w := trivyWorkflow(true, trivyInlineDAGTask("a", a, ""), trivyInlineDAGTask("b", b, ""))
-			err := trivyGuard(w)
-			if (err != nil) != test.refused {
-				t.Fatalf("refused=%v; want %v (err=%v)", err != nil, test.refused, err)
-			}
-		})
-	}
-}
-
 // Every Pod container shape (script, containerSet, helpers with mirroring,
 // inline DAG/steps leaves) gets the cache and nothing else automatic.
 func TestWorkspaceCacheCoversEveryPodContainerShape(t *testing.T) {

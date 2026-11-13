@@ -67,9 +67,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	if workflow == nil {
 		return errors.New("argoworkflow: no Workflow to admit")
 	}
-	if err := RefuseRetiredWorkflow(workflow); err != nil {
-		return err
-	}
 	var problems []error
 	problems = append(problems, admitMetadata(workflow)...)
 	if _, err := DeclaredGoProxyMirrorOnly(workflow); err != nil {

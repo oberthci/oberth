@@ -320,6 +320,10 @@ func TestIsolationRejectsLateCredentialDefaultsAndNonleafControls(t *testing.T) 
 			w.Spec.TemplateDefaults = &wfv1.Template{Container: &corev1.Container{Image: w.Spec.Templates[0].Container.Image, Command: []string{"oberth", "secretstore", "exec"}, Args: []string{"--path", "oberth/data/release/r2-upload-token", "--", "/bin/true"}}}
 			w.Spec.Templates[0].Container.Command = nil
 		}},
+		{"tokenless-credential-defaults", "tokenless templateDefaults", func(w *wfv1.Workflow) {
+			w.Spec.TemplateDefaults = &wfv1.Template{AutomountServiceAccountToken: ptr.To(false), Container: &corev1.Container{Image: w.Spec.Templates[0].Container.Image, Command: []string{"oberth", "secretstore", "exec"}, Args: []string{"--path", "oberth/data/release/r2-upload-token", "--", "/bin/true"}}}
+			w.Spec.Templates[0].Container.Command = nil
+		}},
 		{"parent-workspace-controls", "Pod leaf", func(w *wfv1.Workflow) {
 			leaf := w.Spec.Templates[0].DeepCopy()
 			leaf.Name = "leaf"

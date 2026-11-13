@@ -129,7 +129,7 @@ func TestExecutorContainersReadIdentityThroughKubeconfig(t *testing.T) {
 		{Name: "script", Script: &wfv1.ScriptTemplate{Container: corev1.Container{Image: "busybox"}, Source: "true"}},
 		{Name: "resource", Resource: &wfv1.ResourceTemplate{Action: "get", Manifest: "{}"}},
 	}}}
-	if err := projectExecutorTokens(wf, config, false); err != nil {
+	if err := projectExecutorTokens(wf, config); err != nil {
 		t.Fatal(err)
 	}
 	for _, template := range wf.Spec.Templates {
@@ -182,7 +182,7 @@ func TestExecutorProgressMonitorIsDisabledOverControllerValues(t *testing.T) {
 		{Name: "container", Container: &corev1.Container{Image: "busybox"}},
 		{Name: "resource", Resource: &wfv1.ResourceTemplate{Action: "get", Manifest: "{}"}},
 	}}}
-	if err := projectExecutorTokens(wf, config, false); err != nil {
+	if err := projectExecutorTokens(wf, config); err != nil {
 		t.Fatal(err)
 	}
 	controllerEnv := []corev1.EnvVar{

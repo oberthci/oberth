@@ -271,8 +271,7 @@ func VerifyArgoController(ctx context.Context, cfg Config, deps Deps) error {
 // address. This ensures that the first push after a default
 // `oberth install --install-secretstore` produces credentialed release steps
 // that can reach the installed store — without this, argo.vault.address stays
-// empty and envconsul dials its built-in 127.0.0.1:8200 default, failing every
-// release at tag time.
+// empty and credentialed release steps cannot reach the installed store.
 func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	ns := cfg.ArgoNamespace
 	if ns == "" {

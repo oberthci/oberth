@@ -84,8 +84,8 @@ func TestOberthEveryLeafHasMainStorageBudget(t *testing.T) {
 }
 
 func TestOberthHelmPodStorageCoversObservedWorkingSet(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		t.Run(map[bool]string{false: "v2", true: "v1"}[legacy], func(t *testing.T) {
+	for _, policy := range []string{helperStoragePolicy} {
+		t.Run(policy, func(t *testing.T) {
 			wf, err := Build(oberthConfig(), Request{RunID: "helm-storage", Name: "helm-storage", Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease, Source: loadPipeline(t, "release.yaml"), ApprovedSecrets: oberthReleaseApprovedSecrets()})
 			if err != nil {
 				t.Fatal(err)

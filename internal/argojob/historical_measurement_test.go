@@ -38,7 +38,8 @@ func historicalMeasurementInput(t *testing.T, current, captured *wfv1.Workflow) 
 		}
 		before, after := assistContainer(original), assistContainer(template)
 		if before != nil && after != nil {
-			if originalArgv := legacySecurityCommand(before.Command); len(originalArgv) != len(before.Command) {
+			if len(before.Command) > 3 && before.Command[0] == "/run/oberth/usage/oberth" && before.Command[1] == "internal-step-exec" && before.Command[2] == "--" {
+				originalArgv := before.Command[3:]
 				if !reflect.DeepEqual(originalArgv, after.Command) {
 					t.Fatal("historical authored argv differs")
 				}
@@ -116,4 +117,63 @@ func historicalMeasurementPatch(t *testing.T, current, captured *wfv1.Template) 
 		t.Fatal(err)
 	}
 	current.PodSpecPatch = string(encoded)
+}
+
+// Captures retain their original helper budgets. Compare current security and
+// mount behavior against them without requiring an old resource-policy replay.
+func withoutCapturedHelperBudgets(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
+	helper := func(name string) bool { return name == "init" || name == "wait" || name == executorTokenWaiter }
+	for _, containers := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
+		for i := range containers {
+			c := &containers[i]
+			if helper(c.Name) {
+				c.Resources = corev1.ResourceRequirements{}
+			}
+			for j := range c.Env {
+				env := &c.Env[j]
+				if env.Name != "ARGO_TEMPLATE" {
+					continue
+				}
+				var template wfv1.Template
+				if err := json.Unmarshal([]byte(env.Value), &template); err != nil {
+					t.Fatal(err)
+				}
+				var patch map[string]any
+				if err := json.Unmarshal([]byte(template.PodSpecPatch), &patch); err != nil {
+					t.Fatal(err)
+				}
+				for _, group := range []string{"containers", "initContainers"} {
+					items, _ := patch[group].([]any)
+					var retained []any
+					for _, item := range items {
+						entry := item.(map[string]any)
+						name, _ := entry["name"].(string)
+						if helper(name) {
+							delete(entry, "resources")
+							if len(entry) == 1 {
+								continue
+							}
+						}
+						retained = append(retained, item)
+					}
+					if len(retained) == 0 {
+						delete(patch, group)
+					} else {
+						patch[group] = retained
+					}
+				}
+				encoded, err := json.Marshal(patch)
+				if err != nil {
+					t.Fatal(err)
+				}
+				template.PodSpecPatch = string(encoded)
+				encoded, err = json.Marshal(template)
+				if err != nil {
+					t.Fatal(err)
+				}
+				env.Value = string(encoded)
+			}
+		}
+	}
 }
