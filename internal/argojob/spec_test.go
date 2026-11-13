@@ -1674,10 +1674,14 @@ spec:
 	if err := admitSecretstoreExecPaths(workflow, []string{path}, map[string]map[string]bool{path: {"release-publish": true}}); err == nil || !strings.Contains(err.Error(), "secret grant denied") {
 		t.Fatal("different template's grant authorized the step", err)
 	}
-	request := Request{Repo: "consumer", UpstreamName: "forge", UpstreamOrg: "org", StepGrants: map[string]map[string]bool{path: {name: true}}}
+	request := Request{Repo: "consumer", UpstreamName: "forge", UpstreamOrg: "org", PipelineFile: argoworkflow.ReleaseFile, StepGrants: map[string]map[string]bool{path: {name: true}}}
 	config := testConfig()
-	config.PerStepIdentities = map[string]PerRepoIdentityConfig{"forge/org/consumer/" + name: {ServiceAccountName: "step-authored"}}
-	if err := applyPerStepIdentities(workflow, config, request); err != nil {
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{"forge/org/consumer/" + argoworkflow.ReleaseFile + "/" + name: {ServiceAccountName: "step-authored"}}
+	granted, err := GrantedSecretSteps(workflow, []string{path}, request.StepGrants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyPerStepIdentities(workflow, config, request, granted); err != nil {
 		t.Fatal(err)
 	}
 	if workflow.Spec.Templates[0].ServiceAccountName != "step-authored" {
