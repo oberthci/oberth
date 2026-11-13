@@ -30,7 +30,7 @@ func grantsConfigMap(rv, grants string) *corev1.ConfigMap {
 // converge revoked the qualified row and re-created it bare, undoing the
 // migration and reopening bare-key grant aliasing.
 func TestReconcileCanonicalizesBareEntryOntoQualifiedRow(t *testing.T) {
-	cm := grantsConfigMap("7", `- {repo: terraform, step: "*", secret: oberth/data/release/cosign-secret}
+	cm := grantsConfigMap("7", `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: oberth/data/release/cosign-secret}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -53,7 +53,7 @@ func TestReconcileCanonicalizesBareEntryOntoQualifiedRow(t *testing.T) {
 	}
 	// The v12 migration's post-state: the grant persisted under the
 	// qualified key.
-	if _, err := database.Grant(ctx, qualified, "*", "oberth/data/release/cosign-secret", "migration-v12"); err != nil {
+	if _, err := database.Grant(ctx, qualified, ".oberth/release.yaml", "*", "oberth/data/release/cosign-secret", "migration-v12"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,7 +78,7 @@ func TestReconcileCanonicalizesBareEntryOntoQualifiedRow(t *testing.T) {
 	}
 
 	// The qualified row is what admission consults.
-	active, err := database.ActiveSecretGrants(ctx, repo.ID)
+	active, err := database.ActiveSecretGrants(ctx, repo.ID, ".oberth/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +92,8 @@ func TestReconcileCanonicalizesBareEntryOntoQualifiedRow(t *testing.T) {
 // upstreams, a bare-spelled ConfigMap entry names neither of them and must
 // grant to neither. Qualified entries keep working.
 func TestReconcileSkipsAmbiguousBareEntryFailClosed(t *testing.T) {
-	cm := grantsConfigMap("9", `- {repo: terraform, step: "*", secret: oberth/data/release/cosign-secret}
-- {repo: codeberg/acme/terraform, step: "*", secret: oberth/data/release/r2-upload-token}
+	cm := grantsConfigMap("9", `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: oberth/data/release/cosign-secret}
+- {workflow: .oberth/release.yaml, repo: codeberg/acme/terraform, step: "*", secret: oberth/data/release/r2-upload-token}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -129,7 +129,7 @@ func TestReconcileSkipsAmbiguousBareEntryFailClosed(t *testing.T) {
 
 	// The ambiguous bare entry granted nothing; the qualified entry
 	// granted exactly its named repository.
-	grants1, err := database.ActiveSecretGrants(ctx, repo1.ID)
+	grants1, err := database.ActiveSecretGrants(ctx, repo1.ID, ".oberth/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestReconcileSkipsAmbiguousBareEntryFailClosed(t *testing.T) {
 	if !grants1["*"]["oberth/data/release/r2-upload-token"] {
 		t.Fatal("qualified entry did not grant to its named repository")
 	}
-	grants2, err := database.ActiveSecretGrants(ctx, repo2.ID)
+	grants2, err := database.ActiveSecretGrants(ctx, repo2.ID, ".oberth/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestReconcileSkipsAmbiguousBareEntryFailClosed(t *testing.T) {
 // TestRemoveGrantCanonicalBareEntry verifies that a qualified revoke matches
 // a bare-spelled ConfigMap entry via canonical identity resolution (#689).
 func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
-	cm := grantsConfigMap("20", `- {repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
+	cm := grantsConfigMap("20", `- {workflow: .oberth/release.yaml, repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -183,7 +183,7 @@ func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
 	// Revoke using the qualified name — must match the bare-spelled entry.
 	qualified := "codeberg/acme/acme-example-service"
 	if err := reconciler.UpdateConfigMap(ctx, "admin@test",
-		reconciler.RemoveGrantCanonical(ctx, qualified, "*", "oberth/data/release/gar-sa-key")); err != nil {
+		reconciler.RemoveGrantCanonical(ctx, qualified, ".oberth/release.yaml", "*", "oberth/data/release/gar-sa-key")); err != nil {
 		t.Fatalf("RemoveGrantCanonical failed: %v", err)
 	}
 
@@ -201,9 +201,9 @@ func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
 // a bare-spelled and a qualified entry exist for the same canonical tuple,
 // both are removed by a single revoke.
 func TestRemoveGrantCanonicalBareAndQualifiedDuplicates(t *testing.T) {
-	cm := grantsConfigMap("21", `- {repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
-- {repo: codeberg/acme/acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
-- {repo: codeberg/acme/acme-example-service, step: "*", secret: oberth/data/release/r2-upload-token}
+	cm := grantsConfigMap("21", `- {workflow: .oberth/release.yaml, repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
+- {workflow: .oberth/release.yaml, repo: codeberg/acme/acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
+- {workflow: .oberth/release.yaml, repo: codeberg/acme/acme-example-service, step: "*", secret: oberth/data/release/r2-upload-token}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -226,7 +226,7 @@ func TestRemoveGrantCanonicalBareAndQualifiedDuplicates(t *testing.T) {
 
 	qualified := "codeberg/acme/acme-example-service"
 	if err := reconciler.UpdateConfigMap(ctx, "admin@test",
-		reconciler.RemoveGrantCanonical(ctx, qualified, "*", "oberth/data/release/gar-sa-key")); err != nil {
+		reconciler.RemoveGrantCanonical(ctx, qualified, ".oberth/release.yaml", "*", "oberth/data/release/gar-sa-key")); err != nil {
 		t.Fatalf("RemoveGrantCanonical failed: %v", err)
 	}
 
@@ -248,7 +248,7 @@ func TestRemoveGrantCanonicalBareAndQualifiedDuplicates(t *testing.T) {
 // entry is not matched by the revoke and the removal fails closed.
 func TestRemoveGrantCanonicalAmbiguousFailsClosed(t *testing.T) {
 	// ConfigMap has only a bare entry for "terraform".
-	cm := grantsConfigMap("22", `- {repo: terraform, step: "*", secret: oberth/data/release/cosign-secret}
+	cm := grantsConfigMap("22", `- {workflow: .oberth/release.yaml, repo: terraform, step: "*", secret: oberth/data/release/cosign-secret}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -284,7 +284,7 @@ func TestRemoveGrantCanonicalAmbiguousFailsClosed(t *testing.T) {
 	// Try to revoke as one of the qualified names — the bare entry is
 	// ambiguous and must not match either, so the revoke should fail.
 	err = reconciler.UpdateConfigMap(ctx, "admin@test",
-		reconciler.RemoveGrantCanonical(ctx, "codeberg/acme/terraform", "*", "oberth/data/release/cosign-secret"))
+		reconciler.RemoveGrantCanonical(ctx, "codeberg/acme/terraform", ".oberth/release.yaml", "*", "oberth/data/release/cosign-secret"))
 	if err == nil {
 		t.Fatal("expected error for ambiguous bare entry, got nil")
 	}
@@ -296,7 +296,7 @@ func TestRemoveGrantCanonicalAmbiguousFailsClosed(t *testing.T) {
 // TestRemoveGrantCanonicalAbsentReturnsInvalidInput verifies that removing a
 // truly absent canonical tuple returns ErrInvalidInput, not an internal error.
 func TestRemoveGrantCanonicalAbsentReturnsInvalidInput(t *testing.T) {
-	cm := grantsConfigMap("23", `- {repo: oberth, step: "*", secret: oberth/data/release/cosign-secret}
+	cm := grantsConfigMap("23", `- {workflow: .oberth/release.yaml, repo: oberth, step: "*", secret: oberth/data/release/cosign-secret}
 `)
 	reconciler, _ := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -306,7 +306,7 @@ func TestRemoveGrantCanonicalAbsentReturnsInvalidInput(t *testing.T) {
 	}
 
 	err := reconciler.UpdateConfigMap(ctx, "admin@test",
-		reconciler.RemoveGrantCanonical(ctx, "nonexistent", "*", "nonexistent/secret"))
+		reconciler.RemoveGrantCanonical(ctx, "nonexistent", ".oberth/release.yaml", "*", "nonexistent/secret"))
 	if err == nil {
 		t.Fatal("expected error for absent grant")
 	}
@@ -318,7 +318,7 @@ func TestRemoveGrantCanonicalAbsentReturnsInvalidInput(t *testing.T) {
 // TestAddGrantCanonicalDedupeAgainstBareEntry verifies that a qualified add
 // beside an existing bare entry of the same canonical repo is a no-op.
 func TestAddGrantCanonicalDedupeAgainstBareEntry(t *testing.T) {
-	cm := grantsConfigMap("24", `- {repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
+	cm := grantsConfigMap("24", `- {workflow: .oberth/release.yaml, repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -342,7 +342,7 @@ func TestAddGrantCanonicalDedupeAgainstBareEntry(t *testing.T) {
 	// Adding the same grant under its qualified name should be a no-op.
 	qualified := "codeberg/acme/acme-example-service"
 	if err := reconciler.UpdateConfigMap(ctx, "admin@test",
-		reconciler.AddGrantCanonical(ctx, qualified, "*", "oberth/data/release/gar-sa-key")); err != nil {
+		reconciler.AddGrantCanonical(ctx, qualified, ".oberth/release.yaml", "*", "oberth/data/release/gar-sa-key")); err != nil {
 		t.Fatalf("AddGrantCanonical failed: %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestAddGrantCanonicalDedupeAgainstBareEntry(t *testing.T) {
 // that has not been discovered yet stays spelled as-is and is invisible to
 // ID-keyed admission until the repo registers and the entry resolves.
 func TestReconcileKeepsUnregisteredEntryInert(t *testing.T) {
-	cm := grantsConfigMap("11", `- {repo: not-yet-pushed, step: "*", secret: oberth/data/release/cosign-secret}
+	cm := grantsConfigMap("11", `- {workflow: .oberth/release.yaml, repo: not-yet-pushed, step: "*", secret: oberth/data/release/cosign-secret}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -406,7 +406,7 @@ func TestReconcileKeepsUnregisteredEntryInert(t *testing.T) {
 	if err := reconciler.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	active, err := database.ActiveSecretGrants(ctx, repo.ID)
+	active, err := database.ActiveSecretGrants(ctx, repo.ID, ".oberth/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

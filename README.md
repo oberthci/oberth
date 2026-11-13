@@ -299,9 +299,10 @@ path and the utility image configuration.
    authorizes a parked SHA, merges locally, proves the merged tree for parked
    sources or a divergent target, and pushes without force.
 5. **Release** — a tag reachable from the default branch runs the release
-   Workflow. The presence of declared secret-store paths in the
-   `oberth.ci/secret-paths` annotation selects the credentialed
-   ServiceAccount and its projected token. Release steps wrap their command
+   Workflow. Each secret-consuming step needs declared paths in
+   `oberth.ci/secret-paths` and explicit step grants in its repository/upstream.
+   Only the granted main container receives its store settings and token.
+   Release steps wrap their command
    with `oberth secretstore exec`, which fetches the approved secrets into
    private files on verified tmpfs and redacts child output. Only
    after every burn is terminal green does Oberth sync the exact admitted
@@ -460,10 +461,10 @@ tools (a call to one is still refused by the server); available operations are:
 | `uplink_list` | List public uplink identities and usage. Unscoped admin only. No tokens are returned. |
 | `uplink_revoke` | Revoke an uplink SSH key and bearer immediately. Unscoped admin only; audited; the last active unscoped admin cannot be revoked. |
 | `uplink_rotate` | Finish rotation to an already registered active replacement key with identical identity, admin status and scope, atomically revoking the selected old credential. Unscoped admin only. Issue the replacement through uplink add first; no key material crosses MCP. |
-| `access_dismiss` | Dismiss one stale pending declaration. Unscoped admin only. Copy its exact repository key from access_list; legacy or orphaned keys are supported. Scoped uplinks are refused. Audited; later admission can observe it again. |
-| `access_list` | List secret access grants for a repository. |
-| `access_allow` | Grant a step access to a secret path. Requires admin uplink. |
-| `access_revoke` | Revoke a step's access to a secret path. Requires admin uplink. |
+| `access_dismiss` | Dismiss one stale pending declaration. Unscoped admin only. Copy its exact repository and workflow file from access_list; orphaned repository keys are supported. Scoped uplinks are refused. Audited; later admission can observe it again. |
+| `access_list` | List secret access grants, including their exact workflow file, for a repository. |
+| `access_allow` | Grant a step in an exact workflow file access to a secret path. Requires admin uplink. |
+| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path. Requires admin uplink. |
 | `workflow_capability_grant` | Grant operator-owned Kubernetes API access to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here. |
 | `workflow_capability_revoke` | Revoke a repository's operator capability. New submissions and restart adoption refuse the revoked authority. Running Kubernetes workloads remain operator-owned. Administrator only; audited. |
 | `workflow_capability_get` | Read the repository's current or revoked operator capability within the caller's upstream scope. |
@@ -543,21 +544,19 @@ unauthenticated.
 
 - Workflow Pods use server-enforced identities, dropped capabilities,
   read-only root filesystems, seccomp `RuntimeDefault`, bounded resources and
-  deadlines. Credentialed main containers and the executor receive separate,
+  deadlines. Granted main containers and the executor receive separate,
   scoped projected tokens; ordinary build containers receive no store token.
   [Non-root test leaves](docs/nonroot-test-leaves.md) have a separately enforced
   UID and controller contract.
-- **Declared paths and the trigger together are the security boundary.**
-  Pipelines without declared secret-store paths bind to the pipeline
-  ServiceAccount and receive no secrets on either trigger. Release pipelines
-  with approved paths bind to the credentialed ServiceAccount — the only
-  identity whose OpenBao role carries release-secret grants; branch (CI)
-  pipelines with approved paths bind to the separate ci-secrets
-  ServiceAccount, whose role reaches the upstream subtree only, so release
-  credentials are unreachable from a branch push at the Vault layer. Branch
-  pipelines may only declare upstream-scoped paths; system-namespace paths
-  require a release trigger and an administrator allowlist entry. All fetched
-  secret-store values are delivered to memory only.
+- **Secret access is granted per step.** The reviewed consumer command,
+  declared paths and current step grants determine store delivery. Workflows
+  without granted consumers use the tokenless pipeline identity on either
+  trigger. Granted release steps use the release-login identity; granted CI
+  steps use the separate ci-secrets identity with upstream-only policy. Store
+  address, CA, helper binary and login token go only to the granted main
+  container. Helpers and other steps receive none of those settings. Branch
+  steps cannot consume system-namespace paths. All fetched store values are
+  delivered to memory only. See [secret delivery](docs/argo-secret-delivery.md).
 - Secret-store values never appear in etcd, Kubernetes objects, node disk, or
   logs; per-run store tokens are read-only, short-lived, and revoked after
   every fetch. Every fetch is an actor-attributed entry in the audit chain.

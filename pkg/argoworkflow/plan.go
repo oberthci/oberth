@@ -17,8 +17,8 @@ import (
 // reads the same before it starts, while it runs, and after it finishes.
 //
 // Secrets reports whether the step's template runs a recognised credential
-// chain (UsesSecrets), which is the same condition that mounts the secret
-// store login token into exactly that Pod. It is read from the document like
+// chain (UsesSecrets). Runtime delivery also requires approved step grants.
+// It is read from the document like
 // everything else here: a declared intent, not an observed read. Credentialed
 // also includes release WIF and is the replay-safety classification.
 type PlannedStep struct {

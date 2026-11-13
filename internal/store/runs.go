@@ -17,7 +17,7 @@ type rowScanner interface {
 }
 
 const runColumns = `
-queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
+queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
 schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record`
@@ -79,13 +79,13 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO runs(
-    id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger, phase,
+    id, repo_id, ref_kind, ref, sha, actor, release, trigger, phase,
     tested_sha, base_sha, schedule_entry, status, reason, assist_requested, queued_at, created_at, updated_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
 RETURNING `+runColumns,
 		id, spec.RepoID, spec.RefKind, spec.Ref, spec.SHA, spec.Actor, spec.Release,
-		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, spec.Reason, spec.Assist, now, now, now)
+		spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, spec.Reason, spec.Assist, now, now, now)
 	value, err := scanRun(row)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
@@ -1147,12 +1147,12 @@ FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var value model.Run
 	var issueTrailers, sourceBindings, assistRecord string
-	var release, credentialed, assistRequested, assisted int64
+	var release, assistRequested, assisted int64
 	var queued, created, updated int64
 	var started, finished sql.NullInt64
 	dest := []any{
 		&value.QueueSequence, &value.AdmissionSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
-		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
+		&value.SHA, &value.Actor, &release, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
 		&created, &updated, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord,
@@ -1191,7 +1191,6 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	value.Assisted = assisted != 0
 
 	value.Release = release != 0
-	value.Credentialed = credentialed != 0
 	value.QueuedAt = fromUnixNano(queued)
 	value.StartedAt, value.FinishedAt = nullableTime(started), nullableTime(finished)
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
@@ -1231,29 +1230,6 @@ func nullableUnixNano(value *time.Time) any {
 		return nil
 	}
 	return unixNano(*value)
-}
-
-// SetRunCredentialed marks a running run as credentialed. It is called by the
-// scheduler when the pipeline document declares secret-store paths, after the
-// pipeline has been read from the immutable checkout. The update is a no-op on
-// a run that is already credentialed or no longer active.
-func (s *Store) SetRunCredentialed(ctx context.Context, id string) error {
-	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("%w: run ID is required", ErrInvalid)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin credential transition: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `
-UPDATE runs SET credentialed = 1, updated_at = ?
-WHERE id = ? AND status IN ('queued', 'running') AND credentialed = 0`,
-		unixNano(s.now()), id)
-	if err != nil {
-		return fmt.Errorf("set run credentialed: %w", err)
-	}
-	return tx.Commit()
 }
 
 func isHexPrefix(value string) bool {

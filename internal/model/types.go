@@ -167,7 +167,6 @@ type Run struct {
 	SHA           string
 	Actor         string
 	Release       bool
-	Credentialed  bool
 	Trigger       string
 	ScheduleEntry string `json:",omitempty"`
 	Phase         string
@@ -198,7 +197,6 @@ type RunSpec struct {
 	SHA           string
 	Actor         string
 	Release       bool
-	Credentialed  bool
 	Trigger       string
 	ScheduleEntry string
 	TestedSHA     string

@@ -15,7 +15,7 @@ func TestSecretAccessGrantAndCheck(t *testing.T) {
 	ctx := context.Background()
 
 	// No grant exists yet.
-	ok, err := s.SecretAccessCheck(ctx, "terraform", "plan", "terraform/credentials")
+	ok, err := s.SecretAccessCheck(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestSecretAccessGrantAndCheck(t *testing.T) {
 	}
 
 	// Grant access.
-	grant, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	grant, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestSecretAccessGrantAndCheck(t *testing.T) {
 	}
 
 	// Check now succeeds.
-	ok, err = s.SecretAccessCheck(ctx, "terraform", "plan", "terraform/credentials")
+	ok, err = s.SecretAccessCheck(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestSecretAccessGrantAndCheck(t *testing.T) {
 	}
 
 	// Granting the same triple again returns the existing row.
-	duplicate, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "other-admin")
+	duplicate, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "other-admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,12 +62,12 @@ func TestSecretAccessRevoke(t *testing.T) {
 	s := testStore(t, &now)
 	ctx := context.Background()
 
-	_, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	_, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	revoked, err := s.Revoke(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	revoked, err := s.Revoke(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestSecretAccessRevoke(t *testing.T) {
 	}
 
 	// Check should now return false.
-	ok, err := s.SecretAccessCheck(ctx, "terraform", "plan", "terraform/credentials")
+	ok, err := s.SecretAccessCheck(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSecretAccessRevoke(t *testing.T) {
 	}
 
 	// Revoking again should return ErrNotFound.
-	_, err = s.Revoke(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	_, err = s.Revoke(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err == nil {
 		t.Fatal("expected error for double revoke")
 	}
@@ -99,13 +99,13 @@ func TestSecretAccessList(t *testing.T) {
 	s := testStore(t, &now)
 	ctx := context.Background()
 
-	if _, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Grant(ctx, "terraform", "apply", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "apply", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Grant(ctx, "oberth", "release", "cosign-secret", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, "oberth", ".oberth/release.yaml", "release", "cosign-secret", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,7 +128,7 @@ func TestSecretAccessList(t *testing.T) {
 	}
 
 	// Revoke one and list with revoked.
-	if _, err := s.Revoke(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := s.Revoke(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 	active, err := s.SecretAccessList(ctx, "terraform", false)
@@ -152,16 +152,16 @@ func TestSecretAccessGrantAfterRevoke(t *testing.T) {
 	s := testStore(t, &now)
 	ctx := context.Background()
 
-	first, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	first, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Revoke(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := s.Revoke(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Re-granting creates a new row.
-	second, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	second, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestSecretAccessGrantAfterRevoke(t *testing.T) {
 		t.Fatal("expected a new grant after revoke-and-regrant")
 	}
 
-	ok, err := s.SecretAccessCheck(ctx, "terraform", "plan", "terraform/credentials")
+	ok, err := s.SecretAccessCheck(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,17 +203,17 @@ func TestActiveSecretGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Grant(ctx, qualified, "plan", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, qualified, ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Grant(ctx, qualified, "plan", "terraform/state", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, qualified, ".oberth/release.yaml", "plan", "terraform/state", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Grant(ctx, qualified, "apply", "terraform/credentials", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, qualified, ".oberth/release.yaml", "apply", "terraform/credentials", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
-	grants, err := s.ActiveSecretGrants(ctx, repo.ID)
+	grants, err := s.ActiveSecretGrants(ctx, repo.ID, ".oberth/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestActiveSecretGrantsBareRowIsInert(t *testing.T) {
 
 	// A bare-keyed grant row, as a pre-migration deployment would have
 	// persisted it.
-	if _, err := s.Grant(ctx, "terraform", "*", "release/cosign", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "*", "release/cosign", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,7 +276,7 @@ func TestActiveSecretGrantsBareRowIsInert(t *testing.T) {
 		id   int64
 		name string
 	}{{repo1.ID, "repo1"}, {repo2.ID, "repo2"}} {
-		grants, err := s.ActiveSecretGrants(ctx, repo.id)
+		grants, err := s.ActiveSecretGrants(ctx, repo.id, ".oberth/release.yaml")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -323,12 +323,12 @@ func TestActiveSecretGrantsIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Grant(ctx, qualified1, "*", "release/cosign", "admin@localhost"); err != nil {
+	if _, err := s.Grant(ctx, qualified1, ".oberth/release.yaml", "*", "release/cosign", "admin@localhost"); err != nil {
 		t.Fatal(err)
 	}
 
 	// repo1 sees the grant.
-	grants1, err := s.ActiveSecretGrants(ctx, repo1.ID)
+	grants1, err := s.ActiveSecretGrants(ctx, repo1.ID, ".oberth/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestActiveSecretGrantsIsolation(t *testing.T) {
 	}
 
 	// repo2 must NOT see repo1 grants.
-	grants2, err := s.ActiveSecretGrants(ctx, repo2.ID)
+	grants2, err := s.ActiveSecretGrants(ctx, repo2.ID, ".oberth/release.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestGrantAndRevokeAppendAuditActions(t *testing.T) {
 	}
 
 	// Grant advances chain by exactly 1.
-	grant, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	grant, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestGrantAndRevokeAppendAuditActions(t *testing.T) {
 	}
 
 	// Idempotent grant does NOT advance chain.
-	dup, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "other-admin")
+	dup, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "other-admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestGrantAndRevokeAppendAuditActions(t *testing.T) {
 	}
 
 	// Revoke advances chain by exactly 1 more.
-	_, err = s.Revoke(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+	_, err = s.Revoke(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestConcurrentGrantNoSpuriousError(t *testing.T) {
 	results := make(chan grantResult, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			g, err := s.Grant(ctx, "terraform", "plan", "terraform/credentials", "admin@localhost")
+			g, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 			results <- grantResult{g, err}
 		}()
 	}
@@ -450,13 +450,13 @@ func TestSecretAccessCheckValidation(t *testing.T) {
 	s := testStore(t, &now)
 	ctx := context.Background()
 
-	if _, err := s.SecretAccessCheck(ctx, "", "plan", "terraform/credentials"); err == nil {
+	if _, err := s.SecretAccessCheck(ctx, "", ".oberth/release.yaml", "plan", "terraform/credentials"); err == nil {
 		t.Fatal("expected error for empty repo")
 	}
-	if _, err := s.SecretAccessCheck(ctx, "terraform", "", "terraform/credentials"); err == nil {
+	if _, err := s.SecretAccessCheck(ctx, "terraform", ".oberth/release.yaml", "", "terraform/credentials"); err == nil {
 		t.Fatal("expected error for empty step")
 	}
-	if _, err := s.SecretAccessCheck(ctx, "terraform", "plan", ""); err == nil {
+	if _, err := s.SecretAccessCheck(ctx, "terraform", ".oberth/release.yaml", "plan", ""); err == nil {
 		t.Fatal("expected error for empty secret")
 	}
 }
@@ -472,7 +472,7 @@ func TestGrantRejectsHCLInjectionInSecret(t *testing.T) {
 	// persistence time so hostile values never reach the Vault policy
 	// interpolation in the installer.
 	hostile := `x" { capabilities = ["sudo"] } path "y`
-	_, err := s.Grant(ctx, "terraform", "plan", hostile, "admin@localhost")
+	_, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", hostile, "admin@localhost")
 	if err == nil {
 		t.Fatal("expected rejection of secret containing HCL injection characters")
 	}
@@ -487,7 +487,7 @@ func TestGrantRejectsControlCharsInSecret(t *testing.T) {
 	ctx := context.Background()
 
 	for _, secret := range []string{"path\x00evil", "path\nevil", "path\tevil", `path\evil`} {
-		if _, err := s.Grant(ctx, "terraform", "plan", secret, "admin@localhost"); err == nil {
+		if _, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", secret, "admin@localhost"); err == nil {
 			t.Errorf("Grant(secret=%q) = nil; want error for unsafe characters", secret)
 		}
 	}
@@ -503,7 +503,7 @@ func TestGrantAcceptsValidSecret(t *testing.T) {
 		"release/cosign-secret",
 		"upstream/org/repo/my.secret_name",
 	} {
-		if _, err := s.Grant(ctx, "terraform", "plan", secret, "admin@localhost"); err != nil {
+		if _, err := s.Grant(ctx, "terraform", ".oberth/release.yaml", "plan", secret, "admin@localhost"); err != nil {
 			t.Errorf("Grant(secret=%q) = %v; want nil", secret, err)
 		}
 	}
@@ -520,7 +520,7 @@ func TestGrantRejectsHCLInjectionInRepo(t *testing.T) {
 	// persistence time so hostile values never reach the Vault policy
 	// interpolation in the installer.
 	hostile := `x" { capabilities = ["sudo"] } path "y`
-	_, err := s.Grant(ctx, hostile, "plan", "terraform/credentials", "admin@localhost")
+	_, err := s.Grant(ctx, hostile, ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost")
 	if err == nil {
 		t.Fatal("expected rejection of repo containing HCL injection characters")
 	}
@@ -535,7 +535,7 @@ func TestGrantRejectsControlCharsInRepo(t *testing.T) {
 	ctx := context.Background()
 
 	for _, repo := range []string{"repo\x00evil", "repo\nevil", "repo\tevil", `repo\evil`} {
-		if _, err := s.Grant(ctx, repo, "plan", "terraform/credentials", "admin@localhost"); err == nil {
+		if _, err := s.Grant(ctx, repo, ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost"); err == nil {
 			t.Errorf("Grant(repo=%q) = nil; want error for unsafe characters", repo)
 		}
 	}
@@ -551,7 +551,7 @@ func TestGrantAcceptsValidRepo(t *testing.T) {
 		"codeberg/oberthci/oberth",
 		"my.upstream/my-org/repo_name",
 	} {
-		if _, err := s.Grant(ctx, repo, "plan", "terraform/credentials", "admin@localhost"); err != nil {
+		if _, err := s.Grant(ctx, repo, ".oberth/release.yaml", "plan", "terraform/credentials", "admin@localhost"); err != nil {
 			t.Errorf("Grant(repo=%q) = %v; want nil", repo, err)
 		}
 	}

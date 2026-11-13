@@ -94,7 +94,7 @@ and does not authorize delivery. Legacy repository WIF mappings remain unchanged
 Optional `step_service_accounts` pins a dedicated account for an approved
 WIF-only leaf. When every WIF leaf is pinned and there are no secret-store consumers, the
 workflow and ordinary siblings
-use the uncredentialed pipeline identity; the approved leaves alone get their
+use the ordinary pipeline identity; the approved leaves alone get their
 step accounts. A repository with no secret grants needs no secret-derived
 repository identity. Legacy WIF leaves without a pinned account still require
 `service_account_name` matching the current server-selected repository release

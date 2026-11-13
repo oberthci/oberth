@@ -20,8 +20,7 @@ type installFlagOptions struct {
 	timeout         *time.Duration
 	argoParallelism *int
 
-	alsoUpstreams           stringList
-	credentialedSecretPaths stringList
+	alsoUpstreams stringList
 
 	tlsExtraDNSNames  stringList
 	tlsExtraIPs       stringList
@@ -119,7 +118,7 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags.StringVar(&cfg.RekorChartVersion, "rekor-chart-version", "", "Rekor chart version")
 	flags.StringVar(&cfg.ArgoChartVersion, "argo-chart-version", "", "argo-workflows chart version")
 	flags.StringVar(&cfg.ArgoVaultAddress, "argo-vault-address", "",
-		"OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)")
+		"OpenBao/Vault base URL injected into granted step containers as VAULT_ADDR (https only)")
 	flags.StringVar(&cfg.PushBannerURL, "push-banner-url", "", "push feedback URL; omitted preserves the live URL, explicit empty clears it")
 	flags.StringVar(&cfg.ServiceType, "service-type", "",
 		"Oberth Service type: NodePort (default for a fresh install; clients use NodePorts 30022/30443), "+
@@ -129,16 +128,11 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 		"pipeline egress NetworkPolicy: auto (default: enable, including k3s; preserve existing values), "+
 			"true (always enable), false (always disable)")
 	flags.StringVar(&cfg.ArgoVaultCredentialedRole, "argo-vault-credentialed-role", "",
-		"Kubernetes-auth role credentialed pipelines log in with; bind it to exactly "+
+		"Kubernetes-auth role granted steps log in with; bind it to exactly "+
 			"(--argo-namespace, the credentialed ServiceAccount)")
 	options.argoParallelism = flags.Int("argo-parallelism", -1,
 		"Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; "+
 			"the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2)")
-	flags.Var(&options.credentialedSecretPaths, "credentialed-secret-path",
-		"full KV data path approved in the secret-access table (repeatable, exactly the string "+
-			"`oberth access allow` records, e.g. oberth/data/release/cosign-secret); synced into the "+
-			"RELEASE-tier credentialed Vault policy as an exact read grant when --install-secretstore "+
-			"reconciles the store — the branch-tier ci-secrets policy never receives grants")
 	flags.Var(&options.tlsExtraDNSNames, "tls-extra-dns-name",
 		"additional DNS name the generated server certificate is issued for (repeatable), beyond the "+
 			"in-cluster names; a client reaching the server on any other name hits a hostname mismatch "+
@@ -176,7 +170,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		}
 		*cfg = loaded
 		options.alsoUpstreams = append(stringList(nil), cfg.AlsoUpstreams...)
-		options.credentialedSecretPaths = append(stringList(nil), cfg.CredentialedSecretPaths...)
 		options.tlsExtraDNSNames = append(stringList(nil), cfg.TLSExtraDNSNames...)
 		options.tlsExtraIPs = append(stringList(nil), cfg.TLSExtraIPs...)
 		options.tlsRemoveDNSNames = append(stringList(nil), cfg.TLSRemoveDNSNames...)
@@ -207,7 +200,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	if *options.answersPath == "" {
 		cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev
 	}
-	cfg.CredentialedSecretPaths = options.credentialedSecretPaths
 	cfg.TLSExtraDNSNames = options.tlsExtraDNSNames
 	cfg.TLSExtraIPs = options.tlsExtraIPs
 	cfg.TLSRemoveDNSNames = options.tlsRemoveDNSNames

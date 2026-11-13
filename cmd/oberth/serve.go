@@ -36,6 +36,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/goproxy"
+	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -271,10 +272,10 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoCredentialedAccount, "argo-credentialed-serviceaccount", "oberth-argo-credentialed", "ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth")
 	flags.StringVar(&options.argoCISecretsAccount, "argo-ci-secrets-serviceaccount", "oberth-argo-ci-secrets", "ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants")
 	flags.StringVar(&options.argoExecutorAccount, "argo-executor-serviceaccount", "oberth-argo-executor", "ServiceAccount for Argo's own executor containers; must differ from all pipeline identities")
-	flags.StringVar(&options.argoVaultAddress, "argo-vault-address", "", "OpenBao API base URL injected into credentialed Argo containers as VAULT_ADDR (HTTPS)")
-	flags.StringVar(&options.argoVaultCredentialedRole, "argo-vault-credentialed-role", "", "OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace")
-	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)")
-	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors credentialed pipeline containers verify --argo-vault-address against")
+	flags.StringVar(&options.argoVaultAddress, "argo-vault-address", "", "OpenBao API base URL injected into granted secret-consuming step containers as VAULT_ADDR (HTTPS)")
+	flags.StringVar(&options.argoVaultCredentialedRole, "argo-vault-credentialed-role", "", "OpenBao Kubernetes auth role for granted release step containers; bound to the credentialed ServiceAccount and namespace")
+	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI granted steps at admission)")
+	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors granted step containers verify --argo-vault-address against")
 	flags.StringVar(&options.argoReleaseTagRoutesConfig, "argo-release-tag-routes-config", "", "absolute path to administrator-owned release tag pattern -> workflow file JSON")
 	flags.StringVar(&options.argoExecutionPlacementConfig, "argo-execution-placement-config", "", "absolute path to administrator-owned isolated execution placement JSON")
 	flags.StringVar(&options.argoExecutionTargetConfig, "argo-execution-target-config", "", "absolute path to administrator-owned branch execution target policy")
@@ -673,6 +674,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			return fmt.Errorf("open database after deferred witness recovery: %w", err)
 		}
 	}
+	if database.AppliedStartupMigration(store.WorkflowGrantScopeMigrationID) {
+		logger.Print(installer.SecretApprovalsResetLog)
+	}
 	closed := false
 	closeDatabase := func() error {
 		if closed {
@@ -932,9 +936,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 	}
 	if err := accessReconciler.Reconcile(ctx); err != nil {
-		logger.Printf("WARNING: initial secret access reconcile failed: %v; credentialed admission is blocked until reconciliation succeeds", err)
+		logger.Printf("WARNING: initial secret access reconcile failed: %v; admission of granted secret steps is blocked until reconciliation succeeds", err)
 	}
-	// Wire the reconciler health gate so credentialed admission blocks until
+	// Wire the reconciler health gate so admission of granted secret steps blocks until
 	// the initial ConfigMap read succeeds. Without this, a transient startup
 	// failure would leave stale grants active in sqlite for admission to consume.
 	argoJobs.SetReconcilerHealth(accessReconciler)

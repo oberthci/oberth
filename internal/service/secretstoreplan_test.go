@@ -54,7 +54,7 @@ func testService(t *testing.T) *API {
 func TestSecretStorePlanFirstGrant(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@example-node", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@example-node", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 1 {
@@ -63,8 +63,8 @@ func TestSecretStorePlanFirstGrant(t *testing.T) {
 	if result.Repos[0].Repo != "codeberg/acme/terraform" {
 		t.Fatalf("unexpected repo: %s", result.Repos[0].Repo)
 	}
-	if len(result.Repos[0].Paths) != 1 || result.Repos[0].Paths[0] != "terraform/credentials" {
-		t.Fatalf("unexpected paths: %v", result.Repos[0].Paths)
+	if len(result.Repos[0].Steps[0].Paths) != 1 || result.Repos[0].Steps[0].Paths[0] != "terraform/credentials" {
+		t.Fatalf("unexpected paths: %v", result.Repos[0].Steps[0].Paths)
 	}
 	if result.Repos[0].Policy == "" {
 		t.Fatal("policy name should be non-empty")
@@ -89,27 +89,27 @@ func TestSecretStorePlanExcludesRevoked(t *testing.T) {
 	now := time.Now()
 	revoked := now.Add(-time.Hour)
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now, RevokedAt: &revoked, RevokedBy: "admin"},
-		{ID: 2, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/plan", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now, RevokedAt: &revoked, RevokedBy: "admin"},
+		{Workflow: ".oberth/release.yaml", ID: 2, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/plan", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(result.Repos))
 	}
-	if len(result.Repos[0].Paths) != 1 {
-		t.Fatalf("expected 1 path (revoked excluded), got %d", len(result.Repos[0].Paths))
+	if len(result.Repos[0].Steps[0].Paths) != 1 {
+		t.Fatalf("expected 1 path (revoked excluded), got %d", len(result.Repos[0].Steps[0].Paths))
 	}
-	if result.Repos[0].Paths[0] != "terraform/plan" {
-		t.Fatalf("unexpected path: %s", result.Repos[0].Paths[0])
+	if result.Repos[0].Steps[0].Paths[0] != "terraform/plan" {
+		t.Fatalf("unexpected path: %s", result.Repos[0].Steps[0].Paths[0])
 	}
 }
 
 func TestSecretStorePlanMultipleRepos(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 2, Repo: "codeberg/acme/oberth", Step: "*", Secret: "cosign-secret", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 3, Repo: "codeberg/acme/oberth", Step: "*", Secret: "r2-upload", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 2, Repo: "codeberg/acme/oberth", Step: "*", Secret: "cosign-secret", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 3, Repo: "codeberg/acme/oberth", Step: "*", Secret: "r2-upload", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 2 {
@@ -119,8 +119,8 @@ func TestSecretStorePlanMultipleRepos(t *testing.T) {
 	if result.Repos[0].Repo != "codeberg/acme/oberth" {
 		t.Fatalf("repos should be sorted, first is: %s", result.Repos[0].Repo)
 	}
-	if len(result.Repos[0].Paths) != 2 {
-		t.Fatalf("oberth should have 2 paths, got %d", len(result.Repos[0].Paths))
+	if len(result.Repos[0].Steps[0].Paths) != 2 {
+		t.Fatalf("oberth should have 2 paths, got %d", len(result.Repos[0].Steps[0].Paths))
 	}
 }
 
@@ -134,8 +134,8 @@ func TestSecretStorePlanDerivesPolicyName(t *testing.T) {
 func TestSecretStorePlanDigestDeterministic(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 2, Repo: "codeberg/acme/oberth", Step: "*", Secret: "cosign-secret", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 2, Repo: "codeberg/acme/oberth", Step: "*", Secret: "cosign-secret", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result1 := computeSecretStorePlan(grants)
 	result2 := computeSecretStorePlan(grants)
@@ -153,11 +153,11 @@ func TestSecretStorePlanDigestDeterministic(t *testing.T) {
 func TestSecretStorePlanDigestChangesWithGrants(t *testing.T) {
 	now := time.Now()
 	grants1 := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	grants2 := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 2, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/plan", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 2, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/plan", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result1 := computeSecretStorePlan(grants1)
 	result2 := computeSecretStorePlan(grants2)
@@ -171,27 +171,27 @@ func TestSecretStorePlanDigestChangesWithGrants(t *testing.T) {
 func TestSecretStorePlanPerStepEntries(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "upstream/acme/port/config", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 2, Repo: "codeberg/acme/port", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 3, Repo: "codeberg/acme/port", Step: "release-publish-r2", Secret: "release/r2-token", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "upstream/acme/port/config", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 2, Repo: "codeberg/acme/port", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 3, Repo: "codeberg/acme/port", Step: "release-publish-r2", Secret: "release/r2-token", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(result.Repos))
 	}
 	repo := result.Repos[0]
-	if len(repo.Steps) != 2 {
+	if len(repo.Steps) != 3 {
 		t.Fatalf("expected 2 per-step entries, got %d", len(repo.Steps))
 	}
 	// Steps should be sorted.
-	if repo.Steps[0].Step != "release-publish-images" {
-		t.Fatalf("expected first step 'release-publish-images', got %q", repo.Steps[0].Step)
+	if repo.Steps[1].Step != "release-publish-images" {
+		t.Fatalf("expected first step 'release-publish-images', got %q", repo.Steps[1].Step)
 	}
-	if repo.Steps[1].Step != "release-publish-r2" {
-		t.Fatalf("expected second step 'release-publish-r2', got %q", repo.Steps[1].Step)
+	if repo.Steps[2].Step != "release-publish-r2" {
+		t.Fatalf("expected second step 'release-publish-r2', got %q", repo.Steps[2].Step)
 	}
 	// Each step should have its named path PLUS the wildcard-inherited path.
-	for _, step := range repo.Steps {
+	for _, step := range repo.Steps[1:] {
 		if len(step.Paths) != 2 {
 			t.Fatalf("step %q: expected 2 paths (named + inherited wildcard), got %d: %v",
 				step.Step, len(step.Paths), step.Paths)
@@ -199,17 +199,17 @@ func TestSecretStorePlanPerStepEntries(t *testing.T) {
 	}
 }
 
-func TestSecretStorePlanWildcardOnlyNoStepEntries(t *testing.T) {
+func TestSecretStorePlanWildcardUsesWorkflowScopedIdentity(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(result.Repos))
 	}
-	if len(result.Repos[0].Steps) != 0 {
-		t.Fatalf("wildcard-only grants should produce no per-step entries, got %d", len(result.Repos[0].Steps))
+	if len(result.Repos[0].Steps) != 1 || result.Repos[0].Steps[0].Step != "*" || result.Repos[0].Steps[0].Workflow != ".oberth/release.yaml" {
+		t.Fatalf("wildcard grants require a workflow-scoped identity, got %d", len(result.Repos[0].Steps))
 	}
 }
 
@@ -219,12 +219,12 @@ func TestSecretStorePlanPerStepPolicyName(t *testing.T) {
 	// the installer creates a different one, making the admin-facing output
 	// misleading and the plan digest wrong.
 	planName := deriveStepPolicyName("codeberg/acme/port", "release-publish-images")
-	installerName := installer.PerStepName("codeberg", "acme", "port", "release-publish-images")
+	installerName := installer.PerStepName("codeberg", "acme", "port", ".oberth/release.yaml", "release-publish-images")
 	if planName != installerName {
 		t.Fatalf("plan step name %q != installer step name %q", planName, installerName)
 	}
 	// Also verify the shared package produces the same.
-	sharedName := identityname.PerStepName("codeberg", "acme", "port", "release-publish-images")
+	sharedName := identityname.PerStepName("codeberg", "acme", "port", ".oberth/release.yaml", "release-publish-images")
 	if planName != sharedName {
 		t.Fatalf("plan step name %q != identityname step name %q", planName, sharedName)
 	}
@@ -234,12 +234,12 @@ func TestSecretStorePlanDigestChangesWithStepGrants(t *testing.T) {
 	now := time.Now()
 	// Baseline: wildcard only.
 	grants1 := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	// Named step grant added.
 	grants2 := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 2, Repo: "codeberg/acme/port", Step: "release-publish", Secret: "release/image-key", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 2, Repo: "codeberg/acme/port", Step: "release-publish", Secret: "release/image-key", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result1 := computeSecretStorePlan(grants1)
 	result2 := computeSecretStorePlan(grants2)
@@ -251,7 +251,7 @@ func TestSecretStorePlanDigestChangesWithStepGrants(t *testing.T) {
 func TestSecretStorePlanTextIncludesStepEntries(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/port", Step: "release-publish", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/port", Step: "release-publish", Secret: "release/key", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if !strings.Contains(result.Text, "step: release-publish") {
@@ -475,7 +475,7 @@ func TestAccessListPendingDeclaredNotGranted(t *testing.T) {
 	// Record a grant declaration (normally done at Workflow admission).
 	ctx := context.Background()
 	err := service.secretAccess.(*store.Store).RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
-		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -508,14 +508,14 @@ func TestAccessListPendingGrantedNotPending(t *testing.T) {
 
 	// Record a declaration.
 	err := db.RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
-		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Grant the exact (repo, step, path).
-	_, err = db.Grant(ctx, "codeberg/acme/oberth", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
+	_, err = db.Grant(ctx, "codeberg/acme/oberth", ".oberth/release.yaml", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,14 +541,14 @@ func TestAccessListPendingWildcardGrantCoversNamedDeclaration(t *testing.T) {
 
 	// Record a named-step declaration.
 	err := db.RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
-		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Grant with wildcard step — should cover the named declaration.
-	_, err = db.Grant(ctx, "codeberg/acme/oberth", "*", "oberth/data/release/gar-image-key", "admin@host")
+	_, err = db.Grant(ctx, "codeberg/acme/oberth", ".oberth/release.yaml", "*", "oberth/data/release/gar-image-key", "admin@host")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,18 +573,18 @@ func TestAccessListPendingRevokedGrantRePends(t *testing.T) {
 
 	// Record a declaration.
 	err := db.RecordGrantDeclarations(ctx, "codeberg/acme/oberth", "abc123", []store.GrantDeclaration{
-		{Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Step: "release-publish-images", Path: "oberth/data/release/gar-image-key"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Grant then revoke.
-	_, err = db.Grant(ctx, "codeberg/acme/oberth", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
+	_, err = db.Grant(ctx, "codeberg/acme/oberth", ".oberth/release.yaml", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Revoke(ctx, "codeberg/acme/oberth", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
+	_, err = db.Revoke(ctx, "codeberg/acme/oberth", ".oberth/release.yaml", "release-publish-images", "oberth/data/release/gar-image-key", "admin@host")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,21 +650,21 @@ func TestSecretStorePlanLastMaterializedStale(t *testing.T) {
 func TestSecretStorePlanPerRepoExcludesNamedStepPaths(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/cosign-secret", ApprovedBy: "admin", ApprovedAt: now},
-		{ID: 2, Repo: "codeberg/acme/port", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 1, Repo: "codeberg/acme/port", Step: "*", Secret: "release/cosign-secret", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 2, Repo: "codeberg/acme/port", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(result.Repos))
 	}
 	repo := result.Repos[0]
-	if got := strings.Join(repo.Paths, ","); got != "release/cosign-secret" {
-		t.Fatalf("per-repo plan paths must be the wildcard grants only, got %q", got)
+	if got := strings.Join(repo.Paths, ","); got != "" {
+		t.Fatalf("per-repo policy must carry no explicit approvals, got %q", got)
 	}
-	if len(repo.Steps) != 1 {
+	if len(repo.Steps) != 2 {
 		t.Fatalf("expected 1 per-step entry, got %d", len(repo.Steps))
 	}
-	if got := strings.Join(repo.Steps[0].Paths, ","); got != "release/cosign-secret,release/gar-image-key" {
+	if got := strings.Join(repo.Steps[1].Paths, ","); got != "release/cosign-secret,release/gar-image-key" {
 		t.Fatalf("per-step plan paths must be named ∪ wildcard, got %q", got)
 	}
 	// The text form lists the named path under the step only.
@@ -676,7 +676,7 @@ func TestSecretStorePlanPerRepoExcludesNamedStepPaths(t *testing.T) {
 	// A repo whose grants are all named keeps its per-repo entry (its
 	// ServiceAccount and zero-grant policy still exist) with no paths.
 	namedOnly := computeSecretStorePlan([]store.SecretAccessGrant{
-		{ID: 3, Repo: "codeberg/acme/example-web", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+		{Workflow: ".oberth/release.yaml", ID: 3, Repo: "codeberg/acme/example-web", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
 	})
 	if len(namedOnly.Repos) != 1 || len(namedOnly.Repos[0].Paths) != 0 || len(namedOnly.Repos[0].Steps) != 1 {
 		t.Fatalf("named-only repo must keep a per-repo entry with no paths and one step: %+v", namedOnly.Repos)

@@ -1,15 +1,9 @@
 package installer
 
-// Per-step Vault identities: when a secret grant names a specific step
-// (template name) rather than the wildcard "*", the step receives its own
-// ServiceAccount, Vault policy, and Vault role. This isolates the step's
-// Vault credentials to exactly the paths granted to it, closing the residual
-// gap where a per-repo union policy allowed any credentialed template to
-// read any of the repo's granted paths at the Vault layer.
-//
-// Wildcard grants ("*") keep the per-repo identity (backward compatible).
-// Steps without any grant keep the grant-free pipeline identity.
-// Issue #623.
+// Store login identities are scoped to an upstream repository, exact workflow
+// file, and named or wildcard step. Wildcard inheritance stays within that file.
+// Every granted main uses one of these identities; repository identities carry
+// no explicit secret approvals.
 
 import (
 	"context"
@@ -18,9 +12,10 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/identityname"
+	"github.com/oberthci/oberth/internal/model"
 )
 
-// PerStepIdentity describes one (repo, step) combination's per-step Vault
+// PerStepIdentity describes one (repo, workflow file, step) combination's per-step Vault
 // identity. The installer creates the policy, role, and (via the chart) the
 // ServiceAccount.
 type PerStepIdentity struct {
@@ -30,20 +25,21 @@ type PerStepIdentity struct {
 	Org string
 	// Repo is the repository's bare name.
 	Repo string
-	// Step is the Argo template name this identity is scoped to.
+	// Step is the Argo template name, or * for this file's wildcard grants.
 	Step string
+	// Workflow is the exact repository-relative file.
+	Workflow string
 	// GrantPaths are the paths this step is authorized to read. This includes
 	// both paths with named grants for this step and paths with wildcard
-	// grants for the same repo (inherited, since wildcard means "all
-	// templates").
+	// grants for the same repository and workflow file.
 	GrantPaths []string
 }
 
 // PerStepName generates the deterministic, DNS-1123-safe name for a per-step
 // identity. Delegates to internal/identityname so the plan and the installer
 // always produce the same name (issue #623, finding 3).
-func PerStepName(upstream, org, repo, step string) string {
-	return identityname.PerStepName(upstream, org, repo, step)
+func PerStepName(upstream, org, repo, workflow, step string) string {
+	return identityname.PerStepName(upstream, org, repo, workflow, step)
 }
 
 // PerStepPolicy generates the HCL policy for a single per-step identity. It
@@ -103,7 +99,10 @@ func ConfigurePerStepIdentities(ctx context.Context, store openBaoExec, rootToke
 			return items, fmt.Errorf("per-step identity repo: %w", err)
 		}
 
-		name := PerStepName(id.Upstream, id.Org, id.Repo, id.Step)
+		if err := model.ValidateWorkflowFile(id.Workflow); err != nil {
+			return items, err
+		}
+		name := PerStepName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step)
 
 		// --- Policy ---
 
@@ -161,7 +160,7 @@ func PerStepIdentityNames(identities []PerStepIdentity) []string {
 	seen := make(map[string]struct{}, len(identities))
 	var names []string
 	for _, id := range identities {
-		name := PerStepName(id.Upstream, id.Org, id.Repo, id.Step)
+		name := PerStepName(id.Upstream, id.Org, id.Repo, id.Workflow, id.Step)
 		if _, dup := seen[name]; !dup {
 			seen[name] = struct{}{}
 			names = append(names, name)
@@ -171,21 +170,19 @@ func PerStepIdentityNames(identities []PerStepIdentity) []string {
 	return names
 }
 
-// DerivePerStepIdentities computes per-step identities from per-repo
-// identities and the full grant list. For each named-step grant (step != "*"),
-// a per-step identity is produced with paths = the step's named grants PLUS
-// any wildcard-granted paths for the same repo (inherited). Repos with only
-// wildcard grants produce no per-step identities.
+// DerivePerStepIdentities computes identities for all scoped grants. Named
+// steps inherit wildcard paths only from the same repository and workflow file.
+// Wildcard grants have their own workflow-scoped identity.
 func DerivePerStepIdentities(repoIdentities []PerRepoIdentity, grants []grantWithStep) []PerStepIdentity {
 	// Index grants by qualified repo key.
 	type repoKey struct {
-		upstream, org, repo string
+		upstream, org, repo, workflow string
 	}
 	wildcardPaths := make(map[repoKey][]string)        // paths with step="*"
 	stepPaths := make(map[repoKey]map[string][]string) // step -> paths with named grants
 
 	for _, g := range grants {
-		key := repoKey{upstream: g.upstream, org: g.org, repo: g.repo}
+		key := repoKey{upstream: g.upstream, org: g.org, repo: g.repo, workflow: g.workflow}
 		if g.step == wildcardStep {
 			wildcardPaths[key] = appendUnique(wildcardPaths[key], g.secret)
 		} else {
@@ -196,6 +193,12 @@ func DerivePerStepIdentities(repoIdentities []PerRepoIdentity, grants []grantWit
 		}
 	}
 
+	for key, paths := range wildcardPaths {
+		if stepPaths[key] == nil {
+			stepPaths[key] = map[string][]string{}
+		}
+		stepPaths[key]["*"] = paths
+	}
 	var result []PerStepIdentity
 	for key, steps := range stepPaths {
 		for step, paths := range steps {
@@ -212,6 +215,7 @@ func DerivePerStepIdentities(repoIdentities []PerRepoIdentity, grants []grantWit
 				Upstream:   key.upstream,
 				Org:        key.org,
 				Repo:       key.repo,
+				Workflow:   key.workflow,
 				Step:       step,
 				GrantPaths: merged,
 			})
@@ -219,8 +223,8 @@ func DerivePerStepIdentities(repoIdentities []PerRepoIdentity, grants []grantWit
 	}
 	// Sort for deterministic output.
 	sort.Slice(result, func(i, j int) bool {
-		a := result[i].Upstream + "/" + result[i].Org + "/" + result[i].Repo + "/" + result[i].Step
-		b := result[j].Upstream + "/" + result[j].Org + "/" + result[j].Repo + "/" + result[j].Step
+		a := result[i].Upstream + "/" + result[i].Org + "/" + result[i].Repo + "/" + result[i].Workflow + "/" + result[i].Step
+		b := result[j].Upstream + "/" + result[j].Org + "/" + result[j].Repo + "/" + result[j].Workflow + "/" + result[j].Step
 		return a < b
 	})
 	return result
@@ -229,7 +233,7 @@ func DerivePerStepIdentities(repoIdentities []PerRepoIdentity, grants []grantWit
 // grantWithStep is a fully resolved grant entry with separated upstream/org/repo
 // and the step field. It is the input to DerivePerStepIdentities.
 type grantWithStep struct {
-	upstream, org, repo, step, secret string
+	upstream, org, repo, step, secret, workflow string
 }
 
 func appendUnique(slice []string, val string) []string {

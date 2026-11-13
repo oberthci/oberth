@@ -137,7 +137,7 @@ The complete customer-shaped scenario on a disposable environment
    with `release_secrets_dir` set to a private directory created by `mktemp -d`.
    to fetch the secret into private files on verified tmpfs. See
    [release secret delivery](argo-secret-delivery.md) for the file layout.
-   Use `oberth access allow <repo> <step> oberth/data/r2-upload` to grant
+   Use `oberth access allow <repo> .oberth/release.yaml <step> oberth/data/r2-upload` to grant
    access. Push a tag, and watch the release run go green. Inspect the
    Workflow and its task Pods in the Argo namespace (`argo.namespace`,
    default `oberth-argo`):

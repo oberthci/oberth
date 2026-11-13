@@ -87,13 +87,6 @@ func (s *deadlineFaultStore) SetRunWorkflowName(a0 context.Context, a1 string, a
 	return s.Store.SetRunWorkflowName(a0, a1, a2)
 }
 
-func (s *deadlineFaultStore) SetRunCredentialed(a0 context.Context, a1 string) error {
-	if err := s.fault("SetRunCredentialed"); err != nil {
-		return err
-	}
-	return s.Store.SetRunCredentialed(a0, a1)
-}
-
 func (s *deadlineFaultStore) PendingRunCancellations(a0 context.Context) ([]model.RunCancellation, error) {
 	if err := s.fault("PendingRunCancellations"); err != nil {
 		var zero []model.RunCancellation

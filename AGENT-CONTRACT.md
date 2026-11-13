@@ -1458,7 +1458,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   A missing branch Workflow, or a claimed branch run without a Job, retains
   the requeue-with-supersede fallback (#270): the old run links to a queued
   copy of the same commit and any deletion obligation completes before the
-  replacement is claimed. The copy starts uncredentialed and re-earns delivery
+  replacement is claimed. The copy reloads current step grants
   through normal admission. A replacement inherits the stranded run's
   `admission_sequence`, retaining its FIFO place while receiving a fresh
   `queue_sequence` for identity and unchanged history paging (#1092).
@@ -1595,16 +1595,16 @@ Original object UID and intent continue to fence recovery and cleanup. See
   TTL. A document's own `serviceAccountName` is never honoured — Vault validates
   identity, not intent, so a branch push that could name the release identity
   would defeat the tier gate before OpenBao ever saw it.
-- The presence of declared secret-store paths selects the identity, not the
-  trigger type. A pipeline that declares no secret paths — whether CI or
-  release — binds to the pipeline ServiceAccount and runs with no
-  ServiceAccount token, so an in-Pod store login cannot even be attempted.
-  A pipeline that declares approved paths binds to the credentialed
-  ServiceAccount, which is the identity the OpenBao Kubernetes-auth role is
-  bound to by exact `(namespace, ServiceAccount)` pair. The CI system-path
-  prohibition (branch pipelines may not declare system-namespace paths) and
-  the approval-table grant check are enforced as defense in depth,
-  independently of the identity switch.
+- Current per-step grants select secret identity and delivery. A recognized
+  main store consumer must declare every path and hold the corresponding
+  grant for its stable template name or wildcard in the repository/upstream.
+  Admission and Build share `argojob.GrantedSecretSteps`; only that main
+  Container/Script receives store address/role/CA, helper binary, login token
+  and secret-root mounts. Other containers and steps receive no settings;
+  Argo wait loses the generated store mirrors. Run records carry no durable
+  credential classification. Retry/rerun reload current grants, and granted
+  consumers require healthy access reconciliation. Step-level credential
+  evidence remains part of replay safety.
 - Admission refuses everything that would reach the node or the cluster around
   the envelope: `podSpecPatch`, `hostNetwork`, `hostAliases`, `hostPath`,
   `nodeSelector`, `affinity`, `hostPort`/`hostIP`, `workflowTemplateRef`,
@@ -1851,7 +1851,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   format: when an authenticated caller triggers UpdateConfigMap, the
   reconciler stamps `<actor>+configmap@rv=N` in `approved_by`/`revoked_by`;
   watcher-driven reconciles keep plain `configmap@rv=N`. Grant is
-  duplicate-tolerant via `INSERT ... ON CONFLICT(repo, step, secret) WHERE
+  duplicate-tolerant via `INSERT ... ON CONFLICT(repo, workflow, step, secret) WHERE
   revoked_at IS NULL DO NOTHING`; a concurrent race returns the existing
   active row without error. Grant step values are `*` (wildcard: all
   templates) or a DNS-1123 label (specific Argo template name, e.g.
@@ -1867,58 +1867,32 @@ Original object UID and intent continue to fence recovery and cleanup. See
   KV `data/` segment, slash cleanup, or short-path expansion is inferred.
   For example, `oberth/data/release/cosign-secret` and
   `release/cosign-secret` are different paths. Revocation selects the exact
-  canonical repository, step and secret tuple; `step="*"` selects only that
+  canonical upstream repository, exact workflow file, step and secret tuple; `step="*"` selects only that
   wildcard grant, not its named-step neighbors. A missing tuple is refused
   without mutation. Repository-name canonicalization is unchanged.
 - Grant revocation is immediately effective for Oberth admission (the sqlite
   approval table is updated atomically with ConfigMap reconciliation), but the
   Vault credentialed policy retains the exact-path read entry until a policy
   re-sync. Per-step grants (issue #623) scope a secret path to a named Argo
-  template: `access_allow repo=X step=release-publish-images
+  template: `access_allow repo=X workflow=.oberth/release.yaml step=release-publish-images
   secret=oberth/data/release/gar-image-key` restricts the path to templates
-  named `release-publish-images`; `step="*"` is the backward-compatible
-  wildcard granting access to all templates. Enforcement is at admission:
+  named `release-publish-images`; `step="*"` is the explicit
+  wildcard granting access to templates only within that workflow file. Enforcement is at admission:
   `admitSecretstoreExecPaths` checks each template's `--path` arguments
-  against the step grants before any Workflow is submitted. A path with only
+  against that workflow file's step grants before any Workflow is submitted. A path with only
   named-step grants is refused when consumed by an inline, unnamed, or
   fragment-renamed template (fail-closed: the name is not stable or
   authoritative).
-- **Per-step Vault identities (issue #623):** for each (repo, step) with at
-  least one named-step grant, the installer/sync renders a dedicated
-  ServiceAccount `oberth-step-<readable>-<hash12>` in the pipeline namespace,
-  a Kubernetes-auth role bound to exactly that SA + namespace + the existing
-  audience/TTL conventions, and a policy with exactly the step's approved
-  paths (read) plus `auth/token/revoke-self` plus the upstream org/repo
-  wildcard. Wildcard (`*`) grants keep the per-repo identity (backward
-  compatible). Steps without any grant keep the grant-free pipeline identity.
-  At workflow admission, `applyPerStepIdentities` overrides
-  `template.ServiceAccountName` and `OBERTH_VAULT_ROLE` on templates
-  consuming named-step-granted paths, after `ForceIdentity` set the per-repo
-  SA as the workflow default. The per-step SA's projected token is the only
-  token that template's Pod can use for Vault login, so a template can only
-  read the paths its per-step policy grants. **The two path sets (issue
-  #814):** the per-repo policy carries exactly the repo's wildcard (`*`)
-  grants — never a named-step path — because the per-repo SA is the default
-  for every template without a named grant; the per-step policy carries the
-  step's named grants plus the inherited wildcards. A repo whose grants are
-  all named still gets its per-repo identity, with a zero-grant policy. Every
-  producer applies the same rule (`installer.appendPerRepoGrant` for the
-  `access list --json`, tabwriter, and ConfigMap paths;
-  `service.computeSecretStorePlan` for the `secretstore_plan` tool) so the
-  plan digest and the sync receipt agree. Consequence: revoking a wildcard
-  grant narrows the per-repo policy on the next sync even while a named-step
-  grant for the same path remains, and `secretstore_verify` with the
-  per-repo identity must be denied on a named-step-only path. `secretstore
-  plan` and `secretstore sync` render these per-step roles/policies/SAs
-  alongside per-repo identities. The chart renders per-step SAs from the
-  `argo.perStepIdentities` values list.
-  **Fail-closed admission (finding 2):** when per-step identities are
-  configured (the map is non-empty) and a template has a named grant but its
-  per-step identity is missing from the server's identity store or has an
-  empty SA, admission is DENIED with the message: `secret grant denied: step
-  "<s>" has a named grant for path "<p>" but its per-step identity is not
-  materialized -- run \`oberth secretstore sync\``. This closes the residual
-  where a template would run under the per-repo union identity.
+- **Per-step Vault identities:** every (upstream repository, workflow file,
+  named or wildcard step) with a grant gets a dedicated ServiceAccount,
+  Kubernetes-auth role, and `oberth-step-<readable>-<hash12>` policy. Names
+  hash the complete tuple. Named steps inherit wildcard paths only from the
+  same file. Repository identities carry no explicit secret approvals.
+  `applyPerStepIdentities` assigns the admitted main's scoped account and
+  role. Sidecars, init containers, helpers and ungranted steps receive none
+  of its store settings or login token. Plan and sync digests include the
+  exact workflow file. The chart creates the scoped accounts from
+  `argo.perStepIdentities`.
   **Prune safety (finding 1):** `ProducePerStepIdentities` returns a hard
   error when the `kubectl exec ... access list --json` call fails — it never
   returns `nil, nil` on exec failure. `secretstore sync` aborts before any
@@ -1930,14 +1904,10 @@ Original object UID and intent continue to fence recovery and cleanup. See
   args are only set when the per-repo producer AND the per-step producer
   both succeeded (prune-safety: an empty list from a producer failure never
   reaches the chart or the sync).
-  **Fail-closed admission (finding 2):** `applyPerStepIdentities` does NOT
-  have a `len(config.PerStepIdentities) == 0` early return. Whenever a
-  template consumes a path with a named grant and the snapshot has no entry
-  (or an empty SA), admission is DENIED with the message: `secret grant
-  denied: step "<s>" has a named grant for path "<p>" but its per-step
-  identity is not materialized -- run \`oberth secretstore sync\` then
-  \`oberth install --install-secretstore --upgrade\``. This closes the
-  residual where a template would run under the per-repo union identity.
+  **Fail-closed admission:** every granted release main requires its exact
+  workflow-file and step identity, including wildcard consumers. A missing
+  or empty account is refused with the workflow and step plus the store sync
+  and identity installation commands. An empty identity map supplies no authority.
   At controller.Create, each per-step SA assigned to a template is verified
   to exist in the pipeline namespace using the same mechanism as the
   workflow-level `verifyServiceAccount`; a missing per-step SA produces the
@@ -1955,7 +1925,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   expire by TTL (<=30m `token_max_ttl`). This handles revoked grants: the
   per-step identity stays in OpenBao until the next sync removes it.
   **Pending declarations (finding 4):** `access_list --pending` returns
-  (repo, step, path) declarations observed at Workflow admission that have
+  (repo, workflow file, step, path) declarations observed at Workflow admission that have
   no matching active grant. Declarations are recorded at admission time
   by `ArgoJobs.recordDeclarations` via the `DeclarationRecorder` interface
   (wired to `store.Store.RecordGrantDeclarations` in serve.go)
@@ -2495,7 +2465,7 @@ and v2 backup-and-replace semantics are unchanged. See
 | v5 | v0.11.0 | secret_access table for grant tracking | Database restore |
 | v6 | v0.12.0 | uplinks: add admin flag | Database restore |
 | v7 | v0.13.0 | upstreams: add key_name for per-upstream deploy keys | Database restore |
-| v8 | v0.13.5 | runs: add credentialed flag | Database restore |
+| v8 | v0.13.5 | Historical run credential flag, dropped by the v0.22.5 forward migration | Database restore |
 | v9 | v0.13.10 | schedule_fires table for scheduled entry deduplication | Database restore |
 | v10 | v0.13.25 | Ledger-only no-op (org-qualified identity phase 1); body is immutable and must not be rewritten | Database restore |
 | v11 | v0.13.26 | Canonical persistence rebuild: compound UNIQUE(upstream_id, name) on repositories, schedule-fire qualification (raw connection-level migration) | Database restore |
@@ -3350,3 +3320,11 @@ retain their enforcement gates.
 Recovery requires the current helper-storage policy before reseeding or
 adopting a Workflow. Admitted commands are preserved without interpreting
 server command wrappers.
+
+The v0.22.5 workflow-scoped approval migration clears all existing secret
+approvals with no backfill. Unscoped ConfigMap entries are rejected with an
+error. After a committed reset, install and upgrade output says: all secret approvals are cleared; re-approve.
+After re-approving, run `oberth secretstore sync` to prune old OpenBao roles and policies.
+`access_allow`, `access_revoke`, and `access_dismiss` require `workflow`; lists,
+pending observations, policy digests and generated step identities include it.
+No approval-file default or alias is accepted.

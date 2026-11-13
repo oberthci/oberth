@@ -7,16 +7,40 @@ import (
 	"github.com/oberthci/oberth/internal/identityname"
 )
 
+func TestStepPoliciesIsolateWorkflowFiles(t *testing.T) {
+	grants := []grantWithStep{
+		{upstream: "upstream", org: "org", repo: "repo", workflow: ".oberth/a.yaml", step: "*", secret: "release/a"},
+		{upstream: "upstream", org: "org", repo: "repo", workflow: ".oberth/a.yaml", step: "publish", secret: "release/signing"},
+		{upstream: "upstream", org: "org", repo: "repo", workflow: ".oberth/b.yaml", step: "*", secret: "release/b"},
+	}
+	identities := DerivePerStepIdentities(nil, grants)
+	if len(identities) != 3 {
+		t.Fatal(identities)
+	}
+	for _, id := range identities {
+		for _, p := range id.GrantPaths {
+			if id.Workflow == ".oberth/a.yaml" && p == "release/b" || id.Workflow == ".oberth/b.yaml" && p != "release/b" {
+				t.Fatalf("cross-file policy inheritance: %+v", id)
+			}
+		}
+	}
+	a := PerStepName("upstream", "org", "repo", ".oberth/a.yaml", "publish")
+	b := PerStepName("upstream", "org", "repo", ".oberth/b.yaml", "publish")
+	if a == b {
+		t.Fatal("workflow files share a login identity", a)
+	}
+}
+
 func TestPerStepNameDeterministic(t *testing.T) {
-	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
-	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "release-publish-images")
+	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "release-publish-images")
 	if a != b {
 		t.Fatalf("PerStepName is not deterministic: %q != %q", a, b)
 	}
 }
 
 func TestPerStepNameHasCorrectPrefix(t *testing.T) {
-	name := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	name := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "release-publish-images")
 	if !strings.HasPrefix(name, identityname.PerStepPrefix) {
 		t.Fatalf("PerStepName %q does not start with %q", name, identityname.PerStepPrefix)
 	}
@@ -24,7 +48,7 @@ func TestPerStepNameHasCorrectPrefix(t *testing.T) {
 
 func TestPerStepNameFitsLabel(t *testing.T) {
 	// Even with long inputs, the name must fit in a Kubernetes label value (63 chars).
-	name := PerStepName("very-long-upstream", "very-long-organization-name", "very-long-repository-name-that-goes-on", "very-long-step-template-name")
+	name := PerStepName("very-long-upstream", "very-long-organization-name", "very-long-repository-name-that-goes-on", ".oberth/release.yaml", "very-long-step-template-name")
 	if len(name) > maxPerRepoNameLength {
 		t.Fatalf("PerStepName %q exceeds %d characters (%d)", name, maxPerRepoNameLength, len(name))
 	}
@@ -32,22 +56,22 @@ func TestPerStepNameFitsLabel(t *testing.T) {
 
 func TestPerStepNameDistinctFromPerRepo(t *testing.T) {
 	perRepo := PerRepoName("codeberg", "exampleorg", "exampleorg-port")
-	perStep := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	perStep := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "release-publish-images")
 	if perRepo == perStep {
 		t.Fatal("per-step and per-repo names must differ")
 	}
 }
 
 func TestPerStepNameDistinctAcrossSteps(t *testing.T) {
-	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
-	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-r2")
+	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "release-publish-images")
+	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "release-publish-r2")
 	if a == b {
 		t.Fatalf("different steps produce the same name: %q", a)
 	}
 }
 
 func TestPerStepNameDNS1123Safe(t *testing.T) {
-	name := PerStepName("codeberg", "example.org", "my_repo", "my-step")
+	name := PerStepName("codeberg", "example.org", "my_repo", ".oberth/release.yaml", "my-step")
 	for _, c := range name {
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 			t.Fatalf("PerStepName %q contains non-DNS-1123 character %q", name, c)
@@ -126,17 +150,17 @@ func TestPerStepPolicyNarrowerThanPerRepo(t *testing.T) {
 
 func TestDerivePerStepIdentitiesWildcardOnly(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "*", secret: "oberth/data/release/gar-image-key"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "*", secret: "oberth/data/release/gar-image-key"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
-	if len(result) != 0 {
-		t.Fatalf("wildcard-only grants should produce zero per-step identities, got %d", len(result))
+	if len(result) != 1 || result[0].Step != "*" || result[0].Workflow != ".oberth/release.yaml" {
+		t.Fatalf("wildcard-only grants must produce one workflow-scoped identity, got %d", len(result))
 	}
 }
 
 func TestDerivePerStepIdentitiesNamedGrant(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 1 {
@@ -152,25 +176,25 @@ func TestDerivePerStepIdentitiesNamedGrant(t *testing.T) {
 
 func TestDerivePerStepIdentitiesInheritsWildcard(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "*", secret: "oberth/data/release/r2-token"},
-		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "*", secret: "oberth/data/release/r2-token"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
-	if len(result) != 1 {
+	if len(result) != 2 {
 		t.Fatalf("expected 1 per-step identity, got %d", len(result))
 	}
 	// The per-step identity should include both the named grant and the
 	// inherited wildcard-granted path.
-	if len(result[0].GrantPaths) != 2 {
+	if len(result[1].GrantPaths) != 2 {
 		t.Fatalf("expected 2 grant paths (named + inherited wildcard), got %d: %v",
-			len(result[0].GrantPaths), result[0].GrantPaths)
+			len(result[1].GrantPaths), result[1].GrantPaths)
 	}
 }
 
 func TestDerivePerStepIdentitiesMultipleSteps(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
-		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-r2", secret: "oberth/data/release/r2-token"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-r2", secret: "oberth/data/release/r2-token"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 2 {
@@ -184,8 +208,8 @@ func TestDerivePerStepIdentitiesMultipleSteps(t *testing.T) {
 
 func TestDerivePerStepIdentitiesCrossRepoIsolation(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "exampleorg", repo: "repo-a", step: "release-publish", secret: "oberth/data/release/key-a"},
-		{upstream: "codeberg", org: "exampleorg", repo: "repo-b", step: "release-publish", secret: "oberth/data/release/key-b"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "repo-a", step: "release-publish", secret: "oberth/data/release/key-a"},
+		{workflow: ".oberth/release.yaml", upstream: "codeberg", org: "exampleorg", repo: "repo-b", step: "release-publish", secret: "oberth/data/release/key-b"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 2 {
@@ -204,8 +228,8 @@ func TestDerivePerStepIdentitiesCrossRepoIsolation(t *testing.T) {
 
 func TestPerStepIdentityNamesSorted(t *testing.T) {
 	identities := []PerStepIdentity{
-		{Upstream: "codeberg", Org: "exampleorg", Repo: "zzz-repo", Step: "step-a"},
-		{Upstream: "codeberg", Org: "exampleorg", Repo: "aaa-repo", Step: "step-b"},
+		{Workflow: ".oberth/release.yaml", Upstream: "codeberg", Org: "exampleorg", Repo: "zzz-repo", Step: "step-a"},
+		{Workflow: ".oberth/release.yaml", Upstream: "codeberg", Org: "exampleorg", Repo: "aaa-repo", Step: "step-b"},
 	}
 	names := PerStepIdentityNames(identities)
 	if len(names) != 2 {

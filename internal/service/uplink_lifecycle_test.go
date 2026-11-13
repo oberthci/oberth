@@ -34,14 +34,14 @@ func TestCredentialLifecycleRequiresUnscopedAdmin(t *testing.T) {
 	fixture.service.uplinkLifecycle = stub
 	fixture.service.declarationDismissal = fixture.store
 	ctx := context.Background()
-	if err := fixture.store.RecordGrantDeclarations(ctx, "removed-repo", "old", []store.GrantDeclaration{{Step: "old", Path: "oberth/data/old"}}); err != nil {
+	if err := fixture.store.RecordGrantDeclarations(ctx, "removed-repo", "old", []store.GrantDeclaration{{Workflow: ".oberth/release.yaml", Step: "old", Path: "oberth/data/old"}}); err != nil {
 		t.Fatal(err)
 	}
 	calls := map[string]map[string]any{
 		"uplink_list":    {},
 		"uplink_revoke":  {"identity": "target"},
 		"uplink_rotate":  {"identity": "target", "fingerprint": "old", "replacement_fingerprint": "new"},
-		"access_dismiss": {"repo": "removed-repo", "step": "old", "secret": "oberth/data/old"},
+		"access_dismiss": {"repo": "removed-repo", "workflow": ".oberth/release.yaml", "step": "old", "secret": "oberth/data/old"},
 	}
 	for tool, args := range calls {
 		for _, actor := range []api.Actor{scopedActor, scopedAdmin, {Identity: "ordinary"}} {
@@ -92,10 +92,10 @@ func TestCredentialLifecycleMutationsRequireAuditGate(t *testing.T) {
 func TestUnscopedAdminCanDismissOrphanedDeclaration(t *testing.T) {
 	fixture := newScopeFixture(t)
 	fixture.service.declarationDismissal = fixture.store
-	if err := fixture.store.RecordGrantDeclarations(context.Background(), "removed-repo", "old", []store.GrantDeclaration{{Step: "old", Path: "oberth/data/old"}}); err != nil {
+	if err := fixture.store.RecordGrantDeclarations(context.Background(), "removed-repo", "old", []store.GrantDeclaration{{Workflow: ".oberth/release.yaml", Step: "old", Path: "oberth/data/old"}}); err != nil {
 		t.Fatal(err)
 	}
-	args := map[string]any{"repo": "removed-repo", "step": "old", "secret": "oberth/data/old"}
+	args := map[string]any{"repo": "removed-repo", "workflow": ".oberth/release.yaml", "step": "old", "secret": "oberth/data/old"}
 	if _, err := fixture.call(scopedAdmin, "access_dismiss", args); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("scoped orphan dismiss=%v", err)
 	}

@@ -913,24 +913,26 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 
 	case "access_allow":
 		var arguments struct {
-			Repo   string `json:"repo"`
-			Step   string `json:"step"`
-			Secret string `json:"secret"`
+			Repo     string `json:"repo"`
+			Workflow string `json:"workflow"`
+			Step     string `json:"step"`
+			Secret   string `json:"secret"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.accessAllow(ctx, actor, arguments.Repo, arguments.Step, arguments.Secret)
+		return service.accessAllow(ctx, actor, arguments.Repo, arguments.Workflow, arguments.Step, arguments.Secret)
 	case "access_revoke":
 		var arguments struct {
-			Repo   string `json:"repo"`
-			Step   string `json:"step"`
-			Secret string `json:"secret"`
+			Repo     string `json:"repo"`
+			Workflow string `json:"workflow"`
+			Step     string `json:"step"`
+			Secret   string `json:"secret"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.accessRevoke(ctx, actor, arguments.Repo, arguments.Step, arguments.Secret)
+		return service.accessRevoke(ctx, actor, arguments.Repo, arguments.Workflow, arguments.Step, arguments.Secret)
 	case "repo_list":
 		var arguments struct {
 			Archived string `json:"archived"`
@@ -3221,6 +3223,7 @@ func (service *API) accessListPending(ctx context.Context, repo string) (api.Acc
 	for i, p := range pending {
 		response.Declarations[i] = api.PendingDeclaration{
 			Repo:        p.Repo,
+			Workflow:    p.Workflow,
 			Step:        p.Step,
 			Path:        p.Path,
 			LastSeenSHA: p.LastSeenSHA,
@@ -3230,15 +3233,15 @@ func (service *API) accessListPending(ctx context.Context, repo string) (api.Acc
 	return response, nil
 }
 
-func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step, secret string) (api.AccessGrantResponse, error) {
+func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, workflow, step, secret string) (api.AccessGrantResponse, error) {
 	if !actor.Admin {
 		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_allow requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
 		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
 	}
-	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
-		return api.AccessGrantResponse{}, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalidInput)
+	if strings.TrimSpace(workflow) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
+		return api.AccessGrantResponse{}, fmt.Errorf("%w: repo, workflow, step, and secret are required", ErrInvalidInput)
 	}
 	// Resolve the repo name to its qualified form so same-name repos under
 	// different upstreams cannot alias each other's grants (#245 BLOCKER B).
@@ -3264,11 +3267,11 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 	// would be written to the ConfigMap, and the next reconciliation would
 	// reject the entire list and revoke every active approval — a single
 	// malformed request causing global secret revocation.
-	if err := ValidateGrantEntry(0, SecretAccessGrantEntry{Repo: repo, Step: step, Secret: secret}); err != nil {
+	if err := ValidateGrantEntry(0, SecretAccessGrantEntry{Repo: repo, Workflow: workflow, Step: step, Secret: secret}); err != nil {
 		return api.AccessGrantResponse{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	if service.secretAccessReconciler != nil {
-		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.AddGrantCanonical(ctx, repo, step, secret)); err != nil {
+		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.AddGrantCanonical(ctx, repo, workflow, step, secret)); err != nil {
 			return api.AccessGrantResponse{}, fmt.Errorf("update ConfigMap: %w", err)
 		}
 		// Read the grant back from sqlite after reconcile.
@@ -3277,7 +3280,7 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 			return api.AccessGrantResponse{}, err
 		}
 		for _, grant := range grants {
-			if grant.Repo == repo && grant.Step == step && grant.Secret == secret {
+			if grant.Repo == repo && grant.Workflow == workflow && grant.Step == step && grant.Secret == secret {
 				response := wireAccessGrant(grant)
 				response.Warning = grantPolicySyncAdvisory
 				return response, nil
@@ -3285,7 +3288,7 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 		}
 		return api.AccessGrantResponse{}, fmt.Errorf("grant was written to ConfigMap but not found in store after reconcile")
 	}
-	grant, err := service.secretAccess.Grant(ctx, repo, step, secret, actor.Identity)
+	grant, err := service.secretAccess.Grant(ctx, repo, workflow, step, secret, actor.Identity)
 	if err != nil {
 		return api.AccessGrantResponse{}, err
 	}
@@ -3294,15 +3297,18 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, step
 	return response, nil
 }
 
-func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, step, secret string) (api.AccessGrantResponse, error) {
+func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, workflow, step, secret string) (api.AccessGrantResponse, error) {
 	if !actor.Admin {
 		return api.AccessGrantResponse{}, refuse(ErrForbidden, "access_revoke requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
 	}
 	if service.secretAccess == nil {
 		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "secret access")
 	}
-	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
-		return api.AccessGrantResponse{}, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalidInput)
+	if strings.TrimSpace(workflow) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
+		return api.AccessGrantResponse{}, fmt.Errorf("%w: repo, workflow, step, and secret are required", ErrInvalidInput)
+	}
+	if err := model.ValidateWorkflowFile(workflow); err != nil {
+		return api.AccessGrantResponse{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	// Resolve the repo name to its qualified form for identity-safe
 	// lookup (#245 BLOCKER B).
@@ -3322,15 +3328,15 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, ste
 		}
 		var target *store.SecretAccessGrant
 		for i := range grants {
-			if grants[i].Repo == repo && grants[i].Step == step && grants[i].Secret == secret {
+			if grants[i].Repo == repo && grants[i].Workflow == workflow && grants[i].Step == step && grants[i].Secret == secret {
 				target = &grants[i]
 				break
 			}
 		}
 		if target == nil {
-			return api.AccessGrantResponse{}, fmt.Errorf("%w: no active grant for %s/%s/%s", ErrInvalidInput, repo, step, secret)
+			return api.AccessGrantResponse{}, fmt.Errorf("%w: no active grant for %s workflow %s step %s secret %s", ErrInvalidInput, repo, workflow, step, secret)
 		}
-		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.RemoveGrantCanonical(ctx, repo, step, secret)); err != nil {
+		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.RemoveGrantCanonical(ctx, repo, workflow, step, secret)); err != nil {
 			return api.AccessGrantResponse{}, fmt.Errorf("update ConfigMap: %w", err)
 		}
 		// Read the revoked grant back.
@@ -3347,7 +3353,7 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, ste
 		}
 		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "revocation was requested but its committed state could not be confirmed; inspect access_list")
 	}
-	grant, err := service.secretAccess.Revoke(ctx, repo, step, secret, actor.Identity)
+	grant, err := service.secretAccess.Revoke(ctx, repo, workflow, step, secret, actor.Identity)
 	if err != nil {
 		return api.AccessGrantResponse{}, err
 	}
@@ -3394,6 +3400,7 @@ func wireAccessGrant(grant store.SecretAccessGrant) api.AccessGrantResponse {
 	response := api.AccessGrantResponse{
 		ID:         grant.ID,
 		Repo:       grant.Repo,
+		Workflow:   grant.Workflow,
 		Step:       grant.Step,
 		Secret:     grant.Secret,
 		ApprovedBy: grant.ApprovedBy,

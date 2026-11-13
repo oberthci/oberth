@@ -37,10 +37,6 @@ func (database schedulerDatabase) SetRunWorkflowName(ctx context.Context, runID 
 	})
 }
 
-func (database schedulerDatabase) SetRunCredentialed(ctx context.Context, runID string) error {
-	return retryDatabaseError(ctx, "SetRunCredentialed", func(ctx context.Context) error { return database.SchedulerStore.SetRunCredentialed(ctx, runID) })
-}
-
 func (database schedulerDatabase) PendingRunCancellations(ctx context.Context) ([]model.RunCancellation, error) {
 	return retryDatabase(ctx, "PendingRunCancellations", func(ctx context.Context) ([]model.RunCancellation, error) {
 		return database.SchedulerStore.PendingRunCancellations(ctx)

@@ -23,7 +23,6 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // WorkflowClient is the narrow slice of the generated Argo clientset this
@@ -161,11 +160,8 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	if controller.config.ExecutionPlacement != nil && (controller.seeder.config.ExecutionPlacement == nil || controller.seeder.config.ExecutionPlacement.digest != controller.config.ExecutionPlacement.digest) {
 		return "", errors.New("argojob: source seeder and Build placement authority differ")
 	}
-	// Determine whether this pipeline is credentialed -- it will contact the
-	// secret store -- so the seeder knows whether to deliver the trust anchor.
-	// The document is decoded again inside Build; this lightweight pre-check
-	// avoids restructuring the Seed-before-Build ordering.
-	credentialed := request.Trigger == pipeline.TriggerRelease || pipelineDeclaresSecretPaths(request.Source)
+	// Seed store assets only for admitted consumers, using Build's grant rule.
+	needsSecretStore := requestNeedsSecretStore(request)
 
 	// GET the Workflow BEFORE any seeding. If the same submission already
 	// exists, return/repair ownership without touching its claim. This
@@ -200,7 +196,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 
 	// Workflow definitively does not exist. Seed the source claim.
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
-	volume, err := controller.seeder.SeedRequest(ctx, request, credentialed)
+	volume, err := controller.seeder.SeedRequest(ctx, request, needsSecretStore)
 	if err != nil {
 		if controller.config.Custody != nil {
 			return "", fmt.Errorf("%w: source delivery: %w", ErrTargetUncertain, err)
@@ -1137,16 +1133,22 @@ func normalizeSourceVolume(workflow *wfv1.Workflow) {
 	}
 }
 
-// pipelineDeclaresSecretPaths reports whether the pipeline document declares
-// any secret-store paths. Decoding errors return false: Build will surface the
-// real error when it decodes the same bytes.
-func pipelineDeclaresSecretPaths(source []byte) bool {
-	workflow, err := argoworkflow.Decode(source)
+// requestNeedsSecretStore mirrors Build's resolved grant decision for seeding.
+// Build reports malformed declarations and denied grants before submission.
+func requestNeedsSecretStore(request Request) bool {
+	workflow, err := argoworkflow.Decode(request.Source)
 	if err != nil {
 		return false
 	}
+	if _, err := argoworkflow.Resolve(workflow, request.Fragments); err != nil {
+		return false
+	}
 	paths, err := argoworkflow.DeclaredSecretPaths(workflow)
-	return err == nil && len(paths) > 0
+	if err != nil || authorizeWithApprovalTable(paths, request) != nil {
+		return false
+	}
+	steps, err := GrantedSecretSteps(workflow, paths, request.StepGrants)
+	return err == nil && len(steps) > 0
 }
 
 var errEmptyExitCode = errors.New("argojob: node reported no usable exit code")

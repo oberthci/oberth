@@ -154,13 +154,6 @@ type Config struct {
 	ArgoParallelism           *int
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
-	// CredentialedSecretPaths are exact secret paths for the shared
-	// credentialed Vault policy, populated from the --credentialed-secret-path
-	// flag. When per-repo identities exist (len(PerRepoIdentities) > 0),
-	// these are not included in the shared policy, which is stripped to zero
-	// stanzas (issue #456); the grants are carried by per-repo policies
-	// instead.
-	CredentialedSecretPaths []string
 	// PerRepoIdentities describes per-repo Vault identities to create.
 	// Each entry results in a ServiceAccount (via the chart), a Vault
 	// policy, and a Vault role (via ConfigurePerRepoIdentities). The
@@ -1107,6 +1100,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		tw.WriteRow("Execution engine", "argo-workflows "+displayVersion(argo.TargetVersion), "✓ deployed")
 	}
 
+	mutationStarted := time.Now()
 	quietOberthDeps := deps
 	quietOberthDeps.Output = io.Discard
 	oberthResult, err := InstallOberth(ctx, cfg, quietOberthDeps, openbao, rekor)
@@ -1129,11 +1123,19 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// as onboarding steps complete.
 	tw.WriteFooter()
 
-	// A fresh deployment is deliberately NotReady until its first upstream is
-	// registered (vault-pre-init pattern), so completion goes through the
-	// onboarding-aware finish instead of a blind readiness wait. Onboarding
-	// results are appended to the table via AppendRow.
-	return FinishInstall(ctx, cfg, deps, tw, &creds)
+	return finishInstallWithMigrationNotice(ctx, cfg, deps, tw, &creds, oberthResult, mutationStarted)
+}
+
+// A fresh deployment stays NotReady until upstream registration. Complete
+// onboarding before reporting a migration observed during this installation.
+func finishInstallWithMigrationNotice(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, creds *heldCredentials, result OberthResult, since time.Time) error {
+	if err := FinishInstall(ctx, cfg, deps, tw, creds); err != nil {
+		return err
+	}
+	if !result.AlreadyInstalled {
+		printSecretApprovalReset(ctx, deps, result.Namespace, since)
+	}
+	return nil
 }
 
 // --- Phase 1: Cluster detection ---

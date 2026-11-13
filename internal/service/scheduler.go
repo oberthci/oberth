@@ -258,7 +258,7 @@ func (scheduler *Scheduler) AdmitRelease(ctx context.Context, request ReleaseReq
 	enqueued, err := scheduler.database().EnqueueReceiveEvent(ctx, event, model.RunSpec{
 
 		RepoID: request.Repository.ID, RefKind: model.RefTag, Ref: request.Tag,
-		SHA: request.ObjectSHA, Actor: request.Actor, Release: true, Credentialed: true, Trigger: "tag", TestedSHA: request.CommitSHA,
+		SHA: request.ObjectSHA, Actor: request.Actor, Release: true, Trigger: "tag", TestedSHA: request.CommitSHA,
 	})
 	if err != nil {
 		return model.EnqueueRunResult{}, err
@@ -790,13 +790,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
-	if !run.Credentialed && scheduler.pipelineCredentialed(ctx, jobRequest) {
-		if credErr := scheduler.database().SetRunCredentialed(ctx, run.ID); credErr != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("mark run credentialed: %w", credErr))
-		}
-		run.Credentialed = true
-	}
+
 	if err = require(ctx); err != nil {
 		_ = logFile.Close()
 		return err
@@ -1728,31 +1722,6 @@ func (scheduler *Scheduler) requireMutation(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", errMutationBlocked, err)
 	}
 	return nil
-}
-
-// pipelineCredentialed reports whether the run's pipeline declares secret-store
-// paths that make it a credentialed run. Releases are always credentialed
-// (already set at enqueue time); this method detects CI pipelines with declared
-// secrets so the run can be marked before the log writer is created.
-//
-// Design: on detector error the result is false (not credentialed). This is
-// fail-open for scheduling (the run proceeds as a non-credentialed branch
-// build, which has zero secrets and zero publication rights) and fail-safe
-// for records (a credentialed run that is not marked will be re-detected at
-// admission time). The false result never grants access it should not.
-func (scheduler *Scheduler) pipelineCredentialed(ctx context.Context, request WorkflowRequest) bool {
-	if request.Run.Release || request.Run.Credentialed {
-		return true
-	}
-	if detector, ok := scheduler.jobs.(PipelineCredentialDetector); ok {
-		credentialed, err := detector.PipelineCredentialed(ctx, request)
-		if err != nil {
-			log.Printf("WARN: pipelineCredentialed decode error for run %s: %v (treating as non-credentialed)", request.Run.ID, err)
-			return false
-		}
-		return credentialed
-	}
-	return false
 }
 
 func (scheduler *Scheduler) awaitMutation(ctx context.Context) error {

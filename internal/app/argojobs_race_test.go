@@ -95,7 +95,7 @@ func (c *blockingController) Namespace() string                          { retur
 // in argojob.Build (ApprovedSecrets must be non-nil) is satisfied.
 type emptySecretAccess struct{}
 
-func (emptySecretAccess) ActiveSecretGrants(context.Context, int64) (map[string]map[string]bool, error) {
+func (emptySecretAccess) ActiveSecretGrants(context.Context, int64, string) (map[string]map[string]bool, error) {
 	return map[string]map[string]bool{}, nil
 }
 

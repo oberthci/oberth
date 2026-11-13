@@ -197,7 +197,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 		{"build.yaml", "refs/heads/main", pipeline.TriggerCI},
 		{"release.yaml", "refs/tags/v0.1.0", pipeline.TriggerRelease},
 	} {
-		wf, err := Build(oberthConfig(), Request{
+		wf, err := buildOberthPipeline(oberthConfig(), Request{
 			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 			Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 			Ref: entry.ref, SHA: testSHA, Trigger: entry.trigger,

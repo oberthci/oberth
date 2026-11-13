@@ -15,7 +15,7 @@ func TestRestartMigrationRetiresLegacyDeletionButKeepsCancel(t *testing.T) {
 			s := testStore(t, &now)
 			ctx := context.Background()
 			repo := createRepo(t, s)
-			spec := model.RunSpec{RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TestedSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host", Trigger: kind, Release: true, Credentialed: true}
+			spec := model.RunSpec{RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TestedSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host", Trigger: kind, Release: true}
 			var enqueued model.EnqueueRunResult
 			var err error
 			if kind == "promotion" {
@@ -51,7 +51,7 @@ func TestRestartMigrationRetiresLegacyDeletionButKeepsCancel(t *testing.T) {
 				}
 			}
 			current, err := s.Run(ctx, run.ID)
-			if err != nil || current.Status != model.RunRunning || current.ID != run.ID || current.AdmissionSequence != run.AdmissionSequence || current.QueueSequence != run.QueueSequence || current.Credentialed != run.Credentialed || current.SupersededBy != "" {
+			if err != nil || current.Status != model.RunRunning || current.ID != run.ID || current.AdmissionSequence != run.AdmissionSequence || current.QueueSequence != run.QueueSequence || current.SupersededBy != "" {
 				t.Fatalf("recovery changed attempt: %+v %v", current, err)
 			}
 			if pending, err := s.PendingRunCancellations(ctx); err != nil || len(pending) != 0 {

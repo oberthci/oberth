@@ -46,7 +46,7 @@ func TestGenericWIFOnlyIdentityWithoutSecretGrant(t *testing.T) {
 		sibling.ServiceAccountName = "release-step-main"
 		wf.Spec.Templates = append(wf.Spec.Templates, *sibling)
 	})
-	if len(r.ApprovedSecrets) != 0 || len(r.StepGrants) != 0 || len(c.PerStepIdentities) != 0 {
+	if len(r.ApprovedSecrets) != 0 || len(r.StepGrants) != 0 {
 		t.Fatal("fixture must not have a dummy secret grant")
 	}
 	wf, err := Build(c, r)
@@ -131,7 +131,7 @@ func TestGenericWIFRefusesIdentityMisuse(t *testing.T) {
 			case "shared-sa":
 				grant.StepServiceAccounts["main"] = c.PipelineServiceAccount
 			case "other-step":
-				c.PerStepIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth/sibling": {ServiceAccountName: "release-step-main"}}
+				c.PerStepIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth/.oberth/release.yaml/sibling": {ServiceAccountName: "release-step-main"}}
 			case "pinned-other-step":
 				grant.Templates["sibling"] = "artifact-deployer"
 				grant.StepServiceAccounts["sibling"] = "release-step-main"

@@ -32,7 +32,7 @@ func TestAccessRevokeUsesExactListedPathAndTuple(t *testing.T) {
 	}
 	call := func(name string, value tuple) (any, error) {
 		t.Helper()
-		raw, err := json.Marshal(value)
+		raw, err := json.Marshal(map[string]string{"repo": value.Repo, "workflow": ".oberth/release.yaml", "step": value.Step, "secret": value.Secret})
 		if err != nil {
 			t.Fatal(err)
 		}

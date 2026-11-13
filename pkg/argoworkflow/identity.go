@@ -41,16 +41,6 @@ type Identity struct {
 	// added to the executor container, never to main), which is what makes a
 	// tokenless step container possible at all.
 	ExecutorServiceAccountName string
-	// AutomountServiceAccountToken controls whether the step container
-	// receives a ServiceAccount token. False for branch-tier runs: with no
-	// token file, an in-pod Vault login cannot even be attempted, so the tier
-	// separation fails closed one layer below the Vault role binding.
-	//
-	// Argo refuses a Workflow with automount disabled and no executor
-	// ServiceAccount ("executor.serviceAccountName must not be empty if
-	// automountServiceAccountToken is false"), which is why the executor
-	// identity above is not optional.
-	AutomountServiceAccountToken bool
 }
 
 // Validate reports whether the identity is a usable Kubernetes identity.
@@ -72,7 +62,7 @@ func (identity Identity) Validate() error {
 		if messages := k8svalidation.IsDNS1123Subdomain(identity.ResourceServiceAccountName); len(messages) != 0 {
 			problems = append(problems, fmt.Errorf("argoworkflow: resource ServiceAccount is invalid: %s", strings.Join(messages, ", ")))
 		}
-		if identity.ResourceServiceAccountName == identity.ServiceAccountName || identity.ResourceServiceAccountName == identity.ExecutorServiceAccountName || identity.AutomountServiceAccountToken {
+		if identity.ResourceServiceAccountName == identity.ServiceAccountName || identity.ResourceServiceAccountName == identity.ExecutorServiceAccountName {
 			problems = append(problems, errors.New("argoworkflow: resource authority requires distinct pipeline and shared executor accounts with pipeline token automount disabled"))
 		}
 	}
@@ -328,7 +318,8 @@ func normalizeIdentityStruct(value reflect.Value, identity Identity, depth int) 
 				continue
 			}
 		case automountField:
-			if setAutomount(field, identity.AutomountServiceAccountToken) {
+			// All assigned identities use explicit projections, never ambient tokens.
+			if setAutomount(field, false) {
 				continue
 			}
 		}

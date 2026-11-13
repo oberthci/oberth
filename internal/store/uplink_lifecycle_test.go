@@ -80,20 +80,20 @@ func TestGrantDeclarationSnapshotAndDismiss(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := "forge/org/repo"
-	if err := s.RecordGrantDeclarations(ctx, repo, "old", []GrantDeclaration{{Step: "old", Path: "oberth/data/old"}}); err != nil {
+	if err := s.RecordGrantDeclarations(ctx, repo, "old", []GrantDeclaration{{Workflow: ".oberth/release.yaml", Step: "old", Path: "oberth/data/old"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordGrantDeclarations(ctx, "other/org/repo", "old", []GrantDeclaration{{Step: "keep", Path: "oberth/data/keep"}}); err != nil {
+	if err := s.RecordGrantDeclarations(ctx, "other/org/repo", "old", []GrantDeclaration{{Workflow: ".oberth/release.yaml", Step: "keep", Path: "oberth/data/keep"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReplaceGrantDeclarations(ctx, repo, "new", []GrantDeclaration{{Step: "ci", Path: "oberth/data/ci"}, {Step: "release", Path: "oberth/data/release"}}); err != nil {
+	if err := s.ReplaceGrantDeclarations(ctx, repo, "new", []GrantDeclaration{{Workflow: ".oberth/release.yaml", Step: "ci", Path: "oberth/data/ci"}, {Workflow: ".oberth/release.yaml", Step: "release", Path: "oberth/data/release"}}); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := s.PendingGrantDeclarations(ctx, repo)
 	if err != nil || len(pending) != 2 || pending[0].LastSeenSHA != "new" {
 		t.Fatalf("pending=%+v %v", pending, err)
 	}
-	if err := s.DismissGrantDeclaration(ctx, "admin", repo, "ci", "oberth/data/ci"); err != nil {
+	if err := s.DismissGrantDeclaration(ctx, "admin", repo, ".oberth/release.yaml", "ci", "oberth/data/ci"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.ReplaceGrantDeclarations(ctx, repo, "empty", nil); err != nil {
@@ -165,7 +165,7 @@ func TestDeclarationSnapshotRetiresOnlyUnambiguousLegacyNames(t *testing.T) {
 	if _, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "repo", UpstreamID: upstream.ID, DefaultBranch: "main"}); err != nil {
 		t.Fatal(err)
 	}
-	old := []GrantDeclaration{{Step: "old", Path: "oberth/data/old"}}
+	old := []GrantDeclaration{{Workflow: ".oberth/release.yaml", Step: "old", Path: "oberth/data/old"}}
 	if err := s.RecordGrantDeclarations(ctx, "repo", "old", old); err != nil {
 		t.Fatal(err)
 	}

@@ -86,9 +86,8 @@ func UsesOberthSecretstore(template *wfv1.Template) bool {
 
 // UsesSecrets reports whether a template runs any recognised credential
 // chain: oberth secretstore exec.
-// The server mounts the secret store login token into exactly these Pods and
-// no others, so this is also what marks a planned step as one that reads
-// secrets.
+// This is declaration intent for planning. Runtime delivery additionally
+// requires the approved step grants checked by argojob.GrantedSecretSteps.
 func UsesSecrets(template *wfv1.Template) bool {
 	return UsesOberthSecretstore(template)
 }

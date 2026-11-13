@@ -114,7 +114,7 @@ func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "spec-identity", SpecSHA256: "exact-admitted-spec"}}
 			jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
-			run := model.Run{ID: "run-" + kind, WorkflowName: "workflow-" + kind, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "annotated-tag-object", TestedSHA: "peeled-reviewed-commit", Trigger: kind, Release: true, Credentialed: true}
+			run := model.Run{ID: "run-" + kind, WorkflowName: "workflow-" + kind, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "annotated-tag-object", TestedSHA: "peeled-reviewed-commit", Trigger: kind, Release: true}
 			expectedTier := pipeline.TriggerRelease
 			expectedKind := argoworkflow.RunTriggerTag
 			if kind == "promotion" {

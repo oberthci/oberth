@@ -53,7 +53,7 @@ func (scheduler *Scheduler) recoverPendingPublications(ctx context.Context) erro
 // only. New code uses identityname.PerStepNameFromQualified directly.
 // Issue #623, finding 3: the plan and the installer must produce the same name.
 func deriveStepPolicyName(repo, step string) string {
-	return identityname.PerStepNameFromQualified(repo, step)
+	return identityname.PerStepNameFromQualified(repo, ".oberth/release.yaml", step)
 }
 
 // ExportComputeSecretStorePlan is the exported entry point for testing digest

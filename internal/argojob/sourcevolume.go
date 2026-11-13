@@ -157,23 +157,23 @@ func NewSourceSeeder(client kubernetes.Interface, exec ExecStreamer, config Conf
 // On any failure the claim is removed, so a failed submission does not leave
 // storage behind in the pipeline namespace.
 func (seeder *SourceSeeder) Seed(
-	ctx context.Context, workflowName, sourceDir string, credentialed bool,
+	ctx context.Context, workflowName, sourceDir string, deliverStoreAssets bool,
 ) (SourceVolume, error) {
-	return seeder.seed(ctx, workflowName, sourceDir, credentialed, false)
+	return seeder.seed(ctx, workflowName, sourceDir, deliverStoreAssets, false)
 }
 
 // SeedRequest carries the complete durable selection before any claim or Pod is created.
-func (seeder *SourceSeeder) SeedRequest(ctx context.Context, request Request, credentialed bool) (SourceVolume, error) {
-	return seeder.seed(ctx, request.Name, request.SourceDir, credentialed, request.Assist, &request)
+func (seeder *SourceSeeder) SeedRequest(ctx context.Context, request Request, deliverStoreAssets bool) (SourceVolume, error) {
+	return seeder.seed(ctx, request.Name, request.SourceDir, deliverStoreAssets, request.Assist, &request)
 }
 
-func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir string, credentialed, assistHelper bool, requests ...*Request) (SourceVolume, error) {
+func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir string, deliverStoreAssets, assistHelper bool, requests ...*Request) (SourceVolume, error) {
 	if seeder.config.ExecutionPlacement != nil {
 		if len(requests) != 1 || requests[0] == nil || requests[0].Name != workflowName || requests[0].SourceDir != sourceDir {
 			return SourceVolume{}, errors.New("argojob: isolated source seeding requires a complete request")
 		}
 		request := *requests[0]
-		if credentialed {
+		if deliverStoreAssets {
 			return SourceVolume{}, errors.New("argojob: approved target source delivery must remain credential-free")
 		}
 		if err := seeder.config.ExecutionPlacement.selectRequest(seeder.config, request); err != nil {
@@ -209,7 +209,7 @@ func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir st
 	if err := seeder.createClaim(ctx, volume.ClaimName, workflowName); err != nil {
 		return SourceVolume{}, err
 	}
-	if err := seeder.fill(ctx, &volume, sourceDir, credentialed, assistHelper, requests...); err != nil {
+	if err := seeder.fill(ctx, &volume, sourceDir, deliverStoreAssets, assistHelper, requests...); err != nil {
 		seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return SourceVolume{}, err
 	}
@@ -256,7 +256,7 @@ func (seeder *SourceSeeder) createClaim(ctx context.Context, name, workflowName 
 // the claim itself; its whole job is to be a filesystem the exec stream can
 // write to.
 func (seeder *SourceSeeder) fill(
-	ctx context.Context, volume *SourceVolume, sourceDir string, credentialed, assistHelper bool, requests ...*Request,
+	ctx context.Context, volume *SourceVolume, sourceDir string, deliverStoreAssets, assistHelper bool, requests ...*Request,
 ) error {
 	podName := volume.ClaimName
 	created, err := seeder.createSeedPodBound(ctx, podName, volume.ClaimName, requests...)
@@ -317,13 +317,13 @@ func (seeder *SourceSeeder) fill(
 			}
 		}
 	}
-	if err := seeder.fillVaultCA(ctx, volume, podName, credentialed); err != nil {
+	if err := seeder.fillVaultCA(ctx, volume, podName, deliverStoreAssets); err != nil {
 		return err
 	}
 	if err := seeder.fillGoProxyCA(ctx, volume, podName); err != nil {
 		return err
 	}
-	if credentialed || assistHelper {
+	if deliverStoreAssets || assistHelper {
 		return seeder.fillServerBinary(ctx, volume, podName)
 	}
 	return nil
@@ -359,11 +359,11 @@ func (seeder *SourceSeeder) fillPinnedSource(ctx context.Context, podName string
 // certificate the administrator trusts, which is exactly the decision a
 // repository must not make for itself.
 func (seeder *SourceSeeder) fillVaultCA(
-	ctx context.Context, volume *SourceVolume, podName string, credentialed bool,
+	ctx context.Context, volume *SourceVolume, podName string, deliverStoreAssets bool,
 ) error {
 	pem := seeder.config.VaultCACertPEM
-	if !credentialed || strings.TrimSpace(pem) == "" {
-		// Nothing to deliver: a non-credentialed pipeline holds no token and
+	if !deliverStoreAssets || strings.TrimSpace(pem) == "" {
+		// Nothing to deliver: a step without a secret grant holds no token and
 		// cannot log in, and a store with a publicly trusted certificate needs
 		// no anchor.
 		return nil
@@ -421,7 +421,7 @@ func (seeder *SourceSeeder) fillGoProxyCA(
 // fillServerBinary streams the running server's own binary into the claim so
 // pipeline containers can invoke `oberth secretstore exec` without fetching
 // it from a registry. Assisted continuation uses the same verified executable;
-// ordinary unassisted, uncredentialed runs receive no executable.
+// ordinary unassisted steps without secret grants receive no executable.
 //
 // The binary is verified by SHA-256 readback: the digest is computed during
 // the stream and compared against sha256sum run inside the seed pod.

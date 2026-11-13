@@ -59,9 +59,7 @@ func TestPilotRetirementPreservesReadOnlyHistory(t *testing.T) {
 		}
 	}
 	// Historical pilot rows cannot participate in current execution decisions.
-	if err = s.SetRunCredentialed(ctx, run.ID); err != nil {
-		t.Errorf("credential transition consulted retired pilot history: %v", err)
-	}
+
 }
 
 const executionRetirementTriggersDowngradeSQL = `

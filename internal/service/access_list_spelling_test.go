@@ -41,7 +41,7 @@ func TestAccessListResolvesRepoSpelling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.Grant(ctx, qualified, "*", "oberth/data/release/cosign-secret", "admin@test"); err != nil {
+	if _, err := fixture.store.Grant(ctx, qualified, ".oberth/release.yaml", "*", "oberth/data/release/cosign-secret", "admin@test"); err != nil {
 		t.Fatal(err)
 	}
 

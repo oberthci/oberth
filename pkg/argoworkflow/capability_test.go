@@ -109,8 +109,6 @@ func TestCapabilityIdentitySeparatesResourceAuthority(t *testing.T) {
 				candidate.ServiceAccountName = candidate.ResourceServiceAccountName
 			case "executor":
 				candidate.ExecutorServiceAccountName = candidate.ResourceServiceAccountName
-			case "automount":
-				candidate.AutomountServiceAccountToken = true
 			case "missing binding":
 				candidate.ResourceServiceAccountName = ""
 			case "foreign binding":
@@ -120,9 +118,16 @@ func TestCapabilityIdentitySeparatesResourceAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if scenario == "automount" {
+				enabled := true
+				wf.Spec.AutomountServiceAccountToken = &enabled
+			}
 			err = Prepare(wf, policy, candidate)
-			if (err == nil) != (scenario == "valid") {
+			if (err == nil) != (scenario == "valid" || scenario == "automount") {
 				t.Fatalf("Prepare: %v", err)
+			}
+			if err == nil && (wf.Spec.AutomountServiceAccountToken == nil || *wf.Spec.AutomountServiceAccountToken) {
+				t.Fatal("prepared workflow permits ambient pipeline tokens")
 			}
 		})
 	}

@@ -454,8 +454,8 @@ func recordingExec(calls *[]seedExecCall) ExecStreamer {
 	}
 }
 
-// A credentialed run's claim carries the trust anchor beside the checkout. This
-// is the delivery mechanism itself: without it a credentialed step reaches an
+// A claim serving granted secret steps carries the trust anchor beside the checkout.
+// This is the delivery mechanism itself: without it a granted step reaches an
 // HTTPS OpenBao with nothing to verify it against, and the login fails before
 // any credential exists.
 func TestSeedDeliversTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {

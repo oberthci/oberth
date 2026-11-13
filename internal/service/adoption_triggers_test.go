@@ -23,7 +23,7 @@ func slice2ClaimedRun(t *testing.T, kind string) (*recoveryFixture, model.Run, m
 	t.Helper()
 	fixture := newRecoveryFixture(t)
 	ctx := context.Background()
-	spec := model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: adoptionTagObjectSHA, TestedSHA: adoptionTestedSHA, Actor: "agent@host", Trigger: "tag", Release: true, Credentialed: true}
+	spec := model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: adoptionTagObjectSHA, TestedSHA: adoptionTestedSHA, Actor: "agent@host", Trigger: "tag", Release: true}
 	if kind == "release" {
 		spec.Trigger = "release"
 		spec.Ref = "v2.0.0"
@@ -225,7 +225,7 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 				owner := startSlice2Owner(t, scheduler)
 				owner.waitEntered(t, jobs.waitEntered)
 				active, err := fixture.store.Run(context.Background(), run.ID)
-				if err != nil || active.Status != model.RunRunning || active.Credentialed != run.Credentialed || active.Release != run.Release || active.SHA != run.SHA || active.TestedSHA != run.TestedSHA || active.AdmissionSequence != run.AdmissionSequence || active.SupersededBy != "" {
+				if err != nil || active.Status != model.RunRunning || active.Release != run.Release || active.SHA != run.SHA || active.TestedSHA != run.TestedSHA || active.AdmissionSequence != run.AdmissionSequence || active.SupersededBy != "" {
 					t.Fatalf("adoption changed durable attempt: %+v %v", active, err)
 				}
 				owner.stop(t)
@@ -263,7 +263,7 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 						t.Fatalf("terminal workspace %s retained: %v", path, err)
 					}
 				}
-				if final.ID != run.ID || final.QueueSequence != run.QueueSequence || final.AdmissionSequence != run.AdmissionSequence || final.SupersededBy != "" || final.Credentialed != run.Credentialed {
+				if final.ID != run.ID || final.QueueSequence != run.QueueSequence || final.AdmissionSequence != run.AdmissionSequence || final.SupersededBy != "" {
 					t.Fatalf("final attempt changed: %+v", final)
 				}
 				if jobs.created != 0 || jobs.releaseCreated != 0 || len(jobs.deleted) != 0 || len(jobs.adopted) != 1 {

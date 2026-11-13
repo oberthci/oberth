@@ -46,7 +46,7 @@ rules:
     resources: ["configmaps"]
     resourceNames: ["kube-root-ca.crt"]
     verbs: ["get"]
-  # argojob verifies that a credentialed run's per-repo ServiceAccount exists
+  # argojob verifies that a granted step's per-repo ServiceAccount exists
   # before creating the Job (fail-closed materialization guard, issues
   # #433/#459: a grant added before the installer resync would otherwise
   # produce a Job that binds a non-existent identity). Read-only get; no

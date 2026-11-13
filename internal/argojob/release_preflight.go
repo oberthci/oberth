@@ -22,11 +22,14 @@ type ReleasePreflight struct {
 	Checks       []string
 }
 
-// PreflightRelease checks public capabilities without building a credentialed
-// Workflow, seeding source, requesting tokens, or contacting the secret store.
+// PreflightRelease checks public capabilities without submitting a Workflow,
+// seeding source, requesting tokens, or contacting the secret store.
 func PreflightRelease(config Config, request Request) (ReleasePreflight, error) {
 	config.applyDefaults()
 	request.releasePreflight = true
+	if request.PipelineFile == "" {
+		request.PipelineFile = argoworkflow.ReleaseFile
+	}
 	result := ReleasePreflight{}
 	if request.Identities != nil {
 		config.PerRepoIdentities = request.Identities.Release
@@ -70,7 +73,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		if grants["*"] || grants[step] {
 			return
 		}
-		args, _ := json.Marshal(map[string]string{"repo": canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo), "step": step, "secret": path})
+		args, _ := json.Marshal(map[string]string{"repo": canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo), "workflow": request.PipelineFile, "step": step, "secret": path})
 		result.Problems = append(result.Problems, fmt.Sprintf("step %q lacks a grant for %q; run access_allow %s", step, path, args))
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {
@@ -109,7 +112,8 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 	// Discard authored identities just as admission does. Only the server's
 	// selected repository and per-step accounts may appear in this report.
 	walkTemplates(wf, func(t *wfv1.Template) { t.ServiceAccountName = "" })
-	if err := applyPerStepIdentities(wf, config, request); err != nil {
+	secretSteps, _ := GrantedSecretSteps(wf, paths, request.StepGrants)
+	if err := applyPerStepIdentities(wf, config, request, secretSteps); err != nil {
 		add(err)
 		return result, nil
 	}
@@ -117,7 +121,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		add(err)
 		return result, nil
 	}
-	identity, err := config.identityForWithRepo(pipeline.TriggerRelease, len(paths) > 0 || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
+	identity, err := config.identityForWithRepo(pipeline.TriggerRelease, len(secretSteps) > 0 || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
 	if err != nil {
 		add(err)
 		return result, nil
@@ -148,6 +152,9 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, request Request) error {
 	config := controller.config
 	request.releasePreflight = true
+	if request.PipelineFile == "" {
+		request.PipelineFile = argoworkflow.ReleaseFile
+	}
 	if request.Identities != nil {
 		config.PerRepoIdentities = request.Identities.Release
 		config.PerRepoCIIdentities = request.Identities.CI
@@ -165,7 +172,9 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 	}
 	var problems []error
 	walkTemplates(wf, func(t *wfv1.Template) { t.ServiceAccountName = "" })
-	problems = append(problems, applyPerStepIdentities(wf, config, request))
+	paths, pathErr := argoworkflow.DeclaredSecretPaths(wf)
+	secretSteps, _ := GrantedSecretSteps(wf, paths, request.StepGrants)
+	problems = append(problems, applyPerStepIdentities(wf, config, request, secretSteps))
 	leaves, wifErr := authorizeReleaseWIF(wf, config, request)
 	if wifErr == nil {
 		problems = append(problems, applyReleaseWIFStepIdentities(leaves, config, request))
@@ -183,9 +192,8 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 		one.Spec.Templates = []wfv1.Template{template}
 		problems = append(problems, controller.verifyPerStepServiceAccounts(ctx, one))
 	}
-	paths, pathErr := argoworkflow.DeclaredSecretPaths(wf)
 	problems = append(problems, pathErr)
-	if len(paths) > 0 || releaseWIFNeedsRepoIdentity(leaves, config, request) {
+	if len(secretSteps) > 0 || releaseWIFNeedsRepoIdentity(leaves, config, request) {
 		identity, err := config.identityForWithRepo(pipeline.TriggerRelease, true, request.UpstreamName, request.UpstreamOrg, request.Repo)
 		problems = append(problems, err)
 		if err == nil {

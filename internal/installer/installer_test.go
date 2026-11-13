@@ -251,6 +251,9 @@ func TestDryRunZeroWrites(t *testing.T) {
 		t.Fatalf("dry-run called helm %d times, want read-only Oberth and Argo release lookups", helmCalls)
 	}
 	output := buf.String()
+	if strings.Contains(output, "all secret approvals are cleared; re-approve.") {
+		t.Fatal("dry run falsely reports approvals cleared", output)
+	}
 	if !strings.Contains(output, "Dry-run plan") {
 		t.Fatalf("output missing dry-run plan header:\n%s", output)
 	}

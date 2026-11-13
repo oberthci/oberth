@@ -176,8 +176,9 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 	}
 }
 
-func TestBuildAssistSkipsCredentialedWorkflows(t *testing.T) {
+func TestBuildAssistSkipsWorkflowsWithGrantedSteps(t *testing.T) {
 	document := strings.Replace(assistDocument, "example.com/tier: M", "example.com/tier: M\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/token", 1)
+	document = strings.Replace(document, "command: [go, test, ./...]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/token, --, /bin/true]", 1)
 	request := assistRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/token": true}
 	request.StepGrants = map[string]map[string]bool{"oberth/upstream/acme/oberth/token": {"*": true}}

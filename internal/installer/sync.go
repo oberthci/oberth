@@ -121,7 +121,7 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 			})
 		}
 		for _, sid := range stepIdentities {
-			desiredStepNames[PerStepName(sid.Upstream, sid.Org, sid.Repo, sid.Step)] = struct{}{}
+			desiredStepNames[PerStepName(sid.Upstream, sid.Org, sid.Repo, sid.Workflow, sid.Step)] = struct{}{}
 		}
 	}
 

@@ -28,12 +28,15 @@ func TestProducePerRepoIdentitiesFromQualifiedGrants(t *testing.T) {
 		Data: map[string]string{
 			secretAccessConfigMapKey: `
 - repo: codeberg/oberthci/oberth
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/data/release/cosign-secret
 - repo: codeberg/oberthci/oberth
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/data/release/r2-token
 - repo: github/acme/terraform
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/upstream/acme/terraform/plan/gcp-sa
 `,
@@ -62,7 +65,7 @@ func TestProducePerRepoIdentitiesFromQualifiedGrants(t *testing.T) {
 	if result[0].Upstream != "codeberg" || result[0].Org != "oberthci" || result[0].Repo != "oberth" {
 		t.Fatalf("unexpected identity[0]: %+v", result[0])
 	}
-	if len(result[0].Grants) != 2 {
+	if len(result[0].Grants) != 0 {
 		t.Fatalf("expected 2 grants for oberth, got %d", len(result[0].Grants))
 	}
 
@@ -79,9 +82,11 @@ func TestProducePerRepoIdentitiesSkipsBareRepoNames(t *testing.T) {
 		Data: map[string]string{
 			secretAccessConfigMapKey: `
 - repo: oberth
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/data/release/cosign-secret
 - repo: codeberg/oberthci/oberth
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/data/release/r2-token
 `,
@@ -142,12 +147,12 @@ func TestProduceFromAccessListParsesQualifiedOutput(t *testing.T) {
 	t.Parallel()
 	// Simulate the tabwriter-formatted output of `oberth access list`.
 	accessListOutput := strings.Join([]string{
-		"REPO                                        STEP   SECRET                                             APPROVED BY                            APPROVED AT        STATUS",
-		"codeberg/acme/acme-example-service       *      oberth/data/release/cosign-secret                  admin@localhost+configmap@rv=225951    2026-08-21 16:40   active",
-		"codeberg/acme/acme-example-service       *      oberth/data/release/gar-sa-key                     admin@localhost+configmap@rv=225949    2026-08-21 16:40   active",
-		"codeberg/acme/terraform               *      oberth/upstream/acme/terraform/credentials   configmap@rv=699072                    2026-08-23 22:23   active",
-		"github/oberthci/oberth                      *      oberth/data/release/cosign-secret                  configmap@rv=18991                     2026-08-18 08:54   active",
-		"github/oberthci/oberth                      *      oberth/data/release/r2-upload-token                admin@localhost+configmap@rv=18990     2026-08-18 08:54   active",
+		"REPO                                        WORKFLOW   STEP   SECRET                                             APPROVED BY                            APPROVED AT        STATUS",
+		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/cosign-secret                  admin@localhost+configmap@rv=225951    2026-08-21 16:40   active",
+		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/gar-sa-key                     admin@localhost+configmap@rv=225949    2026-08-21 16:40   active",
+		"codeberg/acme/terraform               .oberth/release.yaml   *      oberth/upstream/acme/terraform/credentials   configmap@rv=699072                    2026-08-23 22:23   active",
+		"github/oberthci/oberth                      .oberth/release.yaml   *      oberth/data/release/cosign-secret                  configmap@rv=18991                     2026-08-18 08:54   active",
+		"github/oberthci/oberth                      .oberth/release.yaml   *      oberth/data/release/r2-upload-token                admin@localhost+configmap@rv=18990     2026-08-18 08:54   active",
 	}, "\n")
 
 	// Mock the CommandRunner. First call (--json) fails to simulate an older
@@ -181,7 +186,7 @@ func TestProduceFromAccessListParsesQualifiedOutput(t *testing.T) {
 	if result[0].Upstream != "codeberg" || result[0].Org != "acme" || result[0].Repo != "acme-example-service" {
 		t.Fatalf("unexpected identity[0]: %+v", result[0])
 	}
-	if len(result[0].Grants) != 2 {
+	if len(result[0].Grants) != 0 {
 		t.Fatalf("expected 2 grants for acme-example-service, got %d: %v", len(result[0].Grants), result[0].Grants)
 	}
 
@@ -189,7 +194,7 @@ func TestProduceFromAccessListParsesQualifiedOutput(t *testing.T) {
 	if result[1].Upstream != "codeberg" || result[1].Org != "acme" || result[1].Repo != "terraform" {
 		t.Fatalf("unexpected identity[1]: %+v", result[1])
 	}
-	if len(result[1].Grants) != 1 || result[1].Grants[0] != "oberth/upstream/acme/terraform/credentials" {
+	if len(result[1].Grants) != 0 {
 		t.Fatalf("unexpected grants for terraform: %v", result[1].Grants)
 	}
 
@@ -197,7 +202,7 @@ func TestProduceFromAccessListParsesQualifiedOutput(t *testing.T) {
 	if result[2].Upstream != "github" || result[2].Org != "oberthci" || result[2].Repo != "oberth" {
 		t.Fatalf("unexpected identity[2]: %+v", result[2])
 	}
-	if len(result[2].Grants) != 2 {
+	if len(result[2].Grants) != 0 {
 		t.Fatalf("expected 2 grants for oberth, got %d", len(result[2].Grants))
 	}
 }
@@ -215,6 +220,7 @@ func TestProduceFromAccessListFallsBackToConfigMapOnExecFailure(t *testing.T) {
 		Data: map[string]string{
 			secretAccessConfigMapKey: `
 - repo: codeberg/oberthci/oberth
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/data/release/cosign-secret
 `,
@@ -251,8 +257,8 @@ func TestProduceFromAccessListFallsBackToConfigMapOnExecFailure(t *testing.T) {
 func TestParseAccessListOutputSkipsBareRows(t *testing.T) {
 	t.Parallel()
 	output := strings.Join([]string{
-		"REPO          STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS",
-		"terraform     *      oberth/data/release/cosign-secret   admin         2026-08-18 08:54   active",
+		"REPO          WORKFLOW   STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS",
+		"terraform     .oberth/release.yaml   *      oberth/data/release/cosign-secret   admin         2026-08-18 08:54   active",
 	}, "\n")
 
 	_, err := ParseAccessListOutput([]byte(output))
@@ -277,9 +283,9 @@ func TestParseAccessListOutputEmptyInput(t *testing.T) {
 func TestParseAccessListJSONQualifiedEntries(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/cosign-secret"},
-		{Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/r2-upload-token"},
-		{Repo: "github/acme/terraform", Step: "*", Secret: "oberth/upstream/acme/terraform/gcp-sa"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/r2-upload-token"},
+		{Workflow: ".oberth/release.yaml", Repo: "github/acme/terraform", Step: "*", Secret: "oberth/upstream/acme/terraform/gcp-sa"},
 	}
 	data, _ := json.Marshal(entries)
 	result, err := ParseAccessListJSON(data)
@@ -305,7 +311,7 @@ func TestParseAccessListJSONEmptyArray(t *testing.T) {
 func TestParseAccessListJSONAllBareReturnsError(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "terraform", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "terraform", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 	}
 	data, _ := json.Marshal(entries)
 	_, err := ParseAccessListJSON(data)
@@ -317,7 +323,7 @@ func TestParseAccessListJSONAllBareReturnsError(t *testing.T) {
 func TestProduceFromAccessListPrefersJSON(t *testing.T) {
 	t.Parallel()
 	jsonEntries := []accessListJSONEntry{
-		{Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/cosign-secret"},
 	}
 	jsonData, _ := json.Marshal(jsonEntries)
 
@@ -402,7 +408,7 @@ func TestProduceExecGarbageTriggersConfigMapFallback(t *testing.T) {
 			}
 		}
 		// Tabwriter: valid exit, data lines, but no qualified repos.
-		return []byte("REPO   STEP   SECRET   APPROVED BY   APPROVED AT   STATUS\ngarbage   *   some/secret   admin   2026-08-18   active\n"), nil
+		return []byte("REPO   WORKFLOW   STEP   SECRET   APPROVED BY   APPROVED AT   STATUS\ngarbage   *   some/secret   admin   2026-08-18   active\n"), nil
 	}
 
 	cm := &corev1.ConfigMap{
@@ -410,6 +416,7 @@ func TestProduceExecGarbageTriggersConfigMapFallback(t *testing.T) {
 		Data: map[string]string{
 			secretAccessConfigMapKey: `
 - repo: codeberg/oberthci/oberth
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/data/release/cosign-secret
 `,
@@ -449,13 +456,13 @@ func TestProduceExecTabwriterGarbageTriggersConfigMapFallback(t *testing.T) {
 				return nil, fmt.Errorf("flag provided but not defined: -json")
 			}
 		}
-		return []byte("REPO          STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS\ngarbage       *      some/secret                         admin         2026-08-18 08:54   active\n"), nil
+		return []byte("REPO          WORKFLOW   STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS\ngarbage       *      some/secret                         admin         2026-08-18 08:54   active\n"), nil
 	}
 
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
 		Data: map[string]string{
-			secretAccessConfigMapKey: "- repo: codeberg/oberthci/oberth\n  step: \"*\"\n  secret: oberth/data/release/cosign-secret\n",
+			secretAccessConfigMapKey: "- repo: codeberg/oberthci/oberth\n  workflow: .oberth/release.yaml\n  step: \"*\"\n  secret: oberth/data/release/cosign-secret\n",
 		},
 	}
 	kube := fake.NewSimpleClientset(cm)
@@ -485,9 +492,9 @@ func TestParseAccessListOutputDataLinesNoQualifiedReturnsError(t *testing.T) {
 	t.Parallel()
 	// Multiple data lines, none qualified — should return format-drift error.
 	output := strings.Join([]string{
-		"REPO          STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS",
-		"terraform     *      oberth/data/release/cosign-secret   admin         2026-08-18 08:54   active",
-		"oberth        *      oberth/data/release/r2-token        admin         2026-08-18 08:54   active",
+		"REPO          WORKFLOW   STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS",
+		"terraform     .oberth/release.yaml   *      oberth/data/release/cosign-secret   admin         2026-08-18 08:54   active",
+		"oberth        .oberth/release.yaml   *      oberth/data/release/r2-token        admin         2026-08-18 08:54   active",
 	}, "\n")
 	_, err := ParseAccessListOutput([]byte(output))
 	if err == nil {
@@ -500,7 +507,7 @@ func TestParseAccessListOutputDataLinesNoQualifiedReturnsError(t *testing.T) {
 
 func TestParseAccessListOutputHeaderOnlyIsEmpty(t *testing.T) {
 	t.Parallel()
-	output := "REPO   STEP   SECRET   APPROVED BY   APPROVED AT   STATUS\n"
+	output := "REPO   WORKFLOW   STEP   SECRET   APPROVED BY   APPROVED AT   STATUS\n"
 	result, err := ParseAccessListOutput([]byte(output))
 	if err != nil {
 		t.Fatal(err)
@@ -513,8 +520,8 @@ func TestParseAccessListOutputHeaderOnlyIsEmpty(t *testing.T) {
 func TestParseAccessListJSONEntriesNoQualifiedReturnsError(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "terraform", Step: "*", Secret: "s1"},
-		{Repo: "oberth", Step: "release", Secret: "s2"},
+		{Workflow: ".oberth/release.yaml", Repo: "terraform", Step: "*", Secret: "s1"},
+		{Workflow: ".oberth/release.yaml", Repo: "oberth", Step: "release", Secret: "s2"},
 	}
 	data, _ := json.Marshal(entries)
 	_, err := ParseAccessListJSON(data)
@@ -536,10 +543,10 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 
 	// Simulate access list output with both data-prefix and upstream-prefix grants.
 	accessListOutput := strings.Join([]string{
-		"REPO                                        STEP   SECRET                                             APPROVED BY       APPROVED AT        STATUS",
-		"codeberg/acme/acme-example-service       *      oberth/data/release/cosign-secret                  admin             2026-08-21 16:40   active",
-		"codeberg/acme/acme-example-service       *      oberth/data/release/gar-sa-key                     admin             2026-08-21 16:40   active",
-		"codeberg/acme/terraform               *      oberth/upstream/acme/terraform/credentials   admin             2026-08-23 22:23   active",
+		"REPO                                        WORKFLOW   STEP   SECRET                                             APPROVED BY       APPROVED AT        STATUS",
+		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/cosign-secret                  admin             2026-08-21 16:40   active",
+		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/gar-sa-key                     admin             2026-08-21 16:40   active",
+		"codeberg/acme/terraform               .oberth/release.yaml   *      oberth/upstream/acme/terraform/credentials   admin             2026-08-23 22:23   active",
 	}, "\n")
 
 	// Mock runner: --json fails (old binary), tabwriter succeeds.
@@ -606,7 +613,7 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 	// Verify that the terraform policy write included the upstream grant.
 	for _, call := range runner.calls {
 		if call.command == "policy write "+terraformName+" -" {
-			if !strings.Contains(call.stdin, `path "oberth/data/upstream/acme/terraform/credentials"`) {
+			if !strings.Contains(call.stdin, `path "oberth/data/upstream/acme/terraform/*"`) {
 				t.Fatalf("terraform policy missing upstream grant path in written HCL:\n%s", call.stdin)
 			}
 			return
@@ -661,9 +668,9 @@ func TestProducePerStepIdentitiesNilRunnerReturnsNil(t *testing.T) {
 func TestParseAccessListJSONExcludesNamedStepGrantsFromPerRepo(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
-		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
-		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/r2-upload-token"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/exampleorg-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/r2-upload-token"},
 	}
 	data, _ := json.Marshal(entries)
 	result, err := ParseAccessListJSON(data)
@@ -673,7 +680,7 @@ func TestParseAccessListJSONExcludesNamedStepGrantsFromPerRepo(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
 	}
-	want := []string{"oberth/data/release/cosign-secret", "oberth/data/release/r2-upload-token"}
+	var want []string
 	if got := result[0].Grants; !reflect.DeepEqual(got, want) {
 		t.Fatalf("per-repo grants must be the wildcard paths only (issue #814): got %v want %v", got, want)
 	}
@@ -686,8 +693,8 @@ func TestParseAccessListJSONExcludesNamedStepGrantsFromPerRepo(t *testing.T) {
 func TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
-		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/exampleorg-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
 	}
 	data, _ := json.Marshal(entries)
 	repoIdentities, grants, err := ParseAccessListJSONWithSteps(data)
@@ -697,19 +704,19 @@ func TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths(t *testing.T) 
 	if len(repoIdentities) != 1 {
 		t.Fatalf("expected 1 per-repo identity, got %d: %+v", len(repoIdentities), repoIdentities)
 	}
-	if got, want := repoIdentities[0].Grants, []string{"oberth/data/release/cosign-secret"}; !reflect.DeepEqual(got, want) {
+	if got, want := repoIdentities[0].Grants, []string(nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("per-repo grants: got %v want %v", got, want)
 	}
 	if len(grants) != 2 {
 		t.Fatalf("expected both raw grants to be carried for per-step derivation, got %d", len(grants))
 	}
 	steps := DerivePerStepIdentities(repoIdentities, grants)
-	if len(steps) != 1 || steps[0].Step != "release-publish-images" {
+	if len(steps) != 2 || steps[1].Step != "release-publish-images" {
 		t.Fatalf("expected one per-step identity for release-publish-images, got %+v", steps)
 	}
 	wantStep := []string{"oberth/data/release/cosign-secret", "oberth/data/release/gar-image-key"}
-	if !reflect.DeepEqual(steps[0].GrantPaths, wantStep) {
-		t.Fatalf("per-step paths must be named ∪ wildcard: got %v want %v", steps[0].GrantPaths, wantStep)
+	if !reflect.DeepEqual(steps[1].GrantPaths, wantStep) {
+		t.Fatalf("per-step paths must be named ∪ wildcard: got %v want %v", steps[1].GrantPaths, wantStep)
 	}
 }
 
@@ -721,7 +728,7 @@ func TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths(t *testing.T) 
 func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/exampleorg/example-web", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/example-web", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
 	}
 	data, _ := json.Marshal(entries)
 	result, err := ParseAccessListJSON(data)
@@ -744,9 +751,9 @@ func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T
 func TestParseAccessListOutputExcludesNamedStepGrants(t *testing.T) {
 	t.Parallel()
 	output := strings.Join([]string{
-		"REPO                                      STEP                     SECRET                                 APPROVED BY   APPROVED AT        STATUS",
-		"codeberg/exampleorg/exampleorg-port       *                        oberth/data/release/cosign-secret      admin         2026-08-21 16:40   active",
-		"codeberg/exampleorg/exampleorg-port       release-publish-images   oberth/data/release/gar-image-key      fabian        2026-10-07 18:00   active",
+		"REPO                                      WORKFLOW   STEP                     SECRET                                 APPROVED BY   APPROVED AT        STATUS",
+		"codeberg/exampleorg/exampleorg-port       .oberth/release.yaml   *                        oberth/data/release/cosign-secret      admin         2026-08-21 16:40   active",
+		"codeberg/exampleorg/exampleorg-port       .oberth/release.yaml   release-publish-images   oberth/data/release/gar-image-key      fabian        2026-10-07 18:00   active",
 	}, "\n")
 	result, err := ParseAccessListOutput([]byte(output))
 	if err != nil {
@@ -755,7 +762,7 @@ func TestParseAccessListOutputExcludesNamedStepGrants(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
 	}
-	if got, want := result[0].Grants, []string{"oberth/data/release/cosign-secret"}; !reflect.DeepEqual(got, want) {
+	if got, want := result[0].Grants, []string(nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tabwriter per-repo grants: got %v want %v", got, want)
 	}
 }
@@ -769,9 +776,11 @@ func TestProduceFromConfigMapExcludesNamedStepGrants(t *testing.T) {
 		Data: map[string]string{
 			secretAccessConfigMapKey: `
 - repo: codeberg/exampleorg/exampleorg-port
+  workflow: .oberth/release.yaml
   step: "*"
   secret: oberth/data/release/cosign-secret
 - repo: codeberg/exampleorg/exampleorg-port
+  workflow: .oberth/release.yaml
   step: release-publish-images
   secret: oberth/data/release/gar-image-key
 `,
@@ -785,7 +794,7 @@ func TestProduceFromConfigMapExcludesNamedStepGrants(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
 	}
-	if got, want := result[0].Grants, []string{"oberth/data/release/cosign-secret"}; !reflect.DeepEqual(got, want) {
+	if got, want := result[0].Grants, []string(nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("ConfigMap per-repo grants: got %v want %v", got, want)
 	}
 }

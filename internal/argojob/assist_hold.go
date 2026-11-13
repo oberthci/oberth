@@ -220,10 +220,10 @@ func (assist AssistConfig) Effective() AssistConfig { return assist.withDefaults
 
 // assistActive reports whether this submission runs in assist mode: the
 // administrator enabled it, the run asked, and it is branch-tier CI with no
-// credentials anywhere in the workflow. Release, tag, promotion, schedule,
+// granted secret steps in the workflow. Release, tag, promotion, schedule,
 // plan and apply runs never hold: their steps publish or carry identity.
-func assistActive(config Config, request Request, credentialed bool) bool {
-	if !config.Assist.Enabled || !request.Assist || credentialed {
+func assistActive(config Config, request Request, hasSecretSteps bool) bool {
+	if !config.Assist.Enabled || !request.Assist || hasSecretSteps {
 		return false
 	}
 	return request.Trigger == pipeline.TriggerCI && request.effectiveRunTrigger() == argoworkflow.RunTriggerBranch && request.ScheduleEntry == ""
@@ -270,10 +270,10 @@ func assistHoldEligible(t *wfv1.Template, workflowServiceAccount string, nonroot
 // deadline by the hold allowance (AssistHoldMaxAgeFactor TTLs) so a parked step cannot be cut short by the
 // run's own budget, and records assist mode on the Workflow. The hold
 // annotations are server-owned: authored copies are removed first.
-func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, credentialed bool) error {
+func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, hasSecretSteps bool) error {
 	delete(workflow.Annotations, AssistWorkflowAnnotation)
 	walkTemplates(workflow, func(t *wfv1.Template) { delete(t.Metadata.Annotations, AssistHoldAnnotation) })
-	if !assistActive(config, request, credentialed) {
+	if !assistActive(config, request, hasSecretSteps) {
 		return nil
 	}
 	// A default or workflow-wide retryStrategy would be replaced on every

@@ -378,7 +378,8 @@ func protectExecutorWorkspaceMounts(wf *wfv1.Workflow) error {
 			for _, m := range main.VolumeMounts {
 				mirrorPath := path.Join(argoMainFilesystem, m.MountPath)
 				if (m.Name == SecretsVolumeName && m.MountPath == SecretsMountPath) ||
-					(m.Name == ReleaseTokenVolumeName && m.MountPath == ReleaseTokenMountPath) {
+					(m.Name == ReleaseTokenVolumeName && m.MountPath == ReleaseTokenMountPath) ||
+					m.MountPath == VaultCAMountPath || m.MountPath == OberthBinMountPath {
 					// The wait executor has its own token. A readonly main-token
 					// mirror can still authenticate to Vault, and its secret-root
 					// mirror is writable under the same Pod UID. VolumeMounts merge

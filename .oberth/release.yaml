@@ -13,7 +13,7 @@
 # Every Pod leaf uses the template-level token and workspace
 # controls every server since v0.16.6 honours (#567): it declares
 # oberth.ci/workspace-mounts: none and oberth.ci/workspace-env: none, and every
-# leaf except the six credentialed ones (release-sign-binaries, release-publish-images,
+# leaf except the six granted ones (release-sign-binaries, release-publish-images,
 # release-publish-homebrew, release-publish-chart,
 # release-verify, release-public-artifacts) declares
 # automountServiceAccountToken: false. The release-public-artifacts leaves already
@@ -29,7 +29,7 @@
 #
 # With workspace-mounts none the server injects neither the persistent
 # /work/cache hostPath nor /work/artifacts (older servers did); every executed
-# command still replaces its environment and uses pod-private caches. Credentialed
+# command still replaces its environment and uses pod-private caches. Granted
 # shells use only system PATH and absolute hash-verified publisher tools.
 # Init checks source bytes against the admitted commit and all executable pins
 # before secretstore can run. Tool hashes come from two clean independent builds.
