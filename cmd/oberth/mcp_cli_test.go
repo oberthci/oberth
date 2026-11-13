@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -468,4 +469,18 @@ func structuredMCPTokenFile(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestMCPToolsRefusesNonMCPResponses(t *testing.T) {
+	for _, body := range []string{`{}`, `{"jsonrpc":"2.0","id":1,"result":{}}`, `{"jsonrpc":"1.0","id":1,"result":{"tools":[]}}`, `<html>not MCP</html>`} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, body) }))
+			defer server.Close()
+			t.Setenv("OBERTH_MCP_URL", server.URL)
+			t.Setenv("OBERTH_TOKEN", "fixture")
+			if err := runMCPTools(t.Context(), nil, io.Discard); err == nil {
+				t.Fatal("accepted a non-MCP response")
+			}
+		})
+	}
 }

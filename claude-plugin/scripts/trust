@@ -694,6 +694,28 @@ configure() {
  case "$url" in https://*) ;; *) fail "MCP URL must use https://";; esac
  case "$url" in *[!]A-Za-z0-9._~:/%[-]*) fail "invalid MCP URL";; esac
  command -v claude >/dev/null 2>&1 || fail "Claude Code CLI is required"
+ # A server origin is not an MCP endpoint. Keep an explicit path, but probe
+ # it before replacing a working registration or touching client settings.
+ origin=${url#https://}
+ case "$origin" in ''|/*|*@*) fail "invalid MCP URL";; esac
+ case "$origin" in */*) case "${origin#*/}" in '') url="${url}mcp";; esac;; *) url="$url/mcp";; esac
+ claude=$(claude_directory)
+ ca="$claude/oberth/ca.crt"
+ [ -r "$ca" ] || fail "stored server CA is missing; run trust connect first"
+ cli=$(command -v oberth || true)
+ if [ -z "$cli" ] && [ -x "$HOME/.local/bin/oberth" ]; then cli="$HOME/.local/bin/oberth"; fi
+ [ -n "$cli" ] || fail "verified Oberth CLI is required; run /oberth:install first"
+ if [ -n "$token_file" ]; then
+  set -- --token-file "$token_file"
+ else
+  variable=CLAUDE_CODE_CLIENT_CERT; cert=$(current_trust "$claude/settings.json")
+  variable=CLAUDE_CODE_CLIENT_KEY; key=$(current_trust "$claude/settings.json")
+  variable=NODE_EXTRA_CA_CERTS
+  [ -n "$cert" ] && [ -n "$key" ] || fail "client certificate and key are missing; run trust credentials first"
+  set -- --client-cert "$cert" --client-key "$key"
+ fi
+ "$cli" mcp tools --url "$url" --ca-file "$ca" --timeout 15s --reconnect-window 1ms "$@" >/dev/null 2>&1 ||
+  fail "URL did not answer as authenticated MCP over verified TLS: $(shown "$url"); check the endpoint and client identity. MCP registration unchanged."
  if [ -n "$token_file" ]; then
   # The helper, not an argv value, supplies the bearer to Claude Code.
   case "$token_file" in *[!A-Za-z0-9/@._-]*) fail "token file path must contain only letters, digits, / . _ -";; esac
