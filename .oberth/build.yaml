@@ -1,10 +1,10 @@
 # Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
-# Main container storage requests and limits remain provisional;
-# templates that require a separate scratch volume declare it explicitly.
+# Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
+# utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
 # Reviewed peak floors add 1.3x memory / 1.5x storage headroom; all bounds remain provisional.
 # CPU requests follow observed averages up to 1000m; main storage limits are at least 512Mi.
 # Sources: branch a5144ee1989c, release 398379142b7c and last-30 maxima; retain larger existing floors.
-# Templates declare private scratch explicitly; Pod storage includes executor output.
+# Pod storage samples include wait (512Mi limit) and disk /tmp (8Gi emptyDir sizeLimit), not PVCs.
 # Neither the helper allowance nor the emptyDir sizeLimit is a measured main-container peak.
 # Oberth CI pipeline (branch-trigger) for the oberth repository.
 #
@@ -69,6 +69,9 @@
 # workflow parallelism still bounds active Pods.
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/nonroot-templates: test-static-git-runtime
 spec:
   priority: 0
   entrypoint: ci
@@ -1791,17 +1794,6 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
-    securityContext:
-      runAsUser: 65534
-      runAsGroup: 65534
-      runAsNonRoot: true
-      fsGroup: 65534
-      seccompProfile:
-        type: RuntimeDefault
-    volumes:
-    - name: qualification-tmp
-      emptyDir:
-        sizeLimit: 512Mi
     retryStrategy:
       limit: 2
       retryPolicy: OnError
@@ -1809,14 +1801,9 @@ spec:
         duration: 30s
         factor: 2
     container:
-      securityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop: [ALL]
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /qualification/source/internal/gitcache
-      # Qualification uses authored UID/GID65534 and read-only inputs.
+      # The selected nonroot template receives UID/GID65534 and read-only mounts.
       # The static launcher denies execution outside the candidate payload.
       command: ["/qualification/launch-static-git"]
       env:
@@ -1827,8 +1814,6 @@ spec:
       - name: OBERTH_ARCHIVE_PARITY_REPO
         value: fixture
       volumeMounts:
-      - name: qualification-tmp
-        mountPath: /tmp
       - name: work
         mountPath: /qualification
         subPath: static-git-qualification

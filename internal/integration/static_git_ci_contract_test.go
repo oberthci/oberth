@@ -87,7 +87,7 @@ func checkStaticGitGate(workflow *wfv1.Workflow) error {
 }
 
 func TestStaticGitRuntimeIsARequiredFreshArtifactGate(t *testing.T) {
-	body, err := os.ReadFile("../../.oberth/build.yaml")
+	body, err := os.ReadFile("../argojob/testdata/own-pipelines-next/build.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}

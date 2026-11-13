@@ -963,12 +963,12 @@ spec:
 func TestOberthPipelinesPassAdmission(t *testing.T) {
 	t.Parallel()
 	policy := Policy{RunnerImagePrefixes: pipeline.DefaultRunnerImagePrefixes}
-	for _, file := range []string{"../../.oberth/build.yaml", "../../.oberth/release.yaml"} {
+	for _, file := range []string{"../../internal/argojob/testdata/own-pipelines-next/build.yaml", "../../internal/argojob/testdata/own-pipelines-next/release.yaml"} {
 		name := file
 		t.Run(name, func(t *testing.T) {
 			source, err := os.ReadFile(file)
 			if err != nil {
-				t.Skipf("pipeline file not found: %s", file)
+				t.Fatalf("pipeline file not found: %s", file)
 			}
 			workflow, err := Decode(source)
 			if err != nil {

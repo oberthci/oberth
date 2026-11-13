@@ -33,7 +33,7 @@ func repositoryRoot(t *testing.T) string {
 
 func loadPipeline(t *testing.T, name string) []byte {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(repositoryRoot(t), ".oberth", name))
+	body, err := os.ReadFile(filepath.Join("testdata", "own-pipelines-next", name))
 	if err != nil {
 		t.Fatalf("read .oberth/%s: %v", name, err)
 	}

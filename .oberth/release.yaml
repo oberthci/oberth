@@ -1,10 +1,10 @@
 # Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
-# Main container storage requests and limits remain provisional;
-# templates that require a separate scratch volume declare it explicitly.
+# Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
+# utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
 # Reviewed peak floors add 1.3x memory / 1.5x storage headroom; all bounds remain provisional.
 # CPU requests follow observed averages up to 1000m; main storage limits are at least 512Mi.
 # Sources: branch a5144ee1989c, release 398379142b7c and last-30 maxima; retain larger existing floors.
-# Historical Pod storage samples include executor output and former private scratch, not PVCs.
+# Pod storage samples include wait (512Mi limit) and disk /tmp (8Gi emptyDir sizeLimit), not PVCs.
 # Neither the helper allowance nor the emptyDir sizeLimit is a measured main-container peak.
 # Release workflow. The Golang and Trivy images pin their Linux amd64
 # platform manifests, not multi-platform indexes: bootstrap tools and their
@@ -1919,12 +1919,6 @@ spec:
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        seccompProfile:
-          type: RuntimeDefault
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
       command:
@@ -2018,12 +2012,6 @@ spec:
           ephemeral-storage: 2Gi # provisional artifact-staging bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        seccompProfile:
-          type: RuntimeDefault
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
       command:
@@ -2121,12 +2109,6 @@ spec:
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        seccompProfile:
-          type: RuntimeDefault
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
       command:
@@ -2289,12 +2271,6 @@ spec:
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        seccompProfile:
-          type: RuntimeDefault
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
       command:
@@ -2384,12 +2360,6 @@ spec:
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        seccompProfile:
-          type: RuntimeDefault
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
       command:
@@ -2623,12 +2593,6 @@ spec:
           ephemeral-storage: 2Gi # provisional artifact-staging bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-        seccompProfile:
-          type: RuntimeDefault
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
       command:
