@@ -59,6 +59,9 @@ func refusalKeepCases() []keepRefusalCase {
 		{"75", "container", "        ports: [{containerPort: 8080, hostPort: 8080}]\n", ".hostPort"},
 		{"77", "container", "        resources:\n          claims: [{name: device}]\n", ".resources.claims"},
 		{"79", "container", "        volumeMounts: [{name: shadow, mountPath: /run/oberth}]\n", "reserved server helper path"},
+		{"79-relative", "container", "        volumeMounts: [{name: shadow, mountPath: run/oberth/bin}]\n", "reserved server helper path"},
+		{"80-mount", "container", "        volumeMounts: [{name: data, mountPath: relative/path}]\n", "must be an absolute path"},
+		{"80-device", "container", "        volumeDevices: [{name: data, devicePath: relative/path}]\n", "must be an absolute path"},
 	}
 }
 

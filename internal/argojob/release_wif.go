@@ -191,7 +191,7 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 		checkVolumes(t.Volumes)
 		templateContainers(t, func(c *corev1.Container) {
 			for _, m := range c.VolumeMounts {
-				if m.Name == releaseWIFVolume || path.Clean(m.MountPath) == releaseWIFPath || strings.HasPrefix(path.Clean(m.MountPath), releaseWIFPath+"/") {
+				if m.Name == releaseWIFVolume || path.Clean("/"+m.MountPath) == releaseWIFPath || strings.HasPrefix(path.Clean("/"+m.MountPath), releaseWIFPath+"/") {
 					failure = &argoworkflow.AdmissionError{Cause: errors.New("argojob: release WIF mounts are server-owned")}
 				}
 			}
@@ -321,7 +321,8 @@ func protectReleaseWIFExecutor(leaves []*wfv1.Template) error {
 		filtered := make([]any, 0, len(mounts)+1)
 		for _, m := range mounts {
 			v, _ := m.(map[string]any)
-			if v["mountPath"] != path.Join(argoMainFilesystem, releaseWIFPath) {
+			mountPath, _ := v["mountPath"].(string)
+			if path.Clean("/"+mountPath) != path.Join(argoMainFilesystem, releaseWIFPath) {
 				filtered = append(filtered, m)
 			}
 		}

@@ -1121,7 +1121,7 @@ func applyTemplateSecurity(template *wfv1.Template, mount corev1.VolumeMount, de
 		}
 		filtered := container.VolumeMounts[:0:0]
 		for _, existing := range container.VolumeMounts {
-			if existing.Name == stepTmpVolumeName || existing.MountPath == stepTmpMountPath {
+			if existing.Name == stepTmpVolumeName || path.Clean("/"+existing.MountPath) == stepTmpMountPath {
 				continue
 			}
 			filtered = append(filtered, existing)
@@ -1583,14 +1583,14 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 		if !workspaceMountKept(template, m) {
 			continue
 		}
-		if tokenDisabled(template) && (m.MountPath == VaultCAMountPath || m.MountPath == OberthBinMountPath) {
+		if tokenDisabled(template) && (path.Clean("/"+m.MountPath) == VaultCAMountPath || path.Clean("/"+m.MountPath) == OberthBinMountPath) {
 			continue
 		}
 		// The server chooses the volume/subpath, but a readonly request at
 		// that path must survive replacement and protect its aliases too.
 		templateContainers(template, func(c *corev1.Container) {
 			for _, existing := range c.VolumeMounts {
-				if existing.MountPath == m.MountPath && existing.ReadOnly {
+				if path.Clean("/"+existing.MountPath) == path.Clean("/"+m.MountPath) && existing.ReadOnly {
 					m.ReadOnly = true
 				}
 			}
@@ -1606,7 +1606,7 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 	// second mount of the same claim existed.
 	reserved := make(map[string]struct{}, len(localInjected))
 	for _, mount := range localInjected {
-		reserved[mount.MountPath] = struct{}{}
+		reserved[path.Clean("/"+mount.MountPath)] = struct{}{}
 	}
 	attach := func(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 		filtered := mounts[:0:0]
@@ -1620,7 +1620,7 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 				existing.Name == SecretsVolumeName {
 				continue
 			}
-			if _, taken := reserved[existing.MountPath]; taken {
+			if _, taken := reserved[path.Clean("/"+existing.MountPath)]; taken {
 				continue
 			}
 			filtered = append(filtered, existing)

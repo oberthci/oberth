@@ -158,9 +158,6 @@ func TestRefusalDuplicateSchemaChecks(t *testing.T) {
 			w.Spec.Templates[0].Container.Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2")}
 			w.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}
 		}},
-		{"80", func(w *wfv1.Workflow) {
-			w.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: "data", MountPath: "relative/path"}}
-		}},
 	} {
 		t.Run("row-"+test.row, func(t *testing.T) {
 			w, err := Decode([]byte(admissibleDocument))
