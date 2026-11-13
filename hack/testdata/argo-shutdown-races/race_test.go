@@ -1,4 +1,4 @@
-package app
+package shutdownraces
 
 import (
 	"strings"
@@ -14,6 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ktesting "k8s.io/client-go/testing"
 
+	"context"
+
+	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -70,7 +73,10 @@ func TestReviewerStopRacePreservesGenuineFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			jobs := &ArgoJobs{controller: c}
+			jobs, err := app.NewArgoJobs(c, argojob.Config{Namespace: wf.Namespace, PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor"}, unusedAuditor{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, err := jobs.TerminalResult(t.Context(), wf.Name)
 			if err != nil {
 				t.Fatal(err)
@@ -133,7 +139,10 @@ func TestReviewerShutdownEscalationKeepsCompletedStop(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			jobs := &ArgoJobs{controller: c}
+			jobs, err := app.NewArgoJobs(c, argojob.Config{Namespace: wf.Namespace, PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor"}, unusedAuditor{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, err := jobs.TerminalResult(t.Context(), wf.Name)
 			if err != nil {
 				t.Fatal(err)
@@ -144,4 +153,11 @@ func TestReviewerShutdownEscalationKeepsCompletedStop(t *testing.T) {
 			}
 		})
 	}
+}
+
+// These terminal readers must not need submission audit writes.
+type unusedAuditor struct{}
+
+func (unusedAuditor) AppendAuditAction(context.Context, model.AuditActionSpec) (model.AuditAction, error) {
+	panic("terminal observation attempted an audit mutation")
 }

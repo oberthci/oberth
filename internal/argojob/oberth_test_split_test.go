@@ -82,46 +82,78 @@ func TestOberthRaceGroupsCoverEveryPackageExactlyOnce(t *testing.T) {
 
 func TestOberthRaceGroupLauncherPreservesChecks(t *testing.T) {
 	root := t.TempDir()
-	packages := oberthTestPackages(t)
-	// A newly listed package must join the remainder without a pipeline edit.
-	packages = append(packages, "github.com/oberthci/oberth/internal/future-package")
+	packages := append(oberthTestPackages(t), "github.com/oberthci/oberth/internal/future-package")
 	packageFile := filepath.Join(root, "packages")
 	if err := os.WriteFile(packageFile, []byte(strings.Join(packages, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	goPath := filepath.Join(root, "go")
+	upstream := filepath.Join(root, "upstream")
+	if err := os.Mkdir(upstream, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(upstream, "go.sum"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	fakeGo := `#!/usr/bin/python3
 import json
 import os
 import sys
-if sys.argv[1:] == ["list", "./..."]:
+args = sys.argv[1:]
+if args == ["list", "./..."]:
     with open(os.environ["TEST_PACKAGE_LIST"]) as source:
         sys.stdout.write(source.read())
-elif sys.argv[1:2] == ["test"]:
+elif args == ["list", "-m", "-json", "github.com/argoproj/argo-workflows/v4"]:
+    print(json.dumps({"Dir": os.environ["TEST_UPSTREAM_MODULE"]}))
+elif args[:2] == ["mod", "edit"]:
+    assert args[2].startswith("-replace=github.com/oberthci/oberth=")
+    with open("edit-args.json", "w") as output:
+        json.dump(args, output)
+elif args[:1] == ["test"] and args[-1] == ".":
+    assert os.path.realpath(os.environ["GOPATH"]) == os.path.join(os.getcwd(), "gopath")
+    assert os.path.isfile("go.sum") and os.path.isfile("edit-args.json")
+    with open("race_test.go") as source:
+        proof = source.read()
+    assert "TestReviewerStopRacePreservesGenuineFailure" in proof
+    assert "TestReviewerShutdownEscalationKeepsCompletedStop" in proof
+    with open(os.environ["TEST_GO_PROOF_ARGS"], "w") as output:
+        json.dump(args, output)
+    print("ISOLATED_PROOF_OUTPUT")
+    if os.path.exists(os.path.join(os.environ["TEST_UPSTREAM_MODULE"], "fail-proof")):
+        raise SystemExit(37)
+elif args[:1] == ["test"]:
     with open(os.environ["TEST_GO_ARGS"], "w") as output:
-        json.dump(sys.argv[1:], output)
+        json.dump(args, output)
+    print("ROOT_GROUP_OUTPUT")
 else:
     raise SystemExit("unexpected Go invocation")
 `
-	if err := os.WriteFile(goPath, []byte(fakeGo), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go"), []byte(fakeGo), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// Store has a binary/worker protocol, exercised by its complete runner controls.
+	env := func(argsFile, proofFile string) []string {
+		return append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "TEST_PACKAGE_LIST="+packageFile, "TEST_GO_ARGS="+argsFile, "TEST_GO_PROOF_ARGS="+proofFile, "TEST_UPSTREAM_MODULE="+upstream)
+	}
 	for _, group := range []string{"service", "gitcache", "rest"} {
 		t.Run(group, func(t *testing.T) {
-			argsFile := filepath.Join(root, group+".json")
+			argsFile, proofFile := filepath.Join(root, group+".json"), filepath.Join(root, group+"-proof.json")
 			command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test-packages.py", group)
 			command.Dir = repositoryRoot(t)
-			command.Env = append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "TEST_PACKAGE_LIST="+packageFile, "TEST_GO_ARGS="+argsFile)
-			if output, err := command.CombinedOutput(); err != nil {
-				t.Fatalf("launch %s: %v\n%s", group, err, output)
+			command.Env = env(argsFile, proofFile)
+			var stdout, stderr strings.Builder
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+			if err := command.Run(); err != nil {
+				t.Fatalf("launch %s: %v\n%s", group, err, stderr.String())
+			}
+			if stdout.String() != "ROOT_GROUP_OUTPUT\n" {
+				t.Fatal("proof output contaminated package events", stdout.String())
 			}
 			output, err := os.ReadFile(argsFile)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var actual []string
-			if err := json.Unmarshal(output, &actual); err != nil {
+			if err = json.Unmarshal(output, &actual); err != nil {
 				t.Fatal(err)
 			}
 			timeout := "-timeout=20m"
@@ -144,10 +176,46 @@ else:
 				}
 			}
 			if !reflect.DeepEqual(actual, want) {
-				t.Fatalf("Go invocation = %v, want %v", actual, want)
+				t.Fatalf("Go invocation=%v, want %v", actual, want)
+			}
+			proof, err := os.ReadFile(proofFile)
+			if group != "rest" {
+				if !os.IsNotExist(err) {
+					t.Fatal("unrelated race group ran the upstream proof", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal("required Argo proof did not run", err)
+			}
+			var proofArgs []string
+			if err = json.Unmarshal(proof, &proofArgs); err != nil {
+				t.Fatal(err)
+			}
+			proofWant := []string{"test", "-mod=mod", "-race", "-gcflags=modernc.org/sqlite/...=-race=false", "-gcflags=modernc.org/libc/...=-race=false", "-count=1", "-p=2", "-timeout=3m", "-v", "."}
+			if !reflect.DeepEqual(proofArgs, proofWant) || !strings.Contains(stderr.String(), "ISOLATED_PROOF_OUTPUT") {
+				t.Fatal("upstream race checks/output lost", proofArgs, stderr.String())
 			}
 		})
 	}
+	t.Run("upstream proof failure prevents package success", func(t *testing.T) {
+		argsFile, proofFile := filepath.Join(root, "failed-root.json"), filepath.Join(root, "failed-proof.json")
+		command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest")
+		command.Dir = repositoryRoot(t)
+		command.Env = env(argsFile, proofFile)
+		if err := os.WriteFile(filepath.Join(upstream, "fail-proof"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := command.CombinedOutput(); err == nil {
+			t.Fatal("failed proof did not fail rest group", string(output))
+		}
+		if _, err := os.Stat(proofFile); err != nil {
+			t.Fatal("failing proof was not executed", err)
+		}
+		if _, err := os.Stat(argsFile); !os.IsNotExist(err) {
+			t.Fatal("package group continued after failed proof", err)
+		}
+	})
 }
 
 func TestOberthRaceBudgetsPreserveKnownBounds(t *testing.T) {

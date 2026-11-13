@@ -574,3 +574,11 @@ selection and final recovery; they cannot complete verified measurements.
 Policy deletion fixtures enforce API UID preconditions across all six rounds
 and reject a replacement inserted immediately before deletion. Namespace UID
 cleanup, overlap/fresh-connection and randomized fault counterexamples remain.
+
+Argo shutdown race proofs: `hack/test-argo-shutdown-races.py` runs
+`TestReviewerStopRacePreservesGenuineFailure` and
+`TestReviewerShutdownEscalationKeepsCompletedStop` against the real pinned Argo
+utilities and Oberth's production TerminalResult API in a disposable test module.
+The required rest driver runs this proof before the complete package group and
+fails if it fails; proof output goes to stderr to preserve Go JSON on stdout.
+Upstream controller-only test dependencies never enter the shipped go.mod/go.sum.
