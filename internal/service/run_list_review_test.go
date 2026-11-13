@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	clocktesting "k8s.io/utils/clock/testing"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -99,6 +101,8 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 			service := f.api(t)
+			fake := clocktesting.NewFakeClock(time.Now())
+			service.waitClock = fake
 			calls := map[string]int{}
 			var callsMu sync.Mutex
 			service.schedulingObserver = schedulingObserverFunc(func(_ context.Context, run model.Run) (*model.ExecutionObservation, error) {
@@ -107,7 +111,7 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 				callsMu.Unlock()
 				return &model.ExecutionObservation{State: "observed", Pods: []model.SchedulingReason{{Phase: "Pending", Reason: "Unschedulable", Message: "pod pending: too many pods; waiting for a pod slot"}}}, nil
 			})
-			for poll := 1; poll <= 2; poll++ {
+			for poll := 1; poll <= 3; poll++ {
 				rows := pollDiagnosticList(t, service, api.Actor{Identity: "owner"}, api.RunFilter{View: view}, func(rows []model.Run) bool {
 					for _, run := range rows {
 						if run.ID == runs[0].ID {
@@ -124,11 +128,18 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 					t.Errorf("missing live observations: %v", calls)
 				}
 				for _, run := range runs {
-					if calls[run.ID] != poll {
-						t.Errorf("native state not refreshed on read: %v", calls)
+					want := 1
+					if poll == 3 {
+						want = 2
+					}
+					if calls[run.ID] != want {
+						t.Errorf("native state cache calls: %v", calls)
 					}
 				}
 				callsMu.Unlock()
+				if poll == 2 {
+					fake.Step(executionDiagnosticTTL)
+				}
 			}
 			event.Status, event.StartedAt = runprogress.StepRunning, &now
 			if err := f.logs.AppendStepProgress(runs[0].ID, event); err != nil {

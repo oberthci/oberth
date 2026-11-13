@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	clocktesting "k8s.io/utils/clock/testing"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -39,6 +41,8 @@ func TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory(t *te
 			queued := submittedDisplayRun(t, f, "queue")
 			suspended := submittedDisplayRun(t, f, "suspended")
 			s := f.api(t)
+			fake := clocktesting.NewFakeClock(time.Now())
+			s.waitClock = fake
 			var resumed atomic.Bool
 			s.schedulingObserver = schedulingObserverFunc(func(_ context.Context, run model.Run) (*model.ExecutionObservation, error) {
 				observation := &model.ExecutionObservation{State: "observed", Phase: "Running", Message: "Workflow execution is running."}
@@ -78,13 +82,14 @@ func TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory(t *te
 				t.Fatal("detail missed suspension", detail, err)
 			}
 			resumed.Store(true)
+			fake.Step(executionDiagnosticTTL)
 			value, err = s.Runs(t.Context(), actor, api.RunFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, run := range value.([]model.Run) {
 				if run.DisplayStatus != model.DisplayRunning || strings.Contains(strings.ToLower(run.DisplayReason), "suspend") || strings.Contains(run.DisplayReason, "workflow slot") {
-					t.Fatal("native state stayed cached after resume", run)
+					t.Fatal("native state stayed cached beyond TTL after resume", run)
 				}
 				durable, err := f.store.Run(t.Context(), run.ID)
 				if err != nil || durable.Status != model.RunRunning {

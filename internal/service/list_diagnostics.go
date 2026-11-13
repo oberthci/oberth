@@ -13,6 +13,7 @@ import (
 const listDiagnosticLimit = 512
 const listDiagnosticWorkers = 4
 const listDiagnosticTTL = 10 * time.Second
+const executionDiagnosticTTL = 2 * time.Second
 
 type listDiagnosticKey struct {
 	id, sha, testedSHA, workflow, scope, kind string
@@ -68,7 +69,11 @@ func (s *API) listDiagnostic(run model.Run, kind string, load func(context.Conte
 			result.scheduling = &copy
 		}
 		cache.recent.MoveToFront(element)
-		if load == nil || (kind != "execution" && now.Sub(entry.checkedAt) < listDiagnosticTTL) {
+		ttl := listDiagnosticTTL
+		if kind == "execution" {
+			ttl = executionDiagnosticTTL
+		}
+		if load == nil || now.Sub(entry.checkedAt) < ttl {
 			return result
 		}
 	}
