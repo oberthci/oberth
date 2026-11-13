@@ -3,19 +3,8 @@
 # not sit beside server-tier ones. That means a second, namespaced Role: the
 # server creates and supervises Workflows there, and reads the step Pods' logs.
 #
-# FROZEN RULES (issue #813): the rules list of this Role is fixed at its
-# v0.17.9 shape. Older installs carry a separate field manager (kubectl-patch
-# from an emergency repair, or kubectl-client-side-apply from adoption) on
-# `.rules`, and Helm 4 applies server-side: any value that differs from the
-# one that manager owns is a conflict that half-applies the upgrade. New
-# permissions are therefore never added here — they go into a new Role bound
-# to the same ServiceAccount (see -argo-executor-tokens and
-# -argo-release-tokens below). cmd/oberth/chart_argo_role_frozen_test.go
-# renders this Role and compares it with the v0.17.9 fixture.
-# Explicit legacy ownership migration: hack/migrate-argo-role (see
-# docs/argo-role-migration.md). It changes only managed fields, not permissions.
-# Correction to #1316 RBAC-2: SourceSeeder.AdoptClaim uses PVC update to bind
-# claims to Workflows; SweepOrphanedSourceClaims uses list. Both remain required.
+# Native shutdown removes workflows/delete from the former permission fixture.
+# Workflow shutdown uses the patch-only companion Role; Pod/PVC cleanup remains.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -26,7 +15,7 @@ metadata:
 rules:
   - apiGroups: ["argoproj.io"]
     resources: ["workflows"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    verbs: ["create", "get", "list", "watch"]
   # A Pod may only mount PersistentVolumeClaims in its own namespace, so the
   # checkout on the server's volume cannot be handed to a pipeline that runs
   # here. The server instead creates a claim per run and fills it through a

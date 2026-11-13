@@ -468,3 +468,5 @@ Block PVCs use ordinary Kubernetes fields: a container may declare
 This does not grant host device access or permission to mount an existing PVC;
 those volume sources remain refused. Device paths follow the same absolute-path
 and reserved-helper-path rules as volume mounts.
+
+A succeeded Workflow publishes and promotes even when a step the author tolerated failed. An Oberth cancellation that did not succeed is shown as cancelled, with failed step evidence retained and no new CI issue. Ordinary branch cancellation uses native Stop so exit handlers run; a second cancel uses Terminate. Release/tag/apply and promotion cancels use Terminate immediately. Restore uses Terminate for all orphaned Workflows because the restored history has no observer to supply their exit Pods with credentials.

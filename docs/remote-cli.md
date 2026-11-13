@@ -174,8 +174,10 @@ token. It requests cancellation of one queued, waiting or running run. A run
 that has not been submitted finishes as `interrupted` with phase `cancelled`.
 For a submitted Workflow, Oberth requests Argo Stop and shows a cancelling
 reason naming the caller. The run and its admission capacity remain active
-until Argo finishes, including exit handlers; Argo's phase determines the
-final verdict. Oberth leaves the Workflow for Argo's TTL cleanup. Cancelled
+until Argo finishes. An unsuccessful stopped Workflow finishes as
+`interrupted` with phase `cancelled`, displayed as `cancelled`. A second cancel
+escalates Stop to Terminate so a stuck exit handler can be ended. Release, tag,
+apply and promotion cancels use Terminate immediately: exit handlers do not run. Oberth leaves the Workflow for Argo's TTL cleanup. Cancelled
 runs are never re-fired and open no CI issue. A non-admin uplink may cancel only branch-push runs
 in repositories it can see. An admin may cancel
 any run, but a tag/release or apply run needs `--force`, because anything its

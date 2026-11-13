@@ -13,17 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
-// The `oberth-argo` Role's rules list is frozen at its v0.17.9 shape: older
-// installs carry a separate field manager on `.rules` (kubectl-patch from an
-// emergency repair, kubectl-client-side-apply from adoption), and Helm 4's
-// server-side apply conflicts on any value that differs from the one that
-// manager owns, half-applying the upgrade. v0.17.10 (2c532e0) prepended two
-// rules and broke that contract on the first upgrade of example-node (issue #813).
-// New permissions must be added as a new Role bound to the same
-// ServiceAccount. These tests pin both halves.
-// hack/migrate-argo-role explicitly transfers legacy rules ownership to Helm.
-// The permission fixture remains unchanged: contrary to #1316 RBAC-2,
-// SourceSeeder.AdoptClaim uses update and orphan cleanup uses list.
+// Native shutdown removes workflows/delete from the previous Role contract.
+// Other permissions remain pinned to the reviewed fixture. Explicit ownership
+// migration remains available for an operator's already co-owned Role.
 
 type chartRBACDoc struct {
 	Kind     string `json:"kind"`
@@ -90,7 +82,7 @@ func canonicalRules(t *testing.T, rules []map[string]any) string {
 	return string(encoded)
 }
 
-func TestChartArgoRoleRulesFrozenAtV0179(t *testing.T) {
+func TestChartArgoRoleRemovesWorkflowDeleteOnly(t *testing.T) {
 	t.Parallel()
 	variants := map[string][]string{
 		"default": nil,
@@ -106,8 +98,9 @@ func TestChartArgoRoleRulesFrozenAtV0179(t *testing.T) {
 		if err := json.Unmarshal(fixture, &want); err != nil {
 			t.Fatal(err)
 		}
+		want[0]["verbs"] = []any{"create", "get", "list", "watch"}
 		if got, wantCanonical := canonicalRules(t, role.Rules), canonicalRules(t, want); got != wantCanonical {
-			t.Fatalf("%s: Role oberth-argo rules differ from the frozen v0.17.9 shape (issue #813).\n"+
+			t.Fatalf("%s: Role oberth-argo rules differ from the native shutdown permission contract.\n"+
 				"Add new permissions in a separate Role bound to the same ServiceAccount.\n--- got ---\n%s\n--- want ---\n%s",
 				variant, got, wantCanonical)
 		}
