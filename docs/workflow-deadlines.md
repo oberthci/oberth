@@ -8,7 +8,7 @@ Argo anchors Workflow execution to its own `status.startedAt`; controller
 parallelism postponement and Kubernetes Pending are native waiting states.
 
 Observations report authored native deadlines and existing queued/running
-reasons. Oberth does not terminalize a run for waiting. Cancellation, supersede,
+reasons. Oberth does not terminalize a run for waiting. Cancellation,
 branch deletion and terminal publication/recovery remain lifecycle operations.
 
 Opted-in [assisted continuation](assisted-continuation.md) retains its bounded

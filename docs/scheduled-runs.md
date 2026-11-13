@@ -54,9 +54,8 @@ schedule run.
 Named entries on the same repository/branch/SHA remain distinct queued runs.
 Ordinary branch pushes and other entries are independent. A due cron occurrence
 coalesces into a queued or running attempt of the same entry and branch instead
-of superseding it. Other active work does not stop cron from queueing. Explicit
-manual retries or forced triggers can still replace an attempt of the same
-entry and branch. Admission, Argo parallelism and native Argo
+of creating another attempt. Other active work does not stop cron from queueing. Explicit
+forced triggers leave existing attempts active. Admission, Argo parallelism and native Argo
 synchronization bound execution ([where limits live](where-limits-live.md)).
 
 Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose

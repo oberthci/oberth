@@ -304,9 +304,8 @@ per-workflow and unaffected.
   `step test-service evicted after continue: ephemeral-storage (…)`, instead
   of a plain step failure or a budget to raise in git; `run.hold_abandoned`
   carries `abandon_reason: evicted` and `eviction`. No status is added.
-- A newer push that supersedes the run deletes its Workflow through the
-  existing cancellation path, which removes any held Pod; explicit
-  `run_cancel` does the same.
+- A newer push leaves this run active. Explicit `run_cancel` requests native
+  Argo Stop and waits for exit handlers; Argo TTL cleans the Workflow.
 - Hold operations run only in the server's own pipeline namespace through
   the `pods/exec` and `pods` delete verbs the chart's Argo Role already
   grants; no RBAC is added. Runs placed on remote execution targets are not

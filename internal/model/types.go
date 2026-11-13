@@ -134,8 +134,7 @@ type Run struct {
 	// FailureCause is private server-classified presentation metadata.
 	FailureCause string `json:"-"`
 	// Read-side identity and admission context; never part of the durable run row.
-	Repo       string
-	Superseded bool `json:"superseded"`
+	Repo string
 
 	// ResourceMessage is advice, separate from the exact status vocabulary.
 	ResourceMessage string `json:"resource_message,omitempty"`
@@ -180,7 +179,7 @@ type Run struct {
 	Error         string
 	Status        RunStatus
 	Reason        string
-	SupersededBy  string
+	SupersededBy  string `json:"-"`
 	QueuedAt      time.Time
 	StartedAt     *time.Time
 	FinishedAt    *time.Time
@@ -226,7 +225,6 @@ type RunResult struct {
 
 type RunListFilter struct {
 	Status       RunStatusFilter
-	Superseded   bool
 	LatestPerRef bool
 	RepoID       int64
 	Ref          string
@@ -262,7 +260,7 @@ type RunCounts struct {
 type RunCancellation struct {
 	RunID        string
 	WorkflowName string `json:"JobName"`
-	SupersededBy string
+	SupersededBy string `json:"-"`
 	Reason       string
 	CreatedAt    time.Time
 	CompletedAt  *time.Time
@@ -270,9 +268,7 @@ type RunCancellation struct {
 
 type EnqueueRunResult struct {
 	Run
-	Cancellations   []RunCancellation
-	SupersededCount int64
-	Duplicate       bool
+	Duplicate bool
 }
 
 type ReceiveEvent struct {

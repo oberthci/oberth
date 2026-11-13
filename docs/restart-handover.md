@@ -4,8 +4,7 @@ An ordinary `oberth upgrade` can proceed with a busy queue. Adoption preserves
 eligible Argo Workflows under their existing run IDs; it does not create a second
 Workflow or repeat a publication. Running branch runs are adopted. Promotion,
 tag and release runs are adopted where the server supports it (#1172 slice 2);
-otherwise their Workflow is deleted and the run is recorded `interrupted`, as
-before. Retired execution declarations fail with a workflow capability migration
+Oberth leaves running Workflows alone on shutdown and re-adopts them at startup. Retired execution declarations fail with a workflow capability migration
 message. Oberth stops the owned Workflow but does not read retired execution
 journals or clean external resources. Drain legacy work and clean those resources
 before upgrade. A claimed run with no parent Workflow follows ordinary recovery;
@@ -66,9 +65,9 @@ Only recognized transport/API failures at identity-delivery stages are labelled
 remote exit and unclassified errors remain hard `job` failures. Fixed safe
 validation diagnostics stay actionable; raw
 transport/server response text stays out of public errors and logs. A real
-terminal CI result takes precedence, and ownership-checked Workflow deletion
-must succeed before an observation failure terminalizes the run. Unsuccessful
-deletion leaves the run owned for recovery. Existing replay authorization and
+terminal CI result takes precedence. An observation failure requests an
+ownership-checked Argo Stop; the run stays owned until Argo finishes, including
+exit handlers. A failed Stop request leaves the run owned for recovery. Existing replay authorization and
 evidence rules still apply to `run_retry`.
 
 Bounded `executor_identity` logs record the Workflow, Pod UID, stage, reason

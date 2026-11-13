@@ -26,7 +26,7 @@ func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
 		{"claimed", model.Run{Status: model.RunRunning}, "queued"},
 		{"legacy waiting", model.Run{Status: model.RunWaiting}, "queued"},
 		{"started", model.Run{Status: model.RunRunning, StartedAt: &started}, "running"},
-		{"superseded", model.Run{Status: model.RunInterrupted, SupersededBy: "newer"}, "superseded"},
+
 		{"cancelled", model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled}, "cancelled"},
 		{"restart", model.Run{Status: model.RunInterrupted, Reason: "oberth restarted"}, "cancelled"},
 		{"passed", model.Run{Status: model.RunPassed}, "passed"},
@@ -124,10 +124,10 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 		t.Fatal(err)
 	}
 	history := historyValue.([]model.Run)
-	if len(history) != 1 || history[0].ID != run.ID || history[0].DisplayStatus != "superseded" ||
-		history[0].SupersededBy == "" || history[0].DisplayReason != "superseded by bbbbbbbb" {
-		t.Fatalf("history did not link successor: %+v", history)
+	if len(history) != 0 {
+		t.Fatalf("newer push terminalized an earlier run: %+v", history)
 	}
+
 }
 
 func TestRestartResetDisplaysQueuedUnderOriginalID(t *testing.T) {
@@ -198,107 +198,6 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	filtered := filteredValue.([]model.Run)
 	if len(filtered) != 1 || filtered[0].ID != second.ID || filtered[0].Scheduling == nil || filtered[0].Scheduling.QueuePosition != 2 {
 		t.Fatalf("filtered list lost its global queue position: %+v", filtered)
-	}
-}
-
-type countingSuccessorHistory struct {
-	RunHistory
-	batchCalls int
-	runCalls   int
-}
-
-func (history *countingSuccessorHistory) RunsByIDs(ctx context.Context, ids []string) (map[string]model.Run, error) {
-	history.batchCalls++
-	return history.RunHistory.(interface {
-		RunsByIDs(context.Context, []string) (map[string]model.Run, error)
-	}).RunsByIDs(ctx, ids)
-}
-
-func (history *countingSuccessorHistory) Run(ctx context.Context, id string) (model.Run, error) {
-	history.runCalls++
-	return history.RunHistory.Run(ctx, id)
-}
-
-func TestDefaultRunListBatchesSuccessorLookups(t *testing.T) {
-	fixture := newControlFixture(t)
-	ctx := t.Context()
-	for _, branch := range []string{"feature/one", "feature/two"} {
-		if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: branch + "-old", Repository: fixture.repo,
-			Branch: branch, SHA: strings.Repeat("a", 40), Actor: "agent@host"}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: branch + "-new", Repository: fixture.repo,
-			Branch: branch, SHA: strings.Repeat("b", 40), Actor: "agent@host"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	service := fixture.api(t)
-	history := &countingSuccessorHistory{RunHistory: service.history}
-	service.history = history
-	value, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runs := value.([]model.Run)
-	if len(runs) != 4 || history.batchCalls != 1 || history.runCalls != 0 {
-		t.Fatalf("list did not batch successors: %d runs, %d batches, %d single lookups", len(runs), history.batchCalls, history.runCalls)
-	}
-	for _, run := range runs {
-		if run.SupersededBy != "" && run.DisplayReason != "superseded by bbbbbbbb" {
-			t.Fatalf("successor reason = %+v", run)
-		}
-	}
-}
-
-func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
-	successor := model.Run{ID: strings.Repeat("b", 32), SHA: strings.Repeat("a", 40), Ref: "same"}
-	service := &API{}
-	for _, tc := range []struct{ reason, phase, want string }{
-		{"superseded by newer run", "interrupted", "superseded by aaaaaaaa"},
-		{"re-queued after restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
-		{"retried once after trusted preflight owner restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
-		{"cancelled by owner: restart later", "cancelled", "by owner: restart later"},
-		{"scheduler stopped", "interrupted", "server restart, retry needed"},
-		{"unrelated reason", "interrupted", "server restart, retry needed"},
-	} {
-		run := model.Run{Status: model.RunInterrupted, Reason: tc.reason, Phase: tc.phase, SupersededBy: successor.ID, SHA: successor.SHA, Ref: successor.Ref}
-		got := service.presentationRunWithSuccessor(t.Context(), run, map[string]model.Run{successor.ID: successor})
-		wantStatus := "superseded"
-		if tc.phase == model.PhaseCancelled {
-			wantStatus = "cancelled"
-		}
-		if got.DisplayStatus != wantStatus || got.DisplayReason != tc.want {
-			t.Fatalf("%s: %+v", tc.reason, got)
-		}
-	}
-	for _, phase := range []string{"waiting", "preflight", "running", "publishing"} {
-		now := time.Now()
-		run := model.Run{Status: model.RunRunning, Phase: phase, StartedAt: &now}
-		wantReason, wantUnadmitted := "", "queued"
-		if phase == "publishing" {
-			wantReason, wantUnadmitted = "publishing to upstream", "running"
-		}
-		if got := presentationRun(run); got.DisplayStatus != "running" || got.DisplayReason != wantReason {
-			t.Fatalf("phase %s: %+v", phase, got)
-		}
-		run.StartedAt = nil
-		if got := presentationRun(run); got.DisplayStatus != wantUnadmitted {
-			t.Fatalf("unadmitted phase %s: %+v", phase, got)
-		}
-	}
-}
-
-func TestScopedDisplayDoesNotLinkHiddenSuccessor(t *testing.T) {
-	service := &API{scope: &repoScope{}}
-	for _, reason := range []string{"superseded by newer run", "re-queued after restart", "retried once after trusted preflight owner restart"} {
-		run := model.Run{Status: model.RunInterrupted, Reason: reason, SupersededBy: strings.Repeat("b", 32)}
-		got := service.presentationRunWithSuccessor(t.Context(), run, nil)
-		if got.SupersededBy != "" || strings.Contains(got.DisplayReason, "bbbb") || got.DisplayStatus != "superseded" {
-			t.Fatalf("hidden successor leaked: %+v", got)
-		}
-		if reason == "retried once after trusted preflight owner restart" && got.DisplayReason != "server restart, re-queued" {
-			t.Fatalf("hidden trusted retry reason = %q", got.DisplayReason)
-		}
 	}
 }
 

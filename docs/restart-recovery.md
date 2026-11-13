@@ -6,7 +6,7 @@ to branch, tag, release, and promotion runs. Recovery releases the abandoned
 worker's claim so the new scheduler can submit the original run; a promotion
 keeps its pending record and original CI run. A deterministic Workflow name
 recorded before admission does not mean a Workflow was submitted. These runs
-need no Workflow deletion. Recovery still excludes durable execution and
+need no Workflow Stop. Recovery still excludes durable execution and
 publication evidence from this path. An eligible waiting run is retained even
 when a newer active sibling exists in the same ref and schedule lane.
 
@@ -16,8 +16,9 @@ Release tags use the same adoption checks.
 
 If no resumable Workflow remains and a run has neither step results nor a
 publication, recovery queues the original run ID with its original queue and
-admission sequences. Its prior Workflow must be deleted through the durable
-cancellation ledger before the run can be claimed again. The new attempt
+admission sequences. Its prior Workflow must finish after an ownership-checked Argo Stop through
+the durable cancellation ledger before the run can be claimed again. Oberth
+leaves the Workflow for Argo's TTL cleanup. The new attempt
 recreates only that run's scratch directory and appends to its existing log.
 First-observed timing milestones and admission episodes remain; subsequent
 Workflow and step timing records are stored separately from prior attempts.
