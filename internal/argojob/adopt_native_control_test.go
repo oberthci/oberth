@@ -17,7 +17,7 @@ func TestAdoptedNativeControlsPreserveRecoveryIdentity(t *testing.T) {
 			wf.Spec.Suspend = ptr.To(true)
 			wf.Status.Phase = wfv1.WorkflowRunning
 			// A new controller represents the process after restart.
-			c := &Controller{config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, workflows: &staticWorkflowClient{workflow: wf}, interval: time.Millisecond}
+			c := &Controller{config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, workflows: &staticWorkflowClient{workflow: wf}, idleInterval: time.Millisecond}
 			binding, found, err := c.Adopt(t.Context(), request)
 			if err != nil || !found {
 				t.Fatal("suspended Workflow not adopted", found, err)
@@ -41,7 +41,7 @@ func TestAdoptedNativeControlsPreserveRecoveryIdentity(t *testing.T) {
 			}
 			wf.Spec.Suspend = nil
 			wf.Status.Phase = wfv1.WorkflowSucceeded
-			completion, err := c.WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+			completion, err := withWaitTestHub(t, c).WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
 			if err != nil || !completion.Succeeded {
 				t.Fatal("native control after restart lost completion", completion, err)
 			}

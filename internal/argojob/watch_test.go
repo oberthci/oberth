@@ -25,6 +25,10 @@ type testObservationHub struct {
 	since      time.Time
 }
 
+func (h *testObservationHub) Subscribe(string) (<-chan struct{}, func()) {
+	return make(chan struct{}, 1), func() {}
+}
+
 func (h *testObservationHub) Healthy() bool {
 	if h.unhealthy || h.unsynced {
 		return false

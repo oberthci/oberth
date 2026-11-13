@@ -23,6 +23,8 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/ptr"
+
+	"github.com/oberthci/oberth/internal/argojob"
 )
 
 const testNamespace = "pipeline"
@@ -531,5 +533,57 @@ func TestSyncedSeparatesInitialListsFromLaterWatchHealth(t *testing.T) {
 	h.healthMu.Unlock()
 	if !h.Synced() || h.Healthy() {
 		t.Fatal("later outage confused initial sync")
+	}
+}
+
+func TestRecoveryWakesUnchangedWorkflowSubscribers(t *testing.T) {
+	h := newTestHub(t, kubefake.NewClientset(), fakeArgo(workflowObject("wf")))
+	runHub(t, h)
+	syncHub(t, h)
+	first, cancelFirst := h.Subscribe("wf")
+	defer cancelFirst()
+	second, cancelSecond := h.Subscribe("other")
+	defer cancelSecond()
+	h.healthMu.Lock()
+	h.attempts[workflowKind].failureSince = time.Now().Add(-time.Minute)
+	h.healthMu.Unlock()
+	if h.Healthy() {
+		t.Fatal("outage was not recorded")
+	}
+	h.recordAttempt(workflowKind, nil)
+	for _, wake := range []<-chan struct{}{first, second} {
+		select {
+		case <-wake:
+		case <-time.After(time.Second):
+			t.Fatal("recovery did not wake subscriber")
+		}
+	}
+	if !h.Healthy() {
+		t.Fatal("successful observation did not recover health")
+	}
+}
+
+func TestControllerWaitRemovesHubSubscription(t *testing.T) {
+	wf := workflowObject("wf")
+	wf.Status.Phase = wfv1.WorkflowSucceeded
+	argo := fakeArgo(wf)
+	h := newTestHub(t, kubefake.NewClientset(), argo)
+	runHub(t, h)
+	syncHub(t, h)
+	config := argojob.Config{Namespace: testNamespace, PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "credentialed", CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor"}
+	controller, err := argojob.NewController(argo.ArgoprojV1alpha1().Workflows(testNamespace), nil, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.WithWatchHub(h)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if completion, err := controller.Wait(ctx, wf.Name, wf.Annotations["oberth.ci/run-id"], io.Discard); err != nil || !completion.Succeeded {
+		t.Fatal(completion, err)
+	}
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	if len(h.subs) != 0 {
+		t.Fatal("run completion leaked subscriptions", len(h.subs))
 	}
 }

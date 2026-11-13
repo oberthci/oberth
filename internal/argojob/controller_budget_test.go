@@ -149,7 +149,7 @@ func TestRunLogBudgetEnforcedAcrossSteps(t *testing.T) {
 	})
 
 	var destination bytes.Buffer
-	_, waitErr := controller.Wait(context.Background(), "wf", "run-budget", &destination)
+	_, waitErr := withWaitTestHub(t, controller).Wait(context.Background(), "wf", "run-budget", &destination)
 	if waitErr == nil {
 		t.Fatal("expected Wait to return an error when the aggregate budget is exceeded")
 	}

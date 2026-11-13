@@ -55,12 +55,12 @@ func TestAdoptedCredentialedTriggersKeepSubmittedIdentityAndWIFDespiteNewConfig(
 			config.PerRepoIdentities = map[string]PerRepoIdentityConfig{}
 			config.PerRepoCIIdentities = map[string]PerRepoIdentityConfig{}
 			config.ReleaseWIF = nil
-			controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: config, interval: time.Millisecond}
+			controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: config, idleInterval: time.Millisecond}
 			binding, found, err := controller.Adopt(context.Background(), request)
 			if err != nil || !found {
 				t.Fatalf("adopt: %v %v", found, err)
 			}
-			completion, err := controller.WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, nil, 0, binding)
+			completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, nil, 0, binding)
 			if err != nil || !completion.Succeeded {
 				t.Fatalf("resume: %+v %v", completion, err)
 			}
@@ -85,7 +85,7 @@ func TestAdoptedCredentialedWaitRejectsIdentityAndWIFChanges(t *testing.T) {
 	for _, mode := range []string{"service-account", "wif-projection", "wif-environment", "uid", "identity"} {
 		t.Run(mode, func(t *testing.T) {
 			config, workflow, request := slice2CredentialedWorkflow(t, "release")
-			controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: config, interval: time.Millisecond}
+			controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: config, idleInterval: time.Millisecond}
 			binding, found, err := controller.Adopt(context.Background(), request)
 			if err != nil || !found {
 				t.Fatal(err)
@@ -115,7 +115,7 @@ func TestAdoptedCredentialedWaitRejectsIdentityAndWIFChanges(t *testing.T) {
 			if binding.matches(workflow) {
 				t.Fatal("negative control did not modify admitted binding")
 			}
-			if _, err := controller.WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, nil, 0, binding); err == nil {
+			if _, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, nil, 0, binding); err == nil {
 				t.Fatal("changed credential binding accepted")
 			}
 		})

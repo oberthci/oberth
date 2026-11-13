@@ -119,18 +119,18 @@ func TestStepDiagnosticCollectionPreservesVerdictAndAttempt(t *testing.T) {
 	controller := &Controller{kube: fake.NewClientset(pod)}
 	completion := completionFor(wf)
 	before := completion.Succeeded
-	controller.collectStepDiagnostics(context.Background(), wf, &completion)
+	controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 	if completion.Succeeded != before || len(completion.Steps) != 1 || completion.Steps[0].NodeID != node.ID || !completion.Steps[0].Termination.Available {
 		t.Fatal("selected attempt lost")
 	}
 	completion.Steps[0].AttemptAmbiguous = true
-	controller.collectStepDiagnostics(context.Background(), wf, &completion)
+	controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 	if completion.Steps[0].Termination.Unavailable != "ambiguous-attempt" {
 		t.Fatal("ambiguity accepted")
 	}
 	completion.Steps[0].AttemptAmbiguous = false
 	controller.kube = fake.NewClientset()
-	controller.collectStepDiagnostics(context.Background(), wf, &completion)
+	controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 	if completion.Succeeded != before || completion.Steps[0].Termination.Unavailable != "pod-absent" {
 		t.Fatal("read failure changed verdict")
 	}
@@ -183,7 +183,7 @@ func TestStepDiagnosticBlockingTransportUsesOneTotalBudget(t *testing.T) {
 	controller := &Controller{kube: client, timings: recorder}
 	completion := completionFor(wf)
 	start := time.Now()
-	controller.collectStepDiagnostics(context.Background(), wf, &completion)
+	controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 	elapsed := time.Since(start)
 	if elapsed < 4900*time.Millisecond || elapsed > 8*time.Second || calls.Load() != 1 || completion.Succeeded {
 		t.Fatalf("budget/verdict: elapsed=%s requests=%d succeeded=%v", elapsed, calls.Load(), completion.Succeeded)
@@ -211,7 +211,7 @@ func TestStepDiagnosticDuplicateNodeAndAbsentResources(t *testing.T) {
 	completion := completionFor(wf)
 	wf.Status.Nodes["contradictory-map-key"] = node
 	controller := &Controller{kube: fake.NewClientset(pod)}
-	controller.collectStepDiagnostics(context.Background(), wf, &completion)
+	controller.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 	if completion.Steps[0].Termination.Unavailable != "ambiguous-attempt" || completion.Succeeded {
 		t.Fatal("duplicate node identity accepted")
 	}

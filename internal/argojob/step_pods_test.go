@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -135,7 +136,7 @@ func TestStepLogsAndDiagnosticsUseObservedOpaquePodName(t *testing.T) {
 		t.Fatal(output.String())
 	}
 	completion := completionFor(workflow)
-	controller.collectStepDiagnostics(t.Context(), workflow, &completion)
+	controller.collectRestartStepDiagnostics(t.Context(), workflow, &completion, time.Time{})
 	if len(completion.Steps) != 1 || completion.Steps[0].PodName != pod.Name || !completion.Steps[0].Termination.Available {
 		t.Fatalf("diagnostic did not bind observed Pod: %+v", completion.Steps)
 	}

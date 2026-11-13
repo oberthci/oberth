@@ -68,7 +68,7 @@ func TestRestartCutR2RequiresPositivePodObservation(t *testing.T) {
 				var got *Completion
 				var err error
 				if path == "wait" {
-					value, e := c.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, events, 0, binding)
+					value, e := withWaitTestHub(t, c).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, events, 0, binding)
 					got, err = &value, e
 				} else {
 					got, err = c.TerminalStateResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], binding, events)
@@ -135,7 +135,7 @@ func TestRestartCutR2NodeOOMOrDeadlineCannotBecomeCut(t *testing.T) {
 func TestRestartCutR2JournalSurvivesSecondRestartWithoutInventingExit(t *testing.T) {
 	c, wf, binding, events := restartCutFixture(t, func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) { p.Name = "" })
 	var output bytes.Buffer
-	first, err := c.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, events, 0, binding)
+	first, err := withWaitTestHub(t, c).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, events, 0, binding)
 	if err != nil || !first.Interrupted {
 		t.Fatal(first, err)
 	}
@@ -158,7 +158,7 @@ func TestRestartCutR2JournalSurvivesSecondRestartWithoutInventingExit(t *testing
 		wf.Status.Nodes[id] = node
 	}
 	output.Reset()
-	real, err := c.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, nil, 0, binding)
+	real, err := withWaitTestHub(t, c).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, nil, 0, binding)
 	if err != nil || real.Interrupted {
 		t.Fatal(real, err)
 	}
