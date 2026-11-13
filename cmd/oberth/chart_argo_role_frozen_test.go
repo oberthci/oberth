@@ -160,3 +160,17 @@ func toStrings(value any) []string {
 	}
 	return out
 }
+
+func TestChartWorkflowStopAddsOnlyPatch(t *testing.T) {
+	docs := renderArgoRBAC(t)
+	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-workflow-stop")
+	want := []map[string]any{{"apiGroups": []any{"argoproj.io"}, "resources": []any{"workflows"}, "verbs": []any{"patch"}}}
+	if canonicalRules(t, role.Rules) != canonicalRules(t, want) || role.Metadata.Namespace != "oberth-argo" {
+		t.Fatalf("Stop Role exceeds the single pipeline Workflow patch rule: %+v", role)
+	}
+	binding := findChartRBACDoc(t, docs, "RoleBinding", "oberth-argo-workflow-stop")
+	original := findChartRBACDoc(t, docs, "RoleBinding", "oberth-argo")
+	if binding.RoleRef["name"] != role.Metadata.Name || binding.RoleRef["kind"] != "Role" || canonicalRules(t, binding.Subjects) != canonicalRules(t, original.Subjects) {
+		t.Fatalf("Stop rule bound to a different identity: %+v", binding)
+	}
+}

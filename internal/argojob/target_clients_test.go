@@ -166,12 +166,16 @@ func TestTargetWorkflowAmbiguousPOSTRestartLateCommitAndUIDFence(t *testing.T) {
 	clients.now = func() time.Time { return time.Now().Add(2 * time.Hour) }
 	remote.object = remote.late
 	done, err := clients.Settle(t.Context(), time.Time{})
-	if err != nil || done || remote.deletes != 1 {
-		t.Fatal("late commit not retained/deleted", done, err)
+	if err != nil || done || remote.deletes != 0 || remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop {
+		t.Fatal("late commit not retained/stopped", done, err)
 	}
+	if done, err := clients.Settle(t.Context(), time.Time{}); done || err != nil {
+		t.Fatal("running Stop released target custody", done, err)
+	}
+	remote.object.Status.Phase = wfv1.WorkflowFailed
 	done, err = clients.Settle(t.Context(), time.Time{})
-	if err != nil || !done {
-		t.Fatal("fresh original-target absence not settled", done, err)
+	if err != nil || !done || remote.object == nil {
+		t.Fatal("Argo completion not settled or Workflow deleted", done, err)
 	}
 	if local.posts != 0 || local.deletes != 0 {
 		t.Fatal("local fallback touched")
@@ -179,7 +183,7 @@ func TestTargetWorkflowAmbiguousPOSTRestartLateCommitAndUIDFence(t *testing.T) {
 	remote.object = remote.late.DeepCopy()
 	remote.object.UID = "replacement"
 	done, err = clients.Settle(t.Context(), time.Time{})
-	if done || err == nil || remote.deletes != 1 {
+	if done || err == nil || remote.deletes != 0 {
 		t.Fatal("replacement deleted or accepted")
 	}
 }
@@ -348,10 +352,10 @@ func TestTargetConfigurationMigrationRetainsOriginalObjectIdentity(t *testing.T)
 		t.Fatal("migration accepted replacement UID")
 	}
 	remote.object = created.DeepCopy()
-	if err := migrated.WorkflowClient().Delete(t.Context(), original.Name, metav1.DeleteOptions{}); err != nil {
-		t.Fatal("original fenced deletion failed", err)
+	if _, err := requestWorkflowStop(t.Context(), migrated.WorkflowClient(), created); err != nil {
+		t.Fatal("original fenced Stop failed", err)
 	}
-	if remote.posts != 1 || remote.deletes != 1 {
-		t.Fatal("migration repeated POST or deletion", remote.posts, remote.deletes)
+	if remote.posts != 1 || remote.deletes != 0 || remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop {
+		t.Fatal("migration repeated POST, deleted or failed to Stop", remote.posts, remote.deletes)
 	}
 }

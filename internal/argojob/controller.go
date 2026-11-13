@@ -29,12 +29,11 @@ import (
 // WorkflowClient is the narrow slice of the generated Argo clientset this
 // engine uses. Narrowing it keeps the package testable with a fake and makes
 // the engine's whole Kubernetes surface reviewable in one place: create, read,
-// delete. It never updates a Workflow, so it can never rewrite a running one's
-// spec.
+// and Stop patches. It never changes the authored execution graph.
 type WorkflowClient interface {
 	Create(ctx context.Context, workflow *wfv1.Workflow, options metav1.CreateOptions) (*wfv1.Workflow, error)
 	Get(ctx context.Context, name string, options metav1.GetOptions) (*wfv1.Workflow, error)
-	Delete(ctx context.Context, name string, options metav1.DeleteOptions) error
+	Patch(ctx context.Context, name string, kind types.PatchType, data []byte, options metav1.PatchOptions, subresources ...string) (*wfv1.Workflow, error)
 }
 
 // PodLogReader fetches one pod's logs. Separated from the Kubernetes client so
@@ -42,8 +41,7 @@ type WorkflowClient interface {
 type PodLogReader func(ctx context.Context, namespace, pod, container string) (io.ReadCloser, error)
 
 const (
-	pollInterval        = 500 * time.Millisecond
-	deletionGracePeriod = int64(10)
+	pollInterval = 500 * time.Millisecond
 	// mainContainerName is the container Argo runs the template's command in.
 	mainContainerName = "main"
 	// maxStepLogBytes bounds one step's replayed log so a runaway step cannot
@@ -708,29 +706,37 @@ func (controller *Controller) Owns(ctx context.Context, name string) (bool, erro
 	return ok, nil
 }
 
-// Cancel deletes a run's Workflow. Deleting the object cascades to its pods
-// through Argo's own ownership references. A Workflow that belongs to another
-// run is left alone and reported, never deleted.
+// Cancel requests Argo Stop for this run. Argo executes exit handlers and owns
+// the Workflow's eventual TTL cleanup; a foreign object is never patched.
 func (controller *Controller) Cancel(ctx context.Context, name, runID string) error {
+	if runID == "" {
+		return errors.New("argojob: run ID is required to Stop a Workflow")
+	}
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("argojob: read Workflow %s before cancelling: %w", name, err)
+		return fmt.Errorf("argojob: read Workflow %s before stopping: %w", name, err)
 	}
 	if err := controller.verifyOwnership(workflow, runID); err != nil {
 		return err
 	}
-	grace := deletionGracePeriod
-	propagation := metav1.DeletePropagationBackground
-	err = controller.workflows.Delete(ctx, name, metav1.DeleteOptions{
-		GracePeriodSeconds: &grace,
-		PropagationPolicy:  &propagation,
-		Preconditions:      &metav1.Preconditions{UID: &workflow.UID},
-	})
-	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
-		return fmt.Errorf("argojob: delete Workflow %s: %w", name, err)
+	_, err = requestWorkflowStop(ctx, controller.workflows, workflow)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if apierrors.IsConflict(err) {
+		// Concurrent Stop requests are idempotent, but a replaced UID must
+		// never inherit this run's request.
+		current, readErr := controller.workflows.Get(ctx, name, metav1.GetOptions{})
+		if readErr == nil && current.UID == workflow.UID && controller.verifyOwnership(current, runID) == nil &&
+			(current.Spec.Shutdown == wfv1.ShutdownStrategyStop || current.Status.Phase.Completed()) {
+			return nil
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("argojob: Stop Workflow %s: %w", name, err)
 	}
 	return nil
 }
