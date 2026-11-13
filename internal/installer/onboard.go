@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -629,8 +630,7 @@ func printAlsoUpstreamCommands(w io.Writer, cfg Config, deps Deps, existing []Ne
 // the server accepts (lowercase letters, digits and inner hyphens, at most
 // 53 characters).
 func alsoUpstreamName(baseURL string, used, orgs map[string]bool) string {
-	forge, _, _ := strings.Cut(hostnameFromURL(baseURL), ".")
-	forge = upstreamNameLabel(forge)
+	forge := upstreamNameLabel(upstreamHostName(hostnameFromURL(baseURL)))
 	if forge == "" || gitcache.ReservedUpstreamNames[forge] {
 		forge = "forge-" + forge
 		forge = strings.TrimSuffix(forge, "-")
@@ -676,7 +676,7 @@ func upstreamNameLabel(s string) string {
 func promptUpstream(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) (baseURL, name string, ok bool, err error) {
 	// Pre-filled path (TUI wizard): derive the upstream from config.
 	if cfg.ForgeURL != "" {
-		name, baseURL, parseErr := upstreamFromInput(cfg.ForgeURL)
+		name, baseURL, parseErr := cfg.primaryUpstream()
 		if parseErr != nil {
 			return "", "", false, fmt.Errorf("invalid forge URL from config: %w", parseErr)
 		}
@@ -731,7 +731,7 @@ func upstreamFromInput(raw string) (string, string, error) {
 	if parsed.User == nil || parsed.User.Username() == "" {
 		parsed.User = url.User("git")
 	}
-	name := strings.Split(parsed.Hostname(), ".")[0]
+	name := upstreamHostName(parsed.Hostname())
 	return name, parsed.String(), nil
 }
 
@@ -958,7 +958,7 @@ func applyProvidedDeployKey(ctx context.Context, cfg Config, deps Deps, privateK
 	if run == nil {
 		run = DefaultRunCommand
 	}
-	name, _, err := upstreamFromInput(cfg.ForgeURL)
+	name, _, err := cfg.primaryUpstream()
 	if err != nil {
 		name = "default"
 	}
@@ -2152,4 +2152,29 @@ func updateSSHBlockPort(data []byte, hostName, port string) []byte {
 		out = append(out, line)
 	}
 	return []byte(strings.Join(out, "\n"))
+}
+
+// DNS hosts keep their established first-label name; IP literals use the full
+// canonical address. URL.Hostname has already removed brackets and ports.
+func upstreamHostName(host string) string {
+	address, _, _ := strings.Cut(host, "%")
+	if ip := net.ParseIP(address); ip != nil {
+		if ip.To4() == nil {
+			// Expansion preserves the position of compressed zero groups, so
+			// different IPv6 addresses cannot collapse to the same label.
+			address, _ := netip.AddrFromSlice(ip)
+			return upstreamNameLabel(address.StringExpanded())
+		}
+		return upstreamNameLabel(ip.String())
+	}
+	name, _, _ := strings.Cut(host, ".")
+	return name
+}
+
+func (cfg Config) primaryUpstream() (string, string, error) {
+	name, base, err := upstreamFromInput(cfg.ForgeURL)
+	if cfg.UpstreamName != "" {
+		name = cfg.UpstreamName
+	}
+	return name, base, err
 }

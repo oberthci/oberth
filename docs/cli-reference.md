@@ -511,6 +511,8 @@ Flags:
         workstation identity (default: user@host)
   -upstream-key-file string
         existing work SSH private key to import into OpenBao
+  -upstream-name string
+        registered name for the first upstream (default: first DNS label or full IP address with punctuation replaced by hyphens; shown in Review)
   -upstream-url string
         organization upstream base URL, e.g. ssh://git@github.com/oberthci
   -utility-image string

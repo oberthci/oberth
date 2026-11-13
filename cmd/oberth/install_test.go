@@ -192,3 +192,19 @@ func TestInstallRequiresReviewedConfirmation(t *testing.T) {
 		t.Fatal("install did not enforce its review gate")
 	}
 }
+
+func TestInstallReviewShowsChosenUpstreamName(t *testing.T) {
+	for _, override := range []string{"", "project-forge"} {
+		var output bytes.Buffer
+		args := []string{"--upstream-url", "ssh://git@[2001:db8::10]:2222/repos"}
+		want := "2001-0db8-0000-0000-0000-0000-0000-0010"
+		if override != "" {
+			args = append(args, "--upstream-name", override)
+			want = override
+		}
+		err := runInstall(t.Context(), args, strings.NewReader(""), &output)
+		if !errors.Is(err, errUsage) || !strings.Contains(output.String(), "Upstream name: "+want) {
+			t.Fatal(err, output.String())
+		}
+	}
+}

@@ -36,6 +36,7 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
+	UpstreamName       string   `json:"upstream_name,omitempty"`
 	ClientRequirements []string `json:"client_requirements,omitempty"`
 	NetworkPolicy      string   `json:"network_policy"`
 	ReissueServerCA    bool     `json:"reissue_server_ca"`
@@ -51,7 +52,8 @@ type InstallReview struct {
 }
 
 func Review(cfg Config) InstallReview {
-	return InstallReview{ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
+	name, _, _ := cfg.primaryUpstream()
+	return InstallReview{UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -96,6 +98,9 @@ func printReview(w io.Writer, review InstallReview) {
 	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
 	for _, requirement := range review.ClientRequirements {
 		_, _ = fmt.Fprintln(w, requirement)
+	}
+	if review.UpstreamName != "" {
+		_, _ = fmt.Fprintf(w, "Upstream name: %s (change with --upstream-name before installing)\n", review.UpstreamName)
 	}
 	printPolicyWarning(w, review.NetworkPolicy)
 }

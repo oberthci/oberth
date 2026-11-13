@@ -145,3 +145,16 @@ cleanup with its own 30-second bound, including after cancellation. Cleanup
 failure names the exact scratch namespace and refuses a successful check.
 Plan and verification therefore create short-lived probe resources; they do not
 install an Oberth release or change the selected kubeconfig.
+
+## Upstream name
+
+Review shows the registered name of the first upstream. DNS hosts keep their
+first label (`forge.example.test` becomes `forge`). IP literals use their full
+canonical address with punctuation replaced by hyphens: `192.0.2.10` becomes
+`192-0-2-10`, and `[2001:db8::10]:2222` becomes
+`2001-0db8-0000-0000-0000-0000-0000-0010`. IPv6 expansion preserves the
+position of zero groups so distinct compressed addresses stay distinct. Ports do not
+change the host-derived name. Pass `--upstream-name project-forge` (answers field
+`UpstreamName`) before approving the install to choose another valid name.
+This controls the first component of repository names, such as
+`192-0-2-10/repos/project`; it does not rename existing registrations.

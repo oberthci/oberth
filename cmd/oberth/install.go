@@ -49,6 +49,7 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags.StringVar(&cfg.KubeconfigPath, "kubeconfig", "", "kubeconfig file for an existing cluster")
 	flags.StringVar(&cfg.ContextName, "context", "", "kubeconfig context to install on (any cluster it reaches; required when the kubeconfig has more than one context)")
 	flags.StringVar(&cfg.ForgeURL, "upstream-url", "", "organization upstream base URL, e.g. ssh://git@github.com/oberthci")
+	flags.StringVar(&cfg.UpstreamName, "upstream-name", "", "registered name for the first upstream (default: first DNS label or full IP address with punctuation replaced by hyphens; shown in Review)")
 	flags.StringVar(&cfg.ForgeType, "forge", "", "upstream name (github, codeberg, or gitlab)")
 	flags.StringVar(&cfg.ForgeOrg, "organization", "", "upstream organization")
 	flags.StringVar(&cfg.ExpectedHostFingerprint, "expected-host-fingerprint", "",

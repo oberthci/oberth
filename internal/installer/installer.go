@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/kubeconfig"
 
 	"golang.org/x/mod/semver"
@@ -270,6 +271,8 @@ type Config struct {
 	// (e.g., "github.com/acme"). When set, onboarding uses it
 	// instead of prompting.
 	ForgeURL string
+	// UpstreamName overrides the name derived from the first forge host.
+	UpstreamName string
 	// UplinkIdentity is the uplink identity (e.g., "admin@workstation") from the
 	// TUI wizard. When set alongside SSHPublicKeyPath, onboarding uses it
 	// instead of prompting.
@@ -694,6 +697,15 @@ func (cfg *Config) Validate() error {
 			return errors.New("provide --forge github, codeberg, or gitlab with --organization; use --upstream-url for other hosts")
 		}
 		cfg.ForgeURL = "ssh://git@" + host + "/" + cfg.ForgeOrg
+	}
+
+	if cfg.UpstreamName != "" {
+		if cfg.ForgeURL == "" {
+			return errors.New("--upstream-name requires --upstream-url or --forge with --organization")
+		}
+		if err := gitcache.ValidateUpstreamName(cfg.UpstreamName); err != nil {
+			return fmt.Errorf("--upstream-name: %w", err)
+		}
 	}
 
 	if cfg.UpstreamPrivateKeyPath != "" {
