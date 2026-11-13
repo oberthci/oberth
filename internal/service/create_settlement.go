@@ -356,6 +356,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		}
 	}
 	scheduler.submissions.releaseTerminalRun(run.ID)
+	scheduler.pruneDeferredPodJournal(ctx, run.ID)
 	// External settlement and the durable verdict are established. Scratch
 	// cleanup can retry independently.
 	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)

@@ -95,7 +95,7 @@ func TestWorkflowCreateRecoveryAbsentGroupMateFailsInEitherOrder(t *testing.T) {
 				t.Fatal(err)
 			}
 			state := scheduler.submissionStateForTest()
-			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != holder.ID || jobs.settleCalls != 1 {
+			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != holder.ID || jobs.settleCalls != 0 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
 			if len(jobs.deleted) != 0 {

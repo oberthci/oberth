@@ -721,6 +721,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err := require(ctx); err != nil {
 		return err
 	}
+	// Cancellation joins preparation and native Create, while a submitted
+	// Workflow keeps the independent observer lifetime below.
+	creationCtx, cancelCreation := reservation.creationContext(ctx)
+	defer cancelCreation()
 	repository, err := scheduler.database().Repository(ctx, run.RepoID)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, fmt.Errorf("load run repository: %w", err))
@@ -748,14 +752,14 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			}
 		}
 	}
-	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
+	if err := scheduler.git.Checkout(creationCtx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
-	if err := scheduler.recordRunIssueTrailers(ctx, run, upstream.QualifiedRepo(repository.Name), require); err != nil {
+	if err := scheduler.recordRunIssueTrailers(creationCtx, run, upstream.QualifiedRepo(repository.Name), require); err != nil {
 		return err
 	}
-	stopped, err := scheduler.awaitWorkflowPolicy(ctx, upstream.QualifiedRepo(repository.Name), run.ID, checkoutSHA, require)
+	stopped, err := scheduler.awaitWorkflowPolicy(creationCtx, upstream.QualifiedRepo(repository.Name), run.ID, checkoutSHA, require)
 	if errors.Is(err, errMutationBlocked) {
 		return err
 	}
@@ -788,7 +792,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return nil
 	}
 	jobRequest := WorkflowRequest{WorkflowName: workflowName, Run: run, Repository: repository, SourceDir: sourceDir, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org()}
-	receipt, err := scheduler.resolvePipelineSource(ctx, jobRequest)
+	receipt, err := scheduler.resolvePipelineSource(creationCtx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline source receipt: %w", err))
@@ -861,9 +865,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record Workflow admission contract: %w", err))
 		}
 	}
-
-	creationCtx, cancelCreation := reservation.creationContext(ctx)
-	defer cancelCreation()
 
 	switch {
 	case run.Release:
@@ -1569,6 +1570,9 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 	handled := make(map[string]bool, len(runs))
 	for _, run := range runs {
 		handled[run.ID] = true
+		if run.Cancelled() {
+			continue // Durable cancellation owns native Stop and terminal observation.
+		}
 		if restored[run.ID] && (isPendingCreate(run) || run.Phase == "waiting") {
 			if err := scheduler.cancelRestoredRun(ctx, run.ID, require); err != nil {
 				return err

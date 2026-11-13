@@ -322,10 +322,10 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(jobs.waitBlocks)
-	// The refused deletion is deferred to the dispatch-loop retry instead of
+	// The refused Stop is deferred to the dispatch-loop retry instead of
 	// ending the scheduler, and its obligation stays pending.
 	if err := <-done; err != nil {
-		t.Fatalf("refused deletion ended the owner with an error: %v", err)
+		t.Fatalf("refused Stop ended the owner with an error: %v", err)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 1 || pending[0].RunID != run.ID {
 		t.Fatalf("uncertain physical cleanup hidden: pending=%+v %v", pending, err)
@@ -337,13 +337,22 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("terminal DB row with live cleanup lost recovery journal", err)
 	}
-	// The dispatch pass that later deletes the Workflow prunes the journal.
+	// Once the worker joins, dispatch hands native observation to cleanup.
 	jobs.deleteErr = nil
+	if err := scheduler.completePendingCancellationsWithGate(t.Context(), scheduler.requireMutation); err != nil {
+		t.Fatal(err)
+	}
+	if scheduler.pendingCreateCount() != 1 {
+		t.Fatal("Stop acceptance lost its terminal observation task")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("Stop acceptance pruned journal before terminal observation", err)
+	}
 	scheduler.settleOneCreate(t.Context())
 	if err := scheduler.completePendingCancellationsWithGate(context.Background(), scheduler.requireMutation); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("journal kept after the deferred deletion completed", err)
+		t.Fatal("journal kept after native terminal observation", err)
 	}
 }

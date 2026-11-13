@@ -116,10 +116,9 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	}
 }
 
-// Cancelling a waiting run withdraws its claim at once: once the host
-// pressure that holds it clears, the run behind it is not held up by
-// a cancelled reservation, and the cancelled run never creates a Workflow.
-func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
+// Cancelling preparation joins its creator without submitting a Workflow or
+// blocking the independently claimed peer. Ownership lasts through worker join.
+func TestRunCancelWaitingRunJoinsCreatorAndPreservesPeer(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
 	lift := fixture.pausePreparation(t)
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
@@ -132,11 +131,15 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	if response.PreviousState != "waiting" || response.Warning != "" {
 		t.Fatalf("waiting cancel response = %#v", response)
 	}
-	if snapshot := fixture.scheduler.ownerForTest(head.QueueSequence); snapshot != nil {
-		t.Fatalf("cancelled head still holds a reservation: %#v", snapshot)
+	cancelled := fixture.awaitTerminal(t, head.ID)
+	until := time.Now().Add(testStartTimeout(5 * time.Second))
+	for fixture.scheduler.ownerForTest(head.QueueSequence) != nil {
+		if time.Now().After(until) {
+			t.Fatal("cancelled creator did not join and release ownership")
+		}
+		time.Sleep(testTimeout(time.Millisecond))
 	}
 	lift()
-	cancelled := fixture.awaitTerminal(t, head.ID)
 	assertCancelled(t, cancelled, cancelAdmin.Identity, "wrong size")
 	shown := fixture.control.presentationRun(t.Context(), cancelled)
 	if shown.StartedAt != nil || shown.DisplayStatus != "cancelled" || shown.DisplayReason != "by "+cancelAdmin.Identity+": wrong size" {
