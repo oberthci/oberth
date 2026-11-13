@@ -172,16 +172,6 @@ func authorizeReleaseWIF(wf *wfv1.Workflow, config Config, request Request) ([]*
 	if failure != nil || len(leaves) == 0 {
 		return leaves, failure
 	}
-	encoded, err := json.Marshal(config.ReleaseWIF)
-	if err != nil {
-		return nil, err
-	}
-	// Public policy provenance is part of the existing immutable spec digest
-	// and submission audit binding; no token or derived token digest is stored.
-	if wf.Annotations == nil {
-		wf.Annotations = make(map[string]string)
-	}
-	wf.Annotations["oberth.ci/release-wif-policy-sha256"] = fmt.Sprintf("%x", sha256.Sum256(encoded))
 	// No authored alias may gain access to the generated projection. Reject
 	// before adding it, including helpers and templates that did not opt in.
 	checkVolumes := func(volumes []corev1.Volume) {
@@ -343,5 +333,20 @@ func protectReleaseWIFExecutor(leaves []*wfv1.Template) error {
 		}
 		t.PodSpecPatch = string(encoded)
 	}
+	return nil
+}
+
+// Stamp public policy provenance only after authored metadata passes admission.
+func stampReleaseWIFProvenance(wf *wfv1.Workflow, config *ReleaseWIFConfig) error {
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	// Public policy provenance is part of the existing immutable spec digest
+	// and submission audit binding; no token or derived token digest is stored.
+	if wf.Annotations == nil {
+		wf.Annotations = make(map[string]string)
+	}
+	wf.Annotations["oberth.ci/release-wif-policy-sha256"] = fmt.Sprintf("%x", sha256.Sum256(encoded))
 	return nil
 }

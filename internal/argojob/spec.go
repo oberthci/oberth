@@ -749,13 +749,13 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	); err != nil {
 		return nil, err
 	}
-	// Reject duplicate normalized (burn, step) keys before the Workflow is
-	// created. The planner's PlannedSteps performs the same check for `oberth
-	// validate`, but the scheduler's recordStepPlan deliberately swallows plan
-	// errors ("observability record, never a gate"), so without this call a
-	// colliding pipeline would still submit and execute — and
-	// deduplicateRetries would silently drop one branch's results. Reusing
-	// PlannedSteps ensures the two layers share the same normalization.
+	if len(wifLeaves) > 0 {
+		if err := stampReleaseWIFProvenance(workflow, config.ReleaseWIF); err != nil {
+			return nil, err
+		}
+	}
+	// The durable result model needs unique normalized step keys until its
+	// planner is replaced. Validate before creating the Workflow.
 	if _, err := argoworkflow.PlannedSteps(workflow); err != nil {
 		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}

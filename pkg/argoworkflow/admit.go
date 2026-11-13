@@ -79,7 +79,25 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	if len(workflow.Finalizers) != 0 {
 		problems = append(problems, errors.New("argoworkflow: metadata.finalizers must be omitted"))
 	}
+	annotations := make(map[string]string, len(workflow.Annotations))
+	for key, value := range workflow.Annotations {
+		if !supportedWorkflowAnnotation(key) {
+			annotations[key] = value
+		}
+	}
+	problems = append(problems, admitWorkflowMetadata("metadata", &wfv1.WorkflowMetadata{Labels: workflow.Labels, Annotations: annotations})...)
 	return problems
+}
+
+// Only annotations with a live authored declaration reader bypass the ownership
+// namespace rule. Assist identity/hold markers are server-written, not opt-ins.
+func supportedWorkflowAnnotation(key string) bool {
+	switch key {
+	case SecretPathsAnnotation, SourcesAnnotation, GoProxyAnnotation, NonrootTemplatesAnnotation:
+		return true
+	default:
+		return false
+	}
 }
 
 func admitSpec(spec *wfv1.WorkflowSpec) []error {
