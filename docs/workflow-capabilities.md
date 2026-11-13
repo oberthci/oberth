@@ -40,7 +40,18 @@ an omitted namespace). The only dynamic manifest substitutions admitted are
 must be static. Duplicate keys, multiple objects, List kinds, manifest files,
 arbitrary flags and dynamic object envelopes are refused. Object specifications
 are opaque to Oberth; the operator must constrain their fields with admission
-policy as well as RBAC and quota. The allowlist supports `create`, `get`,
+policy as well as RBAC and quota. Nonempty `annotations` maps and reserved or
+invalid `labels` are refused only under object `metadata` or `podMetadata`, at
+any depth, including nested templates and list entries; case-variant spellings
+have the same boundary. Custom fields such as `spec.secretTemplate.annotations`,
+`spec.serviceAnnotations`, PrometheusRule `rules[].labels` and `externalLabels`
+pass through unchanged. Custom label fields can contain keys and values that
+are not Kubernetes Pod labels.
+
+Granting an operator kind means trusting how its controller maps fields to Pod
+metadata. The operator controls that mapping with a ValidatingAdmissionPolicy on
+the granted kind; see [operator controls](#operator-controls-for-resource-templates).
+The allowlist supports `create`, `get`,
 `delete`, and `apply`. Argo resource deletion also needs Kubernetes RBAC `list`
 and `watch` on the target kind, in addition to `get` and `delete`; these are RBAC
 verbs, not extra capability actions.

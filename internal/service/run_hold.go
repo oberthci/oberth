@@ -399,12 +399,13 @@ func (service *API) patchRunHold(ctx context.Context, actor api.Actor, id, step,
 	return RunHoldPatchResponse{RunID: run.ID, Step: hold.Step, Pod: hold.Pod, PatchSHA256: digest, PatchBytes: int64(len(diff)), Files: files}, nil
 }
 
-// Helper responses are author-controlled diagnostic data, not attestations of
-// the Pod tree. The caller records the assisted evidence exclusion before exec.
 // applyHoldPatch reads the touched files through the Pod helper, applies
 // every hunk server-side with exact context, then writes all files with
 // their read digests as preconditions; the helper refuses the whole write
 // if any file changed in between.
+//
+// Helper responses are author-controlled diagnostic data, not attestations of
+// the Pod tree. The caller records the assisted evidence exclusion before exec.
 func (service *API) applyHoldPatch(ctx context.Context, hold model.AssistHold, patches []holdfs.FilePatch, policy model.AssistPolicy) ([]string, error) {
 	paths := make([]string, 0, len(patches))
 	for _, patch := range patches {

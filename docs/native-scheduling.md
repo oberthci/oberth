@@ -61,10 +61,13 @@ Oberth’s own run/trigger/tier labels remain server-assigned.
 The same Pod annotation and label rules apply to `artifactGC.podMetadata`,
 including artifact-GC Pods created for archived logs. Artifact-GC Pod patches
 remain refused. Hooks, exits and inline/default templates pass through the same
-recursive template admission. Opaque granted resource manifests also refuse
-metadata annotations, reserved label keys and nested Pod patches, since an
-operator API can propagate that metadata onto a Pod. Workflow-only metadata and
-PodGC label selectors do not write arbitrary Pod metadata.
+recursive template admission. Opaque granted resource manifests refuse nonempty
+annotations and reserved or invalid labels only under object `metadata` or
+`podMetadata`, as well as nested Pod patches. Granting an operator kind means
+trusting how its controller maps fields to Pod metadata. The operator control is
+a ValidatingAdmissionPolicy on the granted kind; see
+[operator controls](workflow-capabilities.md#operator-controls-for-resource-templates).
+Workflow-only metadata and PodGC label selectors do not write arbitrary Pod metadata.
 An author's Pod label can match selectors in the operator's own policies
 elsewhere. Operator policies should select on namespace as well as labels,
 including NetworkPolicy rules that otherwise admit matching Pods from any
@@ -451,13 +454,21 @@ Workflows.
 A Kubernetes ResourceQuota applies to the whole pipeline namespace and cannot
 separate repositories within that namespace.
 
-Granted resource manifests are checked recursively for annotation and label
-maps under any parent field, including nested templates and list entries.
-Nonempty `annotations` maps and reserved `labels` keys are refused regardless
-of the granted kind, including directly named `podAnnotations`/`podLabels`-style
-maps (field names ending in `Annotations` or `Labels`, case-insensitively). Operator APIs remain opaque: a controller that synthesizes
-Pod metadata from differently named scalar fields or transforms arbitrary data
-still requires operator review when granting that API.
+Granted resource manifests are checked recursively, including nested templates
+and list entries. Nonempty maps named `annotations` and reserved or invalid
+`labels` are refused only when their parent key is `metadata` or `podMetadata`,
+including case-variant spellings. Custom fields such as
+`spec.secretTemplate.annotations`, `serviceAnnotations`, PrometheusRule
+`rules[].labels`, `externalLabels` and direct `podAnnotations`/`podLabels` pass
+through unchanged. Custom label fields may use keys and values that are not
+Kubernetes Pod labels. Parent names containing "pod" or "template" do not define
+object metadata. Native `matchLabels` selectors and metric label lists remain
+admitted.
+
+Granting an operator kind means trusting how its controller maps fields to Pod
+metadata. Enforce the operator's constraints with a ValidatingAdmissionPolicy on
+the granted kind; see
+[operator controls](workflow-capabilities.md#operator-controls-for-resource-templates).
 
 Block PVCs use ordinary Kubernetes fields: a container may declare
 `volumeDevices` backed by a per-Workflow `volumeClaimTemplates` entry with
