@@ -56,9 +56,10 @@ recursive template admission. Opaque granted resource manifests also refuse
 metadata annotations, reserved label keys and nested Pod patches, since an
 operator API can propagate that metadata onto a Pod. Workflow-only metadata and
 PodGC label selectors do not write arbitrary Pod metadata.
-An author label can match selectors in the operator’s own policies in other
-namespaces (for example a NetworkPolicy admitting `role=backend` from any
-namespace); Oberth reserves only the keys its own installed charts select on.
+An author's Pod label can match selectors in the operator's own policies
+elsewhere. Operator policies should select on namespace as well as labels,
+including NetworkPolicy rules that otherwise admit matching Pods from any
+namespace. Oberth reserves the keys its own installed charts select on.
 Affinity namespace selectors are explicitly permitted despite other namespace
 reference restrictions.
 Mutex and semaphore names are shared by all repositories in the pipeline
