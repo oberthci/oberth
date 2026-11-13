@@ -380,6 +380,8 @@ DELETE FROM schema_migrations WHERE id='20261113004204-remove-execution-target-p
 
 // PostExtendedResourceGrantDowngrade removes only the removal receipt in disposable fixtures.
 const PostExtendedResourceGrantDowngrade = PostStepMeasurementDowngrade + `
+DROP TRIGGER IF EXISTS workflow_capability_recovery_run_changed;
+DROP TABLE IF EXISTS workflow_capability_recoveries;
 DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-grants-1523724f34af80938b4963079df78930';
 `
 

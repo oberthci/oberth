@@ -26,11 +26,9 @@ func workflowRunAdoptable(run model.Run) bool {
 	return run.RefKind == model.RefBranch || run.RefKind == model.RefTag
 }
 
-// adoptionFailure names the exact Workflow startup could not adopt, so the
-// operator knows which object to delete. A refused Workflow keeps startup
-// stopped until it is deleted; recovery then takes the missing-Workflow
-// fallback and re-queues the run. A failed read names the same object but
-// asks for nothing: the next start retries it.
+// adoptionFailure names the exact Workflow that could not be recovered.
+// A binding refusal fails only its run; no deletion or replacement is authorized.
+// Read failures remain startup errors so unavailable APIs do not become results.
 func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 	namespace := adopter.WorkflowNamespace()
 	if target, ok := adopter.(interface {
@@ -46,11 +44,19 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 	}
 	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.WorkflowName, err)
 	if errors.Is(err, ErrAdoptionRefused) {
-		failure = fmt.Errorf("%w; startup stops until it is deleted (kubectl -n %s delete workflow %s); recovery retains the original execution target",
+		failure = fmt.Errorf("%w; recovery refused for this run; inspect the original Workflow (kubectl -n %s get workflow %s); no automatic deletion or resubmission",
 			failure, namespace, run.WorkflowName)
 	}
 	log.Printf("ERROR: %v", failure)
 	return failure
+}
+
+func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter JobAdopter, run model.Run, cause error, require mutationRequirement) error {
+	failure := adoptionFailure(adopter, run, cause)
+	if !errors.Is(cause, ErrAdoptionRefused) {
+		return failure
+	}
+	return scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()}, require)
 }
 
 // adopt restores the grant of work already running.

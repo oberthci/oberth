@@ -565,7 +565,7 @@ func TestAdoptedTerminalObservationErrorKeepsRealResult(t *testing.T) {
 	}
 }
 
-func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
+func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 	var logged bytes.Buffer
 	log.SetOutput(&logged)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
@@ -596,21 +596,32 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 				_, err := scheduler.submissions.adopt(run)
 				return err
 			})
-			if err == nil || errors.Is(err, ErrAdoptionRefused) != test.refused {
+			if (err == nil) != test.refused {
 				t.Fatalf("adoption failure = %v", err)
 			}
-			deletion := "kubectl -n oberth-argo delete workflow oberth-refused"
-			for _, message := range []string{err.Error(), logged.String()} {
-				if !strings.Contains(message, "run "+run.ID) || !strings.Contains(message, "Workflow oberth-argo/oberth-refused") || strings.Contains(message, deletion) != test.refused {
-					t.Fatalf("operator message does not name the Workflow to delete: %q", message)
+			inspection := "kubectl -n oberth-argo get workflow oberth-refused"
+			messages := []string{logged.String()}
+			if err != nil {
+				messages = append(messages, err.Error())
+			}
+			for _, message := range messages {
+				if !strings.Contains(message, "run "+run.ID) || !strings.Contains(message, "Workflow oberth-argo/oberth-refused") || strings.Contains(message, inspection) != test.refused {
+					t.Fatalf("operator message does not name the Workflow: %q", message)
 				}
 			}
 			if !strings.Contains(logged.String(), "ERROR: ") {
 				t.Fatalf("adoption failure not logged prominently: %q", logged.String())
 			}
 			current, lookupErr := fixture.store.Run(context.Background(), run.ID)
-			if lookupErr != nil || current.Status != model.RunRunning || current.SupersededBy != "" || len(jobs.deleted) != 0 {
-				t.Fatalf("refused adoption mutated work: %#v %v deleted=%v", current, lookupErr, jobs.deleted)
+			wantStatus := model.RunRunning
+			if test.refused {
+				wantStatus = model.RunFailed
+				if current.Phase != "infrastructure" || !strings.Contains(current.Error, "recovery refused for this run") {
+					t.Fatal("refusal not reported on its run", current)
+				}
+			}
+			if lookupErr != nil || current.Status != wantStatus || current.SupersededBy != "" || len(jobs.deleted) != 0 {
+				t.Fatalf("refused adoption changed Workflow or lost run result: %#v %v deleted=%v", current, lookupErr, jobs.deleted)
 			}
 		})
 	}

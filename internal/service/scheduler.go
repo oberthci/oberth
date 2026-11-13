@@ -1672,14 +1672,20 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 					continue
 				}
 				if err != nil {
-					return adoptionFailure(adopter, run, err)
+					if failure := scheduler.handleAdoptionFailure(ctx, adopter, run, err, require); failure != nil {
+						return failure
+					}
+					continue
 				}
 				if found {
 					if adopt == nil {
 						return errors.New("service: adoption requires a worker dispatcher")
 					}
 					if err := adopt(run); err != nil {
-						return adoptionFailure(adopter, run, err)
+						if failure := scheduler.handleAdoptionFailure(ctx, adopter, run, err, require); failure != nil {
+							return failure
+						}
+						continue
 					}
 					continue
 				}

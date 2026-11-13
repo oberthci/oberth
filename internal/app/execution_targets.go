@@ -315,6 +315,7 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	child.targetBinding = &b
 	child.targetClients = clients
 	child.SetWorkflowCapabilityLoader(r.owner.capabilityGrants)
+	child.SetWorkflowCapabilityRecoveryLoader(r.owner.capabilityRecovery)
 	child.SetIdentityStore(r.owner.identities)
 	child.SetDeclarationRecorder(r.owner.declarations)
 	child.SetReconcilerHealth(r.owner.reconcilerHealthy)

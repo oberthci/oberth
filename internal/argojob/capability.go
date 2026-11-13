@@ -92,8 +92,20 @@ func (c *Controller) boundCapability(ctx context.Context, wf *wfv1.Workflow, rep
 	if err != nil {
 		return nil, fmt.Errorf("argojob: read workflow capability: %w", err)
 	}
-	if current == nil || capabilityBinding(binding.RepositoryID, current) != encoded || !c.capabilityIdentityMatches(wf, current) || current.Namespace != wf.Namespace {
+	if current == nil || !c.capabilityIdentityMatches(wf, current) || current.Namespace != wf.Namespace {
 		return nil, ErrWorkflowCapabilityChanged
+	}
+	if capabilityBinding(binding.RepositoryID, current) != encoded {
+		if c.capabilityRecovery == nil {
+			return nil, ErrWorkflowCapabilityChanged
+		}
+		previous, err := c.capabilityRecovery(ctx, binding.RepositoryID, wf.Annotations[runIDAnnotation], wf.Name, wf.Labels["oberth.ci/sha"])
+		if err != nil {
+			return nil, fmt.Errorf("argojob: read capability recovery receipt: %w", err)
+		}
+		if recoveredCapabilityBinding(binding.RepositoryID, previous, current) != encoded {
+			return nil, ErrWorkflowCapabilityChanged
+		}
 	}
 	if err := c.verifyCapabilityScope(ctx, current); err != nil {
 		return nil, err
@@ -151,6 +163,10 @@ func capabilityBinding(repoID int64, capability *argoworkflow.Capability) string
 	if capability == nil {
 		return ""
 	}
+	return encodeCapabilityBinding(repoID, orderedCapability(capability))
+}
+
+func orderedCapability(capability *argoworkflow.Capability) argoworkflow.Capability {
 	c := *capability
 	c.ResourceKinds = slices.Clone(c.ResourceKinds)
 	for i := range c.ResourceKinds {
@@ -160,7 +176,11 @@ func capabilityBinding(repoID int64, capability *argoworkflow.Capability) string
 	slices.SortFunc(c.ResourceKinds, func(a, b argoworkflow.ResourceKindCapability) int {
 		return strings.Compare(a.APIVersion+"/"+a.Kind, b.APIVersion+"/"+b.Kind)
 	})
-	body, _ := json.Marshal(c)
+	return c
+}
+
+func encodeCapabilityBinding(repoID int64, capability any) string {
+	body, _ := json.Marshal(capability)
 	digest := sha256.Sum256(body)
 	binding, _ := json.Marshal(struct {
 		RepositoryID int64  `json:"repository_id"`

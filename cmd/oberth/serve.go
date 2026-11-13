@@ -832,6 +832,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	argoJobs.SetPinnedSources(sourceLoader, database)
 	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
+	argoJobs.SetWorkflowCapabilityRecoveryLoader(database.WorkflowCapabilityRecovery)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
 		options.argoNamespace, options.argoPipelineAccount, options.argoCredentialedAccount,
 		options.argoCISecretsAccount, options.argoExecutorAccount)

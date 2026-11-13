@@ -1,0 +1,131 @@
+{
+  "workflow": {
+    "kind": "Workflow",
+    "apiVersion": "argoproj.io/v1alpha1",
+    "metadata": {
+      "name": "oberth-oberth-run-abc1-aabbccddeeff",
+      "namespace": "oberth-argo",
+      "uid": "original-workflow-uid",
+      "labels": {
+        "app.kubernetes.io/name": "oberth-run",
+        "oberth.ci/engine": "argo",
+        "oberth.ci/repo": "oberth",
+        "oberth.ci/run": "run-abc123",
+        "oberth.ci/sha": "0123456789abcdef0123456789abcdef01234567",
+        "oberth.ci/tier": "ci",
+        "oberth.ci/trigger": "ci"
+      },
+      "annotations": {
+        "example.com/tier": "L",
+        "oberth.ci/helper-storage": "argo-256Mi-512Mi-v4",
+        "oberth.ci/ref": "refs/heads/main",
+        "oberth.ci/request-defaults": "2cpu-2Gi-helpers-250m-256Mi-v2",
+        "oberth.ci/run-id": "run-abc123",
+        "oberth.ci/spec-identity": "4b116231f9130b58f7c4e248716e14974fb96f4be2991e79984cfd2c9c5b93a4",
+        "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
+        "oberth.ci/workflow-capability": "{\"repository_id\":1,\"grant_sha256\":\"e783b2aa5dfeb8bc39bac694c2e3e1dfda24680eeaa5c8edd1cce26a0826cc19\"}",
+        "workflows.argoproj.io/pod-name-format": "v2"
+      }
+    },
+    "spec": {
+      "templates": [
+        {
+          "name": "main",
+          "inputs": {},
+          "outputs": {},
+          "metadata": {},
+          "resource": {
+            "action": "create",
+            "manifest": "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata:\n  name: '{{workflow.name}}-task'\n  namespace: oberth-argo\nspec:\n  payload: opaque\n"
+          },
+          "serviceAccountName": "oberth-argo-pipeline",
+          "automountServiceAccountToken": false,
+          "executor": {
+            "serviceAccountName": "operator-task-runner"
+          },
+          "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"name\":\"main\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}}}],\"initContainers\":[{\"name\":\"oberth-executor-token\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\",\"trap 'printf \\\"%s\\\\n\\\" \\\"executor token wait terminated\\\" \\u003e\\u00262; exit 143' TERM\\ntrap 'printf \\\"%s\\\\n\\\" \\\"executor token wait interrupted\\\" \\u003e\\u00262; exit 130' INT\\nprintf '%s\\\\n' 'waiting for executor token from Oberth' \\u003e\\u00262\\nwaited_seconds=0\\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do\\n  if ! sleep 1; then\\n    printf '%s\\\\n' 'executor token wait failed' \\u003e\\u00262\\n    exit 1\\n  fi\\n  waited_seconds=$((waited_seconds + 1))\\n  if [ \\\"$((waited_seconds % 30))\\\" -eq 0 ]; then\\n    printf 'still waiting for executor token from Oberth after %ss\\\\n' \\\"$waited_seconds\\\" \\u003e\\u00262\\n  fi\\ndone\\nprintf '%s\\\\n' 'executor token ready' \\u003e\\u00262\"],\"resources\":{\"limits\":{\"cpu\":\"500m\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}},\"volumeMounts\":[{\"name\":\"exec-sa-token\",\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"runAsUser\":0,\"runAsGroup\":0,\"runAsNonRoot\":false,\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}}},{\"name\":\"init\",\"resources\":{\"limits\":{\"cpu\":\"500m\",\"memory\":\"512Mi\"},\"requests\":{\"cpu\":\"50m\",\"ephemeral-storage\":\"256Mi\",\"memory\":\"64Mi\"}}}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
+        }
+      ],
+      "entrypoint": "main",
+      "arguments": {},
+      "serviceAccountName": "oberth-argo-pipeline",
+      "automountServiceAccountToken": false,
+      "executor": {
+        "serviceAccountName": "oberth-argo-executor"
+      },
+      "volumes": [
+        {
+          "name": "oberth-tmp",
+          "emptyDir": {
+            "sizeLimit": "8Gi"
+          }
+        },
+        {
+          "name": "oberth-source",
+          "persistentVolumeClaim": {
+            "claimName": "oberth-oberth-run-abc1-aabbccddeeff-src"
+          }
+        }
+      ],
+      "ttlStrategy": {
+        "secondsAfterCompletion": 3600
+      },
+      "activeDeadlineSeconds": 300,
+      "podPriorityClassName": "oberth-argo-oberth-pipeline",
+      "securityContext": {
+        "runAsUser": 0,
+        "runAsGroup": 0,
+        "runAsNonRoot": false,
+        "seccompProfile": {
+          "type": "RuntimeDefault"
+        }
+      },
+      "podSpecPatch": "{\"preemptionPolicy\":\"Never\"}",
+      "podMetadata": {
+        "labels": {
+          "oberth.ci/run": "run-abc123",
+          "oberth.ci/tier": "ci",
+          "oberth.ci/trigger": "ci"
+        }
+      }
+    },
+    "status": {
+      "startedAt": null,
+      "finishedAt": null
+    }
+  },
+  "adoption": {
+    "PinnedSources": null,
+    "RepositoryID": 1,
+    "Name": "oberth-oberth-run-abc1-aabbccddeeff",
+    "RunID": "run-abc123",
+    "Ref": "refs/heads/main",
+    "SHA": "0123456789abcdef0123456789abcdef01234567",
+    "Trigger": "ci",
+    "RunTrigger": "branch",
+    "ScheduleEntry": ""
+  },
+  "config": {
+    "Namespace": "oberth-argo",
+    "PipelineServiceAccount": "oberth-argo-pipeline",
+    "ExecutorServiceAccount": "oberth-argo-executor",
+    "CredentialedServiceAccount": "oberth-argo-credentialed",
+    "CISecretsServiceAccount": "oberth-argo-ci-secrets"
+  },
+  "grant": {
+    "namespace": "oberth-argo",
+    "service_account": "operator-task-runner",
+    "resource_kinds": [
+      {
+        "api_version": "tasks.example.test/v1",
+        "kind": "Task",
+        "actions": [
+          "create"
+        ]
+      }
+    ],
+    "extended_resources": {
+      "devices.example.test/worker": 2
+    }
+  }
+}
