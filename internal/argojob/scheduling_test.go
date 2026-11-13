@@ -278,8 +278,20 @@ func TestSchedulingPreservesArgoLockMessage(t *testing.T) {
 		"Waiting for pipeline/Mutex/oberth-release lock. Lock status: 0/1 ",
 		"Waiting for pipeline/Database/build lock. Lock status: 1/2; controller detail",
 	} {
-		if got := safeWorkflowMessage(message); got != message {
+		if got := safeWorkflowMessage(message); got != strings.TrimSpace(message) {
 			t.Fatalf("safeWorkflowMessage(%q) = %q", message, got)
 		}
+	}
+}
+
+func TestSchedulingBoundsUntrustedArgoLockMessage(t *testing.T) {
+	message := "Waiting for pipeline/Mutex/" + strings.Repeat("界", 300) + "\n\t\x1b\x00 lock. Lock status: 0/1"
+	got := safeWorkflowMessage(message)
+	if len([]rune(got)) != 200 || !strings.HasSuffix(got, "…") || strings.ContainsAny(got, "\n\t\x1b\x00") {
+		t.Fatalf("unsafe lock display: %q", got)
+	}
+	message = "Waiting for pipeline/Mutex/a\n\t\x1b\x00b lock. Lock status: 0/1  "
+	if got := safeWorkflowMessage(message); got != "Waiting for pipeline/Mutex/a b lock. Lock status: 0/1" {
+		t.Fatalf("lock wording changed beyond display sanitation: %q", got)
 	}
 }

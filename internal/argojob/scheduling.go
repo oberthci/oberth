@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -21,7 +22,7 @@ const maxSchedulingItems = 16
 // ObserveScheduling performs only an exact Workflow GET and one scoped, bounded
 // Pod LIST. It never submits, repairs, reads logs, events, or pod specs for output.
 // AI-CONTRACT: arbitrary Kubernetes/Argo status text is untrusted: output only
-// fixed summaries, never raw messages (which may contain secrets or commands).
+// fixed summaries, except bounded printable Argo synchronization messages.
 func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID, sha string) (*model.ExecutionObservation, error) {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -147,6 +148,19 @@ func safeWorkflowMessage(message string) string {
 	case strings.HasPrefix(message, "Waiting for a PVC to be created."):
 		return "Waiting for a persistent volume claim to be created."
 	case waitingForLock(message):
+		message = strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return ' '
+			}
+			if !unicode.IsPrint(r) {
+				return -1
+			}
+			return r
+		}, message)
+		message = strings.Join(strings.Fields(message), " ")
+		if runes := []rune(message); len(runes) > 200 {
+			message = string(runes[:199]) + "…"
+		}
 		return message
 	case strings.HasPrefix(message, "Pending "):
 		return "Workflow node is pending."

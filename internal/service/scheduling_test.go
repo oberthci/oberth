@@ -314,3 +314,10 @@ func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
 		t.Fatalf("plain running run got a lock reason: %q", run.DisplayReason)
 	}
 }
+
+func TestLockWaitReasonDoesNotMatchPVCWait(t *testing.T) {
+	execution := &model.ExecutionObservation{Message: "Waiting for a persistent volume claim to be created."}
+	if got := lockWaitReason(execution); got != "" {
+		t.Fatalf("PVC wait became a lock wait: %q", got)
+	}
+}

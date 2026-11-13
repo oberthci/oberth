@@ -148,7 +148,7 @@ func lockWaitReason(execution *model.ExecutionObservation) string {
 		}
 	}
 	for _, message := range messages {
-		if !strings.HasPrefix(message, "Waiting for ") {
+		if !strings.HasPrefix(message, "Waiting for ") || !strings.Contains(message, " lock. Lock status: ") {
 			continue
 		}
 		return message
