@@ -195,18 +195,18 @@ func TestDryRunPreservesExistingAdminOutputs(t *testing.T) {
 		csrPath:          pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr}),
 		keyPath:          ssh.MarshalAuthorizedKey(sshKey),
 		csrPath + ".crt": []byte("existing public certificate"),
-		secretsPath:      []byte("existing credential store"),
+		secretsPath:      []byte("OPENBAO_ROOT_TOKEN=s.dry-run-fixture\n"),
 	} {
 		if err := os.WriteFile(path, raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	cfg := Config{DryRun: true, InstallSecretStore: true, AdminCSRPath: csrPath, AdminSSHPublicKeyPath: keyPath, SecretsFile: secretsPath, ResumeSecretsFile: filepath.Join(dir, "unread-resume-input")}
+	cfg := Config{DryRun: true, InstallSecretStore: true, AdminCSRPath: csrPath, AdminSSHPublicKeyPath: keyPath, SecretsFile: secretsPath}
 	err = Execute(t.Context(), cfg, noClusterInstallDeps(t, false))
 	if err == nil || !strings.Contains(err.Error(), "stop: cluster reached") {
-		t.Fatalf("dry run refused existing outputs or read recovery credentials: %v", err)
+		t.Fatalf("dry run refused valid existing outputs: %v", err)
 	}
-	for path, want := range map[string]string{csrPath + ".crt": "existing public certificate", secretsPath: "existing credential store"} {
+	for path, want := range map[string]string{csrPath + ".crt": "existing public certificate", secretsPath: "OPENBAO_ROOT_TOKEN=s.dry-run-fixture\n"} {
 		if string(mustRead(t, path)) != want {
 			t.Fatal("dry run changed an existing output")
 		}

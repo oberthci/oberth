@@ -37,9 +37,17 @@ reports `unavailable` and directs the operator to pod events. The diagnostic
 command prints the safe JSON and exits successfully even for a not-ready state.
 
 `oberth install --dry-run` reviews the plan without reserving output paths or
-reading recovery credentials. Existing admin certificate and secrets output
-files are allowed and left untouched. A real install still protects existing
-outputs from overwrite.
+writing credentials. It reads and validates `--resume-secrets-file` and existing
+`--secrets-file` recovery input using the same private-file checks as installation.
+Existing admin certificate and credential files are left untouched. A real
+install still protects non-empty outputs from overwrite.
+
+`oberth install --dry-run --json` returns a version 1 object with `review` and
+`confirmation_required: true`. It emits the resolved public review, including
+the selected context and certificate names, without a live enforcement probe,
+cluster changes, secret values, or credential output files. A failed dry-run
+also returns version 1 JSON, with `ok: false`, the public `review`, and safe
+`checks`; the command still exits with an error.
 
 `oberth install --plan --context <context>` makes no cluster mutations. It
 reports NetworkPolicy capability as unverified and explains that the live

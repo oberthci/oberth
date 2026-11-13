@@ -332,9 +332,6 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 }
 
 func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func(context.Context, Config, InstallDeps) error) error {
-	if cfg.DryRun {
-		return errors.New("use --dry-run without --json to review the install")
-	}
 	output := deps.Output
 	deps.Output = io.Discard
 	deps.IsTerminal = func() bool { return false }
@@ -346,6 +343,22 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	deps.upstreamResult = func(upstream InstallUpstream) { deps.upstream = &upstream }
 	deps.installResolved = func(resolved Config) { cfg = resolved }
 	installErr := execute(ctx, cfg, deps)
+	if cfg.DryRun {
+		if installErr != nil {
+			review := Review(cfg)
+			result := InstallResult{Version: 1, Context: cfg.ContextName, Review: &review, Checks: []CheckResult{}}
+			result.check("dry_run", false, "Review the selected context and install inputs, then retry --dry-run --json.")
+			var failure *installStepError
+			if errors.As(installErr, &failure) {
+				result.Checks[0] = failure.check
+			}
+			if err := json.NewEncoder(output).Encode(result); err != nil {
+				return err
+			}
+			return installErr
+		}
+		return PrintReviewJSON(output, cfg)
+	}
 	result := InstallResult{Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
 		result = verifyInstall(ctx, cfg, deps, cfg.existingRelease)

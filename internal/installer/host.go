@@ -346,6 +346,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 
 	return Run(ctx, cfg, Deps{
 		checkClientReachability: true,
+		installResolved:         deps.installResolved,
 		Output:                  deps.Output,
 		Input:                   deps.Input,
 		RunHelm:                 runHelm,
@@ -370,7 +371,7 @@ func executeCluster(ctx context.Context, cfg Config, deps InstallDeps, secretsFi
 func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) error {
 	// An existing --secrets-file is recovery input. Never overwrite it: any
 	// fresh credentials get a separately reserved owner-only sibling file.
-	if !cfg.DryRun && cfg.SecretsFile != "" && (cfg.InstallSecretStore || cfg.Upgrade) {
+	if cfg.SecretsFile != "" && (cfg.InstallSecretStore || cfg.Upgrade) {
 		if _, err := os.Lstat(cfg.SecretsFile); err == nil {
 			if cfg.ResumeSecretsFile != "" && cfg.ResumeSecretsFile != cfg.SecretsFile {
 				return errors.New("existing --secrets-file conflicts with --resume-secrets-file; choose a new --secrets-file output path")
@@ -388,13 +389,11 @@ func prepareInstallInputs(ctx context.Context, cfg *Config, deps InstallDeps) er
 		if !cfg.InstallSecretStore && !cfg.Upgrade {
 			return errors.New("--resume-secrets-file requires --install-secretstore or --upgrade")
 		}
-		if !cfg.DryRun {
-			token, err := readResumeRootToken(ctx, cfg.ResumeSecretsFile, cfg.ResumeAgeIdentity)
-			if err != nil {
-				return &installStepError{check: CheckResult{Code: "secret_store_credentials", Reason: err.Error(), Remedy: recoveryInputRemedy}}
-			}
-			cfg.resumeRootToken = token
+		token, err := readResumeRootToken(ctx, cfg.ResumeSecretsFile, cfg.ResumeAgeIdentity)
+		if err != nil {
+			return &installStepError{check: CheckResult{Code: "secret_store_credentials", Reason: err.Error(), Remedy: recoveryInputRemedy}}
 		}
+		cfg.resumeRootToken = token
 	}
 
 	if cfg.AdminCSRPath != "" {

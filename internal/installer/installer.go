@@ -469,6 +469,7 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
+	installResolved func(Config)
 	// Host installs verify the advertised endpoint after server readiness.
 	checkClientReachability bool
 
@@ -866,6 +867,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	if cfg.DryRun {
+		if deps.installResolved != nil {
+			deps.installResolved(cfg)
+		}
 		return printDryRunPlan(cfg, deps.Output, cluster)
 	}
 	cleanupRelease, err := preflightInstallRelease(ctx, &cfg, deps)
