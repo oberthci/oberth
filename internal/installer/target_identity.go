@@ -19,7 +19,11 @@ func clusterCAHash(config *rest.Config) (string, error) {
 	}
 	ca := config.CAData
 	if len(ca) == 0 && config.CAFile != "" {
-		file, err := os.OpenInRoot(filepath.Dir(config.CAFile), filepath.Base(config.CAFile))
+		source, err := filepath.EvalSymlinks(config.CAFile)
+		if err != nil {
+			return "", err
+		}
+		file, err := os.OpenInRoot(filepath.Dir(source), filepath.Base(source))
 		if err != nil {
 			return "", err
 		}

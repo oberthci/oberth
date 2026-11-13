@@ -111,6 +111,34 @@ func TestAdminClusterIdentitySecurity(t *testing.T) {
 	if err := recordKubernetesTarget(Config{Namespace: "oberth", KubeconfigPath: path}, Deps{ContextName: "selected", ClientConfigRoot: func() (string, error) { return dir, nil }}); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("CAFileSymlink", func(t *testing.T) {
+		cluster := config.Clusters["selected"]
+		saved := cluster.DeepCopy()
+		defer func() { config.Clusters["selected"] = saved; write() }()
+		source := filepath.Join(root, "public-ca.pem")
+		if err := os.WriteFile(source, authority["ca.crt"], 0600); err != nil {
+			t.Fatal(err)
+		}
+		links := filepath.Join(root, "ca-links")
+		if err := os.Mkdir(links, 0700); err != nil {
+			t.Fatal(err)
+		}
+		selected := filepath.Join(links, "cluster-ca.pem")
+		if err := os.Symlink(source, selected); err != nil {
+			t.Fatal(err)
+		}
+		cluster.CertificateAuthorityData = nil
+		cluster.CertificateAuthority = selected
+		write()
+		if _, _, _, err := loadKubeConfigForContext("selected", "", io.Discard); err != nil {
+			t.Fatal("equivalent CA file was refused", err)
+		}
+		_, _, _, cleanup, err := pinnedKubernetesCommand("kubectl", []string{"get", "pods"}, os.Environ())
+		_ = cleanup()
+		if err != nil {
+			t.Fatal("equivalent CA file refused for child command", err)
+		}
+	})
 	for _, change := range []string{"server", "CA", "TLS name", "TLS verification"} {
 		t.Run(change, func(t *testing.T) {
 			cluster := config.Clusters["selected"]

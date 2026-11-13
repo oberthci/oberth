@@ -94,7 +94,8 @@ The local `kubernetes.json` install record stores the context name, source
 kubeconfig path when supplied, API server URL and SHA-256 of the CA bundle. Cluster
 commands verify that identity before connecting, including explicit reuse of the
 recorded context name. Changing `KUBECONFIG` cannot redirect that recorded name.
-TLS server-name and verification settings are also checked. A context using the
+TLS server-name and verification settings are also checked. Equivalent embedded
+CA bundles and CA files, including symlinks, identify the same cluster. A context using the
 system trust store records the digest of an empty explicit CA bundle; TLS still
 uses system trust. An explicit different context selects another target.
 `scripts/setup-secretstore.sh --context NAME --kubeconfig PATH` uses the same
