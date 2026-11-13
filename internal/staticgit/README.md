@@ -54,7 +54,7 @@ that happens; it can be necessary within weeks of a release.
    `hack/qualify-static-git-build.sh`: rebuild, byte/package verification,
    SBOM generation, Grype scan and the vulnerable-Git positive control.
    `test-static-git-runtime` must then run the full tagged CLI transport suite
-   using the fresh read-only payload under nonroot-static-v1 and Landlock.
+   using the fresh read-only payload with the selected nonroot test leaf and Landlock.
    Require UID/GID 65534, no added capabilities, no shell/runner executable
    fallback, host-key mismatch refusal, receive hooks, archive/history,
    early remote exits and cancellation/reaping checks. An unavailable sandbox

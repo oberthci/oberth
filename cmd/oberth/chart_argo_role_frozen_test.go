@@ -94,7 +94,6 @@ func TestChartArgoRoleRulesFrozenAtV0179(t *testing.T) {
 	t.Parallel()
 	variants := map[string][]string{
 		"default": nil,
-		"nonroot": {"--set", "argo.controllerProfile=nonroot-static-v1"},
 	}
 	for variant, extra := range variants {
 		docs := renderArgoRBAC(t, extra...)

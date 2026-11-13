@@ -253,7 +253,7 @@ func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := writeTestRecord(t, UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0",
-		OberthRevision: 6, ArgoNamespace: "oberth-argo", ArgoRevision: 3, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
+		OberthRevision: 6, SchemaBefore: 73, SchemaAfter: 74, Backup: archive})
 	restored := ""
 	restore := func(_ context.Context, target RollbackRestore) error {
 		*fixture.calls = append(*fixture.calls, "restore")
@@ -283,7 +283,6 @@ func TestRollbackRestoresTheBackupAfterAMigration(t *testing.T) {
 	}
 	want := []string{
 		"list -n oberth --deployed --failed --pending --superseded --uninstalling --uninstalled -o json",
-		"rollback argo-workflows 3 -n oberth-argo --wait --timeout 1m0s",
 		"rollback oberth 6 -n oberth --timeout 1m0s",
 		"restore",
 		"verify",
@@ -379,7 +378,7 @@ func TestRollbackRefusals(t *testing.T) {
 
 // A record binds to where its upgrade left each release: an upgrade that
 // failed before reaching oberth leaves it at the recorded revision (only
-// argo is rolled back, nothing migrated, nothing restored), and a revision
+// nothing migrated, nothing restored), and a revision
 // past the upgrade's is accepted only when helm history shows nothing but
 // rollbacks to the recorded revision (no second helm rollback; the restore
 // still runs).
@@ -392,13 +391,12 @@ func TestRollbackRecordStands(t *testing.T) {
 	for name, tc := range map[string]struct {
 		oberthRevision int
 		history        string
-		argo           bool
 		want           []string
 		wantErr        string
 	}{
-		"upgrade failed after the argo transition": {
-			oberthRevision: 6, argo: true,
-			want: []string{"rollback argo-workflows 3 -n oberth-argo --wait --timeout 1m0s", "verify"},
+		"upgrade failed before the server transition": {
+			oberthRevision: 6,
+			want:           []string{"verify"},
 		},
 		"a rollback of this record already ran": {
 			oberthRevision: 9, history: `[{"revision":7,"description":"Upgrade complete"},{"revision":8,"description":"Rollback to 6"},{"revision":9,"description":"Rollback to 6"}]`,
@@ -429,9 +427,6 @@ func TestRollbackRecordStands(t *testing.T) {
 			}
 			record := UpgradeRecord{APIServer: "https://127.0.0.1:6443", Namespace: "oberth", From: "0.20.1", To: "0.21.0",
 				OberthRevision: 6, SchemaBefore: 73, SchemaAfter: 74, Backup: archive}
-			if tc.argo {
-				record.ArgoNamespace, record.ArgoRevision = "oberth-argo", 3
-			}
 			restore := func(context.Context, RollbackRestore) error {
 				*fixture.calls = append(*fixture.calls, "restore")
 				return nil

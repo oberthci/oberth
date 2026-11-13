@@ -22,7 +22,6 @@
     "container-persisted-workflow.json": "63361d9778c0c9ddf8fcddcdc56f16870c0327c7573f10533008a0db5b2808bb",
     "container-submitted.json": "092d21e3b6c5d8891902da6ab6d475391070a9d900d897f376965c1e0d3b5aed",
     "container.json": "7f5de29ad5d7b6b8dbac2c6146fad191a83685a6cd4f510fcb7ea399f01b9f3d",
-    "controller-profile.json": "7ca0f2aff6cf39e67aa5996672363a3a7a8401449a794f32d5cf375e7267a4c0",
     "generate_test.go.txt": "9ffbce02fddc8ad425b62546189da848b41f5f23b000010efc7b2790b4809350",
     "script-before-patch.json": "2c7b3f57f1489a7b487f4ea3707f4d83bc2ca92dc6cbe971b0185653820e1b7c",
     "script-persisted-workflow.json": "cbfe57a30eaae11efe5d02991fb57a08df662def9cdcd2979a7c3da5dbc470c1",

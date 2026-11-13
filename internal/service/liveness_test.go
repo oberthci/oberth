@@ -131,33 +131,6 @@ func TestExternalAdmissionAndWitnessWaitsDoNotFailLiveness(t *testing.T) {
 		t.Fatal("external wait did not stop")
 	}
 
-	jobs := &livenessAdmissionJobs{entered: make(chan struct{})}
-	scheduler.jobs = jobs
-	ctx, cancel = context.WithCancel(t.Context())
-	go func() {
-		done <- scheduler.awaitDispatchAdmission(withDispatchProgress(ctx, &scheduler.dispatchProgress))
-	}()
-	awaitLivenessSignal(t, jobs.entered)
-	if err := scheduler.dispatchProgress.CheckAt(time.Now().Add(24 * time.Hour)); err != nil {
-		t.Fatal("Kubernetes admission determined liveness", err)
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("admission wait did not stop")
-	}
-}
-
-type livenessAdmissionJobs struct {
-	recoveryJobs
-	entered chan struct{}
-}
-
-func (jobs *livenessAdmissionJobs) AwaitAdmission(ctx context.Context) error {
-	close(jobs.entered)
-	<-ctx.Done()
-	return ctx.Err()
 }
 
 func TestPromotionWitnessWaitDoesNotFailLiveness(t *testing.T) {
@@ -260,35 +233,6 @@ func TestPublicationLivenessExcludesGitButDetectsLocalFinalizationStall(t *testi
 	}
 	close(store.release)
 	awaitLivenessDone(t, done)
-}
-
-func TestLivenessDispatchPauseSurvivesOtherGoroutine(t *testing.T) {
-	fixture := newRecoveryFixture(t)
-	jobs := &livenessAdmissionJobs{entered: make(chan struct{})}
-	scheduler := fixture.scheduler(t, jobs)
-	scheduler.dispatchProgress.Beat()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	dispatchCtx := withDispatchProgress(ctx, &scheduler.dispatchProgress)
-	done := make(chan error, 1)
-	go func() { done <- scheduler.awaitDispatchAdmission(dispatchCtx) }()
-	awaitLivenessSignal(t, jobs.entered)
-	otherDone := make(chan struct{})
-	go func() {
-		defer close(otherDone)
-		suspendDispatch(context.WithoutCancel(dispatchCtx))()
-		beatDispatch(context.WithoutCancel(dispatchCtx))
-	}()
-	awaitLivenessSignal(t, otherDone)
-	if err := scheduler.dispatchProgress.CheckAt(time.Now().Add(24 * time.Hour)); err != nil {
-		t.Fatal("background promotion context cleared dispatch's controller verification wait", err)
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("admission did not stop")
-	}
 }
 
 type livenessRetryHook func(context.Context, model.Promotion)

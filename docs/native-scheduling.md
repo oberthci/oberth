@@ -112,24 +112,13 @@ private scratch resources, retry/hold behavior and hold-lifetime deadlines.
 
 ## Security waits before submission
 
-Two security checks can delay Workflow submission without doing resource
+The upstream policy check can delay Workflow submission without doing resource
 scheduling. `awaitWorkflowPolicy` (`internal/service/workflow_policy.go`) keeps a
 claimed run while refreshing the trusted upstream policy, for at most 30
 minutes. The run reports `waiting for upstream policy`; its scheduling message
 names the unavailable trusted policy, and publication is forbidden. Operators
 restore upstream connectivity/credentials and the trusted policy source; an
 expired wait fails with a policy-refresh deadline error and can be retried.
-
-`awaitAdmission` (`internal/service/scheduler.go`) and the controller profile
-retry (`internal/argojob/profile_retry.go`) wait without a deadline while the
-required immutable controller/profile proof is unverified. This can pause
-dispatch or a claimed run before Create. Operators see `controller_profile`
-state/reason/remedy and retry timing in status and the dashboard's existing
-"Controller verification required" banner with `dispatch_blocked`. Restore the exact Ready controller, profile
-ConfigMap, images and required read permissions named by that diagnostic.
-Existing execution observation and cleanup retain their authority. These waits
-protect policy and identity; neither examines CPU, memory or node capacity.
-Cancellation remains a lifecycle action, not a placement decision.
 
 ## Operators
 
@@ -233,7 +222,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   Credentialed leaves receive `VAULT_ADDR`, `OBERTH_VAULT_ROLE` and, when
   delivered, `VAULT_CACERT`; approved per-repository/per-step identities
   specialize the role. Approved release WIF adds
-  `GOOGLE_APPLICATION_CREDENTIALS` and `OBERTH_RELEASE_WIF`. The nonroot profile
+  `GOOGLE_APPLICATION_CREDENTIALS` and `OBERTH_RELEASE_WIF`. Selected nonroot leaves
   additionally sets `TMPDIR`, `GOTMPDIR`, `XDG_CACHE_HOME`, `HOME` and private
   scratch Go/cache paths. Environment affects program behavior and I/O,
   **not scheduler placement or declared resource quantities**.
@@ -241,7 +230,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   `runAsNonRoot: false` and RuntimeDefault seccomp. Main/script/container-set,
   authored init containers and sidecars get no privilege escalation, all
   capabilities dropped and a read-only root filesystem; conflicting template
-  security contexts are cleared. The verified nonroot profile instead uses
+  security contexts are cleared. Selected nonroot leaves use
   UID/GID 65534 and private scratch for selected leaves, including patched
   Argo init/wait containers and a fixed root initializer for fresh EmptyDirs.
   Oberth forces the pipeline, CI-secrets, release or approved per-step
@@ -252,7 +241,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   cause native admission/startup failure. Authenticated execution targets retain
   cluster, namespace and identity custody without a placement exception.
 - **Scratch and work volumes.** Oberth adds a bounded disk EmptyDir at `/tmp`
-  (8 GiB size limit) to ordinary containers; the nonroot profile uses its own
+  (8 GiB size limit) to ordinary containers; selected nonroot leaves use its own
   private `/tmp` EmptyDir and preparation mounts. If the author declares a
   `work` volumeClaimTemplate, Oberth adds its tools, fallback Go caches, Trivy
   cache and release-artifact subpath mounts at `/tmp/oberth-tools`,
@@ -400,7 +389,6 @@ No new label was added for this release.
 | `oberth.ci/fragments` | Workflow, when fragments used | Immutable fragment-resolution record |
 | `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator API-kind/action capability binding |
 | `oberth.ci/helper-storage` | Workflow | Versioned server-helper footprint binding |
-| `oberth.ci/verified-controller-profile` | Workflow, nonroot profile | Opaque verified controller identity/proof |
 | `oberth.ci/execution-placement` | Workflow, approved target | Approved execution authority digest; no node placement policy |
 | `oberth.ci/execution-target` | Custody-tracked target objects | Exact durable target binding digest |
 | `oberth.ci/release-wif-policy-sha256` | Workflow, WIF release | Public role/policy binding digest |

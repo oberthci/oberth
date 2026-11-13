@@ -48,9 +48,6 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := jobs.AwaitRunAdmission(ctx, request); err != nil {
-				t.Fatal(err)
-			}
 			if err := jobs.CreateWorkflow(ctx, request); err != nil {
 				t.Fatal(err)
 			}

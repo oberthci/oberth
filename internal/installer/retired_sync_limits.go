@@ -9,8 +9,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const retiredSyncLimitsName = "oberth-sync-limits"
@@ -32,15 +30,6 @@ func isRetiredSyncLimitsObject(object any, namespace string) bool {
 	}
 	meta, _ := entry["metadata"].(map[string]any)
 	return meta["name"] == retiredSyncLimitsName && (meta["namespace"] == namespace || meta["namespace"] == nil)
-}
-func isNonrootProfileObject(object any, namespace string) bool {
-	entry, ok := object.(map[string]any)
-	if !ok || entry["kind"] != "ConfigMap" {
-		return false
-	}
-	meta, _ := entry["metadata"].(map[string]any)
-	name, _ := meta["name"].(string)
-	return argoworkflow.ValidNonrootProfileConfigMap(name) && (meta["namespace"] == namespace || meta["namespace"] == nil)
 }
 
 // Reuse-values would otherwise render the retired object again. Filter this

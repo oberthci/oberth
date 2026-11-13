@@ -21,7 +21,6 @@ func TestRetiredProductionSurface(t *testing.T) {
 		"internal/argojob/controller.go":        {"publish"},
 		"internal/argojob/identitystore.go":     {"NewIdentityStore"},
 		"internal/argojob/live_logs.go":         {"consume"},
-		"internal/argojob/nonroot_terminal.go":  {"selectNonrootController"},
 
 		"internal/gitcache/cache.go":         {"TagTime"},
 		"internal/app/upstream_bootstrap.go": {"parseScannedHostKeys"},

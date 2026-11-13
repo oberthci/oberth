@@ -37,7 +37,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/podpriority"
 	"github.com/oberthci/oberth/internal/releaseverify"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const (
@@ -144,28 +143,17 @@ type Config struct {
 	// ArgoNamespace. It does not make pipelines execute any other way: Argo is
 	// the execution engine, so the install still binds Oberth to that
 	// namespace and still verifies a controller is really there.
-	SkipArgo              bool
-	OpenBaoNamespace      string
-	Namespace             string
-	RekorNamespace        string
-	ArgoNamespace         string
-	ChartVersion          string
-	OpenBaoChartVersion   string
-	RekorChartVersion     string
-	ArgoChartVersion      string
-	ArgoControllerProfile string
-	// ArgoValuesReviewed acknowledges stored Argo values outside the nonroot
-	// profile's allowlist: the SHA-256 of `helm get values argo-workflows -o
-	// json` as reviewed (--argo-values-reviewed).
-	ArgoValuesReviewed string
-	// ArgoParallelism and ArgoNamespaceParallelism set the managed Argo
-	// controller's workflow limits (controller.parallelism and
-	// controller.namespaceParallelism); nil keeps the release's value.
-	ArgoParallelism *int
-
-	// argoProfile is the nonroot controller profile the Argo phase rendered
-	// (#1517): the built-in config plus the effective controller limits.
-	argoProfile               *argoworkflow.NonrootProfile
+	SkipArgo            bool
+	OpenBaoNamespace    string
+	Namespace           string
+	RekorNamespace      string
+	ArgoNamespace       string
+	ChartVersion        string
+	OpenBaoChartVersion string
+	RekorChartVersion   string
+	ArgoChartVersion    string
+	// ArgoParallelism sets native controller.parallelism; nil preserves its value.
+	ArgoParallelism           *int
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
 	// CredentialedSecretPaths are exact secret paths for the shared
@@ -1115,7 +1103,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// reconciles produces a run that never starts and never fails.
 	quietArgoDeps := deps
 	quietArgoDeps.Output = io.Discard
-	argo, err := installArgoPinningProfile(ctx, &cfg, quietArgoDeps)
+	argo, err := InstallArgoWorkflows(ctx, cfg, quietArgoDeps)
 	if err != nil {
 		tw.WriteFooter()
 		return fmt.Errorf("install Argo Workflows: %w", err)

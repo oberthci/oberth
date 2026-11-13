@@ -2,12 +2,9 @@ package installer
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,20 +15,15 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
-
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 func TestSyncLimitsUpgradeOrphansKeptObjectAndPreservesOtherObjects(t *testing.T) {
 	const ns = "oberth-argo"
-	for _, profile := range []bool{false, true} {
+	for _, profile := range []bool{false} {
 		t.Run(map[bool]string{false: "stock", true: "nonroot"}[profile], func(t *testing.T) {
 			retired := map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": retiredSyncLimitsName, "namespace": ns}, "data": map[string]any{"heavy": "2"}}
 			unrelated := map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "operator-extra", "namespace": ns}, "data": map[string]any{"key": "value"}}
 			objects := []any{retired, unrelated}
-			if profile {
-				objects = append(nonrootProfileObjects(ns, baseNonrootProfile()), objects...)
-			}
 			stored := map[string]any{"extraObjects": objects}
 			raw, _ := json.Marshal(stored)
 			kube := fake.NewClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: retiredSyncLimitsName, Namespace: ns, UID: "original-cm", ResourceVersion: "1", Labels: map[string]string{"app.kubernetes.io/managed-by": "Helm", "operator.example/label": "kept"}, Annotations: map[string]string{"meta.helm.sh/release-name": "argo-workflows", "meta.helm.sh/release-namespace": ns, "operator.example/note": "kept"}}, Data: map[string]string{"heavy": "2", "kvm": "1"}, BinaryData: map[string][]byte{"opaque": {0, 1, 2}}})
@@ -58,31 +50,6 @@ func TestSyncLimitsUpgradeOrphansKeptObjectAndPreservesOtherObjects(t *testing.T
 						t.Fatal("second upgrade changed operator object")
 					}
 					var remaining []any
-					// Stock upgrades filter stored extraObjects; profile upgrades use their complete values file.
-					if profile {
-						i := slices.Index(args, "--values")
-						if i < 0 {
-							t.Fatal("profile missing")
-						}
-						body, err := os.ReadFile(args[i+1])
-						if err != nil {
-							t.Fatal(err)
-						}
-						var values map[string]any
-						if err = json.Unmarshal(body, &values); err != nil {
-							t.Fatal(err)
-						}
-						objects := values["extraObjects"].([]any)
-						remaining = objects
-						if len(objects) != 2 || !reflect.DeepEqual(objects[1], unrelated) || !isNonrootProfileObject(objects[0], ns) {
-							t.Fatal("profile or unrelated object lost", objects)
-						}
-						for _, arg := range args {
-							if strings.HasPrefix(arg, "extraObjects=") {
-								t.Fatal("stored list overrides newly rendered profile")
-							}
-						}
-					}
 					if !profile {
 						found := false
 						for _, arg := range args {
@@ -111,14 +78,7 @@ func TestSyncLimitsUpgradeOrphansKeptObjectAndPreservesOtherObjects(t *testing.T
 				return nil, nil
 			}}
 			cfg := Config{ArgoNamespace: ns}
-			if profile {
-				cfg.ArgoControllerProfile = argoworkflow.NonrootStaticProfile
-				cfg.ArgoValuesReviewed = fmt.Sprintf("sha256:%x", sha256.Sum256(raw))
-			}
 			for range 2 {
-				if profile {
-					cfg.ArgoValuesReviewed = fmt.Sprintf("sha256:%x", sha256.Sum256(raw))
-				}
 				cfg.Upgrade = true
 				if _, err := InstallArgoWorkflows(t.Context(), cfg, deps); err != nil {
 					t.Fatal(err)

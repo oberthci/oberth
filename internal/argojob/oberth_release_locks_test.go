@@ -7,7 +7,7 @@ import (
 )
 
 func TestOberthReleaseKeepsWorkflowAndPublicationLocks(t *testing.T) {
-	workflow, err := buildOberthPipeline(oberthConfig(), Request{
+	workflow, err := Build(oberthConfig(), Request{
 		RunID: "run-locks", Name: "oberth-release-locks", Repo: "oberth",
 		UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/tags/v0.22.0",
 		SHA: testSHA, Trigger: pipeline.TriggerRelease,

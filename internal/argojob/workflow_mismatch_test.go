@@ -9,14 +9,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestVerifiedWorkflowSubmissionUsesSemanticResources(t *testing.T) {
 	config := testConfig()
-	config.NonrootProfile = argoworkflow.NonrootStaticProfile
-	request := nonrootFixtureProof(testRequest(pipeline.TriggerCI, nonrootTestDocument))
+
+	request := testRequest(pipeline.TriggerCI, nonrootTestDocument)
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 	intended, err := Build(config, request)
 	if err != nil {

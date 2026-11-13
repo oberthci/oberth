@@ -2,14 +2,6 @@
 
 `oberth.ci/nonroot-templates: postgres-tests,browser-tests` is a static workflow
 annotation selecting named, top-level ordinary container/script templates.
-This source draft is disabled unless the server establishes the exact
-`nonroot-static-v1` controller profile. The normal installer option
-`--argo-controller-profile=nonroot-static-v1` prepares the pinned upstream
-chart1.0.24 with an immutable, content-addressed public configuration and fixed
-controller/executor image digests. The chart/server profile name is a request to
-verify support, never sufficient proof. Custom/reused settings outside the
-reviewed profile, a different chart, or `--skip-argo-workflows` are refused.
-No installation or supporting release has been performed by this source change.
 The server sets their fixed UID/GID 65534 and security policy. It is not a request
 for arbitrary user IDs, groups, capabilities, Pod patches or security contexts.
 The first implementation rejects credentialed workflows, template defaults and
@@ -27,43 +19,7 @@ above 128 KiB into a ConfigMap mounted in every init container. The 64 KiB
 margin accommodates fixed controller fields and the script argument while
 keeping preparation confined to EmptyDirs. Repository Pod metadata is already
 rejected by ordinary admission; workflow metadata is not substituted into this
-static mode. Workflow archiveLogs is rejected. Controller-forced archive logging
-is rejected by exact public configuration verification: Argo gives that setting
-priority over workflow/template false and can inject artifact configuration.
-
-
-Before audit, source seeding, Workflow creation and existing-run adoption, the
-server checks one Ready controller, fixed command/environment/image identity,
-and the one named immutable public ConfigMap through narrowly scoped GET.
-The required `config` key is mounted read-only only in the trusted controller at
-`/var/run/oberth-controller-profile`; no subpath, optional key, alternate source,
-extra/overlapping mount or sidecar is supported. The only other controller mount
-is the enumerated standard Kubernetes service-account projection (token with
-3607-second requested lifetime, root CA and namespace). This is a deliberately
-restricted supported profile, not generic compatibility with arbitrary token
-infrastructure; it introduces no Secret or new token permission.
-
-The required mount gates process startup. Authenticated Argo4.0.8 synchronously
-GETs and parses that same configuration in its controller constructor and exits
-on failure before starting background tasks. This causal dependency permits equal-second
-API/process timestamps; a later-created ConfigMap still rejects. This reasoning
-assumes trusted installation, immutable content-addressed names never deleted
-and reused, and trusted cluster clocks/infrastructure. Read-only verification
-cannot atomically freeze Kubernetes between calls or defend against a malicious
-administrator. An observed controller/config UID or resourceVersion change
-invalidates the request proof. The opaque proof binds the full request source,
-fragment bytes and identity before audit; normal SourceVolume assignment does
-not change that request identity. Recovery checks the actual persisted policy,
-volume/template spec and profile binding, not just matching commit annotations.
-
-There is currently no supporting released server. Oberth v0.13.42 accepts and
-ignores this annotation and still forces UID0. The minimum supported release
-must be the first authorized release containing the reviewed #303 fix (the next
-currently unused version, v0.13.43, is only a proposal). Do not activate consumer
-workflows before that release is deployed and the substrate is verified. Every
-initial fixture lane must fail before its tests unless both `id -u` and `id -g`
-equal 65534. Missing-runtime or skip-capable fixture code is not a substitute for
-this check, and a version label alone is not execution proof.
+static mode. Workflow-authored archive logging remains subject to admission.
 
 One fixed initializer uses the administrator-owned, digest-pinned source-seed
 image. It runs as UID 0 with dropALL, RuntimeDefault, read-only root and no
@@ -72,9 +28,8 @@ PVC, host path or token mount. It makes the short test scratch directory, Argo c
 executor scratch subpath 0 and optional script staging writable, then exits. It does
 not chown shared data or set fsGroup. Main and normal Argo init/wait then run as
 65534 with the same restrictions. Argo's existing executor token mounts stay
-confined to its init/wait; main remains tokenless. The fake-controller contract
-uses upstream's existing Secret-volume token fixture; this change neither
-creates sensitive Kubernetes Secret material nor changes token infrastructure.
+confined to its init/wait; main remains tokenless. Pinned-controller fixtures retain the captured upstream token shape; live token
+delivery uses Oberth's separate executor identity mechanism.
 Preparation can replay after partial initialization. An existing executor
 subdirectory must be a real directory owned by the initializer; symlinks,
 files and foreign ownership fail before chmod. The enclosing executor EmptyDir
@@ -118,7 +73,7 @@ directory. It compares the complete result with the observed submitted Pod and
 uses hostile and absent executor-context controls. Every security-context field
 is explicitly set or cleared, with a reflection guard for Kubernetes schema
 additions. Nested `$patch: replace` alone is unsafe for an absent original map:
-strategic merge can discard that map, which the exact-profile regression proves. Argo version, module sums and
+strategic merge can discard that map, which the pinned-controller regression proves. Argo version, module sums and
 fixture hashes are guarded: upgrades require fresh real-controller proof.
 
 The original local capture used the exact authenticated Argo 4.0.8 controller
@@ -137,124 +92,18 @@ UID65534 alone is insufficient. No SYS_ADMIN, privilege escalation, unconfined
 seccomp or `--no-sandbox` workaround is part of this capability. None of these
 source tests proves external-workload enforcement or deployed browser coverage.
 
-## Explicit profile transition on an existing installation
 
-`oberth upgrade --argo-controller-profile=nonroot-static-v1` is an opt-in
-transition of both existing managed releases. It also runs when the Oberth
-version is unchanged; omitting the flag preserves the normal same-version
-no-op. The pipeline namespace is read from the installed Oberth values. The
-command refuses conflicting namespace/profile overrides, absent or unsupported
-Argo releases, pending Helm operations and custom values outside the fixed
-profile. It does not install namespaces, reconcile OpenBao or change uplinks.
+The operator owns Argo controller configuration. Oberth no longer attests its
+image, process, Pod history or ConfigMap, and dispatch does not wait for a
+controller-profile proof. Selected nonroot leaves retain the fixed preparation
+and security patch described above. Containers injected by operator controller
+`templateDefaults` or `workflowDefaults`, including extra sidecars and init
+containers, are operator-owned and are not hardened by this patch. Repository
+admission does not inspect those controller defaults.
 
-Before mutation, review `--dry-run` and the complete rendered diff against the
-current releases, and drain native execution. The command preserves reused
-values, verifies the exact upstream Argo chart1.0.24 archive digest, and applies
-only the built-in public profile overlay to the existing Argo release. It waits
-for the same strict live controller/configuration proof used by submission
-admission before upgrading Oberth and setting `argo.controllerProfile`.
-Unrelated identities stay in reused values. Final success requires the controller proof and Oberth profile value
-and serving flag to agree after rollout.
-
-This is a two-release forward transition, not an atomic transaction. Failure
-after the Argo update leaves the stronger profile installed and reports an
-incomplete transition. Do not roll back to an unverified controller. A fresh
-reviewed invocation accepts the same exact profile and can repair an existing
-failed Helm revision. A changed revision or values snapshot before apply is a
-refusal; the read checks do not lock out another administrator. Installation does not imply a successful pipeline run; gates remain part of
-the repository Workflow.
-
-The transition checks the Argo revision, status, chart and unchanged raw reused
-values both before chart resolution and immediately before the upgrade. These
-observations are not an atomic cross-release lock. Final server verification
-waits for exactly one ready Pod (including waiting out terminating old Pods),
-binds its ReplicaSet and Deployment UID/template plus image and arguments,
-executes the version check by that Pod name, and rechecks its UID. Live rollout
-evidence additionally checks the actual platform image digest. Partial Argo or
-Oberth failure is never reported as success; recovery is a fresh supported
-forward transition, not automatic rollback.
-
-Upgrade `--set` flags accept one canonical dotted key and scalar value each.
-Repeat flags instead of comma-separated assignments; a literal value comma
-can be escaped as `\,`. List syntax and escaped keys are rejected before
-mutation. For structured values use an explicitly reviewed `--values` file;
-protected image/profile paths remain refused there as well.
-
-Retained Failed/Succeeded controller Pods do not represent live controllers
-when their complete current termination status proves otherwise. Selection
-requires the fixed single-controller shape, matching runtime IDs, false
-readiness, ordered start/finish times and coherent prior restart history.
-Names and UIDs must be unique, and timestamps cannot exceed the selection's
-single captured observation time.
-Unknown or synthetic current termination, missing statuses, terminating Pods,
-and multiple active candidates remain refusals. The selected Running Pod still
-passes the full existing profile verification. This relies on trusted API and
-kubelet status and does not authorize deleting historical Pods to unblock an
-upgrade. If an older CLI has stopped after applying Argo because it counted
-terminal history, preserve both releases and use a freshly reviewed supported
-forward transition with the corrected signed CLI; do not roll back or repeat
-the unchanged command.
-
-### Controller profile API availability
-
-A failed profile Pod/ConfigMap read pauses new admission while the server retries;
-it does not stop the scheduler or cancel existing runs. Each verification attempt
-has a five-second deadline. Retry delays grow from 250 ms to a ten-second cap and
-stop on caller cancellation. Every submission still obtains a fresh proof of the
-exact controller/profile identity; a read failure never permits an unverified
-submission. Invalid profile contents remain refused.
-
-Unscoped status includes `controller_profile.state` (`unverified`, `blocked`, or
-`verified`), a bounded error class, the public object identity, `retry_at`, and the
-process-local cumulative `read_failures_total` counter. Raw Kubernetes error bodies
-are omitted. Verification recovery clears the blocked state automatically.
-
-Server Kubernetes clients default to QPS 50 and burst 100, with headroom for eight
-concurrent jobs. Configure these with chart values
-`kubernetesClient.qps` / `kubernetesClient.burst`, or server flags
-`--kubernetes-client-qps` / `--kubernetes-client-burst`. QPS must be finite and
-positive; burst must be a positive integer. For a fractional QPS Helm override,
-use a values file or `--set-json` so the value remains numeric. The same settings
-apply to the Kubernetes and Argo Workflow clients.
-
-An invalid controller profile also pauses all new admission, including ordinary
-workflows, until verification succeeds. `controller_profile.reason` identifies
-the fixed validation predicate that failed; API response bodies are never
-reported. The server logs the reason on change and at most once every 30 seconds
-while unchanged. Existing work retains cleanup and publication authority.
-
-## Evicted controller history and admission visibility
-
-An API `Failed` / `Evicted` or `Failed` / `NodeShutdown` controller Pod can retain missing or synthetic kubelet
-termination data after a Ready replacement takes over. It no longer blocks
-admission solely for that incomplete exit history when replacement is positively
-verified. The live controller must still pass the exact pinned image, executor,
-immutable configuration, mount, watch-scope and identity checks. Its controlling
-ReplicaSet must match by name/UID, have observed its current generation, select
-the Pod and have exactly one desired, current and Ready replica. Older eviction
-records must bind to that ReplicaSet, or to a fully scaled-zero predecessor of
-the same Deployment. Explicit running/Ready historical state, wrong ownership,
-later timestamps, incomplete Pod listings and unobservable ReplicaSets stay
-blocked. Ordinary non-eviction history keeps the existing strict checks.
-
-Graceful node shutdown uses `Failed/Terminated`, rather than the admission
-rejection reason `NodeShutdown`. Its exact kubelet message must be
-`Pod was terminated in response to imminent node shutdown.` to enter the same
-replacement-proof path; generic Terminated history remains fail-closed.
-Kubernetes source: https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubelet/nodeshutdown/nodeshutdown_manager.go
-
-`system_status.controller_profile` now reports `dispatch_blocked`, a bounded
-reason and an operator remedy. The dashboard shows the verification wait in Status and above
-the runs list; aggregate status refreshes in the background at most every five
-minutes, without making log/run rendering wait for those reads. A banner can
-therefore lag by up to five minutes; visiting Status fetches a fresh observation. Restoring the
-supported controller profile/readiness clears the verification wait on the existing retry
-loop. Running work keeps its observation and cleanup authority.
-
-The chart adds a separate, namespaced `-argo-controller-history` Role and binding
-with only `get` on `apps/replicasets` when the nonroot profile is enabled. The
-established `-argo` Role remains unchanged for server-side-apply compatibility.
-Use the matching chart with the image: an old chart lacks this read permission,
-so replacement verification fails closed until that binding is installed. The
-status remedy directs operators to ReplicaSet readiness/profile configuration
-and server read permissions; no Pod deletion is performed by this change.
+The patch depends on the Argo 4.0.8 generated Pod names and paths. A different
+Argo version that changes those shapes fails closed at Pod creation when the
+resulting patch produces an invalid Pod; dispatch no longer verifies the version
+in advance. This is a Pod-creation refusal, not a guarantee that every other
+controller version is detected or that operator-added containers are hardened.
+Qualify controller changes against the resulting Pod shapes before deploying them.

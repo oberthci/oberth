@@ -86,9 +86,6 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 					// altered spec retains its cleanup classification and grant.
 					return nil, false, err
 				}
-				if _, err := controller.refreshNonroot(retryCtx, request); err != nil {
-					return nil, false, fmt.Errorf("%w: %w", &workflowCreateFailure{name: intended.Name, stage: "identity", attempts: attempts, ambiguous: ambiguous}, err)
-				}
 				return existing, false, nil
 			}
 			if !apierrors.IsNotFound(err) {
@@ -110,11 +107,6 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 				}
 				backedOff = true
 				continue // Re-read after backoff: the old POST may have committed.
-			}
-		}
-		if attempts > 0 {
-			if _, err := controller.refreshNonroot(retryCtx, request); err != nil {
-				return nil, false, fmt.Errorf("%w: %w", &workflowCreateFailure{name: intended.Name, stage: "identity", attempts: attempts, ambiguous: ambiguous}, err)
 			}
 		}
 		if err := retryCtx.Err(); err != nil {

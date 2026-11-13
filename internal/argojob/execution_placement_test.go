@@ -35,7 +35,7 @@ import (
 func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	t.Helper()
 	config := testConfig()
-	config.NonrootProfile = argoworkflow.NonrootStaticProfile
+
 	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	request.UpstreamName = "codeberg"
 	request.RepositoryID = 1
@@ -77,8 +77,7 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	d.NodeVersion = "v1.35.7-fixture"
 	d.ControlPlaneVersion = "v1.35.7-fixture"
 	d.EndpointIdentity = placementHash([]any{"https://api.example.org", "", []byte("fixture-ca")})
-	pod, controllerCM := nonrootVerifierObjects()
-	d.ControllerConfigUID = string(controllerCM.UID)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "controller-fixture", Namespace: config.Namespace, UID: "pod-uid", OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "controller", UID: "replicaset-uid", Controller: ptr.To(true)}}}}
 	d.ControllerPod = pod.Name
 	d.ControllerUID = string(pod.UID)
 	d.ReplicaSet = "controller"
@@ -110,7 +109,7 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	config.ExecutionPlacement = p
 	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: d.ReplicaSet, Namespace: d.Namespace, UID: types.UID(d.ReplicaSetUID), OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: d.Deployment, UID: types.UID(d.DeploymentUID), Controller: ptr.To(true)}}}}
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: d.Deployment, Namespace: d.Namespace, UID: types.UID(d.DeploymentUID)}, Spec: appsv1.DeploymentSpec{Replicas: ptr.To(int32(1))}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}}
-	return config, request, []runtime.Object{pod, controllerCM, rs, deployment, cm, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: types.UID(d.ClusterAnchorUID)}}}
+	return config, request, []runtime.Object{pod, rs, deployment, cm, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: types.UID(d.ClusterAnchorUID)}}}
 }
 
 func TestExecutionPlacementSelectionRefusesBeforeSeed(t *testing.T) {

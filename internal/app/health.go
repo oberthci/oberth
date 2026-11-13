@@ -26,8 +26,6 @@ type Health struct {
 	// PipelineNetworkPolicyEnabled is the deployment configuration, not a live
 	// enforcement measurement. Nil means configuration is unavailable.
 	PipelineNetworkPolicyEnabled *bool
-	ControllerProfile            func() *model.ControllerProfileStatus
-	ExecutionTargetProfiles      func() map[string]*model.ControllerProfileStatus
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
 	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
@@ -137,24 +135,22 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
-	ExecutionTargetRecovery *model.ExecutionTargetRecoveryStatus      `json:"execution_target_recovery,omitempty"`
-	DatabaseRetries         uint64                                    `json:"database_retries_total,omitempty"`
-	ControllerProfile       *model.ControllerProfileStatus            `json:"controller_profile,omitempty"`
-	ExecutionTargetProfiles map[string]*model.ControllerProfileStatus `json:"execution_target_profiles,omitempty"`
-	Storage                 any                                       `json:"storage,omitempty"`
-	Database                string                                    `json:"database"`
-	SchemaVersion           int                                       `json:"schema_version,omitempty"`
-	Upstreams               int                                       `json:"upstreams"`
-	Repositories            int                                       `json:"repositories"`
-	VCS                     string                                    `json:"vcs"`
-	Cluster                 string                                    `json:"cluster"`
-	ClusterCheckedAt        time.Time                                 `json:"cluster_checked_at,omitzero"`
-	ClusterDetail           string                                    `json:"cluster_detail"`
-	Audit                   string                                    `json:"audit"`
-	AuditMode               string                                    `json:"audit_mode,omitempty"`
-	Version                 string                                    `json:"version,omitempty"`
-	UpstreamInfo            []UpstreamStatus                          `json:"upstream_info,omitempty"`
-	SSHIdentity             string                                    `json:"ssh_identity,omitempty"`
+	ExecutionTargetRecovery *model.ExecutionTargetRecoveryStatus `json:"execution_target_recovery,omitempty"`
+	DatabaseRetries         uint64                               `json:"database_retries_total,omitempty"`
+	Storage                 any                                  `json:"storage,omitempty"`
+	Database                string                               `json:"database"`
+	SchemaVersion           int                                  `json:"schema_version,omitempty"`
+	Upstreams               int                                  `json:"upstreams"`
+	Repositories            int                                  `json:"repositories"`
+	VCS                     string                               `json:"vcs"`
+	Cluster                 string                               `json:"cluster"`
+	ClusterCheckedAt        time.Time                            `json:"cluster_checked_at,omitzero"`
+	ClusterDetail           string                               `json:"cluster_detail"`
+	Audit                   string                               `json:"audit"`
+	AuditMode               string                               `json:"audit_mode,omitempty"`
+	Version                 string                               `json:"version,omitempty"`
+	UpstreamInfo            []UpstreamStatus                     `json:"upstream_info,omitempty"`
+	SSHIdentity             string                               `json:"ssh_identity,omitempty"`
 	// SSHHostKey and SSHHostKeyFingerprint describe the server's own SSH
 	// endpoint (git push/clone), not an upstream identity.
 	SSHHostKey            string              `json:"ssh_host_key,omitempty"`
@@ -268,12 +264,6 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	status.SSHHostKey, status.SSHHostKeyFingerprint = health.hostKey()
 	if health.DatabaseRetries != nil {
 		status.DatabaseRetries = health.DatabaseRetries()
-	}
-	if health.ControllerProfile != nil {
-		status.ControllerProfile = health.ControllerProfile()
-	}
-	if health.ExecutionTargetProfiles != nil {
-		status.ExecutionTargetProfiles = health.ExecutionTargetProfiles()
 	}
 	if health.Storage != nil {
 		if storage, err := health.Storage(ctx); err == nil {

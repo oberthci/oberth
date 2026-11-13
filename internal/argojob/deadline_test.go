@@ -25,7 +25,7 @@ func TestWorkflowDeadlineSubmittedAndRetryPreservesClock(t *testing.T) {
 			config := seedTestConfig()
 			kube := fake.NewClientset()
 			runningSeedPods(kube)
-			workflows := &nonrootWorkflowClient{}
+			workflows := &persistedWorkflowClient{}
 			controller, err := NewController(workflows, kube, config)
 			if err != nil {
 				t.Fatal(err)

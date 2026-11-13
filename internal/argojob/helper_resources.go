@@ -25,8 +25,7 @@ func executorControlResources() corev1.ResourceRequirements {
 const helperStorageAnnotation = "oberth.ci/helper-storage"
 const legacyHelperStoragePolicy = "argo-256Mi-512Mi-v1"
 
-// v2 applies the same budgets to verified named-profile producer helpers too.
-// The controller profile and its proof remain unchanged. Every helper carries
+// v2 applies the same budgets to nonroot producer helpers too. Every helper carries
 // the 512Mi limit, so a step without its own limit gets a 512Mi Pod total.
 const cappedHelperStoragePolicy = "argo-256Mi-512Mi-v2"
 
@@ -70,15 +69,6 @@ func (request Request) helperStoragePolicy() string {
 		return stepLimitHelperStoragePolicy
 	}
 	return helperStoragePolicy
-}
-
-// Named-profile producer helpers carry budgets since v2.
-func profileHelperBudgets(workflow *wfv1.Workflow) bool {
-	switch workflow.Annotations[helperStorageAnnotation] {
-	case cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy:
-		return true
-	}
-	return false
 }
 
 func executorResourcesWithStorage(enabled bool) corev1.ResourceRequirements {

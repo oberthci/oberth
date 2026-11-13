@@ -37,8 +37,7 @@ go build -o ./oberth-migrate-argo-role ./hack/migrate-argo-role
 
 The dry run asks the API server to validate the exact patch with `dryRun=All`;
 it does not persist it. After checking that result and the target, run the same
-command without `--dry-run`. For the nonroot profile add
-`--controller-profile=nonroot-static-v1`. If configured, supply the existing
+command without `--dry-run`. If configured, supply the existing
 `argo.credentialedServiceAccount` using `--credentialed-service-account` and
 the chart's fullname override using `--role`. `--kubeconfig` is optional;
 `--context` is mandatory. The total request deadline defaults to 30 seconds and

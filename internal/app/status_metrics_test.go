@@ -23,8 +23,7 @@ func (metricsHealthStore) AdminTokenExpiry(context.Context) (*model.AdminTokenEx
 
 func TestWriteStatusMetricsExportsOperatorGauges(t *testing.T) {
 	health := Health{
-		Store:             metricsHealthStore{},
-		ControllerProfile: func() *model.ControllerProfileStatus { return &model.ControllerProfileStatus{DispatchBlocked: true} },
+		Store: metricsHealthStore{},
 		Storage: func(context.Context) (any, error) {
 			return map[string]any{"database_bytes": 1 << 20, "free_bytes": 5000, "below_floor": false}, nil
 		},
@@ -35,7 +34,6 @@ func TestWriteStatusMetricsExportsOperatorGauges(t *testing.T) {
 	var out strings.Builder
 	health.WriteStatusMetrics(t.Context(), &out)
 	for _, want := range []string{
-		"oberth_controller_verification_blocked 1\n",
 		"oberth_database_bytes 1048576\n",
 		"oberth_data_free_bytes 5000\n",
 		fmt.Sprintf("oberth_audit_anchor_timestamp_seconds %d\n", time.Date(2026, 11, 10, 4, 0, 0, 0, time.UTC).Unix()),

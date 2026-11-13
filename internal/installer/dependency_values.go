@@ -40,9 +40,6 @@ func dependencySchedulingValues(ctx context.Context, deps Deps, release, namespa
 			changed = deleteDependencyValue(values, item.path) || changed
 		}
 	}
-	if component == "controller" {
-		changed = deleteDependencyValue(values, []string{component, "namespaceParallelism"}) || changed
-	}
 	if !changed {
 		return "", false, noop, nil
 	}

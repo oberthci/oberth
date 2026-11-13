@@ -113,7 +113,7 @@ func TestOberthOpenBaoUsesVerifiedGoCachesWithoutWritableTools(t *testing.T) {
 			if persistent {
 				config.CICacheRoot = "/var/lib/oberth-cache/ci"
 			}
-			workflow, err := buildOberthPipeline(config, Request{
+			workflow, err := Build(config, Request{
 				RunID: "openbao-cache", Name: "openbao-cache", Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 				Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml"), ApprovedSecrets: map[string]bool{},
 				SourceVolume: SourceVolume{ClaimName: "oberth-source-run", SubPath: "run/src"},

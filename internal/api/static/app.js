@@ -721,7 +721,6 @@ async function renderRuns(seq) {
   replaceApp(`
   <section class="screen">
     <h1 class="sr-only">Runs</h1>
-    ${controllerVerificationBanner(state.status?.controller_profile)}
     <div class="runs-layout">
         <div class="toolbar runs-toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
@@ -1603,16 +1602,6 @@ function svcCard(name, value, sub, mood) {
   const cls = mood || (value === "ready" ? "ok" : "bad");
   return `<div class="svc ${cls}"><div class="svc-name"><span class="led ${cls === "ok" ? "ok" : cls === "warn" ? "" : "bad"}"></span>${esc(name)}</div><div class="svc-val">${esc(value)}</div>${sub ? `<div class="svc-sub">${sub}</div>` : ""}</div>`;
 }
-function controllerProfileStatusCard(profile) {
- if (!profile) return "";
- const paused = profile.dispatch_blocked ?? profile.state !== "verified";
- const detail = [profile.reason || (paused ? "Controller profile is unverified" : "Controller profile verified"), profile.remedy || ""].filter(Boolean).join(" · ");
- return svcCard("controller verification", paused ? "controller verification required" : "controller verified", esc(detail), paused ? "warn" : "ok");
-}
-function controllerVerificationBanner(profile) {
- if (!profile || !(profile.dispatch_blocked ?? profile.state !== "verified")) return "";
- return `<div role="status" class="svc warn"><strong>Controller verification required</strong><div>${esc(profile.reason || "Controller profile is unverified")}</div><div>${esc(profile.remedy || "Check controller profile and ReplicaSet readiness in Status.")}</div></div>`;
-}
 function uplinkExpiryWarnings(data) {
   if (!data) return "";
   if (data.unavailable) return svcCard("uplink token expiry", "unavailable", "Could not check tokens without an expiry.", "warn");
@@ -1641,7 +1630,6 @@ async function renderStatus(seq) {
       ${svcCard("audit anchor", s.audit || "unavailable", chain && chain.detail ? esc(chain.detail) : s.audit_mode === "local" ? "local hash chain — external anchoring off" : "")}
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
-      ${controllerProfileStatusCard(s.controller_profile)}
       ${s.execution_target_recovery ? svcCard("execution target recovery", String(s.execution_target_recovery.quarantined_bindings) + " quarantined bindings", esc(s.execution_target_recovery.reason + " " + s.execution_target_recovery.remedy), "warn") : ""}
     </div>
     ${uplinkExpiryWarnings(uplinks)}

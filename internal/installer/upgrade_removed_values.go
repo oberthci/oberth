@@ -19,6 +19,8 @@ var removedChartValues = []string{
 	"argo.ciSecretsServiceAccount",
 	"argo.ciServiceAccount",
 	"argo.containerDiskPrefixes",
+	"argo.controllerProfile",
+	"argo.controllerProfileConfigMap",
 	"argo.enabled",
 	"argo.defaultWorkflowTimeout",
 	"argo.repoWorkflowTimeouts",

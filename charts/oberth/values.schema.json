@@ -856,18 +856,6 @@
             }
           ]
         },
-        "controllerProfile": {
-          "type": "string",
-          "enum": [
-            "",
-            "nonroot-static-v1"
-          ]
-        },
-        "controllerProfileConfigMap": {
-          "type": "string",
-          "pattern": "^(oberth-argo-nr-[0-9a-f]{48})?$",
-          "description": "Nonroot controller profile ConfigMap; empty is the built-in profile without controller limits."
-        },
         "ciSecrets": {
           "type": [
             "object",

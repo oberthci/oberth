@@ -79,14 +79,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 		}
 		volumes, _ := patch["volumes"].([]any)
 		patch["volumes"] = append(volumes, map[string]any{"name": executorTokenVolume, "secret": nil, "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "1Mi"}})
-		// Only historical policies preserve the old empty named-profile budgets.
-		// New server-owned v2/v3 patches retain the verified profile and all wiring.
-		pinnedProfile := workflow.Annotations[nonrootProfileAnnotation] != "" && !profileHelperBudgets(workflow)
-		controlResources := corev1.ResourceRequirements{}
-		if !pinnedProfile {
-			controlResources = helperResources(workflow, t, storage)
-		}
-		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: controlResources, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
+		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: helperResources(workflow, t, storage), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
 		initializers, _ := patch["initContainers"].([]any)
 		if len(initializers) == 0 {
 			initializers = []any{map[string]any{"name": "init"}}
@@ -99,7 +92,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 				if name, ok := value["name"].(string); ok {
 					if name == "init" {
 						setExecutorEnvironment(value)
-						if _, exists := value["resources"]; !pinnedProfile && !exists {
+						if _, exists := value["resources"]; !exists {
 							value["resources"] = helperResources(workflow, t, storage)
 						}
 						merged = append(merged, waiter)
@@ -118,41 +111,38 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 		// Match Argo: resource/data executors normally run only main. A
 		// resource template gains wait only when it archives logs.
 		hasWait := (t.Resource == nil && t.Data == nil) || (t.Resource != nil && t.SaveLogsAsArtifact())
-		if !pinnedProfile {
-			containers, _ := patch["containers"].([]any)
-			foundWait, foundMain := false, false
-			for _, item := range containers {
-				value, ok := item.(map[string]any)
-				if !ok {
+		containers, _ := patch["containers"].([]any)
+		foundWait, foundMain := false, false
+		for _, item := range containers {
+			value, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch value["name"] {
+			case "wait":
+				foundWait = true
+			case "main":
+				if t.Resource == nil && t.Data == nil {
 					continue
 				}
-				switch value["name"] {
-				case "wait":
-					foundWait = true
-				case "main":
-					if t.Resource == nil && t.Data == nil {
-						continue
-					}
-					foundMain = true
-				default:
-					continue
-				}
-				// Existing server-authored guards keep their resources and commands.
-				if _, exists := value["resources"]; !exists {
-					value["resources"] = helperResources(workflow, t, storage)
-				}
+				foundMain = true
+			default:
+				continue
 			}
-			if hasWait && !foundWait {
-				containers = append(containers, map[string]any{"name": "wait", "resources": helperResources(workflow, t, storage)})
+			// Existing server-authored guards keep their resources and commands.
+			if _, exists := value["resources"]; !exists {
+				value["resources"] = helperResources(workflow, t, storage)
 			}
-			if (t.Resource != nil || t.Data != nil) && !foundMain {
-				containers = append(containers, map[string]any{"name": "main", "resources": helperResources(workflow, t, storage)})
-			}
-			patch["containers"] = containers
 		}
+		if hasWait && !foundWait {
+			containers = append(containers, map[string]any{"name": "wait", "resources": helperResources(workflow, t, storage)})
+		}
+		if (t.Resource != nil || t.Data != nil) && !foundMain {
+			containers = append(containers, map[string]any{"name": "main", "resources": helperResources(workflow, t, storage)})
+		}
+		patch["containers"] = containers
 		// Every Argo executor container that mounts the identity finds it
 		// through the kubeconfig; the in-cluster default token path is empty.
-		containers, _ := patch["containers"].([]any)
 		executors := []string{}
 		if hasWait {
 			executors = append(executors, "wait")
@@ -427,7 +417,7 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 			if mount.Name != executorTokenVolume || container.Name == executorTokenWaiter || container.Name == "init" || container.Name == "wait" {
 				continue
 			}
-			if resourcePod && container.Name == "main" && container.Image == argoworkflow.NonrootExecutorImage {
+			if resourcePod && container.Name == "main" && container.Image == argoworkflow.ExecutorImage {
 				continue
 			}
 			return errors.New("pipeline container can access executor identity")

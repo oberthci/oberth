@@ -50,7 +50,7 @@ func TestDependencyUpgradeDropsManagedSchedulingAndKeepsOperatorValues(t *testin
 			if !reflect.DeepEqual(component["nodeSelector"], map[string]any{"pool": "operator"}) || got["operatorMarker"] != json.Number("9007199254740993") {
 				t.Fatal("operator configuration changed", got)
 			}
-			if test.component == "controller" && component["parallelism"] != json.Number("2") {
+			if test.component == "controller" && (component["parallelism"] != json.Number("2") || component["namespaceParallelism"] != json.Number("4")) {
 				t.Fatal("global cap lost", got)
 			}
 		})

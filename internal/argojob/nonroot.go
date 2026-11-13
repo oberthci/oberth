@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -33,17 +32,11 @@ const (
 // This server-only patch hardens Argo's generated init/wait as well as main.
 // Only a fixed initializer receives UID0, with no token, source, PVC or host
 // mount. It prepares fresh per-Pod EmptyDirs, never shared storage ownership.
-func applyNonrootLeaves(workflow *wfv1.Workflow, config Config, request Request) error {
+func applyNonrootLeaves(workflow *wfv1.Workflow, config Config) error {
 	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)
 	if err != nil || len(names) == 0 {
 		return err
 	}
-	proof := request.nonrootProof
-	if config.NonrootProfile != argoworkflow.NonrootStaticProfile || proof == nil ||
-		proof.namespace != config.Namespace || proof.requestID != nonrootRequestIdentity(request) || time.Since(proof.verifiedAt) < 0 || time.Since(proof.verifiedAt) > 30*time.Second {
-		return fmt.Errorf("argojob: nonroot controller support has not been established; selected leaves are disabled")
-	}
-	workflow.Annotations[nonrootProfileAnnotation] = proof.binding()
 	workflow.Spec.Volumes = append(workflow.Spec.Volumes, corev1.Volume{
 		Name:         nonrootTmpVolume,
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: ptr.To(resource.MustParse("8Gi"))}},
@@ -189,8 +182,8 @@ func nonrootPodPatch(tmpl *wfv1.Template, config Config) ([]byte, error) {
 	return encoded, nil
 }
 
-// executorScratchLimit is shared by generation and Pod attestation.
-// Config.Validate runs before either path consumes an administrator quantity.
+// executorScratchLimit bounds the generated executor scratch EmptyDir.
+// Config.Validate checks an administrator quantity before generation.
 func (config Config) executorScratchLimit() *resource.Quantity {
 	if config.ExecutorScratchSizeLimit == "" {
 		return ptr.To(resource.MustParse("1Gi"))
