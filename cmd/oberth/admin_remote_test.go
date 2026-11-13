@@ -40,7 +40,7 @@ func TestAdminRemoteCommands(t *testing.T) {
 			}
 			called.Store(request.Params.Name)
 			if request.Params.Name == "audit_list" {
-				payload := map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(request.ID), "result": map[string]any{"isError": false, "content": []any{map[string]any{"type": "text", "text": `{"head_id":1,"entries":[{"id":1,"verified":true,"sha256":"` + strings.Repeat("a", 64) + `"}]}`}}}}
+				payload := map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"isError": false, "content": []any{map[string]any{"type": "text", "text": `{"head_id":1,"entries":[{"id":1,"verified":true,"sha256":"` + strings.Repeat("a", 64) + `"}]}`}}}}
 				_ = json.NewEncoder(w).Encode(payload)
 				return
 			}

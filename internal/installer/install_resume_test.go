@@ -153,13 +153,16 @@ func TestInstallJSONOnboardingAndResume(t *testing.T) {
 			}
 		})
 	}
-	for _, change := range []string{"none", "values", "manifest", "force"} {
+	for _, change := range []string{"none", "values", "manifest", "force", "resume-upgrade"} {
 		t.Run("HelmResume/"+change, func(t *testing.T) {
 			chart := t.TempDir()
 			if err := os.WriteFile(filepath.Join(chart, "Chart.yaml"), []byte("apiVersion: v2\nname: oberth\nversion: 0.22.6\nappVersion: 0.22.6\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			cfg := Config{Namespace: DefaultNamespace, ChartPath: chart, ChartVersion: "0.22.6", ResumeSecretsFile: "/private/recovery", ImageRef: fakeChartImageRef, Upgrade: change == "force"}
+			cfg := Config{Namespace: DefaultNamespace, ChartPath: chart, ChartVersion: "0.22.6", ResumeSecretsFile: "/private/recovery", ImageRef: fakeChartImageRef, Upgrade: change == "force" || change == "resume-upgrade"}
+			if change == "force" {
+				cfg.ResumeSecretsFile = ""
+			}
 			applies := 0
 			previews := 0
 			deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -193,7 +196,7 @@ func TestInstallJSONOnboardingAndResume(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if change == "none" {
+			if change == "none" || change == "resume-upgrade" {
 				if applies != 0 || previews != 1 || !result.AlreadyInstalled {
 					t.Fatal("unchanged resume wrote a revision", applies, previews, result)
 				}

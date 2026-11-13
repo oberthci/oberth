@@ -11,11 +11,11 @@ import (
 // A resumed install observes the complete rendered release before deciding
 // whether Helm needs another revision. Values alone miss local chart edits.
 func resumedOberthUnchanged(ctx context.Context, cfg Config, deps Deps, release helmRelease, openbao OpenBaoResult, rekor RekorResult) (bool, error) {
-	if cfg.ResumeSecretsFile == "" || cfg.Upgrade || release.Status != "deployed" {
+	if cfg.ResumeSecretsFile == "" || release.Status != "deployed" {
 		return false, nil
 	}
 	installed := canonicalChartVersion(chartVersionFromRelease(release.Chart, "oberth"))
-	if cfg.ChartPath == "" && (installed == "" || installed != canonicalChartVersion(cfg.ChartVersion)) {
+	if target := canonicalChartVersion(cfg.ChartVersion); (cfg.ChartPath == "" && (installed == "" || target == "")) || (installed != "" && target != "" && installed != target) {
 		return false, nil
 	}
 	args := append(OberthHelmArgs(cfg, openbao, rekor), "--dry-run=server", "--no-hooks", "--output=json")
@@ -71,14 +71,33 @@ func installManualSteps(cfg Config, result InstallResult, installErr error) []st
 	} else if cfg.ForgeURL == "" {
 		steps = append(steps, "oberth upstream add --yes <upstream> ssh://git@<host>/<organization>")
 	}
-	target := []string{"install", "--context", cfg.ContextName, "--namespace", cfg.Namespace}
+	selected := cfg.ContextName
+	if selected == "" {
+		selected = "<context>"
+	}
+	namespace := cfg.Namespace
+	if namespace == "" {
+		namespace = DefaultNamespace
+	}
+	target := []string{"install", "--context", selected, "--namespace", namespace}
+	if cfg.OpenBaoNamespace != "" {
+		target = append(target, "--openbao-namespace", cfg.OpenBaoNamespace)
+	}
+	if cfg.ArgoNamespace != "" {
+		target = append(target, "--argo-namespace", cfg.ArgoNamespace)
+	}
 	if installErr != nil && !errors.Is(installErr, ErrOnboardingPartial) {
 		resume := append([]string{}, target...)
 		saved := cfg.ResumeSecretsFile
 		if cfg.SecretsFile != "" {
 			saved = cfg.SecretsFile
 		}
-		if saved != "" {
+		if cfg.InstallSecretStore {
+			resume = append(resume, "--install-secretstore")
+		} else if cfg.Upgrade {
+			resume = append(resume, "--upgrade")
+		}
+		if saved != "" && (cfg.InstallSecretStore || cfg.Upgrade) {
 			resume = append(resume, "--resume-secrets-file", saved)
 		}
 		if cfg.ForgeURL != "" {

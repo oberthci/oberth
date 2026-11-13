@@ -85,6 +85,7 @@ attempt has a durable cursor, preserving the script's FAIL line for per-step log
 A resume with `--resume-secrets-file` compares Helm's rendered manifest and
 merged effective values with the deployed Oberth release. When both match, it
 continues onboarding without creating a Helm revision. A values change, local
-chart change or chart version change still applies. `--upgrade` explicitly
-requests reconciliation. An existing authenticated admin is reused during
+chart change or chart version change still applies. A resume keeps this
+no-op check even when `--upgrade` is present; a separate install with
+`--upgrade` and no recovery input explicitly requests reconciliation. An existing authenticated admin is reused during
 resume; later enrollment uses the admin API and never repeats first-admin exec.
