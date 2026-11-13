@@ -32,3 +32,15 @@ func TestPluginSkillsKeepInstallerRecoveryPrivateAndDocumented(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallSkillKeepsOriginalCertificateDuringResume(t *testing.T) {
+	raw, err := os.ReadFile(pluginPath(t, "skills", "install", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"Keep the original `--admin-csr`, `--admin-ssh-public-key`", "original CSR key and admin identity, without repeating enrollment", "never delete or replace the certificate to force enrollment", "stop if the original matching inputs are unavailable"} {
+		if !strings.Contains(string(raw), rule) {
+			t.Errorf("install skill lacks certificate recovery rule %q", rule)
+		}
+	}
+}

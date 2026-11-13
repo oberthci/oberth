@@ -125,6 +125,12 @@ Arguments given to the command: `$ARGUMENTS`
    may hold the only copy of the OpenBao root token and unseal key. Leave it
    where it is, tell the user, and resume with `--resume-secrets-file` naming
    that input and a new `--secrets-file` output name. Keep all reviewed answers.
+   Keep the original `--admin-csr`, `--admin-ssh-public-key` and identity flags.
+   The installer itself retains a valid client-auth certificate matching the
+   original CSR key and admin identity, without repeating enrollment or minting
+   credentials. A mismatched, expired, wrong-purpose or malformed certificate
+   stops resume; never delete or replace the certificate to force enrollment.
+   Report the error and stop if the original matching inputs are unavailable.
    When `client_bootstrap_endpoint` fails, show its URL, observed error and
    remedy: installed releases and credentials remain, and the user must make
    the endpoint reachable before resuming. Run documented verify to check
