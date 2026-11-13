@@ -172,7 +172,7 @@ class FailureDiagnostics(unittest.TestCase):
         failure = Refused('private message', stage='plan-selected', check='disk',
                           package='github.com/oberthci/oberth/internal/installer', test='TestFixture')
         line = diagnostic(failure)
-        self.assertIn('stage=plan-selected check=node_ready package=', line)
+        self.assertIn('stage=plan-selected check=disk package=', line)
         self.assertIn('test=TestFixture', line)
         self.assertNotIn('private message', line)
         failure.stage = 'private\nmessage'

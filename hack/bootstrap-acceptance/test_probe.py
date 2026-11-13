@@ -41,6 +41,56 @@ class AcceptanceAssertions(unittest.TestCase):
             with self.assertRaises(probe.Refused):
                 probe.scan_logs([log], [])
 
+    def test_large_inventory_uses_literal_bytes_across_capture_boundaries(self):
+        values = [b'fixture-credential-%08d' % i for i in range(6000)]
+        value = b'private.[key]+$'
+        values.append(value)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'capture.stderr'
+            path.write_bytes(b'privateXkkkk')
+            probe.scan_logs([path], values)
+            path.write_bytes(b'x' * (65536 - 4) + value)
+            with self.assertRaises(probe.Refused) as caught:
+                probe.scan_logs([path], values)
+            self.assertEqual(caught.exception.channel, 'stderr')
+            path.write_text('\n'.join(json.dumps(dict(
+                Package='github.com/oberthci/oberth/internal/installer', Test='TestFixture',
+                Output=part)) for part in ('private.[', 'key]+$')))
+            with self.assertRaises(probe.Refused) as caught:
+                probe.scan_go_events(path, values)
+            self.assertEqual(caught.exception.channel, 'go-output')
+            self.assertEqual(caught.exception.test, 'TestFixture')
+            self.assertNotIn(value.decode(), str(caught.exception))
+            for inventory in ([], [b'']):
+                with self.subTest(inventory=inventory), self.assertRaises(probe.Refused):
+                    probe.scan_go_events(path, inventory)
+
+    def test_decoded_scan_keeps_completing_event_identity_across_blocks(self):
+        value = b'fixture-private-credential'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'events'
+            events = [
+                dict(Package='github.com/oberthci/oberth/internal/installer',
+                     Test='TestPrefix', Output='x' * (65536 - 8) + value[:8].decode()),
+                dict(Package='github.com/oberthci/oberth/internal/releaseverify',
+                     Test='TestCompletingEvent', Output=value[8:].decode()),
+                dict(Package='github.com/oberthci/oberth/cmd/oberth',
+                     Test='TestLaterEvent', Output='public trailing output'),
+            ]
+            path.write_text('\n'.join(map(json.dumps, events)))
+            with self.assertRaises(probe.Refused) as caught:
+                probe.scan_go_events(path, [value, value + b'-longer'])
+            self.assertEqual(caught.exception.package, events[1]['Package'])
+            self.assertEqual(caught.exception.test, 'TestCompletingEvent')
+            self.assertEqual(caught.exception.channel, 'go-output')
+
+    def test_literal_scan_follows_overlapping_prefixes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'capture'
+            path.write_bytes(b'abcdefghiJ')
+            with self.assertRaises(probe.Refused):
+                probe.scan_logs([path], [b'abcdexyz', b'bcdefghiJ'])
+
     def test_capture_never_returns_failed_command_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
