@@ -88,8 +88,6 @@ func TestRefDeletionCancelsAllUnfinishedBranchPhases(t *testing.T) {
 	if err != nil || len(pending) != 5 {
 		t.Fatalf("cleanup obligations: %+v %v", pending, err)
 	}
-	for _, obligation := range pending {
-	}
 	// A name published after cancellation still acquires the existing obligation.
 	late := cancelled[1]
 	if _, err = s.SetRunWorkflowName(t.Context(), late.ID, "late-workflow"); err != nil {
