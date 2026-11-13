@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
 	"github.com/oberthci/oberth/internal/argojob"
+	"github.com/oberthci/oberth/internal/argowatch"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
@@ -64,6 +66,7 @@ type DeclarationRecorder interface {
 // contracts the Argo Workflow engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
+	watchHub       *argowatch.Hub
 	pinnedSources  *PinnedSourceLoader
 	sourceRecorder PinnedSourceRecorder
 
@@ -1290,4 +1293,40 @@ func (jobs *ArgoJobs) EnforceAssistHolds(ctx context.Context, activity map[strin
 		return nil, nil
 	}
 	return controller.EnforceAssistHolds(ctx, activity, recheck, now)
+}
+
+// SetWatchHub supplies the server-owned namespace cache before serving.
+func (jobs *ArgoJobs) SetWatchHub(hub *argowatch.Hub) { jobs.watchHub = hub }
+
+// RunWatch ties the informers to the server lifetime.
+func (jobs *ArgoJobs) RunWatch(ctx context.Context) {
+	if jobs.routes != nil {
+		jobs.routes.local.RunWatch(ctx)
+		return
+	}
+	if jobs.watchHub != nil {
+		jobs.watchHub.Run(ctx)
+	}
+}
+
+// WaitForWatchSync gates recovery and dispatch, but never the API or Git.
+func (jobs *ArgoJobs) WaitForWatchSync(ctx context.Context) error {
+	if jobs.routes != nil {
+		return jobs.routes.local.WaitForWatchSync(ctx)
+	}
+	if jobs.watchHub == nil {
+		return errors.New("app: Workflow watch hub is required")
+	}
+	for {
+		attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := jobs.watchHub.WaitForSync(attempt)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		log.Print("WARN: waiting for Workflow and Pod watch caches to sync")
+	}
 }
