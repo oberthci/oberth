@@ -317,6 +317,12 @@ bounded display reason says `validation refused: …`. Its retry hint asks for a
 YAML fix and new commit. Genuine source/API I/O failures remain infrastructure
 failures. Accepted event-ID replay stays bound to the same run.
 
+Suspension is admitted as vanilla Argo. Resume a run with the Argo CLI
+(`argo resume WORKFLOW -n PIPELINE_NAMESPACE`), or use kubectl to update the
+Workflow's suspension state. Canceling the run or pushing a newer revision
+ends the suspended run. A suspended Workflow continues to hold one global
+Argo slot until it resumes or ends.
+
 Suspension reasons come from the live Workflow's `spec.suspend` or an active
 Argo suspend node. Controller-parallelism waits likewise come from native Argo
 state. Run lists observe these even before local step records exist and after
