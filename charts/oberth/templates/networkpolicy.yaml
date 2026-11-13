@@ -45,8 +45,8 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace | default "kube-system" | quote }}
       {{- end }}
-    # HTTPS outbound: container registries, object storage, module proxy,
-    # GitHub, Trivy DB, and the Kubernetes API server (Argo emissary).
+    # HTTPS outbound: container registries, object storage, public module sources,
+    # dependency downloads, and the Kubernetes API server (Argo emissary).
     # No destination restriction — ipBlock cannot match cluster-internal IPs
     # and namespaceSelector cannot match the host-networked API server, so any
     # "to" block here breaks Argo on policy-enforcing CNIs.
