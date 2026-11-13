@@ -3,42 +3,22 @@ package argoworkflow
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// Structural bounds. A repository-authored document is untrusted input to a
-// server that will create Kubernetes objects from it, so every unbounded
-// dimension gets a ceiling before the object exists.
-const (
-	MaxTemplates            = 128
-	MaxVolumeClaimTemplates = 8
-	MaxContainersPerPod     = 16
-
-	// Resource amplification ceilings. Each bounds one dimension a
-	// repository-authored document can amplify into Kubernetes objects.
-	MaxDAGTasks          = 64
-	MaxStepInvocations   = 64
-	MaxWithItemsCount    = 100
-	MaxWithSequenceCount = 100
-	MaxEmptyDirSize      = "8Gi"
-	MaxDiskEmptyDirSize  = "50Gi"
-	MaxPVCCapacity       = "64Gi"
-)
+// MaxTemplates bounds the existing nonroot annotation, not native templates.
+const MaxTemplates = 128
 
 // Policy is the administrator-owned admission boundary for repository YAML.
 type Policy struct {
 	Capability *Capability
 	// RunnerImagePrefixes is the administrator's image allowlist.
-	// Empty selects the built-in
-	// pipeline.DefaultRunnerImagePrefixes.
+	// Empty admits any image.
 	RunnerImagePrefixes []string
 }
 
@@ -88,9 +68,6 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	if strings.TrimSpace(workflow.Name) != "" {
 		problems = append(problems, errors.New("argoworkflow: metadata.name is assigned by Oberth and must be omitted"))
 	}
-	if strings.TrimSpace(workflow.GenerateName) != "" {
-		problems = append(problems, errors.New("argoworkflow: metadata.generateName is assigned by Oberth and must be omitted"))
-	}
 	if strings.TrimSpace(workflow.Namespace) != "" {
 		problems = append(problems, errors.New("argoworkflow: metadata.namespace is assigned by Oberth and must be omitted"))
 	}
@@ -100,14 +77,29 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	if len(workflow.Finalizers) != 0 {
 		problems = append(problems, errors.New("argoworkflow: metadata.finalizers must be omitted"))
 	}
+	annotations := make(map[string]string, len(workflow.Annotations))
+	for key, value := range workflow.Annotations {
+		if !supportedWorkflowAnnotation(key) {
+			annotations[key] = value
+		}
+	}
+	problems = append(problems, admitWorkflowMetadata("metadata", &wfv1.WorkflowMetadata{Labels: workflow.Labels, Annotations: annotations})...)
 	return problems
+}
+
+// Only annotations with a live authored declaration reader bypass the ownership
+// namespace rule. Assist identity/hold markers are server-written, not opt-ins.
+func supportedWorkflowAnnotation(key string) bool {
+	switch key {
+	case SecretPathsAnnotation, SourcesAnnotation, GoProxyAnnotation, NonrootTemplatesAnnotation:
+		return true
+	default:
+		return false
+	}
 }
 
 func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	var problems []error
-	if strings.TrimSpace(spec.Entrypoint) == "" {
-		problems = append(problems, errors.New("argoworkflow: spec.entrypoint is required"))
-	}
 	// A referenced template is a spec Oberth never read. Admission decisions
 	// must be made against the exact bytes in the pushed revision.
 	if spec.WorkflowTemplateRef != nil {
@@ -122,9 +114,6 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	problems = append(problems, admitArtifactGCPodMetadata(spec.ArtifactGC)...)
 	if spec.ArtifactRepositoryRef != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.artifactRepositoryRef resolves credentials from a Kubernetes Secret; use volumeClaimTemplates for step hand-off"))
-	}
-	if len(spec.ImagePullSecrets) != 0 {
-		problems = append(problems, errors.New("argoworkflow: spec.imagePullSecrets reads Kubernetes Secrets; publish to an allowlisted public registry instead"))
 	}
 	if spec.HostNetwork != nil && *spec.HostNetwork {
 		problems = append(problems, errors.New("argoworkflow: spec.hostNetwork is not admitted"))
@@ -151,15 +140,8 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	if spec.PodDisruptionBudget != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.podDisruptionBudget is not admitted"))
 	}
-	if spec.ActiveDeadlineSeconds != nil && *spec.ActiveDeadlineSeconds <= 0 {
-		problems = append(problems, errors.New("argoworkflow: spec.activeDeadlineSeconds must be positive when supplied"))
-	}
 	problems = append(problems, admitPodSecurityContext("spec.securityContext", spec.SecurityContext)...)
 	problems = append(problems, admitVolumes("spec.volumes", spec.Volumes)...)
-	if len(spec.VolumeClaimTemplates) > MaxVolumeClaimTemplates {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.volumeClaimTemplates declares %d entries, maximum is %d",
-			len(spec.VolumeClaimTemplates), MaxVolumeClaimTemplates))
-	}
 	for index, claim := range spec.VolumeClaimTemplates {
 		if reservedVCTName(claim.Name) {
 			problems = append(problems, fmt.Errorf(
@@ -184,120 +166,21 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 		if len(claim.OwnerReferences) != 0 {
 			problems = append(problems, fmt.Errorf("argoworkflow: spec.volumeClaimTemplates[%d].metadata.ownerReferences must be omitted", index))
 		}
-		if storageReq, ok := claim.Spec.Resources.Requests[corev1.ResourceStorage]; ok && !storageReq.IsZero() {
-			maxPVC := resource.MustParse(MaxPVCCapacity)
-			if storageReq.Cmp(maxPVC) > 0 {
-				problems = append(problems, fmt.Errorf(
-					"argoworkflow: spec.volumeClaimTemplates[%d] requests %s storage, maximum is %s",
-					index, storageReq.String(), MaxPVCCapacity))
-			}
-		}
 	}
 	return problems
 }
 
 func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	var problems []error
-	if len(workflow.Spec.Templates) == 0 {
-		problems = append(problems, errors.New("argoworkflow: spec.templates is required"))
-	}
-	if len(workflow.Spec.Templates) > MaxTemplates {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.templates declares %d templates, maximum is %d",
-			len(workflow.Spec.Templates), MaxTemplates))
-	}
 	if workflow.Spec.TemplateDefaults != nil {
 		problems = append(problems, admitTemplate("spec.templateDefaults", *workflow.Spec.TemplateDefaults, policy, 0)...)
 	}
-	names := make(map[string]struct{}, len(workflow.Spec.Templates))
-	entrypointFound := false
 	for index, template := range workflow.Spec.Templates {
 		location := fmt.Sprintf("spec.templates[%d]", index)
 		if template.Name != "" {
 			location = fmt.Sprintf("spec.templates[%q]", template.Name)
-		}
-		if messages := k8svalidation.IsDNS1123Label(template.Name); len(messages) != 0 {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.name %q is not a DNS-1123 label: %s",
-				location, template.Name, strings.Join(messages, ", ")))
-		}
-		if _, duplicate := names[template.Name]; duplicate {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.name is duplicated", location))
-		}
-		names[template.Name] = struct{}{}
-		if template.Name == workflow.Spec.Entrypoint {
-			entrypointFound = true
 		}
 		problems = append(problems, admitTemplate(location, template, policy, 0)...)
-	}
-	if workflow.Spec.Entrypoint != "" && !entrypointFound {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", workflow.Spec.Entrypoint))
-	}
-	// Every by-name reference must resolve inside this document. Argo would
-	// otherwise accept the Workflow and fail the step at run time, which turns
-	// a typo into a red release rather than a refused push -- and, since
-	// templateRef is already refused, an unresolvable name can only ever be a
-	// mistake.
-	for index, template := range workflow.Spec.Templates {
-		location := fmt.Sprintf("spec.templates[%d]", index)
-		if template.Name != "" {
-			location = fmt.Sprintf("spec.templates[%q]", template.Name)
-		}
-		problems = append(problems, admitTemplateReferences(location, template, names)...)
-	}
-	check := func(where, referenced string) {
-		if referenced == "" {
-			return
-		}
-		if _, ok := names[referenced]; !ok {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s references template %q, which this document does not declare", where, referenced))
-		}
-	}
-	if workflow.Spec.OnExit != "" {
-		check("spec.onExit", workflow.Spec.OnExit)
-	}
-	for hookName, hook := range workflow.Spec.Hooks {
-		check(fmt.Sprintf("spec.hooks[%q]", hookName), hook.Template)
-	}
-	return problems
-}
-
-// admitTemplateReferences checks the by-name template references a DAG task,
-// a step, or a lifecycle hook makes.
-func admitTemplateReferences(location string, template wfv1.Template, names map[string]struct{}) []error {
-	var problems []error
-	check := func(where, referenced string) {
-		if referenced == "" {
-			return
-		}
-		if _, ok := names[referenced]; !ok {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s references template %q, which this document does not declare", where, referenced))
-		}
-	}
-	if template.DAG != nil {
-		for index, task := range template.DAG.Tasks {
-			where := fmt.Sprintf("%s.dag.tasks[%d]", location, index)
-			if task.Name != "" {
-				where = fmt.Sprintf("%s.dag.tasks[%q]", location, task.Name)
-			}
-			check(where, task.Template)
-			for name, hook := range task.Hooks {
-				check(fmt.Sprintf("%s.hooks[%q]", where, name), hook.Template)
-			}
-			if task.Inline != nil {
-				problems = append(problems, admitTemplateReferences(where+".inline", *task.Inline, names)...)
-			}
-		}
-	}
-	for group := range template.Steps {
-		for index, step := range template.Steps[group].Steps {
-			where := fmt.Sprintf("%s.steps[%d][%d]", location, group, index)
-			check(where, step.Template)
-			for name, hook := range step.Hooks {
-				check(fmt.Sprintf("%s.hooks[%q]", where, name), hook.Template)
-			}
-			if step.Inline != nil {
-				problems = append(problems, admitTemplateReferences(where+".inline", *step.Inline, names)...)
-			}
-		}
 	}
 	return problems
 }
@@ -328,11 +211,6 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	}
 	problems = append(problems, admitNestedTemplates(location, template, policy, depth)...)
 	problems = append(problems, admitSynchronization(location+".synchronization", template.Synchronization)...)
-	// Argo applies this deadline to a leaf Pod, never a DAG or steps gate.
-	// Keep the check in the recursive path so inline composites also refuse.
-	if template.ActiveDeadlineSeconds != nil && (template.DAG != nil || len(template.Steps) != 0) {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.activeDeadlineSeconds is only valid for leaf templates", location))
-	}
 	if strings.TrimSpace(template.PodSpecPatch) != "" {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.podSpecPatch is not admitted; it can override the server-assigned identity", location))
 	}
@@ -399,15 +277,12 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 // by-name references to objects outside this document.
 func admitNestedTemplates(location string, template wfv1.Template, policy Policy, depth int) []error {
 	var problems []error
-	totalStepInvocations := 0
 	for group := range template.Steps {
 		for index, step := range template.Steps[group].Steps {
-			totalStepInvocations++
 			where := fmt.Sprintf("%s.steps[%d][%d]", location, group, index)
 			if step.TemplateRef != nil {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.templateRef points outside this document; inline the template", where))
 			}
-			problems = append(problems, admitFanOut(where, len(step.WithItems), step.WithSequence)...)
 			problems = append(problems, admitArguments(where+".arguments", step.Arguments)...)
 			problems = append(problems, admitHooks(where+".hooks", step.Hooks)...)
 			if step.Inline != nil {
@@ -415,33 +290,7 @@ func admitNestedTemplates(location string, template wfv1.Template, policy Policy
 			}
 		}
 	}
-	if totalStepInvocations > MaxStepInvocations {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s declares %d step invocations, maximum is %d",
-			location, totalStepInvocations, MaxStepInvocations))
-	}
 	if template.DAG != nil {
-		if len(template.DAG.Tasks) > MaxDAGTasks {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.dag declares %d tasks, maximum is %d",
-				location, len(template.DAG.Tasks), MaxDAGTasks))
-		}
-		// Argo rejects a DAG template that mixes enhanced depends (string
-		// expressions) with legacy dependencies (string lists). Catch the
-		// same combination at admission so `oberth validate` reports it
-		// before a push creates a red run.
-		hasDepends, hasDependencies := false, false
-		for _, task := range template.DAG.Tasks {
-			if strings.TrimSpace(task.Depends) != "" {
-				hasDepends = true
-			}
-			if len(task.Dependencies) != 0 {
-				hasDependencies = true
-			}
-		}
-		if hasDepends && hasDependencies {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.dag cannot use both 'depends' and 'dependencies' in the same DAG template",
-				location))
-		}
 		for index, task := range template.DAG.Tasks {
 			where := fmt.Sprintf("%s.dag.tasks[%d]", location, index)
 			if task.Name != "" {
@@ -450,30 +299,11 @@ func admitNestedTemplates(location string, template wfv1.Template, policy Policy
 			if task.TemplateRef != nil {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.templateRef points outside this document; inline the template", where))
 			}
-			problems = append(problems, admitFanOut(where, len(task.WithItems), task.WithSequence)...)
 			problems = append(problems, admitArguments(where+".arguments", task.Arguments)...)
 			problems = append(problems, admitHooks(where+".hooks", task.Hooks)...)
 			if task.Inline != nil {
 				problems = append(problems, admitTemplate(where+".inline", *task.Inline, policy, depth+1)...)
 			}
-		}
-	}
-	return problems
-}
-
-// admitFanOut caps literal withItems and withSequence cardinality.
-func admitFanOut(location string, withItemsCount int, withSequence *wfv1.Sequence) []error {
-	var problems []error
-	if withItemsCount > MaxWithItemsCount {
-		problems = append(problems, fmt.Errorf(
-			"argoworkflow: %s.withItems declares %d entries, maximum is %d",
-			location, withItemsCount, MaxWithItemsCount))
-	}
-	if withSequence != nil && withSequence.Count != nil {
-		if count, err := strconv.Atoi(withSequence.Count.String()); err == nil && count > MaxWithSequenceCount {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.withSequence.count %d exceeds the %d ceiling",
-				location, count, MaxWithSequenceCount))
 		}
 	}
 	return problems
@@ -485,21 +315,17 @@ const ReservedExecutorEnvPrefix = "ARGO_"
 
 func admitContainers(location string, template wfv1.Template, policy Policy) []error {
 	var problems []error
-	containers := 0
 	if template.Container != nil {
-		containers++
 		problems = append(problems, admitExecutorContainerName(location+".container", template.Container.Name, true)...)
 		problems = append(problems, admitContainer(location+".container", template.Container, policy)...)
 	}
 	if template.Script != nil {
-		containers++
 		problems = append(problems, admitExecutorContainerName(location+".script", template.Script.Name, true)...)
 		problems = append(problems, admitContainer(location+".script", &template.Script.Container, policy)...)
 	}
 	if template.ContainerSet != nil {
 		problems = append(problems, admitHelperMounts(location+".containerSet", template.ContainerSet.VolumeMounts, nil)...)
 		for index := range template.ContainerSet.Containers {
-			containers++
 			problems = append(problems, admitExecutorContainerName(fmt.Sprintf("%s.containerSet.containers[%d]", location, index), template.ContainerSet.Containers[index].Name, true)...)
 			problems = append(problems, admitContainer(
 				fmt.Sprintf("%s.containerSet.containers[%d]", location, index),
@@ -507,22 +333,16 @@ func admitContainers(location string, template wfv1.Template, policy Policy) []e
 		}
 	}
 	for index := range template.InitContainers {
-		containers++
 		problems = append(problems, admitExecutorContainerName(fmt.Sprintf("%s.initContainers[%d]", location, index), template.InitContainers[index].Name, false)...)
 		problems = append(problems, admitContainer(
 			fmt.Sprintf("%s.initContainers[%d]", location, index),
 			&template.InitContainers[index].Container, policy)...)
 	}
 	for index := range template.Sidecars {
-		containers++
 		problems = append(problems, admitExecutorContainerName(fmt.Sprintf("%s.sidecars[%d]", location, index), template.Sidecars[index].Name, false)...)
 		problems = append(problems, admitContainer(
 			fmt.Sprintf("%s.sidecars[%d]", location, index),
 			&template.Sidecars[index].Container, policy)...)
-	}
-	if containers > MaxContainersPerPod {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s declares %d containers, maximum is %d",
-			location, containers, MaxContainersPerPod))
 	}
 	return problems
 }
@@ -533,9 +353,7 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 	}
 	var problems []error
 	// Every template image must satisfy the administrator's allowlist.
-	if err := pipeline.ValidateRunnerImage(container.Image); err != nil {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.image: %w", location, err))
-	} else if !pipeline.RunnerImageAllowed(container.Image, policy.RunnerImagePrefixes) {
+	if !pipeline.RunnerImageAllowed(container.Image, policy.RunnerImagePrefixes) {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.image %q is outside the administrator prefix allowlist",
 			location, container.Image))
 	}
@@ -562,7 +380,7 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 		if variable.ValueFrom.SecretKeyRef != nil || variable.ValueFrom.ConfigMapKeyRef != nil {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.env[%q] reads a Kubernetes Secret or ConfigMap and is not admitted", location, variable.Name))
 		}
-		if variable.ValueFrom.FieldRef != nil || variable.ValueFrom.ResourceFieldRef != nil {
+		if variable.ValueFrom.FieldRef != nil && variable.ValueFrom.FieldRef.FieldPath != "spec.serviceAccountName" {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.env[%q] reads pod/downward state and is not admitted", location, variable.Name))
 		}
 	}
@@ -578,19 +396,6 @@ func admitContainerResources(location string, resources corev1.ResourceRequireme
 	var problems []error
 	if len(resources.Claims) > 0 {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.resources.claims is not admitted; claim-backed device access is outside the reviewed Pod contract", location))
-	}
-	for _, list := range []corev1.ResourceList{resources.Requests, resources.Limits} {
-		for name, q := range list {
-			if q.Sign() < 0 {
-				problems = append(problems, fmt.Errorf("argoworkflow: %s resource %s must not be negative", location, name))
-			}
-
-		}
-	}
-	for name, q := range resources.Requests {
-		if limit, ok := resources.Limits[name]; ok && q.Cmp(limit) > 0 {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s request %s exceeds its limit", location, name))
-		}
 	}
 	return problems
 }
@@ -760,32 +565,6 @@ func admitVolumes(location string, volumes []corev1.Volume) []error {
 		}
 		switch {
 		case volume.EmptyDir != nil:
-			// Require a bounded sizeLimit on every emptyDir, not just
-			// memory-backed ones. An uncapped disk-backed emptyDir can
-			// exhaust the node's ephemeral storage just as a memory one
-			// exhausts RAM. (Issue #440)
-			if volume.EmptyDir.SizeLimit == nil || volume.EmptyDir.SizeLimit.IsZero() {
-				medium := "disk-backed"
-				if volume.EmptyDir.Medium == corev1.StorageMediumMemory {
-					medium = "memory-backed"
-				}
-				problems = append(problems, fmt.Errorf(
-					"argoworkflow: %s is a %s emptyDir without a sizeLimit; a bounded sizeLimit is required",
-					where, medium))
-			} else {
-				var ceiling string
-				if volume.EmptyDir.Medium == corev1.StorageMediumMemory {
-					ceiling = MaxEmptyDirSize
-				} else {
-					ceiling = MaxDiskEmptyDirSize
-				}
-				maxEmpty := resource.MustParse(ceiling)
-				if volume.EmptyDir.SizeLimit.Cmp(maxEmpty) > 0 {
-					problems = append(problems, fmt.Errorf(
-						"argoworkflow: %s emptyDir sizeLimit %s exceeds the %s ceiling",
-						where, volume.EmptyDir.SizeLimit.String(), ceiling))
-				}
-			}
 			continue
 		case volume.PersistentVolumeClaim != nil:
 			problems = append(problems, fmt.Errorf("argoworkflow: %s references an existing PersistentVolumeClaim; declare spec.volumeClaimTemplates instead", where))

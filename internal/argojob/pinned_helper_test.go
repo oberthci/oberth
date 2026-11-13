@@ -116,12 +116,8 @@ func TestNonrootNewBuildCannotSelectHistoricalBudgets(t *testing.T) {
 		request := testRequest(pipeline.TriggerCI, source)
 		config := testConfig()
 
-		wf, err := Build(config, request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if wf.Annotations[helperStorageAnnotation] != helperStoragePolicy {
-			t.Fatal("authored policy selected recovery mode")
+		if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "metadata.annotations") {
+			t.Fatalf("authored policy admitted: %v", err)
 		}
 
 	}

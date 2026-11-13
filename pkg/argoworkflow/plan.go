@@ -33,10 +33,13 @@ type PlannedStep struct {
 }
 
 // MaxPlannedSteps bounds the enumeration. A repository-authored document is
-// untrusted input, and admission bounds the template count but not the number
-// of pods a nest of DAGs can express, so the walk carries its own ceiling
+// untrusted input, and a nest of DAGs can express more pods than the template count, so the walk carries its own ceiling
 // rather than trusting the product of the two.
 const MaxPlannedSteps = 512
+
+// MaxPlanVisits bounds planner work independently of rows, memoization and
+// recursive shape. This is a planner safety limit, not an Argo workload budget.
+const MaxPlanVisits = 65536
 
 // PlannedSteps enumerates every step the document declares, in declaration
 // order, from the already-decoded object.
@@ -65,32 +68,54 @@ const MaxPlannedSteps = 512
 //     single node after the Workflow object, which the document does not know,
 //     so the plan would name a step the run never reports.
 func PlannedSteps(workflow *wfv1.Workflow) ([]PlannedStep, error) {
+	plan, err := PlanSteps(workflow)
+	if err != nil {
+		return nil, err
+	}
+	return plan.Steps, nil
+}
+
+// StepPlan includes traversal safety evidence even for an empty row list.
+// BackEdgeCut means recursive branches were omitted; replay must fail closed
+// unless its caller separately proves safety for those omitted executions.
+type StepPlan struct {
+	Steps       []PlannedStep
+	BackEdgeCut bool
+}
+
+// PlanSteps returns declared rows together with traversal safety evidence.
+func PlanSteps(workflow *wfv1.Workflow) (StepPlan, error) {
 	if workflow == nil {
-		return nil, errors.New("argoworkflow: no Workflow to enumerate")
+		return StepPlan{}, errors.New("argoworkflow: no Workflow to enumerate")
 	}
 	entrypoint := strings.TrimSpace(workflow.Spec.Entrypoint)
 	if entrypoint == "" {
-		return nil, errors.New("argoworkflow: spec.entrypoint is required to enumerate steps")
+		return StepPlan{}, errors.New("argoworkflow: spec.entrypoint is required to enumerate steps")
 	}
 	templates := make(map[string]*wfv1.Template, len(workflow.Spec.Templates))
 	for index := range workflow.Spec.Templates {
 		template := &workflow.Spec.Templates[index]
-		// Admission refuses duplicate template names; on the unadmitted path
-		// the first declaration wins, which is what Argo's own resolver does.
+		// The first declaration wins, as in Argo's resolver. Native duplicate
+		// name validation remains Argo's responsibility.
 		if _, exists := templates[template.Name]; !exists {
 			templates[template.Name] = template
 		}
 	}
 	root, ok := templates[entrypoint]
 	if !ok {
-		return nil, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", entrypoint)
+		return StepPlan{}, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", entrypoint)
 	}
-	walk := &planWalk{templates: templates, onPath: map[string]struct{}{entrypoint: {}}}
+	walk := &planWalk{templates: templates, onPath: map[string]struct{}{entrypoint: {}}, visits: make(map[planVisit]bool), calls: make(map[*wfv1.Template][]invocation)}
 	// The entrypoint is the root boundary. A pod it invokes directly is a burn
 	// of one step, which is exactly what the runtime derives from a pod node
 	// whose BoundaryID is the root node.
-	if err := walk.descend(root, "", 0); err != nil {
-		return nil, err
+	err := walk.descend(root, "", 0)
+	plan := StepPlan{Steps: walk.steps, BackEdgeCut: walk.backEdges > 0}
+	if walk.exhausted {
+		return plan, fmt.Errorf("argoworkflow: step planning exceeded the %d visit limit", MaxPlanVisits)
+	}
+	if err != nil {
+		return plan, err
 	}
 	// Reject duplicate normalized (burn, step) keys. Two branches invoking
 	// the same nested DAG can normalize to the same key; the durable result
@@ -100,14 +125,14 @@ func PlannedSteps(workflow *wfv1.Workflow) ([]PlannedStep, error) {
 	for _, step := range walk.steps {
 		key := [2]string{step.Stage, step.Step}
 		if _, duplicate := seen[key]; duplicate {
-			return nil, fmt.Errorf("argoworkflow: duplicate step key (%s, %s) — "+
+			return plan, fmt.Errorf("argoworkflow: duplicate step key (%s, %s) — "+
 				"two pipeline branches invoke templates that normalize to the same burn/step name; "+
 				"rename one of the invoking tasks to disambiguate",
 				step.Stage, step.Step)
 		}
 		seen[key] = struct{}{}
 	}
-	return walk.steps, nil
+	return plan, nil
 }
 
 // planWalk carries the accumulator across the same recursive descent
@@ -117,21 +142,56 @@ type planWalk struct {
 	templates map[string]*wfv1.Template
 	onPath    map[string]struct{}
 	steps     []PlannedStep
+	visits    map[planVisit]bool
+	calls     map[*wfv1.Template][]invocation
+	backEdges int
+	work      int
+	exhausted bool
+}
+
+// Only cycle-free subtrees have context-independent normalized rows at a boundary.
+type planVisit struct {
+	template  *wfv1.Template
+	enclosing string
 }
 
 func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth int) error {
+	if !walk.spendVisit() {
+		return nil
+	}
 	if depth > MaxIdentityWalkDepth {
 		return fmt.Errorf("argoworkflow: pipeline nests templates deeper than %d levels", MaxIdentityWalkDepth)
 	}
-	for _, called := range invocations(template) {
+	visit := planVisit{template: template, enclosing: enclosing}
+	if hasSteps, seen := walk.visits[visit]; seen {
+		if hasSteps {
+			return fmt.Errorf("argoworkflow: duplicate step key below repeated template %q at boundary %q", template.Name, enclosing)
+		}
+		return nil
+	}
+	start, backEdges := len(walk.steps), walk.backEdges
+	defer func() {
+		if walk.backEdges == backEdges {
+			walk.visits[visit] = len(walk.steps) > start
+		}
+	}()
+	if reachable, cut := walk.reachesPod(template); !reachable {
+		if cut {
+			walk.backEdges++
+		}
+		return nil
+	}
+	for _, called := range walk.callsFor(template) {
+		if !walk.spendVisit() {
+			return nil
+		}
 		if called.expands {
 			continue
 		}
 		target := walk.resolve(called)
 		if target == nil {
-			// Admission refuses an unresolvable by-name reference. Reaching
-			// here means the caller enumerated an unadmitted document; skip
-			// rather than invent a step.
+			// An unresolved native reference has no statically known step.
+			// Argo validates it; the inventory does not invent one.
 			continue
 		}
 		switch {
@@ -142,7 +202,9 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 			// nearest enclosing template invocation.
 			if called.template != "" {
 				if _, cycle := walk.onPath[called.template]; cycle {
-					return fmt.Errorf("argoworkflow: template %q is reachable from itself", called.template)
+					// The caller must know this traversal omitted recursive executions.
+					walk.backEdges++
+					continue
 				}
 				walk.onPath[called.template] = struct{}{}
 			}
@@ -165,6 +227,16 @@ func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth i
 		}
 	}
 	return nil
+}
+
+// Count traversal and graph-search work under one hard per-plan ceiling.
+func (walk *planWalk) spendVisit() bool {
+	if walk.work >= MaxPlanVisits {
+		walk.exhausted = true
+		return false
+	}
+	walk.work++
+	return true
 }
 
 func (walk *planWalk) resolve(called invocation) *wfv1.Template {

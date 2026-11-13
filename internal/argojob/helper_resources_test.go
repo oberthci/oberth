@@ -107,16 +107,12 @@ func TestCurrentHelperStorageRecoveryPreservesSubmittedWorkflow(t *testing.T) {
 	}
 }
 
-func TestHelperStorageNewBuildOverridesAuthoredPolicy(t *testing.T) {
+func TestHelperStorageNewBuildRefusesAuthoredPolicy(t *testing.T) {
 	config := testConfig()
 	config.RunnerImagePrefixes = []string{"example.invalid/"}
 	source := strings.Replace(resourceBoundsSource(""), "    example.com/tier: XL", "    example.com/tier: XL\n    oberth.ci/helper-storage: unknown-policy", 1)
-	wf, err := Build(config, resourceBoundsRequest(source))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if wf.Annotations[helperStorageAnnotation] != helperStoragePolicy {
-		t.Fatal("authored policy selected helper resources")
+	if _, err := Build(config, resourceBoundsRequest(source)); err == nil || !strings.Contains(err.Error(), "metadata.annotations") {
+		t.Fatalf("authored helper policy admitted: %v", err)
 	}
 }
 

@@ -68,6 +68,15 @@ trusting how its controller maps fields to Pod metadata. The operator control is
 a ValidatingAdmissionPolicy on the granted kind; see
 [operator controls](workflow-capabilities.md#operator-controls-for-resource-templates).
 Workflow-only metadata and PodGC label selectors do not write arbitrary Pod metadata.
+The Workflow’s own labels and annotations reserve `oberth.ci/` and
+`workflows.argoproj.io/` for server ownership. Supported author declaration
+annotations retain their validated behavior; unknown keys under those prefixes
+are refused. Native template names, recursion, fan-out, image pull secrets,
+resource quantities and emptyDir sizes are left to Argo and Kubernetes.
+Oberth accepts `resourceFieldRef` environment values and the exact
+`fieldRef.fieldPath: spec.serviceAccountName`; other fieldRef paths remain
+refused. A camelCase descendant template may produce a Pod name Kubernetes
+rejects; admission accepts it and Argo reports the run failure.
 An author's Pod label can match selectors in the operator's own policies
 elsewhere. Operator policies should select on namespace as well as labels,
 including NetworkPolicy rules that otherwise admit matching Pods from any

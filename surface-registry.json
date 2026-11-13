@@ -931,6 +931,14 @@
     "flag:argo-vault-credentialed-role": {
       "doc_anchor": "docs/argo-secret-delivery.md",
       "test_ref": "internal/argojob/spec_test.go TestBuildInjectsRunIdentityAndVaultCoordinates"
+    },
+    "value:runnerImagePrefixes": {
+      "doc_anchor": "docs/cli-reference.md#oberth-serve",
+      "test_ref": "cmd/oberth/init_test.go TestDefaultRunnerImagePrefixesMatchChart"
+    },
+    "flag:runner-image-prefixes": {
+      "doc_anchor": "docs/cli-reference.md#oberth-validate",
+      "test_ref": "pkg/argoworkflow/admit_test.go TestAdmitEnforcesTheRunnerImageAllowlist"
     }
   }
 }

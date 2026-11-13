@@ -1727,7 +1727,7 @@ Flags:
   -run-log-limit-bytes int
         maximum retained log bytes per run (default 67108864)
   -runner-image-prefixes string
-        comma-separated allowlist of permitted runner image prefixes (default "golang:,debian:,aquasec/trivy:")
+        comma-separated allowlist of permitted runner image prefixes
   -schedule-max-entries int
         most schedule entries one repository may declare (default 8)
   -schedule-min-interval duration
@@ -2108,7 +2108,7 @@ Flags:
   -allow-unresolved-fragments
         deprecated: unresolved fragments still fail validation because admission requires their pinned contents
   -runner-image-prefixes string
-        comma-separated allowlist of permitted runner image prefixes (default "golang:,debian:,aquasec/trivy:")
+        comma-separated allowlist of permitted runner image prefixes
 ```
 
 ## oberth version
