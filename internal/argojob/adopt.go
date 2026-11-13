@@ -66,7 +66,7 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 }
 
 func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request AdoptionRequest) (Adoption, error) {
-	if err := validateWorkflowRecovery(workflow); err != nil {
+	if err := validateHelperStorage(workflow); err != nil {
 		return Adoption{}, err
 	}
 	if err := verifyDeliveredPinnedSources(workflow, request.PinnedSources); err != nil {

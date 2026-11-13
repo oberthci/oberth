@@ -278,7 +278,7 @@ func validateArgoServeOptions(options serveOptions) error {
 //
 // It is a plain file read rather than an x509.CertPool because the bytes
 // themselves travel: the server does not use this anchor, it delivers it, and
-// what it delivers has to be the PEM an secretstore exec in another Pod can parse.
+// what it delivers has to be the PEM that oberth secretstore exec in another Pod can parse.
 // argojob.Config.Validate is what decides the bytes are a usable anchor.
 func readArgoVaultCACert(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
