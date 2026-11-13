@@ -40,9 +40,8 @@ func dagRetryWorkflow(phase wfv1.WorkflowPhase, attempts ...[2]wfv1.NodePhase) *
 	workflow.Name = "wf"
 	workflow.Namespace = testNamespace
 	workflow.Annotations = map[string]string{
-		runIDAnnotation:          "run-retry",
-		identityAnnotation:       "digest",
-		PodNameVersionAnnotation: podNameVersionV2,
+		runIDAnnotation:    "run-retry",
+		identityAnnotation: "digest",
 	}
 	limit := intstr.FromInt32(int32(len(attempts) - 1))
 	workflow.Spec = wfv1.WorkflowSpec{
@@ -157,7 +156,7 @@ func TestDAGRetryThenPassIsPassed(t *testing.T) {
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeFailed},
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeSucceeded})
 
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	want := "address/check address/get create/create install/install"
 	if got := strings.Join(stepKeys(results), " "); got != want {
 		t.Fatalf("steps = %q, want %q", got, want)
@@ -180,7 +179,7 @@ func TestDAGRetryThenPassIsPassed(t *testing.T) {
 
 	// The failed first attempt stays observable as a superseded attempt.
 	var superseded []StepResult
-	for _, attempt := range stepAttempts(workflow) {
+	for _, attempt := range fixtureStepAttempts(workflow) {
 		if attempt.Superseded {
 			superseded = append(superseded, attempt)
 		}
@@ -216,7 +215,7 @@ func TestDAGRetryEveryAttemptFailsIsFailed(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			workflow := dagRetryWorkflow(wfv1.WorkflowFailed, test.attempts...)
-			results := StepResults(workflow)
+			results := fixtureStepResults(workflow)
 			assertPlanned(t, workflow, results)
 			final := stepByKey(t, results, "address/"+test.failed)
 			if final.Status != runprogress.StepFailed || final.NodeID != test.node {
@@ -261,7 +260,7 @@ func TestPodRetryEveryAttemptFailsPointsAtLastAttempt(t *testing.T) {
 	workflow.Status = wfv1.WorkflowStatus{Phase: wfv1.WorkflowFailed, Nodes: nodes}
 
 	appendRetryHook(workflow, "retry")
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	if len(results) != 2 {
 		t.Fatalf("results = %+v, want publish and cleanup rows", results)
 	}
@@ -283,11 +282,11 @@ func TestPodRetryEveryAttemptFailsPointsAtLastAttempt(t *testing.T) {
 // renamed, and a failed step still fails a Workflow Argo called Succeeded.
 func TestNoRetryStrategyIsUnchanged(t *testing.T) {
 	workflow := budgetTestWorkflow()
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	if got := strings.Join(stepKeys(results), " "); got != "build/compile test/unit" {
 		t.Fatalf("steps = %q", got)
 	}
-	attempts := stepAttempts(workflow)
+	attempts := fixtureStepAttempts(workflow)
 	if len(attempts) != len(results) {
 		t.Fatalf("attempts = %d rows, results = %d rows", len(attempts), len(results))
 	}
@@ -366,7 +365,7 @@ func nestedRetryWorkflow(phase wfv1.WorkflowPhase, finalPush wfv1.NodePhase) *wf
 func TestNestedRetryInsideDAG(t *testing.T) {
 	t.Run("outer retry passes", func(t *testing.T) {
 		workflow := nestedRetryWorkflow(wfv1.WorkflowSucceeded, wfv1.NodeSucceeded)
-		results := StepResults(workflow)
+		results := fixtureStepResults(workflow)
 		if got := strings.Join(stepKeys(results), " "); got != "group/push release/prepare" {
 			t.Fatalf("steps = %q", got)
 		}
@@ -376,7 +375,7 @@ func TestNestedRetryInsideDAG(t *testing.T) {
 			t.Fatalf("group/push = %+v, want passed from g1-push-0", push)
 		}
 		superseded := map[string]bool{}
-		for _, attempt := range stepAttempts(workflow) {
+		for _, attempt := range fixtureStepAttempts(workflow) {
 			if attempt.Superseded {
 				superseded[attempt.NodeID] = true
 			}
@@ -390,7 +389,7 @@ func TestNestedRetryInsideDAG(t *testing.T) {
 	})
 	t.Run("outer retry exhausted", func(t *testing.T) {
 		workflow := nestedRetryWorkflow(wfv1.WorkflowFailed, wfv1.NodeFailed)
-		push := stepByKey(t, StepResults(workflow), "group/push")
+		push := stepByKey(t, fixtureStepResults(workflow), "group/push")
 		if push.Status != runprogress.StepFailed || push.NodeID != "g1-push-0" {
 			t.Fatalf("group/push = %+v, want failed from the last attempt g1-push-0", push)
 		}
@@ -437,6 +436,8 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeFailed},
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeSucceeded})
 
+	controller.kube = fixtureKube(final)
+
 	// First observation: the second attempt already passed both steps
 	// before the first attempt's failure was ever seen.
 	var output bytes.Buffer
@@ -453,7 +454,7 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 		t.Fatalf("address/get progress = %s, want both attempts", got)
 	}
 	for _, id := range []string{"address-0-check", "address-1-check", "address-0-get", "address-1-get"} {
-		pod := PodName(final, final.Status.Nodes[id])
+		pod := fixturePodName(final, final.Status.Nodes[id])
 		if replayed[pod] != 1 {
 			t.Errorf("log of %s replayed %d times, want once", id, replayed[pod])
 		}
@@ -489,7 +490,7 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 		if strings.Contains(id, "address-1-") {
 			want = 2
 		}
-		if got := replayed[PodName(final, final.Status.Nodes[id])]; got != want {
+		if got := replayed[fixturePodName(final, final.Status.Nodes[id])]; got != want {
 			t.Errorf("resumed log of %s replayed %d times, want %d total", id, got, want)
 		}
 	}
@@ -551,7 +552,7 @@ func TestDAGRetryWithExitHook(t *testing.T) {
 			workflow.Spec.Templates = append(workflow.Spec.Templates,
 				wfv1.Template{Name: "cleanup", Container: &corev1.Container{Image: "alpine"}})
 			hookID := appendRetryHook(workflow, "address")
-			results := StepResults(workflow)
+			results := fixtureStepResults(workflow)
 			check := stepByKey(t, results, "address/check")
 			get := stepByKey(t, results, "address/get")
 			if check.NodeID != "address-1-check" || get.NodeID != "address-1-get" || check.Status != stepStatus(final) {

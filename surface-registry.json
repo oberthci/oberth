@@ -764,10 +764,6 @@
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
-    "annotation:workflows.argoproj.io/pod-name-format": {
-      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
-      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
-    },
     "annotation:app.kubernetes.io/name": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"

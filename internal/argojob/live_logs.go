@@ -55,6 +55,7 @@ type stepLogFollowers struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	reader         PodLogFollower
+	steps          func(context.Context, *wfv1.Workflow) []StepResult
 	identity       podLogIdentityReader
 	pod            func(context.Context, string, string) (*corev1.Pod, error)
 	restored       map[string]runlog.PodLogCursor
@@ -107,17 +108,18 @@ func newStepLogFollowers(ctx context.Context, reader PodLogFollower, output io.W
 	if sink, ok := output.(runlog.PodLogSink); ok {
 		restored = sink.PodLogCursors()
 	}
-	return &stepLogFollowers{restored: restored, ctx: ctx, cancel: cancel, reader: reader, output: output, workers: map[string]*stepLogFollower{}, resumed: resumed, resumedAt: time.Now().UTC()}
+	return &stepLogFollowers{restored: restored, ctx: ctx, cancel: cancel, reader: reader, steps: func(_ context.Context, workflow *wfv1.Workflow) []StepResult { return stepAttempts(workflow) }, output: output, workers: map[string]*stepLogFollower{}, resumed: resumed, resumedAt: time.Now().UTC()}
 }
 
 func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
+	observed := logs.steps(logs.ctx, workflow)
 	// A journaled earlier attempt proves this logical step uses durable cursors.
 	// A later attempt without a cursor has never been retained and must start
 	// at its beginning, even if it started before controller adoption.
 	if logs.journaledSteps == nil {
 		logs.journaledSteps = map[string]bool{}
 	}
-	for _, step := range stepAttempts(workflow) {
+	for _, step := range observed {
 		saved, ok := logs.restored[string(workflow.UID)+"/"+step.NodeID+"/"+step.PodName]
 		if ok && saved.WorkflowUID == string(workflow.UID) && saved.Node == step.NodeID && saved.Pod == step.PodName {
 			logs.journaledSteps[step.Stage+"/"+step.Step] = true
@@ -133,7 +135,7 @@ func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
 			busySteps[worker.step.Stage+"/"+worker.step.Step] = true
 		}
 	}
-	for _, step := range stepAttempts(workflow) {
+	for _, step := range observed {
 		if step.PodName == "" || (step.Status != runprogress.StepQueued && step.Status != runprogress.StepRunning && !terminal(step.Status)) {
 			continue
 		}
@@ -426,7 +428,7 @@ func (worker *stepLogFollower) open(ctx context.Context, options corev1.PodLogOp
 		if err != nil {
 			return nil, err
 		}
-		if !stepPodIdentityBound(worker.workflow, node, pod) {
+		if !stepPodIdentityBound(worker.workflow, node, pod) || pod.Name != worker.step.PodName {
 			return nil, errLogIdentity
 		}
 		var status *corev1.ContainerStatus

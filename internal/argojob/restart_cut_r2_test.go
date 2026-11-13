@@ -49,9 +49,12 @@ func TestRestartCutR2RequiresPositivePodObservation(t *testing.T) {
 					return true, &corev1.PodList{ListMeta: metav1.ListMeta{ResourceVersion: "2"}}, nil
 				})
 			case "never-executed":
-				// Even a Pod-type node is not executed evidence without a Pod name.
+				// An unstarted node with no observed Pod is not execution evidence.
+				for id, node := range wf.Status.Nodes {
+					node.StartedAt = metav1.Time{}
+					wf.Status.Nodes[id] = node
+				}
 				completion := completionFor(wf)
-				completion.Steps[0].PodName = ""
 				c.collectRestartStepDiagnostics(t.Context(), wf, &completion, binding.RestartedAt)
 				completion.classifyRestartCut()
 				if completion.Interrupted || completion.Infrastructure || completion.Steps[0].Termination.Unavailable != "not-executed" {

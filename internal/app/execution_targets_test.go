@@ -443,6 +443,16 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 		"test": {ID: "test", Name: request.WorkflowName + ".test", DisplayName: "test", TemplateName: "test", BoundaryID: "root", Type: wfv1.NodeTypeDAG, Phase: wfv1.NodeSucceeded},
 		"unit": {ID: "unit", Name: request.WorkflowName + ".test.unit", DisplayName: "unit", TemplateName: "unit", BoundaryID: "test", Type: wfv1.NodeTypePod, Phase: wfv1.NodeSucceeded, StartedAt: start, FinishedAt: end},
 	}
+	// Native Pods carry the node identity regardless of their naming format.
+	if err := f.kube.Tracker().Add(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "observed-remote-step", Namespace: f.remote.object.Namespace, UID: "remote-step-uid",
+		Labels:          map[string]string{"workflows.argoproj.io/workflow": request.WorkflowName},
+		Annotations:     map[string]string{"workflows.argoproj.io/node-id": "unit", "workflows.argoproj.io/node-name": request.WorkflowName + ".test.unit"},
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: request.WorkflowName, UID: f.remote.object.UID, Controller: ptr.To(true)}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
 	child, err := restarted.routes.forName(ctx, request.WorkflowName, run.ID)
 	if err != nil {
 		t.Fatal(err)

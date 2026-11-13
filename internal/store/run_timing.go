@@ -149,7 +149,7 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 			if decodeTiming(oldJSON, &old) != nil || old.Validate() != nil {
 				return fmt.Errorf("%w: corrupt step timing", ErrInvalidState)
 			}
-			if old.WorkflowUID != value.WorkflowUID || old.Namespace != value.Namespace || old.WorkflowName != value.WorkflowName || old.PodName != value.PodName || old.Stage != value.Stage || old.Step != value.Step || old.Ordinal != value.Ordinal || (old.PodUID != "" && old.PodUID != value.PodUID && value.PodUID != "") {
+			if old.WorkflowUID != value.WorkflowUID || old.Namespace != value.Namespace || old.WorkflowName != value.WorkflowName || (old.PodName != "" && value.PodName != "" && old.PodName != value.PodName) || old.Stage != value.Stage || old.Step != value.Step || old.Ordinal != value.Ordinal || (old.PodUID != "" && old.PodUID != value.PodUID && value.PodUID != "") {
 				return fmt.Errorf("%w: step timing attempt changed", ErrInvalidState)
 			}
 			if old.Available {

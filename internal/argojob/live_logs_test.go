@@ -30,7 +30,7 @@ func stamped(lines ...string) string {
 }
 
 func testLogWorker(output io.Writer) *stepLogFollower {
-	owner := newStepLogFollowers(context.Background(), nil, output, nil)
+	owner := newFixtureLogFollowers(context.Background(), nil, output, nil)
 	return &stepLogFollower{owner: owner, step: StepResult{Stage: "build", Step: "compile"}}
 }
 
@@ -178,7 +178,7 @@ func TestWaitLiveBeforeCompletionAndFinalTail(t *testing.T) {
 	}
 	defer file.Close()
 	client := &liveWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: singleStepWorkflow()}, pending: true}
-	controller, err := NewController(client, nil, testConfig())
+	controller, err := NewController(client, fixtureKube(client.workflow), testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestWaitLiveBeforeCompletionAndFinalTail(t *testing.T) {
 func TestLiveCancellationAndAdoptionGap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	opened := make(chan struct{})
-	logs := newStepLogFollowers(ctx, func(ctx context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
+	logs := newFixtureLogFollowers(ctx, func(ctx context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 		close(opened)
 		reader, writer := io.Pipe()
 		go func() { <-ctx.Done(); _ = writer.CloseWithError(ctx.Err()) }()
@@ -280,7 +280,7 @@ func TestLiveCancellationAndAdoptionGap(t *testing.T) {
 	logs.close()
 	var output bytes.Buffer
 	var since *metav1.Time
-	restored := newStepLogFollowers(context.Background(), func(_ context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
+	restored := newFixtureLogFollowers(context.Background(), func(_ context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 		since = options.SinceTime
 		return io.NopCloser(strings.NewReader(stamped("historical"))), nil
 	}, &runBudgetWriter{destination: &output, remaining: 1 << 20}, []runprogress.Event{{Stage: "build", Step: "compile", Status: runprogress.StepRunning}})
@@ -352,7 +352,7 @@ func TestLiveFollowerConcurrencyBoundAndFastSteps(t *testing.T) {
 	var active, peak, calls atomic.Int32
 	ready := make(chan struct{}, maxLogFollowers)
 	release := make(chan struct{})
-	logs := newStepLogFollowers(context.Background(), func(_ context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
+	logs := newFixtureLogFollowers(context.Background(), func(_ context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 		if options.Follow {
 			t.Error("fast terminal step requested Follow")
 		}
@@ -398,7 +398,7 @@ func TestLiveFollowerConcurrencyBoundAndFastSteps(t *testing.T) {
 
 func TestLiveUnavailableLogsDoNotChangeCommandVerdict(t *testing.T) {
 	wf := singleStepWorkflow()
-	controller, err := NewController(&staticWorkflowClient{workflow: wf}, nil, testConfig())
+	controller, err := NewController(&staticWorkflowClient{workflow: wf}, fixtureKube(wf), testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestLiveRetryOrderWithEqualStartTimes(t *testing.T) {
 	wf := singleStepWorkflow()
 	prototype := wf.Status.Nodes["compile-pod"]
 	delete(wf.Status.Nodes, "compile-pod")
-	wf.Annotations[PodNameVersionAnnotation] = "v1"
+	wf.Annotations["workflows.argoproj.io/pod-name-format"] = "v1"
 	wf.Status.Nodes["retry"] = wfv1.NodeStatus{ID: "retry", Name: "wf.build.compile", Type: wfv1.NodeTypeRetry, BoundaryID: "build-burn", Children: []string{"z-first", "m-second", "a-last"}}
 	for i, id := range []string{"z-first", "m-second", "a-last"} {
 		node := prototype
@@ -441,7 +441,7 @@ func TestLiveRetryOrderWithEqualStartTimes(t *testing.T) {
 		wf.Status.Nodes[id] = node
 	}
 	var output bytes.Buffer
-	logs := newStepLogFollowers(context.Background(), func(_ context.Context, _, pod string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
+	logs := newFixtureLogFollowers(context.Background(), func(_ context.Context, _, pod string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(stamped(pod))), nil
 	}, &runBudgetWriter{destination: &output, remaining: 1 << 20}, nil)
 	logs.drain(wf)
@@ -459,7 +459,7 @@ func TestRetryOrderUsesOuterAttemptBeforeInnerAttempt(t *testing.T) {
 		wf.Status.Nodes[id] = node
 	}
 	var got []string
-	for _, step := range stepAttempts(wf) {
+	for _, step := range fixtureStepAttempts(wf) {
 		if step.Step == "push" {
 			got = append(got, step.NodeID)
 		}

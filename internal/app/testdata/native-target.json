@@ -211,10 +211,6 @@
               {
                 "name": "LEADER_ELECTION_DISABLE",
                 "value": "true"
-              },
-              {
-                "name": "POD_NAMES",
-                "value": "v2"
               }
             ],
             "resources": {},

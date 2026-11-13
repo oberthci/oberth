@@ -1,0 +1,138 @@
+package argojob
+
+import (
+	"context"
+	"io"
+	"strings"
+	"testing"
+
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/ptr"
+
+	"github.com/oberthci/oberth/internal/runprogress"
+)
+
+// Fixtures choose opaque Pod names; no copy of Argo's naming convention is used.
+func fixturePodName(_ *wfv1.Workflow, node wfv1.NodeStatus) string { return node.ID }
+
+func fixtureStepPods(workflow *wfv1.Workflow) map[string]*corev1.Pod {
+	if workflow.UID == "" {
+		workflow.UID = "fixture-workflow-uid"
+	}
+	pods := make(map[string]*corev1.Pod)
+	for _, node := range workflow.Status.Nodes {
+		if node.Type != wfv1.NodeTypePod {
+			continue
+		}
+		name := fixturePodName(workflow, node)
+		pods[name] = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: workflow.Namespace, UID: types.UID("fixture-" + name),
+			Labels:          map[string]string{"workflows.argoproj.io/workflow": workflow.Name},
+			Annotations:     map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: workflow.Name, UID: workflow.UID, Controller: ptr.To(true)}}}}
+	}
+	return pods
+}
+
+func fixtureKube(workflow *wfv1.Workflow) *fake.Clientset {
+	var objects []runtime.Object
+	for _, pod := range fixtureStepPods(workflow) {
+		objects = append(objects, pod)
+	}
+	return fake.NewClientset(objects...)
+}
+
+func fixtureStepAttempts(workflow *wfv1.Workflow) []StepResult {
+	steps := stepAttempts(workflow)
+	if workflow != nil {
+		bindStepPodNames(workflow, steps, fixtureStepPods(workflow))
+	}
+	return steps
+}
+
+func fixtureStepResults(workflow *wfv1.Workflow) []StepResult {
+	return finalStepResults(fixtureStepAttempts(workflow))
+}
+
+func newFixtureLogFollowers(ctx context.Context, reader PodLogFollower, output io.Writer, events []runprogress.Event) *stepLogFollowers {
+	logs := newStepLogFollowers(ctx, reader, output, events)
+	logs.steps = func(_ context.Context, workflow *wfv1.Workflow) []StepResult { return fixtureStepAttempts(workflow) }
+	return logs
+}
+
+func TestStepPodDiscoveryUsesAnnotationsAndOwnerWithOpaqueNames(t *testing.T) {
+	for _, format := range []string{"", "v1", "v2"} {
+		t.Run(format, func(t *testing.T) {
+			workflow, node, pod, _ := diagnosticFixture()
+			workflow.Annotations["workflows.argoproj.io/pod-name-format"] = format
+			pod.Name = "opaque-observed-step"
+			controller := &Controller{kube: fake.NewClientset(pod)}
+			steps := controller.observedStepAttempts(t.Context(), workflow)
+			if len(steps) != 1 || steps[0].PodName != pod.Name || steps[0].NodeID != node.ID {
+				t.Fatalf("Pod was not discovered from native identity: %+v", steps)
+			}
+			if StepResults(workflow)[0].PodName != "" {
+				t.Fatal("status-only projection guessed a Pod name")
+			}
+		})
+	}
+}
+
+func TestStepPodDiscoveryRejectsForeignAmbiguousAndMissingPods(t *testing.T) {
+	for _, mode := range []string{"absent", "owner", "namespace", "node-id", "node-name", "duplicate"} {
+		t.Run(mode, func(t *testing.T) {
+			workflow, _, pod, _ := diagnosticFixture()
+			pod.Name = "opaque-observed-step"
+			var objects []runtime.Object
+			switch mode {
+			case "owner":
+				pod.OwnerReferences[0].UID = "another-workflow"
+			case "namespace":
+				pod.Namespace = "another-namespace"
+			case "node-id":
+				pod.Annotations["workflows.argoproj.io/node-id"] = "another-node"
+			case "node-name":
+				pod.Annotations["workflows.argoproj.io/node-name"] = "another-attempt"
+			case "duplicate":
+				other := pod.DeepCopy()
+				other.Name, other.UID = "second-observed-step", "second-pod-uid"
+				objects = append(objects, other)
+			}
+			if mode != "absent" {
+				objects = append(objects, pod)
+			}
+			controller := &Controller{kube: fake.NewClientset(objects...)}
+			steps := controller.observedStepAttempts(t.Context(), workflow)
+			if len(steps) != 1 || steps[0].PodName != "" {
+				t.Fatalf("unsafe or guessed binding: %+v", steps)
+			}
+		})
+	}
+}
+
+func TestStepLogsAndDiagnosticsUseObservedOpaquePodName(t *testing.T) {
+	workflow, _, pod, _ := diagnosticFixture()
+	pod.Name = "opaque-observed-step"
+	var output strings.Builder
+	controller := &Controller{kube: fake.NewClientset(pod), logs: func(_ context.Context, _, name, _ string) (io.ReadCloser, error) {
+		if name != pod.Name {
+			t.Fatalf("log read guessed a name: %q", name)
+		}
+		return io.NopCloser(strings.NewReader("native step output\n")), nil
+	}}
+	if err := controller.publishLogs(t.Context(), workflow, newProgressReporter(&output), &output, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "native step output") {
+		t.Fatal(output.String())
+	}
+	completion := completionFor(workflow)
+	controller.collectStepDiagnostics(t.Context(), workflow, &completion)
+	if len(completion.Steps) != 1 || completion.Steps[0].PodName != pod.Name || !completion.Steps[0].Termination.Available {
+		t.Fatalf("diagnostic did not bind observed Pod: %+v", completion.Steps)
+	}
+}

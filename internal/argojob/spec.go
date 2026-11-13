@@ -1010,10 +1010,6 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	}
 	workflow.Annotations[runIDAnnotation] = request.RunID
 	workflow.Annotations[refAnnotation] = request.Ref
-	// Pin how the controller names step Pods, so the server can compute the
-	// Pod backing each node and stream its log. Left unpinned, the name would
-	// follow the controller's own POD_NAMES environment.
-	workflow.Annotations[PodNameVersionAnnotation] = podNameVersionV2
 	if len(declaredPaths) != 0 {
 		// Paths only, never values: this is the auditable statement of intent
 		// that the run's audit action records at submission time.

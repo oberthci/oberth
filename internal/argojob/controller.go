@@ -397,6 +397,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	var live *stepLogFollowers
 	if controller.followLogs != nil {
 		live = newStepLogFollowers(ctx, controller.followLogs, budget, events)
+		live.steps = controller.observedStepAttempts
 		live.identity = controller.logIdentity
 		live.pod = controller.logPod
 		live.goProxyURL = controller.config.GoProxyURL
@@ -582,7 +583,7 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 	// replaced them, and their failure and log are the evidence of why the
 	// step was retried. They are reported once and never decide a verdict.
 	// An attempt still non-terminal when superseded has nothing to report.
-	observed := stepAttempts(workflow)
+	observed := controller.observedStepAttempts(ctx, workflow)
 	steps := make([]StepResult, 0, len(observed))
 	for _, step := range observed {
 		if step.Superseded && terminal(step.Status) {

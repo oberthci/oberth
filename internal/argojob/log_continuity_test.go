@@ -51,7 +51,7 @@ func TestContinuityAdoptsDurableCursorAndRepeatedRecords(t *testing.T) {
 	sink := durableLogFixture(t)
 	wf := singleStepWorkflow()
 	wf.UID = "workflow-uid"
-	step := stepAttempts(wf)[0]
+	step := fixtureStepAttempts(wf)[0]
 	key := string(wf.UID) + "/" + step.NodeID + "/" + step.PodName
 	first := testLogWorker(&runBudgetWriter{destination: sink, remaining: 1 << 20})
 	first.step = step
@@ -71,7 +71,7 @@ func TestContinuityAdoptsDurableCursorAndRepeatedRecords(t *testing.T) {
 	defer j.Close()
 	events := []runprogress.Event{{Stage: step.Stage, Step: step.Step, Status: runprogress.StepPassed}}
 	reads := 0
-	logs := newStepLogFollowers(context.Background(), func(_ context.Context, _, _ string, o corev1.PodLogOptions) (io.ReadCloser, error) {
+	logs := newFixtureLogFollowers(context.Background(), func(_ context.Context, _, _ string, o corev1.PodLogOptions) (io.ReadCloser, error) {
 		reads++
 		if o.SinceTime == nil {
 			t.Error("adopted cursor missing")
@@ -85,7 +85,7 @@ func TestContinuityAdoptsDurableCursorAndRepeatedRecords(t *testing.T) {
 		t.Fatalf("replayed/missing output (%d): %s", reads, raw)
 	}
 	// A complete checkpoint never fetches or duplicates a terminal Pod on a later adoption.
-	again := newStepLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
+	again := newFixtureLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 		t.Error("complete cursor fetched again")
 		return nil, errors.New("Pod GCd")
 	}, &runBudgetWriter{destination: sink, remaining: 1 << 20}, events)
@@ -100,8 +100,8 @@ func TestContinuityKeepsStreamedLinesWhenPodGone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var output bytes.Buffer
 		wf := singleStepWorkflow()
-		step := stepAttempts(wf)[0]
-		logs := newStepLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
+		step := fixtureStepAttempts(wf)[0]
+		logs := newFixtureLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 			return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, step.PodName)
 		}, &runBudgetWriter{destination: &output, remaining: 1 << 20}, nil)
 		worker := &stepLogFollower{owner: logs, step: step, done: make(chan struct{})}
@@ -145,7 +145,7 @@ func TestContinuitySlowFinalEndpointAndSharedDrainBudget(t *testing.T) {
 			n.DisplayName = n.Name
 			wf.Status.Nodes[n.ID] = n
 		}
-		logs := newStepLogFollowers(context.Background(), func(ctx context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
+		logs := newFixtureLogFollowers(context.Background(), func(ctx context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}, &runBudgetWriter{destination: io.Discard, remaining: 1 << 20}, nil)
@@ -171,7 +171,7 @@ func TestContinuityFailedInitLogsExitAndMessage(t *testing.T) {
 	var output bytes.Buffer
 	var mu sync.Mutex
 	calls := 0
-	controller, err := NewController(&staticWorkflowClient{workflow: wf}, nil, testConfig())
+	controller, err := NewController(&staticWorkflowClient{workflow: wf}, fixtureKube(wf), testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
 	sink := durableLogFixture(t)
 	wf := singleStepWorkflow()
 	wf.UID = "retry-workflow"
-	wf.Annotations[PodNameVersionAnnotation] = "v1"
+	wf.Annotations["workflows.argoproj.io/pod-name-format"] = "v1"
 	prototype := wf.Status.Nodes["compile-pod"]
 	delete(wf.Status.Nodes, "compile-pod")
 	wf.Status.Nodes["retry"] = wfv1.NodeStatus{ID: "retry", Name: "wf.build.compile", Type: wfv1.NodeTypeRetry, BoundaryID: "build-burn", Children: []string{"attempt-0", "attempt-1"}}
@@ -323,7 +323,7 @@ func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
 		node.Phase = wfv1.NodeFailed
 		wf.Status.Nodes[id] = node
 	}
-	firstStep := stepAttempts(wf)[0]
+	firstStep := fixtureStepAttempts(wf)[0]
 	first := testLogWorker(&runBudgetWriter{destination: sink, remaining: 1 << 20})
 	first.step = firstStep
 	first.workflow = wf
@@ -336,7 +336,7 @@ func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
 	if err := first.flush(true); err != nil {
 		t.Fatal(err)
 	}
-	logs := newStepLogFollowers(t.Context(), func(_ context.Context, _, pod string, o corev1.PodLogOptions) (io.ReadCloser, error) {
+	logs := newFixtureLogFollowers(t.Context(), func(_ context.Context, _, pod string, o corev1.PodLogOptions) (io.ReadCloser, error) {
 		if pod != "attempt-1" {
 			t.Errorf("replayed completed attempt: %s", pod)
 		}
