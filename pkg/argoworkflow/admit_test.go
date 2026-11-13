@@ -381,7 +381,7 @@ spec:
                 image: docker.io/library/alpine:3.20@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
                 command: [/bin/true]
 `
-	refuse(t, nested, Policy{}, "outside the administrator prefix allowlist")
+	refuse(t, nested, Policy{RunnerImagePrefixes: []string{"golang:"}}, "outside the administrator prefix allowlist")
 }
 
 func TestAdmitRefusesExternalTemplateReferences(t *testing.T) {
@@ -407,7 +407,8 @@ func TestAdmitEnforcesTheRunnerImageAllowlist(t *testing.T) {
 	const admissibleImage = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const foreignImage = "docker.io/library/alpine:3.20@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	document := strings.Replace(admissibleDocument, admissibleImage, foreignImage, 1)
-	refuse(t, document, Policy{}, "outside the administrator prefix allowlist")
+	mustAdmit(t, document, Policy{})
+	refuse(t, document, Policy{RunnerImagePrefixes: []string{"golang:"}}, "outside the administrator prefix allowlist")
 	mustAdmit(t, document, Policy{RunnerImagePrefixes: []string{"docker.io/library/alpine:"}})
 }
 

@@ -37,8 +37,7 @@ const (
 type Policy struct {
 	Capability *Capability
 	// RunnerImagePrefixes is the administrator's image allowlist.
-	// Empty selects the built-in
-	// pipeline.DefaultRunnerImagePrefixes.
+	// Empty admits any image.
 	RunnerImagePrefixes []string
 }
 

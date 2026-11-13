@@ -46,7 +46,7 @@ func oberthConfig() Config {
 	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo"}}
 	// Oberth's own pipeline uses golang: for toolchain steps and aquasec/trivy:
 	// for the security scan (the official image, pinned by digest).
-	config.RunnerImagePrefixes = []string{"golang:", "debian:", "aquasec/trivy:"}
+	config.RunnerImagePrefixes = []string{}
 
 	return config
 }

@@ -128,8 +128,8 @@ func TestValidateAdmissionFailureReportsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	// No default runner-image-prefix ("golang:", "debian:", ...) matches "disallowed:".
-	err := runValidate(context.Background(), []string{root}, &output)
+	// An explicit operator prefix does not match the authored image.
+	err := runValidate(context.Background(), []string{"--runner-image-prefixes=debian:", root}, &output)
 	if err == nil {
 		t.Fatal("disallowed image accepted")
 	}

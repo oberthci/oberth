@@ -21,12 +21,8 @@ compatibility:
   auditDomain: oberth-audit-v1
   witnessKeyInfo: oberth-audit-witness-v1
 
-# Workflow templates declare their own images and commands.
-# The server admits only images matching one of these prefixes.
-runnerImagePrefixes:
-  - "golang:"
-  - "debian:"
-  - "aquasec/trivy:"
+# Optional image prefix allowlist. Empty admits any authored image.
+runnerImagePrefixes: []
 
 uplinkTokens:
   # New bearer tokens only: an existing token keeps the expiry it was minted
