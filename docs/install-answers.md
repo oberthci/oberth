@@ -72,6 +72,12 @@ contains `ok`, `context`, `server_url`, `mcp_url`, `git_url`, `ca_sha256`
 and the secrets path and digest when written. `checks` contains stable `code`,
 boolean `ok`, and `remedy` for failures.
 
+Clients use mutual TLS and need no uplink token. The result's `client_access`
+object reports `authentication: mutual_tls`, `token_required: false`, and a
+`next_step` directing the user to `/oberth:connect` with the server CA pin and
+local client certificate/key paths. The interactive Client access row gives
+the same next step; a missing bearer token does not prevent certificate access.
+
 ### Pending forge authorization
 
 When onboarding a forge, `upstream` contains `name`, `url`, `deploy_public_key`,

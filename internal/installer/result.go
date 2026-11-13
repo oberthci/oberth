@@ -72,22 +72,34 @@ func PrintReviewJSON(w io.Writer, cfg Config) error {
 	}{1, Review(cfg), true})
 }
 
+type InstallClientAccess struct {
+	Authentication string `json:"authentication"`
+	TokenRequired  bool   `json:"token_required"`
+	NextStep       string `json:"next_step"`
+}
+
+func certificateClientAccess() *InstallClientAccess {
+	return &InstallClientAccess{Authentication: "mutual_tls", TokenRequired: false,
+		NextStep: "Run /oberth:connect with the server CA pin and local client certificate/key paths."}
+}
+
 type InstallResult struct {
-	Upstream      *InstallUpstream `json:"upstream,omitempty"`
-	Cluster       *ClusterIdentity `json:"cluster,omitempty"`
-	SecretsValues []string         `json:"secrets_values,omitempty"`
-	Review        *InstallReview   `json:"review,omitempty"`
-	Version       int              `json:"version"`
-	OK            bool             `json:"ok"`
-	Context       string           `json:"context"`
-	ServerURL     string           `json:"server_url,omitempty"`
-	MCPURL        string           `json:"mcp_url,omitempty"`
-	GitURL        string           `json:"git_url,omitempty"`
-	CAPin         string           `json:"ca_sha256,omitempty"`
-	FirstUplink   string           `json:"first_uplink,omitempty"`
-	SecretsFile   string           `json:"secrets_file,omitempty"`
-	SecretsSHA256 string           `json:"secrets_sha256,omitempty"`
-	Checks        []CheckResult    `json:"checks"`
+	ClientAccess  *InstallClientAccess `json:"client_access,omitempty"`
+	Upstream      *InstallUpstream     `json:"upstream,omitempty"`
+	Cluster       *ClusterIdentity     `json:"cluster,omitempty"`
+	SecretsValues []string             `json:"secrets_values,omitempty"`
+	Review        *InstallReview       `json:"review,omitempty"`
+	Version       int                  `json:"version"`
+	OK            bool                 `json:"ok"`
+	Context       string               `json:"context"`
+	ServerURL     string               `json:"server_url,omitempty"`
+	MCPURL        string               `json:"mcp_url,omitempty"`
+	GitURL        string               `json:"git_url,omitempty"`
+	CAPin         string               `json:"ca_sha256,omitempty"`
+	FirstUplink   string               `json:"first_uplink,omitempty"`
+	SecretsFile   string               `json:"secrets_file,omitempty"`
+	SecretsSHA256 string               `json:"secrets_sha256,omitempty"`
+	Checks        []CheckResult        `json:"checks"`
 }
 
 func (r *InstallResult) check(code string, ok bool, remedy string) {
@@ -128,7 +140,7 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 	progress := host.Output
 	host.Output = io.Discard
 	host = host.withDefaults()
-	r := InstallResult{Version: 1, OK: true, Context: cfg.ContextName, Checks: []CheckResult{}}
+	r := InstallResult{ClientAccess: certificateClientAccess(), Version: 1, OK: true, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if cfg.Namespace == "" {
 		cfg.Namespace = DefaultNamespace
 	}
@@ -386,7 +398,7 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 		}
 		return PrintReviewJSON(output, cfg)
 	}
-	result := InstallResult{Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
+	result := InstallResult{ClientAccess: certificateClientAccess(), Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
 		result = verifyInstall(ctx, cfg, deps, cfg.existingRelease)
 		if cfg.existingRelease && measured != nil {
