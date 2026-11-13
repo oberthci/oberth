@@ -10,20 +10,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// requestWorkflowStop patches only the native shutdown strategy. Callers first
-// verify run ownership. UID and resourceVersion fence replacement and races.
-func requestWorkflowStop(ctx context.Context, client WorkflowClient, workflow *wfv1.Workflow) (*wfv1.Workflow, error) {
-	if workflow.Status.Phase.Completed() || workflow.Spec.Shutdown == wfv1.ShutdownStrategyStop {
+// requestWorkflowShutdown patches only the native shutdown strategy. Callers first
+// verify run ownership. UID fences replacement; status churn does not reject a shutdown.
+func requestWorkflowShutdown(ctx context.Context, client WorkflowClient, workflow *wfv1.Workflow, strategy wfv1.ShutdownStrategy) (*wfv1.Workflow, error) {
+	if workflow.Status.Phase.Completed() || workflow.Spec.Shutdown == strategy || workflow.Spec.Shutdown == wfv1.ShutdownStrategyTerminate {
 		return workflow, nil
 	}
 	if workflow.UID == "" {
 		return nil, fmt.Errorf("argojob: cannot Stop Workflow %s without a UID", workflow.Name)
 	}
 	metadata := map[string]any{"uid": workflow.UID}
-	if workflow.ResourceVersion != "" {
-		metadata["resourceVersion"] = workflow.ResourceVersion
-	}
-	patch, err := json.Marshal(map[string]any{"metadata": metadata, "spec": map[string]any{"shutdown": wfv1.ShutdownStrategyStop}})
+	patch, err := json.Marshal(map[string]any{"metadata": metadata, "spec": map[string]any{"shutdown": strategy}})
 	if err != nil {
 		return nil, err
 	}

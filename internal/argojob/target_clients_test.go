@@ -352,7 +352,7 @@ func TestTargetConfigurationMigrationRetainsOriginalObjectIdentity(t *testing.T)
 		t.Fatal("migration accepted replacement UID")
 	}
 	remote.object = created.DeepCopy()
-	if _, err := requestWorkflowStop(t.Context(), migrated.WorkflowClient(), created); err != nil {
+	if _, err := requestWorkflowShutdown(t.Context(), migrated.WorkflowClient(), created, wfv1.ShutdownStrategyStop); err != nil {
 		t.Fatal("original fenced Stop failed", err)
 	}
 	if remote.posts != 1 || remote.deletes != 0 || remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop {

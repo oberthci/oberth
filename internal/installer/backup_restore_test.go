@@ -412,10 +412,10 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			c.t.Fatal(err)
 		}
 		index := slices.IndexFunc(c.workflows, func(wf runWorkflow) bool { return wf.Name == args[2] })
-		if index < 0 || patch.Metadata.UID != c.workflows[index].UID || patch.Metadata.ResourceVersion != c.workflows[index].ResourceVersion || patch.Spec.Shutdown != "Stop" {
+		if index < 0 || patch.Metadata.UID != c.workflows[index].UID || patch.Spec.Shutdown != "Terminate" {
 			c.t.Fatalf("restore lost native Stop or its object fence: %s", args[7])
 		}
-		c.workflows[index].Shutdown = "Stop"
+		c.workflows[index].Shutdown = "Terminate"
 		c.stopped = append(c.stopped, args[2])
 		return nil, nil
 	case "delete":
@@ -865,7 +865,7 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 		t.Fatalf("secret-access ConfigMap = %v, %v", cm, err)
 	}
 
-	// Only the Workflow unknown to the restored database receives native Stop.
+	// Only the Workflow unknown to the restored database receives native Terminate.
 	if len(target.deleted) != 0 || !slices.Equal(target.stopped, []string{"oberth-oberth-orphan"}) {
 		t.Fatalf("deleted=%v stopped=%v", target.deleted, target.stopped)
 	}

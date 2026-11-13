@@ -165,7 +165,7 @@ func (c *TargetClients) verify(ctx context.Context, kind string, object metav1.O
 			return fmt.Errorf("%w: retained Workflow intent is invalid", ErrTargetUncertain)
 		}
 		observed := actual.DeepCopy()
-		if observed.Spec.Shutdown == wfv1.ShutdownStrategyStop {
+		if observed.Spec.Shutdown == wfv1.ShutdownStrategyStop || observed.Spec.Shutdown == wfv1.ShutdownStrategyTerminate {
 			// A native Stop changes execution control, not the admitted graph.
 			observed.Spec.Shutdown = intended.Spec.Shutdown
 		}
@@ -507,7 +507,7 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 			return false, err
 		}
 		if !workflow.Status.Phase.Completed() {
-			_, err := requestWorkflowStop(ctx, c.workflows, workflow)
+			_, err := requestWorkflowShutdown(ctx, c.workflows, workflow, wfv1.ShutdownStrategyStop)
 			return false, err
 		}
 	}
@@ -547,7 +547,7 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 		if r.Kind == "Workflow" {
 			workflow := object.(*wfv1.Workflow)
 			if !workflow.Status.Phase.Completed() {
-				_, err := requestWorkflowStop(ctx, c.workflows, workflow)
+				_, err := requestWorkflowShutdown(ctx, c.workflows, workflow, wfv1.ShutdownStrategyStop)
 				return false, err // Keep its children and custody through onExit.
 			}
 			continue // Only Argo TTL deletes a completed Workflow.

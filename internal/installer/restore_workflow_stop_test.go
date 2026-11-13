@@ -5,31 +5,35 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func TestRestoreOrphanedWorkflowsUseFencedStop(t *testing.T) {
-	for _, mode := range []string{"running", "already-stopped", "terminal", "replacement", "changed-version", "missing-uid", "missing-version", "missing-run"} {
+func TestRestoreOrphanedWorkflowsUseFencedTerminate(t *testing.T) {
+	for _, mode := range []string{"running", "already-stopped", "already-terminated", "terminal", "replacement", "changed-version", "missing-uid", "missing-run"} {
 		t.Run(mode, func(t *testing.T) {
 			observed := runWorkflow{Name: "orphan", RunID: "run", UID: "original", ResourceVersion: "7", Phase: "Running"}
-			currentUID, currentVersion := observed.UID, observed.ResourceVersion
+			currentUID := observed.UID
 			wantError, wantPatches := false, 1
 			switch mode {
 			case "already-stopped":
-				observed.Shutdown, wantPatches = "Stop", 0
+				observed.Shutdown = "Stop"
+			case "already-terminated":
+				observed.Shutdown, wantPatches = "Terminate", 0
 			case "terminal":
 				observed.Phase, wantPatches = "Failed", 0
 			case "replacement":
 				currentUID, wantError = "replacement", true
 			case "changed-version":
-				currentVersion, wantError = "8", true
+				observed.ResourceVersion = "8"
 			case "missing-uid":
 				observed.UID, wantError, wantPatches = "", true, 0
-			case "missing-version":
-				observed.ResourceVersion, wantError, wantPatches = "", true, 0
 			case "missing-run":
 				observed.RunID, wantError, wantPatches = "", true, 0
 			}
@@ -52,16 +56,16 @@ func TestRestoreOrphanedWorkflowsUseFencedStop(t *testing.T) {
 				if err := json.Unmarshal([]byte(args[7]), &body); err != nil {
 					t.Fatal(err)
 				}
-				if len(body) != 2 || len(body["metadata"]) != 2 || len(body["spec"]) != 1 || body["spec"]["shutdown"] != "Stop" || body["metadata"]["uid"] != "original" || body["metadata"]["resourceVersion"] != "7" {
-					t.Fatalf("Stop rewrote the graph or lost its object fence: %s", args[7])
+				if len(body) != 2 || len(body["metadata"]) != 1 || len(body["spec"]) != 1 || body["spec"]["shutdown"] != "Terminate" || body["metadata"]["uid"] != "original" {
+					t.Fatalf("Terminate rewrote the graph or lost its object fence: %s", args[7])
 				}
-				if body["metadata"]["uid"] != currentUID || body["metadata"]["resourceVersion"] != currentVersion {
+				if body["metadata"]["uid"] != currentUID {
 					return nil, errors.New("object precondition conflict")
 				}
 				shutdown = body["spec"]["shutdown"]
 				return nil, nil
 			}}}
-			err := stopWorkflows(t.Context(), deps, "pipelines", []runWorkflow{observed})
+			err := terminateOrphanedWorkflows(t.Context(), deps, "pipelines", []runWorkflow{observed})
 			if (err != nil) != wantError || patches != wantPatches || deletes != 0 {
 				t.Fatalf("patches=%d deletes=%d error=%v", patches, deletes, err)
 			}
@@ -69,12 +73,12 @@ func TestRestoreOrphanedWorkflowsUseFencedStop(t *testing.T) {
 				t.Fatal("conflict or missing custody changed the Workflow")
 			}
 			if !wantError && wantPatches == 1 {
-				if shutdown != "Stop" {
-					t.Fatal("native Stop was not applied")
+				if shutdown != "Terminate" {
+					t.Fatal("native Terminate was not applied")
 				}
 				observed.Shutdown, observed.ResourceVersion = shutdown, "8"
-				if err := stopWorkflows(t.Context(), deps, "pipelines", []runWorkflow{observed}); err != nil || patches != 1 {
-					t.Fatal("double Stop was not idempotent", err)
+				if err := terminateOrphanedWorkflows(t.Context(), deps, "pipelines", []runWorkflow{observed}); err != nil || patches != 1 {
+					t.Fatal("double Terminate was not idempotent", err)
 				}
 			}
 		})
@@ -109,7 +113,36 @@ func TestRestoreKeepsServerStoppedWhenWorkflowStopListingFails(t *testing.T) {
 	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: 10 * time.Second}
 	cfg.applyDefaults()
 	err := runRestore(t.Context(), cfg, deps)
-	if err == nil || !strings.Contains(err.Error(), "list Workflows for Stop") || !slices.Equal(target.scales, []int32{0}) || len(target.stopped) != 0 || len(target.deleted) != 0 {
-		t.Fatalf("restore resumed without Stop custody: scales=%v stopped=%v deleted=%v error=%v", target.scales, target.stopped, target.deleted, err)
+	if err == nil || !strings.Contains(err.Error(), "list Workflows for Terminate") || !slices.Equal(target.scales, []int32{0}) || len(target.stopped) != 0 || len(target.deleted) != 0 {
+		t.Fatalf("restore resumed without Terminate custody: scales=%v stopped=%v deleted=%v error=%v", target.scales, target.stopped, target.deleted, err)
+	}
+}
+
+func TestRestoreShutdownConflictRereadsUID(t *testing.T) {
+	for _, replacement := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same-object-churn", true: "replacement"}[replacement], func(t *testing.T) {
+			requests := 0
+			deps := backupDeps{Deps: Deps{RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+				requests++
+				if requests == 1 {
+					return nil, apierrors.NewConflict(schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}, "orphan", errors.New("status churn"))
+				}
+				return nil, nil
+			}}, runStdout: func(context.Context, []byte, string, ...string) ([]byte, error) {
+				uid := "original"
+				if replacement {
+					uid = "replacement"
+				}
+				return []byte(fmt.Sprintf(`{"items":[{"metadata":{"name":"orphan","uid":%q,"resourceVersion":"99","labels":{"oberth.ci/run":"run"}},"status":{"phase":"Running"}}]}`, uid)), nil
+			}}
+			err := terminateOrphanedWorkflows(t.Context(), deps, "pipeline", []runWorkflow{{Name: "orphan", RunID: "run", UID: "original", ResourceVersion: "1", Phase: "Running"}})
+			if replacement {
+				if err == nil || requests != 1 {
+					t.Fatalf("replacement was patched: calls=%d err=%v", requests, err)
+				}
+			} else if err != nil || requests != 2 {
+				t.Fatalf("churn prevented shutdown: calls=%d err=%v", requests, err)
+			}
+		})
 	}
 }

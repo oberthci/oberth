@@ -595,17 +595,17 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	if parts.History {
 		workflows, err := listRunWorkflows(ctx, deps, cfg.ArgoNamespace)
 		if err != nil {
-			return stopped(fmt.Errorf("list Workflows for Stop: %w", err))
+			return stopped(fmt.Errorf("list Workflows for Terminate: %w", err))
 		}
 		orphans, err := orphanedWorkflows(ctx, workflows, archive, cfg.InterruptQueued)
 		if err != nil {
 			return stopped(err)
 		}
-		if err := stopWorkflows(ctx, deps, cfg.ArgoNamespace, orphans); err != nil {
+		if err := terminateOrphanedWorkflows(ctx, deps, cfg.ArgoNamespace, orphans); err != nil {
 			return stopped(err)
 		}
 		if len(orphans) > 0 {
-			_, _ = fmt.Fprintf(w, "  ✓ requested Argo Stop for %d orphaned workflows (completed Workflows stay for TTL cleanup)\n", len(orphans))
+			_, _ = fmt.Fprintf(w, "  ✓ requested Argo Terminate for %d orphaned workflows (exit handlers skipped; completed Workflows stay for TTL cleanup)\n", len(orphans))
 		}
 	}
 
@@ -1057,31 +1057,51 @@ func orphanedWorkflows(ctx context.Context, workflows []runWorkflow, archive res
 	return orphans, nil
 }
 
-// stopWorkflows requests native Stop on the exact objects listed after the
-// server stopped. UID and resourceVersion prevent a replacement or changed
-// ownership from being patched. Argo runs exit handlers and owns TTL cleanup.
-func stopWorkflows(ctx context.Context, deps backupDeps, namespace string, workflows []runWorkflow) error {
+// terminateOrphanedWorkflows uses native immediate shutdown because restored
+// history has no owner that can safely supply credentials to their exit Pods.
+// UID fences replacement; conflicts trigger a bounded identity re-read.
+func terminateOrphanedWorkflows(ctx context.Context, deps backupDeps, namespace string, workflows []runWorkflow) error {
 	for _, wf := range workflows {
-		switch wf.Phase {
-		case "Succeeded", "Failed", "Error":
+		if wf.Phase == "Succeeded" || wf.Phase == "Failed" || wf.Phase == "Error" || wf.Shutdown == "Terminate" {
 			continue
 		}
-		if wf.Shutdown == "Stop" {
-			continue
+		if wf.Name == "" || wf.RunID == "" || wf.UID == "" {
+			return fmt.Errorf("terminate orphaned Workflow %s: original object identity required", wf.Name)
 		}
-		if wf.Name == "" || wf.RunID == "" || wf.UID == "" || wf.ResourceVersion == "" {
-			return fmt.Errorf("stop orphaned Workflow %s: original object identity required", wf.Name)
-		}
-		patch, err := json.Marshal(map[string]any{
-			"metadata": map[string]string{"uid": wf.UID, "resourceVersion": wf.ResourceVersion},
-			"spec":     map[string]string{"shutdown": "Stop"},
-		})
+		patch, err := json.Marshal(map[string]any{"metadata": map[string]string{"uid": wf.UID}, "spec": map[string]string{"shutdown": "Terminate"}})
 		if err != nil {
 			return err
 		}
-		args := kubectlContextArgs(deps.ContextName, "patch", "workflows.argoproj.io", wf.Name, "-n", namespace, "--type=merge", "-p", string(patch))
-		if out, err := deps.RunCommand(ctx, nil, "kubectl", args...); err != nil {
-			return fmt.Errorf("stop orphaned Workflow %s: %w%s", wf.Name, err, commandOutputSuffix(out))
+		for attempt := 0; attempt < 3; attempt++ {
+			args := kubectlContextArgs(deps.ContextName, "patch", "workflows.argoproj.io", wf.Name, "-n", namespace, "--type=merge", "-p", string(patch))
+			output, err := deps.RunCommand(ctx, nil, "kubectl", args...)
+			if err == nil {
+				break
+			}
+			if attempt == 2 || (!apierrors.IsConflict(err) && !strings.Contains(string(output), "(Conflict)")) {
+				return fmt.Errorf("terminate orphaned Workflow %s: %w%s", wf.Name, err, commandOutputSuffix(output))
+			}
+			listed, readErr := listRunWorkflows(ctx, deps, namespace)
+			if readErr != nil {
+				return readErr
+			}
+			found := false
+			for _, current := range listed {
+				if current.Name != wf.Name {
+					continue
+				}
+				found = true
+				if current.UID != wf.UID || current.RunID != wf.RunID {
+					return fmt.Errorf("terminate orphaned Workflow %s: original object was replaced", wf.Name)
+				}
+				if current.Phase == "Succeeded" || current.Phase == "Failed" || current.Phase == "Error" || current.Shutdown == "Terminate" {
+					found = false
+				}
+				break
+			}
+			if !found {
+				break
+			}
 		}
 	}
 	return nil

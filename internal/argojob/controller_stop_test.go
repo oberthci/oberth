@@ -50,7 +50,7 @@ func TestCancelUsesNativeStopAndKeepsExitHandlers(t *testing.T) {
 					if err := json.Unmarshal(body["metadata"], &metadata); err != nil {
 						t.Fatal(err)
 					}
-					if metadata["uid"] != "workflow-uid" || metadata["resourceVersion"] != "1" || string(body["spec"]) != `{"shutdown":"Stop"}` {
+					if metadata["uid"] != "workflow-uid" || metadata["resourceVersion"] != "" || string(body["spec"]) != `{"shutdown":"Stop"}` {
 						t.Fatalf("patch lost its identity fence or rewrote a field: %s", action.(ktesting.PatchAction).GetPatch())
 					}
 				}
@@ -92,5 +92,66 @@ func TestCancelRefusesForeignOrReplacedWorkflow(t *testing.T) {
 				t.Fatal("replacement was stopped", err)
 			}
 		})
+	}
+}
+
+func TestNativeTerminateSkipsExitHandlersAndCannotBeDowngraded(t *testing.T) {
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "release", Namespace: "pipeline", UID: "original", ResourceVersion: "1", Annotations: map[string]string{runIDAnnotation: "run"}}, Spec: wfv1.WorkflowSpec{OnExit: "granted-publish"}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
+	client := argofake.NewSimpleClientset(workflow)
+	controller := &Controller{workflows: client.ArgoprojV1alpha1().Workflows(workflow.Namespace)}
+	if err := controller.Cancel(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Terminate(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Cancel(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := controller.workflows.Get(t.Context(), workflow.Name, metav1.GetOptions{})
+	if err != nil || observed.Spec.Shutdown != wfv1.ShutdownStrategyTerminate || observed.Spec.OnExit != "granted-publish" {
+		t.Fatalf("native immediate stop was weakened: %+v %v", observed, err)
+	}
+	patches := 0
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "delete" {
+			t.Fatal("shutdown deleted a Workflow")
+		}
+		if action.GetVerb() == "patch" {
+			patches++
+			var body struct {
+				Metadata map[string]string
+				Spec     map[string]string
+			}
+			if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Metadata) != 1 || body.Metadata["uid"] != "original" || len(body.Spec) != 1 {
+				t.Fatalf("shutdown lost UID-only fence: %+v", body)
+			}
+		}
+	}
+	if patches != 2 {
+		t.Fatalf("Stop, Terminate, Stop issued %d patches; want monotonic escalation", patches)
+	}
+}
+
+func TestNativeShutdownRetriesConflictWithoutResourceVersionFence(t *testing.T) {
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "workflow", Namespace: "pipeline", UID: "original", ResourceVersion: "1", Annotations: map[string]string{runIDAnnotation: "run"}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
+	client := argofake.NewSimpleClientset(workflow)
+	patches := 0
+	client.PrependReactor("patch", "workflows", func(ktesting.Action) (bool, runtime.Object, error) {
+		patches++
+		if patches == 1 {
+			return true, nil, apierrors.NewConflict(workflowTestResource, workflow.Name, errors.New("status changed"))
+		}
+		return false, nil, nil
+	})
+	controller := &Controller{workflows: client.ArgoprojV1alpha1().Workflows(workflow.Namespace)}
+	if err := controller.Terminate(t.Context(), workflow.Name, "run"); err != nil {
+		t.Fatal(err)
+	}
+	if patches != 2 {
+		t.Fatalf("conflict attempts=%d", patches)
 	}
 }
