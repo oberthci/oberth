@@ -54,7 +54,7 @@ func TestExecutionTargetSubmitsExactlyAuthoredPlacement(t *testing.T) {
 				pod.UID = "seed-uid"
 				pod.ResourceVersion = "1"
 				pod.Status.Phase = corev1.PodRunning
-				pod.Spec.Tolerations = p.admittedSeedTolerations()
+				pod.Spec.Tolerations = []corev1.Toleration{{Key: "operator.example/dedicated", Operator: corev1.TolerationOpExists}}
 				return false, nil, nil
 			})
 			kube.PrependReactor("get", "pods", func(a ktesting.Action) (bool, runtime.Object, error) {

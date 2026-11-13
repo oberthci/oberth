@@ -531,40 +531,6 @@ func placementOwner(owners []metav1.OwnerReference, kind, name, uid string) bool
 	return len(owners) == 1 && owners[0].Kind == kind && owners[0].Name == name && string(owners[0].UID) == uid && owners[0].Controller != nil && *owners[0].Controller
 }
 
-// Exact five-field equality retains nil versus zero seconds and refuses repeated
-// key/effect identities before comparison. API decoding already validates raw
-// Pod JSON; deployment configuration uses the duplicate-aware decoder above.
-func equalPlacementTolerations(actual, expected []corev1.Toleration) bool {
-	if len(actual) != len(expected) {
-		return false
-	}
-	want := map[string]corev1.Toleration{}
-	for _, t := range expected {
-		want[t.Key+"\x00"+string(t.Effect)] = t
-	}
-	for _, t := range actual {
-		key := t.Key + "\x00" + string(t.Effect)
-		e, ok := want[key]
-		if !ok || t.Key == "" || t.Effect == "" || !reflect.DeepEqual(t, e) {
-			return false
-		}
-		delete(want, key)
-	}
-	return len(want) == 0
-}
-func (p *ExecutionPlacement) admittedSeedTolerations() []corev1.Toleration {
-	var expected []corev1.Toleration
-	add := func(key string, effect corev1.TaintEffect, seconds *int64) {
-		expected = append(expected, corev1.Toleration{Key: "node.kubernetes.io/" + key, Operator: corev1.TolerationOpExists, Effect: effect, TolerationSeconds: seconds})
-	}
-	add("not-ready", corev1.TaintEffectNoExecute, ptr.To(int64(300)))
-	add("unreachable", corev1.TaintEffectNoExecute, ptr.To(int64(300)))
-	if p.document.AdmissionProfile == "kube1357-dts300-ptr-empty" {
-		add("memory-pressure", corev1.TaintEffectNoSchedule, nil)
-	}
-	return expected
-}
-
 // Verify identity without constraining Kubernetes placement. Retained Workflow
 // intents carry their original authority digest even after configuration removal.
 func (p *ExecutionPlacement) verifyWorkflowIdentity(ctx context.Context, config Config, wf *wfv1.Workflow) error {
@@ -662,7 +628,7 @@ func (p *ExecutionPlacement) VerifyTarget(config *rest.Config) error {
 	return nil
 }
 
-func verifyPlacedSeed(expected, actual *corev1.Pod, p *ExecutionPlacement, scheduled bool) error {
+func verifyPlacedSeed(expected, actual *corev1.Pod, p *ExecutionPlacement) error {
 	if actual == nil || actual.UID == "" || actual.ResourceVersion == "" || actual.Name != expected.Name || actual.Namespace != expected.Namespace || len(actual.OwnerReferences) != 0 || actual.DeletionTimestamp != nil || !reflect.DeepEqual(actual.Labels, expected.Labels) || len(actual.Annotations) != 0 {
 		return errors.New("argojob: seed API identity differs")
 	}
@@ -671,27 +637,31 @@ func verifyPlacedSeed(expected, actual *corev1.Pod, p *ExecutionPlacement, sched
 	if err := p.validate(); err != nil {
 		return err
 	}
-	tolerations := p.admittedSeedTolerations()
-	if !equalPlacementTolerations(got.Spec.Tolerations, tolerations) {
-		return errors.New("argojob: seed admission tolerations differ")
-	}
-	want.Spec.Tolerations = nil
-	got.Spec.Tolerations = nil
-	if scheduled {
-		if got.Spec.NodeName == "" {
-			return errors.New("argojob: running seed has no scheduled node")
-		}
-		want.Spec.NodeName = got.Spec.NodeName
-	} else if got.Spec.NodeName != "" {
-		return errors.New("argojob: seed create was prescheduled")
-	}
 	normalizeSeedDefaults(&want.Spec)
 	normalizeSeedDefaults(&got.Spec)
+	clearSeedPlacement(&want.Spec)
+	clearSeedPlacement(&got.Spec)
 	if !apiequality.Semantic.DeepEqual(want.Spec, got.Spec) {
 		return errors.New("argojob: seed executable, resources, storage or isolation differs")
 	}
 	return nil
 }
+
+// Cluster admission owns seed placement. These fields confer no API, file,
+// executable or ServiceAccount authority; all other fields remain compared.
+func clearSeedPlacement(spec *corev1.PodSpec) {
+	spec.NodeName = ""
+	spec.NodeSelector = nil
+	spec.Affinity = nil
+	spec.Tolerations = nil
+	spec.TopologySpreadConstraints = nil
+	spec.SchedulingGates = nil
+	spec.SchedulerName = ""
+	spec.PriorityClassName = ""
+	spec.Priority = nil
+	spec.PreemptionPolicy = nil
+}
+
 func normalizeSeedDefaults(spec *corev1.PodSpec) {
 	if spec.DNSPolicy == "" {
 		spec.DNSPolicy = corev1.DNSClusterFirst

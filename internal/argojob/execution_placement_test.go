@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -220,30 +219,6 @@ func TestExecutionPlacementConfigurationAndEnvironment(t *testing.T) {
 	}
 }
 
-func TestExecutionTargetSeedAdmissionDefaults(t *testing.T) {
-	config, _, _ := placementFixture(t)
-	p := config.ExecutionPlacement
-	for _, profile := range []string{"kube1357-dts300", "kube1357-dts300-ptr-empty"} {
-		p.document.AdmissionProfile = profile
-		expected := p.admittedSeedTolerations()
-		reordered := append([]corev1.Toleration{}, expected...)
-		slices.Reverse(reordered)
-		if !equalPlacementTolerations(reordered, expected) {
-			t.Fatal("default order changed identity")
-		}
-		for i := range expected {
-			mutated := append([]corev1.Toleration{}, expected...)
-			mutated[i].TolerationSeconds = ptr.To(int64(0))
-			if equalPlacementTolerations(mutated, expected) {
-				t.Fatal("changed admission default accepted")
-			}
-		}
-		if equalPlacementTolerations(append(expected, corev1.Toleration{Operator: corev1.TolerationOpExists}), expected) {
-			t.Fatal("broad injected toleration accepted")
-		}
-	}
-}
-
 func placementHashRaw(body []byte) string { h := sha256.Sum256(body); return hex.EncodeToString(h[:]) }
 
 func TestExecutionPlacementSeedCreateAndReadback(t *testing.T) {
@@ -255,7 +230,9 @@ func TestExecutionPlacementSeedCreateAndReadback(t *testing.T) {
 		if pod.Labels["oberth.ci/component"] == "source-seed" {
 			pod.UID = "seed-uid"
 			pod.ResourceVersion = "1"
-			pod.Spec.Tolerations = config.ExecutionPlacement.admittedSeedTolerations()
+			pod.Spec.NodeSelector = map[string]string{"operator.example/node-pool": "dedicated"}
+			pod.Spec.Tolerations = []corev1.Toleration{{Key: "operator.example/dedicated", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}
+			pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{{Key: "operator.example/node-pool", Operator: corev1.NodeSelectorOpIn, Values: []string{"dedicated"}}}}}}}}
 			submitted = pod.DeepCopy()
 		}
 		return false, nil, nil
@@ -266,18 +243,18 @@ func TestExecutionPlacementSeedCreateAndReadback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submitted == nil || len(submitted.Spec.NodeSelector) != 0 {
-		t.Fatal("target injected seed placement")
+	if submitted == nil || submitted.Spec.NodeSelector["operator.example/node-pool"] != "dedicated" {
+		t.Fatal("admission-added seed placement was lost")
 	}
 	readback := created.DeepCopy()
 	readback.Spec.NodeName = "any-scheduled-node"
-	if err := verifyPlacedSeed(created, readback, config.ExecutionPlacement, true); err != nil {
+	if err := verifyPlacedSeed(created, readback, config.ExecutionPlacement); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutate := range []func(*corev1.Pod){func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/true"} }, func(p *corev1.Pod) { p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "INJECTED", Value: "1"}} }, func(p *corev1.Pod) { p.Spec.Containers[0].Resources = corev1.ResourceRequirements{} }, func(p *corev1.Pod) { p.Spec.Volumes[0].PersistentVolumeClaim.ClaimName = "foreign" }, func(p *corev1.Pod) { p.Spec.HostNetwork = true }, func(p *corev1.Pod) { p.Spec.Tolerations = p.Spec.Tolerations[:1] }} {
+	for _, mutate := range []func(*corev1.Pod){func(p *corev1.Pod) { p.Spec.Containers[0].Command = []string{"/bin/true"} }, func(p *corev1.Pod) { p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "INJECTED", Value: "1"}} }, func(p *corev1.Pod) { p.Spec.Containers[0].Resources = corev1.ResourceRequirements{} }, func(p *corev1.Pod) { p.Spec.Volumes[0].PersistentVolumeClaim.ClaimName = "foreign" }, func(p *corev1.Pod) { p.Spec.HostNetwork = true }, func(p *corev1.Pod) { p.Spec.ServiceAccountName = "foreign" }} {
 		pod := readback.DeepCopy()
 		mutate(pod)
-		if err := verifyPlacedSeed(created, pod, config.ExecutionPlacement, true); err == nil {
+		if err := verifyPlacedSeed(created, pod, config.ExecutionPlacement); err == nil {
 			t.Fatal("mutated seed accepted")
 		}
 	}

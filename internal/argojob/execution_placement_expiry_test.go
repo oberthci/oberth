@@ -55,12 +55,12 @@ func TestExecutionPlacementExpiredSnapshotDoesNotAdmit(t *testing.T) {
 	pod.UID = "original-pod"
 	pod.ResourceVersion = "1"
 	pod.Spec.NodeName = "any-node"
-	pod.Spec.Tolerations = p.admittedSeedTolerations()
-	if err := verifyPlacedSeed(expected, pod, retained.ExecutionPlacement, true); err != nil {
+	pod.Spec.Tolerations = []corev1.Toleration{{Key: "operator.example/dedicated", Operator: corev1.TolerationOpExists}}
+	if err := verifyPlacedSeed(expected, pod, retained.ExecutionPlacement); err != nil {
 		t.Fatal("original observation blocked after expiry", err)
 	}
 	pod.Spec.ServiceAccountName = "foreign"
-	if err := verifyPlacedSeed(expected, pod, seed.config.ExecutionPlacement, true); err == nil {
+	if err := verifyPlacedSeed(expected, pod, seed.config.ExecutionPlacement); err == nil {
 		t.Fatal("expired observation lost service identity fence")
 	}
 	p.document.Expires = time.Time{}

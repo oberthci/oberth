@@ -550,7 +550,7 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 		if err != nil {
 			return nil, fmt.Errorf("argojob: isolated seed Pod create cannot be adopted: %w", err)
 		}
-		if err := verifyPlacedSeed(expected, created, seeder.config.ExecutionPlacement, false); err != nil {
+		if err := verifyPlacedSeed(expected, created, seeder.config.ExecutionPlacement); err != nil {
 			return nil, err
 		}
 		if created.UID == "" || created.ResourceVersion == "" {
@@ -580,7 +580,7 @@ func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, exp
 					if len(expected) != 1 || expected[0] == nil || expected[0].UID != pod.UID {
 						return errors.New("argojob: seed readback identity differs")
 					}
-					if err := verifyPlacedSeed(expected[0], pod, p, true); err != nil {
+					if err := verifyPlacedSeed(expected[0], pod, p); err != nil {
 						return err
 					}
 				}
