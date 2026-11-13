@@ -21,18 +21,23 @@ func TestNonrootNewHelpersHaveBudgets(t *testing.T) {
 			pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), wf)
 			for _, c := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
 				switch c.Name {
-				case "init", "wait", executorTokenWaiter:
+				case executorTokenWaiter:
 					assertControlContainer(t, c, false)
 				}
 			}
 			// A named nonroot leaf stamps the entire Workflow; ordinary siblings must
-			// receive their budgets too, without gaining the leaf's nonroot identity.
+			// keep the token waiter budget without gaining the leaf's nonroot identity.
 			var ordinary corev1.PodSpec
 			if err := json.Unmarshal([]byte(wf.Spec.Templates[1].PodSpecPatch), &ordinary); err != nil {
 				t.Fatal(err)
 			}
-			for _, c := range append(ordinary.InitContainers, ordinary.Containers...) {
-				assertControlContainer(t, c, false)
+			for _, c := range ordinary.InitContainers {
+				if c.Name == executorTokenWaiter {
+					assertControlContainer(t, c, false)
+				}
+			}
+			for _, template := range wf.Spec.Templates {
+				assertNativeExecutorPatch(t, template.PodSpecPatch)
 			}
 			if ordinary.SecurityContext != nil {
 				t.Fatal("ordinary sibling gained a nonroot Pod context")

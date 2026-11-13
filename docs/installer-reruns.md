@@ -45,3 +45,10 @@ oberth upgrade --rollback ./oberth-upgrade-v0.20.1-to-v0.21.0-<time>.json --yes
 ```
 
 It refuses another cluster, a release that moved since, and a stale record: each release's deployed revision must be the recorded one (the upgrade failed before it reached that release: no Helm rollback of it, and an Oberth release the upgrade never reached needs no restore), the one the recorded upgrade made, or later ones that `helm history` shows are all rollbacks to the recorded revision (a rollback of this record already ran: no second Helm rollback, but the restore runs again, so a failed restore can be retried). A later `install --upgrade` or upgrade makes the record unusable. `--force-record` overrides this and is dangerous: the Helm rollback then also undoes those later changes, and the restore replaces the database with a backup that predates them (check `helm history` first). It rolls back the Oberth release to its recorded revision and, when the upgrade migrated the database, restores the pre-upgrade backup's history (`oberth restore --only history`), because the previous server cannot open the migrated database. Rolling back to a release older than v0.21.0, which does not read the restored-runs marker, prints a warning: the old server can dispatch restored work again. Keep that server scaled to zero and inspect or cancel restored work before resuming it. Onto v0.21.0 and later, no run of that backup is dispatched again: running ones whose Workflow is gone are interrupted, and queued or waiting ones (which may have run after the upgrade) are cancelled with the reason "restored from a backup; not dispatched again" (see [backup and restore](backup-restore.md)).
+
+Argo helper budgets use the separate controller release's native
+`executor.resources`. Managed `oberth install --upgrade` fills this setting only
+when absent and reports an existing operator value as preserved in install review.
+Partial and empty operator maps stay unchanged. Standalone `oberth upgrade`
+updates the Oberth release; configure the native Argo setting before using that
+path with a server that no longer writes helper resources into Workflow patches.

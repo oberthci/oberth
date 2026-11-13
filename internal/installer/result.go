@@ -37,19 +37,20 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
-	UpstreamName       string   `json:"upstream_name,omitempty"`
-	ClientRequirements []string `json:"client_requirements,omitempty"`
-	NetworkPolicy      string   `json:"network_policy"`
-	ReissueServerCA    bool     `json:"reissue_server_ca"`
-	Context            string   `json:"context"`
-	Namespace          string   `json:"namespace"`
-	ArgoNamespace      string   `json:"argo_namespace"`
-	ProductionStore    bool     `json:"production_store"`
-	DevStore           bool     `json:"dev_store"`
-	ClientHost         string   `json:"client_host"`
-	AdminIdentity      string   `json:"admin_identity"`
-	DNSNames           []string `json:"tls_dns_names"`
-	IPs                []string `json:"tls_ips"`
+	ArgoExecutorResources *ArgoExecutorResourcesReview `json:"argo_executor_resources,omitempty"`
+	UpstreamName          string                       `json:"upstream_name,omitempty"`
+	ClientRequirements    []string                     `json:"client_requirements,omitempty"`
+	NetworkPolicy         string                       `json:"network_policy"`
+	ReissueServerCA       bool                         `json:"reissue_server_ca"`
+	Context               string                       `json:"context"`
+	Namespace             string                       `json:"namespace"`
+	ArgoNamespace         string                       `json:"argo_namespace"`
+	ProductionStore       bool                         `json:"production_store"`
+	DevStore              bool                         `json:"dev_store"`
+	ClientHost            string                       `json:"client_host"`
+	AdminIdentity         string                       `json:"admin_identity"`
+	DNSNames              []string                     `json:"tls_dns_names"`
+	IPs                   []string                     `json:"tls_ips"`
 }
 
 func Review(cfg Config) InstallReview {
@@ -58,7 +59,7 @@ func Review(cfg Config) InstallReview {
 	if cfg.ClientHost != "" {
 		dns, ips = CertificateNamesForClientHost(cfg.ClientHost, dns, ips)
 	}
-	return InstallReview{UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
+	return InstallReview{ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -102,6 +103,7 @@ func printReview(w io.Writer, review InstallReview) {
 	_, _ = fmt.Fprintf(w, "Review install: context %q, namespace %q, pipeline namespace %q\nSecret store: production=%t dev=%t; client address=%q; admin identity=%q\nTLS DNS names: %v; IP addresses: %v\n", review.Context, review.Namespace, review.ArgoNamespace, review.ProductionStore, review.DevStore, review.ClientHost, review.AdminIdentity, review.DNSNames, review.IPs)
 	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
 	_, _ = fmt.Fprintln(w, "NetworkPolicy enforcement check runs first at install, after approval, using temporary probe Pods and their scratch namespace; fresh installs refuse unless enforcement is measured.")
+	printArgoExecutorResources(w, review.ArgoExecutorResources)
 	for _, requirement := range review.ClientRequirements {
 		_, _ = fmt.Fprintln(w, requirement)
 	}

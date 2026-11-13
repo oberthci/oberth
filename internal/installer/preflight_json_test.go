@@ -32,6 +32,7 @@ func TestApplyJSONPreservesNetworkPolicyFailure(t *testing.T) {
 			ca := newTestServerCA(t, []string{"api.example.test"})
 			var output bytes.Buffer
 			calls, loads, helmReads := 0, 0, 0
+			helmNamespaces := map[string]int{}
 			var measured NetworkPolicyProbeResult
 			host := InstallDeps{Output: &output, CredentialSink: func(string, string) {},
 				LookPath: func(name string) (string, error) { return name, nil },
@@ -44,6 +45,11 @@ func TestApplyJSONPreservesNetworkPolicyFailure(t *testing.T) {
 					if len(args) < 3 || args[0] != "--kube-context" || args[1] != "chosen" || args[2] != "list" {
 						t.Fatalf("unexpected Helm command: %v", args)
 					}
+					index := slices.Index(args, "-n")
+					if index < 0 || index+1 >= len(args) {
+						t.Fatalf("missing Helm lookup namespace: %v", args)
+					}
+					helmNamespaces[args[index+1]]++
 					helmReads++
 					return []byte("[]"), nil
 				},
@@ -66,8 +72,8 @@ func TestApplyJSONPreservesNetworkPolicyFailure(t *testing.T) {
 			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			if result.OK || calls != 1 || loads != 1 || helmReads != 1 {
-				t.Fatalf("apply failure was re-planned: ok=%t calls=%d loads=%d reads=%d", result.OK, calls, loads, helmReads)
+			if result.OK || calls != 1 || loads != 1 || helmReads != 2 || helmNamespaces[DefaultNamespace] != 1 || helmNamespaces[DefaultArgoNamespace] != 1 {
+				t.Fatalf("apply failure was re-planned or release inspection repeated: ok=%t calls=%d loads=%d reads=%d namespaces=%v", result.OK, calls, loads, helmReads, helmNamespaces)
 			}
 			found := 0
 			for _, check := range result.Checks {

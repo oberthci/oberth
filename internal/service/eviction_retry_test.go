@@ -33,14 +33,23 @@ func TestDeterministicAdmissionRefusalsDoNotAutoRetry(t *testing.T) {
 
 func TestEvictionDisplayReason(t *testing.T) {
 	for message, want := range map[string]string{
-		"Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 512Mi.": "evicted: ephemeral storage limit 512 MiB; raise the step's ephemeral-storage limit",
-		"Evicted: The node was low on resource: memory.":                                          "evicted: node memory pressure",
-		"Evicted: The node was low on resource: ephemeral-storage.":                               "evicted: node storage pressure",
+		"Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 512Mi.":   "evicted: pod storage limit 512 MiB",
+		"Evicted: The node was low on resource: memory.":                                            "evicted: node memory pressure",
+		"Evicted: The node was low on resource: ephemeral-storage.":                                 "evicted: node storage pressure",
+		"Evicted: Pod ephemeral local storage usage exceeds the total limit of containers unknown.": "evicted: pod storage limit",
+		"Evicted: Container wait exceeded its local ephemeral storage limit":                        "evicted: container storage limit",
 		"Evicted": "evicted by kubelet",
 	} {
 		run := model.Run{Status: model.RunFailed, Phase: "infrastructure", Error: message}
 		if got := presentationRun(run).DisplayReason; got != want {
 			t.Errorf("%q != %q", got, want)
+		}
+		for _, step := range []string{"", "test"} {
+			run.FailedStep = step
+			hint := runRetryHint(run, nil)
+			if hint == nil || hint.Class != model.RetryInfrastructure || hint.Cause != "eviction" || hint.Action != "run_retry" {
+				t.Errorf("message %q step %q: infrastructure display contradicts retry hint %+v", message, step, hint)
+			}
 		}
 
 	}

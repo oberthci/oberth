@@ -435,12 +435,12 @@ func TestRetryHintClassification(t *testing.T) {
 		{"publication transport", failed("publishing", "", "upstream publication infrastructure failure: all 5 attempts exhausted: connection reset by peer"), model.RetryInfrastructure, "git_transport"},
 		{"publication rejected", failed("publishing", "", "push: non-fast-forward"), model.RetryCode, "upstream_rejected"},
 		{"eviction", failed("infrastructure", "", "Evicted: The node was low on resource: memory."), model.RetryInfrastructure, "eviction"},
-		{"storage eviction", failed("infrastructure", "", "Evicted: Usage of EmptyDir volume \"x\" exceeds the limit"), model.RetryCode, "resource_limit"},
-		// A step's own eviction names the step; it is not a code failure.
+		{"storage eviction", failed("infrastructure", "", "Evicted: Usage of EmptyDir volume \"x\" exceeds the limit"), model.RetryInfrastructure, "eviction"},
+		// Authored-container budget failures retain advice to change the step's limit.
 		{"step storage budget", failed("infrastructure", "test-service", "Step ci/test-service exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at 2Gi. Raise the step's ephemeral-storage limit in git."), model.RetryCode, "resource_limit"},
 		{"step storage budget, test phase", failed("test", "test-service", "Step ci/test-service exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at 2Gi. Raise the step's ephemeral-storage limit in git."), model.RetryCode, "resource_limit"},
 		{"step node pressure eviction", failed("infrastructure", "unit", "Evicted: The node was low on resource: memory."), model.RetryInfrastructure, "eviction"},
-		{"step EmptyDir eviction", failed("infrastructure", "unit", "Evicted: Usage of EmptyDir volume \"x\" exceeds the limit"), model.RetryCode, "resource_limit"},
+		{"step EmptyDir eviction", failed("infrastructure", "unit", "Evicted: Usage of EmptyDir volume \"x\" exceeds the limit"), model.RetryInfrastructure, "eviction"},
 		{"executor identity", failed("infrastructure", "", "deliver executor identity failed (stage=x reason=y attempts=3)"), model.RetryInfrastructure, "executor_identity"},
 		{"image pull", failed("test", "unit", "ErrImagePull: pull access denied"), model.RetryInfrastructure, "image_pull"},
 		{"oom", failed("test", "unit", "OOM kill at test/unit: memory limit 1Gi; sampled memory peak 1Gi (lower bound). Inspect oberth run resources --run r --include-failed; change resources in git."), model.RetryCode, "oom"},
@@ -451,6 +451,9 @@ func TestRetryHintClassification(t *testing.T) {
 		{"interrupted", model.Run{Status: model.RunInterrupted, Phase: "restart"}, model.RetryInfrastructure, "interrupted"},
 	} {
 		hint := runRetryHint(test.run, nil)
+		if hint != nil && test.cause == "resource_limit" && hint.Action != "raise the step's ephemeral-storage limit in git" {
+			t.Errorf("%s: authored-container budget advice lost: %+v", test.name, hint)
+		}
 		if hint == nil || hint.Class != test.class || hint.Cause != test.cause {
 			t.Errorf("%s: hint = %+v, want %s/%s", test.name, hint, test.class, test.cause)
 		}

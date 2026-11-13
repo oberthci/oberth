@@ -429,7 +429,7 @@ func applyExecutionPlacement(wf *wfv1.Workflow, config Config, request Request) 
 		for _, key := range []string{"containers", "initContainers"} {
 			items, _ := patch[key].([]any)
 			for _, item := range items {
-				if m, ok := item.(map[string]any); ok && (m["name"] == "wait" || m["name"] == "init" || m["name"] == executorTokenWaiter) {
+				if m, ok := item.(map[string]any); ok && m["name"] == executorTokenWaiter {
 					m["resources"] = helperResources(wf, t)
 				}
 			}

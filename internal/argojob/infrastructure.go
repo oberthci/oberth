@@ -8,7 +8,6 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -18,10 +17,6 @@ import (
 // OOMKilled alone does not distinguish a step's memory limit from node pressure;
 // only a kubelet eviction/pressure message establishes an infrastructure cause.
 var kubeletEvictionMessage = regexp.MustCompile(`^(Usage of EmptyDir volume "[^"]+" exceeds the limit "[^"]+"\.|The node was low on resource: (ephemeral-storage|memory)\.|Pod ephemeral local storage usage exceeds the total limit of containers|Container [a-z0-9-]+ exceeded its local ephemeral storage limit)`)
-
-// The kubelet prints the Pod total with resource.Quantity.String(): digits with
-// a binary or decimal SI suffix, or a decimal exponent such as 1e9.
-var podStorageTotalMessage = regexp.MustCompile(`^Pod ephemeral local storage usage exceeds the total limit of containers ([0-9]+(?:[.][0-9]+)?(?:[eE][+-]?[0-9]+|[A-Za-z]{0,2}))(?:[.\s]|$)`)
 
 var containerStorageMessage = regexp.MustCompile(`^Container ([a-z0-9-]+) exceeded its local ephemeral storage limit`)
 
@@ -34,8 +29,8 @@ var containerStorageMessage = regexp.MustCompile(`^Container ([a-z0-9-]+) exceed
 // A container eviction qualifies when the named container is one of the step's
 // own containers with a declared limit (stepStorageLimits); the kubelet only
 // enforces a container limit that exists, but a server helper's limit is not
-// the step's. A Pod-total eviction qualifies when the total includes no helper
-// limit the step did not ask for (podTotalIsStepBudget).
+// the step's. Pod-total evictions remain infrastructure because the native
+// operator-controlled helper limits are not owned by the step.
 func stepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, message string) string {
 	if workflow == nil || node.Type != wfv1.NodeTypePod || (node.Phase != wfv1.NodeFailed && node.Phase != wfv1.NodeError) {
 		return ""
@@ -55,15 +50,9 @@ func stepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, message str
 		}
 		return fmt.Sprintf("container %s's own limit %s", match[1], limit.String())
 	}
-	match := podStorageTotalMessage.FindStringSubmatch(message)
-	if match == nil {
-		return ""
-	}
-	total, err := resource.ParseQuantity(match[1])
-	if err != nil || total.Sign() <= 0 || workflow.Annotations[helperStorageAnnotation] != helperStoragePolicy {
-		return ""
-	}
-	return fmt.Sprintf("the total container limit %s (the step's limits plus Argo helper limits)", total.String())
+	// A Pod-total eviction cannot prove that an authored container exceeded its
+	// own budget; native helper limits are absent from the Workflow.
+	return ""
 }
 
 func podStepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) string {

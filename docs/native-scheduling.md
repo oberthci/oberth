@@ -283,14 +283,31 @@ win name/path collisions; validated workspace opt-outs remain available.
   delivered kubeconfig that names it (#1564). The same patch sets both Argo
   progress ticks to `0` there, so Argo's self-reported step progress (`N/M`)
   is disabled: its monitor would otherwise call the API, and re-read the
-  token, while wait reads a step's outputs. The init/wait/waiter
-  helpers normally request 50m CPU and 64 MiB memory, with 500m/512 MiB limits.
-  With helper-storage accounting they also request 256 MiB ephemeral storage;
-  the 512 MiB helper storage limit is applied only when the step itself
-  declares a storage limit. The nonroot preparation helper requests 10m CPU/16 MiB memory and has
-  100m/64 MiB limits. **Helper requests affect Kubernetes Pod packing**
-  (init/steady-state aggregation), and token delivery is a security startup
-  dependency. They do not fill or resize the author's container requests.
+  token, while wait reads a step's outputs.
+
+  Argo-generated init/wait containers, and executor main containers for resource
+  and data templates, inherit native controller `executor.resources`. The managed
+  installer supplies requests of 50m CPU, 64 MiB memory and 256 MiB ephemeral
+  storage, with limits of 500m CPU, 512 MiB memory and 512 MiB ephemeral storage.
+  Workflow patches carry no resource overrides for those containers. An existing
+  operator-set `executor.resources` is kept exactly, including a partial or empty
+  map; install review shows the selected resources and whether they are preserved.
+
+  The native storage limit is uniform. A step without its own storage limit can
+  therefore run in a Pod capped by the helper's 512 MiB limit, including shared
+  disk EmptyDir usage. Operators can omit or change that limit in their Argo Helm
+  values. Oberth does not add main-container limits to compensate. Pod-total
+  storage evictions remain infrastructure observations because the total can
+  include operator-controlled helpers; a named authored container exceeding its
+  own declared limit still reports a step resource failure.
+
+  The Oberth-owned `oberth-executor-token` waiter keeps requests of 50m CPU,
+  64 MiB memory and 256 MiB ephemeral storage, with 500m/512 MiB CPU/memory limits.
+  Its 512 MiB storage limit remains conditional on the step declaring its own
+  storage limit. The nonroot preparation helper keeps requests of 10m CPU/16 MiB
+  memory and limits of 100m/64 MiB. **Helper requests affect Kubernetes Pod packing**
+  through native init/steady-state aggregation. Token delivery is a security
+  startup dependency; it does not fill or resize the author's container requests.
   The separate token-identity holder Pod deliberately carries a scheduling
   gate and never executes; it has its own ServiceAccount, 1m/1 MiB requests
   and 10m/8 MiB limits, and is retired with its owned Workflow identity.
@@ -390,7 +407,7 @@ No new label was added for this release.
 | `oberth.ci/sources` | Workflow with pinned sources | Canonical immutable pinned-source record |
 | `oberth.ci/fragments` | Workflow, when fragments used | Immutable fragment-resolution record |
 | `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator API-kind/action capability binding |
-| `oberth.ci/helper-storage` | Workflow | Current server-helper footprint binding; older policies are refused on recovery |
+| `oberth.ci/helper-storage` | Workflow | Current Oberth token-waiter footprint binding; older policies are refused on recovery |
 | `oberth.ci/execution-placement` | Workflow, approved target | Approved execution authority digest; no node placement policy |
 | `oberth.ci/execution-target` | Custody-tracked target objects | Exact durable target binding digest |
 | `oberth.ci/release-wif-policy-sha256` | Workflow, WIF release | Public role/policy binding digest |

@@ -143,15 +143,16 @@ type Config struct {
 	// ArgoNamespace. It does not make pipelines execute any other way: Argo is
 	// the execution engine, so the install still binds Oberth to that
 	// namespace and still verifies a controller is really there.
-	SkipArgo            bool
-	OpenBaoNamespace    string
-	Namespace           string
-	RekorNamespace      string
-	ArgoNamespace       string
-	ChartVersion        string
-	OpenBaoChartVersion string
-	RekorChartVersion   string
-	ArgoChartVersion    string
+	SkipArgo              bool
+	OpenBaoNamespace      string
+	Namespace             string
+	RekorNamespace        string
+	ArgoNamespace         string
+	ChartVersion          string
+	OpenBaoChartVersion   string
+	RekorChartVersion     string
+	ArgoChartVersion      string
+	argoExecutorResources *ArgoExecutorResourcesReview
 	// ArgoParallelism sets native controller.parallelism; nil preserves its value.
 	ArgoParallelism           *int
 	ArgoVaultAddress          string
@@ -2188,6 +2189,7 @@ Next steps:
 }
 
 func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
+	printArgoExecutorResources(w, argoExecutorResourcesForReview(cfg))
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
 	step := 1
 

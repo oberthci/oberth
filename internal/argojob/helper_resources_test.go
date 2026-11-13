@@ -1,9 +1,7 @@
 package argojob
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -69,118 +67,6 @@ func assertControlContainer(t *testing.T, container corev1.Container, storageLim
 	}
 	if container.Resources.Limits.Cpu().MilliValue() < 500 || container.Resources.Limits.Memory().Value() < 512<<20 {
 		t.Errorf("helper %s limits are below the 500m/512Mi execution floor", container.Name)
-	}
-}
-
-func TestInjectedControlBudgetsCoverUnpinnedExecutorContainers(t *testing.T) {
-	archiveLogs := true
-	cases := []struct {
-		name     string
-		leaf     wfv1.Template
-		wantWait bool
-		wantMain bool
-	}{
-		{name: "container", leaf: wfv1.Template{Container: &corev1.Container{}}, wantWait: true},
-		{name: "resource", leaf: wfv1.Template{Resource: &wfv1.ResourceTemplate{Action: "create"}}, wantMain: true},
-		{name: "resource-logs", leaf: wfv1.Template{Resource: &wfv1.ResourceTemplate{Action: "create"}, ArchiveLocation: &wfv1.ArtifactLocation{ArchiveLogs: &archiveLogs}}, wantWait: true, wantMain: true},
-		{name: "data", leaf: wfv1.Template{Data: &wfv1.Data{}}, wantMain: true},
-	}
-	declared := corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("1Gi")}}}
-	cases = append(cases, struct {
-		name     string
-		leaf     wfv1.Template
-		wantWait bool
-		wantMain bool
-	}{name: "container-declared", leaf: wfv1.Template{Container: declared.DeepCopy()}, wantWait: true})
-	for _, policy := range []string{helperStoragePolicy} {
-		for _, tc := range cases {
-			t.Run(policy+"/"+tc.name, func(t *testing.T) {
-				leaf := tc.leaf
-				leaf.Name = "step"
-				workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{helperStorageAnnotation: policy}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{leaf}}}
-				if err := projectExecutorTokens(workflow, testConfig()); err != nil {
-					t.Fatal(err)
-				}
-				var patch corev1.PodSpec
-				if err := json.Unmarshal([]byte(workflow.Spec.Templates[0].PodSpecPatch), &patch); err != nil {
-					t.Fatal(err)
-				}
-				// Helpers add a storage limit only when the step declares one.
-				limited := tc.name == "container-declared"
-				seen := map[string]bool{}
-				for _, container := range append(patch.InitContainers, patch.Containers...) {
-					assertControlContainer(t, container, limited)
-					if seen[container.Name] {
-						t.Errorf("duplicate helper %s", container.Name)
-					}
-					seen[container.Name] = true
-				}
-				for _, name := range []string{executorTokenWaiter, "init"} {
-					if !seen[name] {
-						t.Errorf("missing explicit %s budget", name)
-					}
-				}
-				if seen["wait"] != tc.wantWait || seen["main"] != tc.wantMain {
-					t.Errorf("executor shape has wait=%t main=%t, want wait=%t main=%t", seen["wait"], seen["main"], tc.wantWait, tc.wantMain)
-				}
-			})
-		}
-	}
-}
-
-// The live ordinary Argo v4.0.8 wait container had resources={}. Compile the
-// default path (no ExecutionPlacement) and apply its patch after Argo mutation.
-// A helper budget on init alone cannot fix the running Pod's aggregate limit.
-func TestDefaultCompiledPodStorageIncludesSharedArgoHelper(t *testing.T) {
-	config := testConfig()
-	config.ExecutionPlacement = nil
-	config.RunnerImagePrefixes = []string{"example.invalid/"}
-	source := resourceBoundsSource("      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi, ephemeral-storage: 128Mi}\n")
-	wf, err := Build(config, resourceBoundsRequest(source))
-	if err != nil {
-		t.Fatal(err)
-	}
-	leaf := wf.Spec.Templates[0]
-	main := *leaf.Container.DeepCopy()
-	main.Name = "main"
-	before := credentialWaitControllerShape(main)
-	before.Volumes = append(before.Volumes, corev1.Volume{Name: "var-run-argo", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
-	after := applyCredentialWaitPatch(t, before, leaf.PodSpecPatch)
-	const measuredHelperBytes int64 = 160849920 // kubelet disk-volume receipt; not a whole-Pod peak
-	var podRequest, podLimit, waitRequest, waitLimit int64
-	for _, c := range after.Containers {
-		req := c.Resources.Requests.StorageEphemeral()
-		lim := c.Resources.Limits.StorageEphemeral()
-		podRequest += req.Value()
-		podLimit += lim.Value()
-		switch c.Name {
-		case "main":
-			if !reflect.DeepEqual(c.Resources, main.Resources) {
-				t.Fatal("workload resources changed")
-			}
-		case "wait":
-			assertBoundedControlContainer(t, c)
-			waitRequest, waitLimit = req.Value(), lim.Value()
-		}
-	}
-	if waitRequest < measuredHelperBytes || waitLimit < measuredHelperBytes {
-		t.Fatal("ordinary wait must reserve the measured shared helper bytes")
-	}
-	if podRequest != (64+256)<<20 || podLimit != (128+512)<<20 {
-		t.Fatalf("unexpected running-Pod storage request/limit %d/%d", podRequest, podLimit)
-	}
-	// Counterfactual: init may still have a budget, but removing wait's storage
-	// recreates the measured eviction condition before main uses any scratch.
-	if podLimit-waitLimit >= measuredHelperBytes {
-		t.Fatal("fixture does not reproduce missing-wait eviction")
-	}
-	for _, c := range after.InitContainers {
-		assertBoundedControlContainer(t, c)
-	}
-	for _, v := range after.Volumes {
-		if v.Name == "var-run-argo" && !reflect.DeepEqual(v, before.Volumes[0]) {
-			t.Fatal("helper storage changed emptyDir policy")
-		}
 	}
 }
 
@@ -255,62 +141,6 @@ func podStorageLimit(spec corev1.PodSpec) int64 {
 		initMax = max(initMax, limit)
 	}
 	return max(sum, initMax)
-}
-
-// #1491: helpers must not cap a Pod whose step has no storage limit,
-// including its /cache and /tmp emptyDirs. Preserve the declared sum.
-func TestHelperStorageAddsNoPodCapToUndeclaredStep(t *testing.T) {
-	undeclared := "      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi}\n"
-	declared := "      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi, ephemeral-storage: 128Mi}\n"
-	cases := []struct {
-		name, resources, policy string
-		wantLimit               int64
-	}{
-		{"undeclared/v4", undeclared, helperStoragePolicy, 0},
-		{"declared/v4", declared, helperStoragePolicy, (128 + 512) << 20},
-	}
-	for _, placement := range []bool{false, true} {
-		for _, tc := range cases {
-			t.Run(fmt.Sprintf("placement=%t/%s", placement, tc.name), func(t *testing.T) {
-				config := testConfig()
-				if !placement {
-					config.ExecutionPlacement = nil
-				}
-				config.RunnerImagePrefixes = []string{"example.invalid/"}
-				request := resourceBoundsRequest(resourceBoundsSource(tc.resources))
-				wf, err := Build(config, request)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if wf.Annotations[helperStorageAnnotation] != tc.policy {
-					t.Fatalf("policy %q, want %q", wf.Annotations[helperStorageAnnotation], tc.policy)
-				}
-				leaf := wf.Spec.Templates[0]
-				main := *leaf.Container.DeepCopy()
-				main.Name = "main"
-				after := applyCredentialWaitPatch(t, credentialWaitControllerShape(main), leaf.PodSpecPatch)
-				if got := podStorageLimit(after); got != tc.wantLimit {
-					t.Fatalf("Pod ephemeral-storage limit %d, want %d", got, tc.wantLimit)
-				}
-				// Helpers keep their scheduling reservation in every case.
-				var waitRequest int64
-				helpers := 0
-				for _, c := range append(after.InitContainers, after.Containers...) {
-					if c.Name == "main" {
-						continue
-					}
-					helpers++
-					assertControlContainer(t, c, tc.wantLimit != 0)
-					if c.Name == "wait" {
-						waitRequest = c.Resources.Requests.StorageEphemeral().Value()
-					}
-				}
-				if helpers != 3 || waitRequest != 256<<20 {
-					t.Fatalf("helpers %d with wait request %d", helpers, waitRequest)
-				}
-			})
-		}
-	}
 }
 
 // Argo v4.0.8 merges spec.templateDefaults into each template before it builds
