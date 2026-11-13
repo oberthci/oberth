@@ -22,9 +22,6 @@ type ArtifactStore interface {
 }
 
 func (jobs *ArgoJobs) SetArtifacts(collector ArtifactCollector, store ArtifactStore, limit int64) {
-	if jobs.routes != nil {
-		jobs.routes.local.SetArtifacts(collector, store, limit)
-	}
 	jobs.collector = collector
 	jobs.artifacts = store
 	jobs.artifactLimit = limit

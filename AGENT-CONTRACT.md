@@ -390,15 +390,6 @@ trust assumptions and complete invalidation rules.
   mount. Existing HTTP installs stage the same bundle on their current PVC,
   publish the TLS config, then roll the chart's OnDelete pod.
 
-### Authenticated execution targets
-
-Administrator approval fixes the cluster, namespace, controller and service
-identity, authenticated transport and original source/custody records. It does
-not fix a worker node. Repository placement passes through unchanged; operators
-isolate dedicated nodes with Kubernetes taints and admission/namespace policy.
-Original object UID and intent continue to fence recovery and cleanup. See
-[execution targets](docs/execution-targets.md).
-
 ### Repository contract
 
 - A repository provides its pipeline as Argo Workflow YAML in the `.oberth/`
@@ -534,7 +525,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   `runs.concurrency_limit` historical columns remain unread; the orphaned declaration table is dropped. Concurrency-group membership no longer
   restricts cancellation.
 - Workflow resources, placement, parallelism, synchronization, priority, deadlines and retries are authored in repository YAML. Oberth configures only Argo global parallelism; it does not inject release locks or priority, manage semaphore ConfigMaps, or apply CPU/pressure/disk/hold/startup gates. Requests and deadlines are optional.
-- Assisted lifecycle settings (`assist.*`), cron entry settings (`schedules.*`), and security execution-target/profile configuration remain operator-owned. Assisted holds retain their explicit deadline extension and keep their Argo slot and locks.
+- Assisted lifecycle settings (`assist.*`), cron entry settings (`schedules.*`), and security profile configuration remain operator-owned. Assisted holds retain their explicit deadline extension and keep their Argo slot and locks.
 - Semaphore limits are operator-owned in `oberth-sync-limits` in the pipeline namespace. The fixed name and same-namespace restriction protect ConfigMap data from disclosure through Argo errors. The installer leaves existing semaphore objects and their ownership to operators. Named mutexes and native Argo priority pass unchanged; no release mutex is reserved or injected.
 - Pipeline steps receive `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`,
   `OBERTH_TRIGGER`, and `OBERTH_STEP` (the Argo template name), plus the

@@ -309,8 +309,7 @@ per-workflow and unaffected.
   `run_cancel` does the same.
 - Hold operations run only in the server's own pipeline namespace through
   the `pods/exec` and `pods` delete verbs the chart's Argo Role already
-  grants; no RBAC is added. Runs placed on remote execution targets are not
-  reachable by the hold tools in this release.
+  grants; no RBAC is added.
 
 ## Helm values (serve flags; chart default equals binary default)
 

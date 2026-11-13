@@ -569,7 +569,7 @@ if grep -q 'oberth-sync-limits\|--serialize-releases\|max-concurrent-jobs\|runti
 fi
 rm -f "$sync_manifest"
 # Removed values are refused by the schema at any value, stock or not.
-for removed in maxConcurrentJobs=0 argoSync.semaphores.kvm=1 admission.runtimeCapacity.enabled=true \
+for removed in argo.executionPlacementConfigMap=retired argo.executionTargetConfigMap=retired argo.executionTargetCredentialsSecret=retired maxConcurrentJobs=0 argoSync.semaphores.kvm=1 admission.runtimeCapacity.enabled=true \
   admission.exclusiveClasses.kvm=1 admission.sizeWeights.XL=0 admission.maxHeadWait=20m \
   admission.declaredResources.ioRuns=0 admission.legacyResources.L.cpu_milli=1 gitBackend=cli gitcache.shadow=false \
   vm.kvm.enabled=false trustedTests.runtime=old argo.vmLauncherServiceAccount=old \

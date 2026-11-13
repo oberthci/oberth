@@ -170,25 +170,6 @@ func (seeder *SourceSeeder) SeedRequest(ctx context.Context, request Request, de
 }
 
 func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir string, deliverStoreAssets, assistHelper bool, requests ...*Request) (SourceVolume, error) {
-	if seeder.config.ExecutionPlacement != nil {
-		if len(requests) != 1 || requests[0] == nil || requests[0].Name != workflowName || requests[0].SourceDir != sourceDir {
-			return SourceVolume{}, errors.New("argojob: isolated source seeding requires a complete request")
-		}
-		request := *requests[0]
-		if deliverStoreAssets {
-			return SourceVolume{}, errors.New("argojob: approved target source delivery must remain credential-free")
-		}
-		if err := seeder.config.ExecutionPlacement.selectRequest(seeder.config, request); err != nil {
-			return SourceVolume{}, err
-		}
-		validation := request
-		if _, err := Build(seeder.config, validation); err != nil {
-			return SourceVolume{}, err
-		}
-		if err := seeder.config.ExecutionPlacement.verifyEnvironment(ctx, seeder.client, seeder.config); err != nil {
-			return SourceVolume{}, err
-		}
-	}
 	volume := SourceVolume{ClaimName: sourceClaimName(workflowName), SubPath: "src"}
 	if strings.TrimSpace(sourceDir) == "" {
 		return SourceVolume{}, errors.New("argojob: a source checkout directory is required")
@@ -204,9 +185,7 @@ func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir st
 	// Collect anything a previous run left unowned before adding storage of our
 	// own. Doing it here rather than on a timer means the sweep runs exactly
 	// when the namespace is about to grow, and needs no scheduler of its own.
-	if seeder.config.Custody == nil {
-		seeder.SweepOrphanedSourceClaims(ctx)
-	}
+	seeder.SweepOrphanedSourceClaims(ctx)
 
 	if err := seeder.createClaim(ctx, volume.ClaimName, workflowName); err != nil {
 		return SourceVolume{}, err
@@ -261,7 +240,7 @@ func (seeder *SourceSeeder) fill(
 	ctx context.Context, volume *SourceVolume, sourceDir string, deliverStoreAssets, assistHelper bool, requests ...*Request,
 ) error {
 	podName := volume.ClaimName
-	created, err := seeder.createSeedPodBound(ctx, podName, volume.ClaimName, requests...)
+	created, err := seeder.createSeedPodBound(ctx, podName, volume.ClaimName)
 	if err != nil {
 		return err
 	}
@@ -271,25 +250,22 @@ func (seeder *SourceSeeder) fill(
 		// Best effort: the Pod is disposable, and leaving one behind must not
 		// fail a run that otherwise seeded correctly.
 		options := *metav1.NewDeleteOptions(0)
-		if seeder.config.ExecutionPlacement != nil && created != nil && created.UID != "" {
-			options.Preconditions = &metav1.Preconditions{UID: &created.UID}
-		}
 		_ = seeder.client.CoreV1().Pods(seeder.config.Namespace).
 			Delete(context.WithoutCancel(ctx), podName, options)
 	}()
 
 	// A seed left by a previous owner may be deleted during restart cleanup.
 	// Retry that stale reuse once; a Pod created by this attempt must still fail
-	// if it disappears. Placed seeds never adopt AlreadyExists.
-	waitErr := seeder.waitForSeedPod(ctx, podName, created)
+	// if it disappears.
+	waitErr := seeder.waitForSeedPod(ctx, podName)
 	if created == nil && apierrors.IsNotFound(waitErr) {
-		created, err = seeder.createSeedPodBound(ctx, podName, volume.ClaimName, requests...)
+		created, err = seeder.createSeedPodBound(ctx, podName, volume.ClaimName)
 		if err != nil {
 			return err
 		}
 		stopObserving()
 		stopObserving = seeder.observeCreatedSeed(created, requests...)
-		waitErr = seeder.waitForSeedPod(ctx, podName, created)
+		waitErr = seeder.waitForSeedPod(ctx, podName)
 	}
 	if waitErr != nil {
 		return waitErr
@@ -478,25 +454,7 @@ func (seeder *SourceSeeder) fillServerBinary(
 	return nil
 }
 
-func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimName string, requests ...*Request) (*corev1.Pod, error) {
-	if p := seeder.config.ExecutionPlacement; p != nil {
-		collector := false
-		if seeder.config.Custody != nil && p.BranchOnly() {
-			binding := seeder.config.Custody.Binding()
-			collector = len(requests) == 0 && claimName == sourceClaimName(binding.Workflow) && name == claimName+collectPodSuffix && binding.Namespace == seeder.config.Namespace
-		}
-		if !collector && (len(requests) != 1 || requests[0] == nil || name != sourceClaimName(requests[0].Name) || name != claimName) {
-			return nil, errors.New("argojob: seed Pod lacks complete selection")
-		}
-		if !collector {
-			if err := p.selectRequest(seeder.config, *requests[0]); err != nil {
-				return nil, err
-			}
-		}
-		if err := p.verifyEnvironment(ctx, seeder.client, seeder.config); err != nil {
-			return nil, err
-		}
-	}
+func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimName string) (*corev1.Pod, error) {
 	falseValue := false
 	trueValue := true
 	rootUser := int64(0)
@@ -563,25 +521,13 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 		deadline := int64(artifactCollectionTimeout / time.Second)
 		pod.Spec.ActiveDeadlineSeconds = &deadline
 	}
-	expected := pod.DeepCopy()
 	created, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) && name == claimName+collectPodSuffix && seeder.config.Custody == nil {
+	if apierrors.IsAlreadyExists(err) && name == claimName+collectPodSuffix {
 		if err := seeder.removeLeftoverCollector(ctx, pod, claimName); err != nil {
 			return nil, err
 		}
 		// Exactly one new CREATE after observed deletion; never execute the leftover.
 		created, err = seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
-	}
-	if seeder.config.ExecutionPlacement != nil {
-		if err != nil {
-			return nil, fmt.Errorf("argojob: isolated seed Pod create cannot be adopted: %w", err)
-		}
-		if err := verifyPlacedSeed(expected, created, seeder.config.ExecutionPlacement); err != nil {
-			return nil, err
-		}
-		if created.UID == "" || created.ResourceVersion == "" {
-			return nil, errors.New("argojob: seed create lacks authenticated identity")
-		}
 	}
 	if apierrors.IsAlreadyExists(err) {
 		if name == claimName+collectPodSuffix {
@@ -597,7 +543,7 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 	return created, nil
 }
 
-func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, expected ...*corev1.Pod) error {
+func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string) error {
 	interval := seeder.interval()
 	for {
 		if err := ctx.Err(); err != nil {
@@ -607,17 +553,6 @@ func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, exp
 		if err == nil {
 			switch pod.Status.Phase {
 			case corev1.PodRunning:
-				if p := seeder.config.ExecutionPlacement; p != nil {
-					if err := p.verifyEnvironment(ctx, seeder.client, seeder.config); err != nil {
-						return err
-					}
-					if len(expected) != 1 || expected[0] == nil || expected[0].UID != pod.UID {
-						return errors.New("argojob: seed readback identity differs")
-					}
-					if err := verifyPlacedSeed(expected[0], pod, p); err != nil {
-						return err
-					}
-				}
 				return nil
 			case corev1.PodFailed, corev1.PodSucceeded:
 				return &sourceSeedFailure{failure: fmt.Errorf("argojob: source seed pod %s ended in phase %s before it could be written to", name, pod.Status.Phase), reason: "source seed Pod ended in phase " + string(pod.Status.Phase)}
