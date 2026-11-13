@@ -278,8 +278,21 @@ func (seeder *SourceSeeder) fill(
 			Delete(context.WithoutCancel(ctx), podName, options)
 	}()
 
-	if err := seeder.waitForSeedPod(ctx, podName, created); err != nil {
-		return err
+	// A seed left by a previous owner may be deleted during restart cleanup.
+	// Retry that stale reuse once; a Pod created by this attempt must still fail
+	// if it disappears. Placed seeds never adopt AlreadyExists.
+	waitErr := seeder.waitForSeedPod(ctx, podName, created)
+	if created == nil && apierrors.IsNotFound(waitErr) {
+		created, err = seeder.createSeedPodBound(ctx, podName, volume.ClaimName, requests...)
+		if err != nil {
+			return err
+		}
+		stopObserving()
+		stopObserving = seeder.observeCreatedSeed(created, requests...)
+		waitErr = seeder.waitForSeedPod(ctx, podName, created)
+	}
+	if waitErr != nil {
+		return waitErr
 	}
 
 	reader, writer := io.Pipe()
@@ -557,7 +570,12 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 			return nil, errors.New("argojob: seed create lacks authenticated identity")
 		}
 	}
-	if err != nil && !apierrors.IsAlreadyExists(err) {
+	if apierrors.IsAlreadyExists(err) {
+		// A non-nil return is proof that this attempt created the Pod. The typed
+		// Kubernetes client may allocate an empty result even on AlreadyExists.
+		return nil, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("argojob: create source seed pod %s: %w", name, err)
 	}
 	return created, nil
