@@ -222,6 +222,17 @@ func (logs *stepLogFollowers) reportUnbound(workflow *wfv1.Workflow, steps []Ste
 				break
 			}
 		}
+		// A completed durable copy survives Pod collection and discovery
+		// outages. Its validated identity is enough to preserve those bytes;
+		// never invent a Pod name or fetch the container again.
+		if !retained && workflow.UID != "" && step.NodeID != "" {
+			for key, saved := range logs.restored {
+				if saved.Complete && saved.WorkflowUID == string(workflow.UID) && saved.Node == step.NodeID && saved.Container == mainContainerName && saved.Pod != "" && saved.Key == key && key == saved.WorkflowUID+"/"+saved.Node+"/"+saved.Pod {
+					retained = true
+					break
+				}
+			}
+		}
 		if retained {
 			continue
 		}
