@@ -690,8 +690,8 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, fmt.Errorf("argojob: %s: mirror-only requires a configured Go module proxy", argoworkflow.GoProxyAnnotation)
 	}
 	delete(workflow.Annotations, capabilityAnnotation)
-	resourceSteps, extended := argoworkflow.CapabilityUsage(workflow)
-	if !resourceSteps && !extended {
+	resourceSteps := argoworkflow.CapabilityUsage(workflow)
+	if !resourceSteps {
 		request.Capability = nil
 	}
 	if err := config.validateCapability(request.Capability); err != nil {

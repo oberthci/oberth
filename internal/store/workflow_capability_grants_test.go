@@ -22,7 +22,7 @@ func TestWorkflowCapabilityGrantsAreScopedAuditedAndRevocable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cap := argoworkflow.Capability{Namespace: "pipelines", ServiceAccount: "operator-worker", ExtendedResources: map[string]int64{"devices.example.test/worker": 2}}
+	cap := argoworkflow.Capability{Namespace: "pipelines", ServiceAccount: "operator-worker", ResourceKinds: []argoworkflow.ResourceKindCapability{{APIVersion: "example.test/v1", Kind: "Task", Actions: []string{"create"}}}}
 	if _, err = s.WorkflowCapabilityGrant(ctx, first.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing grant: %v", err)
 	}
@@ -33,9 +33,9 @@ func TestWorkflowCapabilityGrantsAreScopedAuditedAndRevocable(t *testing.T) {
 	if grant.RepoID != first.ID || grant.GrantedBy != "admin" || grant.RevokedAt != nil {
 		t.Fatalf("grant: %+v", grant)
 	}
-	cap.ExtendedResources["devices.example.test/worker"] = 3
+	cap.ResourceKinds[0].Actions[0] = "delete"
 	active, err := s.ActiveWorkflowCapability(ctx, first.ID)
-	if err != nil || active == nil || active.ExtendedResources["devices.example.test/worker"] != 2 {
+	if err != nil || active == nil || active.ResourceKinds[0].Actions[0] != "create" {
 		t.Fatalf("persisted grant changed with caller: %+v %v", active, err)
 	}
 	if other, e := s.ActiveWorkflowCapability(ctx, second.ID); e != nil || other != nil {

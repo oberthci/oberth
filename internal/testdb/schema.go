@@ -370,8 +370,13 @@ DELETE FROM schema_migrations WHERE id='20261112200858-remove-head-wait-state-5f
 `
 
 // PostNativeTargetPlacementDowngrade reconstructs only disposable old-schema fixtures.
-const PostNativeTargetPlacementDowngrade = `
+const PostNativeTargetPlacementDowngrade = PostExtendedResourceGrantDowngrade + `
 DROP TRIGGER IF EXISTS execution_target_custody_digest_immutable;
 ALTER TABLE execution_target_bindings DROP COLUMN custody_digest;
 DELETE FROM schema_migrations WHERE id='20261113004204-remove-execution-target-placement-9b77efae7729ff92178a88a4344e38e4';
+`
+
+// PostExtendedResourceGrantDowngrade removes only the removal receipt in disposable fixtures.
+const PostExtendedResourceGrantDowngrade = `
+DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-grants-1523724f34af80938b4963079df78930';
 `

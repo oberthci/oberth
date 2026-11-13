@@ -493,7 +493,7 @@ tools (a call to one is still refused by the server); available operations are:
 | `access_list` | List secret access grants for a repository. |
 | `access_allow` | Grant a step access to a secret path. Requires admin uplink. |
 | `access_revoke` | Revoke a step's access to a secret path. Requires admin uplink. |
-| `workflow_capability_grant` | Grant operator-owned Kubernetes access and extended resources to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here. |
+| `workflow_capability_grant` | Grant operator-owned Kubernetes API access to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here. |
 | `workflow_capability_revoke` | Revoke a repository's operator capability. New submissions and restart adoption refuse the revoked authority. Running Kubernetes workloads remain operator-owned. Administrator only; audited. |
 | `workflow_capability_get` | Read the repository's current or revoked operator capability within the caller's upstream scope. |
 | `release_wif_list` | Read the release WIF capability map: boot default from Helm/flags, runtime overrides, the effective map used by preflight and admission, configured role names and any stored grant left inactive. Public data only. Unscoped admin only. |

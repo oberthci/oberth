@@ -79,8 +79,13 @@ by Kubernetes taints plus the admission or namespace policy the operator sets
 up; Oberth does not guarantee that a target's runs land only on a particular
 node. Ordinary repositories may author tolerations too, so taints alone do not
 establish exclusive access to a trusted node. See [execution targets](execution-targets.md).
-Granted device resources still require a bounded aggregate device authorization
-proof; this does not schedule CPU or memory.
+Extended resources, including GPUs, are native requests/limits: Oberth requires
+no device grant and imposes no amount or aggregate bound. Operators use
+Kubernetes ResourceQuota and admission policy in the pipeline namespace; see
+[the quota example](workflow-capabilities.md#extended-resources). Dangerous
+settings such as privilege, host paths/device mounts, host namespaces, runtime
+classes, unapproved images or service identities, and `resources.claims` remain
+refused independently of the requested resource.
 Server-owned executor/identity helpers keep their existing resources. Their
 measured Pod-level effect is an additional **50m CPU, 64Mi memory and 256Mi
 ephemeral storage requested by every Pod of a run**, beyond what its author

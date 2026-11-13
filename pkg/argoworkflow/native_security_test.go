@@ -53,8 +53,8 @@ func TestNativePlacementNeverBypassesSecurityDenials(t *testing.T) {
 		{"foreign-namespace", func(w *wfv1.Workflow) { w.Namespace = "another-namespace" }},
 		{"registry", func(w *wfv1.Workflow) { w.Spec.Templates[0].Container.Image = "untrusted.invalid/runner:latest" }},
 		{"runtime-class", func(w *wfv1.Workflow) { w.Spec.PodSpecPatch = `{"runtimeClassName":"unapproved"}` }},
-		{"device", func(w *wfv1.Workflow) {
-			w.Spec.Templates[0].Container.Resources.Requests = corev1.ResourceList{"devices.example/device": resource.MustParse("1")}
+		{"resource-claim", func(w *wfv1.Workflow) {
+			w.Spec.Templates[0].Container.Resources.Claims = []corev1.ResourceClaim{{Name: "unapproved"}}
 		}},
 		{"priority-class", func(w *wfv1.Workflow) { w.Spec.PodPriorityClassName = "system-node-critical" }},
 		{"template-patch", func(w *wfv1.Workflow) { w.Spec.Templates[0].PodSpecPatch = `{"hostNetwork":true}` }},

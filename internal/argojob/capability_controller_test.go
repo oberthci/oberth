@@ -55,7 +55,7 @@ func TestCapabilityAdoptionRechecksGrantRepositoryAndNamespaceScope(t *testing.T
 			case "revoked":
 				current = nil
 			case "changed":
-				current.ExtendedResources["devices.example.test/worker"]++
+				current.ResourceKinds[0].Actions = append(current.ResourceKinds[0].Actions, "delete")
 			case "foreign repository":
 				repoID++
 			case "missing account":

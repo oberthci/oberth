@@ -57,7 +57,7 @@ func (s *Store) WorkflowCapabilityGrant(ctx context.Context, repoID int64) (Work
 }
 
 // ActiveWorkflowCapability returns a fresh copy. Absence and revocation never
-// imply a default account, resource kind or extended resource allowance.
+// imply a default account or resource kind.
 func (s *Store) ActiveWorkflowCapability(ctx context.Context, repoID int64) (*argoworkflow.Capability, error) {
 	grant, err := s.WorkflowCapabilityGrant(ctx, repoID)
 	if errors.Is(err, ErrNotFound) {

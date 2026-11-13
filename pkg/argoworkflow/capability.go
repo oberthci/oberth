@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -21,10 +20,9 @@ import (
 // Capability is operator-owned, never decoded from repository YAML. The
 // operator owns this account's RBAC and namespace ResourceQuota outside Oberth.
 type Capability struct {
-	Namespace         string                   `json:"namespace"`
-	ServiceAccount    string                   `json:"service_account"`
-	ResourceKinds     []ResourceKindCapability `json:"resource_kinds,omitempty"`
-	ExtendedResources map[string]int64         `json:"extended_resources,omitempty"`
+	Namespace      string                   `json:"namespace"`
+	ServiceAccount string                   `json:"service_account"`
+	ResourceKinds  []ResourceKindCapability `json:"resource_kinds,omitempty"`
 }
 
 type ResourceKindCapability struct {
@@ -37,70 +35,36 @@ var capabilityKindPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,62}$`)
 
 // CapabilityUsage includes defaults and inline templates, even unreachable
 // ones. An unsupported nesting depth must never hide authority from admission.
-func CapabilityUsage(wf *wfv1.Workflow) (resources, extended bool) {
-	check := func(r corev1.ResourceRequirements) {
-		for _, list := range []corev1.ResourceList{r.Requests, r.Limits} {
-			for name := range list {
-				if name != corev1.ResourceCPU && name != corev1.ResourceMemory && name != corev1.ResourceEphemeralStorage {
-					extended = true
-				}
-			}
-		}
-	}
-	var walk func(*wfv1.Template, int)
-	walk = func(t *wfv1.Template, depth int) {
+func CapabilityUsage(wf *wfv1.Workflow) bool {
+	var walk func(*wfv1.Template, int) bool
+	walk = func(t *wfv1.Template, depth int) bool {
 		if t == nil {
-			return
+			return false
 		}
 		if depth > MaxIdentityWalkDepth {
-			resources, extended = true, true
-			return
+			return true
 		}
-		resources = resources || t.Resource != nil
-		if t.Container != nil {
-			check(t.Container.Resources)
-		}
-		if t.Script != nil {
-			check(t.Script.Resources)
-		}
-		if t.ContainerSet != nil {
-			for _, c := range t.ContainerSet.Containers {
-				check(c.Resources)
-			}
-		}
-		for _, group := range [][]wfv1.UserContainer{t.InitContainers, t.Sidecars} {
-			for _, c := range group {
-				check(c.Resources)
-			}
+		if t.Resource != nil {
+			return true
 		}
 		for _, call := range invocations(t) {
-			walk(call.inline, depth+1)
+			if walk(call.inline, depth+1) {
+				return true
+			}
 		}
+		return false
 	}
 	if wf != nil {
-		walk(wf.Spec.TemplateDefaults, 0)
+		if walk(wf.Spec.TemplateDefaults, 0) {
+			return true
+		}
 		for i := range wf.Spec.Templates {
-			walk(&wf.Spec.Templates[i], 0)
+			if walk(&wf.Spec.Templates[i], 0) {
+				return true
+			}
 		}
 	}
-	return resources, extended
-}
-
-func validateExtendedPeak(wf *wfv1.Workflow, c *Capability) error {
-	_, extended := CapabilityUsage(wf)
-	if !extended {
-		return nil
-	}
-	d, err := DeclaredCapabilityPeak(wf)
-	if err != nil || d == nil || c == nil {
-		return errors.New("argoworkflow: extended resources require an operator grant and complete bounded resource declarations")
-	}
-	for name, count := range d.ExtendedResources {
-		if count > c.ExtendedResources[name] {
-			return fmt.Errorf("argoworkflow: extended resource %s peak exceeds the operator grant", name)
-		}
-	}
-	return nil
+	return false
 }
 
 func (c *Capability) Validate() error {
@@ -110,7 +74,7 @@ func (c *Capability) Validate() error {
 	if c.Namespace == "" || len(k8svalidation.IsDNS1123Label(c.Namespace)) != 0 || c.ServiceAccount == "" || c.ServiceAccount == "default" || len(k8svalidation.IsDNS1123Subdomain(c.ServiceAccount)) != 0 {
 		return errors.New("capability requires an explicit namespace and operator ServiceAccount")
 	}
-	if len(c.ResourceKinds) > 32 || len(c.ExtendedResources) > 32 {
+	if len(c.ResourceKinds) > 32 {
 		return errors.New("capability allowlist exceeds 32 entries")
 	}
 	seen := map[string]bool{}
@@ -130,20 +94,6 @@ func (c *Capability) Validate() error {
 				return errors.New("capability resource action is unsupported or repeated")
 			}
 			actions[action] = true
-		}
-	}
-	return ValidateExtendedResourceLimits(c.ExtendedResources)
-}
-
-// ValidateExtendedResourceLimits validates operator-owned integer capacity.
-func ValidateExtendedResourceLimits(limits map[string]int64) error {
-	if len(limits) > 32 {
-		return errors.New("extended-resource capacity exceeds 32 entries")
-	}
-	for name, limit := range limits {
-		parts := strings.Split(name, "/")
-		if len(parts) != 2 || parts[0] == "" || len(k8svalidation.IsQualifiedName(name)) != 0 || parts[0] == "kubernetes.io" || strings.HasSuffix(parts[0], ".kubernetes.io") || limit < 1 || limit > 1_000_000 {
-			return errors.New("capability requires qualified extended-resource names and integer ceilings in 1..1000000")
 		}
 	}
 	return nil
@@ -282,26 +232,4 @@ func rejectEnvelopeCaseVariants(object map[string]json.RawMessage, keys ...strin
 		}
 	}
 	return nil
-}
-
-func admitExtendedResources(location string, resources corev1.ResourceRequirements, c *Capability) []error {
-	var problems []error
-	for _, list := range []corev1.ResourceList{resources.Requests, resources.Limits} {
-		for name := range list {
-			if name == corev1.ResourceCPU || name == corev1.ResourceMemory || name == corev1.ResourceEphemeralStorage {
-				continue
-			}
-			request, requested := resources.Requests[name]
-			limit, limited := resources.Limits[name]
-			value, integer := request.AsInt64()
-			bound := int64(0)
-			if c != nil {
-				bound = c.ExtendedResources[string(name)]
-			}
-			if !requested || !limited || !integer || value <= 0 || bound == 0 || value > bound || request.Cmp(limit) != 0 {
-				problems = append(problems, fmt.Errorf("argoworkflow: %s extended resource %q requires equal positive integer requests/limits within its operator grant", location, name))
-			}
-		}
-	}
-	return problems
 }

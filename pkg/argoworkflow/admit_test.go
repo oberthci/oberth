@@ -923,11 +923,11 @@ spec:
 	refuse(t, document, Policy{}, "exceeds the 50Gi ceiling")
 }
 
-func TestAdmitRefusesGPUResources(t *testing.T) {
+func TestAdmitAllowsGPUResourcesWithoutGrant(t *testing.T) {
 	t.Parallel()
 	document := strings.Replace(admissibleDocument, "        command: [/bin/true]\n",
 		"        command: [/bin/true]\n        resources:\n          requests:\n            nvidia.com/gpu: \"1\"\n", 1)
-	refuse(t, document, Policy{}, "workflow capability grant")
+	mustAdmit(t, document, Policy{})
 }
 
 // --- native synchronization passes through unchanged ---

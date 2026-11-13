@@ -11,7 +11,7 @@ import (
 func capabilityPolicyForTest(t *testing.T) Policy {
 	t.Helper()
 	var policy Policy
-	if err := json.Unmarshal([]byte(`{"Capability":{"namespace":"pipelines","service_account":"operator-executor","resource_kinds":[{"api_version":"tasks.example.test/v1","kind":"Task","actions":["create","get","delete"]}],"extended_resources":{"devices.example.test/worker":2}}}`), &policy); err != nil {
+	if err := json.Unmarshal([]byte(`{"Capability":{"namespace":"pipelines","service_account":"operator-executor","resource_kinds":[{"api_version":"tasks.example.test/v1","kind":"Task","actions":["create","get","delete"]}]}}`), &policy); err != nil {
 		t.Fatal(err)
 	}
 	return policy
@@ -69,31 +69,10 @@ func TestOperatorCapabilityAdmitsOnlyGrantedResourceEnvelopes(t *testing.T) {
 	}
 }
 
-func TestOperatorCapabilityExtendedResourcesAreFiniteIntegers(t *testing.T) {
-	document := admissibleDocument + `        resources:
-          requests: {cpu: '1', memory: 128Mi, devices.example.test/worker: '1'}
-          limits: {memory: 128Mi, devices.example.test/worker: '1'}
-`
-	policy := capabilityPolicyForTest(t)
-	mustAdmit(t, document, policy)
-	for _, bad := range []string{"0", "-1", "0.5", "3", "{{inputs.parameters.count}}"} {
-		t.Run(bad, func(t *testing.T) {
-			body := strings.ReplaceAll(document, "worker: '1'", "worker: '"+bad+"'")
-			wf, err := Decode([]byte(body))
-			if err == nil {
-				err = Admit(wf, policy)
-			}
-			if err == nil {
-				t.Fatal("invalid extended resource quantity admitted")
-			}
-		})
-	}
-	wf, err := Decode([]byte(document))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = Admit(wf, Policy{}); err == nil {
-		t.Fatal("extended resource admitted without a grant")
+func TestExtendedResourcesNeedNoOperatorGrant(t *testing.T) {
+	for _, quantity := range []string{"0", "1", "3", "1000001"} {
+		document := admissibleDocument + "        resources:\n          limits: {example.com/gpu: '" + quantity + "'}\n"
+		mustAdmit(t, document, Policy{})
 	}
 }
 

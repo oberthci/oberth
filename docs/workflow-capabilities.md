@@ -2,12 +2,13 @@
 
 Oberth runs repository Workflows. Pipelines own any objects they create, their
 cleanup, and their test gates. An administrator can grant one repository an
-operator-created identity for namespaced resource templates or qualified
-extended resources. Ordinary CI requires no such grant.
+operator-created identity for namespaced resource templates. Extended resources
+are ordinary Kubernetes requests and need no Oberth grant. Ordinary CI requires
+no resource-template capability.
 
 The operator creates the ServiceAccount in the configured execution namespace,
 its least-privilege resource RBAC, Argo task-result permissions, admission
-policies, and a ResourceQuota scoped to the workload PriorityClass. The server
+policies, and ResourceQuota in the pipeline namespace. The server
 needs permission to request tokens for that exact account. For new capability
 workflows, operators provide their infrastructure and resource permissions. Kubernetes API discovery must identify every
 allowed kind as namespaced; missing or cluster-scoped kinds are refused.
@@ -22,8 +23,7 @@ For example, the MCP `workflow_capability_grant` arguments are:
     "service_account": "operator-workload",
     "resource_kinds": [
       {"api_version": "example.invalid/v1", "kind": "Task", "actions": ["create", "get", "delete"]}
-    ],
-    "extended_resources": {"example.invalid/accelerator": 2}
+    ]
   }
 }
 ```
@@ -55,14 +55,32 @@ Grant scope and identity are checked again before create, adoption and executor
 token delivery. Revocation prevents new authorization; it does not delete
 objects already created by a pipeline.
 
-Extended-resource requests and limits must be equal positive integers. The
-bounded graph accounts overlapping steps, fan-out, helpers and parallelism;
-its peak must fit the repository capability grant. This is a maximum for each
-Workflow, not a shared device reservation across runs. There is no server-wide
-extended-resource capacity setting or ledger. Cross-run device capacity comes
-from the device plugin and node allocatable resources: Kubernetes leaves Pods
-pending until the requested devices are available. Unbounded graphs, missing
-budgets or declarations cannot fall back to size admission for extended resources.
+## Extended resources
+
+GPUs and other extended resources use native `resources.requests` and
+`resources.limits`, without an Oberth grant, amount ceiling or aggregate demand
+graph. Kubernetes validates the declarations and schedules available devices.
+Operators limit them with ResourceQuota on the pipeline namespace, for example:
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: device-budget
+  namespace: pipelines
+spec:
+  hard:
+    requests.example.com/gpu: "4"
+```
+
+Any repository can request a device resource advertised by an installed device
+plugin, including virtualization devices if exposed that way. The former
+extended-resource grant was Oberth's device-request restriction; it is removed.
+Operators must restrict those resources with Kubernetes quota and admission
+policy. Oberth still refuses privilege escalation, added capabilities, host
+paths/device host mounts, hostNetwork/PID/IPC, runtime classes and unreviewed
+images/registries, identities/tokens and resource claims. An allowed device
+request does not authorize any of those independently dangerous settings.
 
 ## Operator controls for resource templates
 
@@ -123,7 +141,8 @@ See [PriorityClass quota scope](https://kubernetes.io/docs/concepts/policy/resou
 Oberth no longer implements technology-specific execution. Move VM creation,
 device requests, guest harnesses, test gates and cleanup into repository
 Workflows. Grant their operator ServiceAccount only the required namespaced
-kinds/actions and extended resources. Existing KubeVirt grants do not become
+kinds/actions. Device requests require Kubernetes quota/admission policy, not an
+Oberth device grant. Existing KubeVirt grants do not become
 capability grants.
 
 Move the required test gate and cleanup into the Workflow, remove

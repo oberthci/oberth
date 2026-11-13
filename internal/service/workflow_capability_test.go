@@ -15,7 +15,7 @@ func TestWorkflowCapabilityToolsEnforceAdminScopeAndRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := func(repo string) json.RawMessage {
-		b, e := json.Marshal(map[string]any{"repo": repo, "capability": map[string]any{"namespace": "pipelines", "service_account": "operator-worker", "extended_resources": map[string]int{"devices.example.test/worker": 2}}})
+		b, e := json.Marshal(map[string]any{"repo": repo, "capability": map[string]any{"namespace": "pipelines", "service_account": "operator-worker", "resource_kinds": []map[string]any{{"api_version": "example.test/v1", "kind": "Task", "actions": []string{"create"}}}}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -67,5 +67,17 @@ func TestWorkflowCapabilityToolsEnforceAdminScopeAndRevocation(t *testing.T) {
 	}
 	if !MutatingTool("workflow_capability_grant") || !MutatingTool("workflow_capability_revoke") || MutatingTool("workflow_capability_get") {
 		t.Fatal("capability mutation gate mismatch")
+	}
+}
+
+func TestWorkflowCapabilityRefusesRetiredDeviceCeilings(t *testing.T) {
+	f := newScopeFixture(t)
+	control, err := NewAPI(APIConfig{Runs: f.store, Repositories: f.store, WorkflowCapabilities: f.store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"repo": f.visible.Name, "capability": map[string]any{"namespace": "pipelines", "service_account": "operator-worker", "extended_resources": map[string]int{"example.com/gpu": 1}}})
+	if _, err := control.CallTool(t.Context(), scopedAdmin, "workflow_capability_grant", raw); !errors.Is(err, ErrInvalidInput) {
+		t.Fatal("retired device grant accepted", err)
 	}
 }

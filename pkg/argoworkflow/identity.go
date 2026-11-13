@@ -134,7 +134,7 @@ func Prepare(workflow *wfv1.Workflow, policy Policy, identity Identity) error {
 	if identity.ResourceServiceAccountName != "" && (policy.Capability == nil || identity.ResourceServiceAccountName != policy.Capability.ServiceAccount || identity.Namespace != policy.Capability.Namespace) {
 		return errors.New("argoworkflow: resource identity differs from the operator capability")
 	}
-	if resources, _ := CapabilityUsage(workflow); resources && policy.Capability != nil && identity.ResourceServiceAccountName == "" {
+	if resources := CapabilityUsage(workflow); resources && policy.Capability != nil && identity.ResourceServiceAccountName == "" {
 		return errors.New("argoworkflow: resource capability requires an operator executor identity")
 	}
 	return ForceIdentity(workflow, identity)

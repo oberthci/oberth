@@ -43,7 +43,7 @@ func TestRetiredDeclarationsRequireWorkflowCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Admit(wf, Policy{}); !errors.Is(err, ErrWorkflowCapabilityRequired) {
+	if err := Admit(wf, Policy{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Admit(wf, capabilityPolicyForTest(t)); err != nil {

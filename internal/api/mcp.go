@@ -784,7 +784,7 @@ func toolDefinitions() []map[string]any {
 		tool("access_list", "List secret access grants for a repository.", object(map[string]any{"repo": stringProperty("Repository name (empty lists all)"), "revoked": map[string]any{"type": "boolean", "description": "Include revoked grants"}, "pending": map[string]any{"type": "boolean", "description": "Return declared-but-not-granted paths observed at Workflow admission (issue #623)"}})),
 		tool("access_allow", "Grant a step access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),
 		tool("access_revoke", "Revoke a step's access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),
-		tool("workflow_capability_grant", "Grant operator-owned Kubernetes access and extended resources to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here.", object(map[string]any{
+		tool("workflow_capability_grant", "Grant operator-owned Kubernetes API access to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here.", object(map[string]any{
 			"repo": stringProperty("Registered repository name"),
 			"capability": object(map[string]any{
 				"namespace":       stringProperty("Configured execution namespace"),
@@ -793,7 +793,6 @@ func toolDefinitions() []map[string]any {
 					"api_version": stringProperty("Exact API version"), "kind": stringProperty("Exact resource kind"),
 					"actions": map[string]any{"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"create", "get", "delete", "apply"}}},
 				}, "api_version", "kind", "actions")},
-				"extended_resources": map[string]any{"type": "object", "maxProperties": 32, "additionalProperties": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000000}},
 			}, "namespace", "service_account"),
 		}, "repo", "capability")),
 		tool("workflow_capability_revoke", "Revoke a repository's operator capability. New submissions and restart adoption refuse the revoked authority. Running Kubernetes workloads remain operator-owned. Administrator only; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),

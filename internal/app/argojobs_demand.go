@@ -55,8 +55,8 @@ func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service
 		if err != nil {
 			return nil, err
 		}
-		resources, extended := argoworkflow.CapabilityUsage(workflow)
-		if capability != nil && (resources || extended) {
+		resources := argoworkflow.CapabilityUsage(workflow)
+		if capability != nil && resources {
 			if capability.Namespace != jobs.config.Namespace {
 				return nil, fmt.Errorf("app: workflow capability belongs to a different execution namespace")
 			}

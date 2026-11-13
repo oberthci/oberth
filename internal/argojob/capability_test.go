@@ -37,8 +37,7 @@ spec:
 func operatorCapability() *argoworkflow.Capability {
 	return &argoworkflow.Capability{
 		Namespace: testNamespace, ServiceAccount: "operator-task-runner",
-		ResourceKinds:     []argoworkflow.ResourceKindCapability{{APIVersion: "tasks.example.test/v1", Kind: "Task", Actions: []string{"create"}}},
-		ExtendedResources: map[string]int64{"devices.example.test/worker": 2},
+		ResourceKinds: []argoworkflow.ResourceKindCapability{{APIVersion: "tasks.example.test/v1", Kind: "Task", Actions: []string{"create"}}},
 	}
 }
 

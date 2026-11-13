@@ -71,9 +71,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 		return err
 	}
 	var problems []error
-	if policy.Capability != nil {
-		problems = append(problems, validateExtendedPeak(workflow, policy.Capability))
-	}
 	problems = append(problems, admitMetadata(workflow)...)
 	if _, err := DeclaredGoProxyMirrorOnly(workflow); err != nil {
 		problems = append(problems, err)
@@ -550,25 +547,22 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 	}
 	problems = append(problems, admitContainerPorts(location, container.Ports)...)
 	problems = append(problems, admitContainerSecurityContext(location+".securityContext", container.SecurityContext)...)
-	problems = append(problems, admitContainerResources(location, container.Resources, policy.Capability)...)
+	problems = append(problems, admitContainerResources(location, container.Resources)...)
 	return problems
 }
 
-// admitContainerResources preserves native compute declarations. Device resources
-// remain constrained by the installation's separate security capability.
-func admitContainerResources(location string, resources corev1.ResourceRequirements, capability *Capability) []error {
+// admitContainerResources preserves native resource declarations without operator budgets.
+func admitContainerResources(location string, resources corev1.ResourceRequirements) []error {
 	var problems []error
 	if len(resources.Claims) > 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: %s.resources.claims is outside the installed device capability", location))
+		problems = append(problems, fmt.Errorf("argoworkflow: %s.resources.claims is not admitted; claim-backed device access is outside the reviewed Pod contract", location))
 	}
 	for _, list := range []corev1.ResourceList{resources.Requests, resources.Limits} {
 		for name, q := range list {
 			if q.Sign() < 0 {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s resource %s must not be negative", location, name))
 			}
-			if name != corev1.ResourceCPU && name != corev1.ResourceMemory && name != corev1.ResourceEphemeralStorage && (capability == nil || capability.ExtendedResources[string(name)] <= 0) {
-				problems = append(problems, fmt.Errorf("argoworkflow: %s resource %s: %w", location, name, ErrWorkflowCapabilityRequired))
-			}
+
 		}
 	}
 	for name, q := range resources.Requests {
@@ -576,7 +570,6 @@ func admitContainerResources(location string, resources corev1.ResourceRequireme
 			problems = append(problems, fmt.Errorf("argoworkflow: %s request %s exceeds its limit", location, name))
 		}
 	}
-	problems = append(problems, admitExtendedResources(location, resources, capability)...)
 	return problems
 }
 

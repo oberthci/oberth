@@ -17,12 +17,12 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/auth"
+	"github.com/oberthci/oberth/internal/measured"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type latencyObserver struct{ calls atomic.Int32 }
@@ -38,7 +38,7 @@ type latencyDemand struct {
 	calls atomic.Int32
 }
 
-func (o *latencyDemand) RunPodDemand(ctx context.Context, _ service.WorkflowRequest) (*argoworkflow.PodDemand, error) {
+func (o *latencyDemand) ResourceDeclarations(ctx context.Context, _ service.WorkflowRequest) ([]measured.Declaration, error) {
 	o.calls.Add(1)
 	<-ctx.Done()
 	return nil, ctx.Err()

@@ -11,6 +11,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/yaml"
 
@@ -277,4 +278,61 @@ func nativePatchPlacement(t *testing.T, patch string) string {
 		t.Fatal(err)
 	}
 	return string(encoded)
+}
+
+func TestExtendedResourcesReachWorkflowAPIWithoutGrant(t *testing.T) {
+	for _, site := range []string{"container", "script", "container-set", "init", "sidecar"} {
+		t.Run(site, func(t *testing.T) {
+			wf := nativeWorkflow(t)
+			resources := corev1.ResourceRequirements{Requests: corev1.ResourceList{"example.com/gpu": resource.MustParse("1")}, Limits: corev1.ResourceList{"example.com/gpu": resource.MustParse("1")}}
+			switch site {
+			case "container":
+				wf.Spec.Templates[0].Container.Resources = resources
+			case "script":
+				c := *wf.Spec.Templates[0].Container
+				c.Resources = resources
+				wf.Spec.Templates[0].Container = nil
+				wf.Spec.Templates[0].Script = &wfv1.ScriptTemplate{Container: c, Source: "true"}
+			case "container-set":
+				c := *wf.Spec.Templates[0].Container
+				c.Resources = resources
+				c.Name = "unit"
+				wf.Spec.Templates[0].Container = nil
+				wf.Spec.Templates[0].ContainerSet = &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: c}}}
+			case "init", "sidecar":
+				c := *wf.Spec.Templates[0].Container
+				c.Resources = resources
+				c.Name = "helper"
+				if site == "init" {
+					wf.Spec.Templates[0].InitContainers = []wfv1.UserContainer{{Container: c}}
+				} else {
+					wf.Spec.Templates[0].Sidecars = []wfv1.UserContainer{{Container: c}}
+				}
+			}
+			posted := nativeSubmit(t, wf)
+			before, _ := json.Marshal(wf.Spec.Templates[0])
+			after, _ := json.Marshal(posted.Spec.Templates[0])
+			if !strings.Contains(string(before), "example.com/gpu") || !strings.Contains(string(after), "example.com/gpu") {
+				t.Fatal("extended request lost")
+			}
+			tmpl := posted.Spec.Templates[0]
+			var got corev1.ResourceRequirements
+			switch site {
+			case "container":
+				got = tmpl.Container.Resources
+			case "script":
+				got = tmpl.Script.Resources
+			case "container-set":
+				got = tmpl.ContainerSet.Containers[0].Resources
+			case "init":
+				got = tmpl.InitContainers[0].Resources
+			case "sidecar":
+				got = tmpl.Sidecars[0].Resources
+			}
+			nativeEqual(t, resources, got)
+			if posted.Annotations[capabilityAnnotation] != "" {
+				t.Fatal("device request acquired an operator identity")
+			}
+		})
+	}
 }
