@@ -30,7 +30,7 @@ func TestNativeSuspensionObservationUsesLiveArgoState(t *testing.T) {
 				wf.Status.Phase = wfv1.WorkflowSucceeded
 			}
 			controller := &Controller{workflows: &schedulingWorkflowClient{workflow: wf}, config: Config{Namespace: "pipeline"}}
-			observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+			observation, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 			if err != nil {
 				t.Fatal(err)
 			}

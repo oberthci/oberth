@@ -128,6 +128,8 @@ type SourceVolume struct {
 type SourceSeeder struct {
 	observationsMu sync.Mutex
 	observations   map[string]sourceSeedIdentity
+	hub            ObservationHub
+	workflows      WorkflowClient
 	client         kubernetes.Interface
 	exec           ExecStreamer
 	config         Config
@@ -702,28 +704,25 @@ func (seeder *SourceSeeder) SweepOrphanedSourceClaims(ctx context.Context) {
 // a terminal phase. Used by the sweeper to preserve claims whose adoption
 // failed but whose Workflow is still running.
 func (seeder *SourceSeeder) workflowLive(ctx context.Context, name string) bool {
-	// The seeder has no WorkflowClient, so it checks via the workflow label
-	// on the claim against the Argo Workflow CRD. Since we only have the
-	// Kubernetes client, check if a pod with the matching label exists and
-	// is not in a terminal phase. Actually, we can't query Workflows from
-	// the plain kubernetes.Interface. Instead, check if any pod owned by
-	// this workflow is still running — a running pod means the workflow is
-	// live.
-	pods, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "workflows.argoproj.io/workflow=" + name,
-	})
-	if err != nil {
-		// Cannot determine state; preserve the claim.
+	// An uncertain or unsynced watch cannot justify collection.
+	if seeder.hub == nil || !seeder.hub.Healthy() {
 		return true
 	}
-	for i := range pods.Items {
-		phase := pods.Items[i].Status.Phase
-		if phase == corev1.PodRunning || phase == corev1.PodPending {
+	workflow, found := seeder.hub.Workflow(name)
+	if !found {
+		if seeder.workflows == nil {
+			return true
+		}
+		var err error
+		workflow, err = seeder.workflows.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false
+		}
+		if err != nil {
 			return true
 		}
 	}
-	// No running/pending pods; the workflow is terminal or absent.
-	return false
+	return !workflow.Status.Phase.Completed()
 }
 
 func (seeder *SourceSeeder) orphanGrace() time.Duration {
