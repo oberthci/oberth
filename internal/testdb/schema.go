@@ -498,7 +498,7 @@ DELETE FROM schema_migrations WHERE id='20261113013336-remove-step-measurement-3
 // historical-schema fixtures. Production migrations remain forward-only.
 const PostWorkflowStopDowngrade = `
 ALTER TABLE runs ADD COLUMN superseded_by TEXT NOT NULL DEFAULT '';
-DELETE FROM schema_migrations WHERE id='20261113211914-native-cancel-escalation-9842e2a107ff9a80b31de7956b93662f';
+DELETE FROM schema_migrations WHERE id='20261113230515-native-cancel-escalation-8cb0de0a8a6722f76e372f08e4ade20b';
 CREATE TEMP TABLE stop_fixture AS SELECT * FROM run_cancellations;
 DROP TABLE run_cancellations;
 CREATE TABLE run_cancellations (
@@ -513,7 +513,7 @@ INSERT INTO run_cancellations SELECT run_id,job_name,'',
  CASE WHEN reason='cancelled' THEN 'superseded' ELSE reason END,created_at,completed_at FROM stop_fixture;
 DROP TABLE stop_fixture;
 CREATE INDEX run_cancellations_pending_idx ON run_cancellations(completed_at, created_at, run_id);
-DELETE FROM schema_migrations WHERE id='20261113184359-native-workflow-stop-9ebb4e6c64856dd49504e94f638069ef';
+DELETE FROM schema_migrations WHERE id='20261113230513-native-workflow-stop-120fcde448527cff2149ac2f86ab812c';
 `
 
 // PredecessorRunSchema reconstructs an empty v1 run table in exact column order
