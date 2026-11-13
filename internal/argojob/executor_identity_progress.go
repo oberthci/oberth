@@ -21,11 +21,23 @@ const executorIdentityRetryAnnotation = "oberth.ci/executor-identity-retry-at"
 type executorIdentityProgress struct {
 	identity                 map[types.UID]identityWait
 	identityReadFailingSince time.Time
+	resumedAt                time.Time
 }
 type identityWait struct {
 	since     time.Time
 	retried   bool
 	persisted bool
+}
+
+// Observation gaps are not evidence that a waiter failed to make progress.
+// Keep the one-retry state, but start a fresh observed readiness/read window.
+func (p *executorIdentityProgress) resumeAfterOutage(now time.Time) {
+	p.identityReadFailingSince = time.Time{}
+	p.resumedAt = now
+	for uid, wait := range p.identity {
+		wait.since = now
+		p.identity[uid] = wait
+	}
 }
 
 type executorIdentityProgressError struct {
@@ -94,6 +106,9 @@ func (p *executorIdentityProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, d
 						wait.since = now
 					}
 				}
+			}
+			if wait.since.Before(p.resumedAt) {
+				wait.since = p.resumedAt
 			}
 			if now.Sub(wait.since) >= executorReadinessTimeout {
 				if wait.retried {
