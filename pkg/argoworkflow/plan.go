@@ -85,7 +85,7 @@ func PlannedSteps(workflow *wfv1.Workflow) ([]PlannedStep, error) {
 	if !ok {
 		return nil, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", entrypoint)
 	}
-	walk := &planWalk{templates: templates, onPath: map[string]struct{}{entrypoint: {}}}
+	walk := &planWalk{templates: templates, onPath: map[string]struct{}{entrypoint: {}}, visits: make(map[planVisit]bool)}
 	// The entrypoint is the root boundary. A pod it invokes directly is a burn
 	// of one step, which is exactly what the runtime derives from a pod node
 	// whose BoundaryID is the root node.
@@ -117,12 +117,29 @@ type planWalk struct {
 	templates map[string]*wfv1.Template
 	onPath    map[string]struct{}
 	steps     []PlannedStep
+	visits    map[planVisit]bool
+}
+
+// A composite has the same normalized rows at the same enclosing boundary.
+type planVisit struct {
+	template  *wfv1.Template
+	enclosing string
 }
 
 func (walk *planWalk) descend(template *wfv1.Template, enclosing string, depth int) error {
 	if depth > MaxIdentityWalkDepth {
 		return fmt.Errorf("argoworkflow: pipeline nests templates deeper than %d levels", MaxIdentityWalkDepth)
 	}
+	visit := planVisit{template: template, enclosing: enclosing}
+	if hasSteps, seen := walk.visits[visit]; seen {
+		if hasSteps {
+			return fmt.Errorf("argoworkflow: duplicate step key below repeated template %q at boundary %q", template.Name, enclosing)
+		}
+		return nil
+	}
+	start := len(walk.steps)
+	walk.visits[visit] = false
+	defer func() { walk.visits[visit] = len(walk.steps) > start }()
 	for _, called := range invocations(template) {
 		if called.expands {
 			continue
