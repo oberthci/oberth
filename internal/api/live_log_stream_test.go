@@ -178,3 +178,24 @@ func TestContainerLogHTTPRejectsBeforeOpen(t *testing.T) {
 		t.Fatal(response.Code, calls)
 	}
 }
+
+func TestContainerLogHTTPAcceptsFullNativeNodeIDs(t *testing.T) {
+	node := strings.Repeat("a", 253)
+	backend := &containerStreamBackend{open: func(_ context.Context, _ Actor, _ string, actual, _ string, _ bool) (io.ReadCloser, error) {
+		if actual != node {
+			t.Fatal(actual)
+		}
+		return io.NopCloser(strings.NewReader("native output")), nil
+	}}
+	server, err := New(backend, backend, backend, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/runs/run-1/containerlog/stream?node_id="+node+"&container=main", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != 200 || response.Body.String() != "native output" {
+		t.Fatal(response.Code, response.Body.String())
+	}
+}

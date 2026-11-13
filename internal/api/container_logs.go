@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -23,7 +24,7 @@ func (server *Server) handleRunContainerLogs(writer http.ResponseWriter, request
 
 func containerLogSelector(writer http.ResponseWriter, request *http.Request) (string, string, string, bool) {
 	id, node, container := request.PathValue("run"), request.URL.Query().Get("node_id"), request.URL.Query().Get("container")
-	if !validRunSelector(id) || !validRunSelector(node) || (container != "" && !validRunSelector(container)) {
+	if !validRunSelector(id) || !validNativeLogSelector(node) || (container != "" && !validNativeLogSelector(container)) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "run, node_id and container must be valid selectors"})
 		return "", "", "", false
 	}
@@ -140,4 +141,8 @@ func (out *containerLogHTTPWriter) Write(body []byte) (int, error) {
 	}
 	_ = out.response.SetWriteDeadline(time.Time{})
 	return n, err
+}
+
+func validNativeLogSelector(value string) bool {
+	return value != "" && strings.TrimSpace(value) == value && !strings.ContainsAny(value, "\t\r\n")
 }

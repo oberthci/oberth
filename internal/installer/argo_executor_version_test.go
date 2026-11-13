@@ -35,13 +35,13 @@ func TestManagedArgoExecutorPinFollowsEffectiveChartVersion(t *testing.T) {
 			// Stored operator resources isolate image reconciliation from resource defaults.
 			// A custom stored image demonstrates that nondefault charts skip the pin's
 			// compatibility check as well as its Helm flag.
-			stored := `{"executor":{"resources":{}}}`
+			stored := `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{}}}},"executor":{"resources":{}}}`
 			if test.mirror {
-				stored = `{"executor":{"resources":{},"image":{"registry":"mirror.invalid","tag":"operator"}}}`
+				stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{}}}},"executor":{"resources":{},"image":{"registry":"mirror.invalid","tag":"operator"}}}`
 			}
 			_, storedTag, _ := strings.Cut(argoworkflow.ExecutorImage, ":")
 			if test.storedPin {
-				stored = `{"executor":{"resources":{},"image":{"tag":"` + storedTag + `"}}}`
+				stored = `{"controller":{"workflowDefaults":{"spec":{"ttlStrategy":{}}}},"executor":{"resources":{},"image":{"tag":"` + storedTag + `"}}}`
 			}
 			deps := Deps{KubeClient: argoSecurityTestClient(), Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {

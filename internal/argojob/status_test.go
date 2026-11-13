@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"io"
 	"testing"
 	"time"
 
@@ -800,22 +799,6 @@ func splitLines(body string) []string {
 		lines = append(lines, current)
 	}
 	return lines
-}
-
-// TestCopyPrefixedAttributesEveryLine proves the run log index can attribute
-// each line of a step's Pod log to its burn and step.
-
-func stringReader(body string) *stringBodyReader { return &stringBodyReader{body: []byte(body)} }
-
-type stringBodyReader struct{ body []byte }
-
-func (reader *stringBodyReader) Read(chunk []byte) (int, error) {
-	if len(reader.body) == 0 {
-		return 0, io.EOF
-	}
-	copied := copy(chunk, reader.body)
-	reader.body = reader.body[copied:]
-	return copied, nil
 }
 
 // TestProgressReporterRetryAttemptResetsFrozenStatus proves that a retry

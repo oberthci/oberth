@@ -93,6 +93,9 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				// protection. Model only that explicit new server patch;
 				// preserve every other captured field and isolation assertion.
 				capturedComparison := wifCaptureWithReadOnlyInitializers(t, &input)
+				// The capture predates removal of the forced server TTL. Native cleanup
+				// fields now pass through; authored values have separate exact-spec tests.
+				capturedComparison.Spec.TTLStrategy = nil
 				currentComparison := current.DeepCopy()
 				historicalPodNameInput(t, currentComparison)
 				withoutCapturedWorkflowRunFacts(t, capturedComparison)

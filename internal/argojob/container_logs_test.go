@@ -123,7 +123,7 @@ func TestContainerLogPodDeletedBeforeObservationHasReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _, _, err := store.ReadContainerLog(t.Context(), "run", "node", "", runlog.Filter{})
-	if err != nil || !strings.Contains(string(body), "Pod disappeared") {
+	if err != nil || !strings.Contains(string(body), "Pod containers were not observed") {
 		t.Fatal(string(body), err)
 	}
 }

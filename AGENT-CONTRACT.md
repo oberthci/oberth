@@ -755,10 +755,13 @@ trust assumptions and complete invalidation rules.
   in localStorage and fetches everything from the authenticated read-only
   views. Those views are `/api/runs`, `/api/runs/{run}` (run record, burn/step
   results, owning repository), `/api/runs/{run}/logs?burn=&step=` (one exactly
-  recorded step's bounded retained log), `/api/runs/{run}/livelog?offset=`
-  (polled live slice of a running Job's redacted log stream — bytes from the
-  cursor, the next cursor, and the terminal flag; offset -1 starts tailing;
-  responses are bounded to 256 KiB per poll), `/api/repos`, `/api/issues`,
+  recorded step's bounded retained log), `/api/runs/{run}/logs?raw=true`
+  (historical bytes displayed as plain text), `/api/runs/{run}/containers`
+  (native node/container selectors), and `/api/runs/{run}/containerlog`
+  (bounded retained container output). `/api/runs/{run}/containerlog/stream`
+  passes through the requested Kubernetes container log; the request owns its
+  lifetime and closes on disconnect or lost authorization. There is no log
+  cursor poll or automatic reconnect. Other views include `/api/repos`, `/api/issues`,
   `/api/grants` (read-only promotion grant list; filters `repo`, `sha`,
   `status`; mirrors `promote_grant_list`; no mutation endpoints), and
   `/api/status`. The run views resolve by full run ID or an unambiguous

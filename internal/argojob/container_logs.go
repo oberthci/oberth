@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -251,6 +252,6 @@ func (controller *Controller) captureObservedContainerLogs(ctx context.Context, 
 		return
 	}
 	if err := controller.ObserveContainerLogs(ctx, workflow, runID, controller.hub.PodsOf(workflow.Name)); err != nil {
-		log.Printf("WARN: run=%s container log copy unavailable: %v", runID, err)
+		log.Printf("WARN: run=%s container log copy unavailable (class=%s)", strconv.Quote(runID), executorIdentityErrorClass(err))
 	}
 }

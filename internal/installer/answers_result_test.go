@@ -288,7 +288,7 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 		t.Fatalf("public verification failed: checks=%v", result.Checks)
 	}
 
-	if result.Review == nil || result.Review.ArgoParallelism != "17 (preserved)" || result.Review.ArgoNamespaceParallelism != "5 (preserved)" || argoReads != 1 || argoResourceReads != 1 {
+	if result.Review == nil || result.Review.ArgoParallelism != "17 (preserved)" || result.Review.ArgoNamespaceParallelism != "5 (preserved)" || argoReads != 1 || argoResourceReads != 2 {
 		t.Fatal("verify omitted current native Argo values", result.Review, argoReads)
 	}
 	assertCurrentResources := func(review *InstallReview) {

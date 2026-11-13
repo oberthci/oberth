@@ -107,8 +107,6 @@ func TestRestartCutAdoptedWaitDistinguishesMissingExitFromFailure(t *testing.T) 
 				if result.Steps[0].Termination == nil || result.Steps[0].Termination.Unavailable == "" {
 					t.Fatal("unknown Pod has no explicit unavailable observation", result)
 				}
-			} else if !strings.Contains(output.String(), "without a durable pod cursor") {
-				t.Fatal("fixture did not exercise adoption gap", output.String())
 			}
 			if test.interrupted && (!result.Infrastructure || result.FailedStep != "" || !strings.Contains(result.Reason, "no recorded process exit")) {
 				t.Fatal("cut retained red test attribution", result)

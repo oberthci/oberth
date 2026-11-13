@@ -449,6 +449,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			preserveObservedExitCodes(&completion, workflow)
 			preserveRecordedExitCodes(&completion, events)
 			controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
+			controller.observeStepProgress(ctx, settled, reporter, destination)
 			controller.captureObservedContainerLogs(ctx, settled, runID)
 			completion.classifyRestartCut()
 			reporter.finish(destination)
@@ -478,9 +479,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 			}
 		}
-		for _, step := range controller.observedStepAttempts(ctx, workflow) {
-			reporter.observe(destination, step)
-		}
+		controller.observeStepProgress(ctx, workflow, reporter, destination)
 		controller.captureObservedContainerLogs(ctx, workflow, runID)
 
 		select {
@@ -488,6 +487,19 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			return Completion{}, ctx.Err()
 		case <-ticker.C:
 		}
+	}
+}
+
+// Status observation remains independent of native container bytes.
+func (controller *Controller) observeStepProgress(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer) {
+	observed := controller.observedStepAttempts(ctx, workflow)
+	for _, step := range observed {
+		if step.Superseded && terminal(step.Status) {
+			reporter.observe(destination, step)
+		}
+	}
+	for _, step := range finalStepResults(observed) {
+		reporter.observe(destination, step)
 	}
 }
 
