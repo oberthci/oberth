@@ -239,8 +239,8 @@ func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool,
 	if !ok || grant.Templates[t.Name] != role || !argoworkflow.ValidReleaseWIFRole(role) {
 		return &argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: release WIF capability is not approved for %q template %q role %q", key, t.Name, role)}
 	}
-	if !topLevel || (t.Container == nil && t.Script == nil) || t.ContainerSet != nil || wf.Spec.TemplateDefaults != nil || len(t.Inputs.Artifacts) > 0 || len(t.Outputs.Artifacts) > 0 || wf.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" {
-		return &argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: release WIF template %q must be a named container/script leaf without defaults, artifact plugins, or nonroot mode", t.Name)}
+	if !topLevel || (t.Container == nil && t.Script == nil) || t.ContainerSet != nil || wf.Spec.TemplateDefaults != nil || len(t.Inputs.Artifacts) > 0 || len(t.Outputs.Artifacts) > 0 {
+		return &argoworkflow.AdmissionError{Cause: fmt.Errorf("argojob: release WIF template %q must be a named container/script leaf without defaults or artifact plugins", t.Name)}
 	}
 	return nil
 }
@@ -291,48 +291,6 @@ func injectReleaseWIF(wf *wfv1.Workflow, leaves []*wfv1.Template, config *Releas
 		walkTemplates(wf, func(t *wfv1.Template) {
 			t.AutomountServiceAccountToken = ptr.To(false)
 		})
-	}
-	return nil
-}
-
-func protectReleaseWIFExecutor(leaves []*wfv1.Template) error {
-	for _, t := range leaves {
-		patch := map[string]any{}
-		if t.PodSpecPatch != "" {
-			if err := json.Unmarshal([]byte(t.PodSpecPatch), &patch); err != nil {
-				return err
-			}
-		}
-		// Strategic merge keys volumeMounts by mountPath. Delete only the
-		// controller-generated JWT/ADC mirror, preserving other server policy.
-		containers, _ := patch["containers"].([]any)
-		var wait map[string]any
-		for _, c := range containers {
-			m, _ := c.(map[string]any)
-			if m["name"] == argoWaitName {
-				wait = m
-			}
-		}
-		if wait == nil {
-			wait = map[string]any{"name": argoWaitName}
-			containers = append(containers, wait)
-		}
-		mounts, _ := wait["volumeMounts"].([]any)
-		filtered := make([]any, 0, len(mounts)+1)
-		for _, m := range mounts {
-			v, _ := m.(map[string]any)
-			mountPath, _ := v["mountPath"].(string)
-			if path.Clean("/"+mountPath) != path.Join(argoMainFilesystem, releaseWIFPath) {
-				filtered = append(filtered, m)
-			}
-		}
-		wait["volumeMounts"] = append(filtered, map[string]any{"mountPath": path.Join(argoMainFilesystem, releaseWIFPath), "$patch": "delete"})
-		patch["containers"] = containers
-		encoded, err := json.Marshal(patch)
-		if err != nil {
-			return err
-		}
-		t.PodSpecPatch = string(encoded)
 	}
 	return nil
 }

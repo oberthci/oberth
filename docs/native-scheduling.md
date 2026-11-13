@@ -224,26 +224,23 @@ win name/path collisions; validated workspace opt-outs remain available.
   Credentialed leaves receive `VAULT_ADDR`, `OBERTH_VAULT_ROLE` and, when
   delivered, `VAULT_CACERT`; approved per-repository/per-step identities
   specialize the role. Approved release WIF adds
-  `GOOGLE_APPLICATION_CREDENTIALS` and `OBERTH_RELEASE_WIF`. Selected nonroot leaves
-  additionally sets `TMPDIR`, `GOTMPDIR`, `XDG_CACHE_HOME`, `HOME` and private
-  scratch Go/cache paths. Environment affects program behavior and I/O,
+  `GOOGLE_APPLICATION_CREDENTIALS` and `OBERTH_RELEASE_WIF`. Environment affects program behavior and I/O,
   **not scheduler placement or declared resource quantities**.
-- **Security context and identity.** The ordinary Pod baseline uses UID/GID 0,
-  `runAsNonRoot: false` and RuntimeDefault seccomp. Main/script/container-set,
-  authored init containers and sidecars get no privilege escalation, all
-  capabilities dropped and a read-only root filesystem; conflicting template
-  security contexts are cleared. Selected nonroot leaves use
-  UID/GID 65534 and private scratch for selected leaves, including patched
-  Argo init/wait containers and a fixed root initializer for fresh EmptyDirs.
+- **Security context and identity.** Authored Pod and container security contexts
+  pass through unchanged, except the named AppArmor/SELinux/procMount/sysctls/
+  Windows fields and beta AppArmor Pod annotations remain refused by Go.
+  Kubernetes enforces the Pod security floor; native Argo main/executor defaults
+  come from its controller configuration. Root and writable-root execution are
+  allowed. No preparation container or security rewrite is injected.
   Oberth forces the pipeline, CI-secrets, release or approved per-step
   ServiceAccount and the separate executor ServiceAccount. Ordinary leaves
   have no automounted API token; authorized credential leaves receive only
   their scoped token mounts. These are security/startup compatibility rules,
   **not placement policy**; missing identities or incompatible security can
   cause native admission/startup failure.
-- **Scratch and work volumes.** Oberth adds a bounded disk EmptyDir at `/tmp`
-  (8 GiB size limit) to ordinary containers; selected nonroot leaves use its own
-  private `/tmp` EmptyDir and preparation mounts. If the author declares a
+- **Scratch and work volumes.** Authors declare any private `/tmp` volume and
+  bound explicitly. Oberth injects no private scratch or preparation container.
+  If the author declares a
   `work` volumeClaimTemplate, Oberth adds its tools, fallback Go caches, Trivy
   cache and release-artifact subpath mounts at `/tmp/oberth-tools`,
   `/cache/gomod`, `/cache/gobuild`, `/tmp/oberth-trivy` and, for release,
@@ -306,8 +303,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   The Oberth-owned `oberth-executor-token` waiter keeps requests of 50m CPU,
   64 MiB memory and 256 MiB ephemeral storage, with 500m/512 MiB CPU/memory limits.
   Its 512 MiB storage limit remains conditional on the step declaring its own
-  storage limit. The nonroot preparation helper keeps requests of 10m CPU/16 MiB
-  memory and limits of 100m/64 MiB. **Helper requests affect Kubernetes Pod packing**
+  storage limit. **Helper requests affect Kubernetes Pod packing**
   through native init/steady-state aggregation. Token delivery is a security
   startup dependency; it does not fill or resize the author's container requests.
   The separate token-identity holder Pod deliberately carries a scheduling
@@ -321,7 +317,6 @@ win name/path collisions; validated workspace opt-outs remain available.
   | `init` | Argo executor initialization |
   | `wait` | Argo executor wait container |
   | `oberth-executor-token` | Pod-bound executor-token delivery waiter |
-  | `oberth-prepare-nonroot` | Preparation for an opted-in nonroot template |
 
 - **Post-run collect Pod.** When collecting artifacts, Oberth creates a
   helper outside the Workflow using the source-seed Pod shape,
@@ -417,7 +412,7 @@ No new label was added for this release.
 | `oberth.ci/executor-identity-retry-at` | Owned step Pod on identity retry | Issuance retry timestamp, not a workload-start deadline |
 
 Author-facing annotations for source/workspace declarations, secret paths,
-Go-proxy choice, nonroot templates and release-WIF roles remain documented in
+Go-proxy choice and release-WIF roles remain documented in
 their respective feature documents; they are not new scheduling syntax.
 Removed CPU/request-default/demand/startup-allowance annotations are not emitted
 and do not restore admission on old running Workflows.

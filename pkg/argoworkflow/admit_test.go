@@ -204,25 +204,6 @@ func TestAdmitRefusesContainerCredentialReads(t *testing.T) {
 			insert: "        env:\n          - name: TOKEN\n            valueFrom:\n              secretKeyRef:\n                name: release\n                key: token\n",
 			expect: "reads a Kubernetes Secret",
 		},
-		// These three previously expected field-specific refusals. They now
-		// get the blanket one: the engine forces the whole container security
-		// baseline, so any securityContext a document sets is refused rather
-		// than inspected field by field. The assertions moved with the
-		// behaviour -- the constructs are still refused, and now so are the
-		// ones the field-by-field version missed (seccompProfile, runAsUser),
-		// which internal/argojob/security_test.go covers directly.
-		"privileged": {
-			insert: "        securityContext:\n          privileged: true\n",
-			expect: "securityContext is assigned by Oberth",
-		},
-		"privilege escalation": {
-			insert: "        securityContext:\n          allowPrivilegeEscalation: true\n",
-			expect: "securityContext is assigned by Oberth",
-		},
-		"added capabilities": {
-			insert: "        securityContext:\n          capabilities:\n            add: [SYS_ADMIN]\n",
-			expect: "securityContext is assigned by Oberth",
-		},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {

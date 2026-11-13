@@ -175,9 +175,6 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 			return
 		}
 		t.PodSpecPatch = string(encoded)
-		if t.SecurityContext != nil && t.SecurityContext.RunAsNonRoot != nil && *t.SecurityContext.RunAsNonRoot {
-			result = argoworkflow.ValidateNonrootTemplateSize(t)
-		}
 	})
 	return result
 }

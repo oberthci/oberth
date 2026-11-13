@@ -28,16 +28,14 @@
   see [workspace isolation](workspace-isolation.md) for supported shapes,
   defaults restrictions and controller-proof limits.
 
-- Uncredentialed Argo workflows can select fixed UID/GID65534 ordinary test
-  leaves with `oberth.ci/nonroot-templates`. Direct securityContext and Pod
-  patch input remains rejected. Main and generated Argo init/wait retain
-  RuntimeDefault, dropALL, read-only root and no privilege escalation. A fixed
-  server initializer uses UID0 only to prepare fresh per-Pod scratch directories;
-  it has no token, PVC or host mount and never changes shared ownership. Selected
-  leaves consume source/tools read-only and use bounded ephemeral private scratch caches.
-  This is separate from trusted VM execution. Browser sandbox compatibility
-  still needs proof under the actual runtime; no capabilities, unconfined
-  seccomp or sandbox-disabling flags are granted by this mode.
+- Authored Pod and container `securityContext` fields pass through unchanged,
+  except Go admission still refuses AppArmor, SELinux, procMount, sysctls,
+  Windows options and beta AppArmor Pod annotations. Kubernetes enforces the
+  namespace Pod security floor at Pod creation. Root and writable-root execution
+  are allowed; privileged execution, unsafe capabilities, escalation and unsafe
+  seccomp are refused. The removed `oberth.ci/nonroot-templates` annotation is
+  refused. Authors declare any user, groups and private scratch directly; see
+  [authored nonroot execution](nonroot-test-leaves.md).
 
 - Before deploying the Argo Pod policy, install and upgrade check the live
   controller ConfigMap for `mainContainer.securityContext` and

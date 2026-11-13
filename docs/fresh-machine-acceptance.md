@@ -125,8 +125,7 @@ check leaves fresh-machine acceptance incomplete for that candidate.
    submitted YAML; require Oberth to preserve those fields unchanged.
 
    Separately inventory generated helpers: Argo's `wait` and `init`,
-   `oberth-executor-token`, and `oberth-prepare-nonroot` when that profile is
-   selected. Compare Argo-generated helpers with the controller's native
+   and `oberth-executor-token`. Compare Argo-generated helpers with the controller's native
    `executor.resources`; record the stored operator value or installer defaults.
    Compare Oberth-owned helpers' requests and limits, including the token waiter's
    conditional ephemeral-storage budget, with the

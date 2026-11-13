@@ -11,9 +11,6 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// MaxTemplates bounds the existing nonroot annotation, not native templates.
-const MaxTemplates = 128
-
 // Policy is the administrator-owned admission boundary for repository YAML.
 type Policy struct {
 	Capability *Capability
@@ -54,9 +51,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	}
 	problems = append(problems, admitSpec(&workflow.Spec)...)
 	problems = append(problems, admitTemplates(workflow, policy)...)
-	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
-		problems = append(problems, err)
-	}
 	return errors.Join(problems...)
 }
 
@@ -91,7 +85,7 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 // namespace rule. Assist identity/hold markers are server-written, not opt-ins.
 func supportedWorkflowAnnotation(key string) bool {
 	switch key {
-	case SecretPathsAnnotation, SourcesAnnotation, GoProxyAnnotation, NonrootTemplatesAnnotation:
+	case SecretPathsAnnotation, SourcesAnnotation, GoProxyAnnotation:
 		return true
 	default:
 		return false
@@ -431,38 +425,42 @@ func admitContainerPorts(location string, ports []corev1.ContainerPort) []error 
 	return problems
 }
 
-// admitContainerSecurityContext refuses the whole container security context.
-//
-// The engine forces the entire container baseline server-side
-// (internal/argojob.applyServerSecurity), so a value set here is either
-// silently overwritten -- which makes it a lie in a reviewed file -- or, for
-// any field the forcer does not name, a real weakening of that baseline.
-//
-// An earlier version checked only privileged, allowPrivilegeEscalation, added
-// capabilities, and platform options. That left seccompProfile: Unconfined and
-// runAsUser passing through untouched on both tiers, on the same node as the
-// server. Refusing the struct removes the class of bug instead of chasing its
-// instances, and it is the same answer Oberth already gives for
-// serviceAccountName: the field is not repository-configurable.
+// Native security contexts pass through. These platform/profile controls stay
+// outside authored Workflows until namespace Pod Security enforces the baseline.
 func admitContainerSecurityContext(location string, security *corev1.SecurityContext) []error {
 	if security == nil {
 		return nil
 	}
-	return []error{fmt.Errorf(
-		"argoworkflow: %s is assigned by Oberth and must be omitted; step containers run "+
-			"with a forced baseline (no privilege escalation, read-only root filesystem)", location)}
+	var problems []error
+	for field, present := range map[string]bool{
+		"appArmorProfile": security.AppArmorProfile != nil,
+		"seLinuxOptions":  security.SELinuxOptions != nil,
+		"procMount":       security.ProcMount != nil,
+		"windowsOptions":  security.WindowsOptions != nil,
+	} {
+		if present {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.%s is not admitted", location, field))
+		}
+	}
+	return problems
 }
 
-// admitPodSecurityContext refuses the whole Pod security context, for the same
-// reason: the workflow-level context is server-assigned in full, including the
-// RuntimeDefault seccomp profile.
 func admitPodSecurityContext(location string, security *corev1.PodSecurityContext) []error {
 	if security == nil {
 		return nil
 	}
-	return []error{fmt.Errorf(
-		"argoworkflow: %s is assigned by Oberth and must be omitted; the Pod security "+
-			"baseline (user, group, seccomp profile) is not repository-configurable", location)}
+	var problems []error
+	for field, present := range map[string]bool{
+		"appArmorProfile": security.AppArmorProfile != nil,
+		"seLinuxOptions":  security.SELinuxOptions != nil,
+		"sysctls":         len(security.Sysctls) != 0,
+		"windowsOptions":  security.WindowsOptions != nil,
+	} {
+		if present {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.%s is not admitted", location, field))
+		}
+	}
+	return problems
 }
 
 // admitParameters reserves the oberth- prefix for server-owned run facts and

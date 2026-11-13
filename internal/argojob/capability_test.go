@@ -156,7 +156,7 @@ func TestCapabilityResourceKeepsOperatorLifecycle(t *testing.T) {
 func TestCapabilityKeepsOrdinaryControllerPodsTokenless(t *testing.T) {
 	for _, shape := range []string{"container", "script"} {
 		t.Run(shape, func(t *testing.T) {
-			wf, err := argoworkflow.Decode([]byte(nonrootTestDocument))
+			wf, err := argoworkflow.Decode([]byte(authoredNonrootDocument))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -187,7 +187,7 @@ func TestCapabilityKeepsOrdinaryControllerPodsTokenless(t *testing.T) {
 			if pod.Spec.ServiceAccountName != testPipelineAcct || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
 				t.Errorf("ordinary Pod received operator identity or ambient token: account=%s automount=%v", pod.Spec.ServiceAccountName, pod.Spec.AutomountServiceAccountToken)
 			}
-			assertWIFPodIsolation(t, "sibling", pod.Spec)
+			assertWIFPodIsolation(t, "sibling", pod.Spec, false)
 			for _, tmpl := range built.Spec.Templates {
 				want := config.ExecutorServiceAccount
 				if tmpl.Resource != nil {

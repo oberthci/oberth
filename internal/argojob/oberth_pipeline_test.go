@@ -118,8 +118,8 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		}
 		foundQualification = true
 		security := template.Container.SecurityContext
-		if security == nil || security.RunAsUser == nil || *security.RunAsUser != 65534 || security.RunAsGroup == nil || *security.RunAsGroup != 65534 || security.ReadOnlyRootFilesystem == nil || !*security.ReadOnlyRootFilesystem {
-			t.Fatal("static Git qualification lost its assigned nonroot/read-only baseline")
+		if security == nil || template.SecurityContext == nil || template.SecurityContext.RunAsUser == nil || *template.SecurityContext.RunAsUser != 65534 || template.SecurityContext.RunAsGroup == nil || *template.SecurityContext.RunAsGroup != 65534 || security.ReadOnlyRootFilesystem == nil || !*security.ReadOnlyRootFilesystem {
+			t.Fatal("static Git qualification lost its authored user/group or read-only root")
 		}
 		if err := credentialMaterial(&template); err != nil {
 			t.Fatal(err)

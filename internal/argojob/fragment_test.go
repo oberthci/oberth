@@ -175,7 +175,7 @@ func TestBuildRefusesAFragmentCarryingAConstructTheGateRejects(t *testing.T) {
         image: ` + fragmentImage + `
         command: [/bin/true]
         securityContext:
-          privileged: true
+          procMount: Unmasked
 `)}
 	request := fragmentRequest(t, consumingDocument("    example.com/tier: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})

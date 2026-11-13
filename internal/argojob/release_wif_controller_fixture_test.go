@@ -89,26 +89,8 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				t.Fatal(err)
 			}
 			if shape == "vault" {
-				// This authenticated capture predates initializer runtime
-				// protection. Model only that explicit new server patch;
-				// preserve every other captured field and isolation assertion.
-				capturedComparison := wifCaptureWithReadOnlyInitializers(t, &input)
-				currentComparison := current.DeepCopy()
-				historicalPodNameInput(t, currentComparison)
-				withoutCapturedWorkflowRunFacts(t, capturedComparison)
-				withoutCapturedWorkflowRunFacts(t, currentComparison)
-				capturedJSON, _ := json.Marshal(capturedComparison)
-				currentJSON, _ := json.Marshal(currentComparison)
-				if string(capturedJSON) != string(currentJSON) {
-					evidence := t.ArtifactDir()
-					if err := os.WriteFile(filepath.Join(evidence, "expected-input.json"), capturedJSON, 0o600); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(filepath.Join(evidence, "current-input.json"), currentJSON, 0o600); err != nil {
-						t.Fatal(err)
-					}
-					t.Fatal("vault capture input differs from current Build")
-				}
+				// The immutable capture predates removal of security rewriting and
+				// credential-mirror deletion; current input is deliberately different.
 				for _, name := range []string{"vault-workflow.json", "vault-sa-false-before-patch.json", "vault-sa-false-submitted.json", "vault-sa-true-before-patch.json", "vault-sa-true-submitted.json"} {
 					if strings.Contains(string(read(t, name)), "oberth-store-") {
 						t.Fatalf("%s retains a removed settings-map reference", name)
@@ -127,7 +109,7 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				} else {
 					assertHistoricalWorkflowPriority(t, &submitted)
 				}
-				assertWIFPodIsolation(t, shape, submitted.Spec)
+				assertWIFPodIsolation(t, shape, submitted.Spec, false)
 				if shape == "wif-only-step" && submitted.Spec.ServiceAccountName != "release-step-main" {
 					t.Fatal("Argo lost pinned step identity")
 				}
@@ -157,13 +139,18 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				if err := json.Unmarshal(patched, &repaired); err != nil {
 					t.Fatal(err)
 				}
-				assertWIFPodIsolation(t, shape, repaired)
+				for i, c := range before.Spec.Containers {
+					if c.Name == "wait" {
+						assertNativeWaitCredentialMirrors(t, c, repaired.Containers[i])
+					}
+				}
+				assertWIFPodIsolation(t, shape, repaired, true)
 			}
 		})
 	}
 }
 
-func assertWIFPodIsolation(t *testing.T, shape string, spec corev1.PodSpec) {
+func assertWIFPodIsolation(t *testing.T, shape string, spec corev1.PodSpec, nativeMirrors bool) {
 	t.Helper()
 	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
 		t.Fatal("ambient API token enabled")
@@ -176,6 +163,9 @@ func assertWIFPodIsolation(t *testing.T, shape string, spec corev1.PodSpec) {
 	}
 	main, executor := false, false
 	for _, c := range append(spec.Containers, spec.InitContainers...) {
+		if nativeMirrors && c.Name == "wait" {
+			c = withoutNativeWaitCredentialMirrors(c)
+		}
 		if c.Name != "main" {
 			assertNoStoreSettings(t, c)
 			if shape == "vault" {
@@ -242,59 +232,4 @@ func renameRemovedSizeAnnotation(workflow *wfv1.Workflow) {
 		delete(workflow.Annotations, "oberth.ci/size")
 		workflow.Annotations["example.com/tier"] = size
 	}
-}
-
-// Keep the historical bytes and native Pod observations immutable. The only
-// expected input delta is the new authored-initializer runtime mount policy.
-func wifCaptureWithReadOnlyInitializers(t *testing.T, captured *wfv1.Workflow) *wfv1.Workflow {
-	t.Helper()
-	expected := captured.DeepCopy()
-	walkTemplates(expected, func(template *wfv1.Template) {
-		if len(template.InitContainers) == 0 {
-			return
-		}
-		var patch map[string]any
-		if err := json.Unmarshal([]byte(template.PodSpecPatch), &patch); err != nil {
-			t.Fatal(err)
-		}
-		initializers, _ := patch["initContainers"].([]any)
-		order, _ := patch["$setElementOrder/initContainers"].([]any)
-		for _, authored := range template.InitContainers {
-			for _, entry := range initializers {
-				if entry.(map[string]any)["name"] == authored.Name {
-					t.Fatal("capture already contains authored initializer patch; remove historical transition")
-				}
-			}
-			initializers = append(initializers, map[string]any{"name": authored.Name, "volumeMounts": []any{map[string]any{"name": "var-run-argo", "mountPath": "/var/run/argo", "readOnly": true}}})
-			order = append(order, map[string]any{"name": authored.Name})
-		}
-		// Build serializes the captured waiter as a Container, so retain its
-		// field order too: the spec identity includes the patch's JSON string.
-		for i, entry := range initializers {
-			if entry.(map[string]any)["name"] != executorTokenWaiter {
-				continue
-			}
-			body, err := json.Marshal(entry)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var waiter corev1.Container
-			if err = json.Unmarshal(body, &waiter); err != nil {
-				t.Fatal(err)
-			}
-			initializers[i] = waiter
-		}
-		patch["initContainers"], patch["$setElementOrder/initContainers"] = initializers, order
-		body, err := json.Marshal(patch)
-		if err != nil {
-			t.Fatal(err)
-		}
-		template.PodSpecPatch = string(body)
-	})
-	identity, err := specIdentity(expected)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected.Annotations[identityAnnotation] = identity
-	return expected
 }

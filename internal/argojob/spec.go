@@ -760,7 +760,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := markAssistHolds(workflow, config, request, hasSecretSteps); err != nil {
 		return nil, err
 	}
-	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, secretSteps)
 	injectAssistHelperMounts(workflow, request)
 	injectWorkspaceEnvironment(workflow)
@@ -789,12 +788,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 	if err := protectExecutorWorkspaceMounts(workflow); err != nil {
-		return nil, err
-	}
-	if err := protectReleaseWIFExecutor(wifLeaves); err != nil {
-		return nil, err
-	}
-	if err := applyNonrootLeaves(workflow, config); err != nil {
 		return nil, err
 	}
 
@@ -1017,110 +1010,6 @@ func applyServerBounds(workflow *wfv1.Workflow, config Config) {
 	workflow.Spec.PodGC = nil
 }
 
-// The step-Pod security baseline. These are forced server-side on every
-// container the pipeline runs, and Admit refuses the repository-authored
-// fields that could weaken them, so the two halves cannot disagree.
-//
-// The Argo-path security baseline runs as UID 0 with RunAsNonRoot false,
-// drops all Linux capabilities, sets a read-only root filesystem with a
-// writable private scratch emptyDir, and applies RuntimeDefault seccomp. Tightening to
-// a non-root UID (65534) is a separate, riskier follow-up that needs real
-// step execution validated against the toolchain and the PVC's ownership.
-//
-// ReadOnlyRootFilesystem requires the writable private scratch emptyDir below because
-// the Go toolchain writes temporary files there.
-const (
-	stepTmpVolumeName = "oberth-tmp"
-	stepTmpMountPath  = "/tmp"
-)
-
-// applyServerSecurity forces the Pod and container security baseline.
-//
-// Without this the Argo path set no securityContext at all, and Admit only
-// refused an explicitly-set privileged:true -- so a document declaring
-// seccompProfile: Unconfined, or runAsUser: 0 on a cluster whose default is
-// non-root, ran exactly as it asked on the same node as the server.
-func applyServerSecurity(workflow *wfv1.Workflow) {
-	runAsNonRoot := false
-	uid, gid := int64(0), int64(0)
-	workflow.Spec.SecurityContext = &corev1.PodSecurityContext{
-		RunAsNonRoot: &runAsNonRoot,
-		RunAsUser:    &uid,
-		RunAsGroup:   &gid,
-		SeccompProfile: &corev1.SeccompProfile{
-			Type: corev1.SeccompProfileTypeRuntimeDefault,
-		},
-	}
-	// A writable scratch mount, so the read-only root filesystem below cannot
-	// break the toolchain. Server-owned: Admit refuses a repository volume of
-	// any kind other than emptyDir, and this name is reserved by collision.
-	// SizeLimit bounds this volume to prevent node-disk exhaustion from an
-	// uncapped emptyDir (issue #440). The limit matches MaxEmptyDirSize.
-	tmpSizeLimit := resource.MustParse("8Gi")
-	workflow.Spec.Volumes = append(workflow.Spec.Volumes, corev1.Volume{
-		Name: stepTmpVolumeName,
-		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{
-			SizeLimit: &tmpSizeLimit,
-		}},
-	})
-	mount := corev1.VolumeMount{Name: stepTmpVolumeName, MountPath: stepTmpMountPath}
-	for index := range workflow.Spec.Templates {
-		applyTemplateSecurity(&workflow.Spec.Templates[index], mount, 0)
-	}
-}
-
-func applyTemplateSecurity(template *wfv1.Template, mount corev1.VolumeMount, depth int) {
-	if template == nil || depth > argoworkflow.MaxIdentityWalkDepth {
-		return
-	}
-	// Template-level Pod security is cleared: the workflow-level baseline is
-	// the only one, so a template cannot present a different posture.
-	template.SecurityContext = nil
-	harden := func(container *corev1.Container) {
-		noEscalation, readOnlyRoot := false, true
-		container.SecurityContext = &corev1.SecurityContext{
-			AllowPrivilegeEscalation: &noEscalation,
-			ReadOnlyRootFilesystem:   &readOnlyRoot,
-			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-		}
-		filtered := container.VolumeMounts[:0:0]
-		for _, existing := range container.VolumeMounts {
-			if existing.Name == stepTmpVolumeName || path.Clean("/"+existing.MountPath) == stepTmpMountPath {
-				continue
-			}
-			filtered = append(filtered, existing)
-		}
-		container.VolumeMounts = append(filtered, mount)
-	}
-	if template.Container != nil {
-		harden(template.Container)
-	}
-	if template.Script != nil {
-		harden(&template.Script.Container)
-	}
-	if template.ContainerSet != nil {
-		for index := range template.ContainerSet.Containers {
-			harden(&template.ContainerSet.Containers[index].Container)
-		}
-	}
-	for index := range template.InitContainers {
-		harden(&template.InitContainers[index].Container)
-	}
-	for index := range template.Sidecars {
-		harden(&template.Sidecars[index].Container)
-	}
-	for group := range template.Steps {
-		for step := range template.Steps[group].Steps {
-			applyTemplateSecurity(template.Steps[group].Steps[step].Inline, mount, depth+1)
-		}
-	}
-	if template.DAG != nil {
-		for task := range template.DAG.Tasks {
-			applyTemplateSecurity(template.DAG.Tasks[task].Inline, mount, depth+1)
-		}
-	}
-}
-
 // SourceVolumeName and SourceMountPath are where every pipeline container
 // finds the pushed revision. They are server-owned names: a document that
 // declares a volume of the same name is refused by the duplicate check
@@ -1187,9 +1076,7 @@ const (
 	// mount and for the same reason: the repository never names this volume,
 	// never chooses the node directory behind it, and cannot opt out of it.
 	//
-	// It sits beside /work/src rather than under private scratch because private scratch is the
-	// emptyDir that makes the read-only root filesystem survivable, and
-	// applyServerSecurity reserves that exact path.
+	// It sits beside /work/src so a repository can mount its own private scratch.
 	CacheVolumeName = "oberth-cache"
 	CacheMountPath  = "/work/cache"
 
@@ -1230,7 +1117,7 @@ const (
 	// "work" claim, shared across every step in the same Argo Workflow.
 	//
 	// The tools, trivy-cache, and release paths live under private scratch, which
-	// applyServerSecurity already mounts as a writable emptyDir. A subPath
+	// A repository can mount as a writable emptyDir. A subPath
 	// mount from the VCT takes precedence at its specific directory while the
 	// emptyDir backs everything else under private scratch.
 	WorkspaceToolsMountPath      = "/tmp/oberth-tools"

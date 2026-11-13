@@ -138,10 +138,7 @@ A leaf is held only when it has no credentials and no identity of its own:
 - no `oberth secretstore exec` or secretstore exec command, no
   `oberth.ci/release-wif-role`, no per-step `serviceAccountName`, no
   `automountServiceAccountToken: true`, no token, secret or WIF volume
-  mount;
-- not a declared nonroot launcher (`oberth.ci/nonroot-templates`): those
-  lanes, such as Oberth's own static-git qualification, forbid exec and own
-  their Pod patch.
+  mount.
 
 Everything else keeps today's behaviour.
 

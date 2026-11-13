@@ -14,6 +14,12 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
+const (
+	argoInitName       = "init"
+	argoWaitName       = "wait"
+	argoMainFilesystem = "/mainctrfs"
+)
+
 func tokenDisabled(t *wfv1.Template) bool {
 	return t.AutomountServiceAccountToken != nil && !*t.AutomountServiceAccountToken
 }
@@ -250,7 +256,7 @@ func preserveWorkspaceReadOnly(t *wfv1.Template, protected []corev1.VolumeMount)
 	for _, v := range t.Volumes {
 		if v.EmptyDir != nil && !sharedWorkspaceMount(corev1.VolumeMount{Name: v.Name}) &&
 			v.Name != SourceVolumeName && v.Name != ReleaseTokenVolumeName &&
-			v.Name != SecretsVolumeName && v.Name != stepTmpVolumeName {
+			v.Name != SecretsVolumeName {
 			local[v.Name] = true
 		}
 	}
@@ -350,9 +356,9 @@ func validateTemplateIsolation(wf *wfv1.Workflow, trigger pipeline.Trigger) erro
 }
 
 // AI-INVARIANT: Argo 4.0.8 addOutputArtifactsVolumes mirrors every main mount
-// into wait, even when the leaf has no output artifacts. Remove the server's
-// credential mounts from wait and reassert readonly source and workspace
-// protection after that mutation with a server-only strategic Pod patch.
+// into wait, even when the leaf has no output artifacts. Reassert readonly
+// source and workspace protection after that mutation with a server-only
+// strategic Pod patch. Secret mounts keep Argo's native mirroring behavior.
 // Repositories cannot supply patches.
 func protectExecutorWorkspaceMounts(wf *wfv1.Workflow) error {
 	var patchErr error
@@ -377,13 +383,9 @@ func protectExecutorWorkspaceMounts(wf *wfv1.Workflow) error {
 		if main != nil {
 			for _, m := range main.VolumeMounts {
 				mirrorPath := path.Join(argoMainFilesystem, m.MountPath)
-				if (m.Name == SecretsVolumeName && m.MountPath == SecretsMountPath) ||
-					(m.Name == ReleaseTokenVolumeName && m.MountPath == ReleaseTokenMountPath) ||
-					m.MountPath == VaultCAMountPath || m.MountPath == OberthBinMountPath {
-					// The wait executor has its own token. A readonly main-token
-					// mirror can still authenticate to Vault, and its secret-root
-					// mirror is writable under the same Pod UID. VolumeMounts merge
-					// by mountPath, so delete only these exact generated paths.
+				if m.MountPath == VaultCAMountPath || m.MountPath == OberthBinMountPath {
+					// Keep the store trust-anchor and binary mirror boundary.
+					// Native secret and main-token mirrors remain present.
 					mounts = append(mounts, map[string]any{"mountPath": mirrorPath, "$patch": "delete"})
 					continue
 				}

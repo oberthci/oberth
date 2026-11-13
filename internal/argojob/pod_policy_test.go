@@ -185,52 +185,14 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 		}
 	}
 	for _, shape := range []string{"container", "script"} {
-		wf := nonrootBuiltWithScratch(t, shape == "script", "128Mi")
+		wf := authoredNonrootWithScratch(t, shape == "script", "128Mi")
 		pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), wf)
-		if !accepts(pod) {
-			t.Fatalf("current %s controller shape refused", shape)
+		if accepts(pod) {
+			t.Fatalf("hostile native %s executor context was repaired or admitted", shape)
 		}
 	}
-	for _, trigger := range []pipeline.Trigger{pipeline.TriggerCI, pipeline.TriggerRelease} {
-		cfg := testConfig()
-		cfg.CICacheRoot = testCICacheRoot
-		cfg.ReleaseCacheRoot = testReleaseCacheRoot
-		wf, err := Build(cfg, testRequest(trigger, nestedSecurityDocument))
-		if err != nil {
-			t.Fatal(err)
-		}
-		walkTemplates(wf, func(template *wfv1.Template) {
-			pod := &corev1.Pod{Spec: corev1.PodSpec{Volumes: wf.Spec.Volumes, SecurityContext: wf.Spec.SecurityContext}}
-			templateContainers(template, func(c *corev1.Container) { pod.Spec.Containers = append(pod.Spec.Containers, *c) })
-			if len(pod.Spec.Containers) > 0 && !accepts(pod) {
-				t.Errorf("%s template %s refused", trigger, template.Name)
-			}
-		})
-	}
-	for _, entry := range []struct {
-		source, ref string
-		trigger     pipeline.Trigger
-	}{
-		{"build.yaml", "refs/heads/main", pipeline.TriggerCI},
-		{"release.yaml", "refs/tags/v0.1.0", pipeline.TriggerRelease},
-	} {
-		wf, err := buildOberthPipeline(oberthConfig(), Request{
-			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-			Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
-			Ref: entry.ref, SHA: testSHA, Trigger: entry.trigger,
-			Source: loadPipeline(t, entry.source), ApprovedSecrets: oberthReleaseApprovedSecrets(),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		walkTemplates(wf, func(template *wfv1.Template) {
-			pod := &corev1.Pod{Spec: corev1.PodSpec{Volumes: wf.Spec.Volumes, SecurityContext: wf.Spec.SecurityContext}}
-			templateContainers(template, func(c *corev1.Container) { pod.Spec.Containers = append(pod.Spec.Containers, *c) })
-			if len(pod.Spec.Containers) > 0 && !accepts(pod) {
-				t.Errorf("%s template %s refused", entry.source, template.Name)
-			}
-		})
-	}
+	// Compiled templates are not controller-emitted Pods: native Argo defaults
+	// have not been applied. The remaining cases below use actual Pod builders.
 	kube := fake.NewClientset()
 	seeder := &SourceSeeder{client: kube, config: testConfig()}
 	if _, err := seeder.createSeedPodBound(t.Context(), "seed", "claim"); err != nil {

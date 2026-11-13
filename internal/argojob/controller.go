@@ -14,7 +14,6 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -356,10 +355,7 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	if err := verifyDeliveredPinnedSources(existing, sources); err != nil {
 		return &workflowSpecMismatch{}
 	}
-	if intended.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" && !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
-		return &workflowSpecMismatch{}
-	}
-	// Ordinary pipelines retain the annotation-only identity check. Namespace
+	// Pipelines retain the annotation-only identity check. Namespace
 	// Workflow-create RBAC remains part of that trust boundary.
 	return nil
 }

@@ -369,10 +369,11 @@ trust assumptions and complete invalidation rules.
     The server delivers the oberth binary into the source claim at seeding
     time and injects the secrets emptyDir volume automatically. Owner-private
     mode confines access by other UIDs and public paths, but does not by
-    itself isolate secrets from a same-UID Argo `wait` container. A separate
-    server-owned patch removes `wait` mirrors of both the secret volume and
-    main release token after Argo adds them (#621); the effective admitted Pod
-    must still be checked for those absent mounts.
+    itself isolate secrets from a same-UID Argo `wait` container. Native Argo
+    wait mirrors are retained. The executor token separately keeps its random
+    relocated path in private memory-backed storage; that protection does not
+    depend on deleting the secret or main release-token mirror.
+
   Values and value-derived digests never appear in etcd, Job annotations,
   node disk (on swapless nodes or verified RAM-only zram), or server-side
   logs; only names and paths are annotated. `secretstore exec` exempts active
@@ -436,8 +437,7 @@ trust assumptions and complete invalidation rules.
   pusher's branch run can plant `GOCACHE` objects that the next run links in
   (pre-existing for default-mode leaves). So `cache` is refused on CI-tier
   leaves that run a credential chain, and admitted on release leaves,
-  credentialed or not, because only admitted release runs write the release root. It is
-  also refused on nonroot leaves, which take no host cache mount. Any
+  credentialed or not, because only admitted release runs write the release root. Any
   other value is refused by admission and `oberth validate`.
   `readonly` covers shared aliases and Argo wait mirrors. Authored read-only
   requests survive mount-path replacement and protect overlapping subpaths
@@ -448,11 +448,9 @@ trust assumptions and complete invalidation rules.
   and controller-proof limits are in [workspace isolation](docs/workspace-isolation.md).
   Helper mount mirroring is resolved once before credential injection, with
   explicit helper paths taking precedence; generated credentials are never
-  mirrored into repository helpers. On credentialed leaves, a server-owned
-  Pod patch also removes Argo `wait` mirrors of the secret root and the main
-  release token after Argo adds them; `wait` retains its own executor token and
-  ordinary output mounts. This boundary still depends on actual controller
-  behavior and must be checked in the admitted Pod. Container-set common
+  mirrored into repository helpers. Argo's native `wait` credential mirrors are
+  retained; source and explicit read-only workspace mirrors stay protected.
+  Container-set common
   mounts are normalized before policy, and a server patch binds their
   referenced volumes to the admitted definitions and this Workflow's own
   generated claims.
@@ -1588,7 +1586,7 @@ trust assumptions and complete invalidation rules.
 - Pipelines execute as Argo Workflows in a namespace that is never the server's.
   Oberth owns the envelope and the repository owns the work: the document
   supplies steps, DAG, images and commands, and Oberth forces namespace,
-  ServiceAccount, a non-root container security baseline, the source mount, the
+  ServiceAccount, the source mount, the
   per-repository build cache mount and its `GOMODCACHE`/`GOCACHE`, the
   server-owned run-fact workflow parameters, the active deadline and the TTL. A document's own `serviceAccountName` is never honoured — Vault validates
   identity, not intent, so a branch push that could name the release identity
@@ -1967,24 +1965,15 @@ trust assumptions and complete invalidation rules.
   tokens and secretstore exec, not through the exec stream. The optional
   `secretstore.createAuthDelegatorBinding` ClusterRoleBinding lets OpenBao
   validate login tokens through TokenReview without a stored reviewer JWT.
-  Argo-authored workflows
-  may select named plain container/script leaves with the static annotation
-  `oberth.ci/nonroot-templates: test-one,test-two`. In this initial mode the
-  entire workflow must be uncredentialed, with no templateDefaults, and selected
-  leaves cannot add init containers, sidecars, plugins, artifacts or nested Pod
-  shapes. The fixed main and Argo init/wait UID/GID is65534, with RuntimeDefault,
-  dropALL, no escalation and a read-only root. Repository security contexts and
-  Pod patches remain forbidden. One server-owned UID0 initializer, using the
-  pinned source-seed image with the same restrictions and no token, prepares
-  only named fresh per-Pod EmptyDirs. It cannot mount source, PVCs or host paths.
-  No chown or fsGroup change is made. Main remains tokenless; Argo's existing
-  executor token remains scoped to its init/wait. Source and shared tool inputs,
-  including their executor mirrors, remain read-only; the selected leaf has no
-  host cache mount. TMPDIR/GOTMPDIR point to private scratch and Go/tool caches are ephemeral
-  within that bounded private Pod volume. Collected artifacts retain their
-  separate existing run-owned mount. Actual PostgreSQL startup and Chromium's
-  namespace/seccomp sandbox require separate execution proof; this interface
-  alone does not establish either test suite's coverage.
+  Authored Pod and container security contexts pass through unchanged. Go still
+  refuses AppArmor, SELinux, procMount, sysctls, Windows security options and
+  beta AppArmor Pod annotations; Kubernetes enforces the remaining Pod floor.
+  The removed `oberth.ci/nonroot-templates` annotation is refused, with no
+  preparation container, security rewrite or injected private `/tmp`. Authors
+  choose users/groups and declare scratch explicitly. Root and writable-root
+  execution are allowed; unsafe contexts reach Kubernetes admission unchanged.
+  The executor-token waiter keeps its existing security context.
+
 - Security-backported runner tools are rebuilt from immutable upstream release
   source, identify themselves as Oberth derivatives, and are bound to their
   patched module versions and exact binary digests by the image contract.
@@ -2736,7 +2725,7 @@ A branch-tier CI run that asked (`git push -o oberth.assist=1`, `run_rerun`
 `assist`, `oberth run rerun --assist`; immutable `runs.assist_requested`) and
 declares no secret-store paths gets, on every single-main container/script leaf
 without its own `retryStrategy` (and no `templateDefaults.retryStrategy` in
-the document), credentials, step identity, token mount or nonroot launcher, a
+the document), credentials, step identity or token mount, a
 server-owned `retryStrategy` (`limit 1`, `OnFailure`,
 `expression: asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137
 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) < <floored
@@ -2808,10 +2797,8 @@ when it reaches its own declared memory limit. Application termination-log
 suffixes never establish node pressure. Only a run whose failed
 steps all have infrastructure causes is reclassified. It retains step rows,
 clears run-level test attribution, permits eligible branch `run_rerun`, and does
-not open/update/resolve repository CI-red issues. Argo's server-injected executor
-scratch defaults to 1Gi for nonroot leaves and is configurable
-through `argo.executorScratchSizeLimit` / `--argo-executor-scratch-size-limit`;
-the nonroot verifier enforces the configured bound. These
+not open/update/resolve repository CI-red issues. Executor scratch follows native Argo configuration; the removed nonroot
+preparation patch no longer sets its volume bound. These
 records trust the Kubernetes API/kubelet and bind observation time separately
 from container event times; they are not independent execution attestations.
 

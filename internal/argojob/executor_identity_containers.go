@@ -27,9 +27,6 @@ func validServerContainer(container corev1.Container, image string, initializer 
 	switch container.Name {
 	case executorTokenWaiter:
 		return sameServerContainer(container, executorWaiterContainer(image, executorWaiterResources(false)))
-	case nonrootPrepareName:
-		return sameServerContainer(container, nonrootPrepareContainer(false, image)) ||
-			sameServerContainer(container, nonrootPrepareContainer(true, image))
 	default:
 		return false
 	}
