@@ -487,16 +487,19 @@ func admitContainers(location string, template wfv1.Template, policy Policy) []e
 	containers := 0
 	if template.Container != nil {
 		containers++
+		problems = append(problems, admitExecutorContainerName(location+".container", template.Container.Name, true)...)
 		problems = append(problems, admitContainer(location+".container", template.Container, policy)...)
 	}
 	if template.Script != nil {
 		containers++
+		problems = append(problems, admitExecutorContainerName(location+".script", template.Script.Name, true)...)
 		problems = append(problems, admitContainer(location+".script", &template.Script.Container, policy)...)
 	}
 	if template.ContainerSet != nil {
 		problems = append(problems, admitHelperMounts(location+".containerSet", template.ContainerSet.VolumeMounts, nil)...)
 		for index := range template.ContainerSet.Containers {
 			containers++
+			problems = append(problems, admitExecutorContainerName(fmt.Sprintf("%s.containerSet.containers[%d]", location, index), template.ContainerSet.Containers[index].Name, true)...)
 			problems = append(problems, admitContainer(
 				fmt.Sprintf("%s.containerSet.containers[%d]", location, index),
 				&template.ContainerSet.Containers[index].Container, policy)...)
@@ -504,12 +507,14 @@ func admitContainers(location string, template wfv1.Template, policy Policy) []e
 	}
 	for index := range template.InitContainers {
 		containers++
+		problems = append(problems, admitExecutorContainerName(fmt.Sprintf("%s.initContainers[%d]", location, index), template.InitContainers[index].Name, false)...)
 		problems = append(problems, admitContainer(
 			fmt.Sprintf("%s.initContainers[%d]", location, index),
 			&template.InitContainers[index].Container, policy)...)
 	}
 	for index := range template.Sidecars {
 		containers++
+		problems = append(problems, admitExecutorContainerName(fmt.Sprintf("%s.sidecars[%d]", location, index), template.Sidecars[index].Name, false)...)
 		problems = append(problems, admitContainer(
 			fmt.Sprintf("%s.sidecars[%d]", location, index),
 			&template.Sidecars[index].Container, policy)...)
@@ -541,6 +546,9 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 		}
 	}
 	for _, variable := range container.Env {
+		if strings.Contains(variable.Name, "{{") {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.env[%q] has a templated name; environment names must be literal", location, variable.Name))
+		}
 		// ARGO_* is the executor's own control vocabulary (ARGO_DEBUG_PAUSE_*,
 		// ARGO_CONTAINER_NAME, ARGO_DEADLINE, ...). A document that sets one
 		// could pause or mislead the emissary; only the server may.
@@ -737,6 +745,7 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 func admitVolumes(location string, volumes []corev1.Volume) []error {
 	var problems []error
 	for index, volume := range volumes {
+		problems = append(problems, admitExecutorVolumeName(fmt.Sprintf("%s[%d]", location, index), volume.Name)...)
 		where := fmt.Sprintf("%s[%d]", location, index)
 		if volume.Name != "" {
 			where = fmt.Sprintf("%s[%q]", location, volume.Name)
@@ -793,7 +802,7 @@ var reservedVCTNames = map[string]bool{
 }
 
 func reservedVCTName(name string) bool {
-	return reservedVCTNames[name]
+	return reservedVCTNames[name] || name == ExecutorTokenVolumeName || strings.Contains(name, "{{")
 }
 
 func admitArtifactGCPodMetadata(gc *wfv1.WorkflowLevelArtifactGC) []error {

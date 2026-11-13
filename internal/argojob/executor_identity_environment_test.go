@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -20,24 +22,16 @@ import (
 func executorEnvironmentPod(t *testing.T, shape, target string, env []corev1.EnvVar) corev1.PodSpec {
 	t.Helper()
 	controller, _, _, _ := executorRetryFixture(t)
-	leaf := wfv1.Template{Name: "step", Container: &corev1.Container{Image: "busybox"}}
+	leaf := wfv1.Template{Name: "step", Container: &corev1.Container{Image: "pipeline-image"}}
 	wf := &wfv1.Workflow{}
 	switch shape {
-	case "direct", "podSpecPatch-free":
-	case "templateDefaults":
-		wf.Spec.TemplateDefaults = &wfv1.Template{Container: &corev1.Container{Env: []corev1.EnvVar{{Name: "KUBECONFIG", Value: "author-default"}}}}
-	case "containerSet":
-		leaf.Container = nil
-		leaf.ContainerSet = &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "main", Image: "busybox"}}}}
-	case "script":
-		leaf.Container = nil
-		leaf.Script = &wfv1.ScriptTemplate{Container: corev1.Container{Image: "busybox"}, Source: "true"}
-	case "resource":
+	case "container":
+	case "resource", "resource-with-logs":
 		leaf.Container = nil
 		leaf.Resource = &wfv1.ResourceTemplate{Action: "get", Manifest: "{}"}
-	case "data":
-		leaf.Container = nil
-		leaf.Data = &wfv1.Data{}
+		if shape == "resource-with-logs" {
+			leaf.ArchiveLocation = &wfv1.ArtifactLocation{ArchiveLogs: ptr.To(true)}
+		}
 	default:
 		t.Fatalf("unknown shape %s", shape)
 	}
@@ -49,18 +43,19 @@ func executorEnvironmentPod(t *testing.T, shape, target string, env []corev1.Env
 		t.Fatal(err)
 	}
 	mounts := []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}
-	before := corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", VolumeMounts: mounts}}}
-	name := "wait"
-	if shape == "resource" || shape == "data" {
-		name = "main"
+	before := corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Image: argoworkflow.ExecutorImage, VolumeMounts: mounts}}}
+	names := []string{"wait"}
+	switch shape {
+	case "resource":
+		names = []string{"main"}
+	case "resource-with-logs":
+		names = append(names, "main")
 	}
-	before.Containers = []corev1.Container{{Name: name, Image: argoworkflow.ExecutorImage, VolumeMounts: mounts}}
-	if name == "wait" {
-		main := corev1.Container{Name: "main", Image: "busybox"}
-		if wf.Spec.TemplateDefaults != nil {
-			main.Env = wf.Spec.TemplateDefaults.Container.Env
-		}
-		before.Containers = append(before.Containers, main)
+	for _, name := range names {
+		before.Containers = append(before.Containers, corev1.Container{Name: name, Image: argoworkflow.ExecutorImage, VolumeMounts: mounts})
+	}
+	if shape == "container" {
+		before.Containers = append(before.Containers, corev1.Container{Name: "main", Image: "pipeline-image"})
 	}
 	for i := range before.InitContainers {
 		if before.InitContainers[i].Name == target {
@@ -76,9 +71,9 @@ func executorEnvironmentPod(t *testing.T, shape, target string, env []corev1.Env
 }
 
 func TestExecutorIdentityRejectsDuplicateEnvironment(t *testing.T) {
-	for _, shape := range []string{"direct", "templateDefaults", "containerSet", "podSpecPatch-free", "script", "resource", "data"} {
+	for _, shape := range []string{"container", "resource", "resource-with-logs"} {
 		for _, target := range []string{"init", "wait", "main"} {
-			if (target == "wait" && (shape == "resource" || shape == "data")) || (target == "main" && shape != "resource" && shape != "data") {
+			if (target == "wait" && shape == "resource") || (target == "main" && shape == "container") {
 				continue
 			}
 			for _, expected := range executorEnvironment {
@@ -105,8 +100,8 @@ func TestExecutorIdentityRejectsDuplicateEnvironment(t *testing.T) {
 						if count != 2 {
 							t.Fatalf("strategic merge removed duplicate: count=%d", count)
 						}
-						if shape == "resource" || shape == "data" {
-							// Exercise the operator/data executor main allowance directly.
+						if shape != "container" {
+							// Exercise the resource executor main allowance directly.
 							if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, true); err == nil {
 								t.Fatal("executor main accepted duplicate environment")
 							}
@@ -138,7 +133,7 @@ func TestExecutorIdentityRejectsEnvironmentDrift(t *testing.T) {
 		for _, drift := range []string{"missing", "wrong", "valueFrom"} {
 			t.Run(expected[0]+"/"+drift, func(t *testing.T) {
 				controller, _, pod, _ := executorRetryFixture(t)
-				pod.Spec = executorEnvironmentPod(t, "direct", "wait", nil)
+				pod.Spec = executorEnvironmentPod(t, "container", "wait", nil)
 				for i := range pod.Spec.Containers {
 					c := &pod.Spec.Containers[i]
 					if c.Name != "wait" {
@@ -168,13 +163,69 @@ func TestExecutorIdentityRejectsEnvironmentDrift(t *testing.T) {
 }
 
 func TestExecutorIdentityAcceptsExactEnvironment(t *testing.T) {
-	for _, shape := range []string{"direct", "templateDefaults", "containerSet", "podSpecPatch-free", "script", "resource", "data"} {
+	for _, shape := range []string{"container", "resource", "resource-with-logs"} {
 		t.Run(shape, func(t *testing.T) {
 			controller, _, pod, _ := executorRetryFixture(t)
 			// A single controller default is overwritten by the server patch.
 			pod.Spec = executorEnvironmentPod(t, shape, "init", []corev1.EnvVar{{Name: "KUBECONFIG", Value: "controller-default"}, {Name: "UNRELATED", Value: "kept"}})
-			if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, shape == "resource" || shape == "data"); err != nil {
+			if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, shape != "container"); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Explicit env takes precedence over envFrom. Controller envFrom is harmless
+// only while all three literal protections are still present exactly once.
+func TestExecutorIdentityEnvFromCannotReplaceExplicitEnvironment(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprint("missing=", missing), func(t *testing.T) {
+			controller, _, pod, _ := executorRetryFixture(t)
+			pod.Spec = executorEnvironmentPod(t, "container", "wait", nil)
+			for i := range pod.Spec.Containers {
+				c := &pod.Spec.Containers[i]
+				if c.Name == "wait" {
+					c.EnvFrom = []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "executor-env"}}}}
+					if missing {
+						c.Env = nil
+					}
+				}
+			}
+			err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, false)
+			if (err != nil) != missing {
+				t.Fatalf("envFrom bypassed literal protections or safe explicit env was refused: %v", err)
+			}
+		})
+	}
+}
+
+func TestExecutorIdentityRejectsAuthoredHelpers(t *testing.T) {
+	for _, tc := range []struct {
+		name, image string
+		initializer bool
+	}{
+		{"wait", "pipeline-image", false},
+		{"wait", "pipeline-image", true},
+		{"init", "pipeline-image", true},
+		{"init", "pipeline-image", false},
+		{"wait", argoworkflow.ExecutorImage, true},
+		{"init", argoworkflow.ExecutorImage, false},
+		{"main", argoworkflow.ExecutorImage, true},
+	} {
+		t.Run(fmt.Sprintf("%s/initializer=%v/image=%s", tc.name, tc.initializer, tc.image), func(t *testing.T) {
+			controller, _, pod, _ := executorRetryFixture(t)
+			pod.Spec = executorEnvironmentPod(t, "resource", "main", nil)
+			helper := corev1.Container{Name: tc.name, Image: tc.image, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
+			for _, expected := range executorEnvironment {
+				helper.Env = append(helper.Env, corev1.EnvVar{Name: expected[0], Value: expected[1]})
+			}
+			if tc.initializer {
+				pod.Spec.InitContainers = append(pod.Spec.InitContainers, helper)
+			} else {
+				pod.Spec.Containers = append(pod.Spec.Containers, helper)
+			}
+			if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, true); err == nil {
+				t.Fatal("authored helper can read the operator executor token")
 			}
 		})
 	}

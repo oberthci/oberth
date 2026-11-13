@@ -26,10 +26,10 @@ import (
 const executorTokenWaiter = "oberth-executor-token"
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenVolume = "exec-sa-token"
+const executorTokenVolume = argoworkflow.ExecutorTokenVolumeName
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+const executorTokenDir = argoworkflow.ExecutorTokenMountPath
 
 // executorKubeconfig is the only fixed name the executor identity has inside
 // the tmpfs. Argo's wait container reads outputs.parameters valueFrom.path and
@@ -376,9 +376,10 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 		}
 	}
 	found := false
-	for _, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
+	for position, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
+		initializer := position < len(pod.Spec.InitContainers)
 		if container.Name == executorTokenWaiter {
-			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || container.Command[2] != executorTokenWaitCommand {
+			if !initializer || container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || container.Command[2] != executorTokenWaitCommand {
 				return errors.New("executor identity waiter was modified")
 			}
 			found = true
@@ -401,10 +402,13 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 					return fmt.Errorf("executor container %q must have exactly one %s", container.Name, expected[0])
 				}
 			}
-			if container.Name == "init" || container.Name == "wait" {
+			// Names alone do not identify Argo helpers: a resource Pod may
+			// have authored containers named init or wait. Verify their image
+			// and the position in which Argo actually creates each executor.
+			if container.Image == argoworkflow.ExecutorImage && ((initializer && container.Name == "init") || (!initializer && container.Name == "wait")) {
 				continue
 			}
-			if resourcePod && container.Name == "main" && container.Image == argoworkflow.ExecutorImage {
+			if !initializer && resourcePod && container.Name == "main" && container.Image == argoworkflow.ExecutorImage {
 				continue
 			}
 			return errors.New("pipeline container can access executor identity")
