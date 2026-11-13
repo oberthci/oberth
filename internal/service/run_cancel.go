@@ -75,7 +75,7 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 // actor. It resolves the run within the actor's scope, applies RunCancelPolicy,
 // records the request durably, and hands any Workflow-Stop obligation to
 // the scheduler, which also withdraws a waiting run's admission reservation at
-// once. Repeating the same Stop is idempotent.
+// once. Repeating an active cancellation escalates it to native Terminate.
 func (service *API) CancelRun(ctx context.Context, actor api.Actor, runID, reason string, force bool) (api.RunCancelResponse, error) {
 	if strings.TrimSpace(actor.Identity) == "" {
 		return api.RunCancelResponse{}, errors.New("service: acting uplink identity is required")
@@ -150,4 +150,18 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 		}
 	}
 	return response, nil
+}
+
+// shutdownRun honours the durable native escalation in every observation path.
+func (scheduler *Scheduler) shutdownRun(ctx context.Context, workflowName, runID string) error {
+	pending, err := scheduler.database().PendingRunCancellations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, request := range pending {
+		if request.RunID == runID && request.Terminate {
+			return scheduler.jobs.Terminate(ctx, workflowName, runID)
+		}
+	}
+	return scheduler.jobs.Stop(ctx, workflowName, runID)
 }

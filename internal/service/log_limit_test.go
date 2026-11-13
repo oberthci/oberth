@@ -110,3 +110,7 @@ func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
 		t.Fatalf("overflow run = %#v", finished)
 	}
 }
+
+func (j overflowingJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}

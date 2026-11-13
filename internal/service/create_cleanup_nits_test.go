@@ -207,3 +207,7 @@ func (j *contractFailureJobs) SettleCreate(ctx context.Context, name, id string,
 	}
 	return true, nil
 }
+
+func (j *contractFailureJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}

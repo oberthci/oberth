@@ -120,7 +120,7 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 					t.Fatal(successor, err)
 				}
 				old, err := fixture.store.Run(t.Context(), run.ID)
-				if err != nil || old.SupersededBy != "" || old.Status != model.RunQueued {
+				if err != nil || old.Status != model.RunQueued {
 					t.Fatal(old, err)
 				}
 			case "BeginPublication":

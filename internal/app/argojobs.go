@@ -32,6 +32,7 @@ type argoControl interface {
 	Create(context.Context, argojob.Request) (string, error)
 	Wait(context.Context, string, string, io.Writer) (argojob.Completion, error)
 	Cancel(context.Context, string, string) error
+	Terminate(context.Context, string, string) error
 	TerminalState(context.Context, string) (*argojob.Completion, error)
 	Owns(context.Context, string) (bool, error)
 	Namespace() string
@@ -109,7 +110,8 @@ type argoIntent struct {
 	runID     string
 	trigger   pipeline.Trigger
 	created   bool // true once controller.Create has returned successfully
-	cancelled bool // true once Stop has requested cancellation
+	cancelled bool // true once shutdown has requested cancellation
+	terminate bool // immediate native shutdown, preserved across an in-flight Create
 }
 
 // ErrCreationCancelled is returned by create() when Stop() cancelled the intent
@@ -499,7 +501,11 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		// A successful create must remain observable through onExit.
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if err := jobs.controller.Cancel(stopCtx, createdName, request.Run.ID); err != nil {
+		shutdown := jobs.controller.Cancel
+		if intent.terminate {
+			shutdown = jobs.controller.Terminate
+		}
+		if err := shutdown(stopCtx, createdName, request.Run.ID); err != nil {
 			log.Printf("Workflow %s: Stop deferred to the durable cancellation owner: %v", createdName, err)
 		}
 	}
@@ -839,42 +845,47 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 }
 
 func (jobs *ArgoJobs) Stop(ctx context.Context, name, runID string) error {
+	return jobs.shutdown(ctx, name, runID, false)
+}
+
+func (jobs *ArgoJobs) Terminate(ctx context.Context, name, runID string) error {
+	return jobs.shutdown(ctx, name, runID, true)
+}
+
+func (jobs *ArgoJobs) shutdown(ctx context.Context, name, runID string, terminate bool) error {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forName(ctx, name, runID)
 		if err != nil {
 			return err
 		}
-		return child.Stop(ctx, name, runID)
+		return child.shutdown(ctx, name, runID, terminate)
 	}
-
 	if strings.TrimSpace(runID) == "" {
-		return errors.New("app: durable run ID is required to stop a Workflow")
+		return errors.New("app: durable run ID is required to shut down a Workflow")
 	}
-
 	jobs.mu.Lock()
-	if current, ok := jobs.intents[name]; ok && current.runID != runID {
+	current, known := jobs.intents[name]
+	if known && current.runID != runID {
 		jobs.mu.Unlock()
 		return fmt.Errorf("app: Workflow %s belongs to a different in-process run", name)
 	}
-	if current, ok := jobs.intents[name]; ok && !current.created {
-		// The Workflow does not exist yet — create() is still running
-		// (seeding, auditing, or waiting on controller.Create). Mark the
-		// intent cancelled so create() will either abort early or cancel
-		// the Workflow after controller.Create returns. Leave the intent
-		// in the map: create() owns the final removal.
+	if known {
 		current.cancelled = true
+		current.terminate = current.terminate || terminate
 		jobs.intents[name] = current
-		jobs.mu.Unlock()
-		// Attempt Cancel anyway — harmless NotFound if the Workflow
-		// genuinely does not exist yet, and a safety net if the Workflow
-		// was created between our read of created=false and this call.
-		_ = jobs.controller.Cancel(ctx, name, runID)
-		return nil
+		terminate = current.terminate
 	}
 	jobs.mu.Unlock()
-
-	// Keep the intent until Wait observes Argo's terminal phase.
-	return jobs.controller.Cancel(ctx, name, runID)
+	shutdown := jobs.controller.Cancel
+	if terminate {
+		shutdown = jobs.controller.Terminate
+	}
+	if known && !current.created {
+		// Create owns the outcome; a late accepted object inherits this exact mode.
+		_ = shutdown(ctx, name, runID)
+		return nil
+	}
+	return shutdown(ctx, name, runID)
 }
 
 // SettleCreate bypasses the in-flight Stop shortcut: an ambiguous POST may

@@ -415,6 +415,7 @@ type JobController interface {
 	CreateWorkflow(context.Context, WorkflowRequest) error
 	Wait(context.Context, string, io.Writer) (JobResult, error)
 	Stop(context.Context, string, string) error
+	Terminate(context.Context, string, string) error
 	// TerminalResult checks whether a named K8s Job has reached a terminal
 	// state. Returns (result, nil) when the Job completed or failed; returns
 	// (_, ErrJobNotTerminal) when the Job is absent or still active; returns

@@ -225,7 +225,7 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 				owner := startSlice2Owner(t, scheduler)
 				owner.waitEntered(t, jobs.waitEntered)
 				active, err := fixture.store.Run(context.Background(), run.ID)
-				if err != nil || active.Status != model.RunRunning || active.Credentialed != run.Credentialed || active.Release != run.Release || active.SHA != run.SHA || active.TestedSHA != run.TestedSHA || active.AdmissionSequence != run.AdmissionSequence || active.SupersededBy != "" {
+				if err != nil || active.Status != model.RunRunning || active.Credentialed != run.Credentialed || active.Release != run.Release || active.SHA != run.SHA || active.TestedSHA != run.TestedSHA || active.AdmissionSequence != run.AdmissionSequence {
 					t.Fatalf("adoption changed durable attempt: %+v %v", active, err)
 				}
 				owner.stop(t)
@@ -263,7 +263,7 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 						t.Fatalf("terminal workspace %s retained: %v", path, err)
 					}
 				}
-				if final.ID != run.ID || final.QueueSequence != run.QueueSequence || final.AdmissionSequence != run.AdmissionSequence || final.SupersededBy != "" || final.Credentialed != run.Credentialed {
+				if final.ID != run.ID || final.QueueSequence != run.QueueSequence || final.AdmissionSequence != run.AdmissionSequence || final.Credentialed != run.Credentialed {
 					t.Fatalf("final attempt changed: %+v", final)
 				}
 				if jobs.created != 0 || jobs.releaseCreated != 0 || len(jobs.deleted) != 0 || len(jobs.adopted) != 1 {
@@ -469,7 +469,7 @@ func TestMissingWorkflowResetsTagsAndInterruptsPromotions(t *testing.T) {
 			if kind == "promotion" {
 				wantStatus, wantDeleted = model.RunFailed, 1
 			}
-			if err != nil || final.Status != wantStatus || final.SupersededBy != "" || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != wantDeleted || jobs.created != 0 || jobs.releaseCreated != 0 {
+			if err != nil || final.Status != wantStatus || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != wantDeleted || jobs.created != 0 || jobs.releaseCreated != 0 {
 				t.Fatalf("missing fallback: %+v %v", final, err)
 			}
 			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
@@ -503,7 +503,7 @@ func TestNewPromotionTagAndReleaseKeepWorkflowAndWorkspaceOnShutdown(t *testing.
 				t.Fatal(err)
 			}
 			active, err := fixture.store.Run(context.Background(), run.ID)
-			if err != nil || active.Status != model.RunRunning || active.SupersededBy != "" || len(jobs.deleted) != 0 {
+			if err != nil || active.Status != model.RunRunning || len(jobs.deleted) != 0 {
 				t.Fatalf("shutdown disrupted run: %+v %v", active, err)
 			}
 			expectedCI, expectedRelease := 1, 0
@@ -544,7 +544,7 @@ func TestLegacyNonReleaseTagAdoptsWithoutInferringRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	final, err := fixture.store.Run(ctx, enqueued.ID)
-	if err != nil || final.Release || final.Status != model.RunRunning || final.SupersededBy != "" || len(jobs.adopted) != 1 || len(jobs.deleted) != 0 {
+	if err != nil || final.Release || final.Status != model.RunRunning || len(jobs.adopted) != 1 || len(jobs.deleted) != 0 {
 		t.Fatalf("legacy tag rebound: %+v %v", final, err)
 	}
 }

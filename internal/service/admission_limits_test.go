@@ -77,3 +77,7 @@ func TestAdmissionLimitsPendingCleanupShowsDeadlineReason(t *testing.T) {
 		}
 	}
 }
+
+func (j *expiredCleanupJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}

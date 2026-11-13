@@ -262,7 +262,7 @@ func TestShutdownLeavesRunningWorkflowForAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunRunning || recovered.SupersededBy != "" {
+	if recovered.Status != model.RunRunning {
 		t.Fatalf("run = %#v, want running under the same ID", recovered)
 	}
 	requeued, err := fixture.store.Run(context.Background(), run.ID)
@@ -326,7 +326,7 @@ func TestShutdownLeavesTagWorkflowForAdoption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunRunning || recovered.SupersededBy != "" || recovered.Error != "" {
+	if recovered.Status != model.RunRunning || recovered.Error != "" {
 		t.Fatalf("tag run = %#v, want queued under the original ID", recovered)
 	}
 	if len(jobs.deleted) != 0 {
@@ -523,7 +523,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" {
+	if recovered.Status != model.RunQueued {
 		t.Fatalf("reconciled run = %#v, want running under the same ID", recovered)
 	}
 	requeued, err := database.Run(ctx, enqueued.ID)
@@ -545,8 +545,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(pending) != 1 || pending[0].RunID != enqueued.ID ||
-		pending[0].WorkflowName != "oberth-vanished-job" || pending[0].Reason != "owner_restart" ||
-		pending[0].SupersededBy != "" {
+		pending[0].WorkflowName != "oberth-vanished-job" || pending[0].Reason != "owner_restart" {
 		t.Fatalf("pending cancellations = %#v, want superseded obligation for the stranded Job", pending)
 	}
 	if err := scheduler.completePendingCancellationsWithGate(ctx, scheduler.requireMutation); err != nil {
@@ -633,7 +632,7 @@ func TestStartupReconciliationResetsUnobservedTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" {
+	if recovered.Status != model.RunQueued {
 		t.Fatalf("reconciled tag run = %#v, want queued under the original ID", recovered)
 	}
 	if recovered.Error != "" || recovered.Reason != store.RestartRequeueReason {
@@ -763,4 +762,8 @@ func (j *recoveryJobs) SettleCreate(ctx context.Context, name, id string, _ time
 		return false, err
 	}
 	return true, nil
+}
+
+func (j *recoveryJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
 }

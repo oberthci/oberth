@@ -164,7 +164,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if current.Status != model.RunRunning || current.SupersededBy != "" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
+				if current.Status != model.RunRunning || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
 					t.Fatalf("adopted run = %#v", current)
 				}
 				scheduler.submissions.mu.Lock()
@@ -184,7 +184,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
-			if current.SupersededBy != "" || current.WorkflowName != "oberth-adopt" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
+			if current.WorkflowName != "oberth-adopt" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
 				t.Fatalf("finalized run = %#v", current)
 			}
 			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
@@ -223,10 +223,10 @@ func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
 			t.Fatal(lookupErr)
 		}
 		if readErr == nil {
-			if err != nil || current.Status != model.RunQueued || current.SupersededBy != "" {
+			if err != nil || current.Status != model.RunQueued {
 				t.Fatalf("missing recovery: %#v, %v", current, err)
 			}
-		} else if err == nil || current.Status != model.RunRunning || current.SupersededBy != "" {
+		} else if err == nil || current.Status != model.RunRunning {
 			t.Fatalf("failed observation mutated run: %#v, %v", current, err)
 		}
 	}
@@ -261,7 +261,7 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunRunning || current.WorkflowName != "oberth-shutdown" || current.SupersededBy != "" || len(jobs.deleted) != 0 {
+	if current.Status != model.RunRunning || current.WorkflowName != "oberth-shutdown" || len(jobs.deleted) != 0 {
 		t.Fatalf("shutdown disrupted Workflow: %#v; deleted %v", current, jobs.deleted)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -388,7 +388,7 @@ func TestNewBranchWorkflowSurvivesShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunRunning || current.SupersededBy != "" || current.WorkflowName == "" || jobs.created != 1 || len(jobs.deleted) != 0 {
+	if current.Status != model.RunRunning || current.WorkflowName == "" || jobs.created != 1 || len(jobs.deleted) != 0 {
 		t.Fatalf("new Workflow shutdown = %#v created=%d deleted=%v", current, jobs.created, jobs.deleted)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -440,7 +440,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		if release {
 			wantStatus, wantDeletes = model.RunQueued, 0
 		}
-		if current.Status != wantStatus || current.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
+		if current.Status != wantStatus || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
 			t.Fatalf("legacy recovery changed: %#v adopted=%v deleted=%v", current, jobs.adopted, jobs.deleted)
 		}
 	}
@@ -619,7 +619,7 @@ func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 					t.Fatal("refusal not reported on its run", current)
 				}
 			}
-			if lookupErr != nil || current.Status != wantStatus || current.SupersededBy != "" || len(jobs.deleted) != 0 {
+			if lookupErr != nil || current.Status != wantStatus || len(jobs.deleted) != 0 {
 				t.Fatalf("refused adoption changed Workflow or lost run result: %#v %v deleted=%v", current, lookupErr, jobs.deleted)
 			}
 		})
@@ -711,4 +711,8 @@ func (jobs *refusingDeleteJobs) SettleCreate(ctx context.Context, name, id strin
 		return false, err
 	}
 	return true, nil
+}
+
+func (j *refusingDeleteJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
 }

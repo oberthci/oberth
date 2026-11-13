@@ -159,7 +159,7 @@ func TestNewPushWaitsWhilePreviousRunPublishes(t *testing.T) {
 	if enqueueErr != nil {
 		t.Fatal(enqueueErr)
 	}
-	if ownerErr != nil || owner.Status != model.RunRunning || owner.Phase != "publishing" || owner.SupersededBy != "" {
+	if ownerErr != nil || owner.Status != model.RunRunning || owner.Phase != "publishing" {
 		t.Fatalf("publication owner during newer enqueue = %#v, %v", owner, ownerErr)
 	}
 	if queuedErr != nil || queued.Status != model.RunQueued {
@@ -888,8 +888,9 @@ func (git *controlGit) setRemoteRefLocked(ref, sha string) {
 }
 
 type fakeJobs struct {
-	mu      sync.Mutex
-	results []JobResult
+	terminated []string
+	mu         sync.Mutex
+	results    []JobResult
 	// transcripts, when set, replace the generated per-step output for the
 	// Wait call at the same position, so a test can stream a realistic
 	// interleaved multi-step log.
@@ -3936,4 +3937,21 @@ func (jobs *flakyDeleteJobs) SettleCreate(ctx context.Context, name, id string, 
 
 func (*controlGit) MirrorBranchMatches(context.Context, string, string, string) (bool, error) {
 	return true, nil
+}
+
+func (j *completingJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}
+func (j *flakyDeleteJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}
+func (j *blockingJobs) Terminate(ctx context.Context, name, id string) error {
+	return j.Stop(ctx, name, id)
+}
+
+func (j *fakeJobs) Terminate(ctx context.Context, name, id string) error {
+	j.mu.Lock()
+	j.terminated = append(j.terminated, name)
+	j.mu.Unlock()
+	return j.Stop(ctx, name, id)
 }

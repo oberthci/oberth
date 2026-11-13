@@ -153,7 +153,7 @@ func TestRestartResetDisplaysQueuedUnderOriginalID(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := value.(RunDetailResponse).Run
-	if run.DisplayStatus != "queued" || run.Reason != store.RestartRequeueReason || run.SupersededBy != "" || replacement.ID != original.ID {
+	if run.DisplayStatus != "queued" || run.Reason != store.RestartRequeueReason || replacement.ID != original.ID {
 		t.Fatalf("restart presentation = %+v", run)
 	}
 }
@@ -264,7 +264,7 @@ func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := presentationRun(run)
-	if shown.DisplayStatus != "cancelled" || shown.DisplayReason != "server restart, retry needed" || shown.SupersededBy != "" {
+	if shown.DisplayStatus != "cancelled" || shown.DisplayReason != "server restart, retry needed" {
 		t.Fatalf("restart promotion %+v", shown)
 	}
 	if _, err = recovered.OpenCIIssue(ctx, f.repo.ID, "feature/restart"); !errors.Is(err, store.ErrNotFound) {

@@ -39,8 +39,9 @@ type groupEngine struct {
 	deleteErrs map[string]error
 	// deleted records every accepted Delete by Workflow name, including
 	// deletions of Workflows this engine never created.
-	holdStop bool
-	deleted  []string
+	holdStop   bool
+	terminated []string
+	deleted    []string
 }
 
 type groupEngineJob struct {
@@ -369,4 +370,24 @@ spec:
 		return nil, err
 	}
 	return resolved.Receipt(argoworkflow.Policy{RunnerImagePrefixes: []string{"example.invalid/"}})
+}
+
+func (engine *groupEngine) Terminate(_ context.Context, name, _ string) error {
+	engine.mu.Lock()
+	job := engine.jobs[name]
+	if job != nil && engine.deleteErrs[job.runID] != nil {
+		err := engine.deleteErrs[job.runID]
+		engine.mu.Unlock()
+		return err
+	}
+	engine.terminated = append(engine.terminated, name)
+	engine.deleted = append(engine.deleted, name)
+	engine.mu.Unlock()
+	if job != nil {
+		select {
+		case job.result <- JobResult{Status: model.RunFailed, Phase: model.PhaseCancelled, Error: "Stopped with strategy Terminate"}:
+		default:
+		}
+	}
+	return nil
 }

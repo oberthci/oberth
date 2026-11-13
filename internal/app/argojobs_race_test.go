@@ -444,3 +444,7 @@ spec:
 		t.Fatalf("controller.Cancel not called for %s after post-create abort", name)
 	}
 }
+
+func (c *blockingController) Terminate(ctx context.Context, name, id string) error {
+	return c.Cancel(ctx, name, id)
+}

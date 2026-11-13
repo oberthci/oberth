@@ -324,3 +324,7 @@ func TestTargetRecoveryReadFailuresRemainFatal(t *testing.T) {
 		})
 	}
 }
+
+func (c *targetRecoveryControl) Terminate(ctx context.Context, name, id string) error {
+	return c.Cancel(ctx, name, id)
+}

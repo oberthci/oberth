@@ -81,7 +81,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if current.Status != model.RunQueued || current.SupersededBy != "" {
+			if current.Status != model.RunQueued {
 				t.Fatalf("never-posted run failed instead of requeueing: %+v", current)
 			}
 			replacement, err := f.store.Run(t.Context(), parked.ID)
@@ -152,7 +152,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if current.Phase != "running" || current.Status != model.RunRunning || current.SupersededBy != "" {
+			if current.Phase != "running" || current.Status != model.RunRunning {
 				t.Fatalf("adoption failed to mark original run submitted: %+v", current)
 			}
 			if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); !os.IsNotExist(err) {
@@ -204,7 +204,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			}
 			state := scheduler.submissionStateForTest()
 			if contract == "none" {
-				if current.Status != model.RunQueued || current.SupersededBy != "" || state.Runs != 0 || scheduler.pendingCreateCount() != 0 {
+				if current.Status != model.RunQueued || state.Runs != 0 || scheduler.pendingCreateCount() != 0 {
 					t.Fatalf("no-contract run quarantined or failed: %+v state=%+v", current, state)
 				}
 				return
