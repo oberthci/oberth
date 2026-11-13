@@ -21,7 +21,7 @@ func TestOversizeTerminalObservationFinishesWithoutReplayEvidence(t *testing.T) 
 			if _, err = s.ClaimNextRun(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			run, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow")
+			_, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow")
 			if err != nil {
 				t.Fatal(err)
 			}
