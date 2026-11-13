@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"os"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -17,7 +16,6 @@ import (
 func TestArgoUpgradePreservesOperatorValuesAndUsesNativeCap(t *testing.T) {
 	stored := `{"controller":{"parallelism":3,"namespaceParallelism":2,"resources":{"requests":{"cpu":"100m","memory":"128Mi"}},"priorityClassName":"oberth-oberth-control-plane","config":{"artifactDrivers":[{"name":"operator"}],"archiveLogs":true}},"executor":{"resources":{"requests":{"cpu":"75m"}}},"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"operator-extra"}}]}`
 	var applied []string
-	var filtered map[string]any
 	deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		switch args[0] {
 		case "list":
@@ -26,17 +24,6 @@ func TestArgoUpgradePreservesOperatorValuesAndUsesNativeCap(t *testing.T) {
 			return []byte(stored), nil
 		case "upgrade":
 			applied = slices.Clone(args)
-			index := slices.Index(args, "--values")
-			if index < 0 || index+1 >= len(args) {
-				t.Fatal("filtered dependency values absent", args)
-			}
-			body, err := os.ReadFile(args[index+1])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := json.Unmarshal(body, &filtered); err != nil {
-				t.Fatal(err)
-			}
 		}
 		return nil, nil
 	}}
@@ -44,18 +31,39 @@ func TestArgoUpgradePreservesOperatorValuesAndUsesNativeCap(t *testing.T) {
 	if _, err := InstallArgoWorkflows(t.Context(), Config{Upgrade: true, ArgoParallelism: &cap}, deps); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(applied, "--reset-values") || !slices.Contains(applied, "controller.parallelism=6") {
+	if !slices.Contains(applied, "--reuse-values") || slices.Contains(applied, "--reset-values") || slices.Contains(applied, "--values") || !slices.Contains(applied, "controller.parallelism=6") {
 		t.Fatal(applied)
 	}
 	var expected map[string]any
 	if err := json.Unmarshal([]byte(stored), &expected); err != nil {
 		t.Fatal(err)
 	}
-	controller := expected["controller"].(map[string]any)
-	delete(controller, "priorityClassName")
-	delete(controller, "resources")
-	if !reflect.DeepEqual(filtered, expected) {
-		t.Fatal("unrelated operator values changed", filtered, expected)
+	objects := renderArgoHelmObjects(t, applied, expected)
+	if !nativeArgoConfigHasCap(t, objects, 6) {
+		t.Fatal("native controller caps changed")
+	}
+	wantController := expected["controller"].(map[string]any)
+	foundController, foundExtra := false, false
+	for _, object := range objects {
+		meta, _ := object["metadata"].(map[string]any)
+		foundExtra = foundExtra || object["kind"] == "ConfigMap" && meta["name"] == "operator-extra"
+		if object["kind"] != "Deployment" {
+			continue
+		}
+		foundController = true
+		spec := object["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+		if spec["priorityClassName"] != wantController["priorityClassName"] {
+			t.Fatal("operator controller priority changed")
+		}
+		controller := spec["containers"].([]any)[0].(map[string]any)
+		resources := controller["resources"].(map[string]any)
+		want := wantController["resources"].(map[string]any)
+		if !reflect.DeepEqual(resources["requests"], want["requests"]) {
+			t.Fatal("operator controller requests changed", resources)
+		}
+	}
+	if !foundController || !foundExtra {
+		t.Fatal("operator controller or extra object missing")
 	}
 }
 
