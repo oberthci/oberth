@@ -46,7 +46,8 @@ any depth, including nested templates and list entries; case-variant spellings
 have the same boundary. Custom fields such as `spec.secretTemplate.annotations`,
 `spec.serviceAnnotations`, PrometheusRule `rules[].labels` and `externalLabels`
 pass through unchanged. Custom label fields can contain keys and values that
-are not Kubernetes Pod labels.
+are not Kubernetes Pod labels. A `metadata` or `podMetadata` value that is not
+an object (or null) is refused, because it cannot be checked as object metadata.
 
 Granting an operator kind means trusting how its controller maps fields to Pod
 metadata. The operator controls that mapping with a ValidatingAdmissionPolicy on
@@ -111,7 +112,9 @@ matchConditions:
 This is only the account selector, not a complete policy. The policy's validations
 must allow only approved digest-pinned images and volume types, cap CPU and
 memory, reject serviceAccount, secret and PVC volumes, and require an owner
-reference to the creating Workflow. Use `{{workflow.name}}` and `{{workflow.uid}}`
+reference to the creating Workflow. It must also constrain every field the controller
+copies onto Pod annotations or labels (for example `podAnnotations`, `podLabels`
+or template fields), because Oberth admits those custom fields unchanged. Use `{{workflow.name}}` and `{{workflow.uid}}`
 for that reference in the resource manifest. Validate every permitted field
 against the installed kind's schema; granting `create` does not enforce any of
 these restrictions. See the [admission policy reference](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/).
