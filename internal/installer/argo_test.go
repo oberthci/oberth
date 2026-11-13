@@ -17,7 +17,7 @@ func argoTestDeps(t *testing.T, recorded *[][]string) Deps {
 	t.Helper()
 	return Deps{
 		Output:     io.Discard,
-		KubeClient: fake.NewClientset(),
+		KubeClient: fake.NewClientset(argoSecurityLiveObjects(DefaultArgoNamespace, true)...),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			*recorded = append(*recorded, slices.Clone(args))
@@ -85,18 +85,15 @@ func TestArgoHelmArgsLeavesWorkflowIdentitiesToTheOberthChart(t *testing.T) {
 	}
 }
 
-// If the controller computes step Pod names differently from the server, log
-// capture fails silently — no error, just missing logs. Both ends are pinned.
-func TestArgoHelmArgsPinsThePodNameFormat(t *testing.T) {
+func TestArgoHelmArgsDoesNotPinPodNames(t *testing.T) {
 	t.Parallel()
 	cfg := Config{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	args := strings.Join(ArgoHelmArgs(cfg), " ")
-	if !strings.Contains(args, "controller.extraEnv[0].name=POD_NAMES") ||
-		!strings.Contains(args, "controller.extraEnv[0].value=v2") {
-		t.Fatalf("argo helm args must pin POD_NAMES=v2:\n%s", args)
+	if strings.Contains(args, "POD_NAMES") {
+		t.Fatalf("installer pins Argo Pod naming: %s", args)
 	}
 }
 
@@ -148,8 +145,10 @@ func TestInstallArgoWorkflowsSkipStillBindsOberthToTheNamespace(t *testing.T) {
 	if !result.Skipped {
 		t.Fatal("expected the install to be skipped")
 	}
-	if len(recorded) != 0 {
-		t.Fatalf("skipping must not run helm: %v", recorded)
+	for _, args := range recorded {
+		if args[0] != "list" && args[0] != "get" {
+			t.Fatalf("skipping mutated Helm: %v", recorded)
+		}
 	}
 	args := argoOberthHelmValues(cfg, OpenBaoResult{})
 	if !slices.Contains(args, "argo.namespace="+DefaultArgoNamespace) {

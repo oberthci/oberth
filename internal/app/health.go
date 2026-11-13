@@ -132,22 +132,21 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
-	ExecutionTargetRecovery *model.ExecutionTargetRecoveryStatus `json:"execution_target_recovery,omitempty"`
-	DatabaseRetries         uint64                               `json:"database_retries_total,omitempty"`
-	Storage                 any                                  `json:"storage,omitempty"`
-	Database                string                               `json:"database"`
-	SchemaVersion           int                                  `json:"schema_version,omitempty"`
-	Upstreams               int                                  `json:"upstreams"`
-	Repositories            int                                  `json:"repositories"`
-	VCS                     string                               `json:"vcs"`
-	Cluster                 string                               `json:"cluster"`
-	ClusterCheckedAt        time.Time                            `json:"cluster_checked_at,omitzero"`
-	ClusterDetail           string                               `json:"cluster_detail"`
-	Audit                   string                               `json:"audit"`
-	AuditMode               string                               `json:"audit_mode,omitempty"`
-	Version                 string                               `json:"version,omitempty"`
-	UpstreamInfo            []UpstreamStatus                     `json:"upstream_info,omitempty"`
-	SSHIdentity             string                               `json:"ssh_identity,omitempty"`
+	DatabaseRetries  uint64           `json:"database_retries_total,omitempty"`
+	Storage          any              `json:"storage,omitempty"`
+	Database         string           `json:"database"`
+	SchemaVersion    int              `json:"schema_version,omitempty"`
+	Upstreams        int              `json:"upstreams"`
+	Repositories     int              `json:"repositories"`
+	VCS              string           `json:"vcs"`
+	Cluster          string           `json:"cluster"`
+	ClusterCheckedAt time.Time        `json:"cluster_checked_at,omitzero"`
+	ClusterDetail    string           `json:"cluster_detail"`
+	Audit            string           `json:"audit"`
+	AuditMode        string           `json:"audit_mode,omitempty"`
+	Version          string           `json:"version,omitempty"`
+	UpstreamInfo     []UpstreamStatus `json:"upstream_info,omitempty"`
+	SSHIdentity      string           `json:"ssh_identity,omitempty"`
 	// SSHHostKey and SSHHostKeyFingerprint describe the server's own SSH
 	// endpoint (git push/clone), not an upstream identity.
 	SSHHostKey            string              `json:"ssh_host_key,omitempty"`
@@ -263,14 +262,6 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	}
 	if health.Store == nil {
 		return status, nil
-	}
-	if reader, ok := health.Store.(interface {
-		ExecutionTargetRecoveryStatus(context.Context) (*model.ExecutionTargetRecoveryStatus, error)
-	}); ok {
-		recovery, err := reader.ExecutionTargetRecoveryStatus(ctx)
-		if err == nil {
-			status.ExecutionTargetRecovery = recovery
-		}
 	}
 	upstreams, upstreamErr := health.Store.ListUpstreams(ctx)
 	repositories, repositoryErr := health.Store.ListRepositories(ctx)

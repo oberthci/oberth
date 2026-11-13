@@ -27,8 +27,6 @@ spec:
     parameters:
     - name: other
       value: kept
-    - name: oberth-trigger
-      value: promotion
   templates:
     - name: main
       dag:
@@ -44,58 +42,66 @@ spec:
         command: [/bin/true]
 `
 
-func TestTriggerParameterDeclarationIsOnlyAPlainDefault(t *testing.T) {
+func TestReservedRunParameterDeclarations(t *testing.T) {
 	mustAdmit(t, triggerGuardedDocument, Policy{})
-	const declared = "      value: promotion"
-	for _, replacement := range []struct{ with, expect string }{
-		{"      value: nightly", "server-owned"},
-		{"      default: promotion", "server-owned"},
-		{declared + "\n      enum: [promotion]", "server-owned"},
-		{"      valueFrom:\n        supplied: {}", "server-owned"},
-		{declared + "\n    - name: oberth-trigger\n      value: branch", "more than once"},
-	} {
-		refuse(t, strings.Replace(triggerGuardedDocument, declared, replacement.with, 1), Policy{}, replacement.expect)
+	for _, name := range []string{"oberth-repo", "oberth-ref", "oberth-sha", TriggerParameter, "oberth-release-tag", "oberth-release-sha", ScheduleParameter, "oberth-future"} {
+		for _, shape := range []string{"", "\n      value: promotion", "\n      default: promotion", "\n      value: promotion\n      enum: [promotion]", "\n      valueFrom:\n        supplied: {}"} {
+			t.Run(name+shape, func(t *testing.T) {
+				document := strings.Replace(triggerGuardedDocument, "    - name: other\n      value: kept", "    - name: "+name+shape, 1)
+				refuse(t, document, Policy{}, "server-owned")
+			})
+		}
 	}
 }
 
-func TestSetTriggerParameterReplacesTheDeclaredDefault(t *testing.T) {
-	workflow, err := Decode([]byte(triggerGuardedDocument))
-	if err != nil {
-		t.Fatal(err)
+func TestReservedParameterPrefixInNestedScopes(t *testing.T) {
+	for _, section := range []string{"inputs", "outputs"} {
+		document := strings.Replace(triggerGuardedDocument, "    - name: leaf\n", "    - name: leaf\n      "+section+":\n        parameters:\n        - name: oberth-sha\n          value: forged\n", 1)
+		refuse(t, document, Policy{}, "server-owned")
 	}
-	if err := SetTriggerParameter(workflow, RunTriggerBranch); err != nil {
-		t.Fatal(err)
-	}
-	parameters := workflow.Spec.Arguments.Parameters
-	if len(parameters) != 2 || parameters[0].Name != "other" || parameters[0].Value.String() != "kept" ||
-		parameters[1].Name != TriggerParameter || parameters[1].Value.String() != "branch" {
-		t.Fatalf("parameters after stamping = %+v", parameters)
-	}
+	document := strings.Replace(triggerGuardedDocument, "        - name: fast\n          template: leaf", "        - name: fast\n          template: leaf\n          arguments:\n            parameters:\n            - name: oberth-future\n              value: forged", 1)
+	refuse(t, document, Policy{}, "server-owned")
+}
 
-	// Referenced but undeclared: added, so the when guard resolves.
-	undeclared := strings.Replace(triggerGuardedDocument,
-		"    - name: oberth-trigger\n      value: promotion\n", "", 1)
-	workflow, err = Decode([]byte(undeclared))
-	if err != nil {
-		t.Fatal(err)
+func TestSetTriggerParameterStampsEveryWorkflow(t *testing.T) {
+	for _, document := range []string{triggerGuardedDocument, admissibleDocument} {
+		workflow, err := Decode([]byte(document))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, trigger := range []RunTrigger{RunTriggerBranch, RunTriggerSchedule} {
+			if err := SetTriggerParameter(workflow, trigger); err != nil {
+				t.Fatal(err)
+			}
+			found := 0
+			for _, p := range workflow.Spec.Arguments.Parameters {
+				if p.Name == TriggerParameter {
+					found++
+					if p.Value == nil || p.Value.String() != string(trigger) {
+						t.Fatalf("trigger = %+v", p)
+					}
+				} else if p.Name != "other" || p.Value.String() != "kept" {
+					t.Fatalf("authored parameter changed: %+v", p)
+				}
+			}
+			if found != 1 {
+				t.Fatalf("trigger parameter count = %d", found)
+			}
+		}
 	}
-	if err := SetTriggerParameter(workflow, RunTriggerSchedule); err != nil {
-		t.Fatal(err)
+	if err := SetTriggerParameter(nil, RunTriggerBranch); err == nil {
+		t.Fatal("nil Workflow accepted")
 	}
-	parameters = workflow.Spec.Arguments.Parameters
-	if len(parameters) != 2 || parameters[1].Name != TriggerParameter || parameters[1].Value.String() != "schedule" {
-		t.Fatalf("parameters after stamping undeclared = %+v", parameters)
-	}
-
-	// Never mentioned: the document is left exactly as it was.
-	plain := decodeAdmissible(t, nil)
-	if err := SetTriggerParameter(plain, RunTriggerPromotion); err != nil {
-		t.Fatal(err)
-	}
-	if len(plain.Spec.Arguments.Parameters) != 0 {
-		t.Fatalf("unused parameter was stamped: %+v", plain.Spec.Arguments.Parameters)
-	}
-	if err := SetTriggerParameter(plain, RunTrigger("push")); err == nil {
+	if err := SetTriggerParameter(decodeAdmissible(t, nil), RunTrigger("push")); err == nil {
 		t.Fatal("an unknown run trigger was stamped")
 	}
+}
+
+func TestReservedGlobalParameterPrefix(t *testing.T) {
+	for _, global := range []string{"oberth-sha", "oberth-future"} {
+		document := strings.Replace(triggerGuardedDocument, "    - name: leaf\n", "    - name: leaf\n      outputs:\n        parameters:\n        - name: result\n          value: forged\n          globalName: "+global+"\n", 1)
+		refuse(t, document, Policy{}, "globalName is server-owned")
+	}
+	document := strings.Replace(triggerGuardedDocument, "    - name: leaf\n", "    - name: leaf\n      outputs:\n        parameters:\n        - name: result\n          value: kept\n          globalName: user-result\n", 1)
+	mustAdmit(t, document, Policy{})
 }

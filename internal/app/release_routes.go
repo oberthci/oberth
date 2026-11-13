@@ -29,20 +29,6 @@ func (jobs *ArgoJobs) runSourceFile(request service.WorkflowRequest) (string, er
 }
 
 func (jobs *ArgoJobs) readRunSource(request service.WorkflowRequest) ([]byte, error) {
-	if jobs.targetBinding != nil {
-		if err := matchTargetRun(*jobs.targetBinding, request.Run, request.WorkflowName); err != nil {
-			return nil, err
-		}
-		source, err := readBoundedSourceFile(request.SourceDir, argoworkflow.BuildFile)
-		if err != nil {
-			return nil, err
-		}
-		if targetBytesHash(source) != jobs.targetBinding.SourceDigest {
-			return nil, errors.New("app: checkout differs from retained source")
-		}
-		return append([]byte(nil), jobs.targetSource...), nil
-	}
-
 	file, err := jobs.runSourceFile(request)
 	if err != nil {
 		return nil, err

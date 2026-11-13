@@ -46,7 +46,7 @@ func restartCutFixture(t *testing.T, change func(*wfv1.Workflow, *wfv1.NodeStatu
 	if err != nil || !found {
 		t.Fatal("verified adoption failed", binding, found, err)
 	}
-	step := StepResults(wf)[0]
+	step := fixtureStepResults(wf)[0]
 	events := []runprogress.Event{{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepRunning, StartedAt: step.StartedAt}}
 	return controller, wf, binding, events
 }
@@ -103,7 +103,11 @@ func TestRestartCutAdoptedWaitDistinguishesMissingExitFromFailure(t *testing.T) 
 			if err != nil || result.Interrupted != test.interrupted || result.Succeeded != test.passed {
 				t.Fatalf("wrong restart verdict: %+v err=%v", result, err)
 			}
-			if !strings.Contains(output.String(), "without a durable pod cursor") {
+			if result.Steps[0].PodName == "" {
+				if result.Steps[0].Termination == nil || result.Steps[0].Termination.Unavailable == "" {
+					t.Fatal("unknown Pod has no explicit unavailable observation", result)
+				}
+			} else if !strings.Contains(output.String(), "without a durable pod cursor") {
 				t.Fatal("fixture did not exercise adoption gap", output.String())
 			}
 			if test.interrupted && (!result.Infrastructure || result.FailedStep != "" || !strings.Contains(result.Reason, "no recorded process exit")) {
@@ -250,7 +254,7 @@ func TestRestartCutRetainedJournalFailureBindsExactAttempt(t *testing.T) {
 	for _, mode := range []string{"exact-failure", "old-attempt", "other-step", "invalid-record"} {
 		t.Run(mode, func(t *testing.T) {
 			controller, wf, binding, events := restartCutFixture(t, func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) { p.Name = "" })
-			step := StepResults(wf)[0]
+			step := fixtureStepResults(wf)[0]
 			event := runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepFailed, ExitCode: 2, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
 			switch mode {
 			case "old-attempt":
@@ -319,7 +323,7 @@ func TestRestartCutConflictingExitEvidenceStaysRed(t *testing.T) {
 				p.DeletionTimestamp = &deletion
 				p.Status.ContainerStatuses[0].State.Terminated = &corev1.ContainerStateTerminated{ExitCode: 143, Signal: 15, Reason: "Error", ContainerID: p.Status.ContainerStatuses[0].ContainerID, StartedAt: n.StartedAt, FinishedAt: n.FinishedAt}
 			})
-			step := StepResults(wf)[0]
+			step := fixtureStepResults(wf)[0]
 			var events []runprogress.Event
 			if source == "journal" {
 				events = []runprogress.Event{{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: runprogress.StepFailed, ExitCode: 2, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}}

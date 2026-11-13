@@ -22,7 +22,7 @@ schedules:
 
 `branch` is optional and defaults to the repository's default branch. A due
 entry runs that branch's `.oberth/build.yaml` at its current commit, through the
-same path a push uses: same admission gate, same fragments, same artifacts, same
+same path a push uses: same admission gate, same artifacts, same
 failure issue.
 
 A scheduled run is a `schedule` run for the `oberth-trigger` workflow

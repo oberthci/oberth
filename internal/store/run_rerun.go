@@ -15,7 +15,7 @@ import (
 
 // RerunRun queues a new run with the same repository, ref, SHA, trigger,
 // tested and base SHA as a failed or interrupted run (#1098), whatever step
-// failed and whether or not it is the newest run of its ref. The checks, the
+// failed. Branch sources must be the newest run of their ref. The checks, the
 // enqueue and the run.rerun audit action commit together.
 //
 // Refused, without any change: an active, passed or publishing-failed source
@@ -64,6 +64,17 @@ func (s *Store) RerunRun(ctx context.Context, request model.RunRerunRequest) (mo
 	if err := requireReplayDeletionCompleteTx(ctx, tx, source); err != nil {
 		return model.RunRerunResult{}, err
 	}
+	if source.RefKind == model.RefBranch {
+		var newestID string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id = ? AND ref_kind = ? AND ref = ? AND schedule_entry = ?
+            ORDER BY queue_sequence DESC LIMIT 1`, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry).Scan(&newestID); err != nil {
+			return model.RunRerunResult{}, fmt.Errorf("check latest ref run: %w", err)
+		}
+		if newestID != source.ID {
+			return model.RunRerunResult{}, fmt.Errorf("%w: rerun source is not the newest run for its ref", ErrInvalidState)
+		}
+	}
+
 	if (source.Release || source.RefKind == model.RefTag) && request.Authorize == nil {
 		return model.RunRerunResult{}, fmt.Errorf("%w: release replay authorization is required", ErrInvalidState)
 	}

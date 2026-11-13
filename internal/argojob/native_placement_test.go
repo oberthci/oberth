@@ -262,7 +262,7 @@ func TestNativeMetadataDescribesOnlyExistingLabels(t *testing.T) {
 		"oberth.ci/run": request.RunID, "oberth.ci/sha": testSHA, "oberth.ci/trigger": "ci", "oberth.ci/tier": "ci",
 	}, wf.Labels)
 	nativeEqual(t, map[string]string{"oberth.ci/run": request.RunID, "oberth.ci/trigger": "ci", "oberth.ci/tier": "ci"}, wf.Spec.PodMetadata.Labels)
-	if wf.Annotations[runIDAnnotation] != request.RunID || wf.Annotations[refAnnotation] != request.Ref || wf.Annotations[identityAnnotation] == "" || wf.Annotations[PodNameVersionAnnotation] != "v2" {
+	if wf.Annotations[runIDAnnotation] != request.RunID || wf.Annotations[refAnnotation] != request.Ref || wf.Annotations[identityAnnotation] == "" {
 		t.Fatal("documented metadata binding missing", wf.Annotations)
 	}
 }

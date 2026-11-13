@@ -19,7 +19,7 @@ def main():
     checksums.update((Path(upstream["Dir"]) / "go.sum").read_text().splitlines())
     with tempfile.TemporaryDirectory(prefix="oberth-argo-shutdown-races-") as tmp:
         module = Path(tmp)
-        shutil.copyfile(root / "hack/testdata/argo-shutdown-races/race_test.go",
+        shutil.copyfile(root / "hack/testdata/argo-shutdown-races/race_test.go.txt",
                         module / "race_test.go")
         # The path grants the test access to Oberth's internal production API.
         # Only this disposable module acquires upstream utility/test dependencies.

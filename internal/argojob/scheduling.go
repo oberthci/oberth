@@ -3,15 +3,13 @@ package argojob
 import (
 	"context"
 	"errors"
-	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -20,23 +18,35 @@ import (
 
 const maxSchedulingItems = 16
 
-// ObserveScheduling performs only an exact Workflow GET and one scoped, bounded
-// Pod LIST. It never submits, repairs, reads logs, events, or pod specs for output.
+// Seed diagnostics remain live until source delivery removes them. They must
+// never inherit the cluster client timeout on a synchronous run-list read.
+const seedObservationTimeout = 100 * time.Millisecond
+
+// ObserveScheduling reads shared Workflow and step-Pod caches. A missing
+// Workflow may use the bounded, exact source-seed diagnostic read.
 // AI-CONTRACT: arbitrary Kubernetes/Argo status text is untrusted: output only
-// fixed summaries, never raw messages (which may contain secrets or commands).
+// fixed summaries, except bounded printable Argo synchronization messages.
 func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID, sha string) (*model.ExecutionObservation, error) {
-	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
+	if controller.hub == nil || !controller.hub.Healthy() {
+		return controller.observationUnavailable(), nil
+	}
+	workflow, found := controller.hub.Workflow(name)
+	if !found {
+		// Source seed Pods have a separate, short-lived observation path (S1 row
+		// 10); they are deliberately outside the step-Pod informer selector.
 		if controller.seeder != nil {
-			observation, seedErr := controller.seeder.observeScheduling(ctx, name, runID, sha)
-			if seedErr != nil || observation != nil {
-				return observation, seedErr
+			seedCtx, cancel := context.WithTimeout(ctx, seedObservationTimeout)
+			observation, err := controller.seeder.observeScheduling(seedCtx, name, runID, sha)
+			timedOut := errors.Is(seedCtx.Err(), context.DeadlineExceeded)
+			cancel()
+			if timedOut {
+				return controller.observationUnavailable(), nil
+			}
+			if err != nil || observation != nil {
+				return observation, err
 			}
 		}
 		return &model.ExecutionObservation{State: "not_observed", Message: "No Workflow was observed; startup or scheduling cause is unknown."}, nil
-	}
-	if err != nil {
-		return nil, err
 	}
 	if workflow.Name != name || workflow.Namespace != controller.config.Namespace ||
 		workflow.Annotations[runIDAnnotation] != runID || workflow.Labels["oberth.ci/sha"] != labelValue(sha) {
@@ -52,7 +62,7 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 	if workflow.Status.Message == "" && workflow.Status.Phase == wfv1.WorkflowRunning {
 		result.Message = "Workflow execution is running."
 	}
-	// Suspension is observed from the exact live Workflow, never inferred from
+	// Suspension is observed from the cached Workflow, never inferred from
 	// missing progress or copied from arbitrary controller messages.
 	defer func() {
 		if workflow.Status.Phase == wfv1.WorkflowSucceeded || workflow.Status.Phase == wfv1.WorkflowFailed || workflow.Status.Phase == wfv1.WorkflowError {
@@ -104,26 +114,20 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		result.Pods = []model.SchedulingReason{{Phase: "Unknown", Reason: "Unavailable", Message: "Pod observation is unavailable."}}
 		return result, nil
 	}
-	pods, err := controller.kube.CoreV1().Pods(controller.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "workflows.argoproj.io/workflow=" + name, Limit: maxSchedulingItems,
-	})
-	if err != nil {
-		result.Pods = []model.SchedulingReason{{Phase: "Unknown", Reason: "Unavailable", Message: "Pod observation is unavailable."}}
-		return result, nil
-	}
-	result.Truncated = result.Truncated || pods.Continue != "" || len(pods.Items) > maxSchedulingItems
+	pods := controller.hub.PodsOf(name)
+	result.Truncated = result.Truncated || len(pods) > maxSchedulingItems
 	var deadlineNodes map[string]bool
 	if deadlineVerdictVisible(workflow, result) {
 		deadlineNodes = currentDeadlineNodes(workflow)
 	}
-	for _, pod := range pods.Items[:min(len(pods.Items), maxSchedulingItems)] {
-		owner := metav1.GetControllerOf(&pod)
+	for _, pod := range pods[:min(len(pods), maxSchedulingItems)] {
+		owner := metav1.GetControllerOf(pod)
 		if owner == nil || owner.UID != workflow.UID || owner.Name != name || owner.Kind != "Workflow" || owner.APIVersion != "argoproj.io/v1alpha1" {
 			continue
 		}
-		reason := podSchedulingReason(pod)
+		reason := podSchedulingReason(*pod)
 		result.Pods = append(result.Pods, reason)
-		if reason.Reason == "Unschedulable" && (podCapacityPending(&pod) || schedulerPlacementReason(pod) != "") {
+		if reason.Reason == "Unschedulable" && (podCapacityPending(pod) || schedulerPlacementReason(*pod) != "") {
 			result.Message = reason.Message
 		}
 		if reason.Reason == "DeadlineExceeded" && deadlineNodes[pod.Annotations["workflows.argoproj.io/node-id"]] {
@@ -143,14 +147,26 @@ func safePhase(phase string) string {
 }
 
 func safeWorkflowMessage(message string) string {
-	// Only recognize controller vocabulary. Even a recognized message contributes
-	// no original bytes to the response: resource names and error suffixes can be
-	// user-controlled and are intentionally withheld.
+	// Synchronization waits retain Argo's own message. Other messages use
+	// curated vocabulary.
 	switch {
 	case strings.HasPrefix(message, "Waiting for a PVC to be created."):
 		return "Waiting for a persistent volume claim to be created."
 	case waitingForLock(message):
-		return lockWaitMessage(message)
+		message = strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return ' '
+			}
+			if !unicode.IsPrint(r) {
+				return -1
+			}
+			return r
+		}, message)
+		message = strings.Join(strings.Fields(message), " ")
+		if runes := []rune(message); len(runes) > 200 {
+			message = string(runes[:199]) + "…"
+		}
+		return message
 	case strings.HasPrefix(message, "Pending "):
 		return "Workflow node is pending."
 	case model.IsExecutionDeadlineReason(message):
@@ -273,22 +289,4 @@ func podRequest(pod corev1.Pod, name corev1.ResourceName) string {
 		return "no explicit"
 	}
 	return total.String()
-}
-
-// lockWaitPattern is the controller's synchronization wait with its lock key
-// (<namespace>/<Kind>/<name>[/<key>], Kind one of ConfigMap, Mutex, Database)
-// and "free/limit" status. Only a key in this grammar reaches the message,
-// without its namespace; anything else gets the fixed form.
-var lockWaitPattern = regexp.MustCompile(`^Waiting for [A-Za-z0-9][A-Za-z0-9_.-]{0,62}/((?:ConfigMap|Mutex|Database)/[A-Za-z0-9][A-Za-z0-9_.-]{0,252}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,252})?) lock\. Lock status: ([0-9]{1,6})/([0-9]{1,6})`)
-
-// lockWaitMessage renders Argo's "Waiting for <ns>/<Kind>/<name>[/<key>]
-// lock. Lock status: a/b" as "Waiting for lock <Kind>/<name>[/<key>] (a/b
-// free).", naming the operator-defined semaphore key or the repository's
-// mutex so the reason line says what the step is queued behind.
-func lockWaitMessage(message string) string {
-	match := lockWaitPattern.FindStringSubmatch(message)
-	if match == nil {
-		return model.LockWaitMessagePrefix + "(synchronization)."
-	}
-	return fmt.Sprintf("%s%s (%s/%s free).", model.LockWaitMessagePrefix, match[1], match[2], match[3])
 }

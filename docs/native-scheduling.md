@@ -70,6 +70,15 @@ trusting how its controller maps fields to Pod metadata. The operator control is
 a ValidatingAdmissionPolicy on the granted kind; see
 [operator controls](workflow-capabilities.md#operator-controls-for-resource-templates).
 Workflow-only metadata and PodGC label selectors do not write arbitrary Pod metadata.
+The Workflow’s own labels and annotations reserve `oberth.ci/` and
+`workflows.argoproj.io/` for server ownership. Supported author declaration
+annotations retain their validated behavior; unknown keys under those prefixes
+are refused. Native template names, recursion, fan-out, image pull secrets,
+resource quantities and emptyDir sizes are left to Argo and Kubernetes.
+Oberth accepts `resourceFieldRef` environment values and the exact
+`fieldRef.fieldPath: spec.serviceAccountName`; other fieldRef paths remain
+refused. A camelCase descendant template may produce a Pod name Kubernetes
+rejects; admission accepts it and Argo reports the run failure.
 An author's Pod label can match selectors in the operator's own policies
 elsewhere. Operator policies should select on namespace as well as labels,
 including NetworkPolicy rules that otherwise admit matching Pods from any
@@ -87,14 +96,6 @@ apply and maintain semaphore limits themselves.
 
 Order Trivy steps that share a cache with `depends`, or use a synchronization mutex.
 
-An administrator-selected execution target still authenticates its approved
-cluster, namespace, controller and service identity, but adds no nodeSelector or
-tolerations and refuses no authored placement because of a target. Repository
-YAML carries nodeSelector, affinity and tolerations. A dedicated node is guarded
-by Kubernetes taints plus the admission or namespace policy the operator sets
-up; Oberth does not guarantee that a target's runs land only on a particular
-node. Ordinary repositories may author tolerations too, so taints alone do not
-establish exclusive access to a trusted node. See [execution targets](execution-targets.md).
 Extended resources, including GPUs, are native requests/limits: Oberth requires
 no device grant and imposes no amount or aggregate bound. Operators use
 Kubernetes ResourceQuota and admission policy in the pipeline namespace; see
@@ -156,7 +157,7 @@ an older chart's `keep` annotation can remain unused.
 
 Oberth has no automatic infrastructure retry. Authors choose native Argo
 `retryStrategy`, such as `retryPolicy: OnError`, on Workflow/templates. Manual
-`run_retry` and `run_rerun` remain. Argo cannot retry a preparation failure that
+`run_rerun` remain. Argo cannot retry a preparation failure that
 happens before a Workflow exists; retry that failed run manually.
 
 ## Source delivery and load
@@ -174,8 +175,7 @@ or tolerations. It mounts and binds a ReadWriteOnce PVC on whichever node
 schedules it. On a multi-node cluster that source volume ties the run's later
 Pods to the seed's node/storage topology; authored placement excluding that
 node stays Pending. This additional placement effect is part of the source
-delivery deviation, not a native placement guarantee. Authenticated execution
-targets also add no seed nodeSelector or tolerations.
+delivery deviation, not a native placement guarantee.
 
 With N active runs and Argo parallelism P, all N prepare and submit; P bounds
 neither server copies nor PVCs nor the source-seed Pods. Up to N seed Pods and N
@@ -190,8 +190,7 @@ Workflow exists. Cancellation stops it
 and cleans its Pod and PVC. There is no automatic infrastructure retry. A
 manual retry attempts source
 delivery again; YAML retryStrategy cannot cover a failure before Workflow Create.
-Custody-bound execution targets retain their uncertainty/cleanup proof before
-retrying. Cancellation and publication can affect retention.
+Cancellation and publication can affect retention.
 This is unbounded source retention. Its native replacement is tracked separately.
 
 ## What Oberth writes into the user's Workflow and Pods
@@ -207,21 +206,22 @@ win name/path collisions; validated workspace opt-outs remain available.
   namespace, run/repository/SHA/trigger/tier labels and immutable source,
   policy and custody annotations. Pod metadata adds run/trigger/tier labels;
   other author Pod labels survive outside reserved keys; author Pod annotations
-  are refused. Declared trigger
-  and schedule arguments are bound to the actual run. These do not set node
+  are refused. Run-fact workflow parameters are set by the server; the
+  `oberth-` parameter prefix is reserved for server-owned declarations.
+  Referenced schedule arguments are bound to the actual run. These do not set node
   placement or resource requests. Labels can affect cluster policy and native
   affinity when selected; that is why installed selector keys are reserved.
-- **Environment.** Run containers receive `OBERTH_REPO`, `OBERTH_REF`,
-  `OBERTH_SHA`, `OBERTH_TRIGGER`, `OBERTH_RUN_ID` and per-template `OBERTH_STEP`.
-  Artifact delivery adds `OBERTH_ARTIFACTS`. Release runs add
-  `OBERTH_RELEASE_TAG` and `OBERTH_RELEASE_SHA`. Standard work-volume setup
+- **Environment.** Run facts are [native workflow parameters](run-facts.md).
+  Authors map them to env explicitly. Oberth preserves authored run-fact env
+  and adds no `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`, `OBERTH_TRIGGER`,
+  `OBERTH_RUN_ID`, `OBERTH_STEP`, `OBERTH_RELEASE_TAG` or `OBERTH_RELEASE_SHA`.
+  Artifact delivery retains `OBERTH_ARTIFACTS`. Standard work-volume setup
   supplies `PATH`, `OBERTH_TOOLS_DIR`, `HOME`, `GOPATH`, `GOTOOLCHAIN`, `GOWORK`,
   `GOENV`, `GOMODCACHE`, `GOCACHE`, `GIT_TERMINAL_PROMPT`, `KUBEBUILDER_ASSETS`,
   `TRIVY_CACHE_DIR` and `GOLANGCI_LINT_CACHE`; workspace annotations can omit
   these defaults. A configured persistent cache overrides `GOMODCACHE` and
   `GOCACHE` and adds `OBERTH_CACHE_DIR`, pointing to that cache instead of the
-  work-volume fallbacks. A configured private module proxy sets `GOPROXY`,
-  `GONOPROXY` and `GONOSUMDB`, including the authored mirror-only option.
+  work-volume fallbacks. Repositories configure their own module access.
   Credentialed leaves receive `VAULT_ADDR`, `OBERTH_VAULT_ROLE` and, when
   delivered, `VAULT_CACERT`; approved per-repository/per-step identities
   specialize the role. Approved release WIF adds
@@ -241,8 +241,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   have no automounted API token; authorized credential leaves receive only
   their scoped token mounts. These are security/startup compatibility rules,
   **not placement policy**; missing identities or incompatible security can
-  cause native admission/startup failure. Authenticated execution targets retain
-  cluster, namespace and identity custody without a placement exception.
+  cause native admission/startup failure.
 - **Scratch and work volumes.** Oberth adds a bounded disk EmptyDir at `/tmp`
   (8 GiB size limit) to ordinary containers; selected nonroot leaves use its own
   private `/tmp` EmptyDir and preparation mounts. If the author declares a
@@ -263,9 +262,9 @@ win name/path collisions; validated workspace opt-outs remain available.
   read-only at `/work/src`; an omitted working directory defaults there.
   Approved pinned sources get additional read-only subpaths at their declared
   paths. `/work/artifacts` is a writable subpath of the same claim when
-  collected artifacts are enabled. Public Vault/proxy trust anchors and the
+  collected artifacts are enabled. Public OpenBao trust anchors and the
   authenticated server binary are additional read-only source-claim subpaths
-  where required (`/run/oberth/vault-ca`, `/etc/ssl/certs/oberth-goproxy-ca.pem`,
+  where required (`/run/oberth/vault-ca`,
   `/run/oberth/bin`). The claim is already bound by source seeding:
   **its RWO/node/storage topology constrains subsequent Pods**, including
   collection. The source deviation above describes the extra pre-Workflow
@@ -409,20 +408,16 @@ No new label was added for this release.
 | `oberth.ci/spec-identity` | Workflow | Opaque digest of intended submitted spec |
 | `oberth.ci/declared-secret-paths` | Workflow, when credentialed | Admitted secret-path record; no values |
 | `oberth.ci/sources` | Workflow with pinned sources | Canonical immutable pinned-source record |
-| `oberth.ci/fragments` | Workflow, when fragments used | Immutable fragment-resolution record |
 | `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator API-kind/action capability binding |
 | `oberth.ci/helper-storage` | Workflow | Current Oberth token-waiter footprint binding; older policies are refused on recovery |
-| `oberth.ci/execution-placement` | Workflow, approved target | Approved execution authority digest; no node placement policy |
-| `oberth.ci/execution-target` | Custody-tracked target objects | Exact durable target binding digest |
 | `oberth.ci/release-wif-policy-sha256` | Workflow, WIF release | Public role/policy binding digest |
 | `oberth.ci/release-wif-adc` | WIF template/Pod | Public ADC identity descriptor; no token |
 | `oberth.ci/assist` | Assisted Workflow | Hold TTL in seconds |
 | `oberth.ci/assist-hold` | Assisted template/Pod | Held-attempt deadline binding |
 | `oberth.ci/executor-identity-retry-at` | Owned step Pod on identity retry | Issuance retry timestamp, not a workload-start deadline |
-| `workflows.argoproj.io/pod-name-format` | Workflow | Pinned Argo Pod naming format `v2` |
 
 Author-facing annotations for source/workspace declarations, secret paths,
-Go-proxy choice, nonroot templates and release-WIF roles remain documented in
+nonroot templates and release-WIF roles remain documented in
 their respective feature documents; they are not new scheduling syntax.
 Removed CPU/request-default/demand/startup-allowance annotations are not emitted
 and do not restore admission on old running Workflows.
@@ -489,3 +484,8 @@ those volume sources remain refused. Device paths follow the same absolute-path
 and reserved-helper-path rules as volume mounts.
 
 A succeeded Workflow publishes and promotes even when a step the author tolerated failed. An Oberth cancellation that did not succeed is shown as cancelled, with failed step evidence retained and no new CI issue. Ordinary branch cancellation uses native Stop so exit handlers run; a second cancel uses Terminate. Release/tag/apply and promotion cancels use Terminate immediately. Restore uses Terminate for all orphaned Workflows because the restored history has no observer to supply their exit Pods with credentials.
+
+Step Pod names belong to Argo. Oberth discovers Pods through their
+`workflows.argoproj.io/node-id` annotation and Workflow controller UID,
+without pinning a naming format. A document may set the native
+`spec.workflowMetadata.annotations.workflows.argoproj.io/pod-name-format`.

@@ -66,7 +66,6 @@ type APIConfig struct {
 	SchedulingObserver     SchedulingObserver
 	Runs                   RunResolver
 	History                RunHistory
-	RunRetries             RunRetryStore
 	Repositories           RepositoryReader
 	Issues                 IssueRepository
 	Promotions             PromotionRepository
@@ -130,7 +129,6 @@ type API struct {
 	deletionQueued         func()
 	receiveOutbox          ReceiveOutbox
 	receiveHandler         gitcache.ReceiveHandler
-	listDiagnostics        *listDiagnosticCache
 	branchCounts           *branchCountCache
 	issueStaleAfter        time.Duration
 	issueActiveStaleAfter  time.Duration
@@ -145,7 +143,6 @@ type API struct {
 	schedulingObserver     SchedulingObserver
 	runs                   RunResolver
 	history                RunHistory
-	runRetries             RunRetryStore
 	repositories           RepositoryReader
 	issues                 IssueRepository
 	promotions             PromotionRepository
@@ -259,9 +256,8 @@ func NewAPI(config APIConfig) (*API, error) {
 		uplinkLifecycle:    config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver,
-		listDiagnostics:    &listDiagnosticCache{},
 		branchCounts:       &branchCountCache{},
-		runs:               config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
+		runs:               config.Runs, history: config.History, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		tags: config.Tags, enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
@@ -489,14 +485,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		// The summary is the default; the full record (timing, diagnostics,
 		// the repository record) only on an explicit summary:false.
 		return service.readRun(ctx, actor, arguments.ID, arguments.Summary == nil || *arguments.Summary)
-	case "run_retry":
-		var arguments struct {
-			ID string `json:"id"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		return service.retryRun(ctx, actor, arguments.ID)
 	case "publication_abandon":
 		return service.abandonPublication(ctx, actor, raw)
 	case "run_cancel":
@@ -1107,32 +1095,21 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
-	var pending []<-chan struct{}
-	var observed []int
 	for i := range runs {
 		if filter.View == api.RunViewHistory {
 			continue
 		}
 		switch runs[i].DisplayStatus {
 		case model.DisplayRunning:
-			value := service.cachedRunListExecution(runs[i])
-			runs[i].Scheduling = value.scheduling
-			observed = append(observed, i)
-			if value.ready != nil {
-				pending = append(pending, value.ready)
+			runs[i].Scheduling = service.observeRunListExecution(ctx, runs[i])
+			applyExecutionDisplay(&runs[i], runs[i].Scheduling)
+			if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
+				runs[i].DisplayReason = "awaiting Argo state"
 			}
 		case model.DisplayQueued:
 			var reason string
 			runs[i].Scheduling, reason = service.observeScheduling(ctx, runs[i], nil, false)
 			applyQueuedDisplay(&runs[i], runs[i].Scheduling, reason)
-		}
-	}
-	waitListExecution(ctx, pending)
-	for _, i := range observed {
-		runs[i].Scheduling = service.listDiagnostic(runs[i], "execution", nil).scheduling
-		applyExecutionDisplay(&runs[i], runs[i].Scheduling)
-		if runs[i].DisplayReason == "" && (runs[i].Scheduling == nil || runs[i].Scheduling.Execution == nil || runs[i].Scheduling.Execution.State == "unavailable" || runs[i].Scheduling.Execution.State == "not_observed") {
-			runs[i].DisplayReason = "awaiting Argo state"
 		}
 	}
 	return service.stripScopedSequences(runs), nil
@@ -1279,6 +1256,7 @@ func (service *API) RunLog(ctx context.Context, actor api.Actor, id, stage, step
 }
 
 func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, stage, step string, filter runlog.Filter) (value any, resultErr error) {
+	var availablePairs []string
 	ctx = withRunLogCaller(ctx, actor)
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
@@ -1288,6 +1266,9 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 		}
 		resultErr = boundedRunReadError(resultErr)
 		if resultErr != nil {
+			if len(availablePairs) != 0 {
+				resultErr = fmt.Errorf("%w; available burn/step pairs: %s", resultErr, strings.Join(availablePairs, ", "))
+			}
 			value = nil
 		}
 		cancel()
@@ -1310,6 +1291,12 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 	steps, err := service.stepsForRun(ctx, run)
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
+	}
+	if stage == "" && step == "" && run.Status == model.RunPassed && len(steps) > 0 {
+		stage, step = steps[0].Stage, steps[0].Step
+		for _, result := range steps {
+			availablePairs = append(availablePairs, result.Stage+"/"+result.Step)
+		}
 	}
 	if strings.TrimSpace(stage) == "" {
 		if strings.TrimSpace(step) != "" {
@@ -1370,7 +1357,9 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 	if !recorded {
 		return nil, fmt.Errorf("no log range for burn %q step %q: %w", stage, step, store.ErrNotFound)
 	}
-	return service.stepLogResponse(ctx, run, steps, stage, step, filter)
+	response, err := service.stepLogResponse(ctx, run, steps, stage, step, filter)
+	response.AvailablePairs = availablePairs
+	return response, err
 }
 
 // maxLiveLogChunk bounds one live-log poll response. 256 KiB keeps a fast
@@ -3003,7 +2992,7 @@ func MutatingTool(name string) bool {
 		return true
 	case "issue_unlock", "issue_close_many":
 		return true
-	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_rerun", "run_cancel", "run_purge", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke",
 

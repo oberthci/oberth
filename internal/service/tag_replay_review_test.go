@@ -22,9 +22,6 @@ func requireTagForce(t *testing.T, h *rerunHarness, id string) {
 	if _, err := h.call(rerunAdmin, "run_rerun", map[string]any{"id": id}); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "force") {
 		t.Fatalf("unsafe rerun was not force-gated: %v", err)
 	}
-	if _, err := h.call(rerunAdmin, "run_retry", map[string]any{"id": id}); err == nil {
-		t.Fatal("unsafe tag retry accepted")
-	}
 }
 
 func TestTagReplayReviewWIFStartedRequiresForce(t *testing.T) {
@@ -92,7 +89,7 @@ func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 	if value.(api.RunCancelResponse).Workflow != cancelWorkflowPending {
 		t.Fatalf("cancel was not deferred: %+v", value)
 	}
-	for _, tool := range []string{"run_retry", "run_rerun"} {
+	for _, tool := range []string{"run_rerun"} {
 		for _, force := range []bool{false, true} {
 			args := map[string]any{"id": source.ID}
 			if tool == "run_rerun" {

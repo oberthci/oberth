@@ -176,7 +176,7 @@ register)
  consent "$7"
  server "$1" "$2" "$3" repo add --default-branch "$6" "$4" "$5";;
 verify)
- [ "$#" -eq 4 ] || fail 'verify <context> <namespace> <pod> <upstream/route-org/repo>'
+ [ "$#" -eq 4 ] || fail 'verify <context> <namespace> <pod> <slug or upstream/route-org/repo>'
  server "$1" "$2" "$3" repo verify "$4";;
 deploy-key)
  if ! { [ "$#" -ge 3 ] && [ "$#" -le 4 ]; }; then fail 'deploy-key <path> <public-key-file> --consent [forge]'; fi

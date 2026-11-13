@@ -162,8 +162,8 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 				if run.Status != model.RunRunning || run.Phase != "infrastructure-pending" {
 					t.Fatalf("pending run released: %+v", run)
 				}
-				if _, err := f.store.RetryRun(t.Context(), model.RunRetryRequest{RunID: run.ID, Actor: "operator"}); err == nil {
-					t.Fatal("pending create allowed run_retry")
+				if _, err := f.store.RerunRun(t.Context(), model.RunRerunRequest{RunID: run.ID, Actor: "operator"}); err == nil {
+					t.Fatal("pending create allowed run_rerun")
 				}
 				other, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: fmt.Sprintf("other-%d", step), Repository: f.repo, Branch: fmt.Sprintf("feature/other-%d", step), SHA: strings.Repeat("b", 40), Actor: "pusher"})
 				if err != nil {

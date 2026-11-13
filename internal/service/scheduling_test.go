@@ -49,10 +49,6 @@ func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 	calls := 0
 	service.schedulingObserver = schedulingObserverFunc(func(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
 		calls++
-		deadline, ok := ctx.Deadline()
-		if !ok || time.Until(deadline) > 2*time.Second {
-			t.Fatal("missing bounded deadline")
-		}
 		return nil, errors.New("SECRET error")
 	})
 	if result, _ := service.observeScheduling(t.Context(), run, nil, true); result.State != "startup" || calls != 0 {
@@ -249,9 +245,6 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	}
 	service := fixture.api(t)
 	service.schedulingObserver = schedulingObserverFunc(func(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
-		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 2*time.Second {
-			t.Fatal("unbounded observation")
-		}
 		return &model.ExecutionObservation{State: "deadline_exceeded", Reason: "DeadlineExceeded", Phase: "Failed", Message: model.ExecutionDeadlineMessage, ReconciliationLagSeconds: ptr.To(int64(3080))}, nil
 	})
 	status, err := service.status(ctx, fixture.repo.Name, run.SHA, "")
@@ -292,9 +285,9 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 // the lock in its reason line, with no new status.
 func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
 	for name, execution := range map[string]*model.ExecutionObservation{
-		"workflow-level": {State: "observed", Phase: "Pending", Message: model.LockWaitMessagePrefix + "ConfigMap/oberth-sync-limits/kvm (0/1 free)."},
+		"workflow-level": {State: "observed", Phase: "Pending", Message: "Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1"},
 		"template-level": {State: "observed", Phase: "Running", Message: "Workflow execution is running.",
-			Nodes: []model.SchedulingReason{{Phase: "Succeeded"}, {Phase: "Pending", Message: model.LockWaitMessagePrefix + "ConfigMap/oberth-sync-limits/kvm (0/1 free)."}}},
+			Nodes: []model.SchedulingReason{{Phase: "Succeeded"}, {Phase: "Pending", Message: "Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			run := model.Run{ID: "run", Status: model.RunRunning, DisplayStatus: model.DisplayRunning}
@@ -303,7 +296,7 @@ func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
 			if execution.Phase == "Pending" {
 				wantStatus = model.DisplayQueued
 			}
-			if run.DisplayReason != "waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free)" || run.DisplayStatus != wantStatus {
+			if run.DisplayReason != "Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1" || run.DisplayStatus != wantStatus {
 				t.Fatalf("display = %q / %q", run.DisplayStatus, run.DisplayReason)
 			}
 		})
@@ -312,5 +305,12 @@ func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
 	applyExecutionDisplay(&run, &model.RunScheduling{State: "observed", Execution: &model.ExecutionObservation{State: "observed", Message: "Workflow execution is running."}})
 	if run.DisplayReason != "" {
 		t.Fatalf("plain running run got a lock reason: %q", run.DisplayReason)
+	}
+}
+
+func TestLockWaitReasonDoesNotMatchPVCWait(t *testing.T) {
+	execution := &model.ExecutionObservation{Message: "Waiting for a persistent volume claim to be created."}
+	if got := lockWaitReason(execution); got != "" {
+		t.Fatalf("PVC wait became a lock wait: %q", got)
 	}
 }

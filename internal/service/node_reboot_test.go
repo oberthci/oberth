@@ -11,7 +11,7 @@ import (
 
 func TestTagSkippedPublicationTimestampsNeedNoForce(t *testing.T) {
 	for _, kind := range []string{"skipped", "skipped with synthesized start", "pending", "earlier failed publication", "earlier publication attempt"} {
-		for _, tool := range []string{"run_rerun", "run_retry"} {
+		for _, tool := range []string{"run_rerun"} {
 			t.Run(kind+"/"+tool, func(t *testing.T) {
 				at := time.Now().UTC()
 				publish := skippedPublisher()

@@ -67,7 +67,10 @@ afterwards. Preserve the public install result, including `server_url`,
 
 `/oberth:add-repo` previews `oberth client repository` through its narrow
 helper. Supply the selected public install result, the server's registered
-`git_path`, and explicit local CA, TLS certificate/key and SSH identity paths.
+`git_path` or unique registered slug, and explicit local TLS certificate/key
+and SSH identity paths. The CA defaults to the trust step's saved
+`${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/ca.crt`; `--ca-file` overrides it.
+A relative `CLAUDE_CONFIG_DIR` is refused when selecting this default CA.
 Only paths enter chat or argv; keys are read by the CLI/OpenSSH, never printed.
 No ambient bearer credential or global `oberth` SSH alias selects the server.
 
@@ -213,8 +216,11 @@ a preserved Review value into a command-line override.
 
 ### Live NetworkPolicy enforcement check
 
-Install preflight (after approval) and verification use a bounded traffic measurement on
-the operator's cluster against Oberth's own server Pod. They do not identify CNI
+Install preflight (after approval) and explicit `install --verify --probe` use a
+bounded traffic measurement on the operator's cluster against Oberth's own server
+Pod. Default verification is read-only: enforcement was measured at install;
+this verification did not re-test it. It creates no probe resources. The live
+measurement does not identify CNI
 brands or try to defend against a hostile server. A server and two differently
 labelled sources per Ready, schedulable, untainted node run in an owned scratch
 namespace. Both sources connect at baseline and after every policy removal.

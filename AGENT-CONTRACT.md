@@ -274,7 +274,7 @@ trust assumptions and complete invalidation rules.
   the audit binds its path and commit. Default-branch tag admission and all
   identity gates still apply. Release preflight/identity plans/declarations
   include routed files with their source-file provenance. Dispatch requires
-  `Run.RefKind == tag` and the stored bare name. Reserved build/fragment/schedule/
+  `Run.RefKind == tag` and the stored bare name. Reserved build/schedule/
   tests contracts cannot be route targets. Dedicated WIF-only step accounts also
   require `step_routes.<template>` pinning an existing exact route file and pattern;
   copying a template into the default file or another pattern cannot reuse it.
@@ -390,15 +390,6 @@ trust assumptions and complete invalidation rules.
   mount. Existing HTTP installs stage the same bundle on their current PVC,
   publish the TLS config, then roll the chart's OnDelete pod.
 
-### Authenticated execution targets
-
-Administrator approval fixes the cluster, namespace, controller and service
-identity, authenticated transport and original source/custody records. It does
-not fix a worker node. Repository placement passes through unchanged; operators
-isolate dedicated nodes with Kubernetes taints and admission/namespace policy.
-Original object UID and intent continue to fence recovery and cleanup. See
-[execution targets](docs/execution-targets.md).
-
 ### Repository contract
 
 - A repository provides its pipeline as Argo Workflow YAML in the `.oberth/`
@@ -510,23 +501,29 @@ Original object UID and intent continue to fence recovery and cleanup. See
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
 
-- Source receipts bind the exact reviewed source and fragments to submission.
+- Source receipts bind the exact reviewed source to submission.
   They carry no aggregate resource authorization or packing budget.
 
 - Native resources and placement are preserved as authored. Oberth has no
   compute admission, numeric grants or resource resizing. See
   [native scheduling](docs/native-scheduling.md).
 
-- The server-owned workflow parameter `oberth-trigger`
-  (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
-  every document that declares or mentions it, so `when:` guards can skip
-  work per trigger, e.g.
-  `when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"`. A
-  document may declare it in `spec.arguments.parameters` only as a plain
-  vocabulary `value` (the default an older server, which never sets it,
-  evaluates); this server replaces that value. `valueFrom`, `default`,
-  `enum`, a duplicate, or an out-of-vocabulary value is refused. A document
-  that never mentions the parameter is submitted byte-identical to before.
+- Every compiled Workflow receives server-owned parameters `oberth-repo`,
+  `oberth-ref`, `oberth-sha` and `oberth-trigger` (`branch|promotion|schedule|tag`).
+  Release-tier runs also receive `oberth-release-tag` and `oberth-release-sha`;
+  these copy the exact ref and SHA. Missing ref/SHA facts are refused at Build,
+  rather than submitted empty. They are absent on ordinary CI runs, including ordinary tags.
+  The entire `oberth-` parameter prefix is reserved: authored parameter
+  declarations are refused in workflow arguments, template inputs/outputs and
+  invocation arguments. References are allowed without declaring defaults.
+  For example, `when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"`
+  selects work by trigger. The run name is `{{workflow.name}}`.
+  Branches, refs and tags share the allowlist
+  `^[A-Za-z0-9][A-Za-z0-9._/+@=,-]*$` at receive and Build; already-stored
+  refs outside it fail Build with the same plain refusal. Version-tag
+  classification bounds its suffix by this alphabet and anchors both ends.
+  Ref/tag facts must go through env, never `when:`. Output `globalName` also
+  reserves the `oberth-` prefix. Assisted step selection uses Argo node names.
   A run that must not overlap another declares a native Argo mutex or
   semaphore. Retired Workflow annotations are inert metadata. The
   `concurrency_groups` tool, `oberth admission groups` and
@@ -534,13 +531,15 @@ Original object UID and intent continue to fence recovery and cleanup. See
   `runs.concurrency_limit` historical columns remain unread; the orphaned declaration table is dropped. Concurrency-group membership no longer
   restricts cancellation.
 - Workflow resources, placement, parallelism, synchronization, priority, deadlines and retries are authored in repository YAML. Oberth configures only Argo global parallelism; it does not inject release locks or priority, manage semaphore ConfigMaps, or apply CPU/pressure/disk/hold/startup gates. Requests and deadlines are optional.
-- Assisted lifecycle settings (`assist.*`), cron entry settings (`schedules.*`), and security execution-target/profile configuration remain operator-owned. Assisted holds retain their explicit deadline extension and keep their Argo slot and locks.
+- Assisted lifecycle settings (`assist.*`), cron entry settings (`schedules.*`), and security profile configuration remain operator-owned. Assisted holds retain their explicit deadline extension and keep their Argo slot and locks.
 - Semaphore limits are operator-owned in `oberth-sync-limits` in the pipeline namespace. The fixed name and same-namespace restriction protect ConfigMap data from disclosure through Argo errors. The installer leaves existing semaphore objects and their ownership to operators. Named mutexes and native Argo priority pass unchanged; no release mutex is reserved or injected.
-- Pipeline steps receive `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`,
-  `OBERTH_TRIGGER`, and `OBERTH_STEP` (the Argo template name), plus the
-  documented Go cache variables. `OBERTH_STEP` is set on every template for
-  observability and diagnostic correlation with per-step grant denials; it is
-  NOT a security control (the value is self-declared by the workflow document).
+- Oberth does not inject run-fact environment variables (`OBERTH_REPO`,
+  `OBERTH_REF`, `OBERTH_SHA`, `OBERTH_TRIGGER`, `OBERTH_RUN_ID`,
+  `OBERTH_RELEASE_TAG`, `OBERTH_RELEASE_SHA` or `OBERTH_STEP`). Authors map
+  native workflow parameters to env explicitly; authored env names and values
+  pass through unchanged. Toolchain/workspace variables, `OBERTH_ARTIFACTS`,
+  assist hold controls and secret-store coordinates remain with their live
+  mechanisms. See [run facts](docs/run-facts.md).
   The SDK itself is configured through `OBERTH_SOURCE_DIR`,
   `OBERTH_STEP_TIMEOUT`, `OBERTH_SECRET_DIR`, `OBERTH_SECRETSTORE_DIR`, and
   (Apply only) `OBERTH_PLAN_DIGEST`/`OBERTH_PLAN_SIZE`.
@@ -802,7 +801,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   `status`, `logs`, `run_get`, `run_logs`, `issue_get` and the other list/get
   tools) with the same arguments, honouring `Retry-After` and their own
   deadline; `oberth mcp call` does this itself (docs/restart-handover.md).
-  Mutations (`promote`, `sync`, `run_cancel`, `run_retry`, `issue_create`, …)
+  Mutations (`promote`, `sync`, `run_cancel`, `run_rerun`, `issue_create`, …)
   must never be re-issued on 503, `-32001` or a lost reply: the request may
   already have committed. Inspect durable state instead (`run_get`,
   `promote_status`, `issue_get`, `promotion_list`) and act on what it records.
@@ -815,8 +814,8 @@ Original object UID and intent continue to fence recovery and cleanup. See
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
 <!-- MCP count generated by internal/api/readme_tools_test.go -->
-- MCP exposes 79 tools: `status`, bounded named-step `logs`, exact-run
-  `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
+- MCP exposes 78 tools: `status`, bounded named-step `logs`, exact-run
+  `run_get`/`run_logs`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
   assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (any uplink whose scope covers the run's repository, or an admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since`, `events_wait` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
@@ -863,7 +862,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   branch run; it is separate from the unchanged run status vocabulary.
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
-  and mutation lookups still require exact durable IDs. `run_retry` and
+  and mutation lookups still require exact durable IDs. `run_rerun` and
   `run_cancel` resolve a prefix read-only within the caller's scope first and
   mutate only by the resolved exact ID. `run_cancel` takes `id`, optional
   `reason` (printable, one line, at most 512 bytes) and `force`, and returns
@@ -1028,9 +1027,8 @@ Original object UID and intent continue to fence recovery and cleanup. See
   Promotions/default targets use ordinary non-forced pushes; tags retain their
   admitted object identity. A hook refusal alone, permission/policy denial or
   non-fast-forward remains a permanent failure. Exhaustion marks the run
-  failed/infrastructure, with an upstream-publication reason. `run_retry` and
-  `run_rerun` route these failures to publication retry without repeating CI
-  or release work. Explicit publication retry resets the bounded budget.
+  failed/infrastructure, with an upstream-publication reason. `run_rerun` routes
+  these failures to publication retry without repeating CI or release work. Explicit publication retry resets the bounded budget.
   Publishing-phase failures get their own CI issue title
   (`Publish red: <branch> — upstream publish failed`) so automation and humans
   can distinguish code red from forge red.
@@ -1082,6 +1080,12 @@ Original object UID and intent continue to fence recovery and cleanup. See
   refuses extra runtime files or a changed SSH alias at assembly/readback.
   Local runtime qualification runs the complete CLI cache suite, host-key
   mismatch refusal and cancellation/reaping checks without a shell/OpenSSH.
+- Releases also publish an optional helper index for `linux/amd64` and
+  `linux/arm64`. Each child has one flattened layer containing only the exact
+  static Oberth release binary and the CA bundle, with no Git executable,
+  SSH alias or static-Git component labels. Steps select the helper digest
+  from signed `release.json`; the five-file binary/chart checksum contract
+  stays unchanged.
 - There is no runner image artifact: Job substrates are public standard
   golang images selected per repository under the administrator prefix
   allowlist.
@@ -1235,7 +1239,9 @@ Original object UID and intent continue to fence recovery and cleanup. See
   Workflow read bound to run ID and effective tested SHA, and one namespaced
   Pod list (limit 16) whose entries must have the exact Workflow controller UID.
   Node and Pod summaries are capped at 16 each, with truncation explicit.
-  Only fixed status vocabulary and curated reason summaries are returned:
+  Status uses fixed vocabulary; synchronization waits retain Argo's wording,
+  with whitespace collapsed, non-printable runes removed and a 200-rune cap.
+  Other reasons use curated summaries:
   arbitrary messages, node/container names, specs, env, commands, logs and raw
   transport errors are withheld. No resource mutation, logs, events, additional
   RBAC or credentials are needed. Observer failure preserves durable status and
@@ -1337,9 +1343,10 @@ Original object UID and intent continue to fence recovery and cleanup. See
   re-arms the obligation so the next pass or restart deletes it.
 - An explicit rerun (`run_rerun`, `oberth run rerun <id> [--reason]
   [--force]`, #1098) queues a new run with the same repository, ref, SHA,
-  trigger, tested and base SHA as one failed or interrupted run, for what
-  `run_retry` refuses: a failed step (a flaky test), a run that is no longer
-  the newest of its ref, and tag/release runs. The checks, the enqueue and a
+  trigger, tested and base SHA as one failed or interrupted run, including
+  infrastructure failures, failed steps and tag/release runs. Branch sources
+  must be the newest run for their ref and still match its head. The checks,
+  the enqueue and a
   `run.rerun` audit action (`source_run_id`, actor, reason, force, warning)
   commit in one transaction; the new run's lineage is that action, shown as
   `RerunOf` by `run_get` and `/api/runs/{run}` and as `rerun of` by `oberth
@@ -1433,7 +1440,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   attribution only when a complete Pod snapshot confirms `pod-absent`, or an
   exact readable owned Pod lacks a main termination. LIST errors, incomplete
   snapshots and nodes that never got a Pod stay ambiguous/red; the existing
-  amber/cancelled presentation and `run_retry` apply.
+  amber/cancelled presentation and `run_rerun` apply.
   A continuity-gap line alone never overrides a known nonzero node or bound-Pod
   exit, or turns a successful Workflow into an interruption. Ambiguous attempts,
   malformed/foreign or conflicting exit evidence, an independent real test failure, hard cleanup
@@ -1583,8 +1590,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   supplies steps, DAG, images and commands, and Oberth forces namespace,
   ServiceAccount, a non-root container security baseline, the source mount, the
   per-repository build cache mount and its `GOMODCACHE`/`GOCACHE`, the
-  `OBERTH_REPO`/`REF`/`SHA`/`TRIGGER` environment, the active deadline and the
-  TTL. A document's own `serviceAccountName` is never honoured — Vault validates
+  server-owned run-fact workflow parameters, the active deadline and the TTL. A document's own `serviceAccountName` is never honoured — Vault validates
   identity, not intent, so a branch push that could name the release identity
   would defeat the tier gate before OpenBao ever saw it.
 - Current per-step grants select secret identity and delivery. A recognized
@@ -1600,7 +1606,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
 - Admission refuses everything that would reach the node or the cluster around
   the envelope: `podSpecPatch`, `hostNetwork`, `hostAliases`, `hostPath`,
   `nodeSelector`, `affinity`, `hostPort`/`hostIP`, `workflowTemplateRef`,
-  `imagePullSecrets`, Secret or ConfigMap references in `env`/`envFrom`, `ARGO_*` environment names,
+  Secret or ConfigMap references in `env`/`envFrom`, `ARGO_*` environment names,
   repository-chosen object names, repository-set Pod or container security
   contexts, and any `claimName`. Documents are decoded strictly, and exactly one
   YAML document per file is accepted.
@@ -1872,8 +1878,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   wildcard granting access to templates only within that workflow file. Enforcement is at admission:
   `admitSecretstoreExecPaths` checks each template's `--path` arguments
   against that workflow file's step grants before any Workflow is submitted. A path with only
-  named-step grants is refused when consumed by an inline, unnamed, or
-  fragment-renamed template (fail-closed: the name is not stable or
+  named-step grants is refused when consumed by an inline or unnamed template (fail-closed: the name is not stable or
   authoritative).
 - **Per-step Vault identities:** every (upstream repository, workflow file,
   named or wildcard step) with a grant gets a dedicated ServiceAccount,
@@ -2086,232 +2091,9 @@ Audit action schema: action `secretstore.sync`, resource_type `secretstore`,
 resource_id is the plan digest, details JSON carries plan_digest, policies
 (map of name to changed boolean), changed_count, total_count, and status.
 
-### Go module mirror (#662)
-
-Credential-free Oberth-served Go module mirror for an explicitly configured
-private module namespace. The `internal/goproxy` package serves the GOPROXY protocol
-(`@latest`, `/@v/list`, `.info`, `.mod`, `.zip`) read-only from Oberth's own git cache
-for repositories it already mirrors. Canonical tags and validated pseudo-versions
-are supported; discovery (`@latest` and `@v/list`) remains tags-only.
-
-**Trust argument:** the mirror exposes only source Oberth already hosts for the
-same trust tier (the git cache is the source of truth for branch and tag pushes
-alike). It runs on a ClusterIP Service in the server namespace, reachable only
-from Argo pipeline pods via a NetworkPolicy that matches pods carrying the
-`oberth.ci/trigger` label (set by applyServerMetadata on every pipeline pod).
-It is not on the public/proxied ingress, not on any NodePort, and requires no
-auth token — it is read-only source that pipeline pods can already clone
-through the Git SSH path if they had credentials (which they do not, by design).
-
-**Canonical zip guarantee (#726):** `.zip` responses are built with
-`golang.org/x/mod/zip.CreateFromDir`, producing byte-identical output to what
-`go mod download` creates from a direct VCS fetch. This means the `h1:`
-dirhash in `go.sum` matches the served zip. The handler extracts the git
-archive to a temporary directory, excludes `vendor/` trees during extraction
-(matching Go's VCS-layer behavior; `CreateFromDir` does not handle this
-itself), and delegates all other exclusion rules to `CreateFromDir`: nested
-modules (subdirectories with their own `go.mod`), `.git`/`.hg`/`.svn`/`.bzr`
-VCS metadata, symlinks, and deterministic entry ordering and zip metadata.
-A non-canonical zip causes Go's checksum verification to fail closed with
-`SECURITY ERROR … checksum mismatch` — the correct behavior for a tampered
-module, but a false positive when the mirror simply builds the zip differently
-than the canonical library.
-
-**Verbatim `.mod` guarantee (#726):** `.mod` responses are the exact `go.mod`
-bytes at the tag — no trimming, no normalisation. `ShowFile` uses
-`run()` with a raw `bytes.Buffer` instead of `capture()` (which returns
-via `tailBuffer.String()` → `bytes.TrimSpace`, correct for SHA/URL/ref
-output but destructive for file content). Go's `/go.mod` line in `go.sum`
-is `dirhash.Hash1` over the exact file bytes; any whitespace change
-(including a stripped trailing newline) produces a different `h1:` hash and
-`go mod tidy` / `go mod download` fails closed with `SECURITY ERROR …
-checksum mismatch`. Both `.mod` and `.zip` are verified against go.sum
-vectors in tests.
-
-**What it never serves:** write operations (non-GET rejected by the handler
-before routing); private modules Oberth does not mirror (403); branch
-names as versions; any secret, credential, or private key. Pseudo-versions
-require exact commit/time and reachability checks. `@latest` selects the highest release tag,
-falling back to the highest prerelease when no release exists. Empty lists are
-successful; an empty `@latest` result is a terminal 403.
-
-**HTTPS listener:** TLS 1.3 minimum, using a certificate issued from a
-chart-generated `oberth-goproxy-ca` (same `genCA`/`genSignedCert` pattern as
-the server's own TLS secret). The CA certificate is public material; the
-private key stays in the Secret volume, never in pipeline pods.
-
-**CA trust distribution to pipeline pods:** the goproxy CA certificate is
-streamed into the source claim at seeding time (like the VaultCACertPEM) and
-mounted at `/etc/ssl/certs/oberth-goproxy-ca.pem` via a subPath mount. Go's
-`crypto/x509` cert directory scan reads it alongside the runner image's system
-CAs — no `SSL_CERT_FILE` override needed, no system CAs lost.
-
-**Namespace authority:** enabling the listener requires explicit
-`--argo-goproxy-module-prefix`, `--argo-goproxy-upstream`, and
-`--argo-goproxy-organization` values. `--argo-goproxy-repository-prefix` optionally
-selects a repository-name prefix (for example `sample-`). The namespace root has
-no trailing slash or glob characters. Only catalog repositories owned by that
-exact upstream and organization can supply modules; qualified cache names avoid
-cross-upstream aliases. Repository `go.mod` contents never grant namespace
-ownership. An unenrolled upstream yields an empty mapping while the entire
-configured namespace still fails closed. Catalog failures and a registered
-upstream with a different organization fail startup.
-
-**Private routing (#764):** classify the entire configured namespace
-(including its root) before parsing any request shape. Unknown private modules,
-missing module directories, missing tags, malformed requests and unsupported
-versions return 403. Backend unavailability returns 503 with `Retry-After: 1`;
-artifact-integrity and archive/zip failures return 500.
-Pseudo-version commit/time/base/reachability denials return terminal 403 with
-`Cache-Control: no-store`. A pinned commit without `go.mod` returns terminal 403
-with `module_go_mod_missing`, without retrying. Private failures never return
-404 or 410. The dedicated listener passes requests
-directly to the handler so a mux cannot redirect a malformed private path into
-another namespace. Canonical `.mod` and `.zip` bytes remain unchanged.
-
-**Immutable artifact cache:** the enabled server stores version artifacts
-under `<data>/goproxy`. SHA-256-addressed `.info` and verbatim `.mod` publish as
-cheap metadata; canonical `.zip` is built lazily from the same pinned source and
-published separately. Objects are fsynced before atomic, no-clobber manifests. Keys include the mapped repository, module path and
-version. Tagged cold fills verify tag membership and pin one Git object for all
-representations; warm tagged requests verify the cached object's size/digest and do
-no Git or catalog lookup. Pseudo-versions pin the full commit and validate live
-reachability even for warm artifacts, again before writing response headers. Cache hits still require the current handler's
-namespace/repository mapping. Private cache data stays on the server PVC;
-pipeline mounts and network authority are unchanged. Corrupt entries fail
-closed without rebuilding from a possibly moved tag. `list` and `@latest`
-remain live queries that filter revoked versions; selected `@latest` info uses
-the same pinned metadata and rechecks denial before serving.
-
-New `.info` artifacts include Go `Origin` data: `VCS=git`, `URL` is the cached
-repository's configured upstream URL, and `Hash` is the full peeled commit SHA
-used for the `.mod` and lazy `.zip`. Tagged versions include
-`Ref=refs/tags/<version>`; pseudo-versions omit `Ref`. Annotated tags pin their
-commit rather than their tag object, preserving the published timestamp.
-`go mod download -json` and `go list -m -json` carry this Origin to verifiers.
-Published metadata, Origin and ETags remain immutable across tag/remote changes
-and restarts. Older artifacts without Origin remain readable and unchanged;
-there is no automatic backfill. Strict verifiers require metadata first
-published with Origin, including in Go's own cache. Existing h1 checksums,
-SHA-256 integrity checks and no-clobber publication remain in force.
-
-**Nested modules:** `<namespace>/<mapped-repository>/<subdir>` resolves inside
-the same mapped repository. The selected directory must have a `go.mod` whose
-module directive exactly matches the requested path; the repository need not
-have a root `go.mod`. Nested tags use `<subdir>/vX.Y.Z`, and discovery strips
-only that module's exact tag prefix. Origin includes `Subdir=<subdir>` and
-tagged `Ref=refs/tags/<subdir>/vX.Y.Z`; pseudo-versions still omit Ref. Go `/vN`
-module paths use the unversioned directory as the tag prefix/Origin.Subdir and
-allow a matching `go.mod` there or in its `vN` child; ambiguous layouts refuse.
-The lazy zip uses only the selected module directory, retaining canonical
-exclusions and inheriting the repository-root LICENSE when no module-local
-LICENSE exists. Cache/revocation keys already include the full module path,
-so siblings never share artifacts. A module-path mismatch is terminal 403
-(`module_path_mismatch`), without retry or public fallback.
-
-Nested pseudo-versions retain commit/time/default-branch checks and live warm
-revalidation. Base tags and opt-in tag-only reachability use that module's own
-`<subdir>/` namespace; root and sibling tags cannot authorize it. Unknown
-commits remain terminal 403, never fetched or negative-cached. Nested discovery
-without matching tags returns an empty list; `@latest` then refuses.
-
-At most two cold version fills execute per handler, with duplicate requests
-sharing one fill. Each fill gets two read-only attempts of at most 15 seconds
-with 250ms backoff, under a separate 31-second fill context including admission
-waits. Waiters have their own request deadlines and cannot cancel shared work.
-All repository-lock callers join one fair queue; deadline-aware module readers
-can leave it. Git repository-lock and catalog waits honor the fill context; local filesystem
-operations and Git process teardown retain their OS/cleanup behavior. Failed
-fills are not cached. Go does not automatically retry a terminal 503 or interpret
-`Retry-After` as a retry policy; these safe retries happen inside the proxy, not
-by replaying pipeline steps. Transient exhaustion is 503 with `Retry-After: 1`; a positively missing pinned
-tagged commit is terminal 500 (`pinned_source_missing`) with no internal retry or tag
-rebinding. The cache
-has no automatic expiry/GC and consumes server data volume space. Tag deletion
-does not revoke already pinned bytes; administrator-owned per-version markers
-under `revoked/` deny all explicit reads without Git, including after restart.
-The local `hack/goproxy-revoke.py` utility creates these durable markers and
-warns on unmatched coordinates while permitting pre-emptive denial. The scratch
-server cannot run it; use a pinned Python maintenance pod or the node data owner. See
-[cache operations](docs/goproxy-availability.md#immutable-version-artifacts).
-
-**Pseudo-version policy:** default-branch ancestry is enabled automatically for
-mapped repositories. Administrators can expand it with
-`--argo-goproxy-pseudo-non-default-branches=true` or Helm
-`argo.goProxy.allowNonDefaultBranchPseudoVersions: true` (default false). The
-expanded policy includes public non-default branches and canonical module-compatible
-tags already allowed by the proxy; private retention/promotion refs never grant
-reachability. The conservative default requires default-branch ancestry even
-for tag-only commits. Cached symbolic HEAD determines the default branch; no
-branch name is assumed and no requested revision is fetched from a remote.
-Default-branch ancestry uses `merge-base --is-ancestor`, without listing refs.
-Opt-in branches use a one-ref query; tag-only eligibility uses the existing
-16 MiB bounded ref reader with cancellation on overflow.
-
-A pseudo-version needs a unique lowercase 12-hex commit abbreviation, exact
-committer timestamp in UTC and a canonical module-compatible version. Noncommit
-prefix collisions are ignored; multiple matching commits are refused. Base-derived
-forms require the exact ancestor tag and a later commit. Annotated tags are peeled
-for that ancestry check; author/tagger timestamps are not pseudo-version times.
-A warmed manifest may never change its full source identity. Missing, ambiguous,
-unreachable, wrong-time/base or rebound revisions are terminal 403, never negative-cached.
-Policy IO failures are 503 and do not fall back to stale successful authority.
-Cached bytes and SHA-256 ETags stay immutable, but pseudo-version HTTP responses
-use `private, no-cache` to require fresh origin eligibility checks; ordinary Go
-clients still retain their own immutable module cache. Explicit administrator
-revocation markers retain precedence and return 403. `@latest` and `@v/list`
-never include pseudo-versions, even if a Git tag is named like one.
-
-**GOPROXY ordering:** `<mirror>,https://proxy.golang.org|direct`
-- Comma after mirror: fall through only on 404/410.
-- Public module misses return 404, deliberately reaching the public proxy.
-- All private failures stop at the mirror, including pseudo-version denials and
-  TLS/transport failures. Backend/policy read failures remain retryable 503.
-- Pipe after public proxy: fall through on any error, preserving public direct
-  fallback for public modules.
-
-Repository YAML can opt a selected build/release Workflow into mirror-only
-resolution with `metadata.annotations["oberth.ci/goproxy"]: mirror-only`.
-Every pipeline container, including inline leaves on CI and release tiers,
-then receives `GOPROXY=<mirror>` exactly, with no public or direct fallback.
-Omission preserves the default chain above. Any other value (including empty)
-is refused with `oberth.ci/goproxy must be "mirror-only" when present`; server
-admission also refuses mirror-only without a configured mirror. This is a
-Workflow-wide declaration sourced only from repository YAML, with no hardcoded
-repository exceptions. The mirror serves mapped private modules only; public
-cache misses fail in mirror-only mode. Public sumdb policy is unchanged.
-
-**Environment injection:** `GOPROXY`, `GONOPROXY=none` and
-`GONOSUMDB=<configured module prefix>` into every pipeline container (CI and release),
-replacing document-provided values. Explicit `GONOPROXY=none` prevents ambient
-`GOPRIVATE` or `GONOPROXY` from bypassing the mirror; the sumdb exclusion covers
-the private root and all descendants. Public module sumdb checks are unaffected.
-This is the server-provided resolver configuration; repository code that
-explicitly replaces its own environment is not a network isolation boundary.
-
-**Availability (#1204):** only the read-only proxy Service publishes not-ready
-pod addresses, so server dependency-readiness failures do not withdraw its sole
-healthy listener from running pipelines. API/SSH readiness and all mutation,
-namespace, TLS and network-policy gates remain unchanged. All server probes use
-explicit timeouts including TLS/scheduling time (five seconds for startup and
-readiness, fifteen for liveness). Proxy HTTP failures
-carry a fixed `X-Oberth-GoProxy-Error` class and emit bounded, quoted diagnostics
-at most once per class per handler per 30 seconds, including the count suppressed
-since the preceding emission. Fixed class windows bound limiter memory;
-normal public 404 fallthrough remains quiet. Listener/TLS errors are attributed
-to goproxy. Live and retained step logs annotate refusals from the configured
-mirror. Generated hints count toward both the 32 MiB per-step transformed-output
-limit and the aggregate run-log limit; they can advance truncation by their
-encoded length. Command verdict rules are unchanged. No whole-step replay,
-integrity retry or private fallback is introduced. See
-[proxy availability](docs/goproxy-availability.md).
-
-**Deployment:** the chart exposes the same namespace/owner parameters under
-`argo.goProxy`. A fresh independent install leaves the private mirror disabled
-until the administrator supplies its mapping. An enabled mirror with missing
-namespace authority is refused; upgrades must preserve the installed namespace
-and owner configuration. TLS identities, CA distribution and NetworkPolicy
-remain required, with no public listener or insecure fallback.
+Repositories configure module access in their own Workflow environment. Oberth
+does not provide a module proxy or inject module resolver settings or proxy CA
+files.
 
 ## Compatibility matrix
 
@@ -2330,15 +2112,15 @@ remain required, with no public listener or insecure fallback.
 | Let a repository annotation change a run's identity or credentials | Forbidden |
 | Refuse a document for carrying the retired `oberth.ci/concurrency-group` or `oberth.ci/concurrency-limit` annotation | Breaking |
 | Decide a run's admission from its workflow document (size, weight, declared demand, a class annotation), rewrite or refuse native `synchronization`, or add a run status or label for a lock wait | Forbidden |
-| Count an assisted run (any exec, patch or continue on a retry hold) as promotion, publication, SHA-pinned fragment or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
+| Count an assisted run (any exec, patch or continue on a retry hold) as promotion, publication or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
 | Change the ConfigMap name `oberth-sync-limits`, the mutex name `oberth-release`, or the trigger that `releases.serialize` applies to | Breaking |
 | Charge Pod start-up to a step's declared deadline budget again by default, or report a step whose `main` exited 0 as a deadline failure | Breaking |
 | Change a scheduling or placement default (`admission.stepStartupAllowance`, `admission.stallTimeout`, `argo.defaultWorkflowTimeout`, `schedules.*`), or add such a setting without a Helm value | Breaking |
 | Let a repository choose the step start-up allowance or write `oberth.ci/step-start-allowance-seconds` | Forbidden |
 | Admit a `volumeClaimTemplate` with `dataSource`, `dataSourceRef`, or `selector` | Forbidden |
-| Admit a construct that reaches the node (`hostPort`, `hostPath`, `hostNetwork`, `nodeSelector`, `affinity`) or the cluster (`workflowTemplateRef`, `imagePullSecrets`) | Forbidden |
+| Admit a construct that reaches the node (`hostPort`, `hostPath`, `hostNetwork`, `nodeSelector`, `affinity`) or the cluster (`workflowTemplateRef`) | Forbidden |
 | Bind an OpenBao role to a wildcard ServiceAccount name or namespace, or grant the CI tier a ServiceAccount token | Forbidden |
-| Change the RunnerImage declaration shape or widen the default prefix allowlist | Breaking security change |
+| Change the RunnerImage declaration shape or bypass an operator-configured image allowlist | Breaking security change |
 | Change token-to-uplink cardinality or accepted Git ref namespaces | Breaking security change |
 | Change the accepted repository path grammar, its resolution to the registered identity, or the upstream-name reserved list / disjointness guards | Breaking security change |
 | Mount any Secret in a branch Job or share/nest CI and release cache roots | Forbidden |
@@ -2353,7 +2135,7 @@ the relevant tests, and the operator-facing documentation in the same change.
 `oberth upgrade` accepts `--values`/`-f` (repeatable values file) and `--set`
 (repeatable `key=value`) flags, forwarded to `helm upgrade` after the
 installer's own pinned arguments. Protected keys are `image.ref`,
-`argo.goProxy.enabled`, `argo.goProxy.port`, and the three `compatibility.*` identity tokens.
+the three `compatibility.*` identity tokens.
 They cannot be overridden via `--set` or `--values`. Setting a pinned key
 (or a parent path like `image`) returns `ErrPinnedKeyOverride` before any cluster mutation. Values files are
 parsed and their leaf keys checked for the same conflicts.
@@ -2512,6 +2294,8 @@ and v2 backup-and-replace semantics are unchanged. See
 | `20261111201000-run-ref-prefix-index` | Ref prefix index | Bounded literal-prefix run lookup | Drop index |
 | `20261111200000-canonical-priorities` | Canonical priorities | Rewrite stored priority classes and constrain new values | Database restore |
 | `YYYYMMDDHHMMSS-<slug>-<random>` | Future migrations | Per-file `Purpose` and `Rollback` contract in `internal/store/migrations/`; no shared number allocation | Per-file contract (database restore by default) |
+
+Timestamp migration `20261113213557-remove-fragment-run-index-8c4f9bbfa3c091b95cecdb689775370b`: remove the obsolete fragment passed-run lookup index; retain runs and audit history. Rollback restores the pre-upgrade database backup.
 
 Timestamp migration `20261104190000-priority-four-classes`: extend execution-priority vocabulary while preserving legacy receipts; rollback restores the pre-upgrade backup.
 
@@ -2762,11 +2546,11 @@ context unified diffs applied through the Pod helper `oberth internal-hold-fs`
 with no symlink following, no `.git`, no renames or binaries) append to the
 audited `runs.assist_record` (`run.assist.<kind>`) before they execute; a
 failed release abandons the Pod. Admission refuses every `ARGO_*` environment
-name from repositories (template defaults and fragments included) and a hold is
+name from repositories (template defaults included) and a hold is
 recognised only on a retry node (`(N)`, N >= 1). **A run with any exec, patch or
 continue on a held step is assisted** (`runs.assisted`, monotonic), also when a
 continue follows nothing: it is never a promotion source, never published upstream,
-never SHA-pinned fragment evidence and never resolves a CI issue. No status,
+never resolves a CI issue. No status,
 label or layout is added; the existing status carries the reason line
 `assisted: step <name> continued after patch sha256:<12 hex> by <actor>; not
 evidence`. Held runs keep their run slot, template locks and groups;
@@ -2801,7 +2585,7 @@ retained as the run error, separate from the typed termination JSON. A container
 when it reaches its own declared memory limit. Application termination-log
 suffixes never establish node pressure. Only a run whose failed
 steps all have infrastructure causes is reclassified. It retains step rows,
-clears run-level test attribution, permits eligible branch `run_retry`, and does
+clears run-level test attribution, permits eligible branch `run_rerun`, and does
 not open/update/resolve repository CI-red issues. Argo's server-injected executor
 scratch defaults to 1Gi for nonroot leaves and is configurable
 through `argo.executorScratchSizeLimit` / `--argo-executor-scratch-size-limit`;
@@ -3046,7 +2830,7 @@ compiled in this topic and included in its bundle.
 
 
 **Infrastructure recovery / run-list UX:** no automatic infrastructure retry remains.
-Authors use native Argo `retryStrategy`; manual `run_retry` and `run_rerun` retain
+Authors use native Argo `retryStrategy`; manual `run_rerun` retain
 existing safety checks. Source preparation precedes Workflow creation and needs
 manual retry after a failure. Historical audit receipts remain immutable.
 Raw failed/interrupted statuses remain; public display states are queued,
@@ -3080,7 +2864,7 @@ restart adoption. Repository YAML cannot choose or widen it.
 GPUs and other extended resources use vanilla Kubernetes requests and limits,
 with no Oberth grant or amount bound. Operators enforce namespace ResourceQuota
 and admission policies, including limits on device-plugin resources. The source
-receipt pins exact source, fragments and run binding across submission.
+receipt pins exact source and run binding across submission.
 
 Retired execution tables are inert; existing migration SQL remains unchanged.
 The five legacy execution tools and technology-specific runtime are removed.
@@ -3262,9 +3046,11 @@ Each round deletes its created NetworkPolicy with a UID precondition. The
 random ownership-labelled namespace is also cleaned with a UID precondition,
 under a separate bounded cleanup context even after cancellation. The pinned
 utility image and restricted, non-root, tokenless Pods are shared across CPU
-architectures. Install (after approval) and verification create these scratch
-resources and never mutate the operator's kubeconfig. Plan makes no cluster
-mutations and reports that enforcement will run first at install.
+architectures. Install (after approval) and explicit `install --verify --probe`
+create these scratch resources and never mutate the operator's kubeconfig.
+Default verification creates no cluster objects and reports that enforcement
+was measured at install; this verification did not re-test it. Plan makes no
+cluster mutations and reports that enforcement will run first at install.
 
 Mac onboarding #1549: selected kubeconfig files are immutable installer inputs.
 No step changes the current context or merges/replaces operator files. The Go
@@ -3291,9 +3077,10 @@ kubeconfig target. Validation and address waiting do not change settings.
 Mac onboarding R3 #1548: existing-release maintenance reads stored values before
 capability probing and preserves true, false or unspecified policy configuration.
 Unverified capability is information during maintenance; fresh installs and
-explicit verification remain fail-closed. Cleanup carries the observed UID,
+explicit `install --verify --probe` remain fail-closed. Cleanup carries the observed UID,
 revalidates expiry and binds deletion to resource version; unknown or replaced
-objects stay untouched. The live scratch-resource probe is the accepted default.
+objects stay untouched. The live scratch-resource probe runs during install and
+only when explicitly requested for verification.
 
 Mac onboarding R3 #1549: transient kubeconfig copies carry a complete ownership
 marker and inherited kernel lease in an owner-only user-cache directory. Handled
@@ -3320,3 +3107,12 @@ After re-approving, run `oberth secretstore sync` to prune old OpenBao roles and
 `access_allow`, `access_revoke`, and `access_dismiss` require `workflow`; lists,
 pending observations, policy digests and generated step identities include it.
 No approval-file default or alias is accepted.
+
+- Argo security defaults: install and upgrade read the live controller ConfigMap.
+  Existing security defaults are filled only with interactive approval of the
+  displayed review or `--argo-security-defaults`; only absent leaves are filled.
+  Compliant external controllers, including `--skip-argo-workflows`, pass without
+  a release rewrite. `controller.configMap.create=false`
+  passes when the live defaults comply; missing defaults require direct ConfigMap
+  edits, with the v0.22.5 migration named for old-profile releases. Pod-level Unconfined
+  seccomp is refused even when every container supplies a safe override.

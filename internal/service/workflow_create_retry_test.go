@@ -22,7 +22,7 @@ func (jobs *workflowCreateFailureJobs) CreateRelease(ctx context.Context, reques
 
 func TestWorkflowCreateExhaustionIsInfrastructureAndRunRetryApplies(t *testing.T) {
 	fixture := newControlFixture(t)
-	// Manual run_retry remains available when the administrator disables automatic recovery.
+	// Manual run_rerun remains available when the administrator disables automatic recovery.
 
 	fixture.scheduler.jobs = &workflowCreateFailureJobs{fixture.jobs}
 	source, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "create-timeout", Repository: fixture.repo, Branch: "feature/create-timeout", SHA: strings.Repeat("a", 40), Actor: "pusher"})
@@ -40,12 +40,16 @@ func TestWorkflowCreateExhaustionIsInfrastructureAndRunRetryApplies(t *testing.T
 		t.Fatalf("create failure became product failure: %+v", failed)
 	}
 	control := fixture.api(t)
-	control.runRetries = fixture.store
-	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_retry", json.RawMessage(fmt.Sprintf(`{"id":%q}`, failed.ID)))
+	control.runReruns = fixture.store
+	control.refs = stubRefResolver{branches: map[string]map[string]string{control.cacheInputFor(t.Context(), fixture.repo): {source.Ref: source.SHA}}}
+	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_rerun", json.RawMessage(fmt.Sprintf(`{"id":%q}`, failed.ID)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	retried := value.(model.Run)
+	retried, err := fixture.store.Run(t.Context(), value.(api.RunRerunResponse).RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if retried.Status != model.RunQueued || retried.ID == source.ID || retried.SHA != source.SHA || retried.Ref != source.Ref {
 		t.Fatalf("retry lost source identity: %+v", retried)
 	}

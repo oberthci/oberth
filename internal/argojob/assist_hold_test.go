@@ -249,12 +249,8 @@ func TestBuildRefusesRepositoryAssistAnnotations(t *testing.T) {
 	authored := strings.Replace(assistDocument, "example.com/tier: M", "example.com/tier: M\n    oberth.ci/assist: \"1\"", 1)
 	request := assistRequest(pipeline.TriggerCI, authored)
 	request.Assist = false
-	wf, err := Build(assistConfig(), request)
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-	if _, ok := wf.Annotations[AssistWorkflowAnnotation]; ok {
-		t.Fatal("an authored workflow assist annotation survived Build")
+	if _, err := Build(assistConfig(), request); err == nil || !strings.Contains(err.Error(), "metadata.annotations") {
+		t.Fatalf("authored workflow assist marker admitted: %v", err)
 	}
 }
 

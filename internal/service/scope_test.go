@@ -687,7 +687,7 @@ var toolScopeBehaviour = map[string]string{
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
 
 	"system_status": "filtered",
-	"sync":          "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
+	"sync":          "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_rerun": "mutation",
 	"run_cancel":    "mutation",
 	"run_hold_list": "lookup",
 	"run_hold_exec": "mutation", "run_hold_patch": "mutation", "run_continue": "mutation", "run_hold_abandon": "mutation",

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -17,15 +16,6 @@ const ScheduleParameter = "oberth-schedule"
 func ValidateScheduleEntry(trigger RunTrigger, entry string) error {
 	if !trigger.Valid() || len(entry) > 64 || strings.TrimSpace(entry) != entry || (entry != "" && trigger != RunTriggerSchedule) {
 		return errors.New("argoworkflow: schedule entry requires a schedule run and at most 64 bytes")
-	}
-	return nil
-}
-
-func admitScheduleParameter(spec *wfv1.WorkflowSpec) []error {
-	for _, parameter := range spec.Arguments.Parameters {
-		if parameter.Name == ScheduleParameter {
-			return []error{fmt.Errorf("argoworkflow: workflow parameter %s is reserved and server-owned; reference it without declaring a default", ScheduleParameter)}
-		}
 	}
 	return nil
 }

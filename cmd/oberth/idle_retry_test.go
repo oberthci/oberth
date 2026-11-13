@@ -58,12 +58,12 @@ func TestUpgradeWaitRetriesTimeoutBeforeUpgrade(t *testing.T) {
 							if slices.Contains(args, "--all") {
 								return []byte(`{"compatibility":{"schemaIdentity":"legacy-schema-v1","auditDomain":"legacy-audit-v1","witnessKeyInfo":"legacy-witness-v1"}}`), nil
 							}
-							return []byte(`{}`), nil
+							return []byte(`{"argo":{"podPolicy":{"enabled":false}}}`), nil
 						case "template":
 							return nil, nil
 						case "upgrade":
 							if slices.Contains(args, "--dry-run=server") {
-								return []byte(`{"config":{}}`), nil
+								return []byte(`{"config":{"argo":{"podPolicy":{"enabled":false}}}}`), nil
 							}
 							upgrades++
 							return nil, upgradeReached

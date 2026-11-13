@@ -68,8 +68,8 @@ func RunRerunPolicy(run model.Run, admin, force, safe bool) (string, error) {
 }
 
 // rerunRun is MCP run_rerun: rerun a failed or interrupted run at the same
-// SHA and ref (#1098), for the cases run_retry refuses: a failed step (a
-// flaky test), a run that is not the newest of its ref, and tag/release runs.
+// SHA and ref, including infrastructure failures, failed steps and tag/release
+// runs. Branch sources must still be the newest run at the branch head.
 // A run whose steps all passed and whose publication alone failed is not
 // re-executed: its publication is retried exactly as publish_retry does.
 func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason string, force, assist bool) (api.RunRerunResponse, error) {

@@ -68,20 +68,20 @@ func TestParallelismPostponementIsTheExactControllerState(t *testing.T) {
 func TestPostponementObservations(t *testing.T) {
 	wf := postponedWorkflow(time.Now())
 	controller := &Controller{workflows: &schedulingWorkflowClient{workflow: wf}, config: Config{Namespace: "pipeline"}}
-	observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	observation, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || observation.Message != model.ParallelismWaitMessage || observation.Phase != "Pending" {
 		t.Fatalf("scheduling observation = %#v, %v", observation, err)
 	}
-	sync, err := controller.ObserveSynchronization(context.Background(), "wf", "run")
+	sync, err := withTestObservationCache(t, controller).ObserveSynchronization(context.Background(), "wf", "run")
 	if err != nil || !slices.Equal(sync.Waiting, []string{model.SyncParallelismLock}) || len(sync.Holding) != 0 {
 		t.Fatalf("postponed sync observation = %+v, %v", sync, err)
 	}
 	wf.Status.Phase, wf.Status.Message = wfv1.WorkflowPending, "Waiting for pipeline/Mutex/oberth-release lock. Lock status: 0/1"
-	if sync, err = controller.ObserveSynchronization(context.Background(), "wf", "run"); err != nil || !slices.Equal(sync.Holding, []string{model.SyncParallelismLock}) {
+	if sync, err = withTestObservationCache(t, controller).ObserveSynchronization(context.Background(), "wf", "run"); err != nil || !slices.Equal(sync.Holding, []string{model.SyncParallelismLock}) {
 		t.Fatalf("admitted lock-waiting sync observation = %+v, %v", sync, err)
 	}
 	wf.Status.Phase, wf.Status.Message = "", ""
-	if sync, err = controller.ObserveSynchronization(context.Background(), "wf", "run"); err != nil || len(sync.Holding)+len(sync.Waiting) != 0 {
+	if sync, err = withTestObservationCache(t, controller).ObserveSynchronization(context.Background(), "wf", "run"); err != nil || len(sync.Holding)+len(sync.Waiting) != 0 {
 		t.Fatalf("unprocessed sync observation = %+v, %v", sync, err)
 	}
 }

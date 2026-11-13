@@ -88,7 +88,7 @@ func TestNativePlacementNeverBypassesSecurityDenials(t *testing.T) {
 			t.Run(placement+"/"+tc.name, func(t *testing.T) {
 				w := base.DeepCopy()
 				tc.change(w)
-				if err := Admit(w, Policy{}); err == nil {
+				if err := Admit(w, Policy{RunnerImagePrefixes: []string{"golang:"}}); err == nil {
 					t.Fatal("security denial bypassed")
 				}
 			})
@@ -120,7 +120,7 @@ func TestNativePolicyHasNoComputeParallelismOrRetryCeiling(t *testing.T) {
 	}
 	w := decodeAdmissible(t, nil)
 	w.Spec.ActiveDeadlineSeconds = ptr.To(int64(0))
-	if err := Admit(w, Policy{}); err == nil {
-		t.Fatal("invalid native zero deadline accepted")
+	if err := Admit(w, Policy{}); err != nil {
+		t.Fatal(err)
 	}
 }

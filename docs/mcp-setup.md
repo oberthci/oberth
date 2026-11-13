@@ -366,9 +366,8 @@ one with a non-admin token is still answered with the server's refusal.
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
-| `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, admission context, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained timing |
-| `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
-| `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
+| `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, run context, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained Workflow/step timing, without admission episodes |
+| `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers infrastructure failures, failed steps and tag/release runs. Branch sources must be the newest run for their ref. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). A claimed run stays active with a cancelling reason until native Argo Stop and its exit handlers finish; A stopped Workflow that did not succeed finishes cancelled; native success stays passed. Queued work with no Workflow finishes cancelled. Non-admins: branch-push runs only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. A second cancel escalates Stop to Terminate; release/tag/apply and promotion cancels use Terminate immediately |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run (`id`): step, pod, attempt, `held_since`, kubelet `deadline`, `patch_capable`, `released`; plus the run's assist record and the `assist.*` policy. Read-only. See [assisted continuation](assisted-continuation.md) |
 | `run_hold_exec` | Run one bounded argv (no shell) inside a held step's main container (`id`, `argv`, optional `step`, `stdin`, `timeout_s`). Any uplink whose scope covers the run's repository, or admin; bounded by `assist.execTimeout`/`execOutputBytes`; serialized per run; recorded and audited (`run.assist.exec`) before the command runs, which marks the run assisted |
@@ -447,6 +446,8 @@ For `run_logs`, an explicit `step` without `burn` selects that step's burn if
 its name is unique across the run's recorded results or active progress. An
 ambiguous name lists the candidate burns and requires `burn`; an unknown name
 returns not-found. If both are omitted, the failed burn/step remains the default.
+For a passed run with neither selector, the first recorded step in run order
+is returned with `available_pairs`, listing every recorded `burn/step`.
 An explicit burn without step defaults only when that burn has exactly one step.
 
 `run_list` accepts `status` as one existing display status or a non-empty list:
@@ -738,15 +739,18 @@ Insufficient cpu`, or a native synchronization lock. `Scheduling.state` and
 and template deadlines apply; Oberth adds no startup timer or watchdog.
 Terminal runs display
 `passed` (including published releases), `failed` (a deadline or memory
-kill is the reason), or `cancelled` for work stopped before submission or interrupted by restart. Submitted cancellations finish with Argo's phase and retain the stopping actor in their reason.
-After a server restart, a
-running branch run whose Argo Workflow still exists is adopted first: it keeps
-its run ID and continues to its real result (#1172). Re-queueing remains the
-fallback when that Workflow is missing; such restart re-fires carry the durable
-reason `re-queued after restart`, under the original ID. The first upgrade to a release with adoption
-still re-queues running branch runs, because the old process does so on its own
-SIGTERM; adoption applies from the next restart. Interrupted results neither
-open nor resolve CI-red issues. Retry and rerun eligibility continues to use the durable status
+kill or missing Workflow after restart is the reason), or `cancelled` for an unsuccessful Oberth stop.
+Submitted cancellations retain the stopping actor and use Argo's final phase; native success stays passed.
+After a server restart, an existing Argo Workflow is adopted: it keeps its run
+ID and continues to its real result. Oberth does not stop or delete a live
+Workflow merely because its observer restarted. A claimed run whose Workflow
+is definitely absent, including work never submitted, fails with the reason
+`interrupted by server restart`. Creation with an uncertain outcome retains its
+observation window and checks the original Workflow identity before concluding
+absence. Failed reads preserve ownership; they do not authorize a replacement.
+Use `run_rerun` to request another attempt explicitly.
+Interrupted results neither
+open nor resolve CI-red issues. Replay eligibility continues to use the durable status
 and cause. The `status`/`wait` tool's `status: "delivered"` remains the legacy
 alias of `passed` for all passed runs; its `display_status` is `passed`.
 
@@ -957,6 +961,9 @@ deadline is 630 seconds; `run_hold_exec` allows for the longest configurable
 long-poll timeouts above 600 seconds. Tools without a timeout argument keep the
 60-second deadline. A reconnect after a server restart shrinks the long poll's
 timeout argument to the client deadline left.
+For read-only calls, `--reconnect-window` accepts a positive duration bounding
+reconnect attempts across a restart; the original client deadline still applies.
+Mutation calls and unknown tools are not replayed.
 
 ```bash
 oberth mcp call --token-file ~/.config/oberth/token run_wait \
@@ -1024,7 +1031,7 @@ is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
 <!-- BEGIN GENERATED MCP TOOL COUNT -->
-The full server registry contains **79 tools**, including administrator-only
+The full server registry contains **78 tools**, including administrator-only
 operations. The authenticated `tools/list` response is authoritative for the
 connected identity; non-admin clients do not receive administrator-only tools.
 <!-- END GENERATED MCP TOOL COUNT -->

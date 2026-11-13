@@ -85,12 +85,6 @@ const (
 	binaryFileName = "oberth"
 
 	artifactsSubPath = "artifacts"
-
-	// goProxyCASubPath holds the Go module proxy TLS trust anchor. Unlike
-	// vaultCASubPath this is written for ALL runs (CI and release) because
-	// go mod tidy and go mod download need it in CI pipelines.
-	goProxyCASubPath  = "goproxy-ca"
-	goProxyCACertFile = "ca.crt"
 )
 
 // SourceVolume describes the per-run claim a Workflow's containers mount.
@@ -114,18 +108,14 @@ type SourceVolume struct {
 	// secretstore execution. Neither use fetches a binary
 	// from a registry or requires baking it into a pipeline image.
 	BinarySubPath string
-	// GoProxyCASubPath is the path inside the claim holding the Go module
-	// proxy CA certificate, and is empty unless this run's seeding actually
-	// wrote it. When set, Build mounts it at /etc/ssl/certs/ so Go's cert
-	// directory scan trusts it alongside the system CAs. Unlike VaultCASubPath,
-	// this is set for ALL runs (CI and release) because go mod tidy runs in CI.
-	GoProxyCASubPath string
 }
 
 // SourceSeeder populates a per-run source claim in the pipeline namespace.
 type SourceSeeder struct {
 	observationsMu sync.Mutex
 	observations   map[string]sourceSeedIdentity
+	hub            ObservationHub
+	workflows      WorkflowClient
 	client         kubernetes.Interface
 	exec           ExecStreamer
 	config         Config
@@ -168,25 +158,6 @@ func (seeder *SourceSeeder) SeedRequest(ctx context.Context, request Request, de
 }
 
 func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir string, deliverStoreAssets, assistHelper bool, requests ...*Request) (SourceVolume, error) {
-	if seeder.config.ExecutionPlacement != nil {
-		if len(requests) != 1 || requests[0] == nil || requests[0].Name != workflowName || requests[0].SourceDir != sourceDir {
-			return SourceVolume{}, errors.New("argojob: isolated source seeding requires a complete request")
-		}
-		request := *requests[0]
-		if deliverStoreAssets {
-			return SourceVolume{}, errors.New("argojob: approved target source delivery must remain credential-free")
-		}
-		if err := seeder.config.ExecutionPlacement.selectRequest(seeder.config, request); err != nil {
-			return SourceVolume{}, err
-		}
-		validation := request
-		if _, err := Build(seeder.config, validation); err != nil {
-			return SourceVolume{}, err
-		}
-		if err := seeder.config.ExecutionPlacement.verifyEnvironment(ctx, seeder.client, seeder.config); err != nil {
-			return SourceVolume{}, err
-		}
-	}
 	volume := SourceVolume{ClaimName: sourceClaimName(workflowName), SubPath: "src"}
 	if strings.TrimSpace(sourceDir) == "" {
 		return SourceVolume{}, errors.New("argojob: a source checkout directory is required")
@@ -202,9 +173,7 @@ func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir st
 	// Collect anything a previous run left unowned before adding storage of our
 	// own. Doing it here rather than on a timer means the sweep runs exactly
 	// when the namespace is about to grow, and needs no scheduler of its own.
-	if seeder.config.Custody == nil {
-		seeder.SweepOrphanedSourceClaims(ctx)
-	}
+	seeder.SweepOrphanedSourceClaims(ctx)
 
 	if err := seeder.createClaim(ctx, volume.ClaimName, workflowName); err != nil {
 		return SourceVolume{}, err
@@ -259,7 +228,7 @@ func (seeder *SourceSeeder) fill(
 	ctx context.Context, volume *SourceVolume, sourceDir string, deliverStoreAssets, assistHelper bool, requests ...*Request,
 ) error {
 	podName := volume.ClaimName
-	created, err := seeder.createSeedPodBound(ctx, podName, volume.ClaimName, requests...)
+	created, err := seeder.createSeedPodBound(ctx, podName, volume.ClaimName)
 	if err != nil {
 		return err
 	}
@@ -269,25 +238,22 @@ func (seeder *SourceSeeder) fill(
 		// Best effort: the Pod is disposable, and leaving one behind must not
 		// fail a run that otherwise seeded correctly.
 		options := *metav1.NewDeleteOptions(0)
-		if seeder.config.ExecutionPlacement != nil && created != nil && created.UID != "" {
-			options.Preconditions = &metav1.Preconditions{UID: &created.UID}
-		}
 		_ = seeder.client.CoreV1().Pods(seeder.config.Namespace).
 			Delete(context.WithoutCancel(ctx), podName, options)
 	}()
 
 	// A seed left by a previous owner may be deleted during restart cleanup.
 	// Retry that stale reuse once; a Pod created by this attempt must still fail
-	// if it disappears. Placed seeds never adopt AlreadyExists.
-	waitErr := seeder.waitForSeedPod(ctx, podName, created)
+	// if it disappears.
+	waitErr := seeder.waitForSeedPod(ctx, podName)
 	if created == nil && apierrors.IsNotFound(waitErr) {
-		created, err = seeder.createSeedPodBound(ctx, podName, volume.ClaimName, requests...)
+		created, err = seeder.createSeedPodBound(ctx, podName, volume.ClaimName)
 		if err != nil {
 			return err
 		}
 		stopObserving()
 		stopObserving = seeder.observeCreatedSeed(created, requests...)
-		waitErr = seeder.waitForSeedPod(ctx, podName, created)
+		waitErr = seeder.waitForSeedPod(ctx, podName)
 	}
 	if waitErr != nil {
 		return waitErr
@@ -318,9 +284,6 @@ func (seeder *SourceSeeder) fill(
 		}
 	}
 	if err := seeder.fillVaultCA(ctx, volume, podName, deliverStoreAssets); err != nil {
-		return err
-	}
-	if err := seeder.fillGoProxyCA(ctx, volume, podName); err != nil {
 		return err
 	}
 	if deliverStoreAssets || assistHelper {
@@ -387,37 +350,6 @@ func (seeder *SourceSeeder) fillVaultCA(
 	return nil
 }
 
-// fillGoProxyCA streams the Go module proxy's TLS trust anchor into the same
-// claim. Unlike fillVaultCA this is for ALL runs (CI and release), because
-// go mod tidy -diff runs in CI pipelines and needs to verify the proxy's
-// certificate.
-//
-// The certificate is public material — the CA that signed the goproxy's
-// TLS certificate. It is mounted into /etc/ssl/certs/ so Go's crypto/x509
-// cert directory scan trusts it alongside the runner image's system CAs.
-func (seeder *SourceSeeder) fillGoProxyCA(
-	ctx context.Context, volume *SourceVolume, podName string,
-) error {
-	pem := seeder.config.GoProxyCACertPEM
-	if strings.TrimSpace(pem) == "" {
-		return nil
-	}
-	target := path.Join(seedMountPath, goProxyCASubPath)
-	file := path.Join(target, goProxyCACertFile)
-	command := []string{"/bin/sh", "-c", fmt.Sprintf(
-		"mkdir -p %s && cat > %s && chmod 0444 %s && [ \"$(wc -c < %s)\" -eq %d ]",
-		target, file, file, file, len(pem))}
-
-	var stdout, stderr strings.Builder
-	if err := seeder.exec(ctx, seeder.config.Namespace, podName, seedContainer, command,
-		strings.NewReader(pem), &stdout, &stderr); err != nil {
-		return fmt.Errorf("argojob: stream the Go module proxy CA into %s: %w: %s",
-			volume.ClaimName, err, strings.TrimSpace(stderr.String()))
-	}
-	volume.GoProxyCASubPath = goProxyCASubPath + "/" + goProxyCACertFile
-	return nil
-}
-
 // fillServerBinary streams the running server's own binary into the claim so
 // pipeline containers can invoke `oberth secretstore exec` without fetching
 // it from a registry. Assisted continuation uses the same verified executable;
@@ -476,25 +408,7 @@ func (seeder *SourceSeeder) fillServerBinary(
 	return nil
 }
 
-func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimName string, requests ...*Request) (*corev1.Pod, error) {
-	if p := seeder.config.ExecutionPlacement; p != nil {
-		collector := false
-		if seeder.config.Custody != nil && p.BranchOnly() {
-			binding := seeder.config.Custody.Binding()
-			collector = len(requests) == 0 && claimName == sourceClaimName(binding.Workflow) && name == claimName+collectPodSuffix && binding.Namespace == seeder.config.Namespace
-		}
-		if !collector && (len(requests) != 1 || requests[0] == nil || name != sourceClaimName(requests[0].Name) || name != claimName) {
-			return nil, errors.New("argojob: seed Pod lacks complete selection")
-		}
-		if !collector {
-			if err := p.selectRequest(seeder.config, *requests[0]); err != nil {
-				return nil, err
-			}
-		}
-		if err := p.verifyEnvironment(ctx, seeder.client, seeder.config); err != nil {
-			return nil, err
-		}
-	}
+func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimName string) (*corev1.Pod, error) {
 	falseValue := false
 	trueValue := true
 	rootUser := int64(0)
@@ -561,25 +475,13 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 		deadline := int64(artifactCollectionTimeout / time.Second)
 		pod.Spec.ActiveDeadlineSeconds = &deadline
 	}
-	expected := pod.DeepCopy()
 	created, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) && name == claimName+collectPodSuffix && seeder.config.Custody == nil {
+	if apierrors.IsAlreadyExists(err) && name == claimName+collectPodSuffix {
 		if err := seeder.removeLeftoverCollector(ctx, pod, claimName); err != nil {
 			return nil, err
 		}
 		// Exactly one new CREATE after observed deletion; never execute the leftover.
 		created, err = seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
-	}
-	if seeder.config.ExecutionPlacement != nil {
-		if err != nil {
-			return nil, fmt.Errorf("argojob: isolated seed Pod create cannot be adopted: %w", err)
-		}
-		if err := verifyPlacedSeed(expected, created, seeder.config.ExecutionPlacement); err != nil {
-			return nil, err
-		}
-		if created.UID == "" || created.ResourceVersion == "" {
-			return nil, errors.New("argojob: seed create lacks authenticated identity")
-		}
 	}
 	if apierrors.IsAlreadyExists(err) {
 		if name == claimName+collectPodSuffix {
@@ -595,7 +497,7 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 	return created, nil
 }
 
-func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, expected ...*corev1.Pod) error {
+func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string) error {
 	interval := seeder.interval()
 	for {
 		if err := ctx.Err(); err != nil {
@@ -605,17 +507,6 @@ func (seeder *SourceSeeder) waitForSeedPod(ctx context.Context, name string, exp
 		if err == nil {
 			switch pod.Status.Phase {
 			case corev1.PodRunning:
-				if p := seeder.config.ExecutionPlacement; p != nil {
-					if err := p.verifyEnvironment(ctx, seeder.client, seeder.config); err != nil {
-						return err
-					}
-					if len(expected) != 1 || expected[0] == nil || expected[0].UID != pod.UID {
-						return errors.New("argojob: seed readback identity differs")
-					}
-					if err := verifyPlacedSeed(expected[0], pod, p); err != nil {
-						return err
-					}
-				}
 				return nil
 			case corev1.PodFailed, corev1.PodSucceeded:
 				return &sourceSeedFailure{failure: fmt.Errorf("argojob: source seed pod %s ended in phase %s before it could be written to", name, pod.Status.Phase), reason: "source seed Pod ended in phase " + string(pod.Status.Phase)}
@@ -697,28 +588,25 @@ func (seeder *SourceSeeder) SweepOrphanedSourceClaims(ctx context.Context) {
 // a terminal phase. Used by the sweeper to preserve claims whose adoption
 // failed but whose Workflow is still running.
 func (seeder *SourceSeeder) workflowLive(ctx context.Context, name string) bool {
-	// The seeder has no WorkflowClient, so it checks via the workflow label
-	// on the claim against the Argo Workflow CRD. Since we only have the
-	// Kubernetes client, check if a pod with the matching label exists and
-	// is not in a terminal phase. Actually, we can't query Workflows from
-	// the plain kubernetes.Interface. Instead, check if any pod owned by
-	// this workflow is still running — a running pod means the workflow is
-	// live.
-	pods, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "workflows.argoproj.io/workflow=" + name,
-	})
-	if err != nil {
-		// Cannot determine state; preserve the claim.
+	// An uncertain or unsynced watch cannot justify collection.
+	if seeder.hub == nil || !seeder.hub.Healthy() {
 		return true
 	}
-	for i := range pods.Items {
-		phase := pods.Items[i].Status.Phase
-		if phase == corev1.PodRunning || phase == corev1.PodPending {
+	workflow, found := seeder.hub.Workflow(name)
+	if !found {
+		if seeder.workflows == nil {
+			return true
+		}
+		var err error
+		workflow, err = seeder.workflows.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false
+		}
+		if err != nil {
 			return true
 		}
 	}
-	// No running/pending pods; the workflow is terminal or absent.
-	return false
+	return !workflow.Status.Phase.Completed()
 }
 
 func (seeder *SourceSeeder) orphanGrace() time.Duration {

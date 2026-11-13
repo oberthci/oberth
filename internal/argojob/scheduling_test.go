@@ -13,11 +13,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	ktesting "k8s.io/client-go/testing"
 )
 
 type schedulingWorkflowClient struct {
@@ -55,23 +53,16 @@ func TestSchedulingObservationIsBoundedAndReadOnly(t *testing.T) {
 	workflow.Status.Message = private
 	for i := 0; i < 40; i++ {
 		id := fmt.Sprintf("%02d", i)
-		workflow.Status.Nodes[id] = wfv1.NodeStatus{Name: private, Phase: wfv1.NodePending, Message: "Waiting for " + private + " lock. Lock status: 0/1"}
+		workflow.Status.Nodes[id] = wfv1.NodeStatus{Name: private, Phase: wfv1.NodePending, Message: "Waiting for pipeline/Mutex/step lock. Lock status: 0/1"}
 	}
 	pod := schedulingPod("own", workflow.UID)
 	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu " + private}}
 	foreign := schedulingPod("foreign", "wrong-owner")
 	foreign.Status.Phase = corev1.PodFailed
 	kube := fake.NewClientset(pod, foreign)
-	kube.PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
-		options := action.(interface{ GetListOptions() metav1.ListOptions }).GetListOptions()
-		if options.Limit != maxSchedulingItems || options.LabelSelector != "workflows.argoproj.io/workflow=wf" || action.GetNamespace() != "pipeline" {
-			t.Errorf("unbounded/unscoped list: %#v", options)
-		}
-		return false, nil, nil
-	})
 	client := &schedulingWorkflowClient{workflow: workflow}
 	controller := &Controller{workflows: client, kube: kube, config: Config{Namespace: "pipeline"}}
-	observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	observation, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,13 +73,8 @@ func TestSchedulingObservationIsBoundedAndReadOnly(t *testing.T) {
 	if strings.Contains(string(body), private) || len(body) > 8192 {
 		t.Fatalf("unsafe or unbounded output: %s", body)
 	}
-	for _, action := range kube.Actions() {
-		if action.GetVerb() != "list" || action.GetResource().Resource != "pods" {
-			t.Fatalf("unexpected API action: %#v", action)
-		}
-	}
-	if client.gets != 1 {
-		t.Fatalf("GET calls = %d", client.gets)
+	if len(kube.Actions()) != 0 || client.gets != 0 {
+		t.Fatal("cache observation read API", kube.Actions(), client.gets)
 	}
 }
 
@@ -101,7 +87,7 @@ func TestSchedulingObservationIdentityAndUnavailable(t *testing.T) {
 		state   string
 	}{
 		{name: "absent", err: apierrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}, "wf"), state: "not_observed"},
-		{name: "unavailable", err: errors.New("private transport detail"), wantErr: true},
+		{name: "unavailable", err: errors.New("private transport detail"), state: "unavailable"},
 		{name: "wrong run", change: func(w *wfv1.Workflow) { w.Annotations[runIDAnnotation] = "other" }, wantErr: true},
 		{name: "wrong SHA", change: func(w *wfv1.Workflow) { w.Labels["oberth.ci/sha"] = "other" }, wantErr: true},
 		{name: "wrong namespace", change: func(w *wfv1.Workflow) { w.Namespace = "other" }, wantErr: true},
@@ -113,7 +99,7 @@ func TestSchedulingObservationIdentityAndUnavailable(t *testing.T) {
 				test.change(workflow)
 			}
 			controller := &Controller{workflows: &schedulingWorkflowClient{workflow: workflow, err: test.err}, config: Config{Namespace: "pipeline"}}
-			observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+			observation, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 			if (err != nil) != test.wantErr {
 				t.Fatalf("err=%v", err)
 			}
@@ -121,23 +107,6 @@ func TestSchedulingObservationIdentityAndUnavailable(t *testing.T) {
 				t.Fatalf("observation=%#v", observation)
 			}
 		})
-	}
-}
-
-func TestSchedulingObservationPodListErrorAndCancellation(t *testing.T) {
-	kube := fake.NewClientset()
-	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("private transport error")
-	})
-	controller := &Controller{workflows: &schedulingWorkflowClient{workflow: schedulingWorkflow()}, kube: kube, config: Config{Namespace: "pipeline"}}
-	observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
-	if err != nil || len(observation.Pods) != 1 || observation.Pods[0].Reason != "Unavailable" {
-		t.Fatalf("observation=%#v err=%v", observation, err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := controller.ObserveScheduling(ctx, "wf", "run", "sha"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -188,7 +157,7 @@ func TestSchedulingObservationCapacityReasons(t *testing.T) {
 			pod.Spec.Containers = []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("3Gi")}}}}
 			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: tc.message + " " + private}}
 			controller := &Controller{workflows: &schedulingWorkflowClient{workflow: workflow}, kube: fake.NewClientset(pod), config: Config{Namespace: "pipeline"}}
-			observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+			observation, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -271,20 +240,27 @@ func TestPendingCPUMessageUsesPodRequests(t *testing.T) {
 	}
 }
 
-// The reason line says which lock a run is queued behind, in the controller's
-// own lock-key grammar; anything outside it falls back to the fixed form.
-func TestLockWaitMessageNamesTheLockWithoutFreeText(t *testing.T) {
-	for message, want := range map[string]string{
-		"Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1": "Waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free).",
-		"Waiting for pipeline/Mutex/oberth-release lock. Lock status: 0/1 ":            "Waiting for lock Mutex/oberth-release (0/1 free).",
-		"Waiting for pipeline/ConfigMap/limits/heavy-go lock. Lock status: 1/2":        "Waiting for lock ConfigMap/limits/heavy-go (1/2 free).",
-		"Waiting for SENSITIVE-command-env-token lock. Lock status: 0/1":               "Waiting for lock (synchronization).",
-		"Waiting for $(curl evil) lock. Lock status: 0/1":                              "Waiting for lock (synchronization).",
-		"Waiting for pipeline/Secret/token lock. Lock status: 0/1":                     "Waiting for lock (synchronization).",
-		"Waiting for pipeline/Mutex/name;rm -rf lock. Lock status: 0/1":                "Waiting for lock (synchronization).",
+// Argo owns synchronization message wording and lock status formatting.
+func TestSchedulingPreservesArgoLockMessage(t *testing.T) {
+	for _, message := range []string{
+		"Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1",
+		"Waiting for pipeline/Mutex/oberth-release lock. Lock status: 0/1 ",
+		"Waiting for pipeline/Database/build lock. Lock status: 1/2; controller detail",
 	} {
-		if got := safeWorkflowMessage(message); got != want {
-			t.Fatalf("safeWorkflowMessage(%q) = %q, want %q", message, got, want)
+		if got := safeWorkflowMessage(message); got != strings.TrimSpace(message) {
+			t.Fatalf("safeWorkflowMessage(%q) = %q", message, got)
 		}
+	}
+}
+
+func TestSchedulingBoundsUntrustedArgoLockMessage(t *testing.T) {
+	message := "Waiting for pipeline/Mutex/" + strings.Repeat("界", 300) + "\n\t\x1b\x00 lock. Lock status: 0/1"
+	got := safeWorkflowMessage(message)
+	if len([]rune(got)) != 200 || !strings.HasSuffix(got, "…") || strings.ContainsAny(got, "\n\t\x1b\x00") {
+		t.Fatalf("unsafe lock display: %q", got)
+	}
+	message = "Waiting for pipeline/Mutex/a\n\t\x1b\x00b lock. Lock status: 0/1  "
+	if got := safeWorkflowMessage(message); got != "Waiting for pipeline/Mutex/a b lock. Lock status: 0/1" {
+		t.Fatalf("lock wording changed beyond display sanitation: %q", got)
 	}
 }

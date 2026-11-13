@@ -216,3 +216,24 @@ func TestInstallReviewAcceptsNativeArgoLimits(t *testing.T) {
 		t.Fatal("review lost chosen Argo values", err, output.String())
 	}
 }
+
+func TestInstallProbeRequiresExplicitVerification(t *testing.T) {
+	for _, args := range [][]string{{"--probe"}, {"--plan", "--probe"}, {"--verify", "--dry-run", "--probe"}} {
+		err := runInstall(t.Context(), args, strings.NewReader(""), io.Discard)
+		if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "--probe requires --verify") {
+			t.Fatal(args, err)
+		}
+	}
+}
+
+func TestInstallArgoSecurityConsentFlag(t *testing.T) {
+	for _, args := range [][]string{{"--yes"}, {"--yes", "--argo-security-defaults"}} {
+		flags, cfg, _ := installFlags()
+		if err := flags.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ArgoSecurityDefaults != (len(args) == 2) {
+			t.Fatal("ordinary install confirmation must not imply security consent", args)
+		}
+	}
+}

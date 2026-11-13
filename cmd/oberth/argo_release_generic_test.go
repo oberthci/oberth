@@ -96,7 +96,7 @@ func TestChartGenericWIFAndTagRoutes(t *testing.T) {
 }
 
 func TestChartReservedReleaseRouteFiles(t *testing.T) {
-	for _, file := range []string{".oberth/build.yaml", ".oberth/fragment.yaml", ".oberth/schedule.yaml", ".oberth/tests.yaml"} {
+	for _, file := range []string{".oberth/build.yaml", ".oberth/schedule.yaml", ".oberth/tests.yaml"} {
 		for _, skipSchema := range []bool{false, true} {
 			routes, _ := json.Marshal(argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: file}}})
 			args := []string{"template", "oberth", "../../charts/oberth", "--set-json", "argo.releaseTagRoutes=" + string(routes)}

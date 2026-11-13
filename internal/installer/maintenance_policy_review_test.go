@@ -15,7 +15,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -26,7 +25,7 @@ func TestExistingUpgradeDoesNotRequireFreshProbe(t *testing.T) {
 			stopped := errors.New("review fixture stops before mutation")
 			reads := 0
 			probeCalls := 0
-			kube := fake.NewClientset(preflightNode(), preflightStorage())
+			kube := argoSecurityTestClient(preflightNode(), preflightStorage())
 			host := InstallDeps{Output: &output, CredentialSink: func(string, string) {},
 				LookPath:     func(name string) (string, error) { return name, nil },
 				KubeContexts: func(string) ([]string, error) { return []string{"chosen"}, nil },
@@ -83,7 +82,7 @@ func TestRunUpgradePreservesPolicyWithoutProbePrivileges(t *testing.T) {
 				values["networkPolicy"] = map[string]any{"enabled": stored == "true"}
 			}
 			raw, _ := json.Marshal(values)
-			deps := Deps{Output: &output, ContextName: "chosen", KubeClient: fake.NewClientset(deployment), ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
+			deps := Deps{Output: &output, ContextName: "chosen", KubeClient: argoSecurityTestClient(deployment), ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
 				t.Fatal("dedicated upgrade required fresh probe")
 				return NetworkPolicyProbeResult{Status: "unverified"}
 			},
@@ -94,6 +93,10 @@ func TestRunUpgradePreservesPolicyWithoutProbePrivileges(t *testing.T) {
 					return []byte("oberth v0.21.11 commit=fixture\n"), nil
 				},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+					if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
+						return out, nil
+					}
+
 					if args[0] == "get" && args[1] == "values" {
 						if slices.Contains(args, "--all") {
 							var compat map[string]any

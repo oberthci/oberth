@@ -114,8 +114,8 @@ func TestWorkspaceCacheMountsOnlyTheCache(t *testing.T) {
 					t.Errorf("cache leaf received %s=%q", absent, value)
 				}
 			}
-			if env["OBERTH_SHA"] != testSHA {
-				t.Error("run identity missing")
+			if _, injected := env["OBERTH_SHA"]; injected {
+				t.Error("run-fact environment was injected")
 			}
 			// The sibling without controls keeps every default.
 			siblingEnv := environmentOf(t, wf, "sibling")

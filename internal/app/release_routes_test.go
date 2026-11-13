@@ -74,7 +74,7 @@ func TestReleaseRoutesExecutionAndAuditBindSelectedFile(t *testing.T) {
 	control := &routeController{}
 	var audit model.AuditActionSpec
 	config := argojob.Config{Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor", ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}
-	jobs, err := NewArgoJobs(control, config, &stubAuditor{onAppend: func(s model.AuditActionSpec) { audit = s }}, emptySecretAccess{}, nil)
+	jobs, err := NewArgoJobs(control, config, &stubAuditor{onAppend: func(s model.AuditActionSpec) { audit = s }}, emptySecretAccess{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestGrantFreeWIFReleaseAndBranchRefusalThroughEngine(t *testing.T) {
 			writePipeline(t, dir, "release.yaml", source)
 			c := argojob.Config{Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor", ReleaseTagRoutes: argojob.ReleaseTagRoutes{key: {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}, ReleaseWIF: &argojob.ReleaseWIFConfig{Namespace: "pipelines", Roles: map[string]argojob.ReleaseWIFRole{"deployer": {Provider: "projects/123/locations/global/workloadIdentityPools/deployers/providers/issuer", ServiceAccount: "deployer@example-project.iam.gserviceaccount.com"}}, Repositories: map[string]argojob.ReleaseWIFRepository{key: {Templates: map[string]string{"main": "deployer"}, StepServiceAccounts: map[string]string{"main": "deployment-step"}, StepRoutes: map[string]argojob.ReleaseTagRoute{"main": {Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}}}
 			control := &routeController{}
-			jobs, err := NewArgoJobs(control, c, &stubAuditor{}, emptySecretAccess{}, nil)
+			jobs, err := NewArgoJobs(control, c, &stubAuditor{}, emptySecretAccess{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -234,7 +234,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	}
 	control := &routeController{}
 	config := argojob.Config{Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor", ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}
-	jobs, err := NewArgoJobs(control, config, &stubAuditor{}, emptySecretAccess{}, nil)
+	jobs, err := NewArgoJobs(control, config, &stubAuditor{}, emptySecretAccess{})
 	if err != nil {
 		t.Fatal(err)
 	}

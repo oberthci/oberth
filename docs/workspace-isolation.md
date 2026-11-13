@@ -199,7 +199,9 @@ The compiler appends the dedicated read-only assist helper mount after authored
 mounts, and the pinned Argo Pod builder preserves that parent-before-child order.
 This proves generated mount ordering, not the behavior of arbitrary runtime
 implementations or filesystem symlinks in repository images.
-Every authored mountPath and devicePath must be absolute, as Kubernetes requires.
+Oberth requires every authored mountPath and devicePath to be absolute.
+The kubelet converts relative mount paths to absolute paths; reserved-path checks
+use the same `path.Clean("/" + value)` normalization before comparing paths.
 Runtime-templated mount and device paths are refused because their resolved
 paths cannot be checked at admission. Literal segment siblings such as
 `/run/oberth-other` and `/run/oberth-gar` remain available.

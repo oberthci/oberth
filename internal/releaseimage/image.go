@@ -33,17 +33,19 @@ import (
 
 const (
 	ServerRepository = "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth"
+	HelperRepository = ServerRepository + "-helper"
 
 	// Scratch runtime rebuilt from the checksum-pinned static Git recipe.
 	// Publication of this exact two-platform index is a release prerequisite.
 	ServerSubstrate = ServerRepository + "@sha256:782d8943cfe4412afd533663c2e2eb9a3040657ada8d86e8c1bc9b3fc0c0d3ab"
 )
 
-// Kind selects a release image contract. Only the server image remains.
+// Kind selects a server or optional helper release image contract.
 type Kind string
 
 const (
 	Server Kind = "server"
+	Helper Kind = "helper"
 )
 
 // PublishConfig binds an image publication to an exact source revision.
@@ -56,12 +58,14 @@ type PublishConfig struct {
 	RemoteOpts    []remote.Option
 }
 
-// Published records the immutable digest reference for the release image.
+// Published records the immutable index references for both release images.
 type Published struct {
 	Server string
+	Helper string
 }
 
 type imageContract struct {
+	kind       Kind
 	repository string
 	substrate  string
 	binaryName string
@@ -85,6 +89,7 @@ func contract(kind Kind) (imageContract, error) {
 			digests[arch] = artifact.GitSHA256
 		}
 		return imageContract{
+			kind:       Server,
 			repository: ServerRepository,
 			substrate:  ServerSubstrate,
 			binaryName: "oberth",
@@ -100,6 +105,8 @@ func contract(kind Kind) (imageContract, error) {
 				Entrypoint: []string{"/usr/local/bin/oberth"}, Cmd: []string{"serve"}, WorkingDir: "/data",
 			},
 		}, nil
+	case Helper:
+		return helperContract(), nil
 	default:
 		return imageContract{}, fmt.Errorf("unknown release image kind %q", kind)
 	}
@@ -159,6 +166,9 @@ func Repack(base v1.Image, kind Kind, architecture string, binary []byte, create
 		}
 		if cleanName == definition.imagePath {
 			foundOldExecutable = true
+			continue
+		}
+		if kind == Helper && !helperRuntimePath(cleanName) {
 			continue
 		}
 		if forbiddenPath(cleanName, definition.forbidden) {
@@ -223,7 +233,7 @@ func Repack(base v1.Image, kind Kind, architecture string, binary []byte, create
 	configFile.Created = v1.Time{Time: created}
 	configFile.Author = "Oberth"
 	configFile.Config = definition.config
-	configFile.Config.Labels = releaseLabels(created, version, revision)
+	configFile.Config.Labels = releaseLabels(kind, created, version, revision)
 	configFile.History = []v1.History{{
 		Created: v1.Time{Time: created}, CreatedBy: "oberth repository release", Comment: "clean flattened substrate plus exact source-built executable",
 	}}
@@ -265,7 +275,7 @@ func Publish(ctx context.Context, config PublishConfig) (Published, error) {
 	authenticator := config.Authenticator
 	remoteOptions := append([]remote.Option{remote.WithContext(ctx), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release")}, config.RemoteOpts...)
 	result := Published{}
-	for _, kind := range []Kind{Server} {
+	for _, kind := range []Kind{Server, Helper} {
 		definition, _ := contract(kind)
 		baseReference, err := name.ParseReference(definition.substrate, name.StrictValidation)
 		if err != nil {
@@ -324,6 +334,8 @@ func Publish(ctx context.Context, config PublishConfig) (Published, error) {
 		digestReference := definition.repository + "@" + digest.String()
 		if kind == Server {
 			result.Server = digestReference
+		} else {
+			result.Helper = digestReference
 		}
 	}
 	return result, nil
@@ -334,7 +346,7 @@ func Publish(ctx context.Context, config PublishConfig) (Published, error) {
 // source-built executable. A manifest-only registry response is not evidence
 // that the referenced blobs or runtime contract are intact.
 func Verify(ctx context.Context, config PublishConfig, published Published) error {
-	if config.Authenticator == nil || config.Dist == "" || published.Server == "" {
+	if config.Authenticator == nil || config.Dist == "" || published.Server == "" || published.Helper == "" {
 		return errors.New("GAR access token, distribution directory, and the digest reference are required")
 	}
 	authenticator := config.Authenticator
@@ -344,6 +356,7 @@ func Verify(ctx context.Context, config PublishConfig, published Published) erro
 		reference string
 	}{
 		{Server, published.Server},
+		{Helper, published.Helper},
 	} {
 		definition, err := contract(item.kind)
 		if err != nil {
@@ -423,7 +436,7 @@ func verifyImage(image v1.Image, definition imageContract, architecture string, 
 	}
 	created = created.UTC().Truncate(time.Second)
 	expectedConfig := definition.config
-	expectedConfig.Labels = releaseLabels(created, version, revision)
+	expectedConfig.Labels = releaseLabels(definition.kind, created, version, revision)
 	if configFile.OS != "linux" || configFile.Architecture != architecture || !configFile.Created.Equal(created) ||
 		!reflect.DeepEqual(configFile.Config, expectedConfig) || len(configFile.History) != 1 {
 		return errors.New("release image configuration is not the canonical runtime contract")
@@ -444,6 +457,9 @@ func verifyImage(image v1.Image, definition imageContract, architecture string, 
 		cleanName, err := cleanTarName(header.Name)
 		if err != nil {
 			return err
+		}
+		if definition.kind == Helper && !helperRuntimePath(cleanName) {
+			return fmt.Errorf("unexpected helper payload %s", cleanName)
 		}
 		if err := validateRuntimeEntry(header, cleanName); err != nil {
 			return err
@@ -496,8 +512,11 @@ func isNotFound(err error) bool {
 	return errors.As(err, &transportError) && transportError.StatusCode == 404
 }
 
-func releaseLabels(created time.Time, version, revision string) map[string]string {
-	labels := staticgit.Labels()
+func releaseLabels(kind Kind, created time.Time, version, revision string) map[string]string {
+	labels := map[string]string{}
+	if kind == Server {
+		labels = staticgit.Labels()
+	}
 	labels["org.opencontainers.image.created"] = created.Format(time.RFC3339)
 	labels["org.opencontainers.image.revision"] = revision
 	labels["org.opencontainers.image.source"] = "https://github.com/oberthci/oberth"

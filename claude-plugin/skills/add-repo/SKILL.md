@@ -80,7 +80,7 @@ same approved change. Commits and pushes still need their explicit approval.
    `<upstream>/<route-org>/<repo>` git path; qualified paths are checked against the
    selected upstream and organization. Call MCP `repo_list` and take this registration's exact
    `git_path`, then run `helper verify '<context>' '<namespace>' '<pod>'
-   '<git_path>'`. This verifies forge access after the public key is accepted;
+   '<git_path>'` (a unique registered slug also works). This verifies forge access after the public key is accepted;
    `--no-wait` preparation alone does not. Run `helper upstreams ...` and check
    its AUTH column; exit zero alone does not prove acceptance for every
    upstream. Do not continue after a failed repository check.
@@ -94,8 +94,13 @@ same approved change. Commits and pushes still need their explicit approval.
    ```sh
    helper configure '<path>' remote --installation '<public install JSON>' \
      --registered-repo '<git_path from repo_list>' --ssh-key '<local SSH private key path>' \
-     --ca-file '<selected server CA>' --client-cert '<local client certificate>' --client-key '<local TLS key>'
+     --client-cert '<local client certificate>' --client-key '<local TLS key>'
    ```
+
+   `--registered-repo` accepts a unique slug or the qualified `git_path`.
+   The CA defaults to `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/ca.crt`, stored
+   by the trust step; use `--ca-file` to select another public CA explicitly.
+   The CLI verifies either CA against the selected install pin.
 
    The CLI reads keys itself; never display, upload or paste them. Use the
    local SSH key already registered for this uplink. The public result names

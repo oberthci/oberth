@@ -42,7 +42,7 @@ func ValidatePinnedSources(sources []PinnedSource) error {
 	seen := map[string]bool{}
 	for _, source := range sources {
 		name := strings.TrimPrefix(source.Path, "/work/sources/")
-		if !ValidSourceRepository(source.Repository) || !IsFullFragmentSHA(source.Commit) || source.Commit != strings.ToLower(source.Commit) || name == source.Path || !sourceSegment.MatchString(name) || seen[source.Path] {
+		if !ValidSourceRepository(source.Repository) || !isFullCommitSHA(source.Commit) || source.Commit != strings.ToLower(source.Commit) || name == source.Path || !sourceSegment.MatchString(name) || seen[source.Path] {
 			return fmt.Errorf("argoworkflow: pinned source requires a canonical upstream/org/repository, full lowercase commit and unique /work/sources/name path")
 		}
 		seen[source.Path] = true

@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -27,9 +26,8 @@ import (
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/oberthci/oberth/internal/containerimage"
-	"github.com/oberthci/oberth/internal/goproxy"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -42,7 +40,6 @@ const (
 	// value is a list of OpenBao paths; on this tier no secret value ever
 	// passes through the server at all.
 	secretPathsAnnotation = "oberth.ci/declared-secret-paths"
-	FragmentsAnnotation   = "oberth.ci/fragments"
 
 	// tierLabel classifies pipeline pods by trust tier so network policy,
 	// monitoring, and RBAC can scope rules to branch-tier (untrusted) or
@@ -68,11 +65,6 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
-	// Custody journals remote effects; it is not serialized operator authority.
-	Custody TargetCustody `json:"-"`
-	// ExecutionPlacement selects an immutable isolated administrator profile.
-	ExecutionPlacement *ExecutionPlacement
-
 	// ExecutorScratchSizeLimit bounds Argo emissary output and control files.
 	// Empty selects 1Gi; this is separate from the test container private scratch.
 	ExecutorScratchSizeLimit string
@@ -147,28 +139,6 @@ type Config struct {
 	// Empty means the store presents a publicly trusted certificate and the
 	// container's own root store suffices.
 	VaultCACertPEM string
-
-	// GoProxyURL is the HTTPS URL of the read-only Go module proxy the server
-	// runs for configured private modules (#662). It is injected into every
-	// pipeline container as the first entry in GOPROXY, followed by
-	// proxy.golang.org and direct unless the Workflow declares mirror-only.
-	// Empty disables injection and refuses a mirror-only declaration.
-	//
-	// The URL must be https:// — the same TLS requirement the Vault address
-	// enforces, for the same reason: module source travels over the wire.
-	GoProxyURL string
-	// GoProxyModulePrefix is the administrator-owned private namespace.
-	GoProxyModulePrefix string
-
-	// GoProxyCACertPEM is the PEM-encoded CA certificate that signed the
-	// module proxy's TLS certificate. It is delivered into the source claim
-	// and mounted at /etc/ssl/certs/oberth-goproxy-ca.pem via a subPath
-	// mount, so Go's crypto/x509 cert directory scan picks it up alongside
-	// the runner image's system CAs — no SSL_CERT_FILE override needed.
-	//
-	// Public material only; Validate rejects a PEM carrying a private key.
-	// Required when GoProxyURL is set (the proxy uses a private CA by design).
-	GoProxyCACertPEM string
 
 	// CICacheRoot and ReleaseCacheRoot are the node-local directories that hold
 	// the persistent Go module and build caches pipeline steps reuse between
@@ -273,18 +243,8 @@ func (config *Config) applyDefaults() {
 	}
 }
 
-// DefaultedConfig freezes the same defaults used by the native controller.
-func DefaultedConfig(config Config) (Config, error) {
-	config.applyDefaults()
-	return config, config.Validate()
-}
-
-// Validate checks engine configuration, including retained custody after expiry.
-// Build and allocation separately require a currently valid placement admission.
+// Validate checks engine configuration.
 func (config Config) Validate() error {
-	if err := config.ExecutionPlacement.validate(); err != nil {
-		return err
-	}
 	if err := config.Assist.Validate(); err != nil {
 		return err
 	}
@@ -374,26 +334,6 @@ func (config Config) Validate() error {
 			config.VaultCISecretsRole))
 	}
 	problems = append(problems, validateCacheRoots(config.CICacheRoot, config.ReleaseCacheRoot)...)
-	if strings.TrimSpace(config.GoProxyURL) != "" {
-		if err := goproxy.ValidateModulePrefix(config.GoProxyModulePrefix); err != nil {
-			problems = append(problems, err)
-		}
-	}
-	if strings.TrimSpace(config.GoProxyURL) != "" && !strings.HasPrefix(config.GoProxyURL, "https://") {
-		problems = append(problems, fmt.Errorf("argojob: Go module proxy URL %q must be https://", config.GoProxyURL))
-	}
-	if err := validateVaultCACertPEM(config.GoProxyCACertPEM); err != nil {
-		problems = append(problems, fmt.Errorf("argojob: Go module proxy CA: %w", err))
-	}
-	if strings.TrimSpace(config.GoProxyURL) != "" && strings.TrimSpace(config.GoProxyCACertPEM) == "" {
-		problems = append(problems, errors.New(
-			"argojob: a Go module proxy URL without a CA certificate configures a proxy no pipeline container can verify; "+
-				"the proxy uses a cluster-internal name with a private CA by design"))
-	}
-	if strings.TrimSpace(config.GoProxyCACertPEM) != "" && strings.TrimSpace(config.GoProxyURL) == "" {
-		problems = append(problems, errors.New(
-			"argojob: a Go module proxy CA certificate without a URL pins trust for a proxy no pipeline is told to reach"))
-	}
 	return errors.Join(problems...)
 }
 
@@ -525,10 +465,8 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 type Request struct {
 	PinnedSources []PinnedSourceTree
 
-	// BranchAuthority is native canonical policy resolution, never YAML authority.
-	BranchAuthority *workflowpolicy.BranchAuthority `json:"-"`
-	Capability      *argoworkflow.Capability
-	SourceReceipt   *argoworkflow.SourceReceipt
+	Capability    *argoworkflow.Capability
+	SourceReceipt *argoworkflow.SourceReceipt
 
 	RunID        string
 	RepositoryID int64
@@ -586,8 +524,6 @@ type Request struct {
 	// Issue #623.
 	StepGrants map[string]map[string]bool
 
-	Fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
-
 	// Identities overrides Config.PerRepoIdentities and Config.PerRepoCIIdentities
 	// when non-nil. The caller sets this from IdentityStore.Snapshot() to bind
 	// both Builds of one admission to the same identity version, so the audit
@@ -610,17 +546,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.PipelineFile == "" {
 		request.PipelineFile, _ = argoworkflow.TriggerFile(request.Trigger)
 	}
-	if err := config.ExecutionPlacement.selectRequest(config, request); err != nil {
-		return nil, err
-	}
-	if config.ExecutionPlacement != nil {
-		expected := (&Controller{config: config}).expectedSourceVolume(request)
-		if request.SourceVolume != (SourceVolume{}) && request.SourceVolume != expected {
-			return nil, errors.New("argojob: isolated source volume differs from server delivery")
-		}
-		// Audit and submission predict the same server-owned delivery before seed.
-		request.SourceVolume = expected
-	}
 	// When the caller supplies a snapshot, overlay it onto the config copy.
 	// Config is received by value, so this does not mutate the original.
 	// All identity lookups in perrepo.go read these map fields, which are
@@ -639,7 +564,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := request.validate(); err != nil {
 		return nil, err
 	}
-	resolved, err := argoworkflow.ResolveRunSource(request.Source, request.Fragments, argoworkflow.RunSourceBinding{
+	resolved, err := argoworkflow.ResolveRunSource(request.Source, argoworkflow.RunSourceBinding{
 		RunID: request.RunID, RepositoryID: request.RepositoryID, SHA: request.SHA,
 		File: request.PipelineFile, Trigger: request.RunTrigger, ScheduleEntry: request.ScheduleEntry,
 	})
@@ -649,11 +574,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	workflow := resolved.Workflow()
 	if err := validatePinnedSourceDelivery(workflow, request); err != nil {
 		return nil, err
-	}
-	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
-		return nil, &argoworkflow.AdmissionError{Cause: err}
-	} else if mirrorOnly && strings.TrimSpace(config.GoProxyURL) == "" {
-		return nil, fmt.Errorf("argojob: %s: mirror-only requires a configured Go module proxy", argoworkflow.GoProxyAnnotation)
 	}
 	delete(workflow.Annotations, capabilityAnnotation)
 	resourceSteps := argoworkflow.CapabilityUsage(workflow)
@@ -666,7 +586,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if request.Capability != nil && request.RepositoryID <= 0 {
 		return nil, errors.New("argojob: workflow capability requires a durable repository binding")
 	}
-	fragmentLock := resolved.Lock()
 	wifLeaves, err := authorizeReleaseWIF(workflow, config, request)
 	if err != nil {
 		return nil, err
@@ -749,13 +668,13 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	); err != nil {
 		return nil, err
 	}
-	// Reject duplicate normalized (burn, step) keys before the Workflow is
-	// created. The planner's PlannedSteps performs the same check for `oberth
-	// validate`, but the scheduler's recordStepPlan deliberately swallows plan
-	// errors ("observability record, never a gate"), so without this call a
-	// colliding pipeline would still submit and execute — and
-	// deduplicateRetries would silently drop one branch's results. Reusing
-	// PlannedSteps ensures the two layers share the same normalization.
+	if len(wifLeaves) > 0 {
+		if err := stampReleaseWIFProvenance(workflow, config.ReleaseWIF); err != nil {
+			return nil, err
+		}
+	}
+	// The durable result model needs unique normalized step keys until its
+	// planner is replaced. Validate before creating the Workflow.
 	if _, err := argoworkflow.PlannedSteps(workflow); err != nil {
 		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
@@ -780,7 +699,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 			}
 		}
 	}
-	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
+	applyServerMetadata(workflow, config, request, declaredPaths)
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
 	}
@@ -826,17 +745,13 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 
-	// Stamp before wrapping so producer inputs cannot inherit a stale
-	// document default instead of the durable run's trigger.
+	// Bind native workflow parameters before wrapping the authored templates.
 	if err := resolved.BindParameters(workflow, request.effectiveRunTrigger()); err != nil {
 		return nil, err
 	}
+	setRunFactParameters(workflow, request)
 	workflow.Annotations[helperStorageAnnotation] = helperStoragePolicy
 	if err := projectExecutorTokens(workflow, config); err != nil {
-		return nil, err
-	}
-
-	if err := applyExecutionPlacement(workflow, config, request); err != nil {
 		return nil, err
 	}
 
@@ -989,7 +904,7 @@ func tierFor(trigger pipeline.Trigger) string {
 	}
 }
 
-func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request, declaredPaths []string, fragmentLock argoworkflow.Lock) {
+func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request, declaredPaths []string) {
 	workflow.APIVersion = argoworkflow.APIVersion
 	workflow.Kind = argoworkflow.Kind
 	workflow.Name = request.Name
@@ -1010,19 +925,10 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	}
 	workflow.Annotations[runIDAnnotation] = request.RunID
 	workflow.Annotations[refAnnotation] = request.Ref
-	// Pin how the controller names step Pods, so the server can compute the
-	// Pod backing each node and stream its log. Left unpinned, the name would
-	// follow the controller's own POD_NAMES environment.
-	workflow.Annotations[PodNameVersionAnnotation] = podNameVersionV2
 	if len(declaredPaths) != 0 {
 		// Paths only, never values: this is the auditable statement of intent
 		// that the run's audit action records at submission time.
 		workflow.Annotations[secretPathsAnnotation] = strings.Join(declaredPaths, ",")
-	}
-	if len(fragmentLock) != 0 {
-		if encoded, err := json.Marshal(fragmentLock); err == nil {
-			workflow.Annotations[FragmentsAnnotation] = string(encoded)
-		}
 	}
 	if workflow.Spec.PodMetadata == nil {
 		workflow.Spec.PodMetadata = &wfv1.Metadata{}
@@ -1121,7 +1027,7 @@ func applyTemplateSecurity(template *wfv1.Template, mount corev1.VolumeMount, de
 		}
 		filtered := container.VolumeMounts[:0:0]
 		for _, existing := range container.VolumeMounts {
-			if existing.Name == stepTmpVolumeName || existing.MountPath == stepTmpMountPath {
+			if existing.Name == stepTmpVolumeName || path.Clean("/"+existing.MountPath) == stepTmpMountPath {
 				continue
 			}
 			filtered = append(filtered, existing)
@@ -1171,14 +1077,6 @@ const (
 	// the same reason the source mount is.
 	VaultCAMountPath = "/run/oberth/vault-ca"
 	VaultCACertPath  = VaultCAMountPath + "/" + vaultCACertFile
-
-	// GoProxyCACertMountPath is where every pipeline container finds the Go
-	// module proxy's trust anchor. It lives inside /etc/ssl/certs/ so Go's
-	// crypto/x509 cert directory scan reads it alongside the runner image's
-	// system CAs — no SSL_CERT_FILE override needed, and no system CA is lost.
-	// The subPath mount adds one file to the existing directory without
-	// replacing anything.
-	GoProxyCACertMountPath = "/etc/ssl/certs/oberth-goproxy-ca.pem"
 
 	// ArtifactsVolumeName remains reserved so authored legacy aliases are stripped.
 	ArtifactsVolumeName = "oberth-artifacts"
@@ -1426,19 +1324,6 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 				ReadOnly:  true,
 			})
 		}
-		if request.goProxyCADelivered() {
-			// The goproxy CA rides the same source claim as another subPath.
-			// Mounted into /etc/ssl/certs/ so Go's cert directory scan picks
-			// it up alongside the runner image's system CAs. This mount is for
-			// Every Go consumer needs this trust anchor: go mod tidy -diff runs in
-			// CI pipelines.
-			mounts = append(mounts, corev1.VolumeMount{
-				Name:      SourceVolumeName,
-				MountPath: GoProxyCACertMountPath,
-				SubPath:   request.SourceVolume.GoProxyCASubPath,
-				ReadOnly:  true,
-			})
-		}
 		if len(secretSteps) > 0 && request.binaryDelivered() {
 			// The server binary rides the same claim as another subPath,
 			// enabling `oberth secretstore exec` in pipeline containers.
@@ -1562,12 +1447,6 @@ func (request Request) binaryDelivered() bool {
 	return strings.TrimSpace(request.SourceVolume.BinarySubPath) != ""
 }
 
-// goProxyCADelivered reports whether this run's seeding wrote the Go module
-// proxy CA certificate into the source claim.
-func (request Request) goProxyCADelivered() bool {
-	return strings.TrimSpace(request.SourceVolume.GoProxyCASubPath) != ""
-}
-
 func (request Request) artifactsDelivered() bool {
 	return strings.TrimSpace(request.SourceVolume.ClaimName) != "" &&
 		strings.TrimSpace(request.SourceVolume.ArtifactsSubPath) != ""
@@ -1583,14 +1462,14 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 		if !workspaceMountKept(template, m) {
 			continue
 		}
-		if tokenDisabled(template) && (m.MountPath == VaultCAMountPath || m.MountPath == OberthBinMountPath) {
+		if tokenDisabled(template) && (path.Clean("/"+m.MountPath) == VaultCAMountPath || path.Clean("/"+m.MountPath) == OberthBinMountPath) {
 			continue
 		}
 		// The server chooses the volume/subpath, but a readonly request at
 		// that path must survive replacement and protect its aliases too.
 		templateContainers(template, func(c *corev1.Container) {
 			for _, existing := range c.VolumeMounts {
-				if existing.MountPath == m.MountPath && existing.ReadOnly {
+				if path.Clean("/"+existing.MountPath) == path.Clean("/"+m.MountPath) && existing.ReadOnly {
 					m.ReadOnly = true
 				}
 			}
@@ -1606,7 +1485,7 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 	// second mount of the same claim existed.
 	reserved := make(map[string]struct{}, len(localInjected))
 	for _, mount := range localInjected {
-		reserved[mount.MountPath] = struct{}{}
+		reserved[path.Clean("/"+mount.MountPath)] = struct{}{}
 	}
 	attach := func(mounts []corev1.VolumeMount) []corev1.VolumeMount {
 		filtered := mounts[:0:0]
@@ -1620,7 +1499,7 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 				existing.Name == SecretsVolumeName {
 				continue
 			}
-			if _, taken := reserved[existing.MountPath]; taken {
+			if _, taken := reserved[path.Clean("/"+existing.MountPath)]; taken {
 				continue
 			}
 			filtered = append(filtered, existing)
@@ -1776,16 +1655,39 @@ func injectWorkspaceEnvironment(workflow *wfv1.Workflow) {
 	}
 }
 
-// injectRunEnvironment gives every container run identity and public tool
-// settings. Store coordinates are delivered separately to admitted consumers.
-func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Request, secretSteps map[*wfv1.Template]bool) {
-	environment := []corev1.EnvVar{
-		{Name: "OBERTH_REPO", Value: request.Repo},
-		{Name: "OBERTH_REF", Value: request.Ref},
-		{Name: "OBERTH_SHA", Value: request.SHA},
-		{Name: "OBERTH_TRIGGER", Value: string(request.Trigger)},
-		{Name: "OBERTH_RUN_ID", Value: request.RunID},
+// setRunFactParameters makes run facts available through native Argo workflow
+// parameters. Non-release runs omit the release parameters; release runs carry
+// the exact ref and SHA, including an empty string when a fact is empty.
+func setRunFactParameters(workflow *wfv1.Workflow, request Request) {
+	facts := []wfv1.Parameter{
+		{Name: "oberth-repo", Value: wfv1.AnyStringPtr(request.Repo)},
+		{Name: "oberth-ref", Value: wfv1.AnyStringPtr(request.Ref)},
+		{Name: "oberth-sha", Value: wfv1.AnyStringPtr(request.SHA)},
 	}
+	if request.Trigger == pipeline.TriggerRelease {
+		facts = append(facts,
+			wfv1.Parameter{Name: "oberth-release-tag", Value: wfv1.AnyStringPtr(request.Ref)},
+			wfv1.Parameter{Name: "oberth-release-sha", Value: wfv1.AnyStringPtr(request.SHA)},
+		)
+	}
+	names := make(map[string]bool, len(facts))
+	for _, fact := range facts {
+		names[fact.Name] = true
+	}
+	kept := workflow.Spec.Arguments.Parameters[:0:0]
+	for _, parameter := range workflow.Spec.Arguments.Parameters {
+		if !names[parameter.Name] && parameter.Name != "oberth-release-tag" && parameter.Name != "oberth-release-sha" {
+			kept = append(kept, parameter)
+		}
+	}
+	workflow.Spec.Arguments.Parameters = append(kept, facts...)
+}
+
+// injectRunEnvironment supplies artifact, workspace, toolchain and secret-store
+// coordinates. Run facts are workflow parameters; authored environment names
+// such as OBERTH_SHA pass through unchanged.
+func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Request, secretSteps map[*wfv1.Template]bool) {
+	var environment []corev1.EnvVar
 	if request.artifactsDelivered() {
 		environment = append(environment, corev1.EnvVar{Name: "OBERTH_ARTIFACTS", Value: ArtifactsMountPath})
 	}
@@ -1802,40 +1704,6 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 			corev1.EnvVar{Name: "GOMODCACHE", Value: ModuleCachePath},
 			corev1.EnvVar{Name: "GOCACHE", Value: BuildCachePath},
 			corev1.EnvVar{Name: "OBERTH_CACHE_DIR", Value: CacheMountPath},
-		)
-	}
-	if request.Trigger == pipeline.TriggerRelease {
-		// release.sh reads these from the environment (not from Argo workflow
-		// parameters). They are the release-tier counterparts of OBERTH_REF
-		// and OBERTH_SHA: the ref is the tag (e.g. "refs/tags/v0.12.11") and
-		// the SHA is the exact commit the tag points to.
-		environment = append(environment,
-			corev1.EnvVar{Name: "OBERTH_RELEASE_TAG", Value: request.Ref},
-			corev1.EnvVar{Name: "OBERTH_RELEASE_SHA", Value: request.SHA},
-		)
-	}
-	// Go module proxy environment: injected into every pipeline container so
-	// go mod tidy -diff and go mod download resolve configured private
-	// modules through Oberth's credential-free mirror rather than failing on
-	// an unreachable upstream (#662).
-	//
-	// AI-CONTRACT: comma falls through only on 404/410. The private mirror
-	// returns neither for any private failure, including unknown modules,
-	// unsupported requests, pseudo-version policy denials and missing go.mod.
-	// These refusals are terminal 403. Public misses return 404; the pipe after the
-	// public proxy preserves its existing any-error direct fallback.
-	// GONOPROXY=none overrides ambient GOPRIVATE/GONOPROXY, keeping private
-	// modules on the mirror. GONOSUMDB excludes the entire private namespace
-	// (including its root) while retaining public checksum verification.
-	if strings.TrimSpace(config.GoProxyURL) != "" {
-		proxy := config.GoProxyURL + ",https://proxy.golang.org|direct"
-		if workflow.Annotations[argoworkflow.GoProxyAnnotation] == argoworkflow.GoProxyMirrorOnly {
-			proxy = config.GoProxyURL
-		}
-		environment = append(environment,
-			corev1.EnvVar{Name: "GOPROXY", Value: proxy},
-			corev1.EnvVar{Name: "GONOPROXY", Value: "none"},
-			corev1.EnvVar{Name: "GONOSUMDB", Value: config.GoProxyModulePrefix},
 		)
 	}
 	var secretEnvironment []corev1.EnvVar
@@ -1880,13 +1748,6 @@ func injectTemplateEnvironment(template *wfv1.Template, environment []corev1.Env
 			continue
 		}
 		localEnvironment = append(localEnvironment, env)
-	}
-	// OBERTH_STEP: the Argo template name, set on every template for
-	// observability. Not a security control (the value is self-declared by
-	// the workflow document), but useful for diagnostic correlation between
-	// per-step grant denials and in-pod log lines. Issue #623.
-	if template.Name != "" {
-		localEnvironment = append(localEnvironment, corev1.EnvVar{Name: "OBERTH_STEP", Value: template.Name})
 	}
 	templateContainers(template, func(c *corev1.Container) { c.Env = overrideEnvironment(c.Env, localEnvironment) })
 	for group := range template.Steps {
@@ -1959,8 +1820,8 @@ func (request Request) validate() error {
 	if strings.TrimSpace(request.Repo) == "" {
 		problems = append(problems, errors.New("argojob: repository is required"))
 	}
-	if strings.TrimSpace(request.Ref) == "" || strings.ContainsAny(request.Ref, "\x00\r\n") {
-		problems = append(problems, errors.New("argojob: ref is required and must not contain control characters"))
+	if err := model.ValidateRunRef(request.Ref); err != nil {
+		problems = append(problems, err)
 	}
 	if !fullSHA(request.SHA) {
 		problems = append(problems, errors.New("argojob: SHA must be a lowercase 40-character object ID"))

@@ -19,7 +19,7 @@ func historicalRestartTimingSQL(t *testing.T) string {
 	t.Helper()
 	for _, migration := range legacyMigrations {
 		if migration.version == 44 {
-			return migration.sql
+			return testdb.PostFragmentIndexDowngrade + migration.sql
 		}
 	}
 	t.Fatal("missing frozen v44 migration")
@@ -72,7 +72,10 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 					appendHistoricalRestart()
 				}
 			}
-			_, err = s.db.Exec(testdb.PostWorkflowStopDowngrade+`-- Reconstruct the old column because this fixture rewinds past its drop migration.
+			if _, err := s.db.Exec(testdb.PostWorkflowStopDowngrade + testdb.PostExecutionTargetRemovalDowngrade); err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.
 ALTER TABLE runs ADD COLUMN credentialed INTEGER NOT NULL DEFAULT 0 CHECK (credentialed IN (0, 1));
 DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, removeRestartTimingsMigrationID)
 			requireRestartNoError(t, err)

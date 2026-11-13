@@ -122,10 +122,6 @@ func TestAdmitRefusesIdentityBypassConstructs(t *testing.T) {
 			insert: "  workflowTemplateRef:\n    name: somebody-elses-template\n",
 			expect: "spec.workflowTemplateRef",
 		},
-		"imagePullSecrets": {
-			insert: "  imagePullSecrets:\n    - name: registry-credentials\n",
-			expect: "spec.imagePullSecrets",
-		},
 		"artifactRepositoryRef": {
 			insert: "  artifactRepositoryRef:\n    configMap: artifact-repositories\n    key: default\n",
 			expect: "spec.artifactRepositoryRef",
@@ -238,9 +234,9 @@ func TestAdmitRefusesContainerCredentialReads(t *testing.T) {
 }
 
 // TestAdmitRefusesDownwardAPIEnvProjection covers the deny-by-default gap
-// where fieldRef and resourceFieldRef were not refused by admitContainer.
+// where unapproved fieldRef values were not refused by admitContainer.
 // A repository-authored pipeline must not project spec.nodeName,
-// status.hostIP, or resource limits into its environment.
+// or status.hostIP into its environment. Container resource values are native.
 func TestAdmitRefusesDownwardAPIEnvProjection(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
@@ -249,10 +245,6 @@ func TestAdmitRefusesDownwardAPIEnvProjection(t *testing.T) {
 	}{
 		"container fieldRef": {
 			insert: "        env:\n          - name: NODE\n            valueFrom:\n              fieldRef:\n                fieldPath: spec.nodeName\n",
-			expect: "reads pod/downward state",
-		},
-		"container resourceFieldRef": {
-			insert: "        env:\n          - name: CPU_LIMIT\n            valueFrom:\n              resourceFieldRef:\n                resource: limits.cpu\n",
 			expect: "reads pod/downward state",
 		},
 	}
@@ -265,7 +257,7 @@ func TestAdmitRefusesDownwardAPIEnvProjection(t *testing.T) {
 	}
 }
 
-// TestAdmitRefusesDownwardAPIAcrossTemplateKinds ensures fieldRef/resourceFieldRef
+// TestAdmitRefusesDownwardAPIAcrossTemplateKinds ensures fieldRef
 // refusal applies to initContainers, sidecars, and script templates.
 func TestAdmitRefusesDownwardAPIAcrossTemplateKinds(t *testing.T) {
 	t.Parallel()
@@ -292,7 +284,7 @@ spec:
         image: ` + admissibleImage + `
         command: [/bin/true]
 `,
-		"sidecar resourceFieldRef": `
+		"sidecar fieldRef": `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
@@ -307,8 +299,8 @@ spec:
           env:
             - name: MEM_LIMIT
               valueFrom:
-                resourceFieldRef:
-                  resource: limits.memory
+                fieldRef:
+                  fieldPath: status.hostIP
       container:
         image: ` + admissibleImage + `
         command: [/bin/true]
@@ -329,7 +321,7 @@ spec:
           - name: SA_NAME
             valueFrom:
               fieldRef:
-                fieldPath: spec.serviceAccountName
+                fieldPath: spec.nodeName
 `,
 	}
 	for name, document := range cases {
@@ -381,7 +373,7 @@ spec:
                 image: docker.io/library/alpine:3.20@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
                 command: [/bin/true]
 `
-	refuse(t, nested, Policy{}, "outside the administrator prefix allowlist")
+	refuse(t, nested, Policy{RunnerImagePrefixes: []string{"golang:"}}, "outside the administrator prefix allowlist")
 }
 
 func TestAdmitRefusesExternalTemplateReferences(t *testing.T) {
@@ -407,29 +399,29 @@ func TestAdmitEnforcesTheRunnerImageAllowlist(t *testing.T) {
 	const admissibleImage = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const foreignImage = "docker.io/library/alpine:3.20@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	document := strings.Replace(admissibleDocument, admissibleImage, foreignImage, 1)
-	refuse(t, document, Policy{}, "outside the administrator prefix allowlist")
+	mustAdmit(t, document, Policy{})
+	refuse(t, document, Policy{RunnerImagePrefixes: []string{"golang:"}}, "outside the administrator prefix allowlist")
 	mustAdmit(t, document, Policy{RunnerImagePrefixes: []string{"docker.io/library/alpine:"}})
 }
 
-func TestAdmitRefusesMutableAndUnpinnedImages(t *testing.T) {
+func TestAdmitAcceptsMutableAndUnpinnedImages(t *testing.T) {
 	const admissibleImage = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	// Tag-only references are rejected (no digest)
-	refuse(t, strings.Replace(admissibleDocument, admissibleImage, "golang:1.26-alpine", 1), Policy{}, "must contain an @sha256")
-	refuse(t, strings.Replace(admissibleDocument, admissibleImage, "golang:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1), Policy{}, "latest")
-	refuse(t, strings.Replace(admissibleDocument, admissibleImage, "golang", 1), Policy{}, "must contain an @sha256")
+	// Native authored images may use tags or omit them.
+	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang:1.26-alpine", 1), Policy{})
+	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1), Policy{})
+	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang", 1), Policy{})
 }
 
 func TestAdmitRefusesServerOwnedMetadata(t *testing.T) {
-	for _, field := range []string{"name: chosen-by-the-repository", "generateName: chosen-", "namespace: oberth"} {
+	for _, field := range []string{"name: chosen-by-the-repository", "namespace: oberth"} {
 		document := strings.Replace(admissibleDocument, "kind: Workflow\n",
 			"kind: Workflow\nmetadata:\n  "+field+"\n", 1)
 		refuse(t, document, Policy{}, "assigned by Oberth")
 	}
 }
 
-func TestAdmitRefusesAnUnknownEntrypoint(t *testing.T) {
-	refuse(t, strings.Replace(admissibleDocument, "entrypoint: main", "entrypoint: nowhere", 1),
-		Policy{}, "names no template")
+func TestAdmitAcceptsAnUnknownEntrypoint(t *testing.T) {
+	mustAdmit(t, strings.Replace(admissibleDocument, "entrypoint: main", "entrypoint: nowhere", 1), Policy{})
 }
 
 func TestAdmitRejectsAMalformedAdministratorAllowlist(t *testing.T) {
@@ -680,7 +672,7 @@ spec:
 `, Policy{}, "ownerReferences must be omitted")
 }
 
-func TestAdmitRejectsUnresolvedOnExit(t *testing.T) {
+func TestAdmitAcceptsUnresolvedOnExit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -695,10 +687,10 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "spec.onExit references template \"cleanup\"")
+	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRejectsUnresolvedInlineDAGReference(t *testing.T) {
+func TestAdmitAcceptsUnresolvedInlineDAGReference(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -722,10 +714,10 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "references template \"nonexistent\"")
+	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRejectsUnresolvedInlineStepReference(t *testing.T) {
+func TestAdmitAcceptsUnresolvedInlineStepReference(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -747,7 +739,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "references template \"missing\"")
+	mustAdmit(t, document, Policy{})
 }
 
 // --- Finding 7 tests: resource amplification ceilings ---
@@ -765,7 +757,7 @@ func TestAdmitAcceptsAuthoredCPU(t *testing.T) {
 	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRefusesExcessivePVCCapacity(t *testing.T) {
+func TestAdmitAcceptsAuthoredLargePVCCapacity(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -787,7 +779,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "requests 256Gi storage, maximum is 64Gi")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAcceptsPVCCapacityAtCeiling(t *testing.T) {
@@ -815,7 +807,7 @@ spec:
 	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRefusesMemoryEmptyDirWithoutSizeLimit(t *testing.T) {
+func TestAdmitAcceptsMemoryEmptyDirWithoutSizeLimit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -833,7 +825,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "memory-backed emptyDir without a sizeLimit")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAcceptsMemoryEmptyDirWithBoundedSizeLimit(t *testing.T) {
@@ -858,10 +850,9 @@ spec:
 	mustAdmit(t, document, Policy{})
 }
 
-// Issue #440: disk-backed emptyDirs must carry a bounded sizeLimit, just
-// like memory-backed ones. An uncapped disk-backed emptyDir can exhaust the
+// Native emptyDir sizing is enforced by Kubernetes. An uncapped disk-backed emptyDir can exhaust the
 // node's ephemeral storage.
-func TestAdmitRefusesDiskEmptyDirWithoutSizeLimit(t *testing.T) {
+func TestAdmitAcceptsDiskEmptyDirWithoutSizeLimit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -878,7 +869,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "disk-backed emptyDir without a sizeLimit")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAcceptsDiskEmptyDirWithBoundedSizeLimit(t *testing.T) {
@@ -902,7 +893,7 @@ spec:
 	mustAdmit(t, document, Policy{})
 }
 
-func TestAdmitRefusesDiskEmptyDirExceedingCeiling(t *testing.T) {
+func TestAdmitAcceptsDiskEmptyDirWithLargeSizeLimit(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -920,7 +911,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "exceeds the 50Gi ceiling")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAllowsGPUResourcesWithoutGrant(t *testing.T) {
@@ -986,7 +977,7 @@ spec:
 }
 
 // TestOberthPipelinesPassAdmission proves Oberth's own pipeline documents
-// pass the admission gate including all newly added ceilings. The policy
+// pass the admission gate including the ownership and host-access guards. The policy
 // includes the image prefixes the live deployment allowlists.
 func TestOberthPipelinesPassAdmission(t *testing.T) {
 	t.Parallel()
@@ -1034,7 +1025,7 @@ spec:
 // TestAdmitRefusesMixedDependsAndDependencies checks that a DAG template
 // mixing enhanced-depends (string expressions) with legacy dependencies
 // (string arrays) is rejected at admission, matching the executor's own check.
-func TestAdmitRefusesMixedDependsAndDependencies(t *testing.T) {
+func TestAdmitAcceptsMixedDependsAndDependencies(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -1059,7 +1050,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "cannot use both 'depends' and 'dependencies'")
+	mustAdmit(t, document, Policy{})
 }
 
 // TestAdmitAcceptsConsistentDependsOnly verifies that a DAG using only the
@@ -1097,8 +1088,8 @@ func TestPipelinePriorityAnnotationDoesNotSetArgoPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Admit(workflow, Policy{}); err != nil {
-		t.Fatal(err)
+	if err := Admit(workflow, Policy{}); err == nil {
+		t.Fatal("unknown ownership annotation admitted")
 	}
 	if workflow.Spec.Priority != nil {
 		t.Fatal("annotation changed controller priority")

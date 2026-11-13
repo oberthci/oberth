@@ -19,8 +19,6 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var imagePrefixes string
-	flags.Bool("allow-unresolved-fragments", false,
-		"deprecated: unresolved fragments still fail validation because admission requires their pinned contents")
 	flags.StringVar(&imagePrefixes, "runner-image-prefixes", strings.Join(pipeline.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -124,22 +122,6 @@ func executeValidate(target validateTarget, output io.Writer) error {
 			continue
 		}
 		report.line("  ok  YAML decode (strict)")
-
-		references, refErr := argoworkflow.FragmentRefs(workflow)
-		if refErr != nil {
-			report.problem("fragment references in %s: %v", entry.file, refErr)
-			continue
-		}
-		if len(references) != 0 {
-			// No offline fragment loader is configured here. Runtime admission
-			// runs after Resolve expands the pinned fragment contents; without
-			// them none of this document's admission checks can be certified.
-			for _, reference := range references {
-				report.problem("fragment %s cannot be resolved offline; admission requires the fully resolved pipeline with pinned fragment contents. "+
-					"The server resolves and admits it at push time; --allow-unresolved-fragments cannot bypass admission", reference)
-			}
-			continue
-		}
 
 		if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: target.imagePrefixes}); err != nil {
 			report.problem("admission %s: %v", entry.file, err)

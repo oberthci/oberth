@@ -14,7 +14,7 @@ func TestScheduleEntryParameterRejectsEveryAuthoredValueShape(t *testing.T) {
 		{Name: ScheduleParameter, ValueFrom: &wfv1.ValueFrom{Parameter: "other"}},
 		{Name: ScheduleParameter, Enum: []wfv1.AnyString{wfv1.AnyString("nightly")}},
 	} {
-		if len(admitScheduleParameter(&wfv1.WorkflowSpec{Arguments: wfv1.Arguments{Parameters: []wfv1.Parameter{p}}})) == 0 {
+		if len(admitParameters("spec.arguments.parameters", []wfv1.Parameter{p})) == 0 {
 			t.Fatalf("authored value accepted: %+v", p)
 		}
 	}
