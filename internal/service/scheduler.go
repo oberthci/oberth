@@ -44,7 +44,6 @@ type SchedulerConfig struct {
 	Signals         *Signals
 	WorkspaceRoot   string
 	RemoveWorkspace func(string) error
-	MaxRunLogBytes  int64
 	MutationGate    func(context.Context) error
 
 	// RestoredRunsFile is oberth restore's marker (RestoredRunsFile in the
@@ -68,8 +67,6 @@ type Scheduler struct {
 	workspaces         *workspaceLifecycle
 	workspaceRoot      string
 	submissions        *submissionRegistry
-
-	maxRunLogBytes int64
 
 	mutationGate       func(context.Context) error
 	wake               chan struct{}
@@ -129,9 +126,6 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.Store == nil || config.Git == nil || config.Logs == nil || config.Jobs == nil || config.Auditor == nil {
 		return nil, errors.New("service: scheduler store, Git, logs, jobs, and auditor are required")
 	}
-	if config.MaxRunLogBytes <= 0 {
-		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
-	}
 	if strings.TrimSpace(config.WorkspaceRoot) == "" {
 		config.WorkspaceRoot = "/data/work"
 	}
@@ -156,9 +150,9 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		releaseJobs: config.ReleaseJobs,
 		auditor:     config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, restoredRunsFile: config.RestoredRunsFile,
-		submissions:    newSubmissionRegistry(),
-		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
-		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
+		submissions:  newSubmissionRegistry(),
+		mutationGate: mutationGate,
+		wake:         make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		recoveredWorkflows: make(chan adoptedRun, 1), createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, policyRetryWait: waitPolicyRetry,
 	}
@@ -920,7 +914,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		log.Printf("WARN: run=%s retained observation output is unavailable", run.ID)
 	}
 	observation.retained = retained
-	progressLog := newStepProgressLogWriter(newRunLogWriter(logDestination, scheduler.maxRunLogBytes-retained), func(event runprogress.Event) error { return scheduler.logs.AppendStepProgress(run.ID, event) })
+	progressLog := newStepProgressLogWriter(logDestination, func(event runprogress.Event) error { return scheduler.logs.AppendStepProgress(run.ID, event) })
 
 	// The plan is recorded here: after the pipeline object exists, so a run
 	// that never reached submission carries no claim about work it would have

@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -14,24 +13,6 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 )
-
-func TestRunLogWriterRetainsExactBoundAndFailsClosed(t *testing.T) {
-	t.Parallel()
-	var retained bytes.Buffer
-	writer := newRunLogWriter(&retained, 5)
-	if written, err := writer.Write([]byte("1234")); err != nil || written != 4 {
-		t.Fatalf("first write = %d, %v", written, err)
-	}
-	if written, err := writer.Write([]byte("567")); !errors.Is(err, errRunLogLimit) || written != 1 {
-		t.Fatalf("limited write = %d, %v", written, err)
-	}
-	if written, err := writer.Write([]byte("8")); !errors.Is(err, errRunLogLimit) || written != 0 {
-		t.Fatalf("post-limit write = %d, %v", written, err)
-	}
-	if retained.String() != "12345" {
-		t.Fatalf("retained log = %q", retained.String())
-	}
-}
 
 func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *testing.T) {
 	logs, err := runlog.Open(t.TempDir())
@@ -82,12 +63,12 @@ func (overflowingJobs) Wait(_ context.Context, _ string, destination io.Writer) 
 	return JobResult{Status: model.RunPassed, Phase: "passed"}, err
 }
 
-func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
+func TestRunObservationOutputDoesNotApplyAnAggregateContainerBudget(t *testing.T) {
 	fixture := newControlFixture(t)
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: overflowingJobs{},
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "bounded-log-work"), MaxRunLogBytes: 64,
+		WorkspaceRoot: filepath.Join(fixture.root, "bounded-log-work"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +87,7 @@ func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.Status != model.RunFailed || finished.Phase != "job" || !strings.Contains(finished.Error, errRunLogLimit.Error()) {
+	if finished.Status != model.RunPassed || finished.Error != "" {
 		t.Fatalf("overflow run = %#v", finished)
 	}
 }

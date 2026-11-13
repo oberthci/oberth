@@ -11,7 +11,7 @@ const sandbox=vm.createContext({console,URLSearchParams,Map,Set,Date,AbortContro
  fetch:async(url,options)=>{
   assert.equal(options.headers.Authorization,'Bearer valid-token');assert.ok(!url.includes('token='));
   const item={url,options,cancelled:false};streams.push(item);
-  const body=new ReadableStream({start(controller){item.controller=controller;options.signal.addEventListener('abort',()=>controller.error(new Error('aborted')),{once:true});},cancel(){item.cancelled=true;}});
+  const body=new ReadableStream({start(controller){item.controller=controller;options.signal.addEventListener('abort',()=>{item.cancelled=true;controller.error(new Error('aborted'));},{once:true});},cancel(){item.cancelled=true;}});
   return {ok:true,status:200,body};
  }
 });

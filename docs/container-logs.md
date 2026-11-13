@@ -2,8 +2,7 @@
 
 The dashboard lists observed Argo node IDs and Pod container names. Select a
 container to read it. Live output is a plain Kubernetes `pods/log?follow`
-request; leaving the view closes it. A closed stream stays closed. Select the
-container again to make another request. There is no automatic reconnect.
+request; leaving the view closes it. A closed stream stays closed. Use Open log to make another request. There is no automatic reconnect.
 
 When an observed container finishes, Oberth reads its log once and stores a
 copy under the run. Each copy uses `--run-log-limit-bytes` independently

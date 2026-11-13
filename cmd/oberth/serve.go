@@ -784,8 +784,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 
-		MaxRunLogBytes: options.runLogLimitBytes,
-		MutationGate:   anchors.AllowMutation,
+		MutationGate: anchors.AllowMutation,
 
 		RestoredRunsFile: filepath.Join(options.dataRoot, service.RestoredRunsFile),
 	})

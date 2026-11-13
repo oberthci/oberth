@@ -185,10 +185,8 @@ type Config struct {
 
 	ArtifactsLimitBytes int64
 
-	// MaxRunLogBytes bounds the aggregate bytes written across all steps of
-	// one run log. Without this ceiling, a pipeline with 512 admitted steps
-	// could write up to 512 * 32 MiB = 16 GiB to the shared server PVC.
-	// Default: 64 MiB.
+	// MaxRunLogBytes bounds each retained container copy independently.
+	// Default: 64 MiB. Truncation records a reason without changing the verdict.
 	MaxRunLogBytes int64
 
 	// PerRepoIdentities maps canonical "upstream/org/repo" identity strings

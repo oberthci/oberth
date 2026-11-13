@@ -138,7 +138,7 @@ func (service *API) RunContainerLogFiltered(ctx context.Context, actor api.Actor
 		}
 		defer release()
 	}
-	body, meta, entry, err := scoped.logs.ReadContainerLog(ctx, run.ID, node, container, filter.WithContext(ctx))
+	body, meta, _, err := scoped.logs.ReadContainerLog(ctx, run.ID, node, container, filter.WithContext(ctx))
 	if errors.Is(err, os.ErrNotExist) && run.Status.Active() {
 		return nil, fmt.Errorf("%w: stored container log is pending; request the live container stream", ErrStepLogPending)
 	}
@@ -146,7 +146,6 @@ func (service *API) RunContainerLogFiltered(ctx context.Context, actor api.Actor
 		return nil, boundedRunReadError(err)
 	}
 	response := ContainerLogResponse{LogResponse: newLogResponse(run.ID, "", "", body, meta), NodeID: node, Container: container}
-	response.Note = entry.Reason
 	return response, nil
 }
 

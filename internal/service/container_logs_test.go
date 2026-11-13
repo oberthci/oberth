@@ -93,7 +93,7 @@ func TestContainerLogServiceHistoricMarkersArePlain(t *testing.T) {
 		t.Fatal(err)
 	}
 	value, err := f.api.CallTool(t.Context(), actor, "run_logs", json.RawMessage(`{"id":"`+run.ID+`","raw":true}`))
-	if err != nil || value.(LogResponse).Output != body {
+	if err != nil || value.(LogResponse).Output != "[test/unit] retained output\n"+body {
 		t.Fatal(value, err)
 	}
 }

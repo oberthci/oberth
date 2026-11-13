@@ -20,7 +20,7 @@ const state = {
   showArchived: localStorage.getItem("oberth-archived") === "show",
   step: "", stepRunID: "",
   logCache: new Map(),
-  live: null, // assigned per-run by liveLogContent
+  live: null, // assigned per container request
   showExec: readShowExec(),
   issueWorkStatus: "", issueState: "open", issueRepo: "", issueQuery: "", issueCursor: 0, issueCursorHistory: [],
   issuePage: null, issueOpener: null,
@@ -859,9 +859,7 @@ const LOG_NIL_VALUES = new Set(["", "\"\"", "''", "<nil>", "nil", "null", "none"
 const LOG_LEVEL_BAD = new Set(["error", "err", "fatal", "crit", "critical", "panic", "emerg", "alert"]);
 const LOG_LEVEL_WARN = new Set(["warn", "warning"]);
 function logLineClass(line) {
-  /* Classification-only prefix strip: anchored rules must work in the
-     combined live view, where lines still carry [burn/step]. Display
-     stripping is stripStepPrefix's job and is untouched by this. */
+  // Styling never changes the container bytes or their native attribution.
   const body = String(line || "").replace(LOG_RE.stepPrefix, "").trim();
   if (!body) return "";
   if (LOG_RE.markBad.test(body)) return "bad";
@@ -924,11 +922,6 @@ function splitLogText(raw) {
   if (lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
-/* stripStepPrefix removes the [burn/step] marker from each line when the
-   viewer is already scoped to that exact step. The prefix is the literal
-   string the runner writes (copyPrefixed) and that runlog indexes on; it
-   stays in the stored data and the API response — this strips it only for
-   the human-facing single-step terminal view. */
 const maxRenderedLogLines = 5000;
 function renderLogLines(lines, opts = {}) {
   const total = lines.length;
@@ -1156,7 +1149,7 @@ async function renderRunDetailView(detail, seq) {
         ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || `<div class="empty">${run.phase === "preflight" ? "Retired execution preflight; see the run result for upgrade details." : "No step results recorded yet."}</div>`}
       </div>
       <div class="logp">
-        <div class="log-h" id="logHead"><label>Container <select id="containerLogSelect">${containerView.options}</select></label>${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
+        <div class="log-h" id="logHead"><label>Container <select id="containerLogSelect">${containerView.options}</select></label><button id="containerLogOpen">Open log</button>${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
         <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "STREAM ENDED" : state.live?.done ? "COMPLETE" : "LIVE"}</span>` : ""}</div><div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
       </div>
     </div>
@@ -1168,7 +1161,7 @@ async function renderRunDetailView(detail, seq) {
     for (const selector of [".rh", "#runBanners", "#stepList", "#logHead", ".term-bar"]) {
       existing.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
     }
-    const preserve = live && previousTerm?.dataset.containerKey === state.live?.key;
+    const preserve = live && previousTerm?.dataset?.containerKey === state.live?.key;
     if (!preserve) existing.querySelector(".terminal").replaceWith(template.content.querySelector(".terminal"));
   } else {
     replaceApp(detailHTML);
@@ -1178,6 +1171,10 @@ async function renderRunDetailView(detail, seq) {
   updateRunHistory(run);
   const termBody = document.getElementById("termBody");
   if (live && termBody) { termBody.dataset.containerKey = state.live.key; paintContainerLog(state.live); }
+  document.getElementById("containerLogOpen")?.addEventListener("click", () => {
+    closeLiveLog();
+    renderRunDetail(run.id, state.routeSeq, true);
+  });
   document.getElementById("containerLogSelect")?.addEventListener("change", event => {
     state.containerKey = event.target.value;
     closeLiveLog();

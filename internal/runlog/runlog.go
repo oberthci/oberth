@@ -242,24 +242,6 @@ func (store *Store) ReadActiveFiltered(runID, stage, step string, filter Filter)
 	return store.readActiveIndexed(runID, stage, step, filter)
 }
 
-// LiveLogSize stats the append-only log without opening or reading its bytes.
-
-// ReadFrom returns up to maximum bytes of the run's append-only log starting
-// at offset, plus the next poll offset and the current log size. It serves the
-// dashboard's live view of a run in progress: the file grows while the Job
-// streams, so callers poll with the returned offset. A negative offset means
-// "start tailing": the read begins near maximum bytes before the current
-// end, rounded back to the start of that record to preserve attribution. A
-// late-joining viewer still receives at most maximum bytes per call. When
-// more bytes remain past the returned chunk, the chunk is trimmed to the last
-// complete line so a multi-byte character split at the read boundary can never
-// be mangled by JSON re-encoding; a chunk without any newline is returned
-// as-is to guarantee forward progress.
-
-// recordStart scans backward with fixed memory. A log record can exceed the
-// poll response size, so one look-behind chunk is not necessarily sufficient.
-// Only initial tail reads align; explicit continuation cursors stay exact.
-
 func (store *Store) Tail(runID string, maximum int64) ([]byte, error) {
 	if maximum <= 0 {
 		return []byte{}, nil

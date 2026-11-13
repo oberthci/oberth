@@ -132,6 +132,9 @@ func (controller *Controller) readContainerCopy(ctx context.Context, workflow *w
 	for attempt := 0; attempt < 2; attempt++ {
 		reader, err := controller.openBoundContainerLog(readCtx, workflow, entry, false)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, "oberth: log unavailable: Pod or container log no longer exists"
+			}
 			if attempt == 0 && retryExecutorIdentityRead(err) && readCtx.Err() == nil {
 				continue
 			}
