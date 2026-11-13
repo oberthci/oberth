@@ -92,11 +92,15 @@ Kubernetes ResourceQuota and admission policy in the pipeline namespace; see
 settings such as privilege, host paths/device mounts, host namespaces, runtime
 classes, unapproved images or service identities, and `resources.claims` remain
 refused independently of the requested resource.
-Server-owned executor/identity helpers keep their existing resources. Their
-measured Pod-level effect is an additional **50m CPU, 64Mi memory and 256Mi
-ephemeral storage requested by every Pod of a run**, beyond what its author
-wrote. A Pod whose author declares no requests is therefore **Burstable, not
-BestEffort**. The author's container resources are unchanged. Opted-in assisted holds retain their
+Server-owned executor/identity helper containers keep their existing requests:
+**50m CPU, 64Mi memory and 256Mi ephemeral storage**. The executor wait container
+usually adds those quantities to the steady-state container sum. Kubernetes
+calculates the effective Pod request using that sum and the applicable
+init-container maxima; an authored init container can dominate the result.
+For example, an ordinary init requesting 2 CPU and 1Gi memory can leave the
+effective request at 2 CPU and 1Gi rather than adding the helper quantities.
+A Pod whose author declares no requests is therefore **Burstable**. The author's
+container resources are unchanged. Opted-in assisted holds retain their
 private scratch resources, retry/hold behavior and hold-lifetime deadlines.
 
 ## Security waits before submission
