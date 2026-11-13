@@ -50,7 +50,7 @@ func TestExtendedResourceGrantRemovalPreservesOperatorAuthorityAndHistory(t *tes
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := s.migrateWithMigrations(ctx, nil, migrations); err != nil {
+		if err := s.migrateWithMigrations(ctx, nil, migrations[:index+1]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,15 +72,23 @@ func TestExtendedResourceGrantRemovalPreservesOperatorAuthorityAndHistory(t *tes
 	if _, exists := fields["extended_resources"]; exists {
 		t.Fatal("retired device ceiling remains", stored)
 	}
-	receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, active.ID, "submitted-workflow", strings.Repeat("a", 40))
-	if err != nil || string(receipt) != raw {
-		t.Fatal("original binding not retained for running submission", string(receipt), err)
+	var receipt string
+	if err := s.db.QueryRow(`SELECT capability_json FROM workflow_capability_recoveries WHERE run_id=?`, active.ID).Scan(&receipt); err != nil || receipt != raw {
+		t.Fatal("shipped migration did not retain its historical receipt", receipt, err)
 	}
-	if receipt, err = s.WorkflowCapabilityRecovery(ctx, repo.ID, queued.ID, "submitted-workflow", strings.Repeat("b", 40)); err != nil || len(receipt) != 0 {
-		t.Fatal("queued work received historical authority", string(receipt), err)
+	var queuedReceipts int
+	if err := s.db.QueryRow(`SELECT count(*) FROM workflow_capability_recoveries WHERE run_id=?`, queued.ID).Scan(&queuedReceipts); err != nil || queuedReceipts != 0 {
+		t.Fatal("queued work received historical authority", queuedReceipts, err)
 	}
 	if _, err = s.db.Exec(`UPDATE workflow_capability_recoveries SET sha='changed' WHERE run_id=?`, active.ID); err == nil {
 		t.Fatal("migration receipt is mutable")
+	}
+	// The forward UID migration cannot authenticate these UID-less receipts.
+	if err := s.migrateWithMigrations(ctx, nil, migrations); err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, active.ID, "submitted-workflow", "workflow-uid", strings.Repeat("a", 40)); err != nil || len(receipt) != 0 {
+		t.Fatal("UID-less historical authority survived", string(receipt), err)
 	}
 	after, err := s.VerifyAuditChain(ctx)
 	if err != nil || !reflect.DeepEqual(audit, after) {
@@ -124,7 +132,8 @@ func TestCapabilityRecoveryDoesNotSurviveSameIDRequeue(t *testing.T) {
 	if err = s.migrateWithMigrations(ctx, nil, migrations); err != nil {
 		t.Fatal(err)
 	}
-	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, run.ID, "same-name", run.SHA); err != nil || len(receipt) == 0 {
+	seedCapabilityRecoveryUID(t, s, run.ID, repo.ID, "same-name", "workflow-uid", run.SHA, old)
+	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, run.ID, "same-name", "workflow-uid", run.SHA); err != nil || len(receipt) == 0 {
 		t.Fatal("original receipt missing", string(receipt), err)
 	}
 	if _, err = s.RequeueStrandedRun(ctx, run.ID); err != nil {
@@ -139,7 +148,7 @@ func TestCapabilityRecoveryDoesNotSurviveSameIDRequeue(t *testing.T) {
 	if _, err = s.SetRunWorkflowName(ctx, run.ID, "same-name"); err != nil {
 		t.Fatal(err)
 	}
-	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, run.ID, "same-name", run.SHA); err != nil || len(receipt) != 0 {
+	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, run.ID, "same-name", "workflow-uid", run.SHA); err != nil || len(receipt) != 0 {
 		t.Fatal("replacement attempt revived original receipt", string(receipt), err)
 	}
 }

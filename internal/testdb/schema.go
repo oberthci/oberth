@@ -385,8 +385,27 @@ DROP TABLE IF EXISTS workflow_capability_recoveries;
 DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-grants-1523724f34af80938b4963079df78930';
 `
 
+// PostWorkflowCapabilityUIDDowngrade reconstructs an empty UID-less table only in disposable historical fixtures.
+const PostWorkflowCapabilityUIDDowngrade = `
+DROP TABLE workflow_capability_recoveries;
+CREATE TABLE workflow_capability_recoveries (
+ run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+ repo_id INTEGER NOT NULL REFERENCES repositories(id),
+ workflow_name TEXT NOT NULL,
+ sha TEXT NOT NULL,
+ capability_json TEXT NOT NULL CHECK(json_valid(capability_json)),
+ projected_json TEXT NOT NULL CHECK(json_valid(projected_json)),
+ granted_by TEXT NOT NULL,
+ granted_at INTEGER NOT NULL
+);
+CREATE TRIGGER workflow_capability_recoveries_immutable BEFORE UPDATE ON workflow_capability_recoveries
+BEGIN SELECT RAISE(ABORT,'workflow capability recovery is immutable'); END;
+
+DELETE FROM schema_migrations WHERE id='20261113054824-bind-workflow-capability-recovery-uid-3d13e105c1264e33bbf137990e3e1977';
+`
+
 // PostStepMeasurementDowngrade restores empty telemetry tables and historical columns only in disposable old-schema fixtures.
-const PostStepMeasurementDowngrade = `
+const PostStepMeasurementDowngrade = PostWorkflowCapabilityUIDDowngrade + `
 CREATE TABLE step_results_measurement_fixture (
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     burn TEXT NOT NULL,

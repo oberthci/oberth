@@ -1134,7 +1134,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	})
 
 	expectedColumns := map[string][]string{
-		"workflow_capability_recoveries": {"run_id", "repo_id", "workflow_name", "sha", "capability_json", "projected_json", "granted_by", "granted_at"},
+		"workflow_capability_recoveries": {"run_id", "repo_id", "workflow_name", "workflow_uid", "sha", "capability_json", "projected_json", "granted_by", "granted_at"},
 		"node_boot_observations":         {"run_id", "workflow_name", "workflow_uid", "node_id", "pod_uid", "node_name", "node_uid", "boot_id", "started_at", "observed_at", "changed_at"},
 		"release_wif_overrides":          {"repo", "revoked", "grant_json", "reason", "actor", "updated_at"},
 		"branch_deletions":               {"sequence", "id", "repo_id", "branch", "old_sha", "actor", "source", "batch_id", "status", "attempts", "retry_after", "error", "created_at", "updated_at"},

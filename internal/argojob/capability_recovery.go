@@ -11,7 +11,7 @@ import (
 // WithWorkflowCapabilityRecoveryLoader binds observation/token recovery to the
 // store's exact pre-migration in-flight submission receipt. Create and its
 // retries keep verifyCapabilityGrant, which never consults this loader.
-func (c *Controller) WithWorkflowCapabilityRecoveryLoader(load func(context.Context, int64, string, string, string) (json.RawMessage, error)) *Controller {
+func (c *Controller) WithWorkflowCapabilityRecoveryLoader(load func(context.Context, int64, string, string, string, string) (json.RawMessage, error)) *Controller {
 	c.capabilityRecovery = load
 	return c
 }

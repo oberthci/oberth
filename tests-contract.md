@@ -225,10 +225,13 @@ reports and replays each attempt once, with no retry suffix in any key, and
 not again from a restored reporter; `TestWaitResumedRetriedDAGIsGreen` adopts
 such a Workflow after a restart and reports only the passing retry.
 
-Capability recovery: the actual old-base Workflow with a device grant passes
-`TestOldDeviceGrantWorkflowRecoversThroughRealMigration`. Migration receipts
-are scoped to pre-existing in-flight run/Workflow/SHA and the unchanged grant
-epoch; changed or revoked grants and new submissions cannot reuse them.
+Capability recovery: `TestWorkflowCapabilityUIDMigrationDiscardsUnboundReceipts`
+runs the forward migration twice, discards UID-less authority and keeps grants,
+runs and audit history. `TestOldDeviceGrantWorkflowRecoversThroughRealMigration`
+first proves that real migration refuses an old UID-less receipt, then uses an
+explicit trusted UID-bound test fixture to exercise adoption and token recovery.
+A same-name replacement, missing UID, changed tuple, grant epoch/revocation and
+same-ID requeue cannot inherit authority; new submissions remain strict.
 `TestStartupAdoptsOtherWorkflowsAfterOneBindingRefusal` proves startup and
 other adoption continue; `TestAdoptedNativeControlsPreserveRecoveryIdentity`
 covers native controls after restart.

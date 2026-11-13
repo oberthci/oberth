@@ -19,8 +19,8 @@ func TestStepMeasurementRemovalDeletesHistoryAndPreservesResults(t *testing.T) {
 			index = i
 		}
 	}
-	if index != len(migrations)-1 {
-		t.Fatal("measurement removal must be last", index)
+	if index < 0 {
+		t.Fatal("measurement removal missing", index)
 	}
 	if err := s.migrateWithMigrations(ctx, nil, migrations[:index]); err != nil {
 		t.Fatal(err)
