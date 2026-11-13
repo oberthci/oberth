@@ -46,9 +46,9 @@ if os.environ.get("FAIL_WORKER") and "TestAlpha" in names:
 class StoreRunner(unittest.TestCase):
     def test_discovery_and_partition_include_new_examples_and_fuzz(self):
         names = RUNNER.discover("TestOld\nExampleFuture\nFuzzNew\nTestOther\nExample\nTest\nFuzz\nBenchmark\nBenchmarkOnly\n")
-        groups = RUNNER.partition(names, {"TestOld": 100, "RemovedTest": 1000})
+        groups = RUNNER.partition(names, {"TestOld": 100})
         self.assertEqual(sorted(sum(groups, [])), sorted(names))
-        self.assertEqual(groups, RUNNER.partition(list(reversed(names)), {"TestOld": 100, "RemovedTest": 1000}))
+        self.assertEqual(groups, RUNNER.partition(list(reversed(names)), {"TestOld": 100}))
         self.assertNotIn("BenchmarkOnly", sum(groups, []))
         for invalid in ["", "TestOld\nTestOld", "ok package", "TestA/subtest"]:
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
@@ -59,6 +59,10 @@ class StoreRunner(unittest.TestCase):
                 RUNNER.validate_partition(["TestOld", "TestOther"], groups)
         with self.assertRaises(ValueError):
             RUNNER.partition(names, {"TestOld": float("nan")})
+
+    def test_weights_cannot_name_removed_targets(self):
+        with self.assertRaisesRegex(ValueError, "nonexistent targets: RemovedTest"):
+            RUNNER.partition(["TestAlpha", "TestBeta"], {"RemovedTest": 1000})
 
     def fixture(self, directory, **extra):
         root = Path(directory).resolve()

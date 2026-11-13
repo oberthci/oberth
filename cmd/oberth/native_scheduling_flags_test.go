@@ -19,3 +19,10 @@ func TestRemovedSchedulingFlagsAreErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestRemovedExtendedResourceGrantFlagIsAnExplicitError(t *testing.T) {
+	_, err := parseServeOptions([]string{"--admission-extended-resources=example.com/gpu=1"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") || !strings.Contains(err.Error(), "admission-extended-resources") {
+		t.Fatal("retired grant flag was not clearly refused", err)
+	}
+}

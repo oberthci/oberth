@@ -68,6 +68,13 @@ class ArgoSchemaTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, f'Helm accepted invalid values: {argo}')
         self.assertIn('schema', result.stderr.lower(), result.stderr)
 
+    def test_removed_extended_resource_grant_value_is_refused(self):
+        result = self.render({}, '--set-json',
+                             'admission={"declaredResources":{"extendedResources":{"example.com/gpu":1}}}')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('admission', result.stderr)
+        self.assertIn('additional properties', result.stderr)
+
     def test_removed_sampler_is_refused_even_when_disabled(self):
         for value in (SAMPLER, dict(SAMPLER, enabled=False)):
             self.assert_schema_refuses({'resourceSampler': value})

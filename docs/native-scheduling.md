@@ -415,3 +415,14 @@ the Pod. Selectors may also read the server-owned `oberth.ci/run` label or
 `workflows.argoproj.io/workflow: WORKFLOW_NAME` for one Workflow. Use actual existing label values. A selector on `oberth.ci/repo` will
 not select every user Pod of that repository: Oberth does not inject that label
 onto those Pods.
+
+
+Extended resources may also be requested by steps of credentialed and release
+Workflows.
+
+A Kubernetes ResourceQuota applies to the whole pipeline namespace and cannot
+separate repositories within that namespace.
+
+When an operator grants a resource kind, annotations that its controller
+propagates to Pods under field names other than metadata are the operator's
+responsibility.

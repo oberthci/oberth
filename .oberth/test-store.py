@@ -44,6 +44,9 @@ def validate_partition(names, groups):
 
 
 def partition(names, weights):
+    stale = set(weights) - set(names)
+    if stale:
+        raise ValueError("store timing weights name nonexistent targets: " + ", ".join(sorted(stale)))
     if any(not isinstance(value, (int, float)) or isinstance(value, bool)
            or not math.isfinite(value) or value < 0 for value in weights.values()):
         raise ValueError("invalid store timing weight")
