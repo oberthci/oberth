@@ -8,8 +8,9 @@ Workflows alone for the successor to adopt.
 A run whose Workflow is confirmed absent, including a claimed run that never
 submitted a Workflow, fails with `interrupted by server restart`. Recovery does
 not resubmit it. Users can request an explicit retry or rerun through the
-existing authorization checks; that creates a new run ID. Unclaimed queued runs
-keep their existing queue order. Runs listed in a restored backup's marker are
+existing authorization checks; that creates a new run ID with its own queue
+and admission sequences. It does not inherit the failed run's admission order.
+Unclaimed queued runs keep their existing queue order. Runs listed in a restored backup's marker are
 cancelled with `restored from a backup; not dispatched again` instead.
 
 An ambiguous Workflow creation remains under bounded observation. An initial
