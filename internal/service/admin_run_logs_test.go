@@ -36,7 +36,11 @@ func TestAdminRunLogsResolvesUniqueStepBeforeFailedBurnDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	control := f.api(t)
-	value, err := control.CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q,"step":"compile"}`, run.ID)))
+	value, err := control.CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID)))
+	if err != nil || value.(LogResponse).Stage != "unit" || value.(LogResponse).Step != "check" || len(value.(LogResponse).AvailablePairs) != 0 {
+		t.Fatalf("failed default changed: %+v %v", value, err)
+	}
+	value, err = control.CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q,"step":"compile"}`, run.ID)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,14 +72,55 @@ func TestAdminRunLogsStepInferenceUsesActiveProgress(t *testing.T) {
 	}
 }
 
-func TestRunLogsWithoutFailureListsAvailablePairs(t *testing.T) {
+func TestRunLogsPassedDefaultsToFirstStepAndListsAvailablePairs(t *testing.T) {
+	for _, count := range []int{1, 2} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			f := newControlFixture(t)
+			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/logs", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps := []model.StepResult{{RunID: run.ID, Stage: "z-build", Step: "compile", Ordinal: 0, Status: model.StepPassed}, {RunID: run.ID, Stage: "a-test", Step: "unit", Ordinal: 1, Status: model.StepPassed}}
+			for _, step := range steps[:count] {
+				if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err = f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(filepath.Join(f.root, "logs", run.ID+".log"), []byte("[z-build/compile] first step output\n[a-test/unit] other step output\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.logs.BuildIndex(run.ID); err != nil {
+				t.Fatal(err)
+			}
+			value, err := f.api(t).CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := value.(LogResponse)
+			if got.Stage != "z-build" || got.Step != "compile" || !strings.Contains(got.Output, "first step output") || strings.Contains(got.Output, "other step output") || len(got.AvailablePairs) != count || got.AvailablePairs[0] != "z-build/compile" {
+				t.Fatalf("wrong default: %+v", got)
+			}
+			if count == 2 {
+				value, err = f.api(t).CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q,"step":"unit"}`, run.ID)))
+				if err != nil || value.(LogResponse).Stage != "a-test" {
+					t.Fatalf("explicit step: %+v %v", value, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRunLogsPassedDefaultErrorIncludesAvailablePairs(t *testing.T) {
 	f := newControlFixture(t)
-	run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/logs", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/missing-logs", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, step := range []model.StepResult{{RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed}, {RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}} {
-		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
+	for i, pair := range []struct{ burn, step string }{{"build", "compile"}, {"test", "unit"}} {
+		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), model.StepResult{RunID: run.ID, Stage: pair.burn, Step: pair.step, Ordinal: i, Status: model.StepPassed}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -83,7 +128,7 @@ func TestRunLogsWithoutFailureListsAvailablePairs(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = f.api(t).CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID)))
-	if err == nil || !strings.Contains(err.Error(), "build/compile, test/unit") {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "available burn/step pairs: build/compile, test/unit") {
+		t.Fatalf("default log read lost discovery: %v", err)
 	}
 }

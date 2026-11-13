@@ -240,7 +240,17 @@ func TestExplicitBearerSetupClearsClientCertificate(t *testing.T) {
 					}
 				} else {
 					bin := t.TempDir()
+					if err := os.MkdirAll(filepath.Join(dir, "oberth"), 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(dir, "oberth", "ca.crt"), []byte("public CA fixture"), 0600); err != nil {
+						t.Fatal(err)
+					}
+
 					if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(bin, "oberth"), []byte("#!/bin/sh\n[ \"$1 $2\" = 'mcp tools' ]\n"), 0700); err != nil {
 						t.Fatal(err)
 					}
 					if out, err := runTrust(t, implementation, dir, []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH")}, "configure", "https://new.example/mcp", "/tmp/fixture-token"); err != nil {

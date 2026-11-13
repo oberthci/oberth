@@ -320,6 +320,10 @@
       "doc_anchor": "docs/agent-events.md#tools",
       "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"
     },
+    "flag:reconnect-window": {
+      "doc_anchor": "docs/mcp-setup.md#cli-long-poll-timeouts",
+      "test_ref": "cmd/oberth/mcp_restart_test.go TestMCPReconnectWindowFlag"
+    },
     "flag:until": {
       "doc_anchor": "docs/agent-events.md#tools",
       "test_ref": "cmd/oberth/transport_test.go TestRunWaitEventsAndSyncStatusVerbs"

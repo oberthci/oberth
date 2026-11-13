@@ -447,6 +447,8 @@ For `run_logs`, an explicit `step` without `burn` selects that step's burn if
 its name is unique across the run's recorded results or active progress. An
 ambiguous name lists the candidate burns and requires `burn`; an unknown name
 returns not-found. If both are omitted, the failed burn/step remains the default.
+For a passed run with neither selector, the first recorded step in run order
+is returned with `available_pairs`, listing every recorded `burn/step`.
 An explicit burn without step defaults only when that burn has exactly one step.
 
 `run_list` accepts `status` as one existing display status or a non-empty list:
@@ -980,6 +982,9 @@ deadline is 630 seconds; `run_hold_exec` allows for the longest configurable
 long-poll timeouts above 600 seconds. Tools without a timeout argument keep the
 60-second deadline. A reconnect after a server restart shrinks the long poll's
 timeout argument to the client deadline left.
+For read-only calls, `--reconnect-window` accepts a positive duration bounding
+reconnect attempts across a restart; the original client deadline still applies.
+Mutation calls and unknown tools are not replayed.
 
 ```bash
 oberth mcp call --token-file ~/.config/oberth/token run_wait \

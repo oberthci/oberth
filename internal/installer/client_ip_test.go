@@ -195,6 +195,27 @@ func checkIPTrustSettings(t *testing.T, shell, address, pin string, ca []byte) {
 			environment = append(environment, "PATH="+tools+":"+value)
 		}
 	}
+	if err := os.WriteFile(filepath.Join(tools, "oberth"), []byte("#!/bin/sh\n[ \"$1 $2\" = 'mcp tools' ]\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// The endpoint-registration fixture supplies an enrolled identity; the
+	// independent IP trust tests above exercise actual TLS and SAN validation.
+	var withIdentity struct {
+		Model string            `json:"model"`
+		Env   map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(mustRead(t, settings), &withIdentity); err != nil {
+		t.Fatal(err)
+	}
+	withIdentity.Env["CLAUDE_CODE_CLIENT_CERT"] = "/local/client.crt"
+	withIdentity.Env["CLAUDE_CODE_CLIENT_KEY"] = "/local/client.key"
+	raw, err := json.Marshal(withIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(settings, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := runTrust(t, shell, dir, environment, "configure", address); err != nil {
 		t.Fatalf("IP configure: %v %s", err, out)
 	}

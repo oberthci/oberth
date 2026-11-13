@@ -187,6 +187,9 @@ func runMCPTools(ctx context.Context, arguments []string, output io.Writer) erro
 	if err := json.Unmarshal(response.Result, &result); err != nil {
 		return fmt.Errorf("invalid tools/list result: %w", err)
 	}
+	if response.JSONRPC != "2.0" || result.Tools == nil {
+		return errors.New("invalid MCP tools/list response")
+	}
 	for _, tool := range result.Tools {
 		if tool.Description != "" {
 			if _, err := fmt.Fprintf(output, "%-30s %s\n", tool.Name, tool.Description); err != nil {
