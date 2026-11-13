@@ -29,7 +29,6 @@ type createAdmission struct {
 type pendingCreate struct {
 	runID       string
 	reason      string
-	grant       *submissionOwner
 	persisted   bool
 	confirmed   bool
 	restarting  bool
@@ -109,59 +108,24 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	return saved, nil
 }
 
-// restoreCreateOwner only restores local admission accounting.
-func (scheduler *Scheduler) restoreCreateOwner(run model.Run, grant *submissionOwner) (*submissionOwner, error) {
-	if grant == nil {
-		scheduler.submissions.mu.Lock()
-		existing := scheduler.submissions.owners[run.QueueSequence]
-		if existing != nil && existing.runID == run.ID && existing.granted {
-			grant = existing
-		}
-		scheduler.submissions.mu.Unlock()
-	}
-	if grant == nil {
-		if _, err := scheduler.readCreateAdmission(run); err != nil {
-			// A missing or corrupt binding changes nothing about the slot the
-			// run holds; keep the API available and warn.
-			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true", run.ID)
-		}
-		var err error
-		grant, err = scheduler.submissions.adopt(run)
-		if err != nil {
-			return nil, err
-		}
-	}
-	scheduler.submissions.mu.Lock()
-	grant.retained = true
-	grant.submitted = false
-	scheduler.submissions.mu.Unlock()
-	return grant, nil
-}
-
 // registerCreateCleanup never waits for Kubernetes, including on startup,
-// push and cancellation paths. Failed local restores are owned by the background task.
-func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *submissionOwner, persisted bool) {
-	// Serialize local restoration and registration so concurrent wake/cancel
-	// callers cannot repeat its admission side effects.
+// push and cancellation paths. Durable run identity remains in the store.
+func (scheduler *Scheduler) registerCreateCleanup(run model.Run, persisted bool) {
+	// Serialize registration so concurrent wake/cancel callers share one task.
 	scheduler.createMu.Lock()
 	defer scheduler.createMu.Unlock()
 	if _, exists := scheduler.createPending[run.ID]; exists {
 		return
 	}
-	restored, err := scheduler.restoreCreateOwner(run, grant)
-	if err != nil {
-		log.Printf("WARN: create_cleanup run=%q restore_conflict=true deferred=true", run.ID)
-	}
 	now := scheduler.createTime()
 	if scheduler.createPending == nil {
 		scheduler.createPending = make(map[string]*pendingCreate)
 	}
-	// A nil grant is an owned, retryable restore failure, never a dropped run.
 	reason := ""
 	if store.WorkflowCleanupReason(run.Error) {
 		reason = run.Error
 	}
-	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, reason: reason, grant: restored, persisted: persisted, next: now, since: now}
+	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, reason: reason, persisted: persisted, next: now, since: now}
 	scheduler.signalCreateCleanup()
 }
 func (scheduler *Scheduler) signalCreateCleanup() {
@@ -181,7 +145,7 @@ func createSettlementBackoff(attempt int) time.Duration {
 }
 
 // One shared background task, one due run per tick. Per-attempt API/DB work is bounded;
-// retries have no total deadline. An outage holds that grant, never the server.
+// retries have no total deadline. An outage leaves cleanup pending.
 func (scheduler *Scheduler) runCreateCleanup(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -240,12 +204,6 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	if done {
 		delete(scheduler.createPending, pending.runID)
 		scheduler.createMu.Unlock()
-		if !pending.adopted {
-			scheduler.submissions.mu.Lock()
-			pending.grant.retained = false
-			scheduler.submissions.releaseLocked(pending.grant)
-			scheduler.submissions.mu.Unlock()
-		}
 		scheduler.signalQueue()
 		return
 	}
@@ -280,15 +238,6 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		}
 		pending.persisted = true
 	}
-	if pending.grant == nil {
-		grant, err := scheduler.restoreCreateOwner(run, nil)
-		if err != nil {
-			return false, err
-		}
-		scheduler.createMu.Lock()
-		pending.grant = grant
-		scheduler.createMu.Unlock()
-	}
 	cancellations, err := scheduler.store.PendingRunCancellations(ctx)
 	if err != nil {
 		return false, err
@@ -322,7 +271,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	}
 	if !pending.confirmed {
 		// A prior owner may have committed completion but lost finalization.
-		// Re-arm one observation window rather than wedging the grant forever.
+		// Re-arm one observation window so a later read can confirm the outcome.
 		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName); err != nil {
 			return false, err
 		}
@@ -356,8 +305,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		}
 	}
 	// Exact external absence and the durable verdict are established. Scratch
-	// cleanup can retry independently; it must not keep CPU/memory reserved.
-	pending.grant.releaseAfterCleanup()
+	// cleanup can retry independently.
 	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
 	err = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
 	cancel()
@@ -368,10 +316,9 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	return true, nil
 }
 
-// The shared background owner retains capacity during uncertain create/delete
-// outcomes; API outages must not turn this run's cleanup into a component exit.
-func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *submissionOwner, failures ...error) {
-	grant.retain()
+// The background task settles uncertain create/delete outcomes without
+// turning an API outage into a component exit.
+func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, failures ...error) {
 	reason := ""
 	for _, failure := range failures {
 		var expired interface{ ExecutorIdentityExpired() bool }
@@ -389,7 +336,7 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 	err := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, name, reason)
 	cancel()
 	run.WorkflowName = name
-	scheduler.registerCreateCleanup(run, grant, err == nil)
+	scheduler.registerCreateCleanup(run, err == nil)
 	if err != nil {
 		log.Printf("WARN: create_cleanup run=%q persistence_deferred=true", run.ID)
 	}

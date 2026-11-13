@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestFailedRestartLeavesFlatQueuePositions(t *testing.T) {
+func TestFailedRestartLeavesFlatClaimOrders(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -32,10 +32,10 @@ func TestFailedRestartLeavesFlatQueuePositions(t *testing.T) {
 		t.Fatal(rows, err)
 	}
 	for _, r := range rows {
-		if r.ID == a.ID && (r.Status != model.RunFailed || r.QueuePosition != 0) {
+		if r.ID == a.ID && (r.Status != model.RunFailed) {
 			t.Fatal(r)
 		}
-		if r.ID == b.ID && (r.Status != model.RunQueued || r.QueuePosition != 1) {
+		if r.ID == b.ID && (r.Status != model.RunQueued) {
 			t.Fatal(r)
 		}
 	}

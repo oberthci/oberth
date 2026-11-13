@@ -1,5 +1,9 @@
 {
   "entries": {
+    "flag:active": {
+      "doc_anchor": "docs/remote-cli.md",
+      "test_ref": "cmd/oberth/remote_test.go TestRunsActivePrintsTheQueue"
+    },
     "flag:upstream-name": {
       "doc_anchor": "docs/install-answers.md#upstream-name",
       "test_ref": "internal/installer/upstream_name_test.go TestInstallUpstreamHostNames"

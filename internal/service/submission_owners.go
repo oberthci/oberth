@@ -2,24 +2,23 @@ package service
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/oberthci/oberth/internal/model"
 )
 
-var errSubmissionWithdrawn = errors.New("service: submission owner withdrawn: run is no longer active")
-
+// submissionRegistry cancels in-flight creates and detects conflicting adoption.
+// It does not reserve execution capacity.
 type submissionRegistry struct {
 	mu     sync.Mutex
 	owners map[int64]*submissionOwner
 }
 type submissionOwner struct {
-	gate                                                        *submissionRegistry
-	withdrawn                                                   chan struct{}
-	sequence, order, repoID                                     int64
-	runID                                                       string
-	granted, submitted, released, canceled, retained, abandoned bool
+	gate                    *submissionRegistry
+	withdrawn               chan struct{}
+	sequence, order, repoID int64
+	runID                   string
+	adopted                 bool
 }
 
 func newSubmissionRegistry() *submissionRegistry {
@@ -35,84 +34,31 @@ func (g *submissionRegistry) trackRun(run model.Run) *submissionOwner {
 	g.mu.Unlock()
 	return r
 }
-func (r *submissionOwner) beginSubmission(ctx context.Context) (func(), error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	g := r.gate
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if r.abandoned {
-		return nil, errSubmissionWithdrawn
-	}
-	if r.canceled || r.released {
-		return nil, context.Canceled
-	}
-	r.granted = true
-	return r.release, nil
-}
 func (r *submissionOwner) cancel() {
 	g := r.gate
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if r.retained {
-		return
+	g.withdrawLocked(r)
+}
+func (g *submissionRegistry) withdrawLocked(r *submissionOwner) {
+	select {
+	case <-r.withdrawn:
+	default:
+		close(r.withdrawn)
 	}
-	r.canceled = true
-	g.releaseLocked(r)
-}
-func (r *submissionOwner) release() {
-	g := r.gate
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.releaseLocked(r)
-}
-func (r *submissionOwner) releaseAfterCleanup() {
-	g := r.gate
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	r.retained = false
-	g.releaseLocked(r)
-}
-func (r *submissionOwner) retain() {
-	g := r.gate
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if r.granted && !r.released {
-		r.retained = true
-	}
-}
-func (g *submissionRegistry) releaseLocked(r *submissionOwner) {
-	if r.released || r.retained {
-		return
-	}
-	r.released = true
 	if g.owners[r.sequence] == r {
 		delete(g.owners, r.sequence)
 	}
 }
-func (g *submissionRegistry) abandon(sequence int64) bool {
+func (g *submissionRegistry) abandon(sequence int64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	r := g.owners[sequence]
-	if r == nil {
-		return false
+	if r := g.owners[sequence]; r != nil {
+		g.withdrawLocked(r)
 	}
-	if !r.canceled {
-		r.canceled = true
-		close(r.withdrawn)
-	}
-	if r.granted || r.retained {
-		return false
-	}
-	r.abandoned = true
-	r.canceled = true
-	g.releaseLocked(r)
-	return true
 }
 
-// Creation can wait on a source Pod indefinitely. A durable cancellation wakes
-// that operation without releasing its cleanup custody before Create returns.
+// A durable cancellation wakes an in-flight create, including source seeding.
 func (r *submissionOwner) creationContext(parent context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 	go func() {

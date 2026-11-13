@@ -51,7 +51,7 @@ func TestLatestRefLargeHistoryPreservesExactHeadsAndCounts(t *testing.T) {
 		}
 	}
 	t.Logf("50k rows / 2k refs / 2KiB errors: %s", time.Since(start))
-	rows, err := s.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+latestRefQuery("", submissionOrderSQL()), "", MaxActiveRuns, "", 0, 0, "", 100)
+	rows, err := s.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+latestRefQuery(""), "", MaxActiveRuns, "", 0, 0, "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}

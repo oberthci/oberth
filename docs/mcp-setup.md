@@ -685,9 +685,6 @@ when an observer is unavailable.
 - `observed_at` and `age_seconds` describe when the snapshot was read. `wait`
   retains that timestamp and updates its age before returning. Controller
   state may itself lag; this is diagnostic context, not execution evidence.
-- `queue_position` is global accepted order across unclaimed and claimed but
-  unadmitted runs, computed before repository/ref filters. Publication
-  gates can let later runs execute first; it is not an ETA.
 - `execution` reports observed Workflow phase, up to 16 node phase/message
   summaries and 16 Pod phase/reason summaries. It can identify unscheduled Pods,
   insufficient CPU/memory, unbound claims, image pull waits, startup, and known
@@ -705,11 +702,11 @@ required.
 ## Run list views
 
 Run rows in `run_list` and `/api/runs` carry `Repo` (repository name),
-`Ref`, `SHA`, `QueuePosition` when available, and the boolean `superseded`.
+`Ref`, `SHA`, and the boolean `superseded`.
 Full run detail carries the same context in `Run`; compact `run_get` uses
-`repo`, `ref`, `sha` and `queue_position`. Serving admission counts runs and
-reports no size or CPU/memory reservation. Kubernetes places Pods using their
-requests. Scoped uplinks omit global queue positions. See
+`repo`, `ref`, and `sha`. Argo controls execution parallelism; run records
+report no size or CPU/memory reservation. Kubernetes places Pods using their
+requests. See
 [admission and native synchronization](native-synchronization.md).
 
 `superseded` is true for a branch run when a run with a greater accepted run
@@ -940,8 +937,8 @@ read tool acquires or renews locks, and neither changes stored content. This is
 live pagination, not a point-in-time snapshot.
 
 `run_get({"id":"<run ID or unique 8+ character prefix>"})` returns the compact run; add `"summary":false` only when you need step diagnostics or retained timing.
-It returns `id`, `repo` (repository name), `ref`, `sha`, `size`,
-`declared_resources`, `queue_position` when available, `superseded`, `status`,
+It returns `id`, `repo` (repository name), `ref`, `sha`,
+`superseded`, `status`,
 `phase`, `failed_burn`, `failed_step`, `error`, and `steps`. Each step contains
 `burn`, `name`, `status`, `started_at`, and `finished_at`; unknown times are null
 and an empty step list is `[]`. Burn names distinguish steps with the same name in different burns. This read omits

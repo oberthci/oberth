@@ -69,7 +69,6 @@ func (service *API) heldRuns(ctx context.Context, filter api.RunFilter) (any, er
 		}
 		for _, hold := range holds {
 			if !hold.Released && !assistReleased(run.Assist, hold.Pod) {
-				candidate.QueuePosition = 0
 				held = append(held, candidate)
 				break
 			}

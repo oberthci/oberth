@@ -326,8 +326,8 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 			return err
 		}
 		capsule := map[string]any{"workflow": workflow, "capability": submission.Capability, "identities": submission.Identities, "source_digest": b.SourceDigest, "graph_digest": b.GraphDigest, "fragment_lock_digest": b.FragmentLockDigest, "policy_digest": b.PolicyDigest}
-		if submission.DemandReceipt != nil {
-			capsule["demand_receipt"] = submission.DemandReceipt.Summary()
+		if submission.SourceReceipt != nil {
+			capsule["source_receipt"] = submission.SourceReceipt.Summary()
 		}
 		body, err := json.Marshal(capsule)
 		if err != nil {

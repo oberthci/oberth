@@ -158,9 +158,9 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	if len(runs) != 2 || runs[0].ID != first.ID || runs[1].ID != second.ID {
 		t.Fatalf("queue order = %+v", runs)
 	}
-	for i, run := range runs {
-		if want := int64(i + 1); run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != want || run.DisplayReason == "" {
-			t.Fatalf("queue position %d = %+v", want, run)
+	for _, run := range runs {
+		if run.DisplayStatus != "queued" || run.Scheduling == nil || run.DisplayReason == "" {
+			t.Fatalf("queued run = %+v", run)
 		}
 	}
 	filteredValue, err := service.Runs(ctx, actor, api.RunFilter{Ref: second.Ref})
@@ -168,7 +168,7 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	filtered := filteredValue.([]model.Run)
-	if len(filtered) != 1 || filtered[0].ID != second.ID || filtered[0].Scheduling == nil || filtered[0].Scheduling.QueuePosition != 2 {
+	if len(filtered) != 1 || filtered[0].ID != second.ID || filtered[0].Scheduling == nil {
 		t.Fatalf("filtered list lost its global queue position: %+v", filtered)
 	}
 }
@@ -273,11 +273,6 @@ func TestScopedDisplayDoesNotLinkHiddenSuccessor(t *testing.T) {
 type listPositionGuard struct {
 	RunResolver
 	calls int
-}
-
-func (guard *listPositionGuard) QueuedRunPosition(context.Context, string) (int64, error) {
-	guard.calls++
-	return 999, nil
 }
 
 func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {

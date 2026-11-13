@@ -66,9 +66,6 @@ func TestFlatRunsListQueueThenRunningThenFinishedAndPageByEndTime(t *testing.T) 
 	if err != nil || strings.Join(runIDs(first), ",") != strings.Join([]string{firstQueued.ID, secondQueued.ID, c.ID, b.ID}, ",") {
 		t.Fatalf("flat first page = %v, %v", runIDs(first), err)
 	}
-	if first[0].QueuePosition != 1 || first[1].QueuePosition != 2 {
-		t.Fatalf("queue positions = %d, %d", first[0].QueuePosition, first[1].QueuePosition)
-	}
 	// Admission moves the run into the running group, between the queue and
 	// the finished runs; the older page's cursor is run B's fixed end time,
 	// so the moved run cannot appear twice.
@@ -106,7 +103,7 @@ func TestFlatRunsListQueueThenRunningThenFinishedAndPageByEndTime(t *testing.T) 
 	}
 }
 
-func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
+func TestFlatRunsRepositoryOrderAndCounts(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -129,15 +126,6 @@ func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("rows: %+v, %v", rows, err)
 	}
-	for i, want := range []int64{2, 4} {
-		if rows[i].QueuePosition != want {
-			t.Fatalf("position %+v, want %d", rows[i], want)
-		}
-		position, err := s.QueuedRunPosition(t.Context(), rows[i].ID)
-		if err != nil || position != want {
-			t.Fatalf("single position %d, %v", position, err)
-		}
-	}
 	counts, err := s.CountRuns(t.Context())
 	if err != nil || counts.Queued != 4 || counts.Running != 0 || counts.QueuedByRepo[repo.ID] != 2 {
 		t.Fatalf("counts %+v, %v", counts, err)
@@ -150,7 +138,7 @@ func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
 		t.Fatalf("admitted counts %+v, %v", counts, err)
 	}
 	rows, err = s.ListRecentRuns(t.Context(), model.RunListFilter{RepoID: other.ID})
-	if err != nil || len(rows) != 2 || rows[0].ID != queued[2].ID || rows[0].QueuePosition != 2 {
+	if err != nil || len(rows) != 2 || rows[0].ID != queued[2].ID {
 		t.Fatalf("claimed queue %+v, %v", rows, err)
 	}
 }

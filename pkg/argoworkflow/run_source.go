@@ -28,7 +28,7 @@ func (b RunSourceBinding) complete() bool {
 	return b.RunID != "" && b.RepositoryID > 0 && IsFullFragmentSHA(b.SHA) && b.File != "" && b.Trigger.Valid() && ValidateScheduleEntry(b.Trigger, b.ScheduleEntry) == nil
 }
 
-// RunSourceSummary is the durable, server-owned part of the demand receipt.
+// RunSourceSummary is the durable, server-owned part of the source receipt.
 // Recovery uses the exact source and fragment identities admitted at submission.
 type RunSourceSummary struct {
 	Version      int              `json:"version"`
@@ -42,10 +42,10 @@ func (s RunSourceSummary) Valid() bool {
 	return s.Version == 1 && s.Binding.complete() && validHash(s.SourceSHA256) && validHash(s.GraphSHA256)
 }
 
-// DemandReceipt cannot be constructed from repository YAML. Fragment bytes
-// stay private and are copied at both boundaries, so sizing and submission use
+// SourceReceipt cannot be constructed from repository YAML. Fragment bytes
+// stay private and are copied at both boundaries, so source validation and submission use
 // one exact, policy-admitted resolution even if the source tag subsequently moves.
-type DemandReceipt struct {
+type SourceReceipt struct {
 	capability bool
 	pods       *wfv1.Workflow
 	summary    RunSourceSummary
@@ -53,11 +53,11 @@ type DemandReceipt struct {
 }
 
 // Workflow returns an isolated copy of the exact admitted source graph.
-func (r *DemandReceipt) Workflow() *wfv1.Workflow { return r.pods.DeepCopy() }
+func (r *SourceReceipt) Workflow() *wfv1.Workflow { return r.pods.DeepCopy() }
 
-func (r *DemandReceipt) Summary() RunSourceSummary { return r.summary }
+func (r *SourceReceipt) Summary() RunSourceSummary { return r.summary }
 
-func (r *DemandReceipt) Fragments() map[FragmentKey]Fragment {
+func (r *SourceReceipt) Fragments() map[FragmentKey]Fragment {
 	return cloneSourceFragments(r.fragments)
 }
 
@@ -137,17 +137,17 @@ func (r *ResolvedRunSource) BindParameters(wf *wfv1.Workflow, fallback RunTrigge
 
 // Receipt admits every resolved template, including otherwise unused fragment
 // templates. A hidden resource create is therefore never collapsed as a driver.
-func (r *ResolvedRunSource) Receipt(policy Policy) (*DemandReceipt, error) {
+func (r *ResolvedRunSource) Receipt(policy Policy) (*SourceReceipt, error) {
 	if err := Admit(r.workflow, policy); err != nil {
 		return nil, err
 	}
 	summary := r.identity
-	return &DemandReceipt{capability: policy.Capability != nil, summary: summary, fragments: cloneSourceFragments(r.fragments), pods: r.workflow.DeepCopy()}, nil
+	return &SourceReceipt{capability: policy.Capability != nil, summary: summary, fragments: cloneSourceFragments(r.fragments), pods: r.workflow.DeepCopy()}, nil
 }
 
-func (r *DemandReceipt) Verify(other *DemandReceipt) error {
+func (r *SourceReceipt) Verify(other *SourceReceipt) error {
 	if r == nil || other == nil || r.summary != other.summary || r.capability != other.capability {
-		return errors.New("argoworkflow: workflow source receipt source, trigger or resolved graph changed after reservation")
+		return errors.New("argoworkflow: workflow source receipt source, trigger or resolved graph changed before submission")
 	}
 	return nil
 }
@@ -155,7 +155,7 @@ func (r *DemandReceipt) Verify(other *DemandReceipt) error {
 // HasResourceRequests distinguishes legacy (including limits-only) documents
 // from measured or partially requested ones. Partial requests must be completed
 // in git. The receipt holds already-resolved fragments.
-func (r *DemandReceipt) HasResourceRequests() bool {
+func (r *SourceReceipt) HasResourceRequests() bool {
 	if r == nil || r.pods == nil {
 		return false
 	}

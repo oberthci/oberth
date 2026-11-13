@@ -387,7 +387,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	f := newTargetRouteFixture(t)
 	ctx := t.Context()
 	request := f.request
-	if size, err := f.jobs.PipelineDemandReceipt(ctx, request); err != nil {
+	if size, err := f.jobs.ResolvePipelineSource(ctx, request); err != nil {
 		t.Fatal(size, err)
 	}
 	if steps, err := f.jobs.PlannedSteps(ctx, request); err != nil || len(steps) != 1 {
@@ -396,11 +396,11 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if credentialed, err := f.jobs.PipelineCredentialed(ctx, request); err != nil || credentialed {
 		t.Fatal(credentialed, err)
 	}
-	receipt, err := f.jobs.PipelineDemandReceipt(ctx, request)
+	receipt, err := f.jobs.ResolvePipelineSource(ctx, request)
 	if err != nil || receipt == nil {
 		t.Fatal(receipt, err)
 	}
-	request.DemandReceipt = receipt
+	request.SourceReceipt = receipt
 	if len(f.kube.Actions()) != 0 || *f.execs != 0 {
 		t.Fatal("planning allocated target resources")
 	}
@@ -504,7 +504,7 @@ func TestExecutionTargetMissingChangedTransportAndPolicyRefuseBeforeEffects(t *t
 					t.Fatal(err)
 				}
 			default:
-				if _, err := f.jobs.PipelineDemandReceipt(ctx, f.request); err != nil {
+				if _, err := f.jobs.ResolvePipelineSource(ctx, f.request); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -544,7 +544,7 @@ func TestExecutionTargetMissingChangedTransportAndPolicyRefuseBeforeEffects(t *t
 func TestExecutionTargetRetainsAuthenticFragmentBytesAcrossRestart(t *testing.T) {
 	f := newTargetRouteFragmentsFixture(t, true)
 	ctx := t.Context()
-	if _, err := f.jobs.PipelineDemandReceipt(ctx, f.request); err != nil {
+	if _, err := f.jobs.ResolvePipelineSource(ctx, f.request); err != nil {
 		t.Fatal(err)
 	}
 	// A moved tag in the current loader cannot replace the retained raw source.
@@ -553,12 +553,12 @@ func TestExecutionTargetRetainsAuthenticFragmentBytesAcrossRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := restarted.PipelineDemandReceipt(ctx, f.request)
+	receipt, err := restarted.ResolvePipelineSource(ctx, f.request)
 	if err != nil || receipt == nil {
 		t.Fatal(receipt, err)
 	}
 	request := f.request
-	request.DemandReceipt = receipt
+	request.SourceReceipt = receipt
 	if err := restarted.CreateWorkflow(ctx, request); err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +619,7 @@ func TestExecutionTargetGitOutageDoesNotSerializeLocalAdmission(t *testing.T) {
 	f.policy.wait = release
 	f.policy.entered = make(chan struct{}, 1)
 	remoteDone := make(chan error, 1)
-	go func() { _, err := f.jobs.PipelineDemandReceipt(ctx, f.request); remoteDone <- err }()
+	go func() { _, err := f.jobs.ResolvePipelineSource(ctx, f.request); remoteDone <- err }()
 	select {
 	case <-f.policy.entered:
 	case <-time.After(5 * time.Second):
@@ -645,10 +645,10 @@ func TestExecutionTargetGitOutageDoesNotSerializeLocalAdmission(t *testing.T) {
 
 // Keep the canonical optional contracts visible at compile time.
 var (
-	_ service.JobController       = (*ArgoJobs)(nil)
-	_ service.JobAdopter          = (*ArgoJobs)(nil)
-	_ service.JobCreateSettler    = (*ArgoJobs)(nil)
-	_ service.PipelineDemandSizer = (*ArgoJobs)(nil)
+	_ service.JobController          = (*ArgoJobs)(nil)
+	_ service.JobAdopter             = (*ArgoJobs)(nil)
+	_ service.JobCreateSettler       = (*ArgoJobs)(nil)
+	_ service.PipelineSourceResolver = (*ArgoJobs)(nil)
 )
 
 // Keep historical synthetic controller captures unchanged; exercise the current

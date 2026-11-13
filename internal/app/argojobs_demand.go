@@ -8,14 +8,14 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// PipelineDemandReceipt admits and pins the exact source and fragment resolution before submission.
-func (jobs *ArgoJobs) PipelineDemandReceipt(ctx context.Context, request service.WorkflowRequest) (*argoworkflow.DemandReceipt, error) {
+// ResolvePipelineSource admits and pins the exact source and fragment resolution before submission.
+func (jobs *ArgoJobs) ResolvePipelineSource(ctx context.Context, request service.WorkflowRequest) (*argoworkflow.SourceReceipt, error) {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forRequest(ctx, request)
 		if err != nil {
 			return nil, err
 		}
-		return child.PipelineDemandReceipt(ctx, request)
+		return child.ResolvePipelineSource(ctx, request)
 	}
 	if request.Run.RepoID == 0 {
 		request.Run.RepoID = request.Repository.ID

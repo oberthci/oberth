@@ -19,15 +19,18 @@ func (s *Scheduler) submissionStateForTest() submissionTestView {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	v := submissionTestView{Runs: len(g.owners)}
+	seen := map[string]bool{}
 	for _, r := range g.owners {
-		state := "preparing"
-		if r.granted {
-			state = "granted"
+		seen[r.runID] = true
+		v.Reservations = append(v.Reservations, submissionTestOwner{RunID: r.runID})
+	}
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+	for id := range s.createPending {
+		if !seen[id] {
+			v.Reservations = append(v.Reservations, submissionTestOwner{RunID: id})
+			v.Runs++
 		}
-		if r.retained {
-			state = "retained"
-		}
-		v.Reservations = append(v.Reservations, submissionTestOwner{RunID: r.runID, State: state})
 	}
 	return v
 }
@@ -39,14 +42,7 @@ func (s *Scheduler) ownerForTest(sequence int64) *submissionTestOwner {
 	if r == nil {
 		return nil
 	}
-	state := "preparing"
-	if r.granted {
-		state = "granted"
-	}
-	if r.retained {
-		state = "retained"
-	}
-	return &submissionTestOwner{RunID: r.runID, State: state}
+	return &submissionTestOwner{RunID: r.runID}
 }
 
 type pausedCheckout struct {

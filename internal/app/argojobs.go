@@ -374,8 +374,8 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		testedSHA = request.Run.SHA
 	}
 	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
-	if request.DemandReceipt != nil {
-		fragments = request.DemandReceipt.Fragments()
+	if request.SourceReceipt != nil {
+		fragments = request.SourceReceipt.Fragments()
 	} else {
 		fragments, err = loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind, request.Run.Trigger)
 		if err != nil {
@@ -440,7 +440,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	submission := argojob.Request{
 
 		BranchAuthority: branchAuthority,
-		DemandReceipt:   request.DemandReceipt,
+		SourceReceipt:   request.SourceReceipt,
 		PipelineFile:    pipelineFile,
 		RunID:           request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
@@ -588,8 +588,8 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 		"fragments":                       fragments,
 		"sources":                         sourcesForAudit(submission.PinnedSources),
 	}
-	if submission.DemandReceipt != nil {
-		details["source_receipt"] = submission.DemandReceipt.Summary()
+	if submission.SourceReceipt != nil {
+		details["source_receipt"] = submission.SourceReceipt.Summary()
 	}
 	if policy := workflow.Annotations["oberth.ci/release-wif-policy-sha256"]; policy != "" {
 		details["release_wif_policy_sha256"] = policy

@@ -11,13 +11,13 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-type admissionExpiredFailure struct{}
+type executorIdentityExpiredFailure struct{}
 
-func (*admissionExpiredFailure) Error() string {
+func (*executorIdentityExpiredFailure) Error() string {
 	return "executor identity readiness deadline exceeded after one issuance retry"
 }
-func (*admissionExpiredFailure) InfrastructureFailure() bool   { return true }
-func (*admissionExpiredFailure) ExecutorIdentityExpired() bool { return true }
+func (*executorIdentityExpiredFailure) InfrastructureFailure() bool   { return true }
+func (*executorIdentityExpiredFailure) ExecutorIdentityExpired() bool { return true }
 
 type expiredCleanupJobs struct{ *pendingCreateJobs }
 
@@ -25,9 +25,9 @@ func (*expiredCleanupJobs) Delete(context.Context, string, string) error {
 	return errors.New("API unavailable")
 }
 
-func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t *testing.T) {
+func TestExecutorIdentityCleanupOutageKeepsServerAvailable(t *testing.T) {
 	f := newControlFixture(t)
-	f.jobs.waitErr = &admissionExpiredFailure{}
+	f.jobs.waitErr = &executorIdentityExpiredFailure{}
 	now := time.Now()
 	f.scheduler.createNow = func() time.Time { return now }
 	absent := false
@@ -44,8 +44,8 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	if err != nil || run.Error != store.ExecutorIdentityPendingMessage || !isPendingCreate(run) {
 		t.Fatalf("deadline cleanup cause was lost: %+v %v", run, err)
 	}
-	if state := f.scheduler.submissionStateForTest(); state.Runs != 1 {
-		t.Fatal("capacity released while workflow may live", state)
+	if f.scheduler.pendingCreateCount() != 1 {
+		t.Fatal("cleanup task lost while Workflow may be alive")
 	}
 	f.scheduler.settleOneCreate(t.Context())
 	absent = true
@@ -57,8 +57,8 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	if err != nil || run.Status != model.RunFailed || !strings.Contains(run.Error, "executor identity readiness deadline") {
 		t.Fatalf("cleanup failed to settle deadline: %+v %v", run, err)
 	}
-	if state := f.scheduler.submissionStateForTest(); state.Runs != 0 || f.scheduler.pendingCreateCount() != 1 {
-		t.Fatalf("scratch cleanup retained physical capacity: %+v", state)
+	if f.scheduler.pendingCreateCount() != 1 {
+		t.Fatal("scratch cleanup lost its retry task")
 	}
 	f.scheduler.workspaces.remove = remove
 	now = now.Add(2 * time.Minute)
@@ -68,7 +68,7 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	}
 }
 
-func TestAdmissionLimitsPendingCleanupShowsDeadlineReason(t *testing.T) {
+func TestExecutorIdentityPendingCleanupShowsDeadlineReason(t *testing.T) {
 	for _, reason := range []string{store.ExecutorIdentityPendingMessage} {
 		run := model.Run{ID: "pending", Status: model.RunRunning, Phase: "infrastructure-pending", Error: reason}
 		got, _ := new(API).observeScheduling(t.Context(), run, nil, true)

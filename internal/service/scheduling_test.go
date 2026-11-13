@@ -89,7 +89,7 @@ func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queued.Scheduling.State != "queued" || queued.Scheduling.QueuePosition != 1 {
+	if queued.Scheduling.State != "queued" {
 		t.Fatalf("queued=%#v", queued.Scheduling)
 	}
 	running, err := fixture.store.ClaimNextRun(t.Context())

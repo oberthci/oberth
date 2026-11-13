@@ -355,12 +355,6 @@ func (runs scopedRuns) DistinctBranchRefsForSHA(ctx context.Context, repoID int6
 	return resolver.DistinctBranchRefsForSHA(ctx, repoID, sha)
 }
 
-// QueuedRunPosition withholds the queue position: it counts every queued
-// run ahead, in or out of scope, so it would reveal out-of-scope volume.
-func (runs scopedRuns) QueuedRunPosition(context.Context, string) (int64, error) {
-	return 0, refuse(ErrUnavailable, "queue position is not shown to a scoped uplink")
-}
-
 type scopedHistory struct {
 	inner RunHistory
 	scope *repoScope
@@ -794,23 +788,23 @@ func (service *API) stripScopedSequences(value any) any {
 	}
 	switch typed := value.(type) {
 	case model.Run:
-		typed.QueueSequence, typed.QueuePosition = 0, 0
+		typed.QueueSequence = 0
 		return typed
 	case []model.Run:
 		runs := make([]model.Run, len(typed))
 		for index, run := range typed {
-			run.QueueSequence, run.QueuePosition = 0, 0
+			run.QueueSequence = 0
 			runs[index] = run
 		}
 		return runs
 	case RunDetailResponse:
-		typed.Run.QueueSequence, typed.Run.QueuePosition = 0, 0
+		typed.Run.QueueSequence = 0
 		return typed
 	case StatusResponse:
-		typed.Run.QueueSequence, typed.Run.QueuePosition = 0, 0
+		typed.Run.QueueSequence = 0
 		return typed
 	case WaitResponse:
-		typed.Run.QueueSequence, typed.Run.QueuePosition = 0, 0
+		typed.Run.QueueSequence = 0
 		return typed
 	case []RepoView:
 		views := make([]RepoView, len(typed))

@@ -44,7 +44,7 @@ func (c *flatRunConn) QueryContext(ctx context.Context, query string, args []dri
 	if err != nil {
 		return nil, err
 	}
-	if strings.Contains(query, "WITH queue AS") && c.afterQueue != nil {
+	if strings.Contains(query, "WHERE ("+queuedRunSQL+")") && c.afterQueue != nil {
 		after := c.afterQueue
 		c.afterQueue = nil
 		return &flatRunRows{Rows: rows, afterClose: after}, nil
@@ -93,7 +93,7 @@ func TestFlatRunsUseOneSnapshotAcrossAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !admitted || len(rows) != 1 || rows[0].ID != run.ID || rows[0].StartedAt != nil || rows[0].QueuePosition != 1 {
+	if !admitted || len(rows) != 1 || rows[0].ID != run.ID || rows[0].StartedAt != nil {
 		t.Fatalf("admitted=%t rows=%+v, want one queued row from the original snapshot", admitted, rows)
 	}
 	current, err := writer.Run(ctx, run.ID)
@@ -101,7 +101,7 @@ func TestFlatRunsUseOneSnapshotAcrossAdmission(t *testing.T) {
 		t.Fatalf("writer admission=%+v, %v", current, err)
 	}
 	rows, err = reader.ListRecentRuns(ctx, model.RunListFilter{Limit: 1})
-	if err != nil || len(rows) != 1 || rows[0].ID != run.ID || rows[0].StartedAt == nil || rows[0].QueuePosition != 0 {
+	if err != nil || len(rows) != 1 || rows[0].ID != run.ID || rows[0].StartedAt == nil {
 		t.Fatalf("next snapshot=%+v, %v; want the admitted row", rows, err)
 	}
 }

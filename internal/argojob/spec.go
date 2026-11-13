@@ -532,7 +532,7 @@ type Request struct {
 	// BranchAuthority is native canonical policy resolution, never YAML authority.
 	BranchAuthority *workflowpolicy.BranchAuthority `json:"-"`
 	Capability      *argoworkflow.Capability
-	DemandReceipt   *argoworkflow.DemandReceipt
+	SourceReceipt   *argoworkflow.SourceReceipt
 
 	RunID        string
 	RepositoryID int64
@@ -728,8 +728,8 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err != nil {
 		return nil, err
 	}
-	if request.DemandReceipt != nil {
-		if err := request.DemandReceipt.Verify(receipt); err != nil {
+	if request.SourceReceipt != nil {
+		if err := request.SourceReceipt.Verify(receipt); err != nil {
 			return nil, err
 		}
 	}

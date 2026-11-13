@@ -82,32 +82,6 @@ func TestLatestRefHeadsFilterByRefGlob(t *testing.T) {
 	}
 }
 
-func TestLatestRefHeadsRetainGlobalQueuePosition(t *testing.T) {
-	now := time.Now()
-	s := testStore(t, &now)
-	repo := createRepo(t, s)
-	for _, ref := range []string{"a", "b", "a", "c"} {
-		queuedRunForTest(t, s, repo.ID, ref)
-	}
-	flat, err := s.ListRecentRuns(t.Context(), model.RunListFilter{Limit: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	positions := map[string]int64{}
-	for _, r := range flat {
-		positions[r.ID] = r.QueuePosition
-	}
-	heads, err := s.ListRecentRuns(t.Context(), model.RunListFilter{LatestPerRef: true, Limit: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range heads {
-		if r.Status == model.RunQueued && (r.QueuePosition == 0 || r.QueuePosition != positions[r.ID]) {
-			t.Fatal("latest-ref head lost queue rank", r.ID, r.QueuePosition, positions[r.ID])
-		}
-	}
-}
-
 func TestSchemaV34LatestRefIndexUpgrade(t *testing.T) {
 	now := time.Now()
 	path := filepath.Join(t.TempDir(), "upgrade.db")

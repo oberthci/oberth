@@ -53,11 +53,11 @@ func TestWorkflowCapabilityLoadedForSizingAndSubmission(t *testing.T) {
 				return &argoworkflow.Capability{Namespace: "pipelines", ServiceAccount: "operator-runner", ResourceKinds: []argoworkflow.ResourceKindCapability{{APIVersion: "tasks.example.test/v1", Kind: "Task", Actions: []string{"create"}}}}, nil
 			})
 			request := service.WorkflowRequest{WorkflowName: "workflow", Run: model.Run{ID: "run", RepoID: 7, Trigger: "branch", RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("b", 40), Actor: "test@example.test"}, Repository: model.Repository{ID: 7, Name: "repo"}, SourceDir: dir}
-			resources, err := jobs.PipelineDemandReceipt(t.Context(), request)
+			resources, err := jobs.ResolvePipelineSource(t.Context(), request)
 			if err != nil || resources == nil {
 				t.Fatalf("sizing: %+v %v", resources, err)
 			}
-			request.DemandReceipt = resources
+			request.SourceReceipt = resources
 			err = jobs.CreateWorkflow(t.Context(), request)
 			if revoke {
 				if err == nil || controller.request.Name != "" {

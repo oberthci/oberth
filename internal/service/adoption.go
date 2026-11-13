@@ -73,12 +73,12 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.owners[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.repoID != run.RepoID {
-			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
+		if previous.runID != run.ID || previous.order != order || !previous.adopted || previous.repoID != run.RepoID {
+			return nil, fmt.Errorf("%w: conflicting adopted run", ErrAdoptionRefused)
 		}
 		return previous, nil
 	}
-	reservation := &submissionOwner{withdrawn: make(chan struct{}), gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, granted: true, submitted: true}
+	reservation := &submissionOwner{withdrawn: make(chan struct{}), gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID, adopted: true}
 	gate.owners[run.QueueSequence] = reservation
 	return reservation, nil
 }
@@ -90,30 +90,25 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 	reservation.retained = false
 	scheduler.submissions.mu.Unlock()
 	if err := require(ctx); err != nil {
-		reservation.retain()
 		return err
 	}
 	repository, err := scheduler.database().Repository(ctx, run.RepoID)
 	if err != nil {
-		reservation.retain()
 		return err
 	}
 
 	current, err := scheduler.database().Run(ctx, run.ID)
 	if err != nil {
-		reservation.retain()
 		return err
 	}
 	if current.Preempted() {
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			reservation.retain()
 			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
 		}
 		return nil
 	}
 	file, events, retained, err := scheduler.logs.Resume(run.ID)
 	if err != nil {
-		reservation.retain()
 		return err
 	}
 	// A previous owner can stop between Workflow creation and this transition.
@@ -121,7 +116,6 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		run, err = scheduler.database().MarkRunSubmitted(ctx, run.ID)
 		if err != nil {
 			_ = file.Close()
-			reservation.retain()
 			return err
 		}
 	}
