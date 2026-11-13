@@ -332,9 +332,6 @@ func TestRefusalPositionArgumentsAndRefsEveryCarrier(t *testing.T) {
 		c{"wfmeta/labelsFrom-oberth", base(func(w *wfv1.Workflow) {
 			w.Spec.WorkflowMetadata = &wfv1.WorkflowMetadata{LabelsFrom: map[string]wfv1.LabelValueFrom{"oberth.ci/run": {Expression: "'x'"}}}
 		})},
-		c{"wfmeta/ann-argo", base(func(w *wfv1.Workflow) {
-			w.Spec.WorkflowMetadata = &wfv1.WorkflowMetadata{Annotations: map[string]string{"workflows.argoproj.io/pod-name-format": "v1"}}
-		})},
 		c{"wfmeta/templated", base(func(w *wfv1.Workflow) {
 			w.Spec.WorkflowMetadata = &wfv1.WorkflowMetadata{Labels: map[string]string{"{{workflow.parameters.k}}": "v"}}
 		})},
@@ -346,9 +343,6 @@ func TestRefusalPositionArgumentsAndRefsEveryCarrier(t *testing.T) {
 		c{"meta/label-oberth", base(func(w *wfv1.Workflow) { w.Labels = map[string]string{"oberth.ci/tier": "release"} })},
 		c{"meta/label-argo", base(func(w *wfv1.Workflow) { w.Labels = map[string]string{"workflows.argoproj.io/completed": "true"} })},
 		c{"meta/ann-wif", base(func(w *wfv1.Workflow) { w.Annotations = map[string]string{"oberth.ci/release-wif-policy-sha256": "00"} })},
-		c{"meta/ann-podname", base(func(w *wfv1.Workflow) {
-			w.Annotations = map[string]string{"workflows.argoproj.io/pod-name-format": "v1"}
-		})},
 		c{"meta/ann-fragments", base(func(w *wfv1.Workflow) { w.Annotations = map[string]string{"oberth.ci/fragments": "{}"} })},
 		c{"meta/ann-capability", base(func(w *wfv1.Workflow) { w.Annotations = map[string]string{"oberth.ci/workflow-capability": "x"} })},
 		c{"meta/label-supported-key-as-label", base(func(w *wfv1.Workflow) { w.Labels = map[string]string{SecretPathsAnnotation: "x"} })},

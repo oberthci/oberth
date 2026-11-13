@@ -39,7 +39,7 @@ func refusalKeepCases() []keepRefusalCase {
 		{"37", "spec", "  volumeClaimTemplates:\n  - metadata: {name: data, finalizers: [example.test/keep]}\n", "metadata.finalizers"},
 		{"39", "spec", "  arguments:\n    parameters:\n    - name: private\n      valueFrom:\n        configMapKeyRef: {name: other, key: private}\n", "valueFrom.configMapKeyRef"},
 		{"40", "spec", "  arguments:\n    parameters: [{name: oberth-trigger, value: other}]\n", "server-owned"},
-		{"41", "spec", "  arguments:\n    parameters: [{name: oberth-schedule, value: other}]\n", "reserved and server-owned"},
+		{"41", "spec", "  arguments:\n    parameters: [{name: oberth-schedule, value: other}]\n", "oberth- parameter prefix is reserved"},
 		{"42", "spec", "  hooks:\n    exit:\n      templateRef: {name: other, template: run}\n", "spec.hooks"},
 		{"45", "spec", "  volumes:\n  - name: other\n    persistentVolumeClaim: {claimName: other}\n", "existing PersistentVolumeClaim"},
 		{"46", "spec", "  volumes:\n  - name: private\n    projected:\n      sources:\n      - serviceAccountToken: {path: token}\n", "projects credential material"},
