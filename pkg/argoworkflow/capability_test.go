@@ -222,3 +222,81 @@ func TestGrantedResourceAnnotationsFollowObjectMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestGrantedResourceLabelsFollowObjectMetadata(t *testing.T) {
+	policy := capabilityPolicyForTest(t)
+	for _, c := range []struct {
+		name     string
+		body     string
+		admitted bool
+	}{
+		{"top metadata reserved", `"metadata":{"name":"x","labels":{"component":"server"}}`, false},
+		{"top podMetadata reserved", `"metadata":{"name":"x"},"podMetadata":{"labels":{"oberth.ci/run":"other"}}`, false},
+		{"nested metadata reserved", `"metadata":{"name":"x"},"spec":{"template":{"metadata":{"labels":{"workflows.argoproj.io/workflow":"other"}}}}`, false},
+		{"nested podMetadata reserved", `"metadata":{"name":"x"},"spec":{"worker":{"podMetadata":{"labels":{"component":"server"}}}}`, false},
+		{"list metadata reserved", `"metadata":{"name":"x"},"spec":{"workers":[{"metadata":{"labels":{"component":"server"}}}]}`, false},
+		{"list podMetadata reserved", `"metadata":{"name":"x"},"spec":{"workers":[{"settings":{"podMetadata":{"labels":{"component":"server"}}}}]}`, false},
+		{"labels case variant", `"metadata":{"name":"x","Labels":{"component":"server"}}`, false},
+		{"labels unicode variant", `"metadata":{"name":"x"},"spec":{"podMetadata":{"labelſ":{"component":"server"}}}`, false},
+		{"metadata case variant", `"metadata":{"name":"x"},"spec":{"Metadata":{"labels":{"component":"server"}}}`, false},
+		{"podMetadata case variant", `"metadata":{"name":"x"},"spec":{"PodMetadata":{"LABELS":{"component":"server"}}}`, false},
+		{"invalid object label key", `"metadata":{"name":"x","labels":{"__name__":"worker"}}`, false},
+		{"non-string object label", `"metadata":{"name":"x"},"spec":{"podMetadata":{"labels":{"count":3}}}`, false},
+		{"non-map object labels", `"metadata":{"name":"x"},"spec":{"template":{"metadata":{"labels":["worker"]}}}`, false},
+		{"ordinary object labels", `"metadata":{"name":"x","labels":{"app":"worker"}},"spec":{"podMetadata":{"labels":{"example.test/part":"worker"}}}`, true},
+		{"empty object labels", `"metadata":{"name":"x","labels":{}},"spec":{"podMetadata":{"labels":null}}`, true},
+		{"custom reserved label", `"metadata":{"name":"x"},"spec":{"rules":[{"labels":{"component":"server","oberth.ci/run":"opaque"}}]}`, true},
+		{"externalLabels", `"metadata":{"name":"x"},"spec":{"externalLabels":{"component":"server","__name__":"custom"}}`, true},
+		{"custom invalid label keys", `"metadata":{"name":"x"},"spec":{"labels":{"__name__":"custom","not/a/qualified/key":"opaque"}}`, true},
+		{"custom non-string label values", `"metadata":{"name":"x"},"spec":{"labels":{"count":3,"enabled":true,"empty":null,"nested":{"data":1},"list":["worker"]}}`, true},
+		{"custom non-map labels", `"metadata":{"name":"x"},"spec":{"labels":[{"key":"route","value":"GET"}]}`, true},
+		{"pod template name is opaque", `"metadata":{"name":"x"},"spec":{"podTemplate":{"labels":{"component":"server"}}}`, true},
+		{"label suffix under metadata is opaque", `"metadata":{"name":"x"},"spec":{"metadata":{"podLabels":{"component":3}}}`, true},
+		{"custom label case variant", `"metadata":{"name":"x"},"spec":{"Labels":{"component":"server"}}`, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			manifest := `{"apiVersion":"tasks.example.test/v1","kind":"Task",` + c.body + `}`
+			wf := decodeAdmissible(t, nil)
+			wf.Spec.Templates[0].Container = nil
+			wf.Spec.Templates[0].Resource = &wfv1.ResourceTemplate{Action: "create", Manifest: manifest}
+			err := Admit(wf, policy)
+			if (err == nil) != c.admitted {
+				t.Fatalf("admission = %v, want admitted %v", err, c.admitted)
+			}
+			if got := wf.Spec.Templates[0].Resource.Manifest; got != manifest {
+				t.Fatal("resource manifest was rewritten")
+			}
+		})
+	}
+}
+
+func TestGrantedPrometheusRulePreservesCustomMetadata(t *testing.T) {
+	policy := capabilityPolicyForTest(t)
+	policy.Capability.ResourceKinds = []ResourceKindCapability{{APIVersion: "monitoring.coreos.com/v1", Kind: "PrometheusRule", Actions: []string{"create"}}}
+	const manifest = `apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rules
+spec:
+  groups:
+    - name: example
+      rules:
+        - alert: WorkerUnavailable
+          expr: up == 0
+          # These are rule labels, not Pod labels.
+          labels:
+            component: server
+            __name__: worker
+          annotations:
+            summary: "Worker is unavailable"
+`
+	wf := decodeAdmissible(t, nil)
+	wf.Spec.Templates[0].Container = nil
+	wf.Spec.Templates[0].Resource = &wfv1.ResourceTemplate{Action: "create", Manifest: manifest}
+	if err := Admit(wf, policy); err != nil {
+		t.Fatal("custom rule labels and annotations refused", err)
+	}
+	if got := wf.Spec.Templates[0].Resource.Manifest; got != manifest {
+		t.Fatal("resource YAML was rewritten")
+	}
+}

@@ -31,10 +31,7 @@ type ResourceKindCapability struct {
 	Actions    []string `json:"actions"`
 }
 
-var (
-	capabilityKindPattern        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,62}$`)
-	resourceMetadataFieldPattern = regexp.MustCompile(`(?i)(annotations|labels)$`)
-)
+var capabilityKindPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,62}$`)
 
 // CapabilityUsage includes defaults and inline templates, even unreachable
 // ones. An unsupported nesting depth must never hide authority from admission.
@@ -181,15 +178,10 @@ func resourcePriorityOverride(value any) bool {
 		value, pending = pending[len(pending)-1], pending[:len(pending)-1]
 		switch node := value.(type) {
 		case map[string]any:
-			// Inspect metadata envelopes and label maps at every depth,
-			// including list entries, without interpreting the granted API.
-			if resourceMetadataOverride(node, false) {
-				return true
-			}
 			for key, child := range node {
 				if strings.EqualFold(key, "metadata") || strings.EqualFold(key, "podMetadata") {
 					metadata, object := child.(map[string]any)
-					if child != nil && (!object || resourceMetadataOverride(metadata, true)) {
+					if child != nil && (!object || resourceMetadataOverride(metadata)) {
 						return true
 					}
 				}
@@ -205,21 +197,12 @@ func resourcePriorityOverride(value any) bool {
 	return false
 }
 
-// Refuse annotations only in metadata/podMetadata envelopes. Other annotation
-// fields belong to the granted API; the operator controls what reaches Pods.
-func resourceMetadataOverride(metadata map[string]any, envelope bool) bool {
+// Check only metadata/podMetadata envelopes. Other annotation and label fields
+// belong to the granted API; the operator trusts what its controller maps to Pods.
+func resourceMetadataOverride(metadata map[string]any) bool {
 	for name, value := range metadata {
-		// Preserve the label boundary for direct podLabels-style maps.
-		// Kubernetes label selectors read Pod labels; they do not write
-		// them. Native affinity may select even server-owned label keys.
-		if strings.EqualFold(name, "matchLabels") {
-			continue
-		}
-		field := resourceMetadataFieldPattern.FindString(name)
-		if field == "" {
-			continue
-		}
-		if strings.EqualFold(field, "annotations") && (!envelope || !strings.EqualFold(name, "annotations")) {
+		annotations := strings.EqualFold(name, "annotations")
+		if !annotations && !strings.EqualFold(name, "labels") {
 			continue
 		}
 		if value == nil {
@@ -227,15 +210,13 @@ func resourceMetadataOverride(metadata map[string]any, envelope bool) bool {
 		}
 		entries, ok := value.(map[string]any)
 		if !ok {
-			// Opaque APIs also use arrays/scalars called labels, for example
-			// metric labels. Only actual metadata envelopes require maps.
-			if envelope {
+			return true
+		}
+		if annotations {
+			if len(entries) != 0 {
 				return true
 			}
 			continue
-		}
-		if strings.EqualFold(field, "annotations") && len(entries) != 0 {
-			return true
 		}
 		labels := make(map[string]string, len(entries))
 		for key, value := range entries {

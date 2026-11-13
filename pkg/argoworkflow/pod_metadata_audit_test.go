@@ -225,8 +225,8 @@ func TestGrantedResourceMetadataAndPatchRoutes(t *testing.T) {
 	}
 }
 
-// Label maps retain their existing boundary under arbitrary parent names.
-// Only metadata/podMetadata envelopes apply the annotation boundary.
+// Only metadata/podMetadata envelopes apply annotation and label boundaries.
+// Other operator fields remain opaque through objects and arrays.
 func TestGrantedResourceMetadataUnderArbitraryParents(t *testing.T) {
 	policy := capabilityPolicyForTest(t)
 	for _, kind := range []ResourceKindCapability{
@@ -242,12 +242,16 @@ func TestGrantedResourceMetadataUnderArbitraryParents(t *testing.T) {
 				opaqueAllowed bool
 			}{
 				{`{"annotations":{"sidecar.istio.io/inject":"true"}}`, false, true},
-				{`{"labels":{"component":"server"}}`, false, false},
+				{`{"labels":{"component":"server"}}`, false, true},
+				{`{"Labels":{"component":"server"}}`, false, true},
+				{`{"labelſ":{"component":"server"}}`, false, true},
+				{`{"labels":{"__name__":"worker"}}`, false, true},
+				{`{"labels":{"count":3,"enabled":true,"nested":{"value":1}}}`, false, true},
 				{`{"Annotations":{"example.test/hook":"enabled"}}`, false, true},
 				{`{"annotationſ":{"example.test/hook":"enabled"}}`, false, true},
-				{`{"workerLabelſ":{"component":"server"}}`, false, false},
+				{`{"workerLabelſ":{"component":"server"}}`, true, true},
 				{`{"podAnnotations":{"sidecar.istio.io/inject":"true"}}`, true, true},
-				{`{"workerLabels":{"component":"server"}}`, false, false},
+				{`{"workerLabels":{"component":"server"}}`, true, true},
 				{`{"podAnnotations":{}}`, true, true},
 				{`{"metrics":{"labels":[{"key":"route","value":"GET"}]}}`, true, true},
 				{`{"labels":{"app":"worker"}}`, true, true},
@@ -263,7 +267,8 @@ func TestGrantedResourceMetadataUnderArbitraryParents(t *testing.T) {
 					}
 					wf := decodeAdmissible(t, nil)
 					wf.Spec.Templates[0].Container = nil
-					wf.Spec.Templates[0].Resource = &wfv1.ResourceTemplate{Action: "create", Manifest: fmt.Sprintf(`{"apiVersion":%q,"kind":%q,"metadata":{"name":"worker"},"spec":{%q:%s}}`, kind.APIVersion, kind.Kind, parent, payload)}
+					manifest := fmt.Sprintf(`{"apiVersion":%q,"kind":%q,"metadata":{"name":"worker"},"spec":{%q:%s}}`, kind.APIVersion, kind.Kind, parent, payload)
+					wf.Spec.Templates[0].Resource = &wfv1.ResourceTemplate{Action: "create", Manifest: manifest}
 					err := Admit(wf, policy)
 					admitted := c.opaqueAllowed
 					if parent == "template" {
@@ -271,6 +276,9 @@ func TestGrantedResourceMetadataUnderArbitraryParents(t *testing.T) {
 					}
 					if (err == nil) != admitted {
 						t.Fatalf("metadata admission = %v", err)
+					}
+					if got := wf.Spec.Templates[0].Resource.Manifest; got != manifest {
+						t.Fatal("resource manifest was rewritten")
 					}
 				})
 			}
