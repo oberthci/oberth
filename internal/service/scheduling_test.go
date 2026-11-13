@@ -292,9 +292,9 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 // the lock in its reason line, with no new status.
 func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
 	for name, execution := range map[string]*model.ExecutionObservation{
-		"workflow-level": {State: "observed", Phase: "Pending", Message: model.LockWaitMessagePrefix + "ConfigMap/oberth-sync-limits/kvm (0/1 free)."},
+		"workflow-level": {State: "observed", Phase: "Pending", Message: "Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1"},
 		"template-level": {State: "observed", Phase: "Running", Message: "Workflow execution is running.",
-			Nodes: []model.SchedulingReason{{Phase: "Succeeded"}, {Phase: "Pending", Message: model.LockWaitMessagePrefix + "ConfigMap/oberth-sync-limits/kvm (0/1 free)."}}},
+			Nodes: []model.SchedulingReason{{Phase: "Succeeded"}, {Phase: "Pending", Message: "Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			run := model.Run{ID: "run", Status: model.RunRunning, DisplayStatus: model.DisplayRunning}
@@ -303,7 +303,7 @@ func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
 			if execution.Phase == "Pending" {
 				wantStatus = model.DisplayQueued
 			}
-			if run.DisplayReason != "waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free)" || run.DisplayStatus != wantStatus {
+			if run.DisplayReason != "Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1" || run.DisplayStatus != wantStatus {
 				t.Fatalf("display = %q / %q", run.DisplayStatus, run.DisplayReason)
 			}
 		})

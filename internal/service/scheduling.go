@@ -120,7 +120,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		}
 	}
 	if wait := lockWaitReason(scheduling.Execution); wait != "" {
-		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(wait))
+		run.DisplayReason = parkPolicyDisplayReason(*run, wait)
 		return
 	}
 	switch scheduling.Execution.State {
@@ -135,12 +135,8 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	}
 }
 
-// lockWaitReason turns the fixed-form synchronization wait of the Workflow
-// or of one Pending step into the reason line: "waiting for lock <key> (0 of
-// 1 free)". The key is the controller's lock name, already bounded to the
-// lock-key grammar by the observation. A Workflow the Argo controller
-// postponed for its parallelism reads "waiting for an Argo workflow slot
-// (controller parallelism)".
+// lockWaitReason preserves Argo's wait message for the reason line.
+// Controller parallelism retains its existing presentation.
 func lockWaitReason(execution *model.ExecutionObservation) string {
 	if execution.Message == model.ParallelismWaitMessage {
 		return "w" + strings.TrimSuffix(strings.TrimPrefix(model.ParallelismWaitMessage, "W"), ".")
@@ -152,10 +148,10 @@ func lockWaitReason(execution *model.ExecutionObservation) string {
 		}
 	}
 	for _, message := range messages {
-		if !strings.HasPrefix(message, model.LockWaitMessagePrefix) {
+		if !strings.HasPrefix(message, "Waiting for ") {
 			continue
 		}
-		return "w" + strings.TrimSuffix(strings.TrimPrefix(message, "W"), ".")
+		return message
 	}
 	return ""
 }

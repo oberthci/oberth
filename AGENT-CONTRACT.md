@@ -1235,7 +1235,8 @@ Original object UID and intent continue to fence recovery and cleanup. See
   Workflow read bound to run ID and effective tested SHA, and one namespaced
   Pod list (limit 16) whose entries must have the exact Workflow controller UID.
   Node and Pod summaries are capped at 16 each, with truncation explicit.
-  Only fixed status vocabulary and curated reason summaries are returned:
+  Status uses fixed vocabulary; synchronization waits show Argo's message as is.
+  Other reasons use curated summaries:
   arbitrary messages, node/container names, specs, env, commands, logs and raw
   transport errors are withheld. No resource mutation, logs, events, additional
   RBAC or credentials are needed. Observer failure preserves durable status and

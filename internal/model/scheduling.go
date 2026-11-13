@@ -18,13 +18,6 @@ type RunScheduling struct {
 // ExecutionDeadlineMessage is a fixed presentation label, never raw controller text.
 const ExecutionDeadlineMessage = "Execution deadline exceeded."
 
-// LockWaitMessagePrefix starts the fixed-form message of a workflow or step
-// queued behind native Argo synchronization: "Waiting for lock
-// <Kind>/<name>[/<key>] (<free>/<limit> free)." The key is the controller's
-// lock name without its namespace, admitted into the message only when it
-// matches the lock-key grammar.
-const LockWaitMessagePrefix = "Waiting for lock "
-
 // WorkflowSuspendedMessage reports the exact live Workflow suspend flag.
 const WorkflowSuspendedMessage = "Workflow is suspended."
 
@@ -55,8 +48,8 @@ type ExecutionDeadline struct {
 	Elapsed          bool       `json:"elapsed"`
 }
 
-// ExecutionObservation contains only curated vocabulary and execution timestamps.
-// Controller messages, names, commands, specs and credentials never cross it.
+// ExecutionObservation contains execution timestamps, curated Kubernetes reasons,
+// and Argo synchronization messages. It never includes commands or Pod specs.
 type ExecutionObservation struct {
 	ObservedAt               time.Time          `json:"observed_at,omitzero"`
 	FinishedAt               *time.Time         `json:"finished_at,omitempty"`

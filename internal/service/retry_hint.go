@@ -93,10 +93,6 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 	if upstreamConfigurationFailure(message) {
 		return code("upstream_configuration", "set the repository's default branch on the forge, then run_retry", boundedText(message, 200))
 	}
-	if semaphoreConfigurationFailure(message) {
-		return code("synchronization_configuration", "ask an operator to create or correct the oberth-sync-limits ConfigMap and its referenced key in the run's namespace, or fix the semaphore reference in the Workflow YAML; then rerun",
-			"Argo could not initialize the semaphore limit; verify the ConfigMap, key, positive integer value and controller read access")
-	}
 	if model.IsInfrastructureRunFailure(run.Status, run.Phase, run.FailedStep) {
 		return infrastructure("infrastructure", "run_retry", "the run failed outside any step")
 	}
@@ -143,16 +139,4 @@ func (service *API) runPublicationRetry(ctx context.Context, run model.Run) *mod
 		}
 	}
 	return nil
-}
-
-// Argo 4.0.8 discards the underlying initial-limit read error. Its exact
-// initialization failure therefore requires checking configuration and access;
-// it is not evidence that retrying the run alone will repair the semaphore.
-// lock_name.go:getSemaphoreLockName encodes ConfigMap-backed semaphores with
-// the ConfigMap kind; semaphore.go emits that name in initialization errors.
-var semaphoreInitializationFailure = regexp.MustCompile(`^(?:Failed to acquire the synchronization lock\. )?failed to initialize semaphore [a-z0-9.-]+/ConfigMap/oberth-sync-limits/[A-Za-z0-9._-]+ with limit$`)
-var semaphoreMissingKey = regexp.MustCompile(`^(?:Failed to acquire the synchronization lock\. )?Sync configuration key '[A-Za-z0-9._-]+' not found in ConfigMap$`)
-
-func semaphoreConfigurationFailure(message string) bool {
-	return semaphoreInitializationFailure.MatchString(message) || semaphoreMissingKey.MatchString(message) || message == `Failed to acquire the synchronization lock. configmaps "oberth-sync-limits" not found`
 }
