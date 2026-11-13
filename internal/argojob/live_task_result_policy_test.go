@@ -323,7 +323,14 @@ func TestLiveExecutorHolderCreatorBoundary(t *testing.T) {
 			}
 			reserved := pod.DeepCopy()
 			reserved.Name = "oberth-executor.creator.executor.run"
-			_, err = client.CoreV1().Pods(cluster.namespace).Create(t.Context(), reserved, dry)
+			deadline := time.Now().Add(time.Minute)
+			for {
+				_, err = client.CoreV1().Pods(cluster.namespace).Create(t.Context(), reserved, dry)
+				if actor.trusted || (err != nil && strings.Contains(err.Error(), "argo-executor-holders")) || time.Now().After(deadline) {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 			if actor.trusted {
 				if err != nil {
 					t.Fatalf("server cannot create its holder: %v", err)
