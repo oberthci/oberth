@@ -701,19 +701,8 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	injectAssistHelperMounts(workflow, request)
 	injectWorkspaceEnvironment(workflow)
 	injectRunEnvironment(workflow, config, request, secretSteps)
-	// Per-step identity override (issue #623): for release templates consuming
-	// named-step-granted paths, override the ServiceAccountName and
-	// OBERTH_VAULT_ROLE with the per-step identity. This runs AFTER
-	// ForceIdentity (which set the per-repo SA on all templates) and AFTER
-	// injectRunEnvironment (which set the per-repo VAULT_ROLE), so the
-	// per-step values take precedence for exactly the templates that need them.
-	//
-	// Fail-closed (finding 2): if a template has named grants but its per-step
-	// identity is not materialized, admission is denied with a clear message.
-	// Until grants have ref scopes, the same per-step policy can include
-	// release paths and upstream paths. A branch run must keep its CI-secrets
-	// identity even when it uses a named-step upstream grant.
-	if hasSecretSteps && request.Trigger == pipeline.TriggerRelease {
+	// Bind every granted step to its exact workflow and tier identity.
+	if hasSecretSteps {
 		if err := applyPerStepIdentities(workflow, config, request, secretSteps); err != nil {
 			return nil, err
 		}
@@ -1659,13 +1648,17 @@ func applyPerStepIdentities(workflow *wfv1.Workflow, config Config, request Requ
 		}
 		key := repo + "/" + request.PipelineFile + "/" + step
 		identity, exists := config.PerStepIdentities[key]
-		if !exists || identity.ServiceAccountName == "" {
+		name := identity.ServiceAccountName
+		if request.Trigger != pipeline.TriggerRelease {
+			name = identity.CIServiceAccountName
+		}
+		if !exists || name == "" {
 			problems = append(problems, fmt.Errorf("secret grant denied: step %q in workflow %q per-step identity is not materialized; run `oberth secretstore sync` then `oberth install --install-secretstore --upgrade`", template.Name, request.PipelineFile))
 			continue
 		}
-		template.ServiceAccountName = identity.ServiceAccountName
+		template.ServiceAccountName = name
 		if c := templateMainContainer(template); c != nil {
-			c.Env = overrideEnvironment(c.Env, []corev1.EnvVar{{Name: "OBERTH_VAULT_ROLE", Value: identity.ServiceAccountName}})
+			c.Env = overrideEnvironment(c.Env, []corev1.EnvVar{{Name: "OBERTH_VAULT_ROLE", Value: name}})
 		}
 	}
 	return errors.Join(problems...)

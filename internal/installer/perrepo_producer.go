@@ -11,23 +11,11 @@ import (
 )
 
 const (
-	secretAccessConfigMapName = "oberth-secret-access" // #nosec G101 — Kubernetes ConfigMap NAME (an identifier), not credential material.
-	secretAccessConfigMapKey  = "grants"
 
 	// wildcardStep is the approval-table step value that grants a path to
 	// every template of a repository. Any other value names one Argo template.
 	wildcardStep = "*"
 )
-
-// grantEntry mirrors service.SecretAccessGrantEntry for ConfigMap parsing
-// without importing the service package (which would pull in transitive
-// dependencies the installer does not need).
-type grantEntry struct {
-	Workflow string `json:"workflow" yaml:"workflow"`
-	Repo     string `json:"repo"   yaml:"repo"`
-	Step     string `json:"step"   yaml:"step"`
-	Secret   string `json:"secret" yaml:"secret"`
-}
 
 // accessListJSONEntry is the local deserialization target for the --json
 // output of `oberth access list`. It mirrors the wire schema defined in

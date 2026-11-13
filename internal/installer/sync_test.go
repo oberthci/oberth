@@ -110,10 +110,10 @@ func TestSyncGrantPoliciesIdempotent(t *testing.T) {
 	// Pre-compute the expected policies so the fake store returns them.
 	// Issue #456: shared policies are always zero-stanza when per-repo
 	// identities exist — no upstream org access, no grant paths.
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
-	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, nil)
-	wantPerRepoPolicy := PerRepoPolicy(defaultKVPrefix, "oberthci", "oberth", nil)
-	wantPerRepoCIPolicy := PerRepoCIPolicy(defaultKVPrefix, "oberthci", "oberth")
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix,nil)
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix)
+	wantPerRepoPolicy := PerRepoPolicy(defaultKVPrefix,nil)
+	wantPerRepoCIPolicy := PerRepoCIPolicy(defaultKVPrefix)
 
 	matchingRoleJSON := func(n string) string {
 		return `{"request_id":"1","data":{` +
@@ -184,14 +184,14 @@ func TestSyncGrantPoliciesSharedPoliciesZeroStanzaWithIdentities(t *testing.T) {
 	responses := map[string]fakeBaoResponse{
 		// Shared policies: currently carry the org-union (pre-#456 shape).
 		// Sync must overwrite them with the zero-stanza shape.
-		"policy read " + defaultCredentialedPolicy:         {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, []string{"acme"}, []string{"release/cosign-secret"})},
+		"policy read " + defaultCredentialedPolicy:         {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix,[]string{"release/cosign-secret"})},
 		"policy write " + defaultCredentialedPolicy + " -": {out: "Success!"},
-		"policy read " + defaultCISecretsPolicy:            {out: OberthCISecretsPolicy(defaultKVPrefix, []string{"acme"})},
+		"policy read " + defaultCISecretsPolicy:            {out: OberthCISecretsPolicy(defaultKVPrefix)},
 		"policy write " + defaultCISecretsPolicy + " -":    {out: "Success!"},
 		// Per-repo identities: matching, so no write needed.
-		"policy read " + name:                              {out: PerRepoPolicy(defaultKVPrefix, "acme", "terraform", []string{"release/cosign-secret"})},
+		"policy read " + name:                              {out: PerRepoPolicy(defaultKVPrefix,[]string{"release/cosign-secret"})},
 		"read -format=json auth/kubernetes/role/" + name:   {out: `{"request_id":"1","data":{"bound_service_account_names":["` + name + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + name + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
-		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "acme", "terraform")},
+		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix)},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: `{"request_id":"1","data":{"bound_service_account_names":["` + ciName + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + ciName + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
 		// No orphan per-step policies.
 		"list -format=json auth/kubernetes/role": {out: `[]`},
@@ -246,8 +246,8 @@ func TestSyncGrantPoliciesNoIdentities(t *testing.T) {
 	t.Parallel()
 
 	// No identities -> both shared policies get "no upstream orgs" form (fail closed).
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
-	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, nil)
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix,nil)
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix)
 
 	responses := map[string]fakeBaoResponse{
 		"policy read " + defaultCredentialedPolicy: {out: wantCredentialedPolicy},
@@ -302,10 +302,10 @@ func TestSyncGrantPoliciesRemovesOrphanPerStepIdentities(t *testing.T) {
 	orphanStepName := PerStepName("codeberg", "oberthci", "oberth", ".oberth/release.yaml", "old-step")
 
 	// Pre-compute expected policies so the fake store returns matching shapes.
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
-	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, nil)
-	wantPerRepoPolicy := PerRepoPolicy(defaultKVPrefix, "oberthci", "oberth", nil)
-	wantPerRepoCIPolicy := PerRepoCIPolicy(defaultKVPrefix, "oberthci", "oberth")
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix,nil)
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix)
+	wantPerRepoPolicy := PerRepoPolicy(defaultKVPrefix,nil)
+	wantPerRepoCIPolicy := PerRepoCIPolicy(defaultKVPrefix)
 
 	matchingRoleJSON := func(n string) string {
 		return `{"request_id":"1","data":{` +
@@ -431,7 +431,7 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stalePerRepoPolicy := PerRepoPolicy(defaultKVPrefix, "exampleorg", "exampleorg-port", unionPaths)
+	stalePerRepoPolicy := PerRepoPolicy(defaultKVPrefix,unionPaths)
 	if !strings.Contains(stalePerRepoPolicy, "gar-image-key") {
 		t.Fatal("fixture is wrong: the stale per-repo policy must carry the named-step path")
 	}
@@ -448,14 +448,14 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 
 	wildcardName := PerStepName("codeberg", "exampleorg", "exampleorg-port", ".oberth/release.yaml", "*")
 	responses := map[string]fakeBaoResponse{
-		"policy read " + defaultCredentialedPolicy: {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)},
-		"policy read " + defaultCISecretsPolicy:    {out: OberthCISecretsPolicy(defaultKVPrefix, nil)},
+		"policy read " + defaultCredentialedPolicy: {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix,nil)},
+		"policy read " + defaultCISecretsPolicy:    {out: OberthCISecretsPolicy(defaultKVPrefix)},
 		// Per-repo release identity: stale union policy present, role matches.
 		"policy read " + name:                            {out: stalePerRepoPolicy},
 		"policy write " + name + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + name: {out: matchingRoleJSON(name)},
 		// Per-repo CI identity: already current.
-		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "exampleorg", "exampleorg-port")},
+		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix)},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
 		// Per-step identity: created by this sync.
 		"policy read " + stepName:                            {out: "No policy named: " + stepName, err: errors.New("exit status 2")},

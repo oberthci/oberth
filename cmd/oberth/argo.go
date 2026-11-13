@@ -394,7 +394,8 @@ func buildPerStepIdentities(ctx context.Context, db perRepoStore) (map[string]ar
 			key := upstream.Name + "/" + org + "/" + repo.Name + "/" + grant.Workflow + "/" + step
 			saName := installer.PerStepName(upstream.Name, org, repo.Name, grant.Workflow, step)
 			result[key] = argojob.PerRepoIdentityConfig{
-				ServiceAccountName: saName,
+				ServiceAccountName:   saName,
+				CIServiceAccountName: installer.PerStepCIName(upstream.Name, org, repo.Name, grant.Workflow, step),
 			}
 		}
 	}

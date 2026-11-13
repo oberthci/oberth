@@ -57,7 +57,7 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 	// empty (fail closed from zero orgs). Issue #456. This also resolves the
 	// sync/install ping-pong where sync wrote the grant-union and install
 	// wrote grant-free — both now produce the same zero-stanza shape.
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil)
 	haveCredentialedPolicy, credentialedExists, err := store.policyRead(ctx, rootToken, defaultCredentialedPolicy)
 	if err != nil {
 		return results, fmt.Errorf("read credentialed policy: %w", err)
@@ -74,7 +74,7 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 	})
 
 	// --- Shared CI-secrets policy (same zero-stanza treatment as above) ---
-	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, nil)
+	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix)
 	haveCISecretsPolicy, ciSecretsExists, err := store.policyRead(ctx, rootToken, defaultCISecretsPolicy)
 	if err != nil {
 		return results, fmt.Errorf("read ci-secrets policy: %w", err)
@@ -122,6 +122,7 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 		}
 		for _, sid := range stepIdentities {
 			desiredStepNames[PerStepName(sid.Upstream, sid.Org, sid.Repo, sid.Workflow, sid.Step)] = struct{}{}
+			desiredStepNames[PerStepCIName(sid.Upstream, sid.Org, sid.Repo, sid.Workflow, sid.Step)] = struct{}{}
 		}
 	}
 

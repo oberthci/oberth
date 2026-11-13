@@ -8,18 +8,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["create", "get", "list", "watch"]
-  # The secret-access grants ConfigMap is the only ConfigMap the server may
-  # mutate in place: update is name-scoped so this ServiceAccount can never
-  # rewrite audit-anchor continuity ConfigMaps, whose rollback-detection value
-  # depends on the server being unable to alter them after creation. Watch
-  # stays on the collection rule above because watch requests carry no
-  # resource name in their URL on every supported Kubernetes version, and the
-  # secret-access reconciler needs it to converge sqlite on ConfigMap edits.
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    resourceNames: ["oberth-secret-access"]
-    verbs: ["update"]
+    verbs: ["create", "get", "list"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

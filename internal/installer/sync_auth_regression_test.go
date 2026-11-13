@@ -13,8 +13,8 @@ func TestSyncRemovesOrphanRepoPoliciesAndFailsClosed(t *testing.T) {
 			name := PerRepoName("github", "oberthci", "removed")
 			ciName := PerRepoCIName("github", "oberthci", "removed")
 			responses := map[string]fakeBaoResponse{
-				"policy read " + defaultCredentialedPolicy: {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)},
-				"policy read " + defaultCISecretsPolicy:    {out: OberthCISecretsPolicy(defaultKVPrefix, nil)},
+				"policy read " + defaultCredentialedPolicy: {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix,nil)},
+				"policy read " + defaultCISecretsPolicy:    {out: OberthCISecretsPolicy(defaultKVPrefix)},
 				"policy list":                              {out: "default\nroot\n" + name + "\n" + ciName + "\n"},
 				"policy delete " + name:                    {},
 				"policy delete " + ciName:                  {},

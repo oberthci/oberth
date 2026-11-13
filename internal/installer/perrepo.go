@@ -119,49 +119,19 @@ func PerRepoCIName(upstream, org, repo string) string {
 	return perRepoCINamePrefix + readable + "-" + hashSuffix
 }
 
-// PerRepoCIPolicy generates the HCL policy for a single repository's per-repo
-// CI-tier identity. It grants:
-//   - Read access to the repo's upstream org/repo namespace only
-//   - Token self-revocation
-//
-// Unlike the release-tier PerRepoPolicy, it NEVER carries approval-table grants.
-// This is the structural guarantee that a CI run cannot reach release secrets
-// even if a CI per-repo identity is used. The policy is scoped to
-// path "oberth/data/upstream/<org>/<repo>/*" — the same subtree the release
-// policy uses, but without any exact-path grant entries.
-func PerRepoCIPolicy(kvPrefix, org, repo string) string {
+// PerRepoCIPolicy grants no secret reads; CI secret access uses per-step identities.
+func PerRepoCIPolicy(kvPrefix string) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, `# Per-repo CI identity: read-only on this repo's upstream namespace.
-# CI-tier policy: no approval-table grants — release secrets are unreachable.
-# Managed by oberth install --install-secretstore. Do not edit manually.
-path "%s/data/upstream/%s/%s/*" {
-  capabilities = ["read"]
-}`, kvPrefix, org, repo)
+	builder.WriteString("# Repository identity: no implicit secret paths. Managed by Oberth.\n")
 
 	builder.WriteString("\n\n# Allow the fetch client to revoke its own short-lived login token.\npath \"auth/token/revoke-self\" {\n  capabilities = [\"update\"]\n}")
 	return builder.String() + denyServerIdentities(kvPrefix)
 }
 
-// PerRepoPolicy generates the HCL policy for a single repository's per-repo
-// identity. It grants:
-//   - Read access to the repo's upstream org namespace (all secrets shared
-//     within the org)
-//   - Any exact-path release grants from the approval table for this specific
-//     repo
-//   - Token self-revocation
-//
-// Compared to the shared credentialed policy which has path "oberth/data/upstream/*"
-// (all orgs), this scopes to the exact repo's namespace only:
-// path "oberth/data/upstream/<org>/<repo>/*". The grant paths from the
-// secret access table are added as exact-path rules for release-tier
-// credentials.
-func PerRepoPolicy(kvPrefix, org, repo string, grantPaths []string) string {
+// PerRepoPolicy includes only explicit paths, with no implicit upstream reads.
+func PerRepoPolicy(kvPrefix string, grantPaths []string) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, `# Per-repo identity: read-only on this repo's namespace.
-# Managed by oberth install --install-secretstore. Do not edit manually.
-path "%s/data/upstream/%s/%s/*" {
-  capabilities = ["read"]
-}`, kvPrefix, org, repo)
+	builder.WriteString("# Repository identity: no implicit secret paths. Managed by Oberth.\n")
 
 	seen := make(map[string]struct{}, len(grantPaths))
 	for _, p := range grantPaths {
@@ -223,7 +193,7 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 			return items, fmt.Errorf("per-repo %s: %w", name, err)
 		}
 
-		wantPolicy := PerRepoPolicy(defaultKVPrefix, id.Org, id.Repo, grantPaths)
+		wantPolicy := PerRepoPolicy(defaultKVPrefix, grantPaths)
 		havePolicy, policyExists, err := store.policyRead(ctx, rootToken, name)
 		if err != nil {
 			return items, fmt.Errorf("per-repo policy read %s: %w", name, err)
@@ -270,7 +240,7 @@ func ConfigurePerRepoIdentities(ctx context.Context, store openBaoExec, rootToke
 
 		ciName := PerRepoCIName(id.Upstream, id.Org, id.Repo)
 
-		wantCIPolicy := PerRepoCIPolicy(defaultKVPrefix, id.Org, id.Repo)
+		wantCIPolicy := PerRepoCIPolicy(defaultKVPrefix)
 		haveCIPolicy, ciPolicyExists, err := store.policyRead(ctx, rootToken, ciName)
 		if err != nil {
 			return items, fmt.Errorf("per-repo CI policy read %s: %w", ciName, err)

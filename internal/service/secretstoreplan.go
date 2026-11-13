@@ -177,10 +177,10 @@ func computeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanRes
 // secretstore_plan tool prints and the sync receipt records — comparing them
 // answers "is the materialized state current?"
 //
-// v3 includes exact workflow-file scope and deliberately invalidates prior sync receipts.
+// v4 binds exact workflow/step grants and distinct CI policies; earlier receipts are stale.
 func ComputePlanDigest(repos []SecretStorePlanRepo) string {
 	h := sha256.New()
-	h.Write([]byte("oberth-secretstore-plan-v3\x00"))
+	h.Write([]byte("oberth-secretstore-plan-v4\x00"))
 	for _, repo := range repos {
 		h.Write([]byte(repo.Repo))
 		h.Write([]byte{0})
