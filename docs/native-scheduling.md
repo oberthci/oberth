@@ -84,6 +84,8 @@ longer creates or manages this ConfigMap. Upgrade preserves an existing object
 and its data with Helm ownership removed; new installs create none. Operators
 apply and maintain semaphore limits themselves.
 
+Order Trivy steps that share a cache with `depends`, or use a synchronization mutex.
+
 An administrator-selected execution target still authenticates its approved
 cluster, namespace, controller and service identity, but adds no nodeSelector or
 tolerations and refuses no authored placement because of a target. Repository

@@ -136,9 +136,8 @@ golangci-lint v2.12.2 result cache here: that pinned tool uses a Go-derived
 cache with local multi-process file locking. This requires the existing
 node-local filesystem, not an NFS cache. With no configured cache root, lint
 uses private scratch instead. Tool binaries remain on the per-run claim. A
-Trivy `--cache-dir` inside `/work/cache` is treated as shared by the Trivy
-guard (unordered pairs are refused), and since concurrent runs of the same
-repository share the directory, keep Trivy's database in private scratch.
+Trivy `--cache-dir` inside `/work/cache` is shared across concurrent runs of
+the same repository, so keep Trivy's database in private scratch.
 
 `cache` is refused on leaves that never take a host-backed mount:
 `oberth.ci/nonroot-templates` leaves (whose Go caches move to their

@@ -2152,28 +2152,6 @@ MCP tools: `promote_grant` (admin, creates a time-bounded grant),
 Maximum grant lifetime is a documented knob
 (`PromotionGrantMaxLifetime`, default 24 h, hard ceiling 168 h / 7 days).
 
-### Trivy cache guard (#655)
-
-Admission refuses an Argo DAG with two Trivy leaves that are UNORDERED (no DAG
-path between them) and whose `--cache-dir` resolves to the SAME shared volume.
-The predicate keys on the resolved shared volume, not the string alone: a
-template with `oberth.ci/workspace-mounts: none` or `cache` uses a per-Pod
-emptyDir, so two such templates sharing the same `--cache-dir` string are
-accepted. A `--cache-dir` inside the persistent cache (`/work/cache`) is shared
-on every leaf that keeps that mount (`cache`, `readonly` or no annotation).
-
-Accepted shapes:
-- Single Trivy leaf (no pair).
-- Two Trivy leaves with an ordering edge (direct or transitive).
-- Two unordered Trivy leaves whose caches are private (`workspace-mounts: none`
-  or `cache`, no VCT mount at the cache path, and not inside `/work/cache`).
-
-Rejected shape: two unordered Trivy leaves where both have `--cache-dir` at a
-path backed by the workspace VCT (when `workspace-mounts` is absent or
-`readonly` and a `work` VCT is declared), by the persistent cache (`--cache-dir`
-inside `/work/cache` and `workspace-mounts != none`), or by a repo-declared VCT
-mount at the same path.
-
 ### secretstore_plan MCP tool (#611)
 
 Admin-only read-only MCP tool `secretstore_plan`: given the approved grants

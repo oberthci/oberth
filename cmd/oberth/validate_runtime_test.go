@@ -140,10 +140,10 @@ spec:
 		}, "templateDefaults volumeMounts or volumeDevices are not admitted"},
 		{"trivy-unordered-shared", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			trivy(wf, "cache", argojob.CacheMountPath+"/trivy", "", false)
-		}, "but have no ordering edge between them"},
+		}, ""},
 		{"trivy-unordered-inline", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			trivy(wf, "cache", argojob.CacheMountPath+"/trivy", "", true)
-		}, "but have no ordering edge between them"},
+		}, ""},
 		{"trivy-ordered-shared", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			trivy(wf, "cache", argojob.CacheMountPath+"/trivy", "scan-a.Succeeded", false)
 		}, ""},

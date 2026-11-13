@@ -166,8 +166,8 @@ credentialed release leaves, Pod-leaf placement and every container shape;
 leaf on the release tier.
 `TestAdmitWorkspaceMountsValues` refuses unknown values;
 `TestAdmitNonrootRefusesWorkspaceCache` refuses `cache` on leaves that take no
-host cache; `TestTrivyGuardWorkspaceCache` isolates scratch storage per Pod and
-`/work/cache` as shared for cache leaves.
+host cache. `TestValidateRuntimeAdmissionParity` admits unordered Trivy steps
+sharing a cache through both CLI validation and Build.
 
 Parallel CI race groups: `TestOberthRaceGroupsCoverEveryPackageExactlyOnce`
 compares the store/service/gitcache/remainder partition with the actual `go list ./...`

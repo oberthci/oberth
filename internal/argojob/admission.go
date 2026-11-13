@@ -9,8 +9,8 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// ValidateDocument runs Build's document-only isolation and Trivy admission
-// checks after argoworkflow.Admit. It normalizes a copy, leaving the caller's
+// ValidateDocument runs Build's document-only isolation checks after
+// argoworkflow.Admit. It normalizes a copy, leaving the caller's
 // document unchanged. It does not check server state such as approvals, grants,
 // identities or admission receipts.
 func ValidateDocument(workflow *wfv1.Workflow, trigger pipeline.Trigger) error {
@@ -26,9 +26,6 @@ func normalizeAndValidateDocument(workflow *wfv1.Workflow, trigger pipeline.Trig
 	argoworkflow.InheritTokenOptOut(workflow)
 	normalizeContainerSetMounts(workflow)
 	if err := validateTemplateIsolation(workflow, trigger); err != nil {
-		return &argoworkflow.AdmissionError{Cause: err}
-	}
-	if err := trivyGuard(workflow); err != nil {
 		return &argoworkflow.AdmissionError{Cause: err}
 	}
 	return nil
