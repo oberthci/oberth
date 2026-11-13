@@ -122,6 +122,7 @@ case "$1 $2" in
  cp "$INVITE_TEST_ROOT/ca.crt" "$cert.ca.crt"
  printf '%s\n' "$INVITE_TEST_URL" >"$cert.url"
  ;;
+ 'mcp tools') exit 0;;
  'client pin') openssl x509 -in "$4" -noout -fingerprint -sha256 | sed 's/^.*=//' | tr -d ':\r\n' | tr A-F a-f;;
  *) exit 90;;
 esac

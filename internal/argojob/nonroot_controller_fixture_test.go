@@ -188,7 +188,8 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 			observed := nonrootControllerFixture(t, shape+"-submitted.json")
 			assertHistoricalWorkflowPriority(t, observed)
 			// Apply the current policy to authenticated upstream Pod input.
-			// Compare all fields except helper budgets, which deliberately changed.
+			// Compare security fields after removing changed helper budgets and
+			// run-fact env from the immutable controller observation.
 			wf := nonrootBuiltWithScratch(t, shape == "script", "128Mi")
 			historicalSchedulingInput(t, wf, false)
 			nonrootHistoricalMeasurementInput(t, wf, shape)
@@ -201,6 +202,8 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 			for _, template := range wf.Spec.Templates {
 				assertNativeExecutorPatch(t, template.PodSpecPatch)
 			}
+			withoutCapturedRunFactEnvironment(t, current)
+			withoutCapturedRunFactEnvironment(t, observed)
 			withoutCapturedHelperBudgets(t, current)
 			withoutCapturedHelperBudgets(t, observed)
 			got, err := json.MarshalIndent(current, "", "  ")

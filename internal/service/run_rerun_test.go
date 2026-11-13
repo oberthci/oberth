@@ -80,7 +80,7 @@ func newRerunHarnessWithOptions(t *testing.T, options store.Options, results ...
 		t.Fatal(err)
 	}
 	harness.service, err = NewAPI(APIConfig{
-		Runs: fixture.store, History: fixture.store, RunRetries: fixture.store, RunReruns: fixture.store,
+		Runs: fixture.store, History: fixture.store, RunReruns: fixture.store,
 		Repositories: fixture.store, Issues: fixture.store, Promotions: fixture.store, PromotionRuns: fixture.store,
 		Enqueues: harness.scheduler, Git: harness.git, Refs: harness.refs, Logs: fixture.logs, Auditor: fixture.store,
 		Signals: fixture.signals, MaximumWait: testTimeout(50 * time.Millisecond),
@@ -153,10 +153,6 @@ func TestRunRerunAfterTestFailurePassesAndStatusReportsNewestRun(t *testing.T) {
 	if failed.Status != model.RunFailed || failed.FailedStep == "" {
 		t.Fatalf("first run = %#v, want a test failure", failed)
 	}
-	if _, err := harness.call(rerunUplink, "run_retry", map[string]any{"id": failed.ID}); err == nil {
-		t.Fatal("run_retry accepted a test failure; run_rerun would be redundant")
-	}
-
 	response := harness.rerun(t, rerunUplink, map[string]any{"id": failed.ID[:8], "reason": "flaky integration test"})
 	if response.Mode != "rerun" || response.RerunOf != failed.ID || response.RunID == "" || response.SHA != rerunSHA || response.Ref != rerunBranch {
 		t.Fatalf("run_rerun = %#v", response)
@@ -198,11 +194,8 @@ func TestRunRerunAfterTestFailurePassesAndStatusReportsNewestRun(t *testing.T) {
 		action.ResourceID != rerun.ID || !strings.Contains(action.Details, failed.ID) || !strings.Contains(action.Details, "flaky integration test") {
 		t.Fatalf("run.rerun audit = %#v, %v", action, err)
 	}
-	// The original is no longer the newest run of its branch, and can still
-	// be rerun while its SHA is the branch head (the passed rerun is terminal).
-	older := harness.rerun(t, rerunUplink, map[string]any{"id": failed.ID})
-	if older.RunID == "" || older.RerunOf != failed.ID {
-		t.Fatalf("rerun of a non-newest run = %#v", older)
+	if _, err := harness.call(rerunUplink, "run_rerun", map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrInvalidState) {
+		t.Fatalf("older branch source was replayed: %v", err)
 	}
 }
 

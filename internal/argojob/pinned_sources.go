@@ -41,7 +41,7 @@ func validatePinnedSourceDelivery(workflow *wfv1.Workflow, request Request) erro
 		for _, source := range actual {
 			var conflict bool
 			walkTemplateContainers(workflow.Spec.TemplateDefaults, func(m string) {
-				a := path.Clean(m)
+				a := path.Clean("/" + m)
 				b := source.Path
 				if a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/") {
 					conflict = true
@@ -56,7 +56,7 @@ func validatePinnedSourceDelivery(workflow *wfv1.Workflow, request Request) erro
 		var conflict bool
 		walkTemplateContainers(&template, func(mountPath string) {
 			for _, source := range actual {
-				a, b := path.Clean(mountPath), source.Path
+				a, b := path.Clean("/"+mountPath), source.Path
 				if a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/") {
 					conflict = true
 				}
@@ -132,7 +132,7 @@ func verifyDeliveredPinnedSources(workflow *wfv1.Workflow, expected []pipeline.P
 	// They must not introduce an alias or shadow outside member containers.
 	checkExtra := func(m corev1.VolumeMount, claims map[string]bool) {
 		for _, source := range expected {
-			a := path.Clean(m.MountPath)
+			a := path.Clean("/" + m.MountPath)
 			if a == "/" || a == source.Path || strings.HasPrefix(a, source.Path+"/") || strings.HasPrefix(source.Path, a+"/") || (claims[m.Name] && !m.ReadOnly) {
 				bad = true
 			}
@@ -169,16 +169,16 @@ func verifyDeliveredPinnedSources(workflow *wfv1.Workflow, expected []pipeline.P
 			for i, source := range expected {
 				count := 0
 				for _, m := range c.VolumeMounts {
-					if m.MountPath == source.Path {
+					if path.Clean("/"+m.MountPath) == source.Path {
 						count++
 						if m.Name != SourceVolumeName || !claims[m.Name] || !m.ReadOnly || m.SubPath != fmt.Sprintf("pinned-sources/%d", i) || m.SubPathExpr != "" {
 							bad = true
 						}
 					}
-					if m.MountPath != source.Path && (path.Clean(m.MountPath) == "/" || strings.HasPrefix(path.Clean(m.MountPath), source.Path+"/") || strings.HasPrefix(source.Path, path.Clean(m.MountPath)+"/")) {
+					if path.Clean("/"+m.MountPath) != source.Path && (path.Clean("/"+m.MountPath) == "/" || strings.HasPrefix(path.Clean("/"+m.MountPath), source.Path+"/") || strings.HasPrefix(source.Path, path.Clean("/"+m.MountPath)+"/")) {
 						bad = true
 					}
-					if claims[m.Name] && m.MountPath != source.Path && (m.SubPathExpr != "" || m.SubPath == "" || m.SubPath == "." || path.Clean(m.SubPath) != m.SubPath || m.SubPath == "pinned-sources" || strings.HasPrefix(m.SubPath, "pinned-sources/")) && !m.ReadOnly {
+					if claims[m.Name] && path.Clean("/"+m.MountPath) != source.Path && (m.SubPathExpr != "" || m.SubPath == "" || m.SubPath == "." || path.Clean(m.SubPath) != m.SubPath || m.SubPath == "pinned-sources" || strings.HasPrefix(m.SubPath, "pinned-sources/")) && !m.ReadOnly {
 						bad = true
 					}
 				}

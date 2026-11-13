@@ -1,0 +1,5 @@
+{
+  "snapshot": {"Version":1,"Config":{"Namespace":"remote","Other":9007199254740993,"ExecutionPlacement":{"schema":"oberth.execution-placement/branch-v2","node_name":"old-node","node_uid":"node-uid","provider_id":"cloud/node","zone":"old-zone","pool":"old-pool","taint_key":"dedicated","taint_value":"trusted","node_version":"approved-admission-version","namespace":"remote","endpoint_identity":"unchanged"}},"Cleanup":{"Pod":"seed"}},
+  "admission": {"workflow":{"metadata":{"annotations":{"oberth.ci/execution-placement":"original-authority"}}},"identity":"unchanged"},
+  "resource": {"metadata":{"annotations":{"oberth.ci/execution-target":"$BINDING_DIGEST","oberth.ci/execution-placement":"original-authority"}},"spec":{"nodeSelector":{"pool":"old-pool"}}}
+}

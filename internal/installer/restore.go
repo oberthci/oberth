@@ -653,6 +653,13 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 // When the target chart no longer declares Transit, remove its retired leaves
 // from stored user values and explicitly retain installed compatibility identities.
 func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, target restoreTarget, work string) ([]string, error) {
+	installed, err := readHelmValuesMap(ctx, deps.Deps, cfg.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseRemovedReleaseValues(installed, "oberth restore"); err != nil {
+		return nil, err
+	}
 	body, err := json.Marshal(target.Overlay)
 	if err != nil {
 		return nil, err

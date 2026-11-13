@@ -118,7 +118,7 @@ func newRaceFixture(t *testing.T) *raceFixture {
 		ExecutorServiceAccount:     "test-executor",
 	}
 	auditor := &stubAuditor{}
-	jobs, err := NewArgoJobs(controller, config, auditor, emptySecretAccess{}, nil)
+	jobs, err := NewArgoJobs(controller, config, auditor, emptySecretAccess{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestDeleteBeforeCreateSeeding(t *testing.T) {
 		ExecutorServiceAccount:     "test-executor",
 	}
 	auditor := &stubAuditor{}
-	jobs, err := NewArgoJobs(controller, config, auditor, emptySecretAccess{}, nil)
+	jobs, err := NewArgoJobs(controller, config, auditor, emptySecretAccess{})
 	if err != nil {
 		t.Fatal(err)
 	}

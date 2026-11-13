@@ -542,7 +542,6 @@ func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 		refused   bool
 	}{
 		{"binding-mismatch", fmt.Errorf("%w: argojob: Workflow oberth-refused adoption binding mismatch", ErrAdoptionRefused), false, true},
-		{"quarantine", errors.Join(ErrAdoptionRefused, store.ErrExecutionTargetQuarantined), false, true},
 		{"admission-conflict", nil, true, true},
 		{"read-failure", errors.New("argojob: read Workflow for adoption: connection refused"), false, false},
 	} {
@@ -581,9 +580,6 @@ func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 			}
 			current, lookupErr := fixture.store.Run(context.Background(), run.ID)
 			wantStatus := model.RunRunning
-			if test.name == "quarantine" && !strings.Contains(presentationRun(current).DisplayReason, "execution target quarantined") {
-				t.Fatal("quarantine hidden by reason-line truncation", presentationRun(current))
-			}
 			if test.refused {
 				wantStatus = model.RunFailed
 				if current.Phase != "infrastructure" || !strings.Contains(current.Error, "recovery refused for this run") {

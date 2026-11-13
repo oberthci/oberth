@@ -16,7 +16,9 @@ import (
 	"github.com/oberthci/oberth/internal/holdfs"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kexec "k8s.io/client-go/util/exec"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -57,13 +59,15 @@ func (controller *Controller) ListAssistHolds(ctx context.Context, workflowName 
 	if strings.TrimSpace(workflowName) == "" {
 		return nil, errors.New("argojob: workflow name is required")
 	}
-	pods, err := controller.kube.CoreV1().Pods(controller.Namespace()).List(ctx, metav1.ListOptions{LabelSelector: argoWorkflowLabel + "=" + workflowName})
-	if err != nil {
-		return nil, fmt.Errorf("list workflow pods: %w", err)
+	if controller.hub == nil || !controller.hub.Healthy() {
+		return nil, errWatchUnavailable
 	}
 	var holds []model.AssistHold
-	for index := range pods.Items {
-		if hold, ok := assistHoldOf(&pods.Items[index]); ok {
+	for _, pod := range controller.hub.PodsOf(workflowName) {
+		if !controller.observedPodOwned(pod) {
+			continue
+		}
+		if hold, ok := assistHoldOf(pod); ok {
 			holds = append(holds, hold)
 		}
 	}
@@ -87,14 +91,7 @@ func assistHoldOf(pod *corev1.Pod) (model.AssistHold, bool) {
 		return model.AssistHold{}, false
 	}
 	hold := model.AssistHold{Pod: pod.Name, Node: pod.Annotations[argoNodeNameAnnotation], SourcePath: SourceMountPath, PatchCapable: hasAssistBinary(main)}
-	for _, variable := range main.Env {
-		if variable.Name == "OBERTH_STEP" {
-			hold.Step = variable.Value
-		}
-	}
-	if hold.Step == "" {
-		hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
-	}
+	hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
 	// Only a retry child (node "...(N)", N >= 1) can be a hold: the held
 	// patch branch is never applied to attempt 1, and the pause variable is
 	// refused from repositories, so an attempt-1 Pod carrying it is not ours.
@@ -259,21 +256,51 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		return nil, nil
 	}
 	assist := controller.config.Assist.Effective()
-	pods, err := controller.kube.CoreV1().Pods(controller.Namespace()).List(ctx, metav1.ListOptions{LabelSelector: assistSweepSelector})
-	if err != nil {
-		return nil, fmt.Errorf("list branch pods: %w", err)
+	if controller.hub == nil || !controller.hub.Healthy() {
+		return nil, errWatchUnavailable
+	}
+	pods := corev1.PodList{}
+	for _, pod := range controller.hub.Pods() {
+		if pod.Labels[triggerLabel] == string(pipeline.TriggerCI) && controller.observedPodOwned(pod) {
+			pods.Items = append(pods.Items, *pod)
+		}
 	}
 	var abandoned []model.AssistAbandon
-	released := map[string]bool{} // released between snapshot and recheck
+	inactive := map[string]bool{} // released, missing or replaced after the snapshot
 	abandon := func(sweep assistSweepHold, reason string) (bool, error) {
 		if recheck != nil {
 			fresh, err := recheck(ctx, sweep.runID, sweep.hold.Pod)
-			released[sweep.hold.Pod] = err == nil && fresh.Released
+			inactive[sweep.hold.Pod] = err == nil && fresh.Released
 			if err != nil || !assistVictimDue(reason, fresh, assist.HoldTTL, sweep.hold, now) {
 				return false, nil
 			}
 		}
-		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, sweep.hold.Pod, metav1.DeleteOptions{}); err != nil {
+		// Cached observations nominate a victim; a fresh identity/hold read gates
+		// the delete, and a UID precondition protects a same-name replacement.
+		if !controller.hub.Healthy() {
+			return false, errWatchUnavailable
+		}
+		pod, current, err := controller.heldPod(ctx, sweep.hold.Pod)
+		if apierrors.IsNotFound(err) || errors.Is(err, ErrNotHeld) {
+			inactive[sweep.hold.Pod] = true
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if pod.UID != sweep.uid || !controller.observedPodOwned(pod) {
+			inactive[sweep.hold.Pod] = true
+			return false, nil
+		}
+		if !assistVictimDue(reason, activity[sweep.hold.Pod], assist.HoldTTL, current, now) {
+			return false, nil
+		}
+		uid := pod.UID
+		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, sweep.hold.Pod, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}); err != nil {
+			if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
+				inactive[sweep.hold.Pod] = true
+				return false, nil
+			}
 			return false, fmt.Errorf("abandon hold %s: %w", sweep.hold.Pod, err)
 		}
 		abandoned = append(abandoned, model.AssistAbandon{RunID: sweep.runID, Pod: sweep.hold.Pod, Step: sweep.hold.Step, Reason: reason,
@@ -294,7 +321,7 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		if !ok || activity[hold.Pod].Released {
 			continue
 		}
-		sweep := assistSweepHold{hold: hold, runID: pod.Labels[runLabel], failedExit: failedAttemptExit(pods.Items, pod, hold)}
+		sweep := assistSweepHold{hold: hold, uid: pod.UID, runID: pod.Labels[runLabel], failedExit: failedAttemptExit(pods.Items, pod, hold)}
 		seen[hold.Pod] = true
 		controller.noteAssistHold(sweep)
 		if assistVictimDue(model.AssistAbandonTTL, activity[hold.Pod], assist.HoldTTL, hold, now) {
@@ -302,8 +329,8 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 			if err != nil {
 				return abandoned, err
 			}
-			if done || released[hold.Pod] {
-				continue // a hold released meanwhile is running work: not counted
+			if done || inactive[hold.Pod] {
+				continue // no longer an active hold: do not count it toward the cap
 			}
 		}
 		holds = append(holds, sweep)
@@ -325,7 +352,7 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		if err != nil {
 			return abandoned, err
 		}
-		if done {
+		if done || inactive[sweep.hold.Pod] {
 			excess--
 		}
 	}
@@ -368,19 +395,7 @@ func assistEvictedOf(pod *corev1.Pod) (model.AssistHold, bool) {
 	if hold.Attempt, _ = strconv.Atoi(match[1]); hold.Attempt < 1 {
 		return model.AssistHold{}, false
 	}
-	for _, container := range pod.Spec.Containers {
-		if container.Name != mainContainerName {
-			continue
-		}
-		for _, variable := range container.Env {
-			if variable.Name == "OBERTH_STEP" {
-				hold.Step = variable.Value
-			}
-		}
-	}
-	if hold.Step == "" {
-		hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
-	}
+	hold.Step = nodeStepName(pod.Labels[argoWorkflowLabel], hold.Node)
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name != mainContainerName {
 			continue
@@ -419,6 +434,7 @@ func (controller *Controller) assistEviction(ctx context.Context, pods []corev1.
 }
 
 type assistSweepHold struct {
+	uid        types.UID
 	hold       model.AssistHold
 	runID      string
 	failedExit *int

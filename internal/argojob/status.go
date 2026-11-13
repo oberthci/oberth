@@ -1,8 +1,6 @@
 package argojob
 
 import (
-	"fmt"
-	"hash/fnv"
 	"slices"
 	"sort"
 	"strings"
@@ -130,10 +128,6 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 		if stage == "" || step == "" {
 			continue
 		}
-		podName := ""
-		if node.Type == wfv1.NodeTypePod {
-			podName = PodName(workflow, node)
-		}
 		attempt, superseded := retries.attempt(workflow.Status.Nodes, node, rootID)
 		retryOrder[node.ID] = retries.order(workflow.Status.Nodes, node)
 		results = append(results, StepResult{
@@ -147,7 +141,6 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 			Status:               stepStatus(node.Phase),
 			ExitCode:             exitCode(node),
 			ExitCodeKnown:        nodeExitCodeKnown(node),
-			PodName:              podName,
 			StartedAt:            optionalTime(node.StartedAt),
 			FinishedAt:           optionalTime(node.FinishedAt),
 		})
@@ -234,46 +227,6 @@ func podTemplate(workflow *wfv1.Workflow, name string) bool {
 		return template.Container != nil || template.Script != nil || template.ContainerSet != nil
 	}
 	return false
-}
-
-// PodNameVersionAnnotation and podNameVersionV2 pin how Argo names the Pod
-// backing a node.
-//
-// The name is not the node ID: under the v2 convention (the default since Argo
-// 3.5) it is "<workflow>-<template>-<fnv32a(nodeName)>". Oberth pins the
-// annotation on every submission so the server's computation and the
-// controller's cannot diverge with the controller's POD_NAMES environment --
-// which would otherwise silently break step log capture, exactly as it did the
-// first time this ran against a real cluster.
-const (
-	PodNameVersionAnnotation = "workflows.argoproj.io/pod-name-format"
-	podNameVersionV2         = "v2"
-
-	maxPodNamePrefixLength = 253 - 10 - 1
-)
-
-// PodName reproduces Argo's own deterministic Pod naming
-// (workflow/util.GeneratePodName). It is reimplemented rather than imported
-// because that package pulls in the whole controller.
-// TestPodNameMatchesArgo pins it against the upstream algorithm, and the live
-// suite proves it against a real controller.
-func PodName(workflow *wfv1.Workflow, node wfv1.NodeStatus) string {
-	if workflow.Annotations[PodNameVersionAnnotation] == "v1" {
-		return node.ID
-	}
-	if workflow.Name == node.Name {
-		return workflow.Name
-	}
-	prefix := workflow.Name
-	if node.TemplateName != "" {
-		prefix += "-" + node.TemplateName
-	}
-	if len(prefix) > maxPodNamePrefixLength {
-		prefix = prefix[:maxPodNamePrefixLength]
-	}
-	digest := fnv.New32a()
-	_, _ = digest.Write([]byte(node.Name))
-	return fmt.Sprintf("%s-%v", prefix, digest.Sum32())
 }
 
 // burnAndStep names one observed node, deferring to the same rule the static

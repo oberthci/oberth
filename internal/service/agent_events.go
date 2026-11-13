@@ -69,7 +69,6 @@ const (
 	MaxAgentEventInterval          = 5 * time.Minute
 	DefaultAgentEventLockWait      = time.Minute
 	agentEventLookback             = 15 * time.Minute
-	agentEventMaxObservedRuns      = 64
 	agentEventMemoLimit            = 8192
 	agentEventPruneGiveUp          = time.Hour
 	agentEventSummaryErrorLength   = 200
@@ -430,7 +429,7 @@ func (recorder *agentEventRecorder) observeActive(ctx context.Context, active []
 	observer, _ := recorder.base.schedulingObserver.(SynchronizationObserver)
 	observed, activeIDs := map[string]bool{}, map[string]bool{}
 	var participants []model.SyncParticipant
-	unobserved, budget := 0, agentEventMaxObservedRuns
+	unobserved := 0
 	for _, run := range active {
 		activeIDs[run.ID] = true
 		if run.Status != model.RunRunning || run.WorkflowName == "" {
@@ -443,14 +442,7 @@ func (recorder *agentEventRecorder) observeActive(ctx context.Context, active []
 		if observer == nil {
 			continue
 		}
-		if budget == 0 {
-			unobserved++
-			continue
-		}
-		budget--
-		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		observation, err := observer.ObserveSynchronization(readCtx, run)
-		cancel()
+		observation, err := observer.ObserveSynchronization(ctx, run)
 		if err != nil || observation == nil {
 			unobserved++
 			continue

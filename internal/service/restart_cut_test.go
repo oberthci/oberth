@@ -79,13 +79,13 @@ func TestRestartCutAdoptionPersistsRetryableWithoutTestIssue(t *testing.T) {
 				t.Fatal("restart replayed execution", created, releaseCreated, adopted)
 			}
 			issue, issueErr := fixture.store.OpenCIIssue(t.Context(), fixture.repo.ID, run.Ref)
-			retry, retryErr := fixture.store.RetryRun(t.Context(), model.RunRetryRequest{RunID: run.ID, Actor: "agent@host"})
 			if mode == "real-nonzero" {
-				if current.Status != model.RunFailed || current.FailedStep != "unit" || issueErr != nil || issue.ID == 0 || !errors.Is(retryErr, store.ErrInvalidState) {
-					t.Fatalf("real failure became retryable: run=%+v issue=%+v/%v retry=%+v/%v", current, issue, issueErr, retry, retryErr)
+				if current.Status != model.RunFailed || current.FailedStep != "unit" || issueErr != nil || issue.ID == 0 || model.IsInfrastructureRunFailure(current.Status, current.Phase, current.FailedStep) {
+					t.Fatalf("real failure lost code attribution: run=%+v issue=%+v/%v", current, issue, issueErr)
 				}
 			} else {
-				if current.Status != model.RunInterrupted || current.FailedStep != "" || !errors.Is(issueErr, store.ErrNotFound) || retryErr != nil || retry.ID == run.ID || retry.Status != model.RunQueued {
+				retry, retryErr := fixture.store.RerunRun(t.Context(), model.RunRerunRequest{RunID: run.ID, Actor: "agent@host"})
+				if current.Status != model.RunInterrupted || current.FailedStep != "" || !errors.Is(issueErr, store.ErrNotFound) || retryErr != nil || retry.Enqueued.ID == run.ID || retry.Enqueued.Status != model.RunQueued {
 					t.Fatalf("restart remained CI red or unretryable: run=%+v issue=%+v/%v retry=%+v/%v", current, issue, issueErr, retry, retryErr)
 				}
 				shown := presentationRun(current)

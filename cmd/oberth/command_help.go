@@ -11,7 +11,6 @@ import (
 var commandGroups = map[string]string{
 	"access":      "list|allow|revoke",
 	"branch":      "prune|prune-refs|deletions",
-	"fragments":   "list|show",
 	"preflight":   "drift|pki|upstreams",
 	"release-wif": "list|grant|revoke|reset",
 	"repo":        "add|remove|archive|unarchive|verify",

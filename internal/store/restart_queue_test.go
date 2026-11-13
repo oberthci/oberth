@@ -170,82 +170,68 @@ func TestOwnerRestartKeepsAdmittedRecovery(t *testing.T) {
 	}
 }
 
-func TestServerRestartRunSupportsExplicitRetryAndRerun(t *testing.T) {
+func TestServerRestartRunSupportsExplicitRerun(t *testing.T) {
 	for _, kind := range []model.RefKind{model.RefBranch, model.RefTag} {
-		for _, operation := range []string{"retry", "rerun"} {
-			t.Run(string(kind)+"/"+operation, func(t *testing.T) {
-				now := time.Now()
-				s := testStore(t, &now)
-				repo := createRepo(t, s)
-				spec := testRunSpec(repo.ID, "feature/restart", strings.Repeat("a", 40))
-				spec.RefKind = kind
-				if kind == model.RefTag {
-					spec.Ref = "v1-restart"
-					spec.Trigger = "tag"
+		t.Run(string(kind), func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now)
+			repo := createRepo(t, s)
+			spec := testRunSpec(repo.ID, "feature/restart", strings.Repeat("a", 40))
+			spec.RefKind = kind
+			if kind == model.RefTag {
+				spec.Ref = "v1-restart"
+				spec.Trigger = "tag"
+			}
+			source, err := s.EnqueueRun(t.Context(), spec)
+			requireRestartNoError(t, err)
+			_, err = s.ClaimNextRun(t.Context())
+			requireRestartNoError(t, err)
+			requireRestartNoError(t, s.RecoverOwnerState(t.Context()))
+			failed, err := s.Run(t.Context(), source.ID)
+			requireRestartNoError(t, err)
+			if failed.Status != model.RunFailed || failed.Error != model.ServerRestartReason {
+				t.Fatal(failed)
+			}
+			if _, err := s.ClaimNextRun(t.Context()); !errors.Is(err, ErrNotFound) {
+				t.Fatal("restart automatically queued work", err)
+			}
+			audit := &model.RunReplayAudit{Basis: "pre-intent"}
+			authorize := func(run model.Run, evidence model.RunReplayEvidence) error {
+				if run.ID != source.ID || run.Error != model.ServerRestartReason || !evidence.ChainComplete || !evidence.Newest || evidence.PublicationStarted {
+					t.Fatal(run, evidence)
 				}
-				source, err := s.EnqueueRun(t.Context(), spec)
-				requireRestartNoError(t, err)
-				_, err = s.ClaimNextRun(t.Context())
-				requireRestartNoError(t, err)
-				requireRestartNoError(t, s.RecoverOwnerState(t.Context()))
-				failed, err := s.Run(t.Context(), source.ID)
-				requireRestartNoError(t, err)
-				if failed.Status != model.RunFailed || failed.Error != model.ServerRestartReason {
-					t.Fatal(failed)
+				audit.RunsChecked = len(evidence.Chain)
+				audit.StepsChecked = len(evidence.Steps)
+				return nil
+			}
+			if kind == model.RefTag {
+				if _, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: source.ID, Actor: "operator"}); !errors.Is(err, ErrInvalidState) {
+					t.Fatal("tag rerun bypassed authorization", err)
 				}
-				if _, err := s.ClaimNextRun(t.Context()); !errors.Is(err, ErrNotFound) {
-					t.Fatal("restart automatically queued work", err)
-				}
-				audit := &model.RunReplayAudit{Basis: "pre-intent"}
-				authorize := func(run model.Run, evidence model.RunReplayEvidence) error {
-					if run.ID != source.ID || run.Error != model.ServerRestartReason || !evidence.ChainComplete || !evidence.Newest || evidence.PublicationStarted {
-						t.Fatal(run, evidence)
-					}
-					audit.RunsChecked = len(evidence.Chain)
-					audit.StepsChecked = len(evidence.Steps)
-					return nil
-				}
-				var next model.Run
-				if operation == "retry" {
-					if kind == model.RefTag {
-						if _, err := s.RetryRun(t.Context(), model.RunRetryRequest{RunID: source.ID, Actor: "operator"}); !errors.Is(err, ErrInvalidState) {
-							t.Fatal("tag retry bypassed authorization", err)
-						}
-					}
-					result, err := s.RetryRun(t.Context(), model.RunRetryRequest{RunID: source.ID, Actor: "operator", ReplayAudit: audit, Authorize: authorize})
-					requireRestartNoError(t, err)
-					next = result.Run
-				} else {
-					if kind == model.RefTag {
-						if _, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: source.ID, Actor: "operator"}); !errors.Is(err, ErrInvalidState) {
-							t.Fatal("tag rerun bypassed authorization", err)
-						}
-					}
-					result, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: source.ID, Actor: "operator", Reason: "retry after restart", ReplayAudit: audit, Authorize: func(run model.Run, evidence model.RunReplayEvidence) (string, error) {
-						return "", authorize(run, evidence)
-					}})
-					requireRestartNoError(t, err)
-					next = result.Enqueued.Run
-				}
-				if next.ID == source.ID || next.Status != model.RunQueued || next.RefKind != kind || next.Ref != source.Ref || next.SHA != source.SHA || next.TestedSHA != source.TestedSHA || next.Actor != "operator" || next.Error != "" {
-					t.Fatal(next)
-				}
-				unchanged, err := s.Run(t.Context(), source.ID)
-				requireRestartNoError(t, err)
-				if unchanged.Status != model.RunFailed || unchanged.Error != model.ServerRestartReason {
-					t.Fatal("explicit replay rewrote failed source", unchanged)
-				}
-				claimed, err := s.ClaimNextRun(t.Context())
-				requireRestartNoError(t, err)
-				if claimed.ID != next.ID {
-					t.Fatal(claimed)
-				}
-				count, err := s.CountRuns(t.Context())
-				requireRestartNoError(t, err)
-				if count.Total != 2 {
-					t.Fatal(count)
-				}
-			})
-		}
+			}
+			result, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: source.ID, Actor: "operator", Reason: "retry after restart", ReplayAudit: audit, Authorize: func(run model.Run, evidence model.RunReplayEvidence) (string, error) {
+				return "", authorize(run, evidence)
+			}})
+			requireRestartNoError(t, err)
+			next := result.Enqueued.Run
+			if next.ID == source.ID || next.Status != model.RunQueued || next.RefKind != kind || next.Ref != source.Ref || next.SHA != source.SHA || next.TestedSHA != source.TestedSHA || next.Actor != "operator" || next.Error != "" {
+				t.Fatal(next)
+			}
+			unchanged, err := s.Run(t.Context(), source.ID)
+			requireRestartNoError(t, err)
+			if unchanged.Status != model.RunFailed || unchanged.Error != model.ServerRestartReason {
+				t.Fatal("explicit replay rewrote failed source", unchanged)
+			}
+			claimed, err := s.ClaimNextRun(t.Context())
+			requireRestartNoError(t, err)
+			if claimed.ID != next.ID {
+				t.Fatal(claimed)
+			}
+			count, err := s.CountRuns(t.Context())
+			requireRestartNoError(t, err)
+			if count.Total != 2 {
+				t.Fatal(count)
+			}
+		})
 	}
 }

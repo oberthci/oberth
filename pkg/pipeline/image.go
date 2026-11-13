@@ -12,19 +12,11 @@ const (
 	maxRunnerImageBytes = 300
 )
 
-// DefaultRunnerImagePrefixes is the allowlist applied when the administrator
-// configures no explicit --runner-image-prefixes. It must stay in sync with
-// the chart default in charts/oberth/values.yaml; a cross-source drift test
-// enforces the invariant.
-var DefaultRunnerImagePrefixes = []string{"golang:", "debian:", "aquasec/trivy:"}
+// DefaultRunnerImagePrefixes is empty: only an explicitly configured list restricts images.
+var DefaultRunnerImagePrefixes []string
 
-// ValidateRunnerImage enforces the syntax shared by repository declarations
-// and the admission gate. Every runner image reference MUST contain a
-// validated @sha256:<64 lowercase hex> digest; a human-readable tag may
-// precede the digest. Tag-only references are rejected because a registry
-// writer can move an allowed tag between admission and node pull, breaking
-// the immutability contract. The administrator prefix allowlist -- not this
-// syntactic check -- decides which registries and repositories are trusted.
+// ValidateRunnerImage validates Oberth-owned seed images. Authored container
+// image syntax belongs to Kubernetes; their optional allowlist is separate.
 func ValidateRunnerImage(image string) error {
 	if image == "" || len(image) > maxRunnerImageBytes {
 		return fmt.Errorf("runner image must contain 1-%d bytes", maxRunnerImageBytes)
@@ -65,6 +57,9 @@ func ValidateRunnerImage(image string) error {
 // Tags may still be narrowed by a tag prefix, but a registry port must never
 // be mistaken for a tag. Docker Hub short and fully qualified names agree.
 func RunnerImageAllowed(image string, prefixes []string) bool {
+	if len(prefixes) == 0 {
+		return true
+	}
 	reference, err := name.ParseReference(image)
 	if err != nil {
 		return false
@@ -81,9 +76,6 @@ func RunnerImageAllowed(image string, prefixes []string) bool {
 	}
 	if digest != "" {
 		canonical += "@" + digest
-	}
-	if len(prefixes) == 0 {
-		prefixes = DefaultRunnerImagePrefixes
 	}
 	for _, prefix := range prefixes {
 		normalized, err := normalizedImagePrefix(prefix)

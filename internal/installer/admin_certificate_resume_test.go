@@ -17,7 +17,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/clientcert"
@@ -83,7 +82,7 @@ func newCertificateResumeHost(t *testing.T, onboard func(context.Context, []byte
 	t.Cleanup(func() { _ = listener.Close() })
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
 	h := &certificateResumeHost{port: port}
-	kube := fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet(), preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
+	kube := argoSecurityTestClient(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet(), preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
 	pki, runner := pkiLifecycleDeps(t, []string{"ci.example.com", "localhost", "node", "node.local"}, []string{"192.0.2.1", "127.0.0.1", "::1"})
 	h.runner = runner
 	h.deps = InstallDeps{Output: &h.output, LookPath: func(s string) (string, error) { return s, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,

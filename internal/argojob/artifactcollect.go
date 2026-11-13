@@ -51,7 +51,7 @@ func (seeder *SourceSeeder) Collect(ctx context.Context, workflowName string) (a
 		}
 		_ = seeder.client.CoreV1().Pods(seeder.config.Namespace).Delete(cleanupCtx, podName, options)
 	}()
-	if err := seeder.waitForSeedPod(ctx, podName, expected); err != nil {
+	if err := seeder.waitForSeedPod(ctx, podName); err != nil {
 		return nil, err
 	}
 

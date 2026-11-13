@@ -21,9 +21,6 @@ func TestRuntimeIdentityCertificateNames(t *testing.T) {
 	for _, name := range []string{
 		"localhost", "127.0.0.1", "oberth.example.internal",
 		"oberth.oberth.svc",
-		// All four goproxy name forms must be present.
-		"oberth-goproxy", "oberth-goproxy.oberth",
-		"oberth-goproxy.oberth.svc", "oberth-goproxy.oberth.svc.cluster.local",
 	} {
 		if err := cert.VerifyHostname(name); err != nil {
 			t.Fatal(err)

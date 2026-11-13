@@ -47,7 +47,7 @@ func TestEvictionDisplayReason(t *testing.T) {
 		for _, step := range []string{"", "test"} {
 			run.FailedStep = step
 			hint := runRetryHint(run, nil)
-			if hint == nil || hint.Class != model.RetryInfrastructure || hint.Cause != "eviction" || hint.Action != "run_retry" {
+			if hint == nil || hint.Class != model.RetryInfrastructure || hint.Cause != "eviction" || hint.Action != "run_rerun" {
 				t.Errorf("message %q step %q: infrastructure display contradicts retry hint %+v", message, step, hint)
 			}
 		}

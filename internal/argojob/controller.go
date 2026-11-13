@@ -69,6 +69,7 @@ type Controller struct {
 	restartedAt  time.Time
 	timings      TimingRecorder
 	nodeBoots    NodeBootRecorder
+	hub          ObservationHub
 	workflows    WorkflowClient
 	kube         kubernetes.Interface
 	logs         PodLogReader
@@ -121,6 +122,10 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 // that would fail on its first step with an empty working directory.
 func (controller *Controller) WithSourceSeeder(seeder *SourceSeeder) *Controller {
 	controller.seeder = seeder
+	if seeder != nil {
+		seeder.hub = controller.hub
+		seeder.workflows = controller.workflows
+	}
 	return controller
 }
 
@@ -144,19 +149,10 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	if err := controller.verifyCapabilityGrant(ctx, request.RepositoryID, request.Capability); err != nil {
 		return "", err
 	}
-	if err := controller.config.ExecutionPlacement.selectRequest(controller.config, request); err != nil {
-		return "", err
-	}
-	if err := controller.config.ExecutionPlacement.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
-		return "", err
-	}
 
 	if controller.seeder == nil {
 		return "", errors.New("argojob: no source seeder is configured; " +
 			"a pipeline cannot mount the server's own claim across namespaces")
-	}
-	if controller.config.ExecutionPlacement != nil && (controller.seeder.config.ExecutionPlacement == nil || controller.seeder.config.ExecutionPlacement.digest != controller.config.ExecutionPlacement.digest) {
-		return "", errors.New("argojob: source seeder and Build placement authority differ")
 	}
 	// Seed store assets only for admitted consumers, using Build's grant rule.
 	needsSecretStore := requestNeedsSecretStore(request)
@@ -196,9 +192,6 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
 	volume, err := controller.seeder.SeedRequest(ctx, request, needsSecretStore)
 	if err != nil {
-		if controller.config.Custody != nil {
-			return "", fmt.Errorf("%w: source delivery: %w", ErrTargetUncertain, err)
-		}
 		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-ready")
@@ -395,9 +388,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	var live *stepLogFollowers
 	if controller.followLogs != nil {
 		live = newStepLogFollowers(ctx, controller.followLogs, budget, events)
+		live.steps = controller.observedStepAttempts
 		live.identity = controller.logIdentity
 		live.pod = controller.logPod
-		live.goProxyURL = controller.config.GoProxyURL
 		defer live.close()
 	}
 	reporter := newProgressReporter(budget)
@@ -564,7 +557,7 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 	// replaced them, and their failure and log are the evidence of why the
 	// step was retried. They are reported once and never decide a verdict.
 	// An attempt still non-terminal when superseded has nothing to report.
-	observed := stepAttempts(workflow)
+	observed := controller.observedStepAttempts(ctx, workflow)
 	steps := make([]StepResult, 0, len(observed))
 	for _, step := range observed {
 		if step.Superseded && terminal(step.Status) {
@@ -573,17 +566,29 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 	}
 	steps = append(steps, finalStepResults(observed)...)
 	for _, step := range steps {
-		if !reporter.observe(destination, step) {
+		if reporter.observe(destination, step) {
+			// A terminal event makes this log eligible; only a read finishes
+			// replay. Missing discovery must remain eligible on later polls.
+			reporter.replayed[step.NodeID] = false
+		}
+		replayed, eligible := reporter.replayed[step.NodeID]
+		if live != nil || !eligible || replayed || !terminal(step.Status) || workflow.Status.Nodes[step.NodeID].Type != wfv1.NodeTypePod {
 			continue
 		}
-		if live == nil && terminal(step.Status) && step.PodName != "" {
-			if err := controller.replayStepLog(ctx, workflow, step, destination); err != nil {
-				return err
+		if step.PodName == "" {
+			if workflow.Status.Phase.Completed() {
+				writeLine(destination, step, "oberth: step log unavailable: Pod identity could not be observed")
 			}
+			continue
 		}
+		read, err := controller.replayStepLog(ctx, workflow, step, destination)
+		if err != nil {
+			return err
+		}
+		reporter.replayed[step.NodeID] = read
 	}
 	if live != nil {
-		live.observe(workflow)
+		live.observeSteps(workflow, observed)
 	}
 	return nil
 }
@@ -598,31 +603,31 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 // It returns an error only when the aggregate run log budget is breached: the
 // per-step truncation is handled in-band (banner + continue), but an aggregate
 // breach must propagate to Wait so the run goes red with step attribution.
-func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.Workflow, step StepResult, destination io.Writer) error {
+func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.Workflow, step StepResult, destination io.Writer) (bool, error) {
 	if controller.logs == nil {
-		return nil
+		return false, nil
 	}
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
 	stream, err := controller.logs(readCtx, workflow.Namespace, step.PodName, mainContainerName)
 	if err != nil {
 		writeLine(destination, step, fmt.Sprintf("oberth: step log unavailable: %v", err))
-		return nil
+		return false, nil
 	}
 	defer func() { _ = stream.Close() }()
 	if step.Attempt != "" {
 		writeLine(destination, step, "oberth: Argo retry attempt "+step.Attempt)
 	}
-	if err := copyPrefixed(destination, step, io.LimitReader(stream, maxStepLogBytes), controller.config.GoProxyURL); err != nil {
+	if err := copyPrefixed(destination, step, io.LimitReader(stream, maxStepLogBytes)); err != nil {
 		if errors.Is(err, errRunLogBudget) {
 			// Best-effort banner -- the budget is exhausted so this write
 			// will likely fail, but writeLine silently drops write errors.
 			writeLine(destination, step, "oberth: run log truncated: aggregate budget exceeded")
-			return fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Stage, step.Step)
+			return true, fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Stage, step.Step)
 		}
 		writeLine(destination, step, fmt.Sprintf("oberth: step log truncated: %v", err))
 	}
-	return nil
+	return true, nil
 }
 
 // TerminalState reports a Workflow's terminal result without requiring any
@@ -680,6 +685,12 @@ func (controller *Controller) terminalState(ctx context.Context, name, wantedRun
 // The dispatcher uses it to route a name back to its engine after a restart,
 // when no in-process routing table survives.
 func (controller *Controller) Owns(ctx context.Context, name string) (bool, error) {
+	if controller.hub != nil && controller.hub.Healthy() {
+		if workflow, ok := controller.hub.Workflow(name); ok {
+			_, _, owned := WorkflowMeta(workflow)
+			return owned, nil
+		}
+	}
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return false, nil
@@ -749,6 +760,7 @@ type progressReporter struct {
 	reported      map[string]runprogress.Status
 	node          map[string]string
 	done          map[string]bool
+	replayed      map[string]bool
 	ordinals      map[string]int
 	ordinalOwners map[int]string
 	failed        error
@@ -760,6 +772,7 @@ func newProgressReporter(destination io.Writer) *progressReporter {
 		reported:      map[string]runprogress.Status{},
 		node:          map[string]string{},
 		done:          map[string]bool{},
+		replayed:      map[string]bool{},
 		ordinals:      map[string]int{},
 		ordinalOwners: map[int]string{},
 	}
@@ -978,8 +991,7 @@ func (writer *runBudgetWriter) Write(body []byte) (int, error) {
 // line, which is the marker internal/runlog indexes on. It returns an error on
 // the first destination write failure or when the transformed output exceeds
 // the per-step budget, and stops reading immediately in either case.
-func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyURL string) error {
-	var diagnostic goProxyDiagnostic
+func copyPrefixed(destination io.Writer, step StepResult, body io.Reader) error {
 	prefix := []byte("[" + step.Stage + "/" + step.Step + "] ")
 	buffered := make([]byte, 0, 8192)
 	chunk := make([]byte, 4096)
@@ -989,11 +1001,6 @@ func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyU
 		assembled = append(assembled, prefix...)
 		assembled = append(assembled, line...)
 		assembled = append(assembled, '\n')
-		if hint := diagnostic.observe(string(line), proxyURL); hint != "" {
-			assembled = append(assembled, prefix...)
-			assembled = append(assembled, hint...)
-			assembled = append(assembled, '\n')
-		}
 		written += int64(len(assembled))
 		if written > maxStepLogBytes {
 			return fmt.Errorf("step log exceeds the %d byte budget", maxStepLogBytes)
@@ -1132,14 +1139,11 @@ func normalizeSourceVolume(workflow *wfv1.Workflow) {
 	}
 }
 
-// requestNeedsSecretStore mirrors Build's resolved grant decision for seeding.
+// requestNeedsSecretStore mirrors Build's authored grant decision for seeding.
 // Build reports malformed declarations and denied grants before submission.
 func requestNeedsSecretStore(request Request) bool {
 	workflow, err := argoworkflow.Decode(request.Source)
 	if err != nil {
-		return false
-	}
-	if _, err := argoworkflow.Resolve(workflow, request.Fragments); err != nil {
 		return false
 	}
 	paths, err := argoworkflow.DeclaredSecretPaths(workflow)

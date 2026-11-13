@@ -1,4 +1,4 @@
-"""Validate explicit CPU and memory budgets in Argo workflows and fragments."""
+"""Validate explicit CPU and memory budgets in Argo workflows and templates."""
 import argparse
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -113,7 +113,7 @@ def main():
         except (OSError, ValueError, yaml.YAMLError, TypeError, AttributeError) as error:
             failures.append(f"{path}: invalid workflow YAML ({error})")
     if workflows == 0:
-        failures.append("no Argo workflows or fragments found")
+        failures.append("no Argo workflows or templates found")
     for failure in failures:
         print(failure, file=sys.stderr)
     print(f"resource guard: {workflows} workflows; {len(failures)} violations")

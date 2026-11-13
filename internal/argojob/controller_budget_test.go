@@ -27,9 +27,8 @@ func budgetTestWorkflow() *wfv1.Workflow {
 	workflow.Name = "wf"
 	workflow.Namespace = testNamespace
 	workflow.Annotations = map[string]string{
-		runIDAnnotation:          "run-budget",
-		identityAnnotation:       "digest",
-		PodNameVersionAnnotation: podNameVersionV2,
+		runIDAnnotation:    "run-budget",
+		identityAnnotation: "digest",
 	}
 	workflow.Spec = wfv1.WorkflowSpec{
 		Entrypoint: "ci",
@@ -76,9 +75,8 @@ func singleStepWorkflow() *wfv1.Workflow {
 	workflow.Name = "wf"
 	workflow.Namespace = testNamespace
 	workflow.Annotations = map[string]string{
-		runIDAnnotation:          "run-single",
-		identityAnnotation:       "digest",
-		PodNameVersionAnnotation: podNameVersionV2,
+		runIDAnnotation:    "run-single",
+		identityAnnotation: "digest",
 	}
 	workflow.Spec = wfv1.WorkflowSpec{
 		Entrypoint: "ci",
@@ -137,7 +135,7 @@ func TestRunLogBudgetEnforcedAcrossSteps(t *testing.T) {
 	config := testConfig()
 	config.MaxRunLogBytes = 2048
 
-	controller, err := NewController(client, nil, config)
+	controller, err := NewController(client, fixtureKube(workflow), config)
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -188,7 +186,7 @@ func TestProgressWriterFailurePropagatesFromWait(t *testing.T) {
 	client := &staticWorkflowClient{workflow: workflow}
 
 	config := testConfig()
-	controller, err := NewController(client, nil, config)
+	controller, err := NewController(client, fixtureKube(workflow), config)
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -222,7 +220,7 @@ func TestPerStepBudgetUnchangedWithAggregateBudget(t *testing.T) {
 	// be the binding constraint.
 	var underlying bytes.Buffer
 	budget := &runBudgetWriter{destination: &underlying, remaining: maxStepLogBytes * 10}
-	err := copyPrefixed(budget, step, strings.NewReader(input), "")
+	err := copyPrefixed(budget, step, strings.NewReader(input))
 	if err == nil {
 		t.Fatal("expected per-step budget error")
 	}

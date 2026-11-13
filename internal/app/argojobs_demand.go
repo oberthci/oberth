@@ -8,15 +8,8 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// ResolvePipelineSource admits and pins the exact source and fragment resolution before submission.
+// ResolvePipelineSource admits and pins the exact source graph before submission.
 func (jobs *ArgoJobs) ResolvePipelineSource(ctx context.Context, request service.WorkflowRequest) (*argoworkflow.SourceReceipt, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forRequest(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		return child.ResolvePipelineSource(ctx, request)
-	}
 	if request.Run.RepoID == 0 {
 		request.Run.RepoID = request.Repository.ID
 	}
@@ -28,14 +21,6 @@ func (jobs *ArgoJobs) ResolvePipelineSource(ctx context.Context, request service
 	if err != nil {
 		return nil, err
 	}
-	tier, err := runTrigger(request.Run)
-	if err != nil {
-		return nil, err
-	}
-	fragments, err := loadFragments(ctx, jobs.fragments, source, tier, request.Run.RefKind, request.Run.Trigger)
-	if err != nil {
-		return nil, err
-	}
 	file, err := jobs.runSourceFile(request)
 	if err != nil {
 		return nil, err
@@ -44,7 +29,7 @@ func (jobs *ArgoJobs) ResolvePipelineSource(ctx context.Context, request service
 	if sha == "" {
 		sha = request.Run.SHA
 	}
-	resolved, err := argoworkflow.ResolveRunSource(source, fragments, argoworkflow.RunSourceBinding{RunID: request.Run.ID, RepositoryID: request.Repository.ID, SHA: sha, File: file, Trigger: kind, ScheduleEntry: request.Run.ScheduleEntry})
+	resolved, err := argoworkflow.ResolveRunSource(source, argoworkflow.RunSourceBinding{RunID: request.Run.ID, RepositoryID: request.Repository.ID, SHA: sha, File: file, Trigger: kind, ScheduleEntry: request.Run.ScheduleEntry})
 	if err != nil {
 		return nil, err
 	}

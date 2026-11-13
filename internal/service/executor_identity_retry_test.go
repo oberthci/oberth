@@ -26,7 +26,7 @@ func (failure *identityObservationFailure) InfrastructureFailure() bool { return
 
 func TestExecutorIdentityFailureStopsAsCancelledAndRunRetryApplies(t *testing.T) {
 	fixture := newControlFixture(t)
-	// Manual run_retry remains available when the administrator disables automatic recovery.
+	// Manual run_rerun remains available when the administrator disables automatic recovery.
 
 	fixture.jobs.waitErr = fmt.Errorf("observe: %w", &identityObservationFailure{cause: context.DeadlineExceeded})
 	fixture.jobs.stopResult = JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: fixture.jobs.waitErr.Error()}
@@ -48,12 +48,16 @@ func TestExecutorIdentityFailureStopsAsCancelledAndRunRetryApplies(t *testing.T)
 		t.Fatal("live Workflow was not stopped before recording cancellation")
 	}
 	control := fixture.api(t)
-	control.runRetries = fixture.store
-	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_retry", json.RawMessage(fmt.Sprintf(`{"id":%q}`, source.ID)))
+	control.runReruns = fixture.store
+	control.refs = stubRefResolver{branches: map[string]map[string]string{control.cacheInputFor(t.Context(), fixture.repo): {source.Ref: source.SHA}}}
+	value, err := control.CallTool(t.Context(), api.Actor{Identity: "operator@host"}, "run_rerun", json.RawMessage(fmt.Sprintf(`{"id":%q}`, source.ID)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	retried := value.(model.Run)
+	retried, err := fixture.store.Run(t.Context(), value.(api.RunRerunResponse).RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if retried.Status != model.RunQueued || retried.ID == source.ID || retried.SHA != source.SHA || retried.Ref != source.Ref {
 		t.Fatalf("retry lost source identity: %+v", retried)
 	}
@@ -82,8 +86,10 @@ func TestExecutorIdentityFailureKeepsTerminalResultAndDeletionSafety(t *testing.
 			} else if err != nil || current.Phase != "test" || current.FailedStep != "unit" || current.Error != "assertion failed" || len(jobs.deleted) != 0 {
 				t.Fatalf("identity observation overrode actual CI failure: %+v %v", current, err)
 			}
-			if _, err := fixture.store.RetryRun(t.Context(), model.RunRetryRequest{RunID: run.ID, Actor: "operator@host"}); !errors.Is(err, store.ErrInvalidState) {
-				t.Fatal("unsafe or actual test failure became retryable", err)
+			if deletionFails {
+				if _, err := fixture.store.RerunRun(t.Context(), model.RunRerunRequest{RunID: run.ID, Actor: "operator@host"}); !errors.Is(err, store.ErrInvalidState) {
+					t.Fatal("unsafe deletion became retryable", err)
+				}
 			}
 		})
 	}

@@ -537,7 +537,7 @@ func validateReservation(reservation receiveReservation, repo string) error {
 		return fmt.Errorf("receive reservation for %s is invalid", repo)
 	}
 	for ref, sha := range reservation.Before {
-		if !publicReceiveRef(ref) || ValidateSHA(sha) != nil {
+		if reversePublicRef(ref) == "" || ValidateSHA(sha) != nil {
 			return fmt.Errorf("receive reservation for %s has invalid before ref", repo)
 		}
 	}

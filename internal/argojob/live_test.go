@@ -691,6 +691,15 @@ func (cluster liveCluster) execStreamer() ExecStreamer {
 // Pods and API defaults. It submits exactly two Workflows; no source claim is
 // needed for these commands, so the same Build and delivery paths run directly.
 func TestLiveExecutorIdentityDefaulting(t *testing.T) {
+	liveExecutorIdentityProof(t, []string{"ordinary", "resource"})
+}
+
+func TestLiveExecutorIdentityAuthoredInit(t *testing.T) {
+	liveExecutorIdentityProof(t, []string{"ordinary-init"})
+}
+
+func liveExecutorIdentityProof(t *testing.T, shapes []string) {
+	t.Helper()
 	cluster := requireLiveCluster(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
@@ -713,7 +722,7 @@ func TestLiveExecutorIdentityDefaulting(t *testing.T) {
 	must(err)
 	_, err = cluster.kube.CoreV1().ConfigMaps(cluster.namespace).Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "oberth-live-proof"}, Data: map[string]string{"proof": "resource-identity"}}, metav1.CreateOptions{})
 	must(err)
-	for _, shape := range []string{"ordinary", "resource"} {
+	for _, shape := range shapes {
 		t.Run(shape, func(t *testing.T) {
 			must := func(err error) {
 				t.Helper()
@@ -776,6 +785,19 @@ spec:
           namespace: %s
 `, cluster.namespace)
 			}
+			if shape == "ordinary-init" {
+				source = strings.Replace(source, "    container:\n", `    initContainers:
+    - name: authored-init
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      command: [sh, -c]
+      args:
+      - |
+        test -r /var/run/argo/template || exit 70
+        if (printf tampered > /var/run/argo/template) 2>/dev/null; then exit 71; fi
+        echo authored-init-read-only-proof
+    container:
+`, 1)
+			}
 			request := liveRequest("oberth-live-token-"+shape, pipeline.TriggerCI, source)
 			request.RepositoryID = 1
 			if shape == "resource" {
@@ -811,6 +833,18 @@ spec:
 					continue
 				}
 				for _, c := range pod.Spec.InitContainers {
+					if shape == "ordinary-init" && c.Name == "authored-init" {
+						found := false
+						for _, m := range c.VolumeMounts {
+							if m.Name == "var-run-argo" && m.MountPath == "/var/run/argo" && m.ReadOnly {
+								found = true
+							}
+						}
+						if !found {
+							t.Fatal("real authored init runtime mount is not read-only")
+						}
+						t.Log("actual API Pod: authored-init var-run-argo is read-only; attempted template write denied and initializer completed")
+					}
 					if c.Name == executorTokenWaiter {
 						checked++
 						if c.ImagePullPolicy == "" || c.TerminationMessagePath == "" || c.TerminationMessagePolicy == "" {

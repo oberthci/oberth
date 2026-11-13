@@ -135,7 +135,7 @@ func bindingFixture(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.Si
 	return bindingFixtureAt(t, root, keyFile, gitURL, sshSigner, "localhost")
 }
 
-func bindingFixtureAt(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.Signer, host string) repositoryClientOptions {
+func bindingFixtureAt(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.Signer, host string, registeredPaths ...string) repositoryClientOptions {
 	t.Helper()
 	clientFiles, err := clientcert.GenerateAuthority()
 	if err != nil {
@@ -166,6 +166,9 @@ func bindingFixtureAt(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.
 		ips = append(ips, ip)
 	}
 	identity, serverCA := inviteCLIIdentityFor(t, ips...)
+	if len(registeredPaths) == 0 {
+		registeredPaths = []string{"github/acme/project"}
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(r.TLS.VerifiedChains) == 0 || r.Header.Get("Authorization") != "" {
 			t.Error("registration lookup lacked certificate-only authentication")
@@ -183,7 +186,11 @@ func bindingFixtureAt(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.
 		case "system_status":
 			result = map[string]string{"ssh_host_key": strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshSigner.PublicKey()))), "ssh_host_key_fingerprint": ssh.FingerprintSHA256(sshSigner.PublicKey())}
 		case "repo_list":
-			result = map[string]any{"repositories": []map[string]string{{"git_path": "github/acme/project"}}}
+			rows := make([]map[string]string, 0, len(registeredPaths))
+			for _, path := range registeredPaths {
+				rows = append(rows, map[string]string{"git_path": path})
+			}
+			result = map[string]any{"repositories": rows}
 		default:
 			t.Error(params.Name)
 			w.WriteHeader(400)
@@ -227,7 +234,8 @@ func TestClientRepositoryTwoServersPushOnlyToTheirPinnedServer(t *testing.T) {
 	t.Setenv("GIT_SSH", "")
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "global"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "config with spaces"))
+	configRoot := filepath.Join(t.TempDir(), "config with spaces")
+	t.Setenv("CLAUDE_CONFIG_DIR", configRoot)
 	_, clientKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -265,6 +273,18 @@ func TestClientRepositoryTwoServersPushOnlyToTheirPinnedServer(t *testing.T) {
 		}
 		gitURL, count := bindingSSHServer(t, hostSigner, clientSigner.PublicKey(), bare)
 		o := bindingFixture(t, root, keyFile, gitURL, hostSigner)
+		if i == 1 {
+			o.RegisteredRepo = "project"
+			if err := os.MkdirAll(filepath.Join(configRoot, "oberth"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			ca, err := os.ReadFile(o.CAFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bindingWrite(t, filepath.Join(configRoot, "oberth", "ca.crt"), ca)
+			o.CAFile = ""
+		}
 		o.Assist = i == 0
 		preview := o
 		preview.Consent = false
@@ -416,5 +436,43 @@ func TestClientRepositoryIPHostsPushWithPinnedIdentity(t *testing.T) {
 				t.Fatal("IP push did not arrive at pinned server")
 			}
 		})
+	}
+}
+
+func TestClientRepositoryRejectsAmbiguousSlugAndAcceptsQualifiedSelection(t *testing.T) {
+	t.Setenv("GIT_SSH_COMMAND", "")
+	t.Setenv("GIT_SSH", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "global"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	root := t.TempDir()
+	bindingGit(t, root, "init")
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := bindingWrite(t, filepath.Join(t.TempDir(), "push"), []byte("local identity fixture"))
+	o := bindingFixtureAt(t, root, identity, "ssh://git@localhost:32022", signer, "localhost", "github/acme/project", "other/team/project")
+	o.Consent = false
+	o.RegisteredRepo = "project"
+	if _, err = configureClientRepository(t.Context(), o); err == nil || !strings.Contains(err.Error(), "uniquely registered") {
+		t.Fatalf("ambiguous selection: %v", err)
+	}
+	o.RegisteredRepo = "other/team/project"
+	got, err := configureClientRepository(t.Context(), o)
+	if err != nil || got.PushURL != "ssh://git@localhost:32022/other/team/project.git" {
+		t.Fatalf("qualified selection: %+v %v", got, err)
+	}
+}
+
+func TestClientRepositoryRefusesRelativeTrustCADefault(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "relative-config")
+	_, err := configureClientRepository(t.Context(), repositoryClientOptions{Path: t.TempDir(), Installation: "public-install.json", RegisteredRepo: "project", SSHKey: "local-push-key", ClientCert: "client.crt", ClientKey: "client.key", Mode: "remote"})
+	if err == nil || !strings.Contains(err.Error(), "CLAUDE_CONFIG_DIR must be absolute") {
+		t.Fatalf("relative CA selection: %v", err)
 	}
 }

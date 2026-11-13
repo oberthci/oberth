@@ -145,7 +145,6 @@
     },
     "runnerImagePrefixes": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "string",
         "minLength": 1,
@@ -708,7 +707,6 @@
                   "not": {
                     "enum": [
                       ".oberth/build.yaml",
-                      ".oberth/fragment.yaml",
                       ".oberth/schedule.yaml",
                       ".oberth/tests.yaml"
                     ]
@@ -814,7 +812,6 @@
                           "not": {
                             "enum": [
                               ".oberth/build.yaml",
-                              ".oberth/fragment.yaml",
                               ".oberth/schedule.yaml",
                               ".oberth/tests.yaml"
                             ]
@@ -941,95 +938,6 @@
         "sourceStorageClass": {
           "type": "string",
           "description": "Storage class for the per-run pipeline source volume. Empty selects the cluster default."
-        },
-        "goProxy": {
-          "type": "object",
-          "description": "Credential-free Go module proxy for private modules (#662). Serves the GOPROXY protocol read-only from Oberth's git cache.",
-          "properties": {
-            "allowNonDefaultBranchPseudoVersions": {
-              "type": "boolean",
-              "default": false,
-              "description": "Allow pseudo-versions from non-default public branches and tags already permitted by module proxy policy. Default restricts pseudo-versions to default-branch ancestry."
-            },
-            "enabled": {
-              "type": "boolean",
-              "description": "Enable the read-only Go module proxy after configuring its owned namespace. Default: false."
-            },
-            "port": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 65535,
-              "description": "HTTPS port for the module proxy ClusterIP Service. Default: 8444."
-            },
-            "modulePrefix": {
-              "type": "string",
-              "maxLength": 253,
-              "pattern": "^[A-Za-z0-9._/-]*$"
-            },
-            "repositoryPrefix": {
-              "type": "string",
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9._-]*$"
-            },
-            "upstream": {
-              "type": "string",
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9._-]*$"
-            },
-            "organization": {
-              "type": "string",
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9._-]*$"
-            }
-          },
-          "allOf": [
-            {
-              "if": {
-                "properties": {
-                  "enabled": {
-                    "const": true
-                  }
-                },
-                "required": [
-                  "enabled"
-                ]
-              },
-              "then": {
-                "required": [
-                  "modulePrefix",
-                  "upstream",
-                  "organization"
-                ],
-                "properties": {
-                  "modulePrefix": {
-                    "minLength": 1
-                  },
-                  "upstream": {
-                    "minLength": 1
-                  },
-                  "organization": {
-                    "minLength": 1
-                  }
-                }
-              }
-            }
-          ],
-          "additionalProperties": false
-        },
-        "executionPlacementConfigMap": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
-          "maxLength": 253
-        },
-        "executionTargetConfigMap": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
-          "maxLength": 253
-        },
-        "executionTargetCredentialsSecret": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
-          "maxLength": 253
         }
       }
     },

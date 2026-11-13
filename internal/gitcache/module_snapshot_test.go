@@ -1,8 +1,6 @@
 package gitcache
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -13,65 +11,6 @@ import (
 	"testing"
 	"time"
 )
-
-func TestModuleSnapshotPinsAnnotatedTagAndArchive(t *testing.T) {
-	repository := newTestRepository(t)
-	want := []byte("module go.example.test/snapshot\n\ngo 1.22\n")
-	if err := os.WriteFile(filepath.Join(repository.work, "go.mod"), want, 0600); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, repository.work, "add", "go.mod")
-	runGit(t, repository.work, "commit", "-m", "module snapshot")
-	runGit(t, repository.work, "tag", "-a", "v1.0.0", "-m", "annotated release")
-	runGit(t, repository.work, "push", repository.upstream, "refs/tags/v1.0.0")
-	cache := newTestCache(t, repository.upstream)
-	ready, err := cache.Ensure(t.Context(), "example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, timestamp, err := cache.ModuleTagSnapshot(t.Context(), "example", "v1.0.0")
-	if err != nil || timestamp.IsZero() || source != strings.TrimSpace(runGit(t, ready.Path, "rev-parse", "refs/tags/v1.0.0^{commit}")) {
-		t.Fatalf("snapshot lost exact annotated tag commit: %s %s %v", source, timestamp, err)
-	}
-	if remote, err := cache.ModuleOriginURL(t.Context(), "example"); err != nil || remote != repository.upstream {
-		t.Fatalf("module origin URL = %q: %v", remote, err)
-	}
-	snapshot, err := cache.ModuleVersionSnapshot(t.Context(), "example", "go.example.test/snapshot", "", "v1.0.0", false)
-	if err != nil || snapshot.Commit != source || !snapshot.Time.Equal(timestamp) || snapshot.Ref != "refs/tags/v1.0.0" || snapshot.URL != repository.upstream {
-		t.Fatalf("coherent annotated snapshot = %+v: %v", snapshot, err)
-	}
-	// Simulate a tag changing between independently locked proxy operations.
-	runGit(t, ready.Path, "update-ref", "refs/tags/v1.0.0", repository.initialSHA)
-	got, err := cache.ShowFile(t.Context(), "example", source, "go.mod")
-	if err != nil || !bytes.Equal(got, want) {
-		t.Fatalf("pinned show followed a moved tag: %q %v", got, err)
-	}
-	var archive bytes.Buffer
-	if err := cache.ArchiveTar(t.Context(), "example", source, &archive); err != nil {
-		t.Fatal(err)
-	}
-	reader := tar.NewReader(&archive)
-	found := false
-	for {
-		header, err := reader.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if header.Name == "go.mod" {
-			body, err := io.ReadAll(reader)
-			if err != nil || !bytes.Equal(body, want) {
-				t.Fatal("pinned archive changed", err)
-			}
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("pinned archive lost go.mod")
-	}
-}
 
 func TestModuleRepositoryLockWaitHonorsContext(t *testing.T) {
 	repository := newTestRepository(t)
@@ -84,32 +23,12 @@ func TestModuleRepositoryLockWaitHonorsContext(t *testing.T) {
 	lock.Lock()
 	defer lock.Unlock()
 	operations := map[string]func(context.Context) error{
-		"root license": func(ctx context.Context) error {
-			_, _, err := cache.ModuleRootLicense(ctx, "example", repository.initialSHA)
-			return err
-		},
-		"identity": func(ctx context.Context) error {
-			_, err := cache.ModuleVersionSnapshot(ctx, "example", "go.example.test/module", "", "v1.0.0", false)
-			return err
-		},
-		"origin": func(ctx context.Context) error {
-			_, err := cache.ModuleOriginURL(ctx, "example")
-			return err
-		},
-		"pseudo": func(ctx context.Context) error {
-			_, _, err := cache.ModulePseudoVersionSnapshot(ctx, "example", "go.example.test/module", "v0.0.0-20260929120000-"+repository.initialSHA[:12], false)
-			return err
-		},
 		"list": func(ctx context.Context) error { _, err := cache.ListTags(ctx, "example"); return err },
 		"mod": func(ctx context.Context) error {
 			_, err := cache.ShowFile(ctx, "example", "v1.0.0", "go.mod")
 			return err
 		},
 		"zip": func(ctx context.Context) error { return cache.ArchiveTar(ctx, "example", "v1.0.0", io.Discard) },
-		"snapshot": func(ctx context.Context) error {
-			_, _, err := cache.ModuleTagSnapshot(ctx, "example", "v1.0.0")
-			return err
-		},
 	}
 	for name, read := range operations {
 		t.Run(name, func(t *testing.T) {

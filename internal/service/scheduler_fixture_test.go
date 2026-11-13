@@ -365,7 +365,7 @@ spec:
         requests: {cpu: %dm, memory: 1Gi}
         limits: {memory: 1Gi}
 `, strings.Repeat("a", 64), cpu))
-	resolved, err := argoworkflow.ResolveRunSource(source, nil, argoworkflow.RunSourceBinding{RunID: req.Run.ID, RepositoryID: req.Repository.ID, SHA: req.Run.SHA, File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
+	resolved, err := argoworkflow.ResolveRunSource(source, argoworkflow.RunSourceBinding{RunID: req.Run.ID, RepositoryID: req.Repository.ID, SHA: req.Run.SHA, File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
 	if err != nil {
 		return nil, err
 	}

@@ -32,7 +32,7 @@ func TestTimingPaginatedLargeDAG(t *testing.T) {
 		n.DisplayName = fmt.Sprintf("task%d", i)
 		wf.Status.Nodes[n.ID] = n
 		p := pod.DeepCopy()
-		p.Name = PodName(wf, n)
+		p.Name = fixturePodName(wf, n)
 		p.UID = types.UID(fmt.Sprintf("22222222-2222-4222-8222-%012d", i))
 		p.Annotations["workflows.argoproj.io/node-id"] = n.ID
 		p.Annotations["workflows.argoproj.io/node-name"] = n.Name
@@ -115,7 +115,7 @@ func TestTimingIncompleteSnapshotNeverProjectsPartialEvidence(t *testing.T) {
 }
 
 func TestTimingRejectsCrossAttemptPodBindings(t *testing.T) {
-	for _, mode := range []string{"owner", "node-id", "node-name", "pod-name", "namespace", "workflow-uid"} {
+	for _, mode := range []string{"owner", "node-id", "node-name", "namespace", "workflow-uid"} {
 		t.Run(mode, func(t *testing.T) {
 			wf, node, pod, at := diagnosticFixture()
 			switch mode {
@@ -125,14 +125,12 @@ func TestTimingRejectsCrossAttemptPodBindings(t *testing.T) {
 				pod.Annotations["workflows.argoproj.io/node-id"] = "other"
 			case "node-name":
 				pod.Annotations["workflows.argoproj.io/node-name"] = "other"
-			case "pod-name":
-				pod.Name = "other"
 			case "namespace":
 				pod.Namespace = "other"
 			case "workflow-uid":
 				wf.UID = "33333333-3333-4333-8333-333333333333"
 			}
-			step := StepResults(wf)[0]
+			step := fixtureStepResults(wf)[0]
 			d := projectStepDiagnostic(wf, node, pod, at)
 			v := projectStepTiming(wf, node, pod, step, d, at)
 			if v.Available || v.Main != nil || v.PodCreatedAt != nil || len(v.Init) != 0 || v.Unavailable != "binding-mismatch" || v.Validate() != nil {
@@ -156,7 +154,7 @@ func TestTimingInitAndLogicalReadinessAreExplicit(t *testing.T) {
 	cid := "containerd://" + strings.Repeat("d", 64)
 	pod.Spec.InitContainers = []corev1.Container{{Name: "executor-token"}}
 	pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: "executor-token", ContainerID: cid, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ContainerID: cid, StartedAt: metav1.NewTime(at.Add(-79 * time.Second)), FinishedAt: metav1.NewTime(at.Add(-74 * time.Second))}}}}
-	v := projectStepTiming(wf, node, pod, StepResults(wf)[0], projectStepDiagnostic(wf, node, pod, at), at)
+	v := projectStepTiming(wf, node, pod, fixtureStepResults(wf)[0], projectStepDiagnostic(wf, node, pod, at), at)
 	if !v.Available || v.DependencyReadyAt == nil || v.ScheduledAt == nil || len(v.Init) != 1 || v.Init[0].FinishedAt.Sub(v.Init[0].StartedAt) != 5*time.Second || v.ScriptTiming != "mixed" || v.ImagePullTiming != "not-observed" {
 		t.Fatalf("timing %+v", v)
 	}

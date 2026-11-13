@@ -29,24 +29,26 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
-	ReissueServerCA     bool
-	WaitTimeout         time.Duration // independent queue-observation limit
-	WaitFor             string        // all or critical; a nonempty selection enables waiting
-	WaitIdle            bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
-	Namespace           string
-	DryRun              bool
-	Yes                 bool   // --yes, with --rollback: replace the database with the pre-upgrade backup without a second run
-	ChartOverride       string // --chart: override the chart reference
-	BinaryVersion       string
-	Timeout             time.Duration
-	UserValues          []string // --values/-f: repeatable values file paths
-	UserSet             []string // --set: repeatable key=value pairs
-	BinarySchemaVersion int      // set by the caller to store.LatestMigrationVersion()
-	TLSExtraDNSNames    []string
-	TLSExtraIPs         []string
-	TLSRemoveDNSNames   []string
-	TLSRemoveIPs        []string
-	OpenBaoNamespace    string
+	// ArgoSecurityDefaults explicitly permits absent-only changes to an existing Argo release.
+	ArgoSecurityDefaults bool
+	ReissueServerCA      bool
+	WaitTimeout          time.Duration // independent queue-observation limit
+	WaitFor              string        // all or critical; a nonempty selection enables waiting
+	WaitIdle             bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
+	Namespace            string
+	DryRun               bool
+	Yes                  bool   // --yes, with --rollback: replace the database with the pre-upgrade backup without a second run
+	ChartOverride        string // --chart: override the chart reference
+	BinaryVersion        string
+	Timeout              time.Duration
+	UserValues           []string // --values/-f: repeatable values file paths
+	UserSet              []string // --set: repeatable key=value pairs
+	BinarySchemaVersion  int      // set by the caller to store.LatestMigrationVersion()
+	TLSExtraDNSNames     []string
+	TLSExtraIPs          []string
+	TLSRemoveDNSNames    []string
+	TLSRemoveIPs         []string
+	OpenBaoNamespace     string
 	// ReleaseDir reads the signed release objects from a directory instead
 	// of fetching them (air-gapped hosts). ReleaseOrigin and ChartRepository
 	// override the publication origins for a mirror; verification is the same.
@@ -96,13 +98,9 @@ func (e *ErrSchemaValidation) Error() string {
 	return fmt.Sprintf("chart schema validation failed: %s", e.Detail)
 }
 
-// upgradePinnedKeys are the helm values protected by the upgrade path. The
-// enablement of an existing private module proxy is preserved from stored values;
-// callers cannot disable that existing routing boundary as an upgrade override.
+// upgradePinnedKeys protect the image and durable compatibility identities.
 var upgradePinnedKeys = map[string]bool{
 	"image.ref":                    true,
-	"argo.goProxy.enabled":         true,
-	"argo.goProxy.port":            true,
 	"compatibility.schemaIdentity": true,
 	"compatibility.auditDomain":    true,
 	"compatibility.witnessKeyInfo": true,
@@ -429,6 +427,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, fmt.Errorf("preview upgrade before writes: %w", previewErr)
 	}
 	previewErr = printHelmValueChanges(ctx, deps, cfg.Namespace, previewRaw, prepared.revision)
+	var argoSecurity *upgradeArgoSecurity
+	if previewErr == nil {
+		argoSecurity, previewErr = planUpgradeArgoSecurityPreview(ctx, deps, previewRaw, cfg.ArgoSecurityDefaults)
+	}
 	clear(previewRaw)
 	if previewErr != nil {
 		return result, previewErr
@@ -461,6 +463,9 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		_, _ = fmt.Fprintf(w, "Rollback record: %s (roll back with: oberth upgrade --rollback %s)\n", recordPath, recordPath)
 	}
 
+	if err := argoSecurity.reconcile(ctx, deps); err != nil {
+		return result, err
+	}
 	if pki != nil {
 		_, replaced, err := ensureServerPKI(ctx, pki.config, pki.store, pki.token, map[string]baoMount{defaultServerPKIMount + "/": {Type: "pki"}})
 		if err != nil {
@@ -678,8 +683,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		"--set-string", "compatibility.schemaIdentity="+compatibility.SchemaIdentity,
 		"--set-string", "compatibility.auditDomain="+compatibility.AuditDomain,
 		"--set-string", "compatibility.witnessKeyInfo="+compatibility.WitnessKeyInfo,
-		// Keep the existing proxy enablement and mapping from reused values.
-		"--set", "argo.goProxy.port=8444",
 	)
 	args = append(args, cfg.defaultPins...)
 	// User values files come after pins. Pinned-key conflicts have already

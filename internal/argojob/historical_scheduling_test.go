@@ -11,9 +11,9 @@ import (
 )
 
 // These immutable controller captures exercise security isolation under the
-// old submission policy. Reconstruct only their retired scheduling inputs;
-// This reconstruction applies only to historical Workflow Pods, never current
-// seed, collect or executor identity helpers. Current submissions use native field preservation
+// old submission policy. Reconstruct their retired scheduling and Pod-name inputs.
+// This applies only to historical Workflow Pods, never current seed, collect
+// or executor identity helpers. Current submissions use native field preservation
 // tests. No captured bytes or provenance hashes are rewritten.
 func historicalSchedulingInput(t *testing.T, wf *wfv1.Workflow, release bool) {
 	t.Helper()
@@ -78,6 +78,14 @@ func historicalSchedulingInput(t *testing.T, wf *wfv1.Workflow, release bool) {
 		}
 	})
 	wf.Annotations["oberth.ci/request-defaults"] = "2cpu-2Gi-helpers-250m-256Mi-v2"
+	historicalPodNameInput(t, wf)
+}
+
+// Reconstruct only the retired pin for comparison with authenticated captures.
+func historicalPodNameInput(t *testing.T, wf *wfv1.Workflow) {
+	t.Helper()
+	// This pin belongs only to the authenticated historical capture.
+	wf.Annotations["workflows.argoproj.io/pod-name-format"] = "v2"
 	identity, err := specIdentity(wf)
 	if err != nil {
 		t.Fatal(err)

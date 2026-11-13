@@ -13,10 +13,12 @@ func TestReleaseRegistrySignaturesAreReusedOnRetry(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			f := newReleaseRuntimeFixture(t)
 			f.tool("cosign", `printf 'cosign:%s\n' "$1" >>"$FIXTURE_TRACE"
+for reference do :; done
+marker="$FIXTURE_ROOT/signature-$(printf '%s' "$reference" | sha256sum | cut -d ' ' -f1)"
 case "$1" in
  public-key) cat "$FIXTURE_ROOT/.oberth/pins/release-cosign.pub";;
- verify) test -f "$FIXTURE_ROOT/registry-signed";;
- sign) if test -f "$FIXTURE_ROOT/registry-signed"; then echo IMMUTABLE_SIGNATURE_REFUSAL >&2; exit 91; fi; touch "$FIXTURE_ROOT/registry-signed";;
+ verify) test -f "$marker";;
+ sign) if test -f "$marker"; then echo IMMUTABLE_SIGNATURE_REFUSAL >&2; exit 91; fi; touch "$marker";;
  sign-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; printf "valid\n" >"$1"; fi; shift; done;;
  verify-blob) while [ "$#" -gt 0 ]; do if [ "$1" = --bundle ]; then shift; grep -qx valid "$1" || exit 92; fi; shift; done;;
  *) exit 90;;
@@ -33,8 +35,12 @@ esac`)
 					t.Fatalf("attempt %d: %v\n%s\n%s", attempt, err, out, f.log())
 				}
 			}
-			if got := strings.Count(f.log(), "cosign:sign\n"); got != 1 {
-				t.Fatalf("signature writes = %d, want exactly one\n%s", got, f.log())
+			want := 1
+			if action == "publish-images" {
+				want = 2
+			}
+			if got := strings.Count(f.log(), "cosign:sign\n"); got != want {
+				t.Fatalf("signature writes = %d, want %d\n%s", got, want, f.log())
 			}
 			if action == "publish-chart" && strings.Count(f.log(), "helm:push\n") != 1 {
 				t.Fatalf("chart retry did not reuse the existing immutable object\n%s", f.log())

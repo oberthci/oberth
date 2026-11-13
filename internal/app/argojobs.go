@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/argojob"
+	"github.com/oberthci/oberth/internal/argowatch"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
@@ -64,14 +65,11 @@ type DeclarationRecorder interface {
 // contracts the Argo Workflow engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
+	watchHub       *argowatch.Hub
 	pinnedSources  *PinnedSourceLoader
 	sourceRecorder PinnedSourceRecorder
 
-	routes        *executionTargets
-	targetBinding *model.ExecutionTargetBinding
-	targetSource  []byte
-	targetClients *argojob.TargetClients
-	beforeCreate  func(context.Context, service.WorkflowRequest, argojob.Request) error
+	beforeCreate func(context.Context, service.WorkflowRequest, argojob.Request) error
 
 	capabilityGrants  func(context.Context, int64) (*argoworkflow.Capability, error)
 	resourceBlobs     workflowpolicy.PolicyGit
@@ -80,7 +78,6 @@ type ArgoJobs struct {
 	config            argojob.Config
 	secretAccess      SecretAccessLoader
 	declarations      DeclarationRecorder
-	fragments         FragmentLoader
 	collector         ArtifactCollector
 	artifacts         ArtifactStore
 	artifactLimit     int64
@@ -122,15 +119,12 @@ var ErrCreationCancelled = errors.New("app: Workflow cancelled before creation")
 // initialization order. Once set, steps with secret grants wait until the
 // reconciler reports at least one successful reconciliation.
 func (jobs *ArgoJobs) SetReconcilerHealth(checker ReconcilerHealthChecker) {
-	if jobs.routes != nil {
-		jobs.routes.local.SetReconcilerHealth(checker)
-	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.reconcilerHealthy = checker
 }
 
-func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.Auditor, secretAccess SecretAccessLoader, fragments FragmentLoader) (*ArgoJobs, error) {
+func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.Auditor, secretAccess SecretAccessLoader) (*ArgoJobs, error) {
 	config.ReleaseWIF = config.ReleaseWIF.Clone()
 	config.ReleaseTagRoutes = config.ReleaseTagRoutes.Clone()
 	if controller == nil {
@@ -146,7 +140,7 @@ func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	jobs := &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, fragments: fragments, intents: map[string]argoIntent{}}
+	jobs := &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, intents: map[string]argoIntent{}}
 	return jobs, nil
 }
 
@@ -154,9 +148,6 @@ func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.
 // construction. When set, create() records (repo, step, path) declarations
 // at Workflow admission for `access_list --pending`. Issue #623, finding 4.
 func (jobs *ArgoJobs) SetDeclarationRecorder(recorder DeclarationRecorder) {
-	if jobs.routes != nil {
-		jobs.routes.local.SetDeclarationRecorder(recorder)
-	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.declarations = recorder
@@ -165,9 +156,6 @@ func (jobs *ArgoJobs) SetDeclarationRecorder(recorder DeclarationRecorder) {
 // SetWorkflowCapabilityLoader wires durable operator authority before serving
 // requests. The controller independently rechecks it at Kubernetes effects.
 func (jobs *ArgoJobs) SetWorkflowCapabilityLoader(load func(context.Context, int64) (*argoworkflow.Capability, error)) {
-	if jobs.routes != nil {
-		jobs.routes.local.SetWorkflowCapabilityLoader(load)
-	}
 	jobs.capabilityGrants = load
 	if controller, ok := jobs.controller.(interface {
 		WithWorkflowCapabilityLoader(func(context.Context, int64) (*argoworkflow.Capability, error)) *argojob.Controller
@@ -180,9 +168,6 @@ func (jobs *ArgoJobs) SetWorkflowCapabilityLoader(load func(context.Context, int
 // When set, create() snapshots it once per admission so both the audit Build
 // and the controller Build bind the same identity version. (Issue #465)
 func (jobs *ArgoJobs) SetIdentityStore(store *argojob.IdentityStore) {
-	if jobs.routes != nil {
-		jobs.routes.local.SetIdentityStore(store)
-	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.identities = store
@@ -191,9 +176,6 @@ func (jobs *ArgoJobs) SetIdentityStore(store *argojob.IdentityStore) {
 // SetReleaseWIFRuntime wires the runtime release WIF layer (#1497) before
 // serving requests. Without it admissions use the boot map unchanged.
 func (jobs *ArgoJobs) SetReleaseWIFRuntime(runtime *argojob.ReleaseWIFRuntime) {
-	if jobs.routes != nil {
-		jobs.routes.local.SetReleaseWIFRuntime(runtime)
-	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.releaseWIF = runtime
@@ -236,13 +218,6 @@ func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.Workflo
 // omits it, and an agent reading `status` on a failed run sees a plausible
 // complete pipeline that is missing exactly the work that never ran.
 func (jobs *ArgoJobs) PlannedSteps(ctx context.Context, request service.WorkflowRequest) ([]runprogress.PlannedStep, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forRequest(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		return child.PlannedSteps(ctx, request)
-	}
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return nil, jobs.noRunPipelineError(err, request)
@@ -263,36 +238,6 @@ func (jobs *ArgoJobs) PlannedSteps(ctx context.Context, request service.Workflow
 }
 
 func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowRequest, trigger pipeline.Trigger) error {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forRequest(ctx, request)
-		if err != nil {
-			return err
-		}
-		err = child.create(ctx, request, trigger)
-		if err != nil && child.targetBinding != nil {
-			return fmt.Errorf("%w: %w", argojob.ErrTargetUncertain, err)
-		}
-		return err
-	}
-	var branchAuthority *workflowpolicy.BranchAuthority
-	if jobs.targetBinding != nil {
-		if err := jobs.config.ExecutionPlacement.ValidateAdmission(); err != nil {
-			return err
-		}
-		b := jobs.targetBinding
-		if err := matchTargetRun(*b, request.Run, request.WorkflowName); err != nil {
-			return err
-		}
-		var err error
-		branchAuthority, err = workflowpolicy.ResolveBranchAuthority(ctx, jobs.resourceBlobs, b.Repository, b.TestedSHA)
-		if err != nil {
-			return err
-		}
-		if !branchAuthority.Matches(b.Repository, b.TestedSHA, b.PolicyBaseline, b.PolicyDigest) {
-			return errors.New("app: branch policy changed before target admission")
-		}
-	}
-
 	if strings.TrimSpace(request.WorkflowName) == "" || strings.TrimSpace(request.Run.ID) == "" || request.Repository.Name == "" {
 		return errors.New("app: deterministic Workflow name, run, and repository are required")
 	}
@@ -353,15 +298,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if testedSHA == "" {
 		testedSHA = request.Run.SHA
 	}
-	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
-	if request.SourceReceipt != nil {
-		fragments = request.SourceReceipt.Fragments()
-	} else {
-		fragments, err = loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind, request.Run.Trigger)
-		if err != nil {
-			return fmt.Errorf("app: resolve fragments for %s: %w", request.Repository.Name, err)
-		}
-	}
 	kind, err := runKind(request.Run)
 	if err != nil {
 		return err
@@ -370,7 +306,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if err != nil {
 		return err
 	}
-	resolved, err := argoworkflow.ResolveRunSource(source, fragments, argoworkflow.RunSourceBinding{
+	resolved, err := argoworkflow.ResolveRunSource(source, argoworkflow.RunSourceBinding{
 		RunID: request.Run.ID, RepositoryID: request.Repository.ID, SHA: testedSHA,
 		File: pipelineFile, Trigger: kind, ScheduleEntry: request.Run.ScheduleEntry,
 	})
@@ -383,17 +319,14 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	}
 
 	submission := argojob.Request{
-
-		BranchAuthority: branchAuthority,
-		SourceReceipt:   request.SourceReceipt,
-		PipelineFile:    pipelineFile,
-		RunID:           request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName,
+		SourceReceipt: request.SourceReceipt,
+		PipelineFile:  pipelineFile,
+		RunID:         request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Ref: request.Run.Ref, SHA: testedSHA, Trigger: trigger, RunTrigger: kind, ScheduleEntry: request.Run.ScheduleEntry, Source: source,
 		Assist:    request.Run.AssistRequested,
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
-		Fragments:  fragments,
 	}
 
 	sources, err := argoworkflow.PinnedSources(resolved.Workflow())
@@ -503,10 +436,6 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 	if workflow.Annotations != nil {
 		declared = workflow.Annotations["oberth.ci/declared-secret-paths"]
 	}
-	fragments := ""
-	if workflow.Annotations != nil {
-		fragments = workflow.Annotations[argojob.FragmentsAnnotation]
-	}
 	automount := workflow.Spec.AutomountServiceAccountToken != nil && *workflow.Spec.AutomountServiceAccountToken
 	details := map[string]any{
 		"repo": request.Repository.Name, "upstream_org": request.UpstreamOrg,
@@ -528,7 +457,6 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 		}(),
 		"automount_service_account_token": automount,
 		"declared_secret_paths":           declared,
-		"fragments":                       fragments,
 		"sources":                         sourcesForAudit(submission.PinnedSources),
 	}
 	if submission.SourceReceipt != nil {
@@ -634,20 +562,6 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Wo
 // Adopt rebuilds the intent from the durable run and the existing Workflow.
 // It never seeds sources, submits work, or re-evaluates repository commands.
 func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
-		if err != nil {
-			if errors.Is(err, store.ErrExecutionTargetQuarantined) {
-				return false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)
-			}
-			return false, err
-		}
-		found, err := child.Adopt(ctx, run)
-		if err == nil && !found && child.targetBinding != nil {
-			return false, argojob.ErrTargetUncertain
-		}
-		return found, err
-	}
 	controller, ok := jobs.controller.(interface {
 		Adopt(context.Context, argojob.AdoptionRequest) (argojob.Adoption, bool, error)
 	})
@@ -702,29 +616,6 @@ func (jobs *ArgoJobs) Wait(ctx context.Context, name string, destination io.Writ
 }
 
 func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writer, events []runprogress.Event, retained int64) (service.JobResult, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, name, "")
-		if err != nil {
-			return service.JobResult{}, err
-		}
-		result, err := child.wait(ctx, name, destination, events, retained)
-		if child.targetClients != nil && err == nil {
-			if custodyErr := child.targetClients.VerifyResultCustody(ctx); custodyErr != nil {
-				return service.JobResult{}, custodyErr
-			}
-		}
-		if result.Reobserve != nil && child.targetClients != nil {
-			original := result.Reobserve
-			result.Reobserve = func(ctx context.Context) (service.JobResult, error) {
-				if err := child.targetClients.VerifyResultCustody(ctx); err != nil {
-					return service.JobResult{}, err
-				}
-				return original(ctx)
-			}
-		}
-		return result, err
-	}
-
 	jobs.mu.Lock()
 	intent, ok := jobs.intents[name]
 	jobs.mu.Unlock()
@@ -827,13 +718,6 @@ func (jobs *ArgoJobs) Terminate(ctx context.Context, name, runID string) error {
 }
 
 func (jobs *ArgoJobs) shutdown(ctx context.Context, name, runID string, terminate bool) error {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, name, runID)
-		if err != nil {
-			return err
-		}
-		return child.shutdown(ctx, name, runID, terminate)
-	}
 	if strings.TrimSpace(runID) == "" {
 		return errors.New("app: durable run ID is required to shut down a Workflow")
 	}
@@ -865,28 +749,6 @@ func (jobs *ArgoJobs) shutdown(ctx context.Context, name, runID string, terminat
 // SettleCreate bypasses the in-flight Stop shortcut: an ambiguous POST may
 // still commit even after an earlier Cancel returned NotFound.
 func (jobs *ArgoJobs) SettleCreate(ctx context.Context, name, runID string, notBefore time.Time) (bool, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, name, runID)
-		if err != nil {
-			return false, err
-		}
-		if child.targetBinding == nil {
-			return child.SettleCreate(ctx, name, runID, notBefore)
-		}
-		if err := jobs.routes.store.CancelExecutionTarget(ctx, runID); err != nil {
-			return false, err
-		}
-		done, err := child.targetClients.Settle(ctx, notBefore)
-		if err != nil || !done {
-			return false, err
-		}
-		if err := jobs.routes.completeCleanup(ctx, runID); err != nil {
-			return false, err
-		}
-		child.forget(name, runID)
-		return true, nil
-	}
-
 	jobs.mu.Lock()
 	intent, exists := jobs.intents[name]
 	jobs.mu.Unlock()
@@ -910,23 +772,6 @@ func (jobs *ArgoJobs) SettleCreate(ctx context.Context, name, runID string, notB
 // TerminalResult reconstructs a run's outcome from the Workflow object alone,
 // so a server that restarted mid-run records what really happened.
 func (jobs *ArgoJobs) TerminalResult(ctx context.Context, name string) (service.JobResult, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, name, "")
-		if err != nil {
-			return service.JobResult{}, err
-		}
-		if child.targetClients != nil {
-			result, err := child.TerminalResult(ctx, name)
-			if err != nil {
-				return result, err
-			}
-			if err := child.targetClients.VerifyResultCustody(ctx); err != nil {
-				return service.JobResult{}, err
-			}
-			return result, nil
-		}
-		return child.TerminalResult(ctx, name)
-	}
 	completion, err := jobs.controller.TerminalState(ctx, name)
 	if errors.Is(err, argojob.ErrNotTerminal) {
 		return service.JobResult{}, service.ErrJobNotTerminal
@@ -943,13 +788,6 @@ func (jobs *ArgoJobs) TerminalResult(ctx context.Context, name string) (service.
 // Owns reports whether this engine created the named object. The dispatcher
 // uses it to route a name back to its engine when no in-process state survives.
 func (jobs *ArgoJobs) Owns(ctx context.Context, name string) (bool, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, name, "")
-		if err != nil {
-			return false, err
-		}
-		return child.Owns(ctx, name)
-	}
 	return jobs.controller.Owns(ctx, name)
 }
 
@@ -1044,13 +882,6 @@ var (
 
 // ObserveScheduling forwards read-only diagnostics without submission or repair.
 func (jobs *ArgoJobs) ObserveScheduling(ctx context.Context, run model.Run) (*model.ExecutionObservation, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
-		if err != nil {
-			return nil, err
-		}
-		return child.ObserveScheduling(ctx, run)
-	}
 	observer, ok := jobs.controller.(interface {
 		ObserveScheduling(context.Context, string, string, string) (*model.ExecutionObservation, error)
 	})
@@ -1066,13 +897,6 @@ func (jobs *ArgoJobs) ObserveScheduling(ctx context.Context, run model.Run) (*mo
 
 // ObserveSynchronization forwards the read-only native lock observation (#1514).
 func (jobs *ArgoJobs) ObserveSynchronization(ctx context.Context, run model.Run) (*model.SyncObservation, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
-		if err != nil {
-			return nil, err
-		}
-		return child.ObserveSynchronization(ctx, run)
-	}
 	observer, ok := jobs.controller.(interface {
 		ObserveSynchronization(context.Context, string, string) (*model.SyncObservation, error)
 	})
@@ -1149,4 +973,33 @@ func (jobs *ArgoJobs) EnforceAssistHolds(ctx context.Context, activity map[strin
 		return nil, nil
 	}
 	return controller.EnforceAssistHolds(ctx, activity, recheck, now)
+}
+
+// SetWatchHub supplies the server-owned namespace cache before serving.
+func (jobs *ArgoJobs) SetWatchHub(hub *argowatch.Hub) { jobs.watchHub = hub }
+
+// RunWatch ties the informers to the server lifetime.
+func (jobs *ArgoJobs) RunWatch(ctx context.Context) {
+	if jobs.watchHub != nil {
+		jobs.watchHub.Run(ctx)
+	}
+}
+
+// WaitForWatchSync gates recovery and dispatch, but never the API or Git.
+func (jobs *ArgoJobs) WaitForWatchSync(ctx context.Context) error {
+	if jobs.watchHub == nil {
+		return errors.New("app: Workflow watch hub is required")
+	}
+	for {
+		attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := jobs.watchHub.WaitForSync(attempt)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		log.Print("WARN: waiting for Workflow and Pod watch caches to sync")
+	}
 }

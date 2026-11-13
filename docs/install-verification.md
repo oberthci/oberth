@@ -37,9 +37,17 @@ reports `unavailable` and directs the operator to pod events. The diagnostic
 command prints the safe JSON and exits successfully even for a not-ready state.
 
 `oberth install --dry-run` reviews the plan without reserving output paths or
-reading recovery credentials. Existing admin certificate and secrets output
-files are allowed and left untouched. A real install still protects existing
-outputs from overwrite.
+writing credentials. It reads and validates `--resume-secrets-file` and existing
+`--secrets-file` recovery input using the same private-file checks as installation.
+Existing admin certificate and credential files are left untouched. A real
+install still protects non-empty outputs from overwrite.
+
+`oberth install --dry-run --json` returns a version 1 object with `review` and
+`confirmation_required: true`. It emits the resolved public review, including
+the selected context and certificate names, without a live enforcement probe,
+cluster changes, secret values, or credential output files. A failed dry-run
+also returns version 1 JSON, with `ok: false`, the public `review`, and safe
+`checks`; the command still exits with an error.
 
 `oberth install --plan --context <context>` makes no cluster mutations. It
 reports NetworkPolicy capability as unverified and explains that the live
@@ -49,9 +57,19 @@ means the read-only checks passed; it does not establish enforcement.
 Install runs a new measurement before creating release namespaces, installing
 charts or writing server credentials. Fresh installs refuse absent or unverified
 enforcement. Existing-release maintenance preserves the stored policy choice
-and treats the observation as information. Explicit verification still measures
-enforcement and refuses failures. No plan measurement receipts are written or
-read; receipts from older versions are unused.
+and treats the observation as information.
+
+Verification is read-only by default and creates no cluster objects. Its
+`network_policy` check reports `reason: not-retested`: enforcement was measured
+at install; this verification did not re-test it. Use
+`oberth install --verify --probe` to explicitly
+run the live measurement and refuse absent or unverified enforcement.
+Maintenance JSON retains the status, warning, evidence and remedy measured
+during that install, including absent or unverified enforcement; a subsequent
+read-only check does not turn it into a successful measurement.
+`--probe` requires `--verify` and cannot be combined with `--plan` or `--dry-run`.
+No plan measurement receipts are written or read; receipts from older versions
+are unused.
 
 Runtime identity certificates constrain their DNS names and each IP SAN.
 IPv4 constraints are exact /32 ranges; IPv6 constraints are exact /128 ranges.

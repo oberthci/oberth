@@ -45,7 +45,7 @@ run before step execution. It never substitutes another revision.
 
 `sources` is an Oberth extension removed before native Argo validation. Its
 canonical `oberth.ci/sources` annotation is a declaration, not authority. Declare
-sources in the consuming workflow, not a fragment. Every container, script,
+sources in the consuming workflow. Every container, script,
 container-set member and authored helper receives every declared source at a
 unique `/work/sources/name` path. Per-step selection is not implemented.
 Conflicting repository mounts are refused. Native retry and restart adoption

@@ -1,8 +1,8 @@
 # Infrastructure failures and retries
 
 Oberth v0.22.0 does not automatically create another run after an infrastructure
-failure. The failed run retains its observed cause. Manual `run_retry` and
-`run_rerun` remain available with their existing cancellation, publication,
+failure. The failed run retains its observed cause. Manual `run_rerun` remains
+available with its existing cancellation, publication,
 credential and ref-safety checks.
 
 Authors choose native Argo retries on individual templates:

@@ -18,7 +18,7 @@ func TestChartPipelineDNSIsolation(t *testing.T) {
 		{name: "host-network escape hatch", anyDestination: true, extra: []string{"--set", "networkPolicy.dnsAnyDestination=true"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			policies, _ := renderGoProxyPolicies(t, 8444, tc.extra...)
+			policies, _ := renderChartPolicies(t, tc.extra...)
 			pipeline := chartPolicyEndpoint{namespace: "pipeline-system"}
 			for _, namespace := range []string{"kube-system", "dns-system", "other-system", ""} {
 				want := tc.anyDestination || namespace == tc.namespace
@@ -52,7 +52,7 @@ func TestChartPipelineIngressIsolation(t *testing.T) {
 		if !enabled {
 			extra = []string{"--set", "networkPolicy.pipelineIngress.enabled=false"}
 		}
-		policies, server := renderGoProxyPolicies(t, 8444, extra...)
+		policies, server := renderChartPolicies(t, extra...)
 		pipeline := chartPolicyEndpoint{namespace: "pipeline-system"}
 		for _, tc := range []struct {
 			name    string

@@ -291,7 +291,7 @@ func TestValidateIgnoresRetiredSizeAnnotations(t *testing.T) {
 		}
 		var output bytes.Buffer
 		err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{"build.yaml": document})}, &output)
-		if err != nil {
+		if err == nil || !strings.Contains(output.String(), "metadata.annotations") || !strings.Contains(output.String(), "assigned by Oberth") || strings.Contains(output.String(), "is removed") {
 			t.Fatalf("%s: %v\n%s", annotation, err, output.String())
 		}
 	}

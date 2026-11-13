@@ -113,7 +113,7 @@ func TestAdoptedWaitRidesOutTransientReadFailures(t *testing.T) {
 func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 	wf, request := adoptionWorkflow()
 	calls := map[string]int{}
-	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond,
+	controller := &Controller{kube: fixtureKube(wf), workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond,
 		logs: func(_ context.Context, _, pod, _ string) (io.ReadCloser, error) {
 			calls[pod]++
 			return io.NopCloser(strings.NewReader("new log line\n")), nil
@@ -122,7 +122,7 @@ func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("adopt: %v %v", found, err)
 	}
-	steps := StepResults(wf)
+	steps := fixtureStepResults(wf)
 	event := func(step StepResult) runprogress.Event {
 		return runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
 	}

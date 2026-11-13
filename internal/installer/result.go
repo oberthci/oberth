@@ -37,6 +37,7 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
+	ArgoSecurity             []ArgoSecurityReview         `json:"argo_security,omitempty"`
 	ArgoParallelism          string                       `json:"argo_parallelism"`
 	ArgoNamespaceParallelism string                       `json:"argo_namespace_parallelism"`
 	ArgoExecutorResources    *ArgoExecutorResourcesReview `json:"argo_executor_resources,omitempty"`
@@ -61,7 +62,7 @@ func Review(cfg Config) InstallReview {
 	if cfg.ClientHost != "" {
 		dns, ips = CertificateNamesForClientHost(cfg.ClientHost, dns, ips)
 	}
-	return InstallReview{ArgoParallelism: argoReviewLimit(cfg, cfg.ArgoParallelism, "parallelism", DefaultArgoParallelism), ArgoNamespaceParallelism: argoReviewLimit(cfg, cfg.ArgoNamespaceParallelism, "namespaceParallelism", DefaultArgoNamespaceParallelism), ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
+	return InstallReview{ArgoSecurity: cfg.argoSecurityReview, ArgoParallelism: argoReviewLimit(cfg, cfg.ArgoParallelism, "parallelism", DefaultArgoParallelism), ArgoNamespaceParallelism: argoReviewLimit(cfg, cfg.ArgoNamespaceParallelism, "namespaceParallelism", DefaultArgoNamespaceParallelism), ArgoExecutorResources: argoExecutorResourcesForReview(cfg), UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -72,22 +73,34 @@ func PrintReviewJSON(w io.Writer, cfg Config) error {
 	}{1, Review(cfg), true})
 }
 
+type InstallClientAccess struct {
+	Authentication string `json:"authentication"`
+	TokenRequired  bool   `json:"token_required"`
+	NextStep       string `json:"next_step"`
+}
+
+func certificateClientAccess() *InstallClientAccess {
+	return &InstallClientAccess{Authentication: "mutual_tls", TokenRequired: false,
+		NextStep: "Run /oberth:connect with the server CA pin and local client certificate/key paths."}
+}
+
 type InstallResult struct {
-	Upstream      *InstallUpstream `json:"upstream,omitempty"`
-	Cluster       *ClusterIdentity `json:"cluster,omitempty"`
-	SecretsValues []string         `json:"secrets_values,omitempty"`
-	Review        *InstallReview   `json:"review,omitempty"`
-	Version       int              `json:"version"`
-	OK            bool             `json:"ok"`
-	Context       string           `json:"context"`
-	ServerURL     string           `json:"server_url,omitempty"`
-	MCPURL        string           `json:"mcp_url,omitempty"`
-	GitURL        string           `json:"git_url,omitempty"`
-	CAPin         string           `json:"ca_sha256,omitempty"`
-	FirstUplink   string           `json:"first_uplink,omitempty"`
-	SecretsFile   string           `json:"secrets_file,omitempty"`
-	SecretsSHA256 string           `json:"secrets_sha256,omitempty"`
-	Checks        []CheckResult    `json:"checks"`
+	ClientAccess  *InstallClientAccess `json:"client_access,omitempty"`
+	Upstream      *InstallUpstream     `json:"upstream,omitempty"`
+	Cluster       *ClusterIdentity     `json:"cluster,omitempty"`
+	SecretsValues []string             `json:"secrets_values,omitempty"`
+	Review        *InstallReview       `json:"review,omitempty"`
+	Version       int                  `json:"version"`
+	OK            bool                 `json:"ok"`
+	Context       string               `json:"context"`
+	ServerURL     string               `json:"server_url,omitempty"`
+	MCPURL        string               `json:"mcp_url,omitempty"`
+	GitURL        string               `json:"git_url,omitempty"`
+	CAPin         string               `json:"ca_sha256,omitempty"`
+	FirstUplink   string               `json:"first_uplink,omitempty"`
+	SecretsFile   string               `json:"secrets_file,omitempty"`
+	SecretsSHA256 string               `json:"secrets_sha256,omitempty"`
+	Checks        []CheckResult        `json:"checks"`
 }
 
 func (r *InstallResult) check(code string, ok bool, remedy string) {
@@ -102,6 +115,7 @@ func (r *InstallResult) check(code string, ok bool, remedy string) {
 // PrintReview deliberately enumerates only non-secret install choices.
 func PrintReview(w io.Writer, cfg Config) { printReview(w, Review(cfg)) }
 func printReview(w io.Writer, review InstallReview) {
+	printArgoSecurityReview(w, review.ArgoSecurity)
 	_, _ = fmt.Fprintf(w, "Review install: context %q, namespace %q, pipeline namespace %q\nSecret store: production=%t dev=%t; client address=%q; admin identity=%q\nTLS DNS names: %v; IP addresses: %v\n", review.Context, review.Namespace, review.ArgoNamespace, review.ProductionStore, review.DevStore, review.ClientHost, review.AdminIdentity, review.DNSNames, review.IPs)
 	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
 	_, _ = fmt.Fprintln(w, "NetworkPolicy enforcement check runs first at install, after approval, using temporary probe Pods and their scratch namespace; fresh installs refuse unless enforcement is measured.")
@@ -125,9 +139,10 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenance bool) InstallResult {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	progress := host.Output
 	host.Output = io.Discard
 	host = host.withDefaults()
-	r := InstallResult{Version: 1, OK: true, Context: cfg.ContextName, Checks: []CheckResult{}}
+	r := InstallResult{ClientAccess: certificateClientAccess(), Version: 1, OK: true, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if cfg.Namespace == "" {
 		cfg.Namespace = DefaultNamespace
 	}
@@ -181,6 +196,11 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		r.Checks[len(r.Checks)-1].Reason = "unverified"
 		return r
 	}
+	if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
+		// Verification still describes the installed release. Obsolete values
+		// require an upgrade before the next write, not a failed read check.
+		r.Checks = append(r.Checks, CheckResult{Code: "installed_values", OK: true, Warning: true, Remedy: err.Error()})
+	}
 
 	if err := readArgoReviewValues(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil {
 		r.check("argo_values", false, argoValuesRemedy)
@@ -193,8 +213,18 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		return r
 	}
 	preflightDeps := deps
+	preflightDeps.Output = progress
 	preflightDeps.RunCommand = host.RunCommand
-	inspectCluster(ctx, &cfg, preflightDeps, &identity, &r, maintenance, true)
+	inspectCluster(ctx, &cfg, preflightDeps, &identity, &r, maintenance, host.VerifyProbe)
+	if !maintenance && !host.VerifyProbe {
+		for i := range r.Checks {
+			check := &r.Checks[i]
+			if check.Code == "network_policy" && check.Warning && check.Reason == "unverified" {
+				check.OK, check.Warning, check.Reason, check.Remedy = true, false, "not-retested", ""
+				check.Evidence = "NetworkPolicy enforcement was measured at install; this verification did not re-test it. Use oberth install --verify --probe to run a live measurement."
+			}
+		}
+	}
 	review := Review(cfg)
 	r.Review = &review
 	r.Cluster = &identity
@@ -308,16 +338,20 @@ func readinessRemedy(reason string) string {
 }
 
 func PrintVerification(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) error {
+	output := deps.Output
+	if asJSON {
+		deps.Output = io.Discard
+	}
 	result := VerifyInstall(ctx, cfg, deps)
 	if asJSON {
-		if err := json.NewEncoder(deps.Output).Encode(result); err != nil {
+		if err := json.NewEncoder(output).Encode(result); err != nil {
 			return err
 		}
 	} else {
 		for _, check := range result.Checks {
-			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
+			_, _ = fmt.Fprintf(output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
 			if check.Code == "network_policy" && check.Evidence != "" {
-				_, _ = fmt.Fprintln(deps.Output, check.Evidence)
+				_, _ = fmt.Fprintln(output, check.Evidence)
 			}
 		}
 	}
@@ -332,9 +366,6 @@ func ExecuteJSON(ctx context.Context, cfg Config, deps InstallDeps) error {
 }
 
 func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func(context.Context, Config, InstallDeps) error) error {
-	if cfg.DryRun {
-		return errors.New("use --dry-run without --json to review the install")
-	}
 	output := deps.Output
 	deps.Output = io.Discard
 	deps.IsTerminal = func() bool { return false }
@@ -345,10 +376,46 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	deps.UplinkCreated = func(value string) { identity = value }
 	deps.upstreamResult = func(upstream InstallUpstream) { deps.upstream = &upstream }
 	deps.installResolved = func(resolved Config) { cfg = resolved }
+	// Keep this invocation's measurement when maintenance verification only
+	// reads state. An informational failed probe must not become a pass.
+	var measured *NetworkPolicyProbeResult
+	probe := deps.ProbeNetworkPolicy
+	if probe == nil {
+		probe = ProbeNetworkPolicy
+	}
+	deps.ProbeNetworkPolicy = func(ctx context.Context, cfg Config, raw Deps) NetworkPolicyProbeResult {
+		value := probe(ctx, cfg, raw)
+		measured = &value
+		return value
+	}
 	installErr := execute(ctx, cfg, deps)
-	result := InstallResult{Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
+	if cfg.DryRun {
+		if installErr != nil {
+			review := Review(cfg)
+			result := InstallResult{Version: 1, Context: cfg.ContextName, Review: &review, Checks: []CheckResult{}}
+			result.check("dry_run", false, "Review the selected context and install inputs, then retry --dry-run --json.")
+			var failure *installStepError
+			if errors.As(installErr, &failure) {
+				result.Checks[0] = failure.check
+			}
+			if err := json.NewEncoder(output).Encode(result); err != nil {
+				return err
+			}
+			return installErr
+		}
+		return PrintReviewJSON(output, cfg)
+	}
+	result := InstallResult{ClientAccess: certificateClientAccess(), Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
 		result = verifyInstall(ctx, cfg, deps, cfg.existingRelease)
+		if cfg.existingRelease && measured != nil {
+			for i := range result.Checks {
+				check := &result.Checks[i]
+				if check.Code == "network_policy" && check.Warning && check.Reason == "unverified" {
+					*check = CheckResult{Code: "network_policy", OK: measured.Status == "enforced", Warning: measured.Status != "enforced", Reason: measured.Status, Remedy: measured.Remedy, Evidence: measured.Evidence}
+				}
+			}
+		}
 	}
 	var preflight *installPreflightError
 	if errors.As(installErr, &preflight) {
@@ -414,3 +481,17 @@ func upstreamsVerifiedOrPending(raw []byte, allowPending bool) bool {
 	}
 	return rows > 0
 }
+
+func printArgoSecurityReview(w io.Writer, contexts []ArgoSecurityReview) {
+	if w == nil {
+		return
+	}
+	for _, security := range contexts {
+		before, _ := json.Marshal(security.Current)
+		after, _ := json.Marshal(security.Planned)
+		_, _ = fmt.Fprintf(w, "Argo %s.%s: %s -> %s (existing values preserved)\n", security.Component, security.Field, before, after)
+	}
+}
+
+// VerifyInstall reads cluster state and verifies the advertised TLS endpoint
+// against the CA obtained over the authenticated Kubernetes connection.

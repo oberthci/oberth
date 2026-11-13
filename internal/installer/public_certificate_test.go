@@ -103,10 +103,10 @@ func TestAbsentBaoCertificateStillChecksExistingRuntimeSANs(t *testing.T) {
 			return runner.run(ctx, input, name, args...)
 		},
 		RunHelm: func(context.Context, []string) ([]byte, error) {
-			return []byte(`{"argo":{"goProxy":{"enabled":true}}}`), nil
+			return []byte(`{}`), nil
 		},
 	}
-	cfg := Config{InstallSecretStore: true}
+	cfg := Config{InstallSecretStore: true, TLSExtraDNSNames: []string{"server.example.test"}}
 	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
 	if err == nil || !strings.Contains(err.Error(), "--reissue-server-ca") {
 		t.Fatalf("missing OpenBao certificate was treated as fresh install: %v", err)

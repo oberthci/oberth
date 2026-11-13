@@ -17,7 +17,7 @@ func TestPendingSeedReasonSurvivesAControllerRestart(t *testing.T) {
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: config.Namespace, UID: "original", Labels: map[string]string{"oberth.ci/component": "source-seed"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: seedContainer}}, Volumes: []corev1.Volume{{Name: "source", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}}}}}, Status: corev1.PodStatus{Phase: corev1.PodPending, ContainerStatuses: []corev1.ContainerStatus{{Name: seedContainer, State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "PRIVATE credentials"}}}}}}
 	client := fake.NewClientset(pod)
 	controller := &Controller{workflows: &schedulingWorkflowClient{err: apierrors.NewNotFound(schema.GroupResource{Resource: "workflows"}, "wf")}, seeder: &SourceSeeder{client: client, config: config}, config: config}
-	got, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	got, err := withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || got == nil || got.Reason != "SourceSeedPending" || !strings.Contains(got.Message, "ImagePullBackOff") || strings.Contains(got.Message, "PRIVATE") {
 		t.Fatal("restart lost curated seed reason", got, err)
 	}
@@ -30,7 +30,7 @@ func TestPendingSeedReasonSurvivesAControllerRestart(t *testing.T) {
 	if err := client.CoreV1().Pods(config.Namespace).Delete(t.Context(), name, metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	got, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	got, err = withTestObservationCache(t, controller).ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || got.Reason == "SourceSeedMissing" {
 		t.Fatal("absence after restart claimed a lost created Pod", got, err)
 	}

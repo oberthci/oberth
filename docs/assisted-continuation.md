@@ -168,8 +168,7 @@ verification requires an ordinary run of the committed source.
 
 A hold is identified by the server-owned annotation, the pause variable on
 `main` and a retry node name (`...(N)`, N ≥ 1); admission refuses every
-`ARGO_*` environment name from repository YAML, template defaults and
-fragments included, so a document cannot pause its own attempt 1 (which
+`ARGO_*` environment name from repository YAML, including template defaults, so a document cannot pause its own attempt 1 (which
 Argo would run without a Pod deadline) or impersonate a hold.
 
 ## Working a hold
@@ -220,7 +219,6 @@ from:
 - upstream publication: the run finishes `passed` in Oberth but
   `beginRunPublication` is skipped, so the branch is never force-synced from
   a tree that is not in Git;
-- SHA-pinned fragment evidence (`HasPassedRunForSHA`);
 - CI-issue resolution and issue-trailer closing.
 
 No status, label or layout is added. The reason line of the existing status
@@ -308,8 +306,7 @@ per-workflow and unaffected.
   Argo Stop and waits for exit handlers; Argo TTL cleans the Workflow.
 - Hold operations run only in the server's own pipeline namespace through
   the `pods/exec` and `pods` delete verbs the chart's Argo Role already
-  grants; no RBAC is added. Runs placed on remote execution targets are not
-  reachable by the hold tools in this release.
+  grants; no RBAC is added.
 
 ## Helm values (serve flags; chart default equals binary default)
 

@@ -126,7 +126,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	second.StartedAt = metav1.NewTime(at)
 	second.FinishedAt = metav1.NewTime(at.Add(30 * time.Second))
 	secondPod := firstPod.DeepCopy()
-	secondPod.Name = PodName(terminal, second)
+	secondPod.Name = fixturePodName(terminal, second)
 	secondPod.UID = "33333333-3333-4333-8333-333333333333"
 	secondPod.Annotations = map[string]string{"workflows.argoproj.io/node-id": second.ID, "workflows.argoproj.io/node-name": second.Name}
 	cid := "containerd://" + strings.Repeat("e", 64)
@@ -178,7 +178,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("adopt: %v %v", found, err)
 	}
-	steps := StepResults(running)
+	steps := fixtureStepResults(running)
 	var events []runprogress.Event
 	for _, step := range steps {
 		if step.NodeID == first.ID {

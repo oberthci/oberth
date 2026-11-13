@@ -27,11 +27,15 @@ spec:
   matchConditions:
     - name: argo-namespace
       expression: {{ printf "request.namespace == %s" (.Values.argo.namespace | toJson) | quote }}
+    - name: pod-creation-or-ephemeral-containers
+      expression: "request.operation == 'CREATE' || request.subResource == 'ephemeralcontainers'"
   variables:
     - name: containers
       expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])"
     - name: cacheRoots
       expression: {{ $roots | toJson | quote }}
+    - name: isStepPod
+      expression: "has(object.metadata.labels) && 'workflows.argoproj.io/workflow' in object.metadata.labels"
   validations:
     - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC) && (!has(object.spec.hostNetwork) || !object.spec.hostNetwork)"
       message: "Argo pods cannot share host PID, IPC or network namespaces"
@@ -39,6 +43,16 @@ spec:
       message: "Argo containers cannot be privileged"
     - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(x, x == 'NET_BIND_SERVICE'))"
       message: "Argo containers can add only NET_BIND_SERVICE"
+    - expression: "variables.containers.all(c, has(c.securityContext) && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop.exists(x, x == 'ALL'))"
+      message: "Argo containers must drop ALL capabilities"
+    - expression: "variables.containers.all(c, has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation)"
+      message: "Argo containers must set allowPrivilegeEscalation to false"
+    - expression: "(!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost']) && (variables.isStepPod ? variables.containers.all(c, has(c.securityContext) && has(c.securityContext.seccompProfile) ? c.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost'] : has(object.spec.securityContext) && has(object.spec.securityContext.seccompProfile) && object.spec.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost']) : ((!has(object.spec.securityContext) || !has(object.spec.securityContext.seccompProfile) || object.spec.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost']) && variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.seccompProfile) || c.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost'])))"
+      message: "Argo step containers require effective RuntimeDefault or Localhost seccomp; other Pods cannot set Unconfined seccomp"
+    - expression: "variables.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0))"
+      message: "Argo containers cannot expose host ports"
+    - expression: "(!has(object.spec.securityContext) || !has(object.spec.securityContext.windowsOptions) || !has(object.spec.securityContext.windowsOptions.hostProcess) || !object.spec.securityContext.windowsOptions.hostProcess) && variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.windowsOptions) || !has(c.securityContext.windowsOptions.hostProcess) || !c.securityContext.windowsOptions.hostProcess)"
+      message: "Argo Pods and containers cannot use hostProcess"
     # The server must keep setting hostPath.type explicitly for reviewed cache volumes.
     - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath) || (has(v.hostPath.type) && v.hostPath.type == 'DirectoryOrCreate' && variables.cacheRoots.exists(root, v.hostPath.path.startsWith(root + '/') && v.hostPath.path.substring(size(root) + 1).matches('^[a-z0-9_-]+-[a-f0-9]{12}$'))))"
       message: "Argo hostPath volumes must be repository directories beneath the configured CI or release cache root"
