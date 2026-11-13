@@ -62,7 +62,7 @@ func TestTimingPaginatedLargeDAG(t *testing.T) {
 	c := &Controller{kube: kube}
 	completion := completionFor(wf)
 	start := time.Now()
-	c.collectStepDiagnostics(context.Background(), wf, &completion)
+	c.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 	if calls != 2 || len(completion.Steps) != 65 || time.Since(start) > testtimeout.Start(time.Second) {
 		t.Fatalf("collection calls=%d steps=%d time=%s", calls, len(completion.Steps), time.Since(start))
 	}
@@ -101,7 +101,7 @@ func TestTimingIncompleteSnapshotNeverProjectsPartialEvidence(t *testing.T) {
 			})
 			c := &Controller{kube: kube}
 			completion := completionFor(wf)
-			c.collectStepDiagnostics(context.Background(), wf, &completion)
+			c.collectRestartStepDiagnostics(context.Background(), wf, &completion, time.Time{})
 			if calls > 16 {
 				t.Fatal("page budget exceeded")
 			}

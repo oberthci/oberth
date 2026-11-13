@@ -22,7 +22,7 @@ func TestRestartCutInitFailureStaysRedWithoutLogContinuity(t *testing.T) {
 				var result *Completion
 				var err error
 				if path == "wait" {
-					value, e := c.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, events, 0, binding)
+					value, e := withWaitTestHub(t, c).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, events, 0, binding)
 					result, err = &value, e
 				} else {
 					result, err = c.TerminalStateResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], binding, events)

@@ -451,7 +451,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := 0
-	child.controller.(*argojob.Controller).WithPodLogReader(func(_ context.Context, namespace, pod, container string) (io.ReadCloser, error) {
+	child.controller.(*argojob.Controller).WithWatchHub(terminalTargetWatchSnapshot{workflow: f.remote.object.DeepCopy()}).WithPodLogReader(func(_ context.Context, namespace, pod, container string) (io.ReadCloser, error) {
 		logs++
 		if namespace != f.definition.Config.Namespace || container != "main" || pod == "" {
 			t.Fatal("log left selected native bundle")
@@ -661,4 +661,18 @@ func decodeCurrentTargetFixture(body []byte, selection *map[string]any) error {
 		delete(*selection, retired)
 	}
 	return nil
+}
+
+// This legacy target fixture supplies the same required observation seam as
+// native wait fixtures. A9 removes the target implementation and this test.
+type terminalTargetWatchSnapshot struct{ workflow *wfv1.Workflow }
+
+func (h terminalTargetWatchSnapshot) Workflow(string) (*wfv1.Workflow, bool) { return h.workflow, true }
+func (terminalTargetWatchSnapshot) PodsOf(string) []*corev1.Pod              { return nil }
+func (terminalTargetWatchSnapshot) Pods() []*corev1.Pod                      { return nil }
+func (terminalTargetWatchSnapshot) Healthy() bool                            { return true }
+func (terminalTargetWatchSnapshot) Synced() bool                             { return true }
+func (terminalTargetWatchSnapshot) UnhealthySince() (time.Time, bool)        { return time.Time{}, false }
+func (terminalTargetWatchSnapshot) Subscribe(string) (<-chan struct{}, func()) {
+	return make(chan struct{}, 1), func() {}
 }

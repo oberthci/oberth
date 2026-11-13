@@ -205,6 +205,21 @@ func (h *Hub) notify(name string) {
 	}
 }
 
+// A reconnect can recover access without changing a terminal object's version.
+// Wake waiters so a failed final live read can be retried after recovery.
+func (h *Hub) notifyRecovery() {
+	h.subMu.Lock()
+	defer h.subMu.Unlock()
+	for _, subscribers := range h.subs {
+		for ch := range subscribers {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
 func (h *Hub) handlers(name func(any) string) cache.ResourceEventHandlerFuncs {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) { h.notify(name(obj)) },

@@ -503,13 +503,13 @@ func TestWaitResumedRetriedDAGIsGreen(t *testing.T) {
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeFailed},
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeSucceeded})
 	controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow},
-		config: Config{Namespace: workflow.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond}
+		config: Config{Namespace: workflow.Namespace, MaxRunLogBytes: 1 << 20}, idleInterval: time.Millisecond}
 	// Before the restart the first attempt's failure had been reported.
 	failedAt := time.Unix(1_700_000_100, 0).UTC()
 	events := []runprogress.Event{{Version: runprogress.Version, Stage: "address", Step: "check",
 		Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &failedAt, FinishedAt: &failedAt}}
 	var output bytes.Buffer
-	completion, err := controller.WaitResumed(context.Background(), workflow.Name, "run-retry", &output, events, 0, Adoption{})
+	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, "run-retry", &output, events, 0, Adoption{})
 	if err != nil {
 		t.Fatalf("WaitResumed: %v", err)
 	}

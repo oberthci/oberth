@@ -182,7 +182,7 @@ func TestWaitLiveBeforeCompletionAndFinalTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller.interval = 5 * time.Millisecond
+	controller.idleInterval = 5 * time.Millisecond
 	opened := make(chan struct{})
 	var once sync.Once
 	var finalCalls atomic.Int32
@@ -212,7 +212,7 @@ func TestWaitLiveBeforeCompletionAndFinalTail(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		completion, err := controller.Wait(ctx, "wf", "run-single", file)
+		completion, err := withWaitTestHub(t, controller).Wait(ctx, "wf", "run-single", file)
 		if err == nil && !completion.Succeeded {
 			err = fmt.Errorf("verdict %s", completion.Phase)
 		}
@@ -406,7 +406,7 @@ func TestLiveUnavailableLogsDoNotChangeCommandVerdict(t *testing.T) {
 		return nil, errors.New("injected log outage")
 	})
 	var output bytes.Buffer
-	completion, err := controller.Wait(context.Background(), wf.Name, "run-single", &output)
+	completion, err := withWaitTestHub(t, controller).Wait(context.Background(), wf.Name, "run-single", &output)
 	if err != nil || !completion.Succeeded {
 		t.Fatalf("log outage changed command verdict: %+v %v", completion, err)
 	}

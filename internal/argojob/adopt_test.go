@@ -96,16 +96,18 @@ func TestAdoptedWaitRidesOutTransientReadFailures(t *testing.T) {
 		t.Fatalf("adopt: %v %v", found, err)
 	}
 	client := &flakyWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}, failures: 3}
-	controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond, readGrace: time.Minute}
-	completion, err := controller.WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, idleInterval: time.Millisecond}
+	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
 	if err != nil || !completion.Succeeded || client.reads <= 3 {
 		t.Fatalf("transient read failure ended adopted Wait: %#v %v reads=%d", completion, err, client.reads)
 	}
 
 	client = &flakyWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}, failures: -1}
-	controller = &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond, readGrace: 20 * time.Millisecond}
-	completion, err = controller.WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
-	if err == nil || completion.Name != "" || !strings.Contains(err.Error(), "connection reset") || client.reads < 2 {
+	controller = &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, idleInterval: time.Millisecond}
+	timeout, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	completion, err = withWaitTestHub(t, controller).WaitResumed(timeout, wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	if !errors.Is(err, context.DeadlineExceeded) || completion.Name != "" || client.reads < 2 {
 		t.Fatalf("persistent read failure = %#v %v reads=%d", completion, err, client.reads)
 	}
 }
@@ -113,7 +115,7 @@ func TestAdoptedWaitRidesOutTransientReadFailures(t *testing.T) {
 func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 	wf, request := adoptionWorkflow()
 	calls := map[string]int{}
-	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond,
+	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, idleInterval: time.Millisecond,
 		logs: func(_ context.Context, _, pod, _ string) (io.ReadCloser, error) {
 			calls[pod]++
 			return io.NopCloser(strings.NewReader("new log line\n")), nil
@@ -127,7 +129,7 @@ func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 		return runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
 	}
 	var output bytes.Buffer
-	completion, err := controller.WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0])}, 100, binding)
+	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0])}, 100, binding)
 	if err != nil || !completion.Succeeded || len(completion.Steps) != 2 {
 		t.Fatalf("resumed completion = %#v, %v", completion, err)
 	}
@@ -135,12 +137,12 @@ func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 		t.Fatalf("duplicate replay: calls=%v output=%s", calls, output.String())
 	}
 	output.Reset()
-	_, err = controller.WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0]), event(steps[1])}, 200, binding)
+	_, err = withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0]), event(steps[1])}, 200, binding)
 	if err != nil || output.Len() != 0 || calls[steps[1].PodName] != 1 {
 		t.Fatalf("second resume replayed completed steps: %v %s %v", err, output.String(), calls)
 	}
 	output.Reset()
-	completion, err = controller.WaitResumed(context.Background(), wf.Name, request.RunID, &output, nil, 4090, binding)
+	completion, err = withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, &output, nil, 4090, binding)
 	if err == nil || output.Len() > 6 || completion.Name == "" {
 		t.Fatalf("retained budget not enforced: output=%d completion=%#v err=%v", output.Len(), completion, err)
 	}
@@ -149,7 +151,7 @@ func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 func TestAdoptedWaitRefusesReplacedWorkflow(t *testing.T) {
 	for _, mutation := range []string{"uid", "identity", "spec"} {
 		wf, request := adoptionWorkflow()
-		controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond}
+		controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, idleInterval: time.Millisecond}
 		binding, _, err := controller.Adopt(context.Background(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -162,7 +164,7 @@ func TestAdoptedWaitRefusesReplacedWorkflow(t *testing.T) {
 		case "spec":
 			wf.Spec.Templates[3].Container.Image = "foreign-image"
 		}
-		if _, err := controller.WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding); err == nil {
+		if _, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), wf.Name, request.RunID, io.Discard, nil, 0, binding); err == nil {
 			t.Fatalf("Workflow replacement accepted: %s", mutation)
 		}
 	}

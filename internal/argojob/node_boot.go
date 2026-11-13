@@ -25,12 +25,15 @@ func (controller *Controller) WithNodeBootRecorder(recorder NodeBootRecorder) *C
 
 // Observe only owned step Pods, never infer a reboot from readiness changes or
 // an exit code. One bounded read snapshot supplies all attempts on each node.
-func (controller *Controller) nodeRebootReasons(ctx context.Context, workflow *wfv1.Workflow, pods map[string]*corev1.Pod, resumedAt time.Time) map[string]string {
+func (controller *Controller) nodeRebootReasons(ctx context.Context, workflow *wfv1.Workflow, pods map[string]*corev1.Pod, resumedAt time.Time, nodes map[string]*corev1.Node) map[string]string {
 	reasons := map[string]string{}
 	if controller.nodeBoots == nil || controller.kube == nil {
 		return reasons
 	}
-	nodes := map[string]*corev1.Node{}
+	if nodes == nil {
+		nodes = map[string]*corev1.Node{}
+	}
+	failed := map[string]bool{}
 	runID, _, _ := WorkflowMeta(workflow)
 	for _, node := range workflow.Status.Nodes {
 		if node.Type != wfv1.NodeTypePod {
@@ -67,11 +70,16 @@ func (controller *Controller) nodeRebootReasons(ctx context.Context, workflow *w
 		}
 		n, seen := nodes[pod.Spec.NodeName]
 		if !seen {
+			if failed[pod.Spec.NodeName] {
+				continue
+			}
 			observed, err := controller.kube.CoreV1().Nodes().Get(ctx, pod.Spec.NodeName, metav1.GetOptions{})
 			if err == nil {
 				n = observed
+				nodes[pod.Spec.NodeName] = n
+			} else {
+				failed[pod.Spec.NodeName] = true
 			}
-			nodes[pod.Spec.NodeName] = n
 		}
 		if n == nil || n.Name != pod.Spec.NodeName || n.DeletionTimestamp != nil {
 			continue
@@ -118,15 +126,21 @@ func (controller *Controller) nodeRebootReasons(ctx context.Context, workflow *w
 	return reasons
 }
 
-func (controller *Controller) observeRunningNodeBoots(ctx context.Context, workflow *wfv1.Workflow) {
+func (controller *Controller) observeRunningNodeBoots(ctx context.Context, workflow *wfv1.Workflow, nodes map[string]*corev1.Node) {
 	if controller.nodeBoots == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	pods, reason := controller.timingPodSnapshot(ctx, workflow)
+	var pods map[string]*corev1.Pod
+	var reason string
+	if controller.hub != nil {
+		pods, reason = controller.watchedPodSnapshot(workflow)
+	} else {
+		pods, reason = controller.timingPodSnapshot(ctx, workflow)
+	}
 	if reason == "" {
-		controller.nodeRebootReasons(ctx, workflow, pods, time.Time{})
+		controller.nodeRebootReasons(ctx, workflow, pods, time.Time{}, nodes)
 	}
 }
 

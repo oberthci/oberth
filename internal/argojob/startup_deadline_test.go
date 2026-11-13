@@ -43,7 +43,7 @@ func TestPendingWorkloadHasNoServerStartupDeadline(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				controller.interval = time.Minute
+				controller.idleInterval = time.Minute
 				if scenario == "identity holder" {
 					if _, err := controller.executorIdentityPod(t.Context(), wf, config.ExecutorServiceAccount); err != nil {
 						t.Fatal(err)
@@ -61,7 +61,7 @@ func TestPendingWorkloadHasNoServerStartupDeadline(t *testing.T) {
 				if hashErr != nil {
 					t.Fatal(hashErr)
 				}
-				_, err = controller.WaitResumed(ctx, wf.Name, "run", io.Discard, nil, 0, Adoption{UID: wf.UID, Identity: wf.Annotations[identityAnnotation], SpecSHA256: digest})
+				_, err = withWaitTestHub(t, controller).WaitResumed(ctx, wf.Name, "run", io.Discard, nil, 0, Adoption{UID: wf.UID, Identity: wf.Annotations[identityAnnotation], SpecSHA256: digest})
 				want := 15 * time.Minute
 				if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != want {
 					t.Fatalf("startup deadline: elapsed=%s want=%s, error=%v", time.Since(begin), want, err)
@@ -95,10 +95,10 @@ func TestStartupDeadlineExecutorReadRetriesAreBoundedAcrossRestart(t *testing.T)
 				})
 				client := wffake.NewSimpleClientset(wf)
 				controller.workflows = client.ArgoprojV1alpha1().Workflows(wf.Namespace)
-				controller.interval, controller.readGrace = time.Minute, 2*time.Minute
+				controller.idleInterval = time.Minute
 				ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 				defer cancel()
-				_, err := controller.Wait(ctx, wf.Name, "identity-run", io.Discard)
+				_, err := withWaitTestHub(t, controller).Wait(ctx, wf.Name, "identity-run", io.Discard)
 				want := 2 * time.Minute
 				if err == nil || !strings.Contains(err.Error(), "Kubernetes executor identity observation unavailable") || time.Since(begin) != want {
 					t.Fatalf("unbounded identity retry: elapsed=%s error=%v", time.Since(begin), err)
@@ -131,17 +131,17 @@ func TestStartupDeadlineScheduledWorkSurvives(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		controller.interval = time.Minute
+		controller.idleInterval = time.Minute
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 		defer cancel()
-		result, err := controller.Wait(ctx, wf.Name, "run", io.Discard)
+		result, err := withWaitTestHub(t, controller).Wait(ctx, wf.Name, "run", io.Discard)
 		if err != nil || !result.Succeeded {
 			t.Fatalf("real progress failed: %+v %v", result, err)
 		}
 	})
 }
 
-func TestStartupDeadlinePodObservationRecoversOrExpires(t *testing.T) {
+func TestPodObservationOutageDoesNotExpireRun(t *testing.T) {
 	for _, outage := range []time.Duration{time.Minute, 3 * time.Minute} {
 		t.Run(outage.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -169,17 +169,14 @@ func TestStartupDeadlinePodObservationRecoversOrExpires(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				controller.interval = time.Minute
+				controller.idleInterval = time.Minute
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 				defer cancel()
-				result, err := controller.Wait(ctx, wf.Name, "run", io.Discard)
-				if outage == time.Minute {
-					if err != nil || !result.Succeeded {
-						t.Fatalf("transient observation ended run: %+v %v", result, err)
-					}
-				} else if err == nil || !strings.Contains(err.Error(), "observation unavailable for 2m") || time.Since(begin) != 2*time.Minute {
-					t.Fatalf("observation retries unbounded: %s %v", time.Since(begin), err)
+				result, err := withWaitTestHub(t, controller).Wait(ctx, wf.Name, "run", io.Discard)
+				if err != nil || !result.Succeeded || time.Since(begin) != 3*time.Minute {
+					t.Fatalf("observation outage replaced the native verdict: outage=%s elapsed=%s result=%+v err=%v", outage, time.Since(begin), result, err)
 				}
+
 			})
 		})
 	}
@@ -200,10 +197,10 @@ func TestUnstartedWaiterHasNoServerStartupDeadline(t *testing.T) {
 		}
 		client := wffake.NewSimpleClientset(wf)
 		controller.workflows = client.ArgoprojV1alpha1().Workflows(wf.Namespace)
-		controller.interval, controller.readGrace = time.Minute, 2*time.Minute
+		controller.idleInterval = time.Minute
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 		defer cancel()
-		_, err := controller.Wait(ctx, wf.Name, "identity-run", io.Discard)
+		_, err := withWaitTestHub(t, controller).Wait(ctx, wf.Name, "identity-run", io.Discard)
 		if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != 15*time.Minute {
 			t.Fatalf("unstarted waiter was terminated by a server startup deadline: %s %v", time.Since(begin), err)
 		}
@@ -212,25 +209,33 @@ func TestUnstartedWaiterHasNoServerStartupDeadline(t *testing.T) {
 
 // A slow Kubernetes call must be bounded even before a waiter or Workflow
 // start event exists. Fake reactors do not receive contexts; wrap the client.
-type blockedStartupWorkflow struct{ WorkflowClient }
+type blockedStartupWorkflow struct {
+	WorkflowClient
+	reads    int
+	deadline time.Time
+}
 
-func (w blockedStartupWorkflow) Get(ctx context.Context, _ string, _ metav1.GetOptions) (*wfv1.Workflow, error) {
+func (w *blockedStartupWorkflow) Get(ctx context.Context, _ string, _ metav1.GetOptions) (*wfv1.Workflow, error) {
+	w.reads++
+	w.deadline, _ = ctx.Deadline()
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
 
 func TestStartupDeadlineFirstWorkflowReadIsBounded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		controller, err := NewController(blockedStartupWorkflow{}, fake.NewClientset(), testConfig())
+		client := &blockedStartupWorkflow{}
+		controller, err := NewController(client, fake.NewClientset(), testConfig())
 		if err != nil {
 			t.Fatal(err)
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 		defer cancel()
 		begin := time.Now()
-		_, err = controller.Wait(ctx, "missing", "run", io.Discard)
-		if err == nil || time.Since(begin) > 3*time.Minute {
-			t.Fatalf("unbounded first read: elapsed=%s err=%v", time.Since(begin), err)
+		hub := newControlledWaitHub(nil)
+		_, err = controller.WithWatchHub(hub).Wait(ctx, "missing", "run", io.Discard)
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != 15*time.Minute || client.reads != 1 || client.deadline.Sub(begin) != executorIdentityAttemptTimeout || hub.subscriptions() != 0 {
+			t.Fatalf("first read/outage: elapsed=%s calls=%d read deadline=%s subscriptions=%d err=%v", time.Since(begin), client.reads, client.deadline.Sub(begin), hub.subscriptions(), err)
 		}
 	})
 }

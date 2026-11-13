@@ -256,7 +256,7 @@ func TestExecutorIdentityWaitSurvivesTransientDelivery(t *testing.T) {
 		controller, wf, _, _ := executorRetryFixture(t)
 		wf.Status.Phase = wfv1.WorkflowRunning
 		controller.workflows = &staticWorkflowClient{workflow: wf}
-		controller.interval = time.Millisecond
+		controller.idleInterval = time.Millisecond
 		attempts := 0
 		controller.seeder.exec = func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
 			attempts++
@@ -266,7 +266,7 @@ func TestExecutorIdentityWaitSurvivesTransientDelivery(t *testing.T) {
 			wf.Status.Phase = wfv1.WorkflowSucceeded
 			return nil
 		}
-		result, err := controller.Wait(t.Context(), wf.Name, "identity-run", io.Discard)
+		result, err := withWaitTestHub(t, controller).Wait(t.Context(), wf.Name, "identity-run", io.Discard)
 		if err != nil || !result.Succeeded || attempts != 2 {
 			t.Fatalf("transient delivery terminalized Wait: %+v %v", result, err)
 		}

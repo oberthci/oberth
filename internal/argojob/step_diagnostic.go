@@ -15,22 +15,31 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// collectStepDiagnostics runs before completion is handed to the scheduler and
+// collectRestartStepDiagnostics runs before completion is handed to the scheduler and
 // before its cleanup. Source-owned Workflows retain Pods until Workflow TTL;
 // external GC/read failures are explicit unavailable observations. Diagnostics
 // keep their typed projection separate from infrastructure classification.
 // One total five-second budget bounds all API reads, including large workflows
 // and recovery.
-func (controller *Controller) collectStepDiagnostics(ctx context.Context, workflow *wfv1.Workflow, completion *Completion) {
-	controller.collectRestartStepDiagnostics(ctx, workflow, completion, time.Time{})
-}
-
 func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context, workflow *wfv1.Workflow, completion *Completion, restartedAt time.Time) {
-	adopted := !restartedAt.IsZero() && !workflowDeadlineExceeded(workflow)
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	pods, snapshotReason := controller.timingPodSnapshot(readCtx, workflow)
-	reboots := controller.nodeRebootReasons(readCtx, workflow, pods, restartedAt)
+	pods, reason := controller.timingPodSnapshot(readCtx, workflow)
+	controller.projectRestartStepDiagnostics(ctx, readCtx, workflow, completion, restartedAt, pods, reason)
+}
+
+// The run watcher already holds the shared namespace snapshot. Explicit
+// historical/recovery readers above keep their one live snapshot.
+func (controller *Controller) collectWatchedStepDiagnostics(ctx context.Context, workflow *wfv1.Workflow, completion *Completion, restartedAt time.Time) {
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	pods, reason := controller.watchedPodSnapshot(workflow)
+	controller.projectRestartStepDiagnostics(ctx, readCtx, workflow, completion, restartedAt, pods, reason)
+}
+
+func (controller *Controller) projectRestartStepDiagnostics(ctx, readCtx context.Context, workflow *wfv1.Workflow, completion *Completion, restartedAt time.Time, pods map[string]*corev1.Pod, snapshotReason string) {
+	adopted := !restartedAt.IsZero() && !workflowDeadlineExceeded(workflow)
+	reboots := controller.nodeRebootReasons(readCtx, workflow, pods, restartedAt, nil)
 	for i := range completion.Steps {
 		step := &completion.Steps[i]
 		node, ok := workflow.Status.Nodes[step.NodeID]
@@ -324,4 +333,18 @@ func failedInitContainer(pod *corev1.Pod) *corev1.ContainerStatus {
 		}
 	}
 	return failed
+}
+
+func (controller *Controller) watchedPodSnapshot(workflow *wfv1.Workflow) (map[string]*corev1.Pod, string) {
+	if controller.hub == nil || !controller.hub.Healthy() {
+		return nil, "observation-unavailable"
+	}
+	pods := map[string]*corev1.Pod{}
+	for _, pod := range controller.hub.PodsOf(workflow.Name) {
+		if len(pods) >= model.MaxTimingTasks {
+			return nil, "snapshot-incomplete"
+		}
+		pods[pod.Name] = pod
+	}
+	return pods, ""
 }
