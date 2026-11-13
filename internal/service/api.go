@@ -1316,6 +1316,13 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
+	var availablePairs []string
+	if stage == "" && step == "" && run.Status == model.RunPassed && len(steps) > 0 {
+		stage, step = steps[0].Stage, steps[0].Step
+		for _, result := range steps {
+			availablePairs = append(availablePairs, result.Stage+"/"+result.Step)
+		}
+	}
 	if strings.TrimSpace(stage) == "" {
 		if strings.TrimSpace(step) != "" {
 			stages := map[string]bool{}
@@ -1375,7 +1382,9 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 	if !recorded {
 		return nil, fmt.Errorf("no log range for burn %q step %q: %w", stage, step, store.ErrNotFound)
 	}
-	return service.stepLogResponse(ctx, run, steps, stage, step, filter)
+	response, err := service.stepLogResponse(ctx, run, steps, stage, step, filter)
+	response.AvailablePairs = availablePairs
+	return response, err
 }
 
 // maxLiveLogChunk bounds one live-log poll response. 256 KiB keeps a fast

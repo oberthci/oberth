@@ -2297,3 +2297,33 @@ func TestRepoAddAcceptsMatchingQualifiedPath(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoVerifyAcceptsRegisteredQualifiedPathAndSlug(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oberth.sqlite")
+	registerTestUpstream(t, path, "forge", "ssh://git@forge.example/team")
+	if err := runRepoAdd(t.Context(), []string{"--database", path, "project", "forge"}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+		t.Fatal(err)
+	}
+	database, err := storetest.OpenAdminClient(t.Context(), path, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.SetRepositoryArchived(t.Context(), "admin@test", "forge/team/project", true); err != nil {
+		t.Fatal(err)
+	}
+	if err = database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, selector := range []string{"project", "forge/team/project"} {
+		var out bytes.Buffer
+		if err = runRepoVerify(t.Context(), []string{"--database", path, "--git-cache-root", t.TempDir(), selector}, &out); err != nil {
+			t.Fatalf("%s: %v", selector, err)
+		}
+		if !strings.Contains(out.String(), "SKIP  project: repository archived") {
+			t.Fatal(out.String())
+		}
+	}
+	if err = runRepoVerify(t.Context(), []string{"--database", path, "other/team/project"}, io.Discard); err == nil {
+		t.Fatal("accepted another upstream's path")
+	}
+}

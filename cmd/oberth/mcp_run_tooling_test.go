@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -114,7 +115,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 					}
 				}
 			}
-			if got != want {
+			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("MCP log metadata = %#v, want %#v", got, want)
 			}
 		}
@@ -204,7 +205,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			if response.Code != http.StatusOK || got != want {
+			if response.Code != http.StatusOK || !reflect.DeepEqual(got, want) {
 				t.Fatalf("%s %s: HTTP %d %s", storage, filter.query, response.Code, response.Body)
 			}
 		}

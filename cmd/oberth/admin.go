@@ -1226,13 +1226,13 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 		}
 	} else {
 		for i := 0; i < flags.NArg(); i++ {
-			name, normErr := gitcache.NormalizeRepo(flags.Arg(i))
+			_, _, _, normErr := gitcache.ParseRepoPath(flags.Arg(i))
 			if normErr != nil {
 				return normErr
 			}
-			repo, lookupErr := database.RepositoryByName(ctx, name)
+			repo, lookupErr := database.RepositoryByName(ctx, flags.Arg(i))
 			if lookupErr != nil {
-				return fmt.Errorf("repository %s: %w", name, lookupErr)
+				return fmt.Errorf("repository %s: %w", flags.Arg(i), lookupErr)
 			}
 			repos = append(repos, repo)
 		}

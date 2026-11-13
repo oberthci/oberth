@@ -67,7 +67,9 @@ afterwards. Preserve the public install result, including `server_url`,
 
 `/oberth:add-repo` previews `oberth client repository` through its narrow
 helper. Supply the selected public install result, the server's registered
-`git_path`, and explicit local CA, TLS certificate/key and SSH identity paths.
+`git_path` or unique registered slug, and explicit local TLS certificate/key
+and SSH identity paths. The CA defaults to the trust step's saved
+`${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/ca.crt`; `--ca-file` overrides it.
 Only paths enter chat or argv; keys are read by the CLI/OpenSSH, never printed.
 No ambient bearer credential or global `oberth` SSH alias selects the server.
 

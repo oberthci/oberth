@@ -447,6 +447,8 @@ For `run_logs`, an explicit `step` without `burn` selects that step's burn if
 its name is unique across the run's recorded results or active progress. An
 ambiguous name lists the candidate burns and requires `burn`; an unknown name
 returns not-found. If both are omitted, the failed burn/step remains the default.
+For a passed run with neither selector, the first recorded step in run order
+is returned with `available_pairs`, listing every recorded `burn/step`.
 An explicit burn without step defaults only when that burn has exactly one step.
 
 `run_list` accepts `status` as one existing display status or a non-empty list:

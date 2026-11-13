@@ -28,11 +28,11 @@ import (
 	"github.com/oberthci/oberth/internal/invite"
 )
 
-const clientRepositoryUsage = `Usage: oberth client repository --path <repo> --installation <public install JSON> --registered-repo <upstream/org/repo> --ssh-key <local private key> --ca-file <public CA> --client-cert <certificate> --client-key <TLS key> [flags]
+const clientRepositoryUsage = `Usage: oberth client repository --path <repo> --installation <public install JSON> --registered-repo <slug or upstream/org/repo> --ssh-key <local private key> [--ca-file <public CA>] --client-cert <certificate> --client-key <TLS key> [flags]
 Read the selected server's registered repository path and SSH host key over mTLS.
 Print the exact push URL and per-install SSH binding as JSON. --consent writes
 that binding and repository-local configuration. No global SSH alias is used.
-Explicit connection files are required; ambient credentials are not selected.`
+The CA defaults to the file stored by plugin trust; other connection files are explicit.`
 
 type repositoryClientOptions struct {
 	Path, Installation, RegisteredRepo, SSHKey, CAFile, ClientCert, ClientKey, Mode string
@@ -53,7 +53,7 @@ func runClientRepository(ctx context.Context, args []string, output io.Writer) e
 	for _, item := range []struct {
 		value      *string
 		name, help string
-	}{{&o.Path, "path", "local Git repository"}, {&o.Installation, "installation", "public JSON from the selected install"}, {&o.RegisteredRepo, "registered-repo", "canonical repository path registered on that server"}, {&o.SSHKey, "ssh-key", "local private SSH identity registered for this uplink"}, {&o.CAFile, "ca-file", "public server CA matching the install result's pin"}, {&o.ClientCert, "client-cert", "explicit mTLS client certificate"}, {&o.ClientKey, "client-key", "explicit local mTLS private key"}} {
+	}{{&o.Path, "path", "local Git repository"}, {&o.Installation, "installation", "public JSON from the selected install"}, {&o.RegisteredRepo, "registered-repo", "repository slug or canonical path registered on that server"}, {&o.SSHKey, "ssh-key", "local private SSH identity registered for this uplink"}, {&o.CAFile, "ca-file", "public server CA matching the install pin (default: plugin trust CA)"}, {&o.ClientCert, "client-cert", "explicit mTLS client certificate"}, {&o.ClientKey, "client-key", "explicit local mTLS private key"}} {
 		flags.StringVar(item.value, item.name, "", item.help)
 	}
 	flags.StringVar(&o.Mode, "mode", "remote", "remote, replace-remote or push-url")
@@ -106,8 +106,19 @@ func repositoryGit(ctx context.Context, root string, args ...string) (string, er
 
 func configureClientRepository(ctx context.Context, o repositoryClientOptions) (repositoryBinding, error) {
 	var binding repositoryBinding
-	if o.Path == "" || o.Installation == "" || o.RegisteredRepo == "" || o.SSHKey == "" || o.CAFile == "" || o.ClientCert == "" || o.ClientKey == "" {
-		return binding, errors.New("repository binding requires explicit install, repository, CA, certificate and local key paths")
+	if o.Path == "" || o.Installation == "" || o.RegisteredRepo == "" || o.SSHKey == "" || o.ClientCert == "" || o.ClientKey == "" {
+		return binding, errors.New("repository binding requires explicit install, repository, certificate and local key paths")
+	}
+	if o.CAFile == "" {
+		directory := os.Getenv("CLAUDE_CONFIG_DIR")
+		if directory == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return binding, err
+			}
+			directory = filepath.Join(home, ".claude")
+		}
+		o.CAFile = filepath.Join(directory, "oberth", "ca.crt")
 	}
 	if os.Getenv("GIT_SSH_COMMAND") != "" || os.Getenv("GIT_SSH") != "" {
 		return binding, errors.New("clear GIT_SSH_COMMAND and GIT_SSH before binding a repository")
@@ -137,8 +148,8 @@ func configureClientRepository(ctx context.Context, o repositoryClientOptions) (
 	if portErr != nil || portNumber < 1 || portNumber > 65535 || strconv.Itoa(portNumber) != endpoint.Port() {
 		return binding, errors.New("invalid advertised SSH port")
 	}
-	if _, _, _, err = gitcache.ParseRepoPath(o.RegisteredRepo); err != nil || len(strings.Split(o.RegisteredRepo, "/")) != 3 {
-		return binding, errors.New("select a canonical registered repository path")
+	if _, _, _, err = gitcache.ParseRepoPath(o.RegisteredRepo); err != nil {
+		return binding, errors.New("select a registered repository slug or path")
 	}
 	o.SSHKey, err = filepath.Abs(o.SSHKey)
 	if err != nil {
@@ -148,7 +159,7 @@ func configureClientRepository(ctx context.Context, o repositoryClientOptions) (
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return binding, errors.New("SSH identity must be a regular owner-only local private key file")
 	}
-	ca, err := os.ReadFile(o.CAFile)
+	ca, err := os.ReadFile(o.CAFile) //nolint:gosec // G703: operator-selected public CA or plugin trust file; the pin check below validates the selected public certificate.
 	if err != nil {
 		return binding, errors.New("cannot read public server CA")
 	}
@@ -165,7 +176,7 @@ func configureClientRepository(ctx context.Context, o repositoryClientOptions) (
 		return binding, errors.New("server CA does not match the selected install result")
 	}
 	cfg := mcpFlagResult{mcpConfig: mcpConfig{URL: installation.ServerURL + "/mcp", CAFile: string(pem.EncodeToMemory(block)), ClientCert: o.ClientCert, ClientKey: o.ClientKey}}
-	hostKey, fingerprint, err := readRepositoryHost(ctx, cfg, o.RegisteredRepo)
+	hostKey, fingerprint, canonicalPath, err := readRepositoryHost(ctx, cfg, o.RegisteredRepo)
 	if err != nil {
 		return binding, err
 	}
@@ -186,7 +197,7 @@ func configureClientRepository(ctx context.Context, o repositoryClientOptions) (
 	directory := filepath.Join(store, "oberth", binding.ServerID)
 	binding.SSHConfig = filepath.Join(directory, "ssh_config")
 	binding.SSHCommand = "ssh -F " + shellSSHWord(binding.SSHConfig)
-	endpoint.Path = "/" + o.RegisteredRepo + ".git"
+	endpoint.Path = "/" + canonicalPath + ".git"
 	binding.PushURL = endpoint.String()
 	binding.Assist = o.Assist
 	keyWord, err := sshConfigWord(o.SSHKey)
@@ -294,12 +305,12 @@ func writeImmutableBinding(path, body string) error {
 	return errors.Join(writeErr, closeErr)
 }
 
-func readRepositoryHost(ctx context.Context, cfg mcpFlagResult, registeredPath string) (ssh.PublicKey, string, error) {
+func readRepositoryHost(ctx context.Context, cfg mcpFlagResult, registeredPath string) (ssh.PublicKey, string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	httpClient, err := certificateMCPClient(cfg)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	defer httpClient.CloseIdleConnections()
 	httpClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
@@ -329,15 +340,15 @@ func readRepositoryHost(ctx context.Context, cfg mcpFlagResult, registeredPath s
 		Fingerprint string `json:"ssh_host_key_fingerprint"`
 	}
 	if err = call("system_status", &health); err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	fingerprint, err := invite.SSHFingerprint([]byte(health.Key))
 	if err != nil || fingerprint != health.Fingerprint {
-		return nil, "", errors.New("selected server supplied no valid SSH host identity")
+		return nil, "", "", errors.New("selected server supplied no valid SSH host identity")
 	}
 	hostKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(health.Key))
 	if err != nil {
-		return nil, "", errors.New("invalid server SSH public key")
+		return nil, "", "", errors.New("invalid server SSH public key")
 	}
 	var catalog struct {
 		Repositories []struct {
@@ -345,16 +356,26 @@ func readRepositoryHost(ctx context.Context, cfg mcpFlagResult, registeredPath s
 		} `json:"repositories"`
 	}
 	if err = call("repo_list", &catalog); err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	found := 0
+	canonicalPath := ""
+	upstream, org, name, err := gitcache.ParseRepoPath(registeredPath)
+	if err != nil {
+		return nil, "", "", err
+	}
 	for _, repo := range catalog.Repositories {
-		if repo.Path == registeredPath {
+		candidateUpstream, candidateOrg, candidateName, parseErr := gitcache.ParseRepoPath(repo.Path)
+		if parseErr != nil || candidateUpstream == "" || candidateOrg == "" {
+			return nil, "", "", errors.New("invalid canonical repository registration")
+		}
+		if candidateName == name && (upstream == "" || upstream == candidateUpstream) && (org == "" || org == candidateOrg) {
+			canonicalPath = repo.Path
 			found++
 		}
 	}
 	if found != 1 {
-		return nil, "", errors.New("repository is not uniquely registered on the selected server")
+		return nil, "", "", errors.New("repository is not uniquely registered on the selected server")
 	}
-	return hostKey, fingerprint, nil
+	return hostKey, fingerprint, canonicalPath, nil
 }

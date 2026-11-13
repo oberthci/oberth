@@ -888,15 +888,15 @@ TCP success does not establish server readiness or TLS trust. Nothing is install
 ## oberth client repository
 
 ```text
-Usage: oberth client repository --path <repo> --installation <public install JSON> --registered-repo <upstream/org/repo> --ssh-key <local private key> --ca-file <public CA> --client-cert <certificate> --client-key <TLS key> [flags]
+Usage: oberth client repository --path <repo> --installation <public install JSON> --registered-repo <slug or upstream/org/repo> --ssh-key <local private key> [--ca-file <public CA>] --client-cert <certificate> --client-key <TLS key> [flags]
 Read the selected server's registered repository path and SSH host key over mTLS.
 Print the exact push URL and per-install SSH binding as JSON. --consent writes
 that binding and repository-local configuration. No global SSH alias is used.
-Explicit connection files are required; ambient credentials are not selected.
+The CA defaults to the file stored by plugin trust; other connection files are explicit.
   -assist
         enable repository-local assisted pushes
   -ca-file string
-        public server CA matching the install result's pin
+        public server CA matching the install pin (default: plugin trust CA)
   -client-cert string
         explicit mTLS client certificate
   -client-key string
@@ -910,7 +910,7 @@ Explicit connection files are required; ambient credentials are not selected.
   -path string
         local Git repository
   -registered-repo string
-        canonical repository path registered on that server
+        repository slug or canonical path registered on that server
   -ssh-key string
         local private SSH identity registered for this uplink
 ```
