@@ -20,7 +20,7 @@ import (
 func reinstallFixture(t *testing.T) (string, string, *fakeBackupCluster, *fakeBackupCluster) {
 	t.Helper()
 	archiveBytes, raw, runID := sourceDatabase(t)
-	source := newFakeBackupCluster(t, sourceCompat, grantsConfigMap(testGrants))
+	source := newFakeBackupCluster(t, sourceCompat)
 	source.database, source.rawFiles = archiveBytes, raw
 	source.clusterUID = "source-cluster"
 	source.values["watchTunnel"] = map[string]any{"enabled": true}

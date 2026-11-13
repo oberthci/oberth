@@ -39,10 +39,9 @@ import (
 
 const (
 	// backupFormat is what this release writes: the database, the OpenBao
-	// state a fresh install cannot recreate, and the grants. v2 (v0.17.32-33)
-	// and v1 archives are still read; the Helm values and step logs they
-	// carry are ignored.
-	backupFormat       = "oberth.backup/v3"
+	// state a fresh install cannot recreate. Grants have one persisted copy,
+	// inside the verified database. Older archive formats are refused.
+	backupFormat       = "oberth.backup/v4"
 	backupFormatV2     = "oberth.backup/v2"
 	backupFormatV1     = "oberth.backup/v1"
 	backupManifestName = "manifest.json"
@@ -53,7 +52,7 @@ const (
 	backupMemberReference    = "openbao/reference.json"
 	backupMemberDatabase     = "database/oberth-database.tar"
 	backupMemberHelmValues   = "kubernetes/helm-values.json"
-	backupMemberSecretAccess = "kubernetes/secret-access.json" // #nosec G101 -- archive member NAME, not credential material.
+	backupMemberSecretAccess = "database/secret-grants.json" // #nosec G101 -- archive member NAME, not credential material.
 	backupMemberLogs         = "server/logs.tar"
 
 	// Non-database member cap; the database has an operator-configured limit.
@@ -65,7 +64,7 @@ const (
 	minBackupRecipientBits = 3072
 )
 
-// backupMemberOrder is the exact, closed member inventory of a full v3
+// backupMemberOrder is the exact, closed member inventory of a full v4
 // archive in archive order. A restore refuses any archive whose inventory
 // differs, so an unexpected file can never be smuggled in next to the
 // verified ones.
@@ -75,7 +74,6 @@ var backupMemberOrder = []string{
 	backupMemberRoles,
 	backupMemberReference,
 	backupMemberDatabase,
-	backupMemberSecretAccess,
 }
 
 // legacyMemberOrder is the full inventory of v1 and v2 archives, which also
@@ -87,7 +85,6 @@ var legacyMemberOrder = []string{
 	backupMemberReference,
 	backupMemberDatabase,
 	backupMemberHelmValues,
-	backupMemberSecretAccess,
 }
 
 // Archive scopes: a full archive holds the database and the secrets; a
@@ -102,6 +99,8 @@ const (
 // archive order.
 func requiredBackupMembers(format, scope string) []string {
 	switch {
+	case format != backupFormat:
+		return nil
 	case scope == BackupScopeHistory:
 		return []string{backupMemberDatabase}
 	case format == backupFormat:
@@ -575,7 +574,7 @@ func openBackupArchive(ctx context.Context, input string, cipher archiveCipher, 
 	if err := json.Unmarshal(manifestBytes, &header); err != nil {
 		return backupManifest{}, fmt.Errorf("parse archive manifest: %w", err)
 	}
-	if !slices.Contains([]string{backupFormat, backupFormatV2, backupFormatV1}, header.Format) {
+	if header.Format != backupFormat {
 		return backupManifest{}, fmt.Errorf("archive format %q is not %q; use the oberth release that wrote it", header.Format, backupFormat)
 	}
 	var manifest backupManifest

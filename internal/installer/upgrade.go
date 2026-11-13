@@ -310,6 +310,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	w := deps.Output
+	printGrantMirrorUpgradeNotice(w, deps.ContextName, cfg.Namespace)
 	if w == nil {
 		w = io.Discard
 	}

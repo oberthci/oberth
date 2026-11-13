@@ -33,10 +33,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/containerimage"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -201,7 +201,6 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 			{backupMemberKV, &archive.KV},
 			{backupMemberPolicies, &archive.Policies},
 			{backupMemberRoles, &archive.Roles},
-			{backupMemberSecretAccess, &archive.Grants},
 		} {
 			if err := readBackupJSON(work, member.name, member.value); err != nil {
 				return archive, err
@@ -250,6 +249,18 @@ func loadRestoreArchive(ctx context.Context, cfg RestoreConfig, deps backupDeps,
 	}
 	archive.LocalDatabase = archive.Database.Main
 	if archive.Contents, err = summarizeDatabase(ctx, archive.LocalDatabase, protocol); err != nil {
+		return archive, err
+	}
+	inspection, err := store.InspectCurrent(ctx, archive.LocalDatabase, store.Options{Protocol: protocol, SnapshotTempDir: filepath.Dir(archive.LocalDatabase)})
+	if err != nil {
+		return archive, err
+	}
+	archive.Grants, err = exportDatabaseGrants(ctx, inspection)
+	err = errors.Join(err, inspection.Close())
+	if err != nil {
+		return archive, err
+	}
+	if err := validateExportedGrants(archive.Grants.Grants); err != nil {
 		return archive, err
 	}
 	_, _ = fmt.Fprintf(deps.Output, "Verified: all %d parts match the manifest; the database (schema %d) passes integrity, foreign-key and audit-chain checks offline.\n",
@@ -469,13 +480,7 @@ func compatibilityOverlay(archive restoreArchive, target restoreTarget) map[stri
 	}}
 }
 
-func countGrants(grants secretAccessExport) int {
-	var entries []grantEntry
-	if err := yaml.Unmarshal([]byte(grants.Data[secretAccessConfigMapKey]), &entries); err != nil {
-		return 0
-	}
-	return len(entries)
-}
+func countGrants(grants secretAccessExport) int { return len(grants.Grants) }
 
 // confirmRestore requires --yes, or the target context typed back on a
 // terminal: a restore replaces live secrets and the live database.
@@ -565,6 +570,12 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			err, target.previousFiles())
 	}
 
+	if parts.Secrets && !parts.History && archive.Grants.Present {
+		if err := writeSecretAccess(ctx, deps.Deps, cfg.Namespace, archive.Grants); err != nil {
+			return fmt.Errorf("restore database approvals: %w", err)
+		}
+		_, _ = fmt.Fprintf(w, "  ✓ restored database approvals (%d grants)\n", countGrants(archive.Grants))
+	}
 	_, _ = fmt.Fprintln(w, "Stopping the server...")
 	if err := scaleServer(ctx, deps.Deps, cfg.Namespace, 0); err != nil {
 		return err
@@ -575,19 +586,12 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 
 	if parts.History {
 		_, _ = fmt.Fprintln(w, "Swapping the database on the volume...")
-		if err := swapDatabase(ctx, cfg, deps, archive, target); err != nil {
+		if err := swapDatabase(ctx, cfg, deps, &archive, target, !parts.Secrets); err != nil {
 			swapped = errors.Is(err, errRestoredDatabaseInPlace)
 			return stopped(err)
 		}
 		swapped = true
 		_, _ = fmt.Fprintf(w, "  ✓ restored database in place; the previous files are in %s\n", target.previousFiles())
-	}
-
-	if parts.Secrets && archive.Grants.Present {
-		if err := writeSecretAccess(ctx, deps.Deps, cfg.Namespace, archive.Grants); err != nil {
-			return stopped(err)
-		}
-		_, _ = fmt.Fprintf(w, "  ✓ ConfigMap %s restored (%d grants)\n", secretAccessConfigMapName, countGrants(archive.Grants))
 	}
 
 	// List again now that no server can submit new Workflows.
@@ -805,7 +809,7 @@ func restoreHelperPod(name, namespace, timestamp string, server serverDeployment
 	}
 }
 
-func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive restoreArchive, target restoreTarget) (resultErr error) {
+func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archive *restoreArchive, target restoreTarget, preserveGrants bool) (resultErr error) {
 	name := "oberth-restore-" + strings.ToLower(target.Timestamp)
 	server := target.Server
 	if cfg.UtilityImage != "" {
@@ -848,7 +852,7 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 		if output == nil {
 			output = io.Discard
 		}
-		if err := preflightRestoreMigration(ctx, archive, schema, target.previousFiles(), output); err != nil {
+		if err := preflightRestoreMigration(ctx, *archive, schema, target.previousFiles(), output); err != nil {
 			return err
 		}
 	}
@@ -856,6 +860,11 @@ func swapDatabase(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 	inPod := func(stdin []byte, script string, args ...string) ([]byte, error) {
 		command := append([]string{"sh", "-c", script, "sh"}, args...)
 		return deps.RunCommand(ctx, stdin, "kubectl", kubectlExecArgs(deps.ContextName, cfg.Namespace, name, restoreHelperContainer, stdin != nil, command...)...)
+	}
+	if preserveGrants {
+		if err := retainStoppedTargetGrants(ctx, cfg, deps, archive, target, name); err != nil {
+			return err
+		}
 	}
 	if out, err := inPod(nil, stageResetScript); err != nil {
 		return fmt.Errorf("clear staging directory %s: %w%s", restoreStageDir, err, commandOutputSuffix(out))
@@ -970,24 +979,38 @@ func checkUploadedSize(member string, out []byte, want int64) error {
 }
 
 func writeSecretAccess(ctx context.Context, deps Deps, namespace string, grants secretAccessExport) error {
-	configMaps := deps.KubeClient.CoreV1().ConfigMaps(namespace)
-	existing, err := configMaps.Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		_, err = configMaps.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: namespace},
-			Data:       grants.Data,
-		}, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("create ConfigMap %s: %w", secretAccessConfigMapName, err)
-		}
+	if !grants.Present {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("get ConfigMap %s: %w", secretAccessConfigMapName, err)
+	if err := validateExportedGrants(grants.Grants); err != nil {
+		return err
 	}
-	existing.Data = grants.Data
-	if _, err := configMaps.Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("update ConfigMap %s: %w", secretAccessConfigMapName, err)
+	current, err := readSecretAccess(ctx, deps, namespace)
+	if err != nil {
+		return err
+	}
+	desired := map[model.SecretAccessKey]bool{}
+	for _, key := range grants.Grants {
+		desired[key] = true
+	}
+	active := map[model.SecretAccessKey]bool{}
+	for _, key := range current.Grants {
+		active[key] = true
+	}
+	// Remove excess authority before adding the exact restored approvals.
+	for _, key := range current.Grants {
+		if !desired[key] {
+			if err := CallAdmin(ctx, Config{Namespace: namespace}, deps, "access-revoke", key, nil); err != nil {
+				return err
+			}
+		}
+	}
+	for _, key := range grants.Grants {
+		if !active[key] {
+			if err := CallAdmin(ctx, Config{Namespace: namespace}, deps, "access-allow", key, nil); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

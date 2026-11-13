@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -22,14 +23,12 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
-	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -210,6 +209,7 @@ func (f *fakeOpenBao) handle(command []string, input []byte) ([]byte, error) {
 // --- A fake cluster: kubectl, helm and the Kubernetes API ---
 
 type fakeBackupCluster struct {
+	compat        backupCompatibility
 	helmShowChart []string
 	missingChart  bool
 	t             *testing.T
@@ -289,6 +289,7 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 	objects = append(objects, serverDeploymentFixture(compat), serverPodFixture("oberth-1"), runningOpenBaoPod(), runningOpenBaoStatefulSet())
 	c := &fakeBackupCluster{
 		t:       t,
+		compat:  compat,
 		bao:     newFakeOpenBao(t),
 		client:  fake.NewClientset(objects...),
 		values:  map[string]any{"compatibility": map[string]any{"schemaIdentity": compat.SchemaIdentity, "auditDomain": compat.AuditDomain, "witnessKeyInfo": compat.WitnessKeyInfo}, "argo": map[string]any{"namespace": DefaultArgoNamespace}},
@@ -450,18 +451,66 @@ func (c *fakeBackupCluster) run(ctx context.Context, input []byte, name string, 
 	joined := strings.Join(command, " ")
 	switch {
 	case joined == "oberth access list --json":
-		cm, err := c.client.CoreV1().ConfigMaps(DefaultNamespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return []byte("[]"), nil
+		db, _, cleanup, err := c.openGrantDatabase(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+		grants, err := exportDatabaseGrants(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(grants.Grants)
+	case strings.HasPrefix(joined, "oberth access allow ") || strings.HasPrefix(joined, "oberth access revoke "):
+		if len(command) != 7 {
+			return nil, fmt.Errorf("bad grant tuple: %v", command)
+		}
+		db, path, cleanup, err := c.openGrantDatabase(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if command[2] == "allow" {
+			_, err = db.Grant(ctx, command[3], command[4], command[5], command[6], "admin@fixture")
+		} else {
+			_, err = db.Revoke(ctx, command[3], command[4], command[5], command[6], "admin@fixture")
+		}
+		if closeErr := cleanup(); err == nil {
+			err = closeErr
 		}
 		if err != nil {
 			return nil, err
 		}
-		var entries []accessListJSONEntry
-		if err := yaml.Unmarshal([]byte(cm.Data[secretAccessConfigMapKey]), &entries); err != nil {
+		return nil, c.captureGrantDatabase(ctx, path)
+	case container == restoreHelperContainer && strings.Contains(joined, "tar -cf -"):
+		db, path, cleanup, err := c.openGrantDatabase(ctx)
+		_ = db
+		if err != nil {
 			return nil, err
 		}
-		return json.Marshal(entries)
+		if err := cleanup(); err != nil {
+			return nil, err
+		}
+		var out bytes.Buffer
+		tw := tar.NewWriter(&out)
+		for _, suffix := range []string{"", "-wal"} {
+			body, err := os.ReadFile(path + suffix)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if err := tw.WriteHeader(&tar.Header{Name: "oberth.sqlite" + suffix, Mode: 0600, Size: int64(len(body))}); err != nil {
+				return nil, err
+			}
+			if _, err := tw.Write(body); err != nil {
+				return nil, err
+			}
+		}
+		if err := tw.Close(); err != nil {
+			return nil, err
+		}
+		return out.Bytes(), nil
 	case joined == "oberth version --schema":
 		if c.schemaExecErr != nil {
 			return nil, c.schemaExecErr
@@ -576,6 +625,9 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	if _, err := database.SetRunWorkflowName(ctx, run.ID, "oberth-backup-fixture"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Grant(ctx, "codeberg/org/repo", ".oberth/release.yaml", "*", "oberth/data/release/cosign-secret", "admin@fixture"); err != nil {
+		t.Fatal(err)
+	}
 	// An audited action makes the hash chain depend on the audit domain.
 	if _, err := database.AppendAuditAction(ctx, model.AuditActionSpec{Actor: "fixture", Action: "backup-test", ResourceType: "backup", ResourceID: "restore"}); err != nil {
 		t.Fatal(err)
@@ -642,20 +694,13 @@ func seedSourceOpenBao(bao *fakeOpenBao) {
 	}
 }
 
-func grantsConfigMap(grants string) *corev1.ConfigMap {
-	return &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: DefaultNamespace},
-		Data:       map[string]string{secretAccessConfigMapKey: grants},
-	}
-}
-
-const testGrants = "- repo: codeberg/org/repo\n  step: '*'\n  secret: oberth/data/release/cosign-secret\n"
+const testGrants = "- repo: codeberg/org/repo\n  workflow: .oberth/release.yaml\n  step: '*'\n  secret: oberth/data/release/cosign-secret\n"
 
 // backupFixtureArchive runs a full backup against a seeded source cluster.
 func backupFixtureArchive(t *testing.T, oldServer bool) (string, string, *fakeBackupCluster) {
 	t.Helper()
 	archiveBytes, raw, runID := sourceDatabase(t)
-	source := newFakeBackupCluster(t, sourceCompat, grantsConfigMap(testGrants))
+	source := newFakeBackupCluster(t, sourceCompat)
 	source.database, source.rawFiles, source.oldServer = archiveBytes, raw, oldServer
 	source.clusterUID = "source-cluster"
 	source.values["argo"] = map[string]any{"namespace": DefaultArgoNamespace, "releaseWIF": map[string]any{
@@ -732,13 +777,11 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 	if _, ok := reference.TransitKeys["oberth-transit/trusted-plan-artifacts"]; !ok || reference.PKICACerts["oberth-pki"] == "" {
 		t.Fatalf("reference lacks Transit/PKI metadata: %+v", reference)
 	}
-	var grants secretAccessExport
-	if err := readBackupJSON(work, backupMemberSecretAccess, &grants); err != nil {
-		t.Fatal(err)
+	_, grants, err := inspectGrantSnapshot(t.Context(), filepath.Join(work, backupMemberDatabase), work, store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}, 0)
+	if err != nil || !grants.Present || len(grants.Grants) != 1 || grants.Grants[0].Repo != "codeberg/org/repo" {
+		t.Fatal("database approvals missing", grants, err)
 	}
-	if !grants.Present || !strings.Contains(grants.Data[secretAccessConfigMapKey], "codeberg/org/repo") {
-		t.Fatalf("secret-access export = %+v", grants)
-	}
+
 }
 
 func TestBackupDryRunReadsNoSecrets(t *testing.T) {
@@ -1223,4 +1266,47 @@ func assertUtilityHelperImage(t *testing.T, cluster *fakeBackupCluster, image st
 	if !found {
 		t.Fatal("no maintenance helper pod created")
 	}
+}
+
+func (c *fakeBackupCluster) openGrantDatabase(ctx context.Context) (*store.Store, string, func() error, error) {
+	work := c.t.TempDir()
+	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: c.compat.SchemaIdentity, AuditDomain: c.compat.AuditDomain}, SnapshotTempDir: work}
+	path := filepath.Join(work, "oberth.sqlite")
+	if len(c.database) > 0 {
+		tarPath := filepath.Join(work, "db.tar")
+		if err := os.WriteFile(tarPath, c.database, 0600); err != nil {
+			return nil, "", nil, err
+		}
+		files, err := extractDatabaseFiles(ctx, tarPath, work, 0)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		path = files.Main
+	}
+	var db *store.Store
+	var err error
+	if len(c.database) > 0 {
+		db, err = store.OpenAdminClient(ctx, path, opts)
+	} else {
+		db, err = store.CreateGenesis(ctx, path, opts)
+	}
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return db, path, db.Close, nil
+}
+func (c *fakeBackupCluster) captureGrantDatabase(ctx context.Context, path string) error {
+	var out bytes.Buffer
+	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: c.compat.SchemaIdentity, AuditDomain: c.compat.AuditDomain}, SnapshotTempDir: filepath.Dir(path)}
+	if _, err := store.WriteVerifiedBackup(ctx, path, store.LatestMigrationVersion(), opts, &out); err != nil {
+		return err
+	}
+	c.database = out.Bytes()
+	c.rawFiles = map[string][]byte{}
+	for _, suffix := range []string{"", "-wal"} {
+		if body, err := os.ReadFile(path + suffix); err == nil {
+			c.rawFiles[serverDatabasePath+suffix] = body
+		}
+	}
+	return nil
 }

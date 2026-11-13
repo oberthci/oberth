@@ -3,7 +3,6 @@ package installer
 import (
 	"bytes"
 	"context"
-	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"

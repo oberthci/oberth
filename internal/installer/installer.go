@@ -1593,6 +1593,9 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		return result, err
 	}
 	cfg.existingRelease = exists
+	if exists {
+		printGrantMirrorUpgradeNotice(deps.Output, deps.ContextName, cfg.Namespace)
+	}
 
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "oberth")
 	result.TargetVersion = cfg.ChartVersion

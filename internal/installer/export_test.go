@@ -252,7 +252,7 @@ func printProductionCredentials(w io.Writer, initResult baoInitResult, color boo
 // to close a trust-tier collapse where any CI pipeline declaring an
 // upstream path received credentials that could read all release secrets.
 func OberthCredentialedPolicy(kvPrefix string, upstreamOrgs []string) string {
-	return OberthCredentialedPolicyWithGrants(kvPrefix, upstreamOrgs, nil)
+	return OberthCredentialedPolicyWithGrants(kvPrefix,nil)
 }
 
 // checkValuesPinnedConflicts checks parsed YAML data for leaf keys that
