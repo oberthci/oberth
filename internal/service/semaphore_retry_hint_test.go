@@ -9,8 +9,8 @@ import (
 
 func TestSemaphoreConfigurationRetryHint(t *testing.T) {
 	for _, message := range []string{
-		`Failed to acquire the synchronization lock. failed to initialize semaphore pipelines/Semaphore/oberth-sync-limits/build with limit`,
-		`failed to initialize semaphore pipelines/Semaphore/oberth-sync-limits/build with limit`,
+		`Failed to acquire the synchronization lock. failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/build with limit`,
+		`failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/build with limit`,
 		`Failed to acquire the synchronization lock. configmaps "oberth-sync-limits" not found`,
 		`Failed to acquire the synchronization lock. Sync configuration key 'build' not found in ConfigMap`,
 	} {
@@ -33,16 +33,19 @@ func TestSemaphoreConfigurationRetryHint(t *testing.T) {
 	}
 	for _, message := range []string{
 		"connection refused", "Failed to acquire the synchronization lock. connection refused",
+		"Failed to acquire the synchronization lock. failed to initialize semaphore pipelines/Semaphore/oberth-sync-limits/build with limit",
+		"failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/bad/key with limit",
+		"failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/build with limit trailing text",
 		`configmaps "unrelated" not found`,
-		"failed to initialize semaphore pipelines/Semaphore/other/build with limit",
-		"prefix failed to initialize semaphore pipelines/Semaphore/oberth-sync-limits/build with limit",
+		"failed to initialize semaphore pipelines/ConfigMap/other/build with limit",
+		"prefix failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/build with limit",
 	} {
 		hint := runRetryHint(model.Run{Status: model.RunFailed, Phase: "infrastructure", Error: message}, nil)
 		if hint == nil || hint.Class != model.RetryInfrastructure {
 			t.Fatalf("unrelated error reclassified: %+v", hint)
 		}
 	}
-	if hint := runRetryHint(model.Run{Status: model.RunRunning, Error: "failed to initialize semaphore pipelines/Semaphore/oberth-sync-limits/build with limit"}, nil); hint != nil {
+	if hint := runRetryHint(model.Run{Status: model.RunRunning, Error: "failed to initialize semaphore pipelines/ConfigMap/oberth-sync-limits/build with limit"}, nil); hint != nil {
 		t.Fatal("active run has retry hint", hint)
 	}
 }

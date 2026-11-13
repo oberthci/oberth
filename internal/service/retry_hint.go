@@ -154,7 +154,9 @@ func (service *API) runPublicationRetry(ctx context.Context, run model.Run) *mod
 // Argo 4.0.8 discards the underlying initial-limit read error. Its exact
 // initialization failure therefore requires checking configuration and access;
 // it is not evidence that retrying the run alone will repair the semaphore.
-var semaphoreInitializationFailure = regexp.MustCompile(`^(?:Failed to acquire the synchronization lock\. )?failed to initialize semaphore [a-z0-9.-]+/Semaphore/oberth-sync-limits/[A-Za-z0-9._-]+ with limit$`)
+// lock_name.go:getSemaphoreLockName encodes ConfigMap-backed semaphores with
+// the ConfigMap kind; semaphore.go emits that name in initialization errors.
+var semaphoreInitializationFailure = regexp.MustCompile(`^(?:Failed to acquire the synchronization lock\. )?failed to initialize semaphore [a-z0-9.-]+/ConfigMap/oberth-sync-limits/[A-Za-z0-9._-]+ with limit$`)
 var semaphoreMissingKey = regexp.MustCompile(`^(?:Failed to acquire the synchronization lock\. )?Sync configuration key '[A-Za-z0-9._-]+' not found in ConfigMap$`)
 
 func semaphoreConfigurationFailure(message string) bool {
