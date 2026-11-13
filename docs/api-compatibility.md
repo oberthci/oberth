@@ -34,7 +34,7 @@ responses keep their distinct `publication_id`, `promotion_id` and `run_id`.
 Every tool that selects one run takes it as `id`: `run_get`, `run_logs`,
 `run_retry`, `run_cancel`, `run_rerun`, `run_hold_list`, `run_hold_exec`,
 `run_hold_patch`, `run_continue`, `run_hold_abandon`, `run_purge`,
-`artifacts`, `artifact_get`, ID-based `wait`, `run_wait`, `run_resources`,
+`artifacts`, `artifact_get`, ID-based `wait`, `run_wait`,
 `run_priority` and `admission_release`. No other spelling is accepted.
 
 ## Collection envelopes

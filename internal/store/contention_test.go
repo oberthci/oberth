@@ -114,7 +114,7 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 				observed := make(chan struct{})
 				lookupRequests <- observed
 				<-observed
-				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Stage: "test", Step: fmt.Sprintf("step-%d", round), Ordinal: round, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
+				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Stage: "test", Step: fmt.Sprintf("step-%d", round), Ordinal: round, Status: model.StepPassed}); err != nil {
 					errs <- err
 				}
 			})

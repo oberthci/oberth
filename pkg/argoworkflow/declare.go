@@ -58,7 +58,7 @@ func DeclaredSecretPaths(workflow *wfv1.Workflow) ([]string, error) {
 // login token.
 func UsesEnvconsul(template *wfv1.Template) bool {
 	isEnvconsul := func(command []string) bool {
-		command = resourceUsageCommand(command)
+		command = legacyCredentialCommand(command)
 		return len(command) > 0 &&
 			(strings.HasSuffix(command[0], "/envconsul") || command[0] == "envconsul")
 	}
@@ -77,7 +77,7 @@ func UsesEnvconsul(template *wfv1.Template) bool {
 // stripping, and redaction in a single binary.
 func UsesOberthSecretstore(template *wfv1.Template) bool {
 	isOberthSecretstore := func(command, args []string) bool {
-		command = resourceUsageCommand(command)
+		command = legacyCredentialCommand(command)
 		if len(command) == 0 {
 			return false
 		}
@@ -130,9 +130,9 @@ func UsesReleaseWIF(template *wfv1.Template) bool {
 	return present
 }
 
-// Resource measurement is outside the credential chain in admitted specs.
-// Keep static plans and post-admission credential classification identical.
-func resourceUsageCommand(command []string) []string {
+// Read the original argv of already-submitted Workflows when checking
+// credential access. New submissions do not add this retired wrapper.
+func legacyCredentialCommand(command []string) []string {
 	if len(command) > 3 && command[0] == "/run/oberth/usage/oberth" && command[1] == "internal-step-exec" && command[2] == "--" {
 		return command[3:]
 	}
@@ -143,6 +143,8 @@ func resourceUsageCommand(command []string) []string {
 // document that carries one is refused, naming what replaced it, instead of
 // running as if it took effect.
 var removedAnnotations = map[string]string{
+	"oberth.ci/step-usage-memory-policy":     "per-step measurement is absent in v0.22.0",
+	"oberth.ci/step-usage-memory-warning":    "per-step measurement is absent in v0.22.0",
 	"oberth.ci/cpu-requests":                 "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
 	"oberth.ci/request-defaults":             "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",
 	"oberth.ci/declared-pod-demand":          "not supported; resources, parallelism and deadlines are authored directly in Workflow YAML",

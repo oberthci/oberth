@@ -144,8 +144,7 @@ type serveOptions struct {
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 
-	argoWorkflowTTL           int
-	argoResourceSamplerConfig string
+	argoWorkflowTTL int
 	// argoSourceStorageClass names the class for the per-run source claim the
 	// server creates in the pipeline namespace. Empty selects the cluster
 	// default, which is what a single-node install wants.
@@ -297,7 +296,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoGoProxyNamespace.Upstream, "argo-goproxy-upstream", "", "Exact upstream owning private module repositories")
 	flags.StringVar(&options.argoGoProxyNamespace.Organization, "argo-goproxy-organization", "", "Exact organization owning private module repositories")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
-	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.StringVar(&options.reservedBranches, "reserved-branches", "main,master", "comma-separated branch globs that, like the default branch, no push or prune may delete")
@@ -1063,10 +1061,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	controlAPI, err := service.NewAPI(withAgentEvents(options, database, service.APIConfig{
 		Tags: pushes, BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
-		ResourceDeclarations: argoJobs,
-		ReleasePreflight:     argoJobs,
-		ClientCertificates:   &service.ClientCertIssuer{Authority: clientAuthority, Store: database, ServerCAPin: servedCAPin(served)},
-		UplinkLifecycle:      database, DeclarationDismissal: database,
+		ReleasePreflight:   argoJobs,
+		ClientCertificates: &service.ClientCertIssuer{Authority: clientAuthority, Store: database, ServerCAPin: servedCAPin(served)},
+		UplinkLifecycle:    database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		SchedulingObserver: argoJobs,
 		Runs:               database, History: database, RunRetries: database, Repositories: database, Issues: database,
@@ -1138,7 +1135,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			served.writeMetrics(w)
 			database.WriteTokenUseMetrics(w)
 			writeHealthMetrics(w, health)
-			argoJobs.WriteResourceMetrics(w)
 		}),
 		api.WithMaximumToolWait(service.DefaultMaximumWait), api.WithAgentEventStreams(options.agentEventStreams, options.agentEventBacklog), api.WithMCPHeartbeat(options.mcpHeartbeat),
 		api.WithLiveness(func() error {

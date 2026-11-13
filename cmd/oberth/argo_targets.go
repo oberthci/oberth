@@ -24,18 +24,16 @@ import (
 
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/argojob"
-	"github.com/oberthci/oberth/internal/resourcesampler"
 )
 
 // This file is administrator configuration. Repositories and API requests
 // cannot supply a target, transport, credentials or executor configuration.
 type argoTargetPolicy struct {
-	Schema          string         `json:"schema"`
-	ID              string         `json:"id"`
-	Kubeconfig      string         `json:"kubeconfig"`
-	Context         string         `json:"context"`
-	ResourceSampler string         `json:"resource_sampler"`
-	Config          argojob.Config `json:"config"`
+	Schema     string         `json:"schema"`
+	ID         string         `json:"id"`
+	Kubeconfig string         `json:"kubeconfig"`
+	Context    string         `json:"context"`
+	Config     argojob.Config `json:"config"`
 }
 
 func readArgoTargetPolicy(name string) (*argoTargetPolicy, error) {
@@ -148,17 +146,6 @@ func buildArgoTarget(policy *argoTargetPolicy) ([]app.ExecutionTarget, error) {
 	target := app.ExecutionTarget{ID: policy.ID, Config: policy.Config, Transport: transport, Kubernetes: &singlePostKubernetes{Interface: kube}, Workflows: func(namespace string) argojob.WorkflowClient {
 		return &singlePostWorkflows{WorkflowClient: workflows.ArgoprojV1alpha1().Workflows(namespace), client: workflows.ArgoprojV1alpha1().RESTClient(), namespace: namespace}
 	}, Exec: newArgoExecStreamer(transport, kube)}
-	if policy.ResourceSampler != "" {
-		config, err := resourcesampler.ReadConfig(policy.ResourceSampler)
-		if err != nil {
-			return nil, err
-		}
-		source, err := resourcesampler.NewClient(config)
-		if err != nil {
-			return nil, err
-		}
-		target.ResourceSource = source
-	}
 	return []app.ExecutionTarget{target}, nil
 }
 

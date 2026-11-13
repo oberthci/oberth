@@ -58,9 +58,6 @@ type APIConfig struct {
 	IssueStaleAfter        time.Duration
 	IssueActiveStaleAfter  time.Duration
 	WorkflowCapabilities   WorkflowCapabilityStore
-	RunResources           RunResourceReader
-	ResourceDeclarations   ResourceDeclarationReader
-	Resources              ResourceUsageReader
 	ReleasePreflight       ReleasePreflighter
 	ClientCertificates     *ClientCertIssuer
 	UplinkLifecycle        UplinkLifecycle
@@ -139,9 +136,6 @@ type API struct {
 	issueActiveStaleAfter  time.Duration
 	issueObservedAt        time.Time
 	workflowCapabilities   WorkflowCapabilityStore
-	runResources           RunResourceReader
-	resourceDeclarations   ResourceDeclarationReader
-	resources              ResourceUsageReader
 	promotionProgress      *sync.Map
 	releasePreflight       ReleasePreflighter
 	clientCertificates     *ClientCertIssuer
@@ -220,12 +214,6 @@ func NewAPI(config APIConfig) (*API, error) {
 		return nil, fmt.Errorf("%w: issue stale windows must be positive and active must not exceed general", ErrInvalidInput)
 	}
 
-	if config.RunResources == nil {
-		config.RunResources, _ = config.History.(RunResourceReader)
-	}
-	if config.Resources == nil {
-		config.Resources, _ = config.History.(ResourceUsageReader)
-	}
 	if config.Runs == nil {
 		return nil, errors.New("service: run resolver is required")
 	}
@@ -270,10 +258,10 @@ func NewAPI(config APIConfig) (*API, error) {
 		clientCertificates: config.ClientCertificates,
 		uplinkLifecycle:    config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
-		schedulingObserver: config.SchedulingObserver, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
-		listDiagnostics: &listDiagnosticCache{},
-		branchCounts:    &branchCountCache{},
-		resources:       config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
+		schedulingObserver: config.SchedulingObserver,
+		listDiagnostics:    &listDiagnosticCache{},
+		branchCounts:       &branchCountCache{},
+		runs:               config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		tags: config.Tags, enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
@@ -501,8 +489,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		// The summary is the default; the full record (timing, diagnostics,
 		// the repository record) only on an explicit summary:false.
 		return service.readRun(ctx, actor, arguments.ID, arguments.Summary == nil || *arguments.Summary)
-	case "run_resources":
-		return service.readRunResources(ctx, raw)
 	case "run_retry":
 		var arguments struct {
 			ID string `json:"id"`
@@ -945,8 +931,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.accessRevoke(ctx, actor, arguments.Repo, arguments.Step, arguments.Secret)
-	case "repo_usage":
-		return service.repoUsage(ctx, raw)
 	case "repo_list":
 		var arguments struct {
 			Archived string `json:"archived"`
@@ -1967,15 +1951,6 @@ func matchesFailedStep(step model.StepResult, run model.Run) bool {
 // progress it had visibly made. Its honest record is the plan, with the steps
 // that reached a state filled in and unreached declarations marked skipped.
 func (service *API) stepsForRun(ctx context.Context, run model.Run) (result []model.StepResult, resultErr error) {
-	defer func() {
-		if resultErr != nil || service.resources == nil {
-			return
-		}
-		values, truncated, err := service.resources.StepResourceUsage(ctx, run.ID)
-		if err == nil {
-			model.AttachResourceUsage(result, values, truncated)
-		}
-	}()
 
 	steps, err := service.history.StepResults(ctx, run.ID)
 	if err != nil {
@@ -2115,7 +2090,7 @@ func progressStepResult(runID string, event runprogress.Event) model.StepResult 
 	return model.StepResult{
 		RunID: runID, Stage: event.Stage, Step: event.Step, Ordinal: event.Ordinal,
 		Status: model.StepStatus(event.Status), ExitCode: event.ExitCode,
-		DeclaredSize: event.DeclaredSize.Effective(), StartedAt: event.StartedAt, FinishedAt: event.FinishedAt,
+		StartedAt: event.StartedAt, FinishedAt: event.FinishedAt,
 	}
 }
 

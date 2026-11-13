@@ -68,12 +68,9 @@ class ArgoSchemaTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, f'Helm accepted invalid values: {argo}')
         self.assertIn('schema', result.stderr.lower(), result.stderr)
 
-    def test_string_false_cannot_enable_sampler(self):
-        self.assert_schema_refuses({'resourceSampler': SAMPLER},
-                                   '--set-string', 'argo.resourceSampler.enabled=false')
-        result = self.render({'resourceSampler': dict(SAMPLER, enabled=False)})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn('name: oberth-resource-sampler', result.stdout)
+    def test_removed_sampler_is_refused_even_when_disabled(self):
+        for value in (SAMPLER, dict(SAMPLER, enabled=False)):
+            self.assert_schema_refuses({'resourceSampler': value})
 
     def test_active_value_types_and_unknown_keys(self):
         cases = [
@@ -123,14 +120,7 @@ class ArgoSchemaTests(unittest.TestCase):
     def test_valid_boundaries_render(self):
         cases = [{}, {'ciSecrets': None},
                  {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'},
-                  'controllerProfile': 'nonroot-static-v1', 'resourceSampler': SAMPLER},
-                 {'resourceSampler': dict(SAMPLER, nodes={
-                     'node-' + str(n): 'https://node.example.com:10250' for n in range(32)})},
-                 {'resourceSampler': dict(SAMPLER, interval='')},
-                 {'resourceSampler': dict(SAMPLER, interval='1s')},
-                 {'resourceSampler': dict(SAMPLER, interval='30s')},
-                 {'resourceSampler': dict(SAMPLER, interval='1.5s')},
-                 {'resourceSampler': dict(SAMPLER, interval='1s500ms')}]
+                  'controllerProfile': 'nonroot-static-v1'}]
         for key in ('perRepoIdentities', 'perRepoCIIdentities', 'perStepIdentities'):
             cases.append({key: [MAX_NAME]})
         for argo in cases:

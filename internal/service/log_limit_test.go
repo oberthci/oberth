@@ -41,7 +41,7 @@ func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *test
 	started := time.Now().UTC()
 	event := runprogress.Event{
 		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
-		Status: runprogress.StepRunning, DeclaredSize: "M", StartedAt: &started,
+		Status: runprogress.StepRunning, StartedAt: &started,
 	}
 	marker, err := runprogress.MarshalMarker(event)
 	if err != nil {

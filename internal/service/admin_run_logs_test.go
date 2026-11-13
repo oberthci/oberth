@@ -21,7 +21,7 @@ func TestAdminRunLogsResolvesUniqueStepBeforeFailedBurnDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, step := range []model.StepResult{{RunID: run.ID, DeclaredSize: "M", Stage: "build", Step: "compile", Status: model.StepPassed}, {RunID: run.ID, DeclaredSize: "M", Stage: "unit", Step: "check", Status: model.StepFailed}, {RunID: run.ID, DeclaredSize: "M", Stage: "integration", Step: "check", Status: model.StepFailed}} {
+	for _, step := range []model.StepResult{{RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed}, {RunID: run.ID, Stage: "unit", Step: "check", Status: model.StepFailed}, {RunID: run.ID, Stage: "integration", Step: "check", Status: model.StepFailed}} {
 		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func TestRunLogsWithoutFailureListsAvailablePairs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, step := range []model.StepResult{{RunID: run.ID, DeclaredSize: "M", Stage: "build", Step: "compile", Status: model.StepPassed}, {RunID: run.ID, DeclaredSize: "M", Stage: "test", Step: "unit", Status: model.StepPassed}} {
+	for _, step := range []model.StepResult{{RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed}, {RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}} {
 		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
 			t.Fatal(err)
 		}

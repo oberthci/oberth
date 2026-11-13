@@ -95,7 +95,7 @@ func TestBatchToolAmbiguousPrefixes(t *testing.T) {
 	control.runCancels, control.runReruns, control.runRetries = f.store, f.store, f.store
 
 	control.artifacts = kept.retention.Artifacts
-	for _, tool := range []string{"run_get", "run_logs", "run_cancel", "run_rerun", "run_retry", "run_resources", "artifacts", "artifact_get", "wait", "publish_retry", "run_list", "promote_status", "promote_retry", "promotion_list"} {
+	for _, tool := range []string{"run_get", "run_logs", "run_cancel", "run_rerun", "run_retry", "artifacts", "artifact_get", "wait", "publish_retry", "run_list", "promote_status", "promote_retry", "promotion_list"} {
 		for _, n := range []int{8, 12} {
 			t.Run(fmt.Sprintf("%s/%d", tool, n), func(t *testing.T) {
 				key := "id"

@@ -102,7 +102,7 @@ func TestRestartResetRefusesExecutionAndPublicationEvidence(t *testing.T) {
 			_, err = s.ClaimNextRun(t.Context())
 			requireRestartNoError(t, err)
 			if evidence == "step" {
-				_, err = s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "S"})
+				_, err = s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed})
 			} else {
 				_, err = s.BeginPublication(t.Context(), model.PublicationSpec{RepoID: repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
 			}

@@ -358,31 +358,18 @@ func (s StepStatus) Progress() int {
 }
 
 type StepResult struct {
-	// MeasuredUsage is outside-step, identity-bound sampled telemetry; legacy usage fields below remain self-reported.
-	MeasuredUsage          []StepResourceUsage      `json:",omitempty"`
-	MeasuredUsageTruncated bool                     `json:",omitempty"`
-	MeasuredSizeComparison []ResourceSizeComparison `json:",omitempty"`
-	Termination            *StepDiagnostic
-	RunID                  string
-	Stage                  string `json:"Burn"`
-	Step                   string
-	Ordinal                int
-	Status                 StepStatus
-	ExitCode               int
-	LogStart               int64
-	LogEnd                 int64
-	DeclaredSize           pipeline.Size `json:"-"`
-	// Usage counters are self-reported by untrusted build code, never evidence
-	// for admission or size grants. Any aggregation must saturate on overflow.
-	// Pointers distinguish unavailable telemetry from measured zero.
-	// CPU durations are nanoseconds; MemoryPeakBytes includes cgroup page cache.
-	MaxRSSBytes     *int64
-	MemoryPeakBytes *int64
-	UserCPU         *time.Duration
-	SystemCPU       *time.Duration
-	StartedAt       *time.Time
-	FinishedAt      *time.Time
-	RecordedAt      time.Time
+	Termination *StepDiagnostic
+	RunID       string
+	Stage       string `json:"Burn"`
+	Step        string
+	Ordinal     int
+	Status      StepStatus
+	ExitCode    int
+	LogStart    int64
+	LogEnd      int64
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
+	RecordedAt  time.Time
 	// Secrets marks a step whose template runs a credential chain and so
 	// received the secret store login token. It is a projection from the
 	// run's plan, never a durable result: the store does not record it.

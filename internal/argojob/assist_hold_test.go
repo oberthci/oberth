@@ -374,8 +374,8 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	if readOnly, ok := mountReadOnly(main, CacheMountPath); !ok || !readOnly {
 		t.Fatal("held attempt shared cache mount is not read-only")
 	}
-	if held.NodeSelector[corev1.LabelArchStable] == "" {
-		t.Fatal("held attempt with the server binary mounted needs the server's architecture")
+	if len(held.NodeSelector) != 0 {
+		t.Fatal("held attempt injected an architecture selector")
 	}
 	names := []string{held.Containers[0].Name, held.Containers[1].Name}
 	if len(held.Containers) != 2 || !slices.Contains(names, "wait") || !slices.Contains(names, mainContainerName) {
@@ -577,7 +577,7 @@ func TestBuildAssistHoldKeepsTemplateSynchronization(t *testing.T) {
 	}
 }
 
-// A leaf below the step-usage memory floor is not measured, but its held
+// An ordinary leaf has no measurement executable, but its held
 // attempt still carries the server helper, so run_hold_patch works on any
 // image. injectServerVolumes replaces every mount of the source volume; the
 // helper mount must be added after it (it was silently dropped before).
@@ -616,15 +616,15 @@ spec:
 	}
 	for _, name := range []string{"test", "unlimited"} {
 		template := templateNamed(t, wf, name)
-		main := usageContainer(template)
+		main := assistContainer(template)
 		if _, held := template.Metadata.Annotations[AssistHoldAnnotation]; !held {
 			t.Fatalf("%s is not hold-eligible", name)
 		}
-		if !hasUsageBinary(main) {
+		if !hasAssistBinary(main) {
 			t.Fatalf("%s lost the patch helper mount: %+v", name, main.VolumeMounts)
 		}
-		if len(main.Command) > 0 && main.Command[0] == usageBinPath {
-			t.Fatalf("%s below the usage memory floor was wrapped for measurement: %v", name, main.Command)
+		if len(main.Command) > 0 && main.Command[0] == assistBinPath {
+			t.Fatalf("%s had its authored command rewritten: %v", name, main.Command)
 		}
 	}
 }

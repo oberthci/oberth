@@ -32,7 +32,3 @@ func (worker *stepLogFollower) consume(reader io.Reader) error {
 func selectNonrootController(pods []corev1.Pod, namespace string) (*corev1.Pod, error) {
 	return selectNonrootControllerWithHistory(pods, namespace, nil)
 }
-
-func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow, runID string) error {
-	return c.sampleResourceUsageWithState(ctx, wf, runID, nil)
-}

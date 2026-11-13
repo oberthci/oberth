@@ -1,10 +1,9 @@
 # Unreleased: CLI, MCP and dashboard quality of life (#1486)
 
 Dashboard run polling now explicitly requests `GET /api/runs/{id}?view=dashboard`
-and omits `Timing` and step `MeasuredUsage`, `MeasuredSizeComparison` and
-`Termination` diagnostics. The default HTTP response, `oberth run <id> --json`
-and full MCP `run_get` retain them. Use MCP `run_resources` or
-`oberth run resources --run <id>` for resource analysis.
+and omits timing and termination diagnostics. The default HTTP response,
+`oberth run <id> --json` and full MCP `run_get` retain them. Per-step resource
+figures and reports are absent in v0.22.0.
 
 MCP `repo_list` now returns compact repository records with one latest run;
 run history, probes and grant metadata remain available from `/api/repos`.

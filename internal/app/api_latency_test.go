@@ -17,7 +17,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/auth"
-	"github.com/oberthci/oberth/internal/measured"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/service"
@@ -28,17 +27,6 @@ import (
 type latencyObserver struct{ calls atomic.Int32 }
 
 func (o *latencyObserver) ObserveScheduling(ctx context.Context, _ model.Run) (*model.ExecutionObservation, error) {
-	o.calls.Add(1)
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-type latencyDemand struct {
-	service.ResourceDeclarationReader
-	calls atomic.Int32
-}
-
-func (o *latencyDemand) ResourceDeclarations(ctx context.Context, _ service.WorkflowRequest) ([]measured.Declaration, error) {
 	o.calls.Add(1)
 	<-ctx.Done()
 	return nil, ctx.Err()
@@ -93,8 +81,8 @@ func newAPILatencyFixture(tb testing.TB) apiLatencyFixture {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	_, err = seed.ExecContext(ctx, `INSERT INTO step_results(run_id,burn,step,ordinal,status,exit_code,log_start,log_end,declared_size,started_at,finished_at,recorded_at)
- SELECT id,'build',step,ordinal,'passed',0,0,0,'M',CASE WHEN runs.status='failed' THEN 1 END,CASE WHEN runs.status='failed' THEN 2 END,2
+	_, err = seed.ExecContext(ctx, `INSERT INTO step_results(run_id,burn,step,ordinal,status,exit_code,log_start,log_end,started_at,finished_at,recorded_at)
+ SELECT id,'build',step,ordinal,'passed',0,0,0,CASE WHEN runs.status='failed' THEN 1 END,CASE WHEN runs.status='failed' THEN 2 END,2
  FROM runs CROSS JOIN(SELECT 'test' AS step,0 AS ordinal UNION ALL SELECT 'check',1) WHERE runs.status='failed'`)
 	if err != nil {
 		tb.Fatal(err)
@@ -125,7 +113,7 @@ func newAPILatencyFixture(tb testing.TB) apiLatencyFixture {
 	health := Health{Store: database, VCSCache: &VCSSnapshot{}, ClusterCache: &ClusterSnapshot{}, SecretStoreCache: &SecretStoreProbeSnapshot{},
 		VCS: func(ctx context.Context, _ model.Upstream) error { return probe(ctx) }, Cluster: probe,
 		SecretStore: &SecretStoreStatus{Configured: true}, SecretStoreProbe: probe, Audit: func(context.Context) error { return nil }}
-	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Logs: logs, Repositories: database, Health: health, SchedulingObserver: &latencyObserver{}, ResourceDeclarations: &latencyDemand{}})
+	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Logs: logs, Repositories: database, Health: health, SchedulingObserver: &latencyObserver{}})
 	if err != nil {
 		tb.Fatal(err)
 	}

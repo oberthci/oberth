@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -242,7 +241,7 @@ func assistHoldEligible(t *wfv1.Template, workflowServiceAccount string, nonroot
 	if t == nil || t.RetryStrategy != nil || t.Timeout != "" || t.DAG != nil || len(t.Steps) != 0 || t.Suspend != nil || t.Resource != nil || t.ContainerSet != nil || t.Data != nil || t.HTTP != nil || t.Plugin != nil {
 		return false
 	}
-	if usageContainer(t) == nil || nonroot[t.Name] {
+	if assistContainer(t) == nil || nonroot[t.Name] {
 		return false
 	}
 	if argoworkflow.UsesCredentials(t) || t.Executor != nil {
@@ -382,7 +381,7 @@ func injectAssistHolds(workflow *wfv1.Workflow, assist AssistConfig) error {
 		// allowance (AssistHoldMaxAgeFactor TTLs); the budget is the bound a
 		// failed command must have finished under.
 		budget := deadline - assistHoldAllowance(ttl)
-		main := usageContainer(t)
+		main := assistContainer(t)
 		if main == nil {
 			failure = fmt.Errorf("argojob: hold-eligible template %q lost its main container", t.Name)
 			return
@@ -411,13 +410,8 @@ func injectAssistHolds(workflow *wfv1.Workflow, assist AssistConfig) error {
 	return failure
 }
 
-// injectAssistHelperMounts gives every hold-eligible leaf the server helper
-// (run_hold_patch applies files through this server's own static executable,
-// not through whatever shell the image may lack). It runs after
-// injectServerVolumes, which replaces every mount of a server-owned volume,
-// so the helper survives on leaves below the step-usage memory floor too;
-// wrapStepUsage still wraps only leaves above that floor. The mount is the
-// read-only one measured steps already receive.
+// injectAssistHelperMounts supplies only explicitly opted-in continuation helpers.
+// It does not wrap commands or constrain Pod architecture.
 func injectAssistHelperMounts(workflow *wfv1.Workflow, request Request) {
 	if !request.binaryDelivered() || request.SourceVolume.ClaimName == "" {
 		return
@@ -426,17 +420,17 @@ func injectAssistHelperMounts(workflow *wfv1.Workflow, request Request) {
 		if _, marked := t.Metadata.Annotations[AssistHoldAnnotation]; !marked {
 			return
 		}
-		main := usageContainer(t)
+		main := assistContainer(t)
 		if main == nil {
 			return
 		}
 		mounts := main.VolumeMounts[:0:0]
 		for _, m := range main.VolumeMounts {
-			if m.MountPath != usageBinMountPath {
+			if m.MountPath != assistBinMountPath {
 				mounts = append(mounts, m)
 			}
 		}
-		main.VolumeMounts = append(mounts, corev1.VolumeMount{Name: SourceVolumeName, MountPath: usageBinMountPath, SubPath: request.SourceVolume.BinarySubPath, ReadOnly: true})
+		main.VolumeMounts = append(mounts, corev1.VolumeMount{Name: SourceVolumeName, MountPath: assistBinMountPath, SubPath: request.SourceVolume.BinarySubPath, ReadOnly: true})
 	})
 }
 
@@ -500,15 +494,6 @@ func assistHoldPatch(base map[string]any, main *corev1.Container, deadline, scra
 		containers = append(containers, container)
 	}
 	held["containers"] = containers
-	if hasUsageBinary(main) {
-		// run_hold_patch runs this server's executable inside the held pod.
-		selectors, _ := held["nodeSelector"].(map[string]any)
-		if selectors == nil {
-			selectors = map[string]any{}
-		}
-		selectors[corev1.LabelArchStable] = runtime.GOARCH
-		held["nodeSelector"] = selectors
-	}
 	return held, nil
 }
 
@@ -565,9 +550,9 @@ func assistScratchResources(containers []any, main *corev1.Container, scratch in
 	return resources, json.Unmarshal(encoded, &resources)
 }
 
-func hasUsageBinary(main *corev1.Container) bool {
+func hasAssistBinary(main *corev1.Container) bool {
 	return slices.ContainsFunc(main.VolumeMounts, func(m corev1.VolumeMount) bool {
-		return m.Name == SourceVolumeName && m.MountPath == usageBinMountPath && m.ReadOnly
+		return m.Name == SourceVolumeName && m.MountPath == assistBinMountPath && m.ReadOnly
 	})
 }
 
@@ -659,4 +644,17 @@ func AssistHoldPod(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+const assistBinMountPath = "/run/oberth/assist"
+const assistBinPath = assistBinMountPath + "/oberth"
+
+func assistContainer(t *wfv1.Template) *corev1.Container {
+	if t.Container != nil {
+		return t.Container
+	}
+	if t.Script != nil {
+		return &t.Script.Container
+	}
+	return nil
 }

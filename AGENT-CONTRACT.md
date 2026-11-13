@@ -962,8 +962,8 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 81 tools: `status`, bounded named-step `logs`, exact-run
-  `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
+- MCP exposes 79 tools: `status`, bounded named-step `logs`, exact-run
+  `run_get`/`run_logs`, `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
   assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (any uplink whose scope covers the run's repository, or an admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since`, `events_wait` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
@@ -975,7 +975,7 @@ containing CI and real workload qualification remain separately required.
   `access_dismiss`,
   admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
-  `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
+  `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
@@ -1463,45 +1463,11 @@ containing CI and real workload qualification remain separately required.
   plan one set of names and record another. Constructs whose step count is a
   runtime property (`withItems`, `withParam`, `withSequence`) are deliberately
   left out of the plan rather than given a fabricated count.
-- Step resource measurements never widen admission. Source-backed single-main
-  container/script leaves with explicit commands run through the read-only
-  server-delivered `oberth internal-step-exec` wrapper on new submissions
-  only when the leaf has an explicit memory limit of at
-  least 256Mi. The full server's package initialization consumes the main
-  container's memory budget. Smaller or unspecified limits stay unwrapped,
-  with an admission log/template annotation warning and null usage, without
-  changing requests, limits or scheduling. Requests and inherited/defaulted
-  limits cannot establish instrumentation headroom. The policy annotation
-  preserves pre-policy wrapped specs on adoption; existing Pods are not
-  rewritten. For measured leaves the wrapper forwards signals,
-  preserves streams/exit codes, and writes a bounded, numeric-only v1 summary
-  to the kubelet termination file. No new RBAC, hostPath, capabilities or
-  writable root is required. The server reads it from the already-bound final
-  Pod/main container status, never logs or LastTerminationState. This is advisory
-  self-reported by untrusted build code, never trusted diagnostic evidence and
-  never an input to admission or size grants. Any aggregation must saturate on
-  overflow; currently counters are stored/projected individually without sums.
-  Wrapped Pods add `kubernetes.io/arch=runtime.GOARCH` through strategic
-  podSpecPatch merge, preserving workflow/parent scheduling selectors, since
-  the seed copies this server's single-architecture executable. Catchable signals
-  are forwarded to the child process group, except SIGCHLD and Go's SIGURG,
-  matching emissary; SIGKILL/SIGSTOP cannot be caught. A child killed by a signal
-  exits with 128+signal. A command that cannot start returns shell-style 127
-  (a failed step), rather than emissary's executor Error classification.
-  A step-written nonempty termination message is preserved verbatim instead of
-  writing telemetry; its usage is unknown. No message contents are copied into
-  the numeric usage fields. A wrapper killed before reporting leaves usage null.
-  `MaxRSSBytes` is Linux wait4 maximum descendant RSS (not concurrent summed
-  RSS); `MemoryPeakBytes` is this container's cgroup-v2 `memory.peak`, including
-  cache. `UserCPU`/`SystemCPU` are cumulative container CPU from `cpu.stat`,
-  including executor/wrapper overhead, stored/API-encoded as duration nanoseconds
-  (divide by 1e9 for seconds). Missing counters remain independent nulls, including
-  on cgroup v1, OOM/deadline kills that prevent reporting, missing Pods, skipped
-  steps, resource/ContainerSet templates, image-only ENTRYPOINTs,
-  custom termination-file paths or old workflows.
-  No host-level aggregate fallback or deadline widening is allowed. Schema v33
-  migrates each ambiguous legacy zero counter to NULL independently; positive
-  legacy counters survive. Only newly collected summaries can establish zero.
+- Step measurement is absent in v0.22.0: commands and arguments stay authored,
+  no measurement executable or mount or architecture selector is injected,
+  and per-step usage figures and resource reports are absent. The forward
+  migration deletes historical measurements, preserving outcomes, logs, timing
+  and bound termination diagnostics. Static YAML resource checks remain.
 - Retained output is prefixed by burn and step, redacted before disk for
   streams the oberth credential chain (exec or materialize) wraps, indexed by
   byte range, and served only through bounded reads. Retained logs are bounded
@@ -2228,10 +2194,9 @@ containing CI and real workload qualification remain separately required.
   the Kubernetes distribution.
 - Chart optional cluster-scoped objects have explicit enabling values:
   `secretstore.createAuthDelegatorBinding` (with `secretstore.enabled`) creates
-  the TokenReview ClusterRoleBinding; `argo.resourceSampler.enabled` creates
-  a node metrics ClusterRole and binding scoped to allowlisted node names;
-  the chart always creates a control-plane PriorityClass shared by the server,
-  Argo controller and OpenBao, plus a non-preempting lower pipeline class.
+  the TokenReview ClusterRoleBinding. The control-plane PriorityClass belongs
+  only to the server; Argo and OpenBao have no injected class. The external
+  usage sampler and its node metrics permissions are absent in v0.22.0.
   The remaining access Roles are namespaced.
 - The server-namespace Role grants only ConfigMap access: collection
   create/get/list/watch and update of `oberth-secret-access` by exact name.
@@ -3277,10 +3242,9 @@ migration. Existing single-issue mutation authorization is unchanged.
 
 MCP `run_get {summary: false}` (the default is the compact summary), default
 `GET /api/runs/{id}`, and `oberth run <id> --json`
-expose `Timing`, version 1, and per-step `MeasuredSizeComparison` when available.
-Dashboard polling selects `?view=dashboard`, which omits `Timing`,
-`MeasuredUsage`, `MeasuredSizeComparison`, and `Termination`. For resource
-analysis, use MCP `run_resources` or `oberth run resources --run <id>`.
+expose `Timing`, version 1. Dashboard polling selects `?view=dashboard`,
+which omits timing and bound termination diagnostics. Per-step resource
+measurements and sizing reports are absent in v0.22.0.
 These are observations, independent of the verdict and the older `Run.StartedAt` field.
 Missing timestamps are unknown; they never mean a zero duration. Legacy rows
 have `unavailable=not-recorded`; no timestamp is backfilled from `StartedAt`.
@@ -3430,38 +3394,9 @@ status in the background at most every five minutes; direct Status visits remain
 fresh. Existing work is not
 canceled or re-authorized by profile recovery.
 
-**Report-only size comparison:** outside-step usage rows may carry the observed
-Workflow admission label; legacy/ambiguous/conflicting classes remain unknown.
-Per-step run views and repo_usage group sampled peaks by S/M/L/XL/unknown with
-coverage/kill flags. Labels are not numeric resource budgets. Progress or
-termination-message declarations are not authority for these labels. The view
-never changes authored requests/limits, weights, grants or execution results;
-unknowns and OOM lower bounds cannot authorize smaller resources. Details:
-[measured size reports](docs/measured-size-report.md).
-
-
-**External container measurements (#1216):** schema 37 guards version-2 telemetry
-JSON while preserving schema-36 tables and version-1 main rows; v37 also adds
-the global observation-age retention index. The opt-in sampler
-covers verified Workflow app/init/sidecar/ContainerSet/ephemeral containers,
-with Kubernetes lifetime timing and optional kubelet pod
-CPU/memory, rootfs/log and complete mounted-PVC usage. `repo_usage` adds separate
-container/pod quantiles and per-run overlap without changing main-only size
-comparisons or admission. Shared PVC usage is not additive across Pods. Existing 4,096-row/run,
-8-KiB/row, bounded read/batch windows remain. Retention targets 90 days/100,000
-newest rows globally in oldest-first sweeps
-of at most 1,000 rows, with 100-row DELETE batches on a separate SQLite connection
-(one-second pass, 25ms busy wait; backlog may exceed targets until swept).
-Unchanged terminal rows are not rewritten and sessions suppress up to 4,096
-successfully recorded finishes. Helm rollback alone fails schema-too-new and
-requires a pre-upgrade database restore; see [schema 37](docs/backup-restore.md).
-Full scopes, exclusions and overhead:
-[external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).
-
-
 ### Operator-owned workflow capabilities (#1294)
 
-Resource templates and qualified extended resources require an audited grant
+Resource templates require an audited API-kind/action grant
 for the durable repository ID and execution namespace. The operator provides
 the ServiceAccount, namespaced RBAC, namespace ResourceQuota and any device
 capacity. Oberth does not create infrastructure for a particular workload.
@@ -3472,11 +3407,10 @@ secret-store or WIF identities. The server fixes the resource executor identity
 and rechecks current grant authority before submission, token delivery and
 restart adoption. Repository YAML cannot choose or widen it.
 
-Extended-resource requests and limits must agree as positive integers. Their
-bounded graph peak is checked against the grant and explicit server capacity;
-missing declarations or capacity never fall back to size-based admission.
-The source receipt pins exact source, fragments and run binding across sizing
-and submission. Ordinary workflows retain the existing admission behavior.
+GPUs and other extended resources use vanilla Kubernetes requests and limits,
+with no Oberth grant or amount bound. Operators enforce namespace ResourceQuota
+and admission policies, including limits on device-plugin resources. The source
+receipt pins exact source, fragments and run binding across submission.
 
 Retired execution tables are inert; existing migration SQL remains unchanged.
 The five legacy execution tools and technology-specific runtime are removed.

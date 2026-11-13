@@ -7,7 +7,7 @@ import (
 )
 
 // ErrWorkflowCapabilityRequired also explains refusal of historical execution declarations.
-var ErrWorkflowCapabilityRequired = errors.New("removed or ungranted execution feature; migrate to a workflow capability grant with allowlisted resource kinds and extended resources")
+var ErrWorkflowCapabilityRequired = errors.New("removed or ungranted execution feature; migrate to a workflow capability grant with allowlisted resource kinds")
 
 // RefuseRetiredWorkflow prevents old server-owned execution annotations from becoming inert hints.
 func RefuseRetiredWorkflow(w *wfv1.Workflow) error {

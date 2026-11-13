@@ -27,7 +27,7 @@ type pendingSourceJobs struct {
 
 func (j pendingSourceJobs) CreateWorkflow(ctx context.Context, r WorkflowRequest) error {
 	defer close(j.finished)
-	_, err := j.seeder.SeedRequest(ctx, argojob.Request{Name: r.WorkflowName, SourceDir: r.SourceDir}, false, false)
+	_, err := j.seeder.SeedRequest(ctx, argojob.Request{Name: r.WorkflowName, SourceDir: r.SourceDir}, false)
 	if err != nil {
 		return err
 	}

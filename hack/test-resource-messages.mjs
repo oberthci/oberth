@@ -6,8 +6,8 @@ const source = readFileSync(new URL('../internal/api/static/app.js', import.meta
 const context = vm.createContext({URLSearchParams, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(){},clearInterval(){}});
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), context);
 const evaluate = code => vm.runInContext(code, context);
-const notice = '2 steps have undeclared CPU/memory requests; inspect oberth run resources --run ' + 'a'.repeat(32) + ' --include-failed.';
-const base = {id:'a'.repeat(32),repo_id:1,ref:'step-abc12345',status:'running',started_at:'2026-11-01T10:00:00Z',priority_class:'normal',priority_reason:'ordinary run',display_reason:'',resource_message:notice};
+const notice = 'unit exceeded its authored memory limit.';
+const base = {id:'a'.repeat(32),repo_id:1,ref:'step-abc12345',status:'running',started_at:'2026-11-01T10:00:00Z',display_reason:'',resource_message:notice};
 for (const extra of [{},{trigger:'schedule',schedule_entry:'nightly'},{release:true},{error:'full error'}]) {
  context.row={...base,...extra};
  assert.equal(evaluate('rowMessage(row)'),'');

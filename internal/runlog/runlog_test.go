@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestIndexAndReadStageOrStepSlices(t *testing.T) {
@@ -241,7 +240,7 @@ func TestStepProgressJournalReducesTransitionsInPlanOrder(t *testing.T) {
 	}
 	queued := runprogress.Event{
 		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
-		Status: runprogress.StepQueued, DeclaredSize: pipeline.L,
+		Status: runprogress.StepQueued,
 	}
 	if err := store.AppendStepProgress("r-progress", queued); err != nil {
 		t.Fatal(err)

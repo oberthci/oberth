@@ -16,7 +16,6 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/holdfs"
 	"github.com/oberthci/oberth/internal/installer"
-	"github.com/oberthci/oberth/internal/stepusage"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -34,9 +33,6 @@ func main() {
 		// backup writer so deferred plaintext cleanup runs instead of taking
 		// Go's special SIGPIPE exit on fd 1. SIGKILL is reclaimed next backup.
 		signal.Ignore(syscall.SIGPIPE)
-	}
-	if len(os.Args) > 1 && os.Args[1] == "internal-step-exec" {
-		os.Exit(stepusage.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "internal-hold-fs" {
 		// Pod-side helper of run_hold_patch/run_continue, exec'd by the server

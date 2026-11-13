@@ -369,7 +369,7 @@ func resolveRemoteRunID(_ context.Context, _ *client.Client, given string) (stri
 
 func runRunDetail(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) > 0 && arguments[0] == "resources" {
-		return runRunResources(ctx, arguments[1:], output)
+		return fmt.Errorf("%w: run resources is absent in v0.22.0; per-step usage figures are no longer recorded", errUsage)
 	}
 	if len(arguments) > 0 && arguments[0] == "purge" {
 		return runRunPurge(ctx, arguments[1:], output)

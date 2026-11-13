@@ -366,7 +366,6 @@ one with a non-admin token is still answered with the server's refusal.
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
-| `run_resources` | Read-only resource history, numeric git declarations and p95/max suggestions; repo or exact run, ref/default/any, last 1..100, include_failed, JSON or YAML; see [measured requests](measured-requests.md) |
 | `run_get` | One durable run by full run ID or unique 8+ character prefix; by default repository/ref/SHA, admission context, superseded status, failure and compact steps; `summary:false` returns the full record with step diagnostics and retained timing |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
@@ -574,7 +573,6 @@ A step above the 4 MiB response ceiling returns a truncated result with
 `truncated: true` rather than failing. Prefer a pattern to retrieving a whole
 step: a single step can exceed a model's context window.
 
-| `repo_usage` | Bounded external resource report by repository/step: sampled p50/p95/max, requests, coverage and used/request ratios. |
 | `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at, `non_default_branches` (mirror `refs/heads/*` besides the default branch, cached up to a minute; null until counted) and one latest_run (id, status, ref, finished_at). Archived repositories are hidden by default and counted in `archived_hidden`; `archived=include` lists the whole catalog, `archived=only` the archived subset. No run history or probe payload. |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |

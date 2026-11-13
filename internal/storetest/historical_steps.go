@@ -32,15 +32,14 @@ func PutHistoricalStepResult(database *store.Store, ctx context.Context, result 
 		return value.UnixNano()
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO step_results(
- run_id,burn,step,ordinal,status,exit_code,log_start,log_end,declared_size,
- max_rss_bytes,user_cpu_ns,system_cpu_ns,started_at,finished_at,recorded_at,termination_json,memory_peak_bytes)
- VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ run_id,burn,step,ordinal,status,exit_code,log_start,log_end,
+ started_at,finished_at,recorded_at,termination_json)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
  ON CONFLICT(run_id,burn,step) DO UPDATE SET ordinal=excluded.ordinal,status=excluded.status,
  exit_code=excluded.exit_code,log_start=excluded.log_start,log_end=excluded.log_end,
- declared_size=excluded.declared_size,max_rss_bytes=excluded.max_rss_bytes,user_cpu_ns=excluded.user_cpu_ns,
- system_cpu_ns=excluded.system_cpu_ns,started_at=excluded.started_at,finished_at=excluded.finished_at,
- recorded_at=excluded.recorded_at,termination_json=excluded.termination_json,memory_peak_bytes=excluded.memory_peak_bytes`,
+ started_at=excluded.started_at,finished_at=excluded.finished_at,
+ recorded_at=excluded.recorded_at,termination_json=excluded.termination_json`,
 		result.RunID, result.Stage, result.Step, result.Ordinal, result.Status, result.ExitCode, result.LogStart, result.LogEnd,
-		result.DeclaredSize, result.MaxRSSBytes, result.UserCPU, result.SystemCPU, stamp(result.StartedAt), stamp(result.FinishedAt), fixtureNow(fixture).UnixNano(), diagnostic, result.MemoryPeakBytes)
+		stamp(result.StartedAt), stamp(result.FinishedAt), fixtureNow(fixture).UnixNano(), diagnostic)
 	return result, err
 }

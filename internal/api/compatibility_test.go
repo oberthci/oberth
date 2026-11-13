@@ -183,21 +183,16 @@ func TestRunSelectorsAreID(t *testing.T) {
 	}
 }
 
-func TestResourceQueryRefusesRunIDAndPassesID(t *testing.T) {
-	server, backend := testServer(t)
-	request := httptest.NewRequest(http.MethodGet, "/api/run-resources?run=aaaaaaaa&resource_only=true", nil)
-	request.Header.Set("Authorization", "Bearer valid-token")
-	out := httptest.NewRecorder()
-	server.Handler().ServeHTTP(out, request)
-	if out.Code != 200 {
-		t.Fatalf("%d %s", out.Code, out.Body)
-	}
-	var args map[string]any
-	if err := json.Unmarshal(backend.calledArguments, &args); err != nil {
-		t.Fatal(err)
-	}
-	if args["id"] != "aaaaaaaa" || args["run"] != nil || args["resource_only"] != nil {
-		t.Fatalf("arguments: %s", backend.calledArguments)
+func TestRemovedResourceReportsHaveNoHTTPRoute(t *testing.T) {
+	server, _ := testServer(t)
+	for _, path := range []string{"/api/run-resources?run=aaaaaaaa", "/api/repos/repo/usage"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer valid-token")
+		out := httptest.NewRecorder()
+		server.Handler().ServeHTTP(out, request)
+		if out.Code != http.StatusNotFound {
+			t.Fatal("removed report route remains", path, out.Code)
+		}
 	}
 }
 
@@ -206,11 +201,7 @@ func TestResourceQueryRefusesRunIDAndPassesID(t *testing.T) {
 func TestRunGetMCPPayloadSendsRecordsOnce(t *testing.T) {
 	steps := make([]model.StepResult, 41)
 	for i := range steps {
-		usage := make([]model.StepResourceUsage, 40)
-		for j := range usage {
-			usage[j] = model.StepResourceUsage{TemplateName: fmt.Sprintf("step-%d", i), ContainerKind: "main", PodKind: "workflow"}
-		}
-		steps[i] = model.StepResult{Stage: "ci", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed, MeasuredUsage: usage}
+		steps[i] = model.StepResult{Stage: "ci", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed}
 	}
 	payload := RunDetailResponse{Run: model.Run{ID: "aaaaaaaa", RepoID: 1, Status: model.RunPassed, SHA: strings.Repeat("a", 40)}, Steps: steps, Timing: &model.RunTiming{}}
 	size := func() map[string]json.RawMessage {

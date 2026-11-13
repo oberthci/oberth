@@ -1351,46 +1351,6 @@ Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
-## oberth run resources
-
-```text
-Usage: oberth run resources [flags]
-
-Flags:
-  -anonymize
-        hash repository, ref, step names, SHAs and run IDs with a fresh per-export salt (never printed), to share usage data
-  -burn string
-        optional burn
-  -ca-file string
-        PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
-  -client-cert string
-        PEM client certificate (default: OBERTH_CLIENT_CERT or client files)
-  -client-key string
-        owner-only PEM client private key (default: OBERTH_CLIENT_KEY or client files)
-  -format string
-        json or yaml (default "json")
-  -include-failed
-        include failed and incomplete runs
-  -json
-        JSON report (default)
-  -last int
-        last N runs, maximum 100 (default 30)
-  -ref string
-        exact ref; default includes default branch and its promotion runs; any includes all refs
-  -repo string
-        registered repository (optional with --run); use upstream/org/name when ambiguous
-  -run string
-        exact run ID or unique prefix
-  -step string
-        optional template name
-  -token-file string
-        owner-only (0600) file holding the bearer token (default: OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, ~/.config/oberth)
-  -url string
-        server address or its /mcp endpoint (default: OBERTH_MCP_URL, OBERTH_BASE_URL, ~/.config/oberth)
-  -yaml
-        YAML report with paste-ready resources
-```
-
 ## oberth run retry
 
 ```text
@@ -1654,8 +1614,6 @@ Flags:
         absolute path to administrator-owned release tag pattern -> workflow file JSON
   -argo-release-wif-config string
         absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)
-  -argo-resource-sampler-config string
-        administrator-owned kubelet sampler JSON config; disabled when empty
   -argo-source-storage-class string
         storage class for per-run pipeline source volumes (empty: cluster default)
   -argo-vault-address string

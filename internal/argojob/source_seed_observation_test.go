@@ -53,7 +53,7 @@ func TestPendingSourceSchedulingUsesExactSeedWithoutWorkflow(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { _, err := seeder.SeedRequest(ctx, request, false, false); done <- err }()
+			go func() { _, err := seeder.SeedRequest(ctx, request, false); done <- err }()
 			<-ready
 			controller := &Controller{workflows: &schedulingWorkflowClient{err: apierrors.NewNotFound(schema.GroupResource{Resource: "workflows"}, "wf")}, seeder: seeder, config: config}
 			var observation *model.ExecutionObservation

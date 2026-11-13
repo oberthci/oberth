@@ -25,7 +25,6 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const maximumCIIssueTailBytes = 16 << 10
@@ -1297,9 +1296,6 @@ func (scheduler *Scheduler) persistSteps(ctx context.Context, runID string, step
 			// planned step rather than displacing one.
 			result.Ordinal = next
 			next++
-		}
-		if result.DeclaredSize == "" {
-			result.DeclaredSize = pipeline.M
 		}
 		result.LogStart, result.LogEnd = logOffsets(index, result.Stage, result.Step)
 		if _, err := scheduler.database().PutStepResult(ctx, result); err != nil {

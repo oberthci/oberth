@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -16,19 +15,11 @@ func (s *Scheduler) withResourceFailure(ctx context.Context, runID string, resul
 		return result
 	}
 	deadline := model.IsExecutionDeadlineReason(result.Error)
-	if model.ResourceFailureMessage(runID, result.Steps, nil, deadline) == "" {
+	if model.ResourceFailureMessage(runID, result.Steps, deadline) == "" {
 		return result
 	}
-	var values []model.StepResourceUsage
-	if reader, ok := s.store.(interface {
-		StepResourceUsage(context.Context, string) ([]model.StepResourceUsage, bool, error)
-	}); ok {
-		readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		values, _, _ = reader.StepResourceUsage(readCtx, runID)
-	}
 	result.FailureCause = structuredFailureCause(runID, result)
-	if message := model.ResourceFailureMessage(runID, result.Steps, values, deadline); message != "" {
+	if message := model.ResourceFailureMessage(runID, result.Steps, deadline); message != "" {
 		result.Error = message
 	}
 	return result

@@ -127,7 +127,7 @@ func TestExecutionPlacementSelectionRefusesBeforeSeed(t *testing.T) {
 			}
 			client := placementClient(objects...)
 			seeder := NewSourceSeeder(client, recordingExec(nil), config)
-			if _, err := seeder.SeedRequest(t.Context(), r, false, false); err == nil {
+			if _, err := seeder.SeedRequest(t.Context(), r, false); err == nil {
 				t.Fatal("seed accepted changed binding")
 			}
 			if len(client.Actions()) != 0 {

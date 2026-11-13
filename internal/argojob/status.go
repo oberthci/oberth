@@ -13,7 +13,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/internal/stepusage"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -24,7 +23,6 @@ type StepResult struct {
 	restartCutReason     string
 	storageLimit         string // the enforced limit of a step-declared storage eviction
 	exitEvidenceConflict bool
-	Usage                stepusage.Usage
 	Timing               *model.StepTiming
 	NodeID               string
 	AttemptAmbiguous     bool

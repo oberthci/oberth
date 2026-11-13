@@ -99,6 +99,7 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				t.Fatal(err)
 			}
 			historicalSchedulingInput(t, current, true)
+			historicalMeasurementInput(t, current, &input)
 			if !reflect.DeepEqual(current, &input) {
 				t.Fatal("Build changed: recapture actual controller proof")
 			}

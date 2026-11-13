@@ -9,6 +9,7 @@ import (
 	"flag"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -51,6 +52,34 @@ func TestOberthPostedAuthorMetadataReachesPod(t *testing.T) {
 	}
 	if !reflect.DeepEqual(pod.Spec.Affinity, wf.Spec.Affinity) {
 		t.Fatal("authored anti-affinity changed", pod.Spec.Affinity)
+	}
+	if len(pod.Spec.NodeSelector) != 0 {
+		t.Fatal("Oberth injected a Pod node selector", pod.Spec.NodeSelector)
+	}
+	var main *corev1.Container
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "main" {
+			main = &pod.Spec.Containers[i]
+		}
+	}
+	if main == nil {
+		t.Fatal("missing main")
+	}
+	// The pinned Argo emissary launcher is intrinsic to Argo execution. Compare
+	// its child argv, while the posted Workflow itself retains authored argv.
+	if len(main.Command) < 3 || main.Command[0] != "/var/run/argo/argoexec" || main.Command[1] != "emissary" {
+		t.Fatal("unexpected Argo launcher", main.Command)
+	}
+	delimiter := slices.Index(main.Command, "--")
+	if delimiter < 0 || !slices.Equal(main.Command[delimiter+1:], tmpl.Container.Command) || !slices.Equal(main.Args, tmpl.Container.Args) {
+		t.Fatal("authored argv changed", main.Command, main.Args)
+	}
+	for _, container := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
+		for _, mount := range container.VolumeMounts {
+			if mount.MountPath == "/run/oberth/usage" {
+				t.Fatal("measurement mount remains")
+			}
+		}
 	}
 	encoded, _ := json.Marshal(pod.ObjectMeta)
 	t.Logf("actual Pod metadata: %s", encoded)

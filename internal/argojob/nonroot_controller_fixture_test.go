@@ -193,6 +193,7 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 			// are covered by the pinned helper regression and controller proof.
 			wf := nonrootBuiltWithHelperPolicy(t, shape == "script", "128Mi", legacyHelperStoragePolicy)
 			historicalSchedulingInput(t, wf, false)
+			nonrootHistoricalMeasurementInput(t, wf, shape)
 			current := nonrootApplyControllerFixture(t, before, wf)
 			got, err := json.MarshalIndent(current, "", "  ")
 			if err != nil {
@@ -318,6 +319,7 @@ func TestNonrootRecoveryAcceptsActualControllerPersistedSpec(t *testing.T) {
 		}
 		intended := nonrootBuiltWithHelperPolicy(t, shape == "script", "128Mi", legacyHelperStoragePolicy)
 		historicalSchedulingInput(t, intended, false)
+		historicalMeasurementInput(t, intended, &existing)
 		if err := sameSubmission(&existing, intended); err != nil {
 			t.Fatal(err)
 		}
@@ -328,4 +330,18 @@ func TestNonrootRecoveryAcceptsActualControllerPersistedSpec(t *testing.T) {
 			t.Fatal("persisted controller metadata hid root policy drift")
 		}
 	}
+}
+
+// Read only authenticated frozen input, never rewrite captured observations.
+func nonrootHistoricalMeasurementInput(t *testing.T, wf *wfv1.Workflow, shape string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(nonrootControllerFixtureDirectory, shape+"-persisted-workflow.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var captured wfv1.Workflow
+	if err = json.Unmarshal(data, &captured); err != nil {
+		t.Fatal(err)
+	}
+	historicalMeasurementInput(t, wf, &captured)
 }

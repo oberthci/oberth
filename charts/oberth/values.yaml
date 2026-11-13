@@ -304,14 +304,6 @@ upstream:
 # accepts pushes and then executes nothing. Install the controller with
 # `oberth install`, or point argo.namespace at an existing one.
 argo:
-  # Outside-step sampler: disabled until operator verifies kubelet serving TLS,
-  # token authentication, nodes/stats + nodes/metrics authorization and routing.
-  # Read-only node telemetry is broad; never bind it to pipeline identities.
-  resourceSampler:
-    enabled: false
-    interval: 15s
-    nodes: {} # e.g. example-node: https://example-node.example:10250
-    caCert: "" # public kubelet serving CA PEM, not a private key
   # Emissary retains stdout/stderr and control files here until Pod cleanup.
   # Separate from the test leaf private scratch; applies to nonroot leaves.
   executorScratchSizeLimit: 1Gi
@@ -530,7 +522,7 @@ secretstore:
   # Grant this ServiceAccount system:auth-delegator so OpenBao can validate
   # its tokens via TokenReview without storing a reviewer JWT. This binding is
   # cluster-scoped, like the chart's ValidatingAdmissionPolicy and its binding,
-  # the resource-sampler ClusterRole and the scheduling PriorityClasses;
+  # the scheduling PriorityClasses;
   # disable it if the binding is
   # managed elsewhere.
   createAuthDelegatorBinding: true

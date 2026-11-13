@@ -13,7 +13,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestScopedRunListUnknownPositionDoesNotInventQueueHead(t *testing.T) {
@@ -80,7 +79,7 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 				runs = append(runs, run)
 			}
 			now := time.Now()
-			event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now, DeclaredSize: pipeline.M}
+			event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now}
 			if err := f.logs.AppendStepProgress(runs[1].ID, event); err != nil {
 				t.Fatal(err)
 			}
@@ -93,7 +92,6 @@ func TestRunListsObserveArgoWithoutDependingOnLocalStepHistory(t *testing.T) {
 			}
 			step := stepResult(model.StepPassed)
 			step.RunID = runs[3].ID
-			step.DeclaredSize = pipeline.M
 			if _, err := f.store.PutStepResult(t.Context(), step); err != nil {
 				t.Fatal(err)
 			}

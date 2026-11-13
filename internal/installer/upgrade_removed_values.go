@@ -22,6 +22,7 @@ var removedChartValues = []string{
 	"argo.enabled",
 	"argo.defaultWorkflowTimeout",
 	"argo.repoWorkflowTimeouts",
+	"argo.resourceSampler",
 	"argo.workflowTimeout",
 	"argo.kubevirtCeiling",
 	"argo.vault.ciSecretsRole",

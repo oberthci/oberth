@@ -25,7 +25,6 @@ import (
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/resourcesampler"
 	"github.com/oberthci/oberth/internal/service"
 )
 
@@ -125,21 +124,6 @@ func buildArgoEngine(
 	}
 	if recorder, ok := auditor.(argojob.NodeBootRecorder); ok {
 		controller.WithNodeBootRecorder(recorder)
-	}
-	if options.argoResourceSamplerConfig != "" {
-		samplerConfig, err := resourcesampler.ReadConfig(options.argoResourceSamplerConfig)
-		if err != nil {
-			return nil, err
-		}
-		sampler, err := resourcesampler.NewClient(samplerConfig)
-		if err != nil {
-			return nil, err
-		}
-		recorder, ok := auditor.(argojob.ResourceUsageRecorder)
-		if !ok {
-			return nil, errors.New("external resource sampler requires durable storage")
-		}
-		controller.WithResourceSampler(sampler, recorder)
 	}
 	seeder := argojob.NewSourceSeeder(kube, newArgoExecStreamer(restConfig, kube), config)
 	if seeder == nil {

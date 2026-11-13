@@ -3216,7 +3216,7 @@ func TestPutStepResultWithTimes(t *testing.T) {
 	result, err := s.PutStepResult(ctx, model.StepResult{
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
-		DeclaredSize: "S", StartedAt: &startedAt, FinishedAt: &finishedAt,
+		StartedAt: &startedAt, FinishedAt: &finishedAt,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3388,7 +3388,6 @@ func TestPutStepResultUpsert(t *testing.T) {
 	if _, err := s.PutStepResult(ctx, model.StepResult{
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
-		DeclaredSize: "S",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3397,7 +3396,6 @@ func TestPutStepResultUpsert(t *testing.T) {
 	result, err := s.PutStepResult(ctx, model.StepResult{
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 1,
 		Status: model.StepFailed, ExitCode: 1, LogStart: 0, LogEnd: 200,
-		DeclaredSize: "M",
 	})
 	if err != nil {
 		t.Fatal(err)

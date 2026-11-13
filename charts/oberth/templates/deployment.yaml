@@ -74,9 +74,6 @@ spec:
         {{- if .Values.argo.releaseWIF }}
         checksum/release-wif: {{ .Values.argo.releaseWIF | toJson | sha256sum | quote }}
         {{- end }}
-        {{- if (.Values.argo.resourceSampler).enabled }}
-        checksum/resource-sampler: {{ .Values.argo.resourceSampler | toJson | sha256sum | quote }}
-        {{- end }}
         checksum/per-repo-identities: {{ list .Values.argo.perRepoIdentities .Values.argo.perRepoCIIdentities | toJson | sha256sum | quote }}
         # Audit clients load TLS roots at startup; rotate the Pod with the bundle.
         {{- if .Values.auditAnchor.rekorCA }}
@@ -348,9 +345,6 @@ spec:
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
             - --argo-executor-scratch-size-limit={{ .Values.argo.executorScratchSizeLimit | default "1Gi" }}
             - --argo-workflow-ttl={{ int64 .Values.argo.workflowTTL }}
-            {{- if (.Values.argo.resourceSampler).enabled }}
-            - --argo-resource-sampler-config=/etc/oberth/resource-sampler/config.json
-            {{- end }}
             {{- if .Values.argo.sourceStorageClass }}
             - --argo-source-storage-class={{ .Values.argo.sourceStorageClass }}
             {{- end }}
@@ -475,11 +469,6 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
-            {{- if (.Values.argo.resourceSampler).enabled }}
-            - name: resource-sampler
-              mountPath: /etc/oberth/resource-sampler
-              readOnly: true
-            {{- end }}
             - name: data
               mountPath: /data
             - name: ci-cache
@@ -543,11 +532,6 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
-        {{- if (.Values.argo.resourceSampler).enabled }}
-        - name: resource-sampler
-          configMap:
-            name: {{ include "oberth.fullname" . }}-resource-sampler
-        {{- end }}
         {{- if .Values.argo.executionPlacementConfigMap }}
         - name: execution-placement
           configMap:

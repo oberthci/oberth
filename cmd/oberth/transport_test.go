@@ -107,7 +107,7 @@ func TestRESTAndMCPCommandsShareTheTransportFlags(t *testing.T) {
 	if err := runCLI(t.Context(), append([]string{"mcp", "call", "system_status"}, fixture.flags()...), strings.NewReader(""), &out); err != nil {
 		t.Fatalf("mcp call with the same flags = %v %s", err, &out)
 	}
-	for _, command := range [][]string{{"runs"}, {"run", "0123456789abcdef"}, {"repos"}, {"issues"}, {"log", "0123456789abcdef"}, {"run", "resources", "--repo", "x"}, {"artifacts", "0123456789abcdef"}} {
+	for _, command := range [][]string{{"runs"}, {"run", "0123456789abcdef"}, {"repos"}, {"issues"}, {"log", "0123456789abcdef"}, {"artifacts", "0123456789abcdef"}} {
 		var help strings.Builder
 		if err := runCLI(t.Context(), append(append([]string{}, command...), "--help"), strings.NewReader(""), &help); err != nil {
 			t.Fatalf("%v --help: %v", command, err)

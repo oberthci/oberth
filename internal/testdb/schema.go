@@ -377,6 +377,80 @@ DELETE FROM schema_migrations WHERE id='20261113004204-remove-execution-target-p
 `
 
 // PostExtendedResourceGrantDowngrade removes only the removal receipt in disposable fixtures.
-const PostExtendedResourceGrantDowngrade = `
+const PostExtendedResourceGrantDowngrade = PostStepMeasurementDowngrade + `
 DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-grants-1523724f34af80938b4963079df78930';
+`
+
+// PostStepMeasurementDowngrade restores empty telemetry tables and historical columns only in disposable old-schema fixtures.
+const PostStepMeasurementDowngrade = `
+CREATE TABLE step_results_measurement_fixture (
+    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    burn TEXT NOT NULL,
+    step TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('passed', 'failed', 'skipped', 'timed_out')),
+    exit_code INTEGER NOT NULL,
+    log_start INTEGER NOT NULL CHECK (log_start >= 0),
+    log_end INTEGER NOT NULL CHECK (log_end >= log_start),
+    started_at INTEGER,
+    finished_at INTEGER,
+    recorded_at INTEGER NOT NULL,
+    declared_size TEXT NOT NULL DEFAULT 'M' CHECK (declared_size IN ('S', 'M', 'L', 'XL')),
+    max_rss_bytes INTEGER CHECK (max_rss_bytes >= 0),
+    user_cpu_ns INTEGER CHECK (user_cpu_ns >= 0),
+    system_cpu_ns INTEGER CHECK (system_cpu_ns >= 0),
+    termination_json TEXT CHECK(termination_json IS NULL OR length(termination_json) <= 4096),
+    memory_peak_bytes INTEGER CHECK (memory_peak_bytes >= 0),
+    PRIMARY KEY (run_id, burn, step)
+);
+INSERT INTO step_results_measurement_fixture
+ SELECT run_id,burn,step,ordinal,status,exit_code,log_start,log_end,
+ started_at,finished_at,recorded_at,'M',NULL,NULL,NULL,termination_json,NULL FROM step_results;
+DROP TABLE step_results;
+ALTER TABLE step_results_measurement_fixture RENAME TO step_results;
+CREATE INDEX step_results_order_idx ON step_results(run_id,ordinal,burn,step);
+CREATE TABLE step_resource_usage (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ repo_id INTEGER NOT NULL REFERENCES repositories(id),
+ node_id TEXT NOT NULL,
+ pod_uid TEXT NOT NULL,
+ container_id TEXT NOT NULL,
+ burn TEXT NOT NULL,
+ step TEXT NOT NULL,
+ last_observed_at INTEGER NOT NULL,
+ observation_json TEXT NOT NULL CHECK(length(observation_json)<=8192),
+ PRIMARY KEY(run_id,node_id,pod_uid,container_id)
+);
+CREATE INDEX step_resource_usage_repo_idx ON step_resource_usage(repo_id,last_observed_at DESC,run_id,node_id,pod_uid,container_id);
+CREATE INDEX step_resource_usage_step_idx ON step_resource_usage(repo_id,burn,step,last_observed_at DESC);
+
+-- Purpose: Persist bounded Pod resource dispositions independently of runtime IDs.
+-- Rollback: Restore the pre-upgrade database backup.
+
+CREATE TABLE pod_resource_dispositions (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ repo_id INTEGER NOT NULL REFERENCES repositories(id),
+ node_id TEXT NOT NULL,
+ pod_uid TEXT NOT NULL,
+ burn TEXT NOT NULL,
+ step TEXT NOT NULL,
+ observation_json TEXT NOT NULL CHECK(length(observation_json)<=3072),
+ PRIMARY KEY(run_id,node_id,pod_uid)
+);
+
+-- Purpose: Retain Workflow attempt inventory independently of Pods and metrics.
+-- Rollback: Restore the pre-upgrade database backup.
+CREATE TABLE resource_attempt_inventories (
+ run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+ repo_id INTEGER NOT NULL REFERENCES repositories(id),
+ observation_json TEXT NOT NULL CHECK(length(observation_json)<=1024)
+);
+CREATE TABLE resource_attempts (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ node_id TEXT NOT NULL,
+ observation_json TEXT NOT NULL CHECK(length(observation_json)<=2048),
+ PRIMARY KEY(run_id,node_id)
+);
+
+DELETE FROM schema_migrations WHERE id='20261113013336-remove-step-measurement-32ae7f0f09084618bddcb8f20fd0fbac';
 `

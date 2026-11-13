@@ -7,12 +7,39 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/pkg/pipeline"
+
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+func resourceBoundsSource(resources string) string {
+	return `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    example.com/tier: XL
+spec:
+  entrypoint: step-abc12345
+  activeDeadlineSeconds: 3600
+  templates:
+  - name: step-abc12345
+    container:
+      image: example.invalid/repo-01@sha256:` + strings.Repeat("a", 64) + `
+      command: [/bin/true]
+` + resources
+}
+func resourceBoundsRequest(source string) Request {
+	r := testRequest(pipeline.TriggerCI, source)
+	r.Repo = "repo-01"
+	r.UpstreamName = "repo-01"
+	r.UpstreamOrg = "repo-01"
+	r.ApprovedSecrets = map[string]bool{}
+	return r
+}
 
 func assertBoundedControlContainer(t *testing.T, container corev1.Container) {
 	t.Helper()

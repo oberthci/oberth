@@ -145,7 +145,7 @@ func TestAdminPapercutStepOnlyLogsCLIAndREST(t *testing.T) {
 	f := newPapercutFixture(t)
 	run := f.run(t, "feature/logs")
 	for i, step := range []model.StepResult{{Stage: "build", Step: "compile"}, {Stage: "unit", Step: "check"}, {Stage: "integration", Step: "check"}} {
-		step.RunID, step.Ordinal, step.DeclaredSize, step.Status = run.ID, i, "M", model.StepPassed
+		step.RunID, step.Ordinal, step.Status = run.ID, i, model.StepPassed
 		if _, err := storetest.PutHistoricalStepResult(f.db, t.Context(), step); err != nil {
 			t.Fatal(err)
 		}

@@ -877,62 +877,6 @@
             "$ref": "#/definitions/kubernetesName"
           }
         },
-        "resourceSampler": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "interval": {
-              "type": "string",
-              "pattern": "^$|^\\+?(([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))+$",
-              "description": "Go duration between 1s and 30s, checked by the server; empty selects the 15s default."
-            },
-            "nodes": {
-              "type": "object",
-              "maxProperties": 32,
-              "propertyNames": {
-                "$ref": "#/definitions/kubernetesName"
-              },
-              "additionalProperties": {
-                "type": "string",
-                "pattern": "^https://[^/?#@\\s]+/?$"
-              }
-            },
-            "caCert": {
-              "type": "string"
-            }
-          },
-          "allOf": [
-            {
-              "if": {
-                "properties": {
-                  "enabled": {
-                    "const": true
-                  }
-                },
-                "required": [
-                  "enabled"
-                ]
-              },
-              "then": {
-                "required": [
-                  "nodes",
-                  "caCert"
-                ],
-                "properties": {
-                  "nodes": {
-                    "minProperties": 1
-                  },
-                  "caCert": {
-                    "minLength": 1
-                  }
-                }
-              }
-            }
-          ]
-        },
         "namespace": {
           "type": "string",
           "description": "Namespace pipelines run in. Must differ from the release namespace: Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs."

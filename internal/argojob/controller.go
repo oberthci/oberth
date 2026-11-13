@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"sync"
 	"time"
@@ -70,27 +69,25 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
-	capabilities     func(context.Context, int64) (*argoworkflow.Capability, error)
-	restartedAt      time.Time
-	profileVerifyMu  sync.Mutex
-	profileMu        sync.Mutex
-	profileStatus    model.ControllerProfileStatus
-	profileBackoff   time.Duration
-	profileLogAt     time.Time
-	timings          TimingRecorder
-	nodeBoots        NodeBootRecorder
-	resourceSource   ResourceUsageSource
-	resourceRecorder ResourceUsageRecorder
-	workflows        WorkflowClient
-	kube             kubernetes.Interface
-	logs             PodLogReader
-	followLogs       PodLogFollower
-	logIdentity      podLogIdentityReader
-	logPod           func(context.Context, string, string) (*corev1.Pod, error)
-	seeder           *SourceSeeder
-	config           Config
-	interval         time.Duration
-	readGrace        time.Duration
+	capabilities    func(context.Context, int64) (*argoworkflow.Capability, error)
+	restartedAt     time.Time
+	profileVerifyMu sync.Mutex
+	profileMu       sync.Mutex
+	profileStatus   model.ControllerProfileStatus
+	profileBackoff  time.Duration
+	profileLogAt    time.Time
+	timings         TimingRecorder
+	nodeBoots       NodeBootRecorder
+	workflows       WorkflowClient
+	kube            kubernetes.Interface
+	logs            PodLogReader
+	followLogs      PodLogFollower
+	logIdentity     podLogIdentityReader
+	logPod          func(context.Context, string, string) (*corev1.Pod, error)
+	seeder          *SourceSeeder
+	config          Config
+	interval        time.Duration
+	readGrace       time.Duration
 	// assistSeen remembers the holds the sweep already logged.
 	assistSeen struct {
 		sync.Mutex
@@ -190,16 +187,14 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		if err := recoverHelperStorage(existing, &request); err != nil {
 			return "", err
 		}
-		request.omitStepUsage = !workflowHasStepUsage(existing) && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
-		request.legacyStepUsage = !request.omitStepUsage && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
 		request, err = controller.refreshNonroot(ctx, request)
 		if err != nil {
 			return "", err
 		}
 		request.SourceVolume = controller.expectedSourceVolume(request)
 		// Reconstruct the original delivery footprint without reseeding. Legacy
-		// workflows keep their unwrapped command; measured workflows retain the
-		// same helper, including the exact nonroot executor mirror policy.
+		// workflows retain their source and executor security policy. No command
+		// instrumentation or measurement executable is added.
 		intended, buildErr := Build(controller.config, request)
 		if buildErr != nil {
 			return "", buildErr
@@ -225,7 +220,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
-	volume, err := controller.seeder.SeedRequest(ctx, request, credentialed, true)
+	volume, err := controller.seeder.SeedRequest(ctx, request, credentialed)
 	if err != nil {
 		if controller.config.Custody != nil {
 			return "", fmt.Errorf("%w: source delivery: %w", ErrTargetUncertain, err)
@@ -262,9 +257,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return "", saErr
 	}
-	for _, warning := range stepUsageMemoryWarnings(intended) {
-		log.Printf("WARN: %s", warning)
-	}
+
 	created, rejected, createErr := controller.createWorkflowWithRetry(ctx, request, intended)
 	if createErr != nil {
 		if rejected {
@@ -426,8 +419,6 @@ func (controller *Controller) WaitResumed(ctx context.Context, name, runID strin
 }
 
 func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (result Completion, retErr error) {
-	session := controller.resourceSession(ctx, runID)
-	defer session.finish()
 	if retained < 0 {
 		return Completion{}, errors.New("argojob: invalid retained log size")
 	}
@@ -493,7 +484,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if live != nil {
 			live.observe(workflow)
 		}
-		session.update(workflow)
 		if !workflow.Status.Phase.Completed() {
 			controller.observeRunningNodeBoots(ctx, workflow)
 		}
@@ -525,7 +515,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			if binding.UID != "" && !binding.matches(settled) {
 				return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
 			}
-			session.update(settled)
 			controller.retainWorkflowTiming(ctx, settled)
 			completion := completionFor(settled)
 			completion.ObservationComplete = completion.ObservationComplete && completeRead
@@ -1148,7 +1137,7 @@ func normalizeSourceVolume(workflow *wfv1.Workflow) {
 		return kept
 	}
 	normalizeContainer := func(c *corev1.Container) {
-		c.Command = usageOriginalCommand(c.Command)
+		c.Command = legacySecurityCommand(c.Command)
 		c.VolumeMounts = removeMounts(c.VolumeMounts)
 		c.Env = removeVaultCACertEnv(c.Env)
 	}

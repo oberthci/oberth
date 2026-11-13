@@ -15,7 +15,7 @@ variables into your shell profile:
 ```
 
 Sourcing it is optional: every remote command, the REST reads (`runs`,
-`run`, `log`, `repos`, `issues`, `status`, `artifacts`, `run resources`) and
+`run`, `log`, `repos`, `issues`, `status`, `artifacts`) and
 the MCP-backed ones (`mcp call`, `run wait`, `events`, `run hold`, `admission`
 and the rest) resolves the server the same way, one setting at a time:
 

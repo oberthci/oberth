@@ -70,7 +70,6 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 			if step.Termination.Available && step.Termination.Container.ContainerKind == "init" {
 				step.ExitCode = int(step.Termination.Container.ExitCode)
 			}
-			step.Usage = projectStepUsage(workflow, node, pod)
 			if limit := podStepStorageLimit(workflow, node, pod); limit != "" {
 				step.InfrastructureReason, step.storageLimit = "", limit
 			} else if reason := podInfrastructureReason(workflow, node, pod); reason != "" {

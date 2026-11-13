@@ -12,7 +12,7 @@ import (
 
 func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing.T) {
 	server, backend := testServer(t)
-	detail := RunDetailResponse{Run: model.Run{ID: "run-1"}, Timing: &model.RunTiming{}, Steps: []model.StepResult{{DeclaredSize: "M", Stage: "test", Step: "unit", MeasuredUsage: []model.StepResourceUsage{{}}, MeasuredSizeComparison: []model.ResourceSizeComparison{{}}, Termination: &model.StepDiagnostic{}}}}
+	detail := RunDetailResponse{Run: model.Run{ID: "run-1"}, Timing: &model.RunTiming{}, Steps: []model.StepResult{{Stage: "test", Step: "unit", Termination: &model.StepDiagnostic{}}}}
 	backend.runResult = detail
 	request := httptest.NewRequest(http.MethodGet, "/api/runs/run-1?view=dashboard", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
@@ -37,7 +37,7 @@ func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing
 	if writer.Code != http.StatusOK {
 		t.Fatal(writer.Code, writer.Body.String())
 	}
-	for _, field := range []string{"measured_usage", "measured_size_comparison", "termination", "timing"} {
+	for _, field := range []string{"termination", "timing"} {
 		if !strings.Contains(writer.Body.String(), `"`+field+`"`) {
 			t.Fatalf("default HTTP response lost %s", field)
 		}
@@ -49,11 +49,16 @@ func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing
 	if mcp.IsError || strings.Contains(string(mcp.Structured), "declared_size") || strings.Contains(string(mcp.Content), "declared_size") {
 		t.Fatal("MCP retained obsolete size", mcp)
 	}
+	for _, field := range []string{"max_rss_bytes", "memory_peak_bytes", "user_cpu", "system_cpu", "measured_usage", "measured_size_comparison", "MaxRSSBytes", "MemoryPeakBytes", "UserCPU", "SystemCPU", "MeasuredUsage", "MeasuredSizeComparison"} {
+		if strings.Contains(writer.Body.String(), field) || strings.Contains(string(mcp.Structured), field) || strings.Contains(string(mcp.Content), field) {
+			t.Fatal("retired usage field exposed", field)
+		}
+	}
 	full, err := json.Marshal(detail)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"MeasuredUsage", "MeasuredSizeComparison", "Termination", "Timing"} {
+	for _, field := range []string{"Termination", "Timing"} {
 		if !strings.Contains(string(full), field) {
 			t.Fatalf("full/MCP value lost %s", field)
 		}

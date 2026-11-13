@@ -44,7 +44,7 @@ func TestRunLogDefaults(t *testing.T) {
 				steps = append(steps, model.StepResult{Stage: "test", Step: "integration"})
 			}
 			for i, step := range steps {
-				step.RunID, step.Status, step.DeclaredSize, step.Ordinal = run.ID, model.StepPassed, "M", i
+				step.RunID, step.Status, step.Ordinal = run.ID, model.StepPassed, i
 				if _, err := f.retention.Database.PutStepResult(ctx, step); err != nil {
 					t.Fatal(err)
 				}

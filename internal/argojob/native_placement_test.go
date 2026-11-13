@@ -86,6 +86,12 @@ func nativeWorkflow(t *testing.T) *wfv1.Workflow {
 
 func nativeSubmit(t *testing.T, wf *wfv1.Workflow) *wfv1.Workflow {
 	t.Helper()
+	submitted, _ := nativeSubmitWithSeedCalls(t, wf)
+	return submitted
+}
+
+func nativeSubmitWithSeedCalls(t *testing.T, wf *wfv1.Workflow) (*wfv1.Workflow, []seedExecCall) {
+	t.Helper()
 	body, err := yaml.Marshal(wf)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +114,7 @@ func nativeSubmit(t *testing.T, wf *wfv1.Workflow) *wfv1.Workflow {
 	if len(client.posts) != 1 {
 		t.Fatalf("submitted %d Workflows", len(client.posts))
 	}
-	return client.posts[0]
+	return client.posts[0], seeds
 }
 
 func TestNativeOfficialPlacementExamplesReachWorkflowAPIUnchanged(t *testing.T) {

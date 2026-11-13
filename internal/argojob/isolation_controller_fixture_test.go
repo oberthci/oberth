@@ -93,6 +93,7 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 				t.Fatal(err)
 			}
 			historicalSchedulingInput(t, current, true)
+			historicalMeasurementInput(t, current, &input)
 			if !reflect.DeepEqual(current, &input) {
 				t.Fatal("Build output changed; rerun actual controller capture before updating proof")
 			}
@@ -208,7 +209,7 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 func translateIsolationCaptureArchitecture(t *testing.T, input *wfv1.Workflow, recordedArchitecture string) {
 	t.Helper()
 	walkTemplates(input, func(tmpl *wfv1.Template) {
-		if c := usageContainer(tmpl); c != nil && len(usageOriginalCommand(c.Command)) != len(c.Command) {
+		if c := assistContainer(tmpl); c != nil && len(legacySecurityCommand(c.Command)) != len(c.Command) {
 			var patch map[string]any
 			if err := json.Unmarshal([]byte(tmpl.PodSpecPatch), &patch); err != nil {
 				t.Fatal(err)

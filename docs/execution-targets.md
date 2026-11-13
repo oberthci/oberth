@@ -12,8 +12,7 @@ bundle after restart; removing configuration never redirects them locally.
 
 The JSON object has schema `oberth.execution-target/v1`, a nonempty `id` other
 than `local`, an absolute `kubeconfig` path, an explicit `context`, the complete
-public Argo executor `config`, and an optional `resource_sampler` configuration
-path. Credentials remain in the selected runtime transport, outside the stored
+public Argo executor `config`. Credentials remain in the selected runtime transport, outside the stored
 configuration and workload objects. The same authenticated transport constructs
 Workflow, Kubernetes, logs, exec, dynamic-resource and cleanup clients. There is
 no second scheduler or external success-result API.

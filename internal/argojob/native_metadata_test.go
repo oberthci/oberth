@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
@@ -15,6 +17,7 @@ import (
 
 func TestNativeAuthorLabelsAndAntiAffinityReachWorkflowAPI(t *testing.T) {
 	wf := nativeWorkflow(t)
+	wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")}
 	wf.Spec.PodMetadata = &wfv1.Metadata{Labels: map[string]string{"app": "store"}}
 	wf.Spec.Templates[0].Metadata = wfv1.Metadata{Labels: map[string]string{"security": "S2"}}
 	wf.Spec.Affinity = nativeExample(t, "../../pkg/argoworkflow/testdata/native/placement-06.yaml").Affinity

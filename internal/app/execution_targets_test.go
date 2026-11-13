@@ -393,9 +393,6 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if steps, err := f.jobs.PlannedSteps(ctx, request); err != nil || len(steps) != 1 {
 		t.Fatal(steps, err)
 	}
-	if declarations, err := f.jobs.ResourceDeclarations(ctx, request); err != nil || len(declarations) != 1 {
-		t.Fatal("target resource declarations lost", declarations, err)
-	}
 	if credentialed, err := f.jobs.PipelineCredentialed(ctx, request); err != nil || credentialed {
 		t.Fatal(credentialed, err)
 	}
@@ -416,7 +413,7 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if err := f.jobs.CreateWorkflow(ctx, request); err != nil {
 		t.Fatal(err)
 	}
-	if f.remote.posts != 1 || *f.execs < 3 {
+	if f.remote.posts != 1 || *f.execs != 2 {
 		t.Fatal("native Workflow/source delivery missing", f.remote.posts, *f.execs)
 	}
 	binding, found, err := f.db.ExecutionTarget(ctx, request.Run.ID, request.WorkflowName)

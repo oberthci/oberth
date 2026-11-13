@@ -548,9 +548,6 @@ type Request struct {
 	BranchAuthority *workflowpolicy.BranchAuthority `json:"-"`
 	Capability      *argoworkflow.Capability
 	DemandReceipt   *argoworkflow.DemandReceipt
-	// omitStepUsage preserves already-running legacy specs during recovery.
-	omitStepUsage bool
-	// Only recovery of an already-submitted workflow can omit current defaults.
 	// Preserve helper resources in already-submitted Workflow identities.
 	legacyHelperStorage          bool
 	legacyProfileHelperResources bool
@@ -558,9 +555,6 @@ type Request struct {
 	legacyHelperStorageLimits bool
 	// legacyStepLimitHelperStorage keeps the v3 "step declares a limit" decision.
 	legacyStepLimitHelperStorage bool
-	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
-	// new submissions must never opt out of the instrumentation memory guard.
-	legacyStepUsage bool
 
 	RunID        string
 	RepositoryID int64
@@ -836,7 +830,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
-	injectStepUsageMounts(workflow, request)
 	injectAssistHelperMounts(workflow, request)
 	injectWorkspaceEnvironment(workflow)
 	injectRunEnvironment(workflow, config, request, credentialed)
@@ -890,9 +883,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 
-	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
-		return nil, err
-	}
 	if err := injectAssistHolds(workflow, config.Assist); err != nil {
 		return nil, err
 	}
@@ -1848,7 +1838,7 @@ func ExtractExecPaths(template *wfv1.Template) []string {
 // invocation in a template's container command+args.
 func extractExecPaths(template *wfv1.Template) []string {
 	extract := func(command, args []string) []string {
-		command = usageOriginalCommand(command)
+		command = legacySecurityCommand(command)
 		// Combine command and args into one slice for scanning.
 		all := append(command, args...)
 		var paths []string

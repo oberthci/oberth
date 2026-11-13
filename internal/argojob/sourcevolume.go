@@ -112,8 +112,8 @@ type SourceVolume struct {
 	ArtifactsSubPath string
 	// BinarySubPath is the directory inside the claim holding the Oberth
 	// server binary, and is empty unless this run's seeding actually wrote
-	// it. Build mounts it read-only for resource measurement and, in credentialed
-	// containers, for `oberth secretstore exec`. Neither use fetches a binary
+	// it. Build mounts it read-only only for assisted continuation or credentialed
+	// secretstore execution. Neither use fetches a binary
 	// from a registry or requires baking it into a pipeline image.
 	BinarySubPath string
 	// GoProxyCASubPath is the path inside the claim holding the Go module
@@ -153,7 +153,7 @@ func NewSourceSeeder(client kubernetes.Interface, exec ExecStreamer, config Conf
 }
 
 // Seed creates the run's claim and fills it with the checkout at sourceDir,
-// including the verified resource-measurement binary, and for credentialed
+// including a verified executable only for assisted continuation, and for credentialed
 // runs the OpenBao TLS trust anchor beside it.
 //
 // On any failure the claim is removed, so a failed submission does not leave
@@ -161,22 +161,22 @@ func NewSourceSeeder(client kubernetes.Interface, exec ExecStreamer, config Conf
 func (seeder *SourceSeeder) Seed(
 	ctx context.Context, workflowName, sourceDir string, credentialed bool,
 ) (SourceVolume, error) {
-	return seeder.seed(ctx, workflowName, sourceDir, credentialed, true)
+	return seeder.seed(ctx, workflowName, sourceDir, credentialed, false)
 }
 
 // SeedRequest carries the complete durable selection before any claim or Pod is created.
-func (seeder *SourceSeeder) SeedRequest(ctx context.Context, request Request, credentialed, measure bool) (SourceVolume, error) {
-	return seeder.seed(ctx, request.Name, request.SourceDir, credentialed, measure, &request)
+func (seeder *SourceSeeder) SeedRequest(ctx context.Context, request Request, credentialed bool) (SourceVolume, error) {
+	return seeder.seed(ctx, request.Name, request.SourceDir, credentialed, request.Assist, &request)
 }
 
-func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir string, credentialed, measure bool, requests ...*Request) (SourceVolume, error) {
+func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir string, credentialed, assistHelper bool, requests ...*Request) (SourceVolume, error) {
 	if seeder.config.ExecutionPlacement != nil {
 		if len(requests) != 1 || requests[0] == nil || requests[0].Name != workflowName || requests[0].SourceDir != sourceDir {
 			return SourceVolume{}, errors.New("argojob: isolated source seeding requires a complete request")
 		}
 		request := *requests[0]
-		if credentialed || !measure {
-			return SourceVolume{}, errors.New("argojob: isolated source delivery must preserve normal measurement and credential-free preflight")
+		if credentialed {
+			return SourceVolume{}, errors.New("argojob: approved target source delivery must remain credential-free")
 		}
 		if err := seeder.config.ExecutionPlacement.selectRequest(seeder.config, request); err != nil {
 			return SourceVolume{}, err
@@ -211,7 +211,7 @@ func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir st
 	if err := seeder.createClaim(ctx, volume.ClaimName, workflowName); err != nil {
 		return SourceVolume{}, err
 	}
-	if err := seeder.fill(ctx, &volume, sourceDir, credentialed, measure, requests...); err != nil {
+	if err := seeder.fill(ctx, &volume, sourceDir, credentialed, assistHelper, requests...); err != nil {
 		seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return SourceVolume{}, err
 	}
@@ -258,7 +258,7 @@ func (seeder *SourceSeeder) createClaim(ctx context.Context, name, workflowName 
 // the claim itself; its whole job is to be a filesystem the exec stream can
 // write to.
 func (seeder *SourceSeeder) fill(
-	ctx context.Context, volume *SourceVolume, sourceDir string, credentialed, measure bool, requests ...*Request,
+	ctx context.Context, volume *SourceVolume, sourceDir string, credentialed, assistHelper bool, requests ...*Request,
 ) error {
 	podName := volume.ClaimName
 	created, err := seeder.createSeedPodBound(ctx, podName, volume.ClaimName, requests...)
@@ -312,7 +312,7 @@ func (seeder *SourceSeeder) fill(
 	if err := seeder.fillGoProxyCA(ctx, volume, podName); err != nil {
 		return err
 	}
-	if credentialed || measure {
+	if credentialed || assistHelper {
 		return seeder.fillServerBinary(ctx, volume, podName)
 	}
 	return nil
@@ -409,8 +409,8 @@ func (seeder *SourceSeeder) fillGoProxyCA(
 
 // fillServerBinary streams the running server's own binary into the claim so
 // pipeline containers can invoke `oberth secretstore exec` without fetching
-// it from a registry. Ordinary source-backed runs receive the read-only binary for
-// resource measurement; this delivers no credentials or ServiceAccount token.
+// it from a registry. Assisted continuation uses the same verified executable;
+// ordinary unassisted, uncredentialed runs receive no executable.
 //
 // The binary is verified by SHA-256 readback: the digest is computed during
 // the stream and compared against sha256sum run inside the seed pod.

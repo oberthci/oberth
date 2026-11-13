@@ -33,7 +33,7 @@ func TestAPIReadIndexesUpgradePreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	step := model.StepResult{RunID: enqueued.ID, Stage: "build", Step: "test", Status: model.StepPassed, DeclaredSize: "M"}
+	step := model.StepResult{RunID: enqueued.ID, Stage: "build", Step: "test", Status: model.StepPassed}
 	if _, err := s.PutStepResult(ctx, step); err != nil {
 		t.Fatal(err)
 	}

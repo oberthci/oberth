@@ -38,17 +38,17 @@ func TestTagSkippedPublicationTimestampsNeedNoForce(t *testing.T) {
 				failed := admitRerunTag(t, h)
 				ensureTagJournal(t, h, failed)
 				if kind == "skipped with synthesized start" {
-					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepRunning, StartedAt: &at}); err != nil {
+					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepRunning, StartedAt: &at}); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if kind != "pending" {
-					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepSkipped, StartedAt: &at, FinishedAt: &at}); err != nil {
+					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepSkipped, StartedAt: &at, FinishedAt: &at}); err != nil {
 						t.Fatal(err)
 					}
 				}
 				if kind == "earlier failed publication" {
-					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, DeclaredSize: "M", Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &at, FinishedAt: &at}); err != nil {
+					if err := h.fixture.logs.AppendStepProgress(failed.ID, runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 1, Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &at, FinishedAt: &at}); err != nil {
 						t.Fatal(err)
 					}
 				}

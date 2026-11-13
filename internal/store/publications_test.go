@@ -443,8 +443,8 @@ func TestPublishFailureLeavesDeliveredStagesIntact(t *testing.T) {
 	}
 	// Record step results (simulating burns that passed).
 	for _, step := range []model.StepResult{
-		{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"},
-		{RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed, DeclaredSize: "M"},
+		{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed},
+		{RunID: run.ID, Stage: "build", Step: "compile", Status: model.StepPassed},
 	} {
 		if _, err := s.PutStepResult(ctx, step); err != nil {
 			t.Fatal(err)

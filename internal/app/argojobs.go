@@ -36,19 +36,6 @@ type argoControl interface {
 	Namespace() string
 }
 
-func (jobs *ArgoJobs) WriteResourceMetrics(w io.Writer) {
-	if controller, ok := jobs.controller.(interface{ WriteResourceMetrics(io.Writer) }); ok {
-		controller.WriteResourceMetrics(w)
-	}
-	if jobs.routes != nil {
-		for _, definition := range jobs.routes.definitions {
-			if source, ok := definition.ResourceSource.(interface{ WriteMetrics(io.Writer) }); ok {
-				source.WriteMetrics(w)
-			}
-		}
-	}
-}
-
 // SecretAccessLoader loads approved secret grants for a repository at
 // admission time. The store.Store satisfies this interface directly.
 // The repository is identified by its durable ID to prevent same-name
@@ -1093,10 +1080,6 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Termination: step.Termination,
 			Status: model.StepStatus(step.Status), ExitCode: step.ExitCode,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
-			MaxRSSBytes:     step.Usage.MaxRSSBytes,
-			MemoryPeakBytes: step.Usage.MemoryPeakBytes,
-			UserCPU:         step.Usage.UserCPU,
-			SystemCPU:       step.Usage.SystemCPU,
 		})
 	}
 	if completion.FailedStep != "" {

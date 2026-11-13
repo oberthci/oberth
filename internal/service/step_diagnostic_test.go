@@ -23,7 +23,7 @@ func TestRunGetRetainsBoundTerminationAndUnavailableHistory(t *testing.T) {
 	observed := time.Now().UTC()
 	record := &model.StepDiagnostic{Available: true, ObservedAt: &observed, Container: &model.StepTermination{RunID: run.ID, Namespace: "pipelines", WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", NodeID: "workflow-test-1234", PodName: "workflow-test-main-1234", PodUID: "22222222-2222-4222-8222-222222222222", ContainerName: "main", ContainerID: "containerd://" + strings.Repeat("c", 64), Reason: "OOMKilled", PodReason: "none", ExitCode: 137, StartedAt: observed.Add(-time.Minute), FinishedAt: observed.Add(-time.Second)}}
 	for _, name := range []string{"new", "legacy"} {
-		step := model.StepResult{RunID: run.ID, Stage: "test", Step: name, Status: model.StepFailed, ExitCode: 137, DeclaredSize: "M"}
+		step := model.StepResult{RunID: run.ID, Stage: "test", Step: name, Status: model.StepFailed, ExitCode: 137}
 		if name == "new" {
 			step.Termination = record
 		}

@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/utils/ptr"
-
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
@@ -602,7 +600,6 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if _, err := database.PutStepResult(ctx, model.StepResult{
 		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 10, LogEnd: 20,
-		DeclaredSize: "XL", MaxRSSBytes: ptr.To(int64(8192 << 10)), UserCPU: ptr.To(100 * time.Millisecond), SystemCPU: ptr.To(25 * time.Millisecond),
 	}); err != nil {
 		_ = database.Close()
 		t.Fatal(err)

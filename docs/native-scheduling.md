@@ -150,25 +150,6 @@ Oberth has no automatic infrastructure retry. Authors choose native Argo
 `run_retry` and `run_rerun` remain. Argo cannot retry a preparation failure that
 happens before a Workflow exists; retry that failed run manually.
 
-## TEMPORARY DEVIATION: measurement executable architecture
-
-Usage instrumentation wraps eligible steps with the server-delivered native
-executable. Its server-owned Pod patch adds `kubernetes.io/arch` matching that
-binary, after Argo resolves the authored Workflow/template placement. The
-original fields are preserved, but the constructed Pod has this extra selector;
-instrumentation is skipped when authored selectors or node affinity name a
-different architecture; it never replaces those authored constraints. This violates the
-no-placement-injection model and remains a second explicit deviation.
-
-The release publishes Linux amd64 and arm64 executables, but each server image
-contains only its own executable. Source delivery copies `os.Executable()` and
-verifies its SHA-256 after streaming to the seed Pod. Removing this selector
-requires changing the server image's contents and release delivery: include both
-authenticated executables, verify each delivered hash, select the matching
-binary inside the step, and cover both architectures and recovery. That is
-outside this bootstrap correction. The selector remains until that delivery
-replacement is implemented; execution targets add no placement policy.
-
 ## Source delivery and load
 
 Source delivery is a **TEMPORARY DEVIATION** from the native scheduling model,
@@ -207,7 +188,7 @@ This is unbounded source retention. Its native replacement is tracked separately
 ## What Oberth writes into the user's Workflow and Pods
 
 This inventory describes current submission (`internal/argojob/spec.go`,
-`executor_tokens.go`, `nonroot.go`, `release_wif.go`, `step_usage.go`,
+`executor_tokens.go`, `nonroot.go`, `release_wif.go`, `assist_hold.go`,
 `sourcevolume.go` and `artifactcollect.go`). The metadata tables below list
 individual server labels and annotations. Conditional features apply only when
 configured/authorized. Oberth's injected environment and reserved mount paths
@@ -306,19 +287,17 @@ win name/path collisions; validated workspace opt-outs remain available.
   collection is tied to the node/topology of that source volume. The running
   helper's `sleep 900` is a leak backstop, not a Pending-Pod expiry. These
   separate helpers run outside Argo's Workflow parallelism.
-- **Usage instrumentation.** Eligible explicit container/script commands
-  become `/run/oberth/usage/oberth internal-step-exec -- <authored command>`;
-  authored args and Argo's script-path behavior remain. The executable is
-  mounted read-only at `/run/oberth/usage` from the authenticated source-claim
-  binary. Argo adds its own emissary entrypoint around this command later.
-  Instrumentation uses the existing explicit-memory-limit safety check;
-  opaque entrypoints/container sets or incompatible architecture placement
-  remain uninstrumented, with usage unknown. The wrapper/mount add runtime
-  work but **no resource request rewrite**. Instrumented Pod patches add
-  `kubernetes.io/arch` for the delivered binary, **an extra placement
-  constraint and the named architecture deviation**. An authored different
-  architecture is never overwritten or narrowed. Instrumentation itself is
-  unchanged in this round.
+- **Step measurement removed.** Oberth adds no measurement command wrapper,
+  usage executable mount, memory-policy/warning annotations or architecture
+  selector. Authored commands and args pass through unchanged by measurement.
+  Per-step CPU/memory/storage usage figures, the external sampler and
+  run_resources/repo_usage reports are removed. The static YAML resource guard
+  remains. Existing secret-store execution and explicitly opted-in assisted
+  filesystem helpers retain their separate authenticated executable delivery;
+  assisted helper mounts use /run/oberth/assist and add no architecture selector.
+  Those helper executables are native binaries; authors/operators must choose
+  compatible execution environments if they use those features. They no longer
+  cause Oberth to select a worker architecture.
 - **Retention and native fields.** Oberth writes `ttlStrategy` with
   `secondsAfterCompletion` from configured retention (at least 180 seconds)
   and removes authored PodGC so step logs remain for the Workflow's retention
@@ -383,8 +362,6 @@ No new label was added for this release.
 | `oberth.ci/execution-target` | Custody-tracked target objects | Exact durable target binding digest |
 | `oberth.ci/release-wif-policy-sha256` | Workflow, WIF release | Public role/policy binding digest |
 | `oberth.ci/release-wif-adc` | WIF template/Pod | Public ADC identity descriptor; no token |
-| `oberth.ci/step-usage-memory-policy` | Workflow | Instrumentation memory-policy version |
-| `oberth.ci/step-usage-memory-warning` | Template/Pod | Instrumentation unavailable reason; resources unchanged |
 | `oberth.ci/assist` | Assisted Workflow | Hold TTL in seconds |
 | `oberth.ci/assist-hold` | Assisted template/Pod | Held-attempt deadline binding |
 | `oberth.ci/executor-identity-retry-at` | Owned step Pod on identity retry | Issuance retry timestamp, not a workload-start deadline |

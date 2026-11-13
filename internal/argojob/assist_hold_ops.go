@@ -84,7 +84,7 @@ func assistHoldOf(pod *corev1.Pod) (model.AssistHold, bool) {
 	if main == nil {
 		return model.AssistHold{}, false
 	}
-	hold := model.AssistHold{Pod: pod.Name, Node: pod.Annotations[argoNodeNameAnnotation], SourcePath: SourceMountPath, PatchCapable: hasUsageBinary(main)}
+	hold := model.AssistHold{Pod: pod.Name, Node: pod.Annotations[argoNodeNameAnnotation], SourcePath: SourceMountPath, PatchCapable: hasAssistBinary(main)}
 	for _, variable := range main.Env {
 		if variable.Name == "OBERTH_STEP" {
 			hold.Step = variable.Value
@@ -206,7 +206,7 @@ func (controller *Controller) ReleaseAssistHold(ctx context.Context, pod string)
 	}
 	argv := []string{"touch", AssistReleasePath}
 	if hold.PatchCapable {
-		argv = []string{usageBinPath, "internal-hold-fs", "release", "--path", AssistReleasePath}
+		argv = []string{assistBinPath, "internal-hold-fs", "release", "--path", AssistReleasePath}
 	}
 	result, err := controller.ExecAssistHold(ctx, model.AssistExecRequest{Pod: pod, Argv: argv, Timeout: 30 * time.Second, OutputLimit: 4096})
 	if err != nil {

@@ -227,7 +227,7 @@ func TestRunGetSummary(t *testing.T) {
 			status = model.StepFailed
 		}
 		_, err := fixture.store.PutStepResult(ctx, model.StepResult{
-			RunID: run.ID, Stage: "test", Step: name, Ordinal: i, Status: status, DeclaredSize: "M",
+			RunID: run.ID, Stage: "test", Step: name, Ordinal: i, Status: status,
 			StartedAt: &started, FinishedAt: &ended,
 		})
 		if err != nil {

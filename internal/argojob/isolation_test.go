@@ -132,8 +132,7 @@ func TestBuildPreservesReadonlyToolsAcrossAliases(t *testing.T) {
 func isolationControllerRequest(t *testing.T, shape string) Request {
 	return isolationRequest(t, func(wf *wfv1.Workflow) {
 		leaf := &wf.Spec.Templates[0]
-		// Keep the measured-leaf/architecture proof above the instrumentation
-		// floor. Tiny and unspecified limits have independent negative tests.
+		// Keep the authored limit from the immutable security-isolation capture.
 		leaf.Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("256Mi")}
 		leaf.AutomountServiceAccountToken = ptr.To(false)
 		leaf.Metadata.Annotations = map[string]string{"oberth.ci/workspace-mounts": "readonly", "oberth.ci/workspace-env": "none"}

@@ -33,7 +33,6 @@ func TestStartupRetriesInterruptedPromotionUnderOriginalGrant(t *testing.T) {
 			if mode == "failed-step" {
 				step := stepResult(model.StepFailed)
 				step.RunID = original.RunID
-				step.DeclaredSize = "S"
 				if _, err = f.store.PutStepResult(t.Context(), step); err != nil {
 					t.Fatal(err)
 				}

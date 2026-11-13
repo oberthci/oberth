@@ -1,9 +1,7 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -87,7 +84,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 		if _, err := f.retention.Database.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
+		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed}); err != nil {
 			t.Fatal(err)
 		}
 		run, err = f.retention.Database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: run.SHA})
@@ -578,211 +575,6 @@ func TestRetentionStatusUsesLastSweepTotals(t *testing.T) {
 	}
 }
 
-func seedRetentionResourceUsage(t *testing.T, f *retentionFixture) model.Run {
-	t.Helper()
-	run := f.run(t, "telemetry", "branch", false)
-	if _, err := f.retention.Database.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); err != nil {
-		t.Fatal(err)
-	}
-	at := f.now.Add(-91 * 24 * time.Hour)
-	code := int32(0)
-	v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: run.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "node-1", PodName: "pod-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("a", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, Terminal: true, ExitCode: &code, Reason: "Completed", SampledLowerBound: true}
-	if err := f.retention.Database.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
-		t.Fatal(err)
-	}
-	return run
-}
-
-func TestRetentionPrunesResourceUsageWithEvidencePoliciesDisabled(t *testing.T) {
-	f := newRetentionFixture(t)
-	run := seedRetentionResourceUsage(t, f)
-	if err := f.retention.Sweep(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	rows, _, err := f.retention.Database.StepResourceUsage(t.Context(), run.ID)
-	if err != nil || len(rows) != 0 {
-		t.Fatal("disabled evidence policies disabled telemetry retention", len(rows), err)
-	}
-	f.retained(t, run.ID, true)
-}
-
-type retentionRetryLog struct {
-	bytes.Buffer
-	ready chan struct{}
-}
-
-func (w *retentionRetryLog) Write(p []byte) (int, error) {
-	n, err := w.Buffer.Write(p)
-	if bytes.Contains(p, []byte("DEBUG: resource telemetry retention busy")) {
-		select {
-		case w.ready <- struct{}{}:
-		default:
-		}
-	}
-	return n, err
-}
-
-func TestRetentionBusyIsSkippedAndRetriedWithoutEvidenceSweep(t *testing.T) {
-	f := newRetentionFixture(t)
-	run := seedRetentionResourceUsage(t, f)
-	other, err := sql.Open("sqlite", "file:"+filepath.Join(f.root, "oberth.sqlite")+"?mode=rw&_txlock=immediate")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer other.Close()
-	tx, err := other.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(10*time.Second))
-	out := &retentionRetryLog{ready: make(chan struct{}, 8)}
-	done := make(chan struct{})
-	go func() { defer close(done); f.retention.run(ctx, time.Hour, 10*time.Millisecond, log.New(out, "", 0)) }()
-	defer func() { cancel(); <-done }()
-	// Observe both the first skip and a retry while writes remain locked.
-	for range 2 {
-		select {
-		case <-out.ready:
-		case <-ctx.Done():
-			t.Fatal("busy sweep did not retry", ctx.Err())
-		}
-	}
-	value, err := f.retention.Status(ctx)
-	if err != nil || value.(RetentionStatus).LastError != "" {
-		t.Fatal("busy skip became status error", value, err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
-	}
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		rows, _, err := f.retention.Database.StepResourceUsage(ctx, run.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(rows) == 0 {
-			break
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatal("retry did not drain after writers yielded", ctx.Err())
-		}
-	}
-	cancel()
-	<-done
-	if strings.Contains(out.String(), "retention sweep:") || strings.Contains(out.String(), "retention retry:") {
-		t.Fatal("busy skip logged as error", out.String())
-	}
-}
-
-func TestRetentionBudgetIsRetriedWithoutEvidenceSweep(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		var expirePass bool
-		f := newRetentionFixtureWithClock(t, func() time.Time {
-			if expirePass {
-				expirePass = false
-				// PruneResourceUsage reads its clock after selection. Exhaust
-				// its real one-second pass budget before the DELETE, without
-				// cancelling the service or relying on host load.
-				time.Sleep(time.Second)
-				synctest.Wait()
-			}
-			return time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-		})
-		run := seedRetentionResourceUsage(t, f)
-		expirePass = true
-		ctx, cancel := context.WithCancel(t.Context())
-		done := make(chan struct{})
-		out := &retentionRetryLog{ready: make(chan struct{}, 8)}
-		go func() { defer close(done); f.retention.run(ctx, time.Hour, 10*time.Millisecond, log.New(out, "", 0)) }()
-		defer func() { cancel(); <-done }()
-		select {
-		case <-out.ready:
-		case <-time.After(2 * time.Second):
-			t.Fatal("bounded telemetry pass did not schedule a short retry")
-		}
-		synctest.Wait()
-		if !f.retention.resourceRetry {
-			t.Fatal("bounded telemetry pass lost its pending retry")
-		}
-		value, err := f.retention.Status(t.Context())
-		if err != nil || value.(RetentionStatus).LastError != "" {
-			t.Fatal("bounded telemetry pass became a status error", value, err)
-		}
-		rows, _, err := f.retention.Database.StepResourceUsage(t.Context(), run.ID)
-		if err != nil || len(rows) != 1 {
-			t.Fatal("expired pass did not retain its backlog", len(rows), err)
-		}
-		// The retry must not depend on rescanning log/artifact evidence.
-		for _, name := range []string{"logs", "artifacts"} {
-			path := filepath.Join(f.root, name)
-			if err := os.Rename(path, path+"-saved"); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		// Pending telemetry must drain on the short retry, rather than
-		// waiting for an hourly sweep or rescanning the broken evidence trees.
-		time.Sleep(20 * time.Millisecond)
-		synctest.Wait()
-		rows, _, err = f.retention.Database.StepResourceUsage(t.Context(), run.ID)
-		if err != nil || len(rows) != 0 {
-			t.Fatal("bounded telemetry backlog did not drain on retry", len(rows), err)
-		}
-		if f.retention.resourceRetry {
-			t.Fatal("successful telemetry pass left retry armed")
-		}
-		cancel()
-		<-done
-		if strings.Contains(out.String(), "retention sweep:") || strings.Contains(out.String(), "retention retry:") {
-			t.Fatal("telemetry retry failed or rescanned evidence", out.String())
-		}
-	})
-}
-
-func TestRetentionDatabaseFailureIsNotRetried(t *testing.T) {
-	f := newRetentionFixture(t)
-	seedRetentionResourceUsage(t, f)
-	if err := f.retention.Database.Close(); err != nil {
-		t.Fatal(err)
-	}
-	f.retention.resourceRetry = true
-	if err := f.retention.Sweep(t.Context()); err == nil || f.retention.resourceRetry {
-		t.Fatal("permanent database failure was swallowed or retried", err, f.retention.resourceRetry)
-	}
-	value, err := f.retention.Status(t.Context())
-	if err != nil || value.(RetentionStatus).LastError == "" {
-		t.Fatal("permanent database failure lost status error", value, err)
-	}
-}
-
-func TestRetentionCallerCancellationIsNotRetried(t *testing.T) {
-	f := newRetentionFixture(t)
-	seedRetentionResourceUsage(t, f)
-	for _, deadline := range []bool{false, true} {
-		t.Run(fmt.Sprint(deadline), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
-			want := context.Canceled
-			if deadline {
-				cancel()
-				ctx, cancel = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
-				want = context.DeadlineExceeded
-			}
-			cancel()
-			f.retention.resourceRetry = true
-			if err := f.retention.Sweep(ctx); !errors.Is(err, want) || f.retention.resourceRetry {
-				t.Fatal("caller cancellation was swallowed or retried", err, f.retention.resourceRetry)
-			}
-		})
-	}
-}
-
-// Free-space observation remains available without evidence retention policies.
 func TestRetentionReportsFreeSpaceWithEvidencePoliciesDisabled(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/floor", "push", true)

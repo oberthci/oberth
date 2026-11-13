@@ -17,7 +17,7 @@ func resourceBytes(n *int64) string {
 // ResourceFailureMessage uses only bound pod-spec diagnostics and external
 // sampler values. Self-reported peaks and raw termination messages are ignored.
 // Only failed final steps participate; a successful retry keeps its verdict.
-func ResourceFailureMessage(runID string, steps []StepResult, usage []StepResourceUsage, deadline bool) string {
+func ResourceFailureMessage(runID string, steps []StepResult, deadline bool) string {
 	if !diagnosticRun.MatchString(runID) {
 		return ""
 	}
@@ -43,21 +43,8 @@ func ResourceFailureMessage(runID string, steps []StepResult, usage []StepResour
 		if !oom && !timed {
 			continue
 		}
-		var peak *int64
-		if c != nil {
-			for _, v := range usage {
-				if v.Source != "kubelet-cadvisor" || v.Saturated || v.RunID != runID || v.WorkflowUID != c.WorkflowUID || v.PodUID != c.PodUID || v.ContainerID != c.ContainerID || v.ContainerName != c.ContainerName || v.RestartCount != c.RestartCount {
-					continue
-				}
-				if v.MemoryPeakBytes != nil && *v.MemoryPeakBytes >= 0 && (peak == nil || *v.MemoryPeakBytes > *peak) {
-					n := *v.MemoryPeakBytes
-					peak = &n
-				}
-			}
-		}
-		command := "oberth run resources --run " + runID + " --include-failed"
 		if oom {
-			return fmt.Sprintf("OOM kill at %s/%s: memory limit %s; sampled memory peak %s (lower bound). Inspect %s; change resources in git.", step.Stage, step.Step, resourceBytes(c.MemoryLimitBytes), resourceBytes(peak), command)
+			return fmt.Sprintf("OOM kill at %s/%s: memory limit %s. Inspect step diagnostics and logs; change resources in git.", step.Stage, step.Step, resourceBytes(c.MemoryLimitBytes))
 		}
 		limit := "unknown"
 		runtime := "unknown"
@@ -69,14 +56,14 @@ func ResourceFailureMessage(runID string, steps []StepResult, usage []StepResour
 				runtime = c.FinishedAt.Sub(c.StartedAt).String()
 			}
 		}
-		return fmt.Sprintf("%s Step %s/%s: deadline limit %s; observed runtime %s; sampled memory peak %s (lower bound). Inspect %s; change deadlines in git.", ExecutionDeadlineMessage, step.Stage, step.Step, limit, runtime, resourceBytes(peak), command)
+		return fmt.Sprintf("%s Step %s/%s: deadline limit %s; observed runtime %s. Inspect step diagnostics and logs; change deadlines in git.", ExecutionDeadlineMessage, step.Stage, step.Step, limit, runtime)
 	}
 	if deadline {
-		return fmt.Sprintf("%s Step unknown: deadline limit unknown; sampled memory peak unknown. Inspect oberth run resources --run %s --include-failed; change deadlines in git.", ExecutionDeadlineMessage, runID)
+		return ExecutionDeadlineMessage + " Step unknown: inspect step diagnostics and logs; change deadlines in git."
 	}
 	return ""
 }
 
 func IsResourceFailureMessage(message string) bool {
-	return (strings.HasPrefix(message, "OOM kill at ") || strings.HasPrefix(message, ExecutionDeadlineMessage+" Step ")) && strings.Contains(message, "Inspect oberth run resources --run ")
+	return (strings.HasPrefix(message, "OOM kill at ") || strings.HasPrefix(message, ExecutionDeadlineMessage+" Step "))
 }

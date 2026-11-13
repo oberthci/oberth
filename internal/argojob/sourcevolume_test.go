@@ -522,8 +522,8 @@ func TestSeedWithholdsTheVaultTrustAnchorFromTheCITier(t *testing.T) {
 	if volume.VaultCASubPath != "" {
 		t.Fatalf("a CI run was given a trust anchor at %q", volume.VaultCASubPath)
 	}
-	if len(calls) != 3 || volume.BinarySubPath == "" {
-		t.Fatalf("expected checkout and verified measurement binary, got %d execs", len(calls))
+	if len(calls) != 1 || volume.BinarySubPath != "" {
+		t.Fatalf("expected checkout only and no executable, got %d execs", len(calls))
 	}
 }
 

@@ -44,7 +44,7 @@ func TestOberthLintKeepsDeadlineCacheAndToolIsolation(t *testing.T) {
 				}
 				container := template.Container
 				want := []string{"hack/run-ci-lint.sh", "/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."}
-				if container == nil || !reflect.DeepEqual(usageOriginalCommand(container.Command), []string{"/bin/sh"}) || !reflect.DeepEqual(container.Args, want) {
+				if container == nil || !reflect.DeepEqual(legacySecurityCommand(container.Command), []string{"/bin/sh"}) || !reflect.DeepEqual(container.Args, want) {
 					t.Fatalf("lint lost its bounded launcher or checks: %+v", container)
 				}
 				env := map[string]string{}

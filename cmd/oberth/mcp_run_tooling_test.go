@@ -151,7 +151,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	// finalized index containing only another step's output.
 	if _, err := storetest.PutHistoricalStepResult(database, ctx, model.StepResult{
 		RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
-		Status: model.StepFailed, DeclaredSize: "M", Termination: model.UnavailableStepDiagnostic("not-executed"),
+		Status: model.StepFailed, Termination: model.UnavailableStepDiagnostic("not-executed"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 		{Termination: model.UnavailableStepDiagnostic("not-executed"), LogEnd: 1},
 	} {
 		step.RunID, step.Stage, step.Step = run.ID, want.Stage, want.Step
-		step.Status, step.DeclaredSize = model.StepFailed, "M"
+		step.Status = model.StepFailed
 		if _, err := storetest.PutHistoricalStepResult(database, ctx, step); err != nil {
 			t.Fatal(err)
 		}

@@ -703,7 +703,6 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"logs":                {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
 		"run_get":             {"id", "summary"},
 		"run_list":            {"before", "held", "latest", "limit", "own", "ref", "ref_glob", "repo", "status", "superseded", "view"},
-		"run_resources":       {"burn", "format", "id", "include_failed", "last", "ref", "repo", "step"},
 		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "tail"},
 		"run_retry":           {"id"},
 		"run_cancel":          {"force", "id", "reason"},
@@ -857,7 +856,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 81
+	const documented = 79
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -931,14 +930,14 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 	want := []string{
-		"status", "logs", "run_get", "run_resources", "run_retry", "publication_abandon", "run_cancel", "run_rerun", "run_hold_list", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
+		"status", "logs", "run_get", "run_retry", "publication_abandon", "run_cancel", "run_rerun", "run_hold_list", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
 		"issue_create", "issue_get", "issue_get_many", "issue_update", "issue_append", "issue_close", "issue_reopen",
 		"issue_delete", "issue_list", "issue_unlock", "issue_close_many", "issue_lock",
 		"uplink_invite", "uplink_cert", "client_renew", "uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss",
 		"access_list", "access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
 		"release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset",
-		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "branch_delete_many", "branch_deletion_list", "branch_deletion_resolve", "ref_delete_many", "receive_outbox", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
+		"repo_list", "repo_archive", "repo_unarchive", "repo_remove", "branch_delete_many", "branch_deletion_list", "branch_deletion_resolve", "ref_delete_many", "receive_outbox", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list", "run_wait", "events_subscribe", "events_since", "events_wait", "sync_status",
 	}
 	definitions := toolDefinitions()

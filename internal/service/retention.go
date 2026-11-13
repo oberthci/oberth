@@ -53,7 +53,6 @@ type Retention struct {
 	mu             sync.Mutex
 	statusMu       sync.Mutex
 	status         RetentionStatus
-	resourceRetry  bool // protected by mu; contention/pass exhaustion is an expected skip
 }
 
 func (r *Retention) now() time.Time {
@@ -166,9 +165,6 @@ func (r *Retention) Sweep(ctx context.Context) (resultErr error) {
 		r.status = status
 		r.statusMu.Unlock()
 	}()
-	// Resource telemetry is independently bounded even with log/artifact
-	// retention disabled. Its sweeper uses a separate SQLite connection.
-	defer func() { resultErr = errors.Join(resultErr, r.pruneResourceUsage(ctx)) }()
 	// Run timing detail is bounded by count whatever the evidence policies say.
 	defer func() {
 		pruned, err := r.Database.PruneRunTiming(ctx, store.RunTimingRetainedRuns, r.KeepNewest)
@@ -271,43 +267,13 @@ func (r *Retention) Status(ctx context.Context) (any, error) {
 	return r.status, nil
 }
 
-// pruneResourceUsage is called with mu held. SQLite contention and exhaustion
-// of the store's bounded pass are skips. Run schedules a short retry while the
-// caller remains live; cancellation and other failures still propagate.
-func (r *Retention) pruneResourceUsage(ctx context.Context) error {
-	_, err := r.Database.PruneResourceUsage(ctx)
-	r.resourceRetry = ctx.Err() == nil && (store.IsTransientLockError(err) || errors.Is(err, context.DeadlineExceeded))
-	if r.resourceRetry {
-		return nil
-	}
-	return err
-}
-
 func (r *Retention) Run(ctx context.Context, interval time.Duration, logger *log.Logger) {
-	r.run(ctx, interval, min(interval, time.Minute), logger)
-}
-
-func (r *Retention) run(ctx context.Context, interval, retryDelay time.Duration, logger *log.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	retry := time.NewTimer(retryDelay)
-	retry.Stop()
-	defer retry.Stop()
-	armRetry := func() {
-		r.mu.Lock()
-		pending := r.resourceRetry
-		r.mu.Unlock()
-		retry.Stop()
-		if pending && ctx.Err() == nil {
-			logger.Printf("DEBUG: resource telemetry retention busy or pass budget exhausted; skipped, retry in %s", retryDelay)
-			retry.Reset(retryDelay)
-		}
-	}
 	sweep := func() {
 		if err := r.Sweep(ctx); err != nil && ctx.Err() == nil {
 			logger.Printf("retention sweep: %v", err)
 		}
-		armRetry()
 	}
 	sweep()
 	for {
@@ -316,17 +282,6 @@ func (r *Retention) run(ctx context.Context, interval, retryDelay time.Duration,
 			return
 		case <-ticker.C:
 			sweep()
-		case <-retry.C:
-			r.mu.Lock()
-			err := r.pruneResourceUsage(ctx)
-			r.mu.Unlock()
-			if err != nil && ctx.Err() == nil {
-				r.statusMu.Lock()
-				r.status.LastError = err.Error()
-				r.statusMu.Unlock()
-				logger.Printf("resource telemetry retention retry: %v", err)
-			}
-			armRetry()
 		}
 	}
 }

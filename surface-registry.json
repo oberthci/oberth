@@ -416,10 +416,6 @@
       "doc_anchor": "docs/agent-events.md#tools",
       "test_ref": "internal/service/run_list_filters_test.go TestRunListLatestPerRefGlob"
     },
-    "flag:anonymize": {
-      "doc_anchor": "docs/measured-requests.md#resource-history-and-reviewed-declarations-1216-stage-a",
-      "test_ref": "cmd/oberth/run_resources_test.go TestRunResourcesAnonymize"
-    },
     "flag:answers": {
       "doc_anchor": "docs/install-answers.md",
       "test_ref": "internal/installer/answers_result_test.go TestAnswersStrictRoundTrip"
@@ -796,14 +792,6 @@
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
-    "annotation:oberth.ci/step-usage-memory-policy": {
-      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
-      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
-    },
-    "annotation:oberth.ci/step-usage-memory-warning": {
-      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
-      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
-    },
     "annotation:oberth.ci/assist": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
@@ -890,6 +878,14 @@
     },
     "annotation:oberth.ci/step-start-allowance-seconds": {
       "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
+    "annotation:oberth.ci/step-usage-memory-policy": {
+      "doc_anchor": "docs/releases/v0.22.0.md#step-usage-figures-removed",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
+    },
+    "annotation:oberth.ci/step-usage-memory-warning": {
+      "doc_anchor": "docs/releases/v0.22.0.md#step-usage-figures-removed",
       "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
     }
   }

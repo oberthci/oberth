@@ -116,7 +116,7 @@ func (controller *Controller) refreshNonroot(ctx context.Context, request Reques
 
 func (controller *Controller) expectedSourceVolume(request Request) SourceVolume {
 	volume := SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath}
-	if !request.omitStepUsage {
+	if request.Assist {
 		volume.BinarySubPath = binarySubPath
 	}
 	if controller.config.GoProxyCACertPEM != "" {

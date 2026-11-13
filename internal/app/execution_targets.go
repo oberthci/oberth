@@ -26,13 +26,12 @@ import (
 // ExecutionTarget is an operator-owned authenticated native client bundle.
 // It supplies no scheduler, grants, result importer or alternate Git authority.
 type ExecutionTarget struct {
-	ID             string
-	Config         argojob.Config
-	Transport      *rest.Config
-	Kubernetes     kubernetes.Interface
-	Workflows      func(string) argojob.WorkflowClient
-	Exec           argojob.ExecStreamer
-	ResourceSource argojob.ResourceUsageSource
+	ID         string
+	Config     argojob.Config
+	Transport  *rest.Config
+	Kubernetes kubernetes.Interface
+	Workflows  func(string) argojob.WorkflowClient
+	Exec       argojob.ExecStreamer
 }
 
 type executionTargets struct {
@@ -301,13 +300,6 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	}
 	if recorder, ok := r.owner.auditor.(argojob.NodeBootRecorder); ok {
 		controller.WithNodeBootRecorder(recorder)
-	}
-	if definition.ResourceSource != nil {
-		recorder, ok := r.owner.auditor.(argojob.ResourceUsageRecorder)
-		if !ok {
-			return nil, errors.New("app: target resource sampler requires canonical storage")
-		}
-		controller.WithResourceSampler(definition.ResourceSource, recorder)
 	}
 	seeder := argojob.NewSourceSeeder(clients.Kubernetes(), definition.Exec, snapshot.Config)
 	if seeder == nil {
