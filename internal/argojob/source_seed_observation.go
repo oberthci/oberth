@@ -45,13 +45,18 @@ func (seeder *SourceSeeder) observeScheduling(ctx context.Context, name, runID, 
 	identity, ok := seeder.observations[name]
 	seeder.observationsMu.Unlock()
 	if !ok {
-		return nil, nil
+		// The authenticated caller selected this run's canonical Workflow name.
+		// No in-memory preparation record survives a server restart.
+		identity = sourceSeedIdentity{runID: runID, sha: sha, podName: sourceClaimName(name)}
 	}
-	if identity.runID != runID || identity.sha != sha {
+	if name == "" || runID == "" || sha == "" || identity.runID != runID || identity.sha != sha {
 		return nil, errors.New("argojob: source observation identity mismatch")
 	}
 	pod, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Get(ctx, identity.podName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		if !ok {
+			return nil, nil
+		}
 		seeder.observationsMu.Lock()
 		active := seeder.observations[name] == identity
 		seeder.observationsMu.Unlock()
@@ -63,8 +68,11 @@ func (seeder *SourceSeeder) observeScheduling(ctx context.Context, name, runID, 
 	if err != nil {
 		return nil, err
 	}
-	if pod.UID != identity.uid || pod.Namespace != seeder.config.Namespace || pod.Name != identity.podName {
+	if pod.UID == "" || (ok && pod.UID != identity.uid) || pod.Namespace != seeder.config.Namespace || pod.Name != identity.podName {
 		return nil, errors.New("argojob: source seed observation UID mismatch")
+	}
+	if !ok && !isSourceSeedForClaim(pod, identity.podName) {
+		return nil, errors.New("argojob: source seed observation identity mismatch")
 	}
 	result := &model.ExecutionObservation{State: "observed", Phase: "Pending", Reason: "SourceSeedPreparing", Message: "Preparing source in the source seed Pod."}
 	switch pod.Status.Phase {
@@ -85,4 +93,14 @@ func (seeder *SourceSeeder) observeScheduling(ctx context.Context, name, runID, 
 		result.Message = "Source seed Pod ended; awaiting run finalization."
 	}
 	return result, nil
+}
+
+// Deterministic lookup observes only the known server seed shape. It neither
+// adopts the Pod nor grants authority to copy source or modify its claim.
+func isSourceSeedForClaim(pod *corev1.Pod, claim string) bool {
+	if pod.Labels["oberth.ci/component"] != "source-seed" || len(pod.OwnerReferences) != 0 || len(pod.Spec.Volumes) != 1 || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != seedContainer {
+		return false
+	}
+	volume := pod.Spec.Volumes[0]
+	return volume.Name == "source" && volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == claim
 }
