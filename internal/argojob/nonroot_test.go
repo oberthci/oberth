@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -68,12 +67,10 @@ func nonrootBuiltWithHelperPolicy(t *testing.T, script bool, scratch, policy str
 	}
 	config := testConfig()
 	config.ExecutorScratchSizeLimit = scratch
-	config.NonrootProfile = argoworkflow.NonrootStaticProfile
 	config.CICacheRoot = "/server/cache/ci"
 	config.ReleaseCacheRoot = "/server/cache/release"
 	request := testRequest(pipeline.TriggerCI, document)
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
-	request = nonrootFixtureProof(request)
 	historical := &wfv1.Workflow{}
 	historical.Annotations = map[string]string{helperStorageAnnotation: policy}
 	if err := recoverHelperStorage(historical, &request); err != nil {
@@ -84,11 +81,6 @@ func nonrootBuiltWithHelperPolicy(t *testing.T, script bool, scratch, policy str
 		t.Fatal(err)
 	}
 	return wf
-}
-
-func nonrootFixtureProof(request Request) Request {
-	request.nonrootProof = &nonrootProof{requestID: nonrootRequestIdentity(request), namespace: testNamespace, podUID: "fixture-controller", configUID: "fixture-config", configVersion: "1", verifiedAt: time.Now()}
-	return request
 }
 
 func TestBuildNonrootLeaves(t *testing.T) {
@@ -128,13 +120,6 @@ func TestBuildNonrootLeaves(t *testing.T) {
 		if tmpl.PodSpecPatch == "" {
 			t.Fatal("no executor policy")
 		}
-	}
-}
-
-func TestNonrootControllerSupportFailsClosed(t *testing.T) {
-	_, err := Build(testConfig(), testRequest(pipeline.TriggerCI, nonrootTestDocument))
-	if err == nil || !strings.Contains(err.Error(), "support has not been established") {
-		t.Fatalf("unverified controller accepted selected leaves: %v", err)
 	}
 }
 
@@ -277,12 +262,10 @@ func TestNonrootSizeIsRecheckedAfterServerInjection(t *testing.T) {
 			t.Fatal(err)
 		}
 		config := testConfig()
-		config.NonrootProfile = argoworkflow.NonrootStaticProfile
 		config.CICacheRoot = "/server/cache/ci"
 		config.ReleaseCacheRoot = "/server/cache/release"
 		request := testRequest(pipeline.TriggerCI, string(document))
 		request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
-		request = nonrootFixtureProof(request)
 		_, err = Build(config, request)
 		if (err != nil) != (delta > 0) {
 			t.Fatalf("final size delta%d: %v", delta, err)

@@ -55,9 +55,6 @@ type ArgoResult struct {
 	// TargetVersion is the chart version the install aimed at.
 	TargetVersion string
 	Namespace     string
-	// Profile is the nonroot controller profile rendered, nil without one;
-	// the Oberth chart pins its ConfigMap name for verification (#1517).
-	Profile *argoworkflow.NonrootProfile
 	// Skipped reports that the caller opted out with --skip-argo-workflows,
 	// having supplied a controller by other means.
 	Skipped bool
@@ -94,9 +91,6 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		ns = DefaultArgoNamespace
 	}
 	cfg.ArgoNamespace = ns
-	if cfg.ArgoControllerProfile != "" && (cfg.ArgoControllerProfile != argoworkflow.NonrootStaticProfile || cfg.SkipArgo || (cfg.ArgoChartVersion != "" && cfg.ArgoChartVersion != DefaultArgoChartVersion)) {
-		return ArgoResult{}, errors.New("nonroot profile requires the managed exact Argo chart1.0.24")
-	}
 	result := ArgoResult{Namespace: ns}
 	if err := validateArgoLimits(cfg); err != nil {
 		return result, err
@@ -138,34 +132,33 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 			_, _ = fmt.Fprintf(deps.Output, "Argo parallelism defaults to %d (half the cluster's allocatable CPUs, at least 2); change it with --argo-parallelism.\n", parallelism)
 		}
 	}
-	if cfg.ArgoControllerProfile == "" && exists && argoLimitsRequested(cfg) {
-		// Under the nonroot profile the chart never renders
-		// controller.parallelism: the limits must go into the profile
-		// ConfigMap, so a limit run on a profile release keeps the profile.
-		if stored, err := storedNonrootRelease(ctx, deps, ns); err != nil {
+	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
+	effectiveVersion := result.TargetVersion
+	if action == actionSkip {
+		effectiveVersion = result.InstalledVersion
+	}
+	imageMissing := false
+	if canonicalChartVersion(effectiveVersion) == canonicalChartVersion(DefaultArgoChartVersion) {
+		imageMissing, err = checkArgoExecutorImage(ctx, deps, ns, exists)
+		if err != nil {
 			return result, err
-		} else if stored {
-			cfg.ArgoControllerProfile = argoworkflow.NonrootStaticProfile
-			_, _ = fmt.Fprintln(deps.Output, "The argo-workflows release runs the nonroot controller profile; the limits go into its profile ConfigMap.")
 		}
+	} else {
+		_, _ = fmt.Fprintf(deps.Output, "Argo chart %s: executor image left unchanged; resource-template token delivery requires %s.\n", displayVersion(effectiveVersion), argoworkflow.ExecutorImage)
 	}
 	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "argo-workflows", ns, "controller", controlPlanePriority(cfg), exists)
 	if err != nil {
 		return result, err
 	}
 	defer cleanupDependency()
-	profileFile, profile, cleanup, err := prepareNonrootArgoValues(ctx, cfg, deps, exists, result.InstalledVersion)
-	if err != nil {
-		return result, err
-	}
-	defer cleanup()
-	cfg.argoProfile, result.Profile = profile, profile
 	retiredArgs, retiredValues, err := removeSyncLimitsValues(ctx, deps, ns, exists)
 	if err != nil {
 		return result, err
 	}
-	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
-	if (profileFile != "" || argoLimitsRequested(cfg) || retiredValues || dependencyChanged) && action == actionSkip {
+	if err := noticeArgoExternalConfigMap(ctx, cfg, deps, ns, exists); err != nil {
+		return result, err
+	}
+	if (argoLimitsRequested(cfg) || retiredValues || dependencyChanged || imageMissing) && action == actionSkip {
 		if canonicalChartVersion(result.InstalledVersion) == "" {
 			return result, errors.New("cannot reconcile existing Argo values without a known installed chart version")
 		}
@@ -192,27 +185,11 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		_, _ = fmt.Fprintln(deps.Output, "Installing Argo Workflows...")
 	}
 
-	args := withDependencyValues(ArgoHelmArgs(cfg), dependencyFile)
-	if profileFile != "" {
-		args = append(args, "--values", profileFile)
-	}
-	if profileFile == "" {
-		args = append(args, retiredArgs...)
-	}
+	args := append(withDependencyValues(ArgoHelmArgs(cfg), dependencyFile), retiredArgs...)
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}
 	return result, nil
-}
-
-// installArgoPinningProfile installs Argo and records the nonroot profile it
-// rendered, so the Oberth chart pins the ConfigMap the controller runs.
-func installArgoPinningProfile(ctx context.Context, cfg *Config, deps Deps) (ArgoResult, error) {
-	result, err := InstallArgoWorkflows(ctx, *cfg, deps)
-	if err == nil && result.Profile != nil {
-		cfg.argoProfile, cfg.ArgoControllerProfile = result.Profile, argoworkflow.NonrootStaticProfile
-	}
-	return result, err
 }
 
 // ArgoHelmArgs returns the exact helm arguments for installing the workflow
@@ -252,6 +229,9 @@ func ArgoHelmArgs(cfg Config) []string {
 		// the --set flags above still override reused values.
 		"--reuse-values",
 		"--wait",
+	}
+	if canonicalChartVersion(chartVersion) == canonicalChartVersion(DefaultArgoChartVersion) {
+		args = append(args, "--set-string", "executor.image.tag="+strings.SplitN(argoworkflow.ExecutorImage, ":", 2)[1])
 	}
 	return append(args, argoLimitArgs(cfg)...)
 }
@@ -299,13 +279,6 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 		ns = DefaultArgoNamespace
 	}
 	values := []string{"--set", "argo.namespace=" + ns}
-	if cfg.ArgoControllerProfile != "" {
-		// No profile name is pinned (and an earlier pin is cleared): the
-		// server follows the canonical profile the controller runs, so the
-		// two releases need no order and admission never pauses (#1517).
-		values = append(values, "--set", "argo.controllerProfile="+cfg.ArgoControllerProfile,
-			"--set-string", "argo.controllerProfileConfigMap=")
-	}
 	address := strings.TrimSpace(cfg.ArgoVaultAddress)
 	// When the installer manages a production secret store and the caller did
 	// not explicitly point pipelines at a different vault, default to the

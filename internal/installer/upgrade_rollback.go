@@ -35,12 +35,8 @@ type UpgradeRecord struct {
 	To         string `json:"to"`
 	// OberthRevision is the deployed oberth Helm revision before the upgrade.
 	OberthRevision int `json:"oberthRevision"`
-	// ArgoNamespace and ArgoRevision are set when the upgrade also changes
-	// the argo-workflows release; ArgoRevision is its revision before.
-	ArgoNamespace string `json:"argoNamespace,omitempty"`
-	ArgoRevision  int    `json:"argoRevision,omitempty"`
 	// SchemaBefore is the running database schema (0 when unknown);
-	// SchemaAfter the schema the target server migrates to.
+	// SchemaAfter is the schema the target server migrates to.
 	SchemaBefore int `json:"schemaBefore"`
 	SchemaAfter  int `json:"schemaAfter"`
 	// Backup is the pre-upgrade backup archive ("" with --no-backup).
@@ -202,11 +198,9 @@ func ReadUpgradeRecord(path string) (UpgradeRecord, error) {
 	return record, nil
 }
 
-// RunRollback rolls one recorded upgrade back: the argo-workflows release (if
-// the upgrade changed it) and the oberth release to their recorded
-// revisions, then, when the upgrade migrated the database, the pre-upgrade
-// backup's history through oberth restore, because the previous server cannot
-// open the migrated database.
+// RunRollback restores the Oberth release to its recorded revision. If the
+// upgrade migrated the database, it restores the pre-upgrade backup's history
+// through oberth restore because the previous server cannot open that database.
 func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	w := deps.Output
 	if w == nil {
@@ -253,19 +247,6 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	argoStand := standUntouched
-	if record.ArgoRevision > 0 {
-		argo, found, err := findHelmRelease(ctx, deps, "argo-workflows", record.ArgoNamespace)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("no argo-workflows Helm release in namespace %s", record.ArgoNamespace)
-		}
-		if argoStand, err = recordRevisionStand(ctx, deps, "argo-workflows", record.ArgoNamespace, record.ArgoRevision, argo, cfg.ForceRecord); err != nil {
-			return err
-		}
-	}
 	// A server the upgrade never reached never migrated the database.
 	needRestore := record.migrates() && oberthStand != standUntouched
 	if needRestore && record.Backup == "" {
@@ -284,14 +265,6 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 
 	_, _ = fmt.Fprintf(w, "Rollback of the upgrade %s -> %s in namespace %s (context %s):\n", displayVersion(record.From), displayVersion(record.To), record.Namespace, deps.ContextName)
 	step := 1
-	if record.ArgoRevision > 0 {
-		if argoStand == standUpgraded {
-			_, _ = fmt.Fprintf(w, "  %d. helm rollback argo-workflows %d -n %s --wait\n", step, record.ArgoRevision, record.ArgoNamespace)
-		} else {
-			_, _ = fmt.Fprintf(w, "  %d. argo-workflows in %s: %s; no helm rollback\n", step, record.ArgoNamespace, argoStand.describe(record.ArgoRevision))
-		}
-		step++
-	}
 	oberthArgs := []string{"rollback", "oberth", strconv.Itoa(record.OberthRevision), "-n", record.Namespace, "--timeout", cfg.Timeout.String()}
 	if !needRestore {
 		oberthArgs = append(oberthArgs, "--wait")
@@ -324,12 +297,6 @@ func RunRollback(ctx context.Context, cfg RollbackConfig, deps Deps) error {
 		return errors.New("the rollback needs a restore of the backup, and no restore is configured")
 	}
 
-	if record.ArgoRevision > 0 && argoStand == standUpgraded {
-		if _, err := deps.RunHelm(ctx, []string{"rollback", "argo-workflows", strconv.Itoa(record.ArgoRevision), "-n", record.ArgoNamespace, "--wait", "--timeout", cfg.Timeout.String()}); err != nil {
-			return fmt.Errorf("helm rollback argo-workflows: %w", err)
-		}
-		_, _ = fmt.Fprintf(w, "argo-workflows rolled back to revision %d\n", record.ArgoRevision)
-	}
 	if oberthStand == standUpgraded {
 		if _, err := deps.RunHelm(ctx, oberthArgs); err != nil {
 			return fmt.Errorf("helm rollback oberth: %w", err)

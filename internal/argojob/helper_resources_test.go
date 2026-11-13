@@ -97,7 +97,7 @@ func TestInjectedControlBudgetsCoverUnpinnedExecutorContainers(t *testing.T) {
 				t.Run(policy+"/"+profile+"/"+tc.name, func(t *testing.T) {
 					leaf := tc.leaf
 					leaf.Name = "step"
-					workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nonrootProfileAnnotation: profile, helperStorageAnnotation: policy}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{leaf}}}
+					workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{helperStorageAnnotation: policy}}, Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{leaf}}}
 					if err := projectExecutorTokens(workflow, testConfig(), true); err != nil {
 						t.Fatal(err)
 					}

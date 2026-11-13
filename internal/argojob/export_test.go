@@ -5,7 +5,6 @@ import (
 	"io"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // publish emits the progress transitions and step logs this observation
@@ -24,11 +23,4 @@ func NewIdentityStore(release, ci map[string]PerRepoIdentityConfig) *IdentitySto
 
 func (worker *stepLogFollower) consume(reader io.Reader) error {
 	return worker.consumeRecords(reader, false)
-}
-
-// Selection trusts the API/kubelet's final incarnation status, not phase alone.
-// Historical records grant no authority. The one remaining candidate still
-// undergoes every existing live controller and immutable configuration check.
-func selectNonrootController(pods []corev1.Pod, namespace string) (*corev1.Pod, error) {
-	return selectNonrootControllerWithHistory(pods, namespace, nil)
 }

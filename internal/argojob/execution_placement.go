@@ -74,7 +74,6 @@ type placementDocument struct {
 	DependencyIdentity     string              `json:"dependency_identity"`
 	ControllerPod          string              `json:"controller_pod"`
 	ControllerUID          string              `json:"controller_uid"`
-	ControllerConfigUID    string              `json:"controller_config_uid"`
 	ReplicaSet             string              `json:"replica_set"`
 	ReplicaSetUID          string              `json:"replica_set_uid"`
 	Deployment             string              `json:"deployment"`
@@ -366,7 +365,7 @@ func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 		return err
 	}
 	d := p.document
-	if d.DependencyIdentity != placementDependencyIdentity(config) || config.NonrootProfile != argoworkflow.NonrootStaticProfile || config.GoProxyURL == "" || config.GoProxyModulePrefix == "" || config.GoProxyCACertPEM == "" || config.SourceStorageClass == "" || config.executorScratchLimit().Cmp(resource.MustParse("1Gi")) != 0 {
+	if d.DependencyIdentity != placementDependencyIdentity(config) || config.GoProxyURL == "" || config.GoProxyModulePrefix == "" || config.GoProxyCACertPEM == "" || config.SourceStorageClass == "" || config.executorScratchLimit().Cmp(resource.MustParse("1Gi")) != 0 {
 		return errors.New("argojob: isolated executor configuration differs or lacks dependency closure")
 	}
 	selected := d.Normal
@@ -488,13 +487,6 @@ func (p *ExecutionPlacement) verifyEnvironment(ctx context.Context, client kuber
 	}
 	if string(anchor.UID) != d.ClusterAnchorUID || anchor.DeletionTimestamp != nil {
 		return errors.New("argojob: cluster anchor replaced")
-	}
-	proof, err := verifyNonrootController(ctx, client, config.Namespace, config.NonrootProfileConfigMap, Request{})
-	if err != nil {
-		return err
-	}
-	if proof.podUID != d.ControllerUID || proof.configUID != d.ControllerConfigUID {
-		return errors.New("argojob: selected controller differs from authority")
 	}
 	controller, err := client.CoreV1().Pods(config.Namespace).Get(ctx, d.ControllerPod, metav1.GetOptions{})
 	if err != nil {

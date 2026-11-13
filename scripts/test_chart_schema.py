@@ -88,8 +88,6 @@ class ArgoSchemaTests(unittest.TestCase):
             {'ciSecrets': {'serviceAccount': 17}},
             {'ciSecrets': {'vaultRole': []}},
             {'ciSecrets': {'servceAccount': 'typo'}},
-            {'controllerProfile': False},
-            {'controllerProfile': 'unknown'},
             {'perRepoIdentities': 'repo'},
             {'perRepoCIIdentities': [7]},
             {'perStepIdentities': [{}]},
@@ -127,7 +125,7 @@ class ArgoSchemaTests(unittest.TestCase):
     def test_valid_boundaries_render(self):
         cases = [{}, {'ciSecrets': None},
                  {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'},
-                  'controllerProfile': 'nonroot-static-v1'}]
+                  'executorScratchSizeLimit': '1Gi'}]
         for key in ('perRepoIdentities', 'perRepoCIIdentities', 'perStepIdentities'):
             cases.append({key: [MAX_NAME]})
         for argo in cases:

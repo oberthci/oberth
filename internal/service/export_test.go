@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/identityname"
@@ -75,22 +74,4 @@ func (s historicalStepStore) PutStepResult(ctx context.Context, result model.Ste
 func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *store.Store, runID string, steps []model.StepResult, index runlog.Index) error {
 	fixture := &Scheduler{store: historicalStepStore{scheduler.store, database}, logs: scheduler.logs}
 	return fixture.persistSteps(ctx, runID, steps, index)
-}
-
-func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, want model.RunStatus) model.Run {
-	t.Helper()
-	deadline := time.Now().Add(testStartTimeout(15 * time.Second))
-	for {
-		run, err := fixture.store.Run(context.Background(), runID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if run.Status == want {
-			return run
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("run %s is %s, want %s", runID, run.Status, want)
-		}
-		time.Sleep(testTimeout(20 * time.Millisecond))
-	}
 }

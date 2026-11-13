@@ -404,12 +404,6 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if len(f.kube.Actions()) != 0 || *f.execs != 0 {
 		t.Fatal("planning allocated target resources")
 	}
-	if err := f.jobs.AwaitRunAdmission(ctx, request); err != nil {
-		t.Fatal(err)
-	}
-	if f.jobs.ExecutionTargetProfiles()["remote"].State != "verified" {
-		t.Fatal("selected controller health was not verified")
-	}
 	if err := f.jobs.CreateWorkflow(ctx, request); err != nil {
 		t.Fatal(err)
 	}
@@ -607,35 +601,6 @@ func TestExecutionTargetCancellationAndDeniedCleanupRetainOriginalBundle(t *test
 	f.noLocalEffects(t)
 }
 
-func TestExecutionTargetLocalAdmissionIndependentOfRemoteHealth(t *testing.T) {
-	f := newTargetRouteFixture(t)
-	ctx := t.Context()
-	result, err := storetest.EnqueueRun(f.db, ctx, model.RunSpec{RepoID: f.request.Repository.ID, RefKind: model.RefBranch, Ref: "unrelated", SHA: strings.Repeat("c", 40), Actor: "fixture", Trigger: "branch"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := f.db.SetRunWorkflowName(ctx, result.ID, "local-run")
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := f.request
-	request.Run = run
-	request.WorkflowName = run.WorkflowName
-	if err := f.jobs.AwaitRunAdmission(ctx, request); err != nil {
-		t.Fatal("remote health blocked unrelated local work", err)
-	}
-	b, found, err := f.db.ExecutionTarget(ctx, run.ID, run.WorkflowName)
-	if err != nil || !found || b.Target != "local" {
-		t.Fatal(b, found, err)
-	}
-	if len(f.kube.Actions()) != 0 {
-		t.Fatal("local admission touched remote controller")
-	}
-	if profile := f.jobs.ExecutionTargetProfiles()["remote"]; profile == nil || !profile.DispatchBlocked || profile.State != "unverified" {
-		t.Fatal("unverified remote health hidden", profile)
-	}
-}
-
 func TestExecutionTargetGitOutageDoesNotSerializeLocalAdmission(t *testing.T) {
 	f := newTargetRouteFixture(t)
 	ctx := t.Context()
@@ -662,7 +627,7 @@ func TestExecutionTargetGitOutageDoesNotSerializeLocalAdmission(t *testing.T) {
 		t.Fatal("native policy refresh not entered")
 	}
 	localDone := make(chan error, 1)
-	go func() { localDone <- f.jobs.AwaitRunAdmission(ctx, local) }()
+	go func() { _, err := f.jobs.PipelineDemandReceipt(ctx, local); localDone <- err }()
 	select {
 	case err := <-localDone:
 		if err != nil {

@@ -27,7 +27,6 @@
       "dependency_identity": "71dc2c6199c097fc9ff6f65b540de4f538e396bbffc807d33cb944b8c8b914dd",
       "controller_pod": "controller-fixture",
       "controller_uid": "pod-uid",
-      "controller_config_uid": "config-uid",
       "replica_set": "controller",
       "replica_set_uid": "replicaset-uid",
       "deployment": "controller",
@@ -52,7 +51,6 @@
       }
     },
     "ExecutorScratchSizeLimit": "",
-    "NonrootProfile": "nonroot-static-v1",
     "Namespace": "oberth-argo",
     "PipelineServiceAccount": "oberth-argo-pipeline",
     "CredentialedServiceAccount": "oberth-argo-credentialed",

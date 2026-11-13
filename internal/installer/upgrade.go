@@ -29,26 +29,24 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
-	ReissueServerCA       bool
-	WaitTimeout           time.Duration // independent queue-observation limit
-	WaitFor               string        // all or critical; a nonempty selection enables waiting
-	WaitIdle              bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
-	Namespace             string
-	DryRun                bool
-	Yes                   bool   // --yes, with --rollback: replace the database with the pre-upgrade backup without a second run
-	ChartOverride         string // --chart: override the chart reference
-	BinaryVersion         string
-	Timeout               time.Duration
-	UserValues            []string // --values/-f: repeatable values file paths
-	UserSet               []string // --set: repeatable key=value pairs
-	ArgoControllerProfile string   // explicit supported controller transition; empty preserves existing profile
-	ArgoValuesReviewed    string   // --argo-values-reviewed: SHA-256 of the reviewed stored Argo values
-	BinarySchemaVersion   int      // set by the caller to store.LatestMigrationVersion()
-	TLSExtraDNSNames      []string
-	TLSExtraIPs           []string
-	TLSRemoveDNSNames     []string
-	TLSRemoveIPs          []string
-	OpenBaoNamespace      string
+	ReissueServerCA     bool
+	WaitTimeout         time.Duration // independent queue-observation limit
+	WaitFor             string        // all or critical; a nonempty selection enables waiting
+	WaitIdle            bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
+	Namespace           string
+	DryRun              bool
+	Yes                 bool   // --yes, with --rollback: replace the database with the pre-upgrade backup without a second run
+	ChartOverride       string // --chart: override the chart reference
+	BinaryVersion       string
+	Timeout             time.Duration
+	UserValues          []string // --values/-f: repeatable values file paths
+	UserSet             []string // --set: repeatable key=value pairs
+	BinarySchemaVersion int      // set by the caller to store.LatestMigrationVersion()
+	TLSExtraDNSNames    []string
+	TLSExtraIPs         []string
+	TLSRemoveDNSNames   []string
+	TLSRemoveIPs        []string
+	OpenBaoNamespace    string
 	// ReleaseDir reads the signed release objects from a directory instead
 	// of fetching them (air-gapped hosts). ReleaseOrigin and ChartRepository
 	// override the publication origins for a mirror; verification is the same.
@@ -135,9 +133,6 @@ func (cfg *UpgradeConfig) ValidateUpgrade() error {
 		return err
 	}
 	cfg.TLSExtraIPs, cfg.TLSRemoveIPs = tls.TLSExtraIPs, tls.TLSRemoveIPs
-	if cfg.ArgoControllerProfile != "" && cfg.ArgoControllerProfile != "nonroot-static-v1" {
-		return errors.New("unsupported Argo controller profile")
-	}
 	if cfg.WaitFor != "" {
 		if cfg.WaitFor != "all" && cfg.WaitFor != "critical" {
 			return errors.New("--wait-for must be all or critical")
@@ -361,12 +356,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
-	if err != nil {
-		return result, err
-	}
-	defer cleanupProfile()
-
 	liveSchema, err := announceUpgradeSchema(ctx, w, cfg, deps, cmp > 0)
 	if err != nil {
 		return result, err
@@ -389,9 +378,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 		if _, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values); err != nil {
 			return result, err
-		}
-		if profile != nil {
-			profile.describe(w, cfg.Timeout)
 		}
 		return printUpgradeDryRun(w, cfg, result, retryFailed)
 	}
@@ -480,9 +466,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		From: currentVersion, To: targetVersion, OberthRevision: helmRevisionNumber(release.Revision),
 		SchemaBefore: liveSchema, SchemaAfter: cfg.BinarySchemaVersion, Backup: backupPath,
 	}
-	if profile != nil {
-		record.ArgoNamespace, record.ArgoRevision = profile.namespace, profile.revisionNumber
-	}
 	if record.OberthRevision > 0 && (cfg.RecordDir != "" || backupPath != "") {
 		recordPath, err := writeUpgradeRecord(cfg, record)
 		if err != nil {
@@ -492,11 +475,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		_, _ = fmt.Fprintf(w, "Rollback record: %s (roll back with: oberth upgrade --rollback %s)\n", recordPath, recordPath)
 	}
 
-	if profile != nil {
-		if err := profile.apply(ctx, cfg, deps); err != nil {
-			return result, fmt.Errorf("argo controller profile transition incomplete: %w", err)
-		}
-	}
 	if pki != nil {
 		_, replaced, err := ensureServerPKI(ctx, pki.config, pki.store, pki.token, map[string]baoMount{defaultServerPKIMount + "/": {Type: "pki"}})
 		if err != nil {
@@ -532,11 +510,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 	phase(w, "Oberth", "✓ "+displayVersion(runningVersion), color)
 
-	if profile != nil {
-		if err := profile.verifyFinal(ctx, cfg, deps); err != nil {
-			return result, fmt.Errorf("controller transition incomplete after Oberth upgrade: %w", err)
-		}
-	}
 	result.Upgraded = true
 	deps.Output = w
 	details := map[string]any{"from": currentVersion, "to": targetVersion}
@@ -574,8 +547,6 @@ func planUpgradeVersions(w io.Writer, cfg UpgradeConfig, release helmRelease, cu
 		switch {
 		case status == "deployed" && upgradeHasTLSFlags(cfg):
 			// Explicit TLS changes require the same-version reconciliation path.
-		case status == "deployed" && cfg.ArgoControllerProfile != "":
-		// Explicit supported profile reconciliation is not a same-version no-op.
 		case status == "deployed" && (len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0):
 			// Explicit --values/--set are a request to change the release, so
 			// re-apply them through the same pinned upgrade path (#055).
@@ -718,12 +689,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
 	)
-	if cfg.ArgoControllerProfile != "" {
-		// Clear any pinned profile name: the server follows the profile the
-		// controller runs (#1517).
-		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile,
-			"--set-string", "argo.controllerProfileConfigMap=")
-	}
 	args = append(args, cfg.defaultPins...)
 	// User values files come after pins. Pinned-key conflicts have already
 	// been refused by checkPinnedKeyConflicts, so these cannot override a pin.
@@ -966,7 +931,7 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 		} else if len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0 {
 			_, _ = fmt.Fprintf(w, "  %d. Re-apply --values/--set at %s\n", step, displayVersion(result.TargetVersion))
 		} else {
-			_, _ = fmt.Fprintf(w, "  %d. Reconcile the Argo controller profile at %s\n", step, displayVersion(result.TargetVersion))
+			_, _ = fmt.Fprintf(w, "  %d. Reconcile Oberth at %s\n", step, displayVersion(result.TargetVersion))
 		}
 	default:
 		_, _ = fmt.Fprintf(w, "  %d. Upgrade Oberth from %s to %s\n", step, displayVersion(result.PreviousVersion), displayVersion(result.TargetVersion))

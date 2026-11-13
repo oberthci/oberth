@@ -28,7 +28,7 @@ func TestCapabilityResourceExecutorUsesLiveOperatorAuthority(t *testing.T) {
 	wf.Status.Nodes = map[string]wfv1.NodeStatus{"task-node": {TemplateName: "task"}}
 	pod.Annotations = map[string]string{"workflows.argoproj.io/node-id": "task-node"}
 	pod.Spec.ServiceAccountName = c.config.PipelineServiceAccount
-	pod.Spec.Containers[0].Image = argoworkflow.NonrootExecutorImage
+	pod.Spec.Containers[0].Image = argoworkflow.ExecutorImage
 	pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}
 	if _, err := c.kube.CoreV1().Pods(wf.Namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)

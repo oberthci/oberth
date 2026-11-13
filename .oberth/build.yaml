@@ -1803,7 +1803,7 @@ spec:
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /qualification/source/internal/gitcache
-      # Server-owned nonroot profile supplies UID/GID65534 and read-only mounts.
+      # The selected nonroot template receives UID/GID65534 and read-only mounts.
       # The static launcher denies execution outside the candidate payload.
       command: ["/qualification/launch-static-git"]
       env:

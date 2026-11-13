@@ -131,7 +131,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	r = prepareNonrootFixture(t, c, r)
+
 	if _, err := Build(c, r); err != nil {
 		t.Fatal(err)
 	}

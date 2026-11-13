@@ -76,18 +76,6 @@
       "doc_anchor": "docs/platform-protection.md#platform-protection",
       "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseUpstreamPodDefaults"
     },
-    "flag:argo-controller-profile-configmap": {
-      "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
-      "test_ref": "internal/argojob/nonroot_parallelism_test.go TestNonrootVerifierAcceptsTheParallelismProfile"
-    },
-    "value:controllerProfileConfigMap": {
-      "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
-      "test_ref": "internal/installer/argo_profile_render_test.go TestArgoParallelismOnANonrootReleaseKeepsTheProfile"
-    },
-    "flag:argo-values-reviewed": {
-      "doc_anchor": "docs/where-limits-live.md#under-the-nonroot-controller-profile",
-      "test_ref": "internal/installer/argo_nonroot_test.go TestNonrootReuseAcknowledgesReviewedValues"
-    },
     "flag:stored": {
       "doc_anchor": "docs/backup-restore.md#the-backup-key",
       "test_ref": "cmd/oberth/backup_key_test.go TestBackupWithoutATerminalWarnsOnStderr"
@@ -773,10 +761,6 @@
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
     "annotation:oberth.ci/helper-storage": {
-      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
-      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
-    },
-    "annotation:oberth.ci/verified-controller-profile": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },

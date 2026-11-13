@@ -403,14 +403,10 @@ Flags:
         version 1 YAML/JSON install answers; explicit flags override scalar answers
   -argo-chart-version string
         argo-workflows chart version
-  -argo-controller-profile string
-        install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)
   -argo-namespace string
         namespace pipelines execute in; must differ from --namespace (default: oberth-argo)
   -argo-parallelism int
         Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value; fresh installs use half allocatable CPU, minimum 2) (default -1)
-  -argo-values-reviewed sha256:DIGEST
-        keep stored argo-workflows values the nonroot profile does not know: sha256:DIGEST of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)
   -argo-vault-address string
         OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
@@ -1590,10 +1586,6 @@ Flags:
         newest native Argo lock holder/waiter intervals kept for sync_status (1-1000000) (default 20000)
   -argo-ci-secrets-serviceaccount string
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
-  -argo-controller-profile string
-        exact controller profile to verify before nonroot submission; empty disables nonroot
-  -argo-controller-profile-configmap string
-        pin the nonroot profile ConfigMap (oberth-argo-nr-<digest>); empty follows the canonical profile the controller names in --configmap
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
   -argo-execution-placement-config string
@@ -1861,10 +1853,6 @@ Usage: oberth upgrade [flags]
 Flags:
   -allow-downgrade
         accept a CLI older than the installed release (a deliberate rollback within one database schema)
-  -argo-controller-profile string
-        explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
-  -argo-values-reviewed sha256:DIGEST
-        keep stored argo-workflows values the nonroot profile does not know: sha256:DIGEST of the reviewed `helm get values argo-workflows -n NS -o json` output (any later change refuses again; the controller is still verified)
   -backup-dir DIR
         write the pre-upgrade backup and the rollback record to DIR (default: the current directory)
   -backup-recipient CERT

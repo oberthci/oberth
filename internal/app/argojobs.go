@@ -482,14 +482,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		submission.Identities = jobs.identities.Snapshot()
 	}
 	submission.ReleaseWIF = jobs.releaseWIFSnapshot()
-	if preparer, ok := jobs.controller.(interface {
-		PrepareNonroot(context.Context, argojob.Request) (argojob.Request, error)
-	}); ok {
-		submission, err = preparer.PrepareNonroot(ctx, submission)
-		if err != nil {
-			return err
-		}
-	}
 	if len(sources) > 0 {
 		if err := jobs.sourceRecorder.RecordRunSources(ctx, request.Run.ID, testedSHA, sources); err != nil {
 			return err
@@ -598,10 +590,6 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 	}
 	if submission.DemandReceipt != nil {
 		details["source_receipt"] = submission.DemandReceipt.Summary()
-	}
-	if binding := workflow.Annotations["oberth.ci/verified-controller-profile"]; binding != "" {
-		details["controller_profile"] = binding
-		details["nonroot_templates"] = workflow.Annotations[argoworkflow.NonrootTemplatesAnnotation]
 	}
 	if policy := workflow.Annotations["oberth.ci/release-wif-policy-sha256"]; policy != "" {
 		details["release_wif_policy_sha256"] = policy
@@ -1228,23 +1216,6 @@ func (jobs *ArgoJobs) ObserveSynchronization(ctx context.Context, run model.Run)
 		return nil, service.ErrUnavailable
 	}
 	return observer.ObserveSynchronization(ctx, run.WorkflowName, run.ID)
-}
-
-// SetProfileOutageGate connects the controller profile outage gate to the scheduler.
-func (jobs *ArgoJobs) AwaitAdmission(ctx context.Context) error {
-	if gate, ok := jobs.controller.(interface{ AwaitAdmission(context.Context) error }); ok {
-		return gate.AwaitAdmission(ctx)
-	}
-	return ctx.Err()
-}
-
-func (jobs *ArgoJobs) ControllerProfileStatus() *model.ControllerProfileStatus {
-	if source, ok := jobs.controller.(interface {
-		ControllerProfileStatus() *model.ControllerProfileStatus
-	}); ok {
-		return source.ControllerProfileStatus()
-	}
-	return nil
 }
 
 // Assisted continuation (run_hold_* tools) delegates to the native

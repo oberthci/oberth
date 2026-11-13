@@ -16,15 +16,13 @@ import (
 )
 
 func TestPinnedSourcesPublicRetryAndAdoption(t *testing.T) {
-	for _, profile := range []bool{false, true} {
-		t.Run(map[bool]string{false: "ordinary", true: "profile"}[profile], func(t *testing.T) {
+	for _, nonroot := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "nonroot"}[nonroot], func(t *testing.T) {
 			config := seedTestConfig()
 			kube := fake.NewClientset()
 			document := greedyDocument
-			if profile {
-				pod, cm := nonrootVerifierObjects()
-				kube = fake.NewClientset(pod, cm)
-				config.NonrootProfile = argoworkflow.NonrootStaticProfile
+			if nonroot {
+
 				document = nonrootTestDocument
 			}
 			runningSeedPods(kube)
@@ -40,12 +38,6 @@ func TestPinnedSourcesPublicRetryAndAdoption(t *testing.T) {
 			request := testRequest(pipeline.TriggerCI, "sources: "+string(body)+"\n"+document)
 			request.SourceDir = writeCheckout(t)
 			request.PinnedSources = []PinnedSourceTree{{Source: source, Directory: t.TempDir()}}
-			if profile {
-				request, err = controller.PrepareNonroot(t.Context(), request)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
 			if _, err := controller.Create(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}

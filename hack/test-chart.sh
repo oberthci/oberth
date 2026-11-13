@@ -619,37 +619,6 @@ grep -q -- '--argo-executor-scratch-size-limit=4Gi' "$argo_legacy_manifest"
 render --set argo.executorScratchSizeLimit=null >"$argo_legacy_manifest"
 grep -q -- '--argo-executor-scratch-size-limit=1Gi' "$argo_legacy_manifest"
 
-# Ordinary nonroot capability must stay off unless the exact built-in profile
-# is selected. Selection grants GET (only) on the pipeline namespace's public
-# ConfigMaps, so the server can follow the profile the controller runs.
-if grep -q -- '--argo-controller-profile=' "$manifest"; then
-  exit 1
-fi
-render --set argo.controllerProfile=nonroot-static-v1 >"$argo_legacy_manifest"
-grep -q -- '--argo-controller-profile=nonroot-static-v1' "$argo_legacy_manifest"
-render --set argo.controllerProfile=nonroot-static-v1 \
-  --show-only templates/rbac-argo.yaml >"$argo_vault_manifest"
-test "$(grep -c 'resources: \["configmaps"\]' "$argo_vault_manifest")" -eq 3
-grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | \
-  grep -q 'resourceNames: \["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"\]'
-# Only GET is ever granted on ConfigMaps: no list, watch or write.
-test "$(grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | grep -c 'verbs:')" -eq 3
-test "$(grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | grep -c 'verbs: \["get"\]')" -eq 3
-grep -q 'name: oberth-argo-controller-profile$' "$argo_vault_manifest"
-if render --set argo.controllerProfile=unchecked >/dev/null 2>&1; then
-  exit 1
-fi
-# Without a pin the server follows the controller's profile: no flag. An
-# explicit pin (#1517) renders the verification flag; the frozen Role keeps
-# its v0.17.9 rules either way (issue #813).
-if grep -q -- '--argo-controller-profile-configmap' "$argo_legacy_manifest"; then exit 1; fi
-render --set argo.controllerProfile=nonroot-static-v1 --set argo.controllerProfileConfigMap=oberth-argo-nr-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$argo_legacy_manifest"
-grep -q -- '--argo-controller-profile-configmap=oberth-argo-nr-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$argo_legacy_manifest"
-grep -A2 'resources: \["configmaps"\]' "$argo_legacy_manifest" | grep -q 'resourceNames: \["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"\]'
-if render --set argo.controllerProfile=nonroot-static-v1 --set argo.controllerProfileConfigMap=other >/dev/null 2>&1; then
-  exit 1
-fi
-
 # argojob's fail-closed per-repo ServiceAccount verification (issue #467):
 # the server Role in the pipeline namespace must grant read-only get on
 # serviceaccounts (the plain resource, distinct from the serviceaccounts/token

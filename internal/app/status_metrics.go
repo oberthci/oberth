@@ -12,24 +12,13 @@ import (
 )
 
 // WriteStatusMetrics exports the system_status values an operator alerts on:
-// controller identity verification, backup and audit-anchor age, admin token
+// backup and audit-anchor age, admin token
 // expiry and the database size the backup ceiling is measured against. Every
 // value is read from the same sources as Status; a source that fails is left
 // out rather than reported as zero. No probe here touches the network.
 func (health Health) WriteStatusMetrics(ctx context.Context, w io.Writer) {
 	gauge := func(name, help string, value float64) {
 		_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %s\n", name, help, name, name, strconv.FormatFloat(value, 'f', -1, 64))
-	}
-	flag := func(value bool) float64 {
-		if value {
-			return 1
-		}
-		return 0
-	}
-	if health.ControllerProfile != nil {
-		if profile := health.ControllerProfile(); profile != nil {
-			gauge("oberth_controller_verification_blocked", "1 while controller identity verification blocks new dispatch", flag(profile.DispatchBlocked))
-		}
 	}
 	if health.Storage != nil {
 		if raw, err := health.Storage(ctx); err == nil {

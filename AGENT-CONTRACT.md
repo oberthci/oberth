@@ -1731,8 +1731,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   installation-wide storage information. The same sweep keeps Workflow and step
   timing records for the newest 2000 terminal runs and the runs evidence
   retention protects, pruning older ones in bounded passes (`timing_pruned`).
-- The administrator-only `/metrics` endpoint exports controller verification
-  status (`oberth_controller_verification_blocked`), database/free bytes,
+- The administrator-only `/metrics` endpoint exports database/free bytes,
   backup/audit-anchor timestamps and admin-token expiry. An unavailable source
   is omitted, never reported as zero.
 - One bearer credential holds at most 64 blocking calls (`wait`,
@@ -2797,38 +2796,11 @@ Both Go publisher binaries are rebuilt from admitted source and re-pinned in
 `.oberth/pins/bootstrap-tools.sha256`. Publisher source verification includes
 `scripts/oberth-release-wif-credential.py` before any credential is consumed.
 
-### Protected controller prerequisite and upgrade (#887)
-
-An explicit `upgrade --argo-controller-profile=nonroot-static-v1` reconciles
-only the existing managed Argo profile and normal Oberth release, including an
-explicit same-version transition. Its dry-run identifies both effects; actual
-execution uses the exact chart archive digest, unchanged reused values and
-strict before/after readbacks. No automatic rollback or partial success is
-allowed. Normal upgrades without the option retain existing behavior.
-
 Upgrade override grammar (#888): each `--set` accepts one canonical dotted key
 and scalar string; repeat the flag for multiple assignments. Escaped literal
 commas in values retain Helm semantics. Unescaped separators, list syntax and
-escaped/noncanonical keys fail before any mutation. Pin, schema and explicit
-controller-profile checks use the same grammar. This is a documented subset
+escaped/noncanonical keys fail before any mutation. Pin and schema checks use the same grammar. This is a documented subset
 of Helm strvals, not a replacement parser.
-
-Controller selection (#889) excludes historical Pod records only after a
-complete terminal-incarnation proof: Failed/Succeeded, undeleting fixed
-controller shape, explicit false readiness, matching runtime IDs, ordered
-nonzero termination timestamps, and coherent prior restart history. Synthetic
-or unknown current termination reasons, incomplete/contradictory statuses and
-terminating Pods refuse. Exactly one Running candidate must then pass every
-existing pinned image, process, mount and immutable configuration predicate.
-Historical records are never deleted and confer no authority. This trusts the
-Kubernetes API/kubelet's final status; it is not attestation against a malicious
-node or administrator. A prior restart with a separately identified final
-terminated incarnation is permitted, including an unknown *prior* reason;
-that history cannot substitute for evidence of the current incarnation's exit.
-Pod names and UIDs must be nonempty and unique. Creation and both incarnation
-timestamps are bounded by one observation time captured for the selection;
-ordered timestamps wholly in the future cannot establish termination.
-
 
 ### Fixed-field MCP wait diagnostics (#863)
 
@@ -2842,20 +2814,6 @@ Heartbeat ownership, bounded writes and positive join remain unchanged; final
 flush is a server-side observation, never client acknowledgement. Correlation
 adds no authority, retry or durable-work cancellation, and cannot retrospectively
 attribute uncorrelated transport failures.
-
-Server selection during the explicit controller-profile upgrade (#893) applies
-an independent strict historical-record check before the unchanged live
-Deployment/ReplicaSet/template/version proof. Only the fixed Oberth server plus
-one ordinary `prepare-caches` init container is supported. Every declared
-container must have a matching final runtime incarnation, coherent timestamps
-and prior restart history. The init must have completed successfully before the
-server starts; its normal kubelet `Ready=true` is permitted only with
-`Started=false`, a terminated state and no restartable-init policy. Additional,
-missing, waiting, running, unknown or contradictory lifecycle records refuse.
-Exactly one live candidate remains mandatory. This neither deletes history nor
-changes the Argo-controller predicate; it trusts API/kubelet status and does not
-attest against a malicious node. Terminal record identity and observation-time
-checks apply equally to server and init history.
 
 ## Native step termination observations (#894/#895)
 
@@ -3155,11 +3113,6 @@ Migration v30 stacks after #1102's repository-archive migration v29. Shipped
 migration bodies and existing ledger rows remain unchanged; older backups
 replay v29 and v30 in order on restore.
 
-Controller profile verification failures keep all new controller verification required. Unscoped
-status exposes the fixed verifier `controller_profile.reason` (never raw API
-errors); unchanged failure logs are limited to once per 30 seconds. Recovery
-clears the reason and resumes dispatch without changing existing background tasks.
-
 Live-log SSE streams revalidate their original bearer credential every 30 seconds
 with a five-second authentication deadline. Revocation, rotation, lookup failure
 or changed actor authority emits a fixed `auth_error` event and closes the
@@ -3224,23 +3177,6 @@ See [recovery, history and readiness semantics](docs/rca-run-recovery.md).
 Argo and Kubernetes own waiting. Pause the controller at zero replicas or use
 `argo suspend`; parallelism zero is unlimited. See
 [native scheduling](docs/native-scheduling.md).
-
-### Evicted controller replacement and visible verification waits (#1214)
-
-Incomplete kubelet eviction/shutdown controller history is ignored only after exact live
-profile verification and a converged controlling ReplicaSet (observed generation,
-selector and UID, one desired/current/Ready replica). A predecessor ReplicaSet
-must be fully scaled to zero and belong to the same Deployment. Failed/Terminated
-history needs the exact kubelet imminent-shutdown message; generic termination
-is not eligible for replacement evidence. Uncertain live
-or historical authority stays blocked. ReplicaSet API failures retain the
-profile-read retry class and five-second per-attempt budget. The chart grants
-only namespaced ReplicaSet GET in a new Role, preserving frozen existing rules.
-`controller_profile.dispatch_blocked`, reason and remedy are exposed in status;
-the dashboard shows a runs-list banner and Status card, refreshing aggregate
-status in the background at most every five minutes; direct Status visits remain
-fresh. Existing work is not
-canceled or re-authorized by profile recovery.
 
 ### Operator-owned workflow capabilities (#1294)
 

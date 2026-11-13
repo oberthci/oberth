@@ -24,17 +24,13 @@ import (
 const migrationManager = "oberth-argo-rules-migration"
 
 type target struct {
-	Namespace, Name, Release, ReleaseNamespace, CredentialedSA, Profile string
+	Namespace, Name, Release, ReleaseNamespace, CredentialedSA string
 }
 
-// Match the reviewed v0.17.9 rules, including the supported nonroot profile
-// and configured credentialed identity. Unknown custom permissions require
+// Match the reviewed v0.17.9 rules and configured credentialed identity. Unknown custom permissions require
 // separate review, not a forced ownership takeover.
 func expectedRules(spec target) []rbacv1.PolicyRule {
 	rules := []rbacv1.PolicyRule{}
-	if spec.Profile == "nonroot-static-v1" {
-		rules = append(rules, rbacv1.PolicyRule{APIGroups: []string{""}, Resources: []string{"configmaps"}, ResourceNames: []string{"oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"}, Verbs: []string{"get"}})
-	}
 	return append(rules,
 		rbacv1.PolicyRule{APIGroups: []string{"argoproj.io"}, Resources: []string{"workflows"}, Verbs: []string{"create", "get", "list", "watch", "delete"}},
 		rbacv1.PolicyRule{APIGroups: []string{""}, Resources: []string{"persistentvolumeclaims"}, Verbs: []string{"create", "get", "list", "update", "delete"}},
@@ -49,9 +45,6 @@ func expectedRules(spec target) []rbacv1.PolicyRule {
 func validateTarget(spec target) error {
 	if spec.Namespace == "" || spec.Name == "" || spec.Release == "" || spec.ReleaseNamespace == "" || spec.CredentialedSA == "" {
 		return errors.New("namespace, role, release, release-namespace and credentialed-service-account must be nonempty")
-	}
-	if spec.Profile != "" && spec.Profile != "nonroot-static-v1" {
-		return errors.New("controller-profile must be empty or nonroot-static-v1")
 	}
 	return nil
 }
@@ -233,7 +226,6 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	flags.StringVar(&spec.Release, "release", "", "Helm release name (required)")
 	flags.StringVar(&spec.ReleaseNamespace, "release-namespace", "", "Helm release namespace (required)")
 	flags.StringVar(&spec.CredentialedSA, "credentialed-service-account", "oberth-argo-credentialed", "existing argo.credentialedServiceAccount value")
-	flags.StringVar(&spec.Profile, "controller-profile", "", "existing argo.controllerProfile value")
 	kubeconfig := flags.String("kubeconfig", "", "kubeconfig path (default: normal kubeconfig loading rules)")
 	kubeContext := flags.String("context", "", "explicit kubeconfig context (required)")
 	dryRun := flags.Bool("dry-run", false, "validate the exact patch server-side without persisting it")

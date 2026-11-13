@@ -2,7 +2,7 @@
 
 | Control | Owner | Configuration |
 | --- | --- | --- |
-| Workflows running at once | Argo | `oberth install --argo-parallelism N`, or controller `parallelism` |
+| Workflows running at once | Argo | `oberth install --argo-parallelism N`, or Helm `controller.parallelism` / `controller.namespaceParallelism` |
 | Container requests/limits and Pod placement | Repository and Kubernetes | Native Argo YAML and cluster admission/quotas |
 | Shared step concurrency | Argo and operator | Native mutexes or an operator-created semaphore ConfigMap |
 | Workflow/template deadlines and retries | Repository and Argo | Native `activeDeadlineSeconds` and `retryStrategy` |
@@ -18,16 +18,13 @@ unchanged: half observed node allocatable CPU, minimum 2, within the installer's
 maximum; no limit is installed if capacity cannot be observed. On an existing
 install, explicit settings change the value and omission preserves it.
 
-Under `nonroot-static-v1`, the cap is carried in the canonical digest-named
-controller profile ConfigMap rather than the chart's normal mutable ConfigMap.
-Changing a cap produces a new verified profile and controller rollout. Existing
-Workflows continue. Explicit profile pins and identity verification remain
-security controls; do not edit a digest-named profile's content in place.
+The managed installer uses Argo Helm values directly. Changing the cap does
+not require a content-addressed ConfigMap or a second Oberth release. Existing
+operator-set Argo values, including namespace parallelism, are preserved.
 
 ## Shared step limits
 
 Operators create and own semaphore ConfigMaps with `kubectl`; see
 [native synchronization](native-synchronization.md). The v0.22.0 upgrade stops
 rendering `oberth-sync-limits` and orphans the existing object with data unchanged; new installs create required keys themselves.
-The managed installer preserves unrelated `extraObjects`, including the nonroot
-controller profile. Oberth's own pipelines use named mutexes, not semaphore keys.
+The managed installer preserves unrelated `extraObjects`, including operator-owned controller configuration. Oberth's own pipelines use named mutexes, not semaphore keys.

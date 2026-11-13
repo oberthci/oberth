@@ -88,12 +88,6 @@ func beatDispatch(ctx context.Context) {
 	}
 }
 
-func (scheduler *Scheduler) awaitDispatchAdmission(ctx context.Context) error {
-	resume := suspendDispatch(ctx)
-	defer resume()
-	return scheduler.awaitAdmission(ctx)
-}
-
 // runDispatchExternal excludes one external call. Keep local DB work and
 // background task locks outside this scope so they can still time out as real wedges.
 func runDispatchExternal(ctx context.Context, operation func(context.Context) error) error {

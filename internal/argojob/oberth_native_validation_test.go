@@ -25,7 +25,7 @@ func TestOberthPipelinesPassNativeArgoValidation(t *testing.T) {
 		{"release.yaml", pipeline.TriggerRelease, "refs/tags/v0.1.0"},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
-			workflow, err := buildOberthPipeline(oberthConfig(), Request{
+			workflow, err := Build(oberthConfig(), Request{
 				RunID: "run-native", Name: "oberth-native-validation",
 				Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 				Ref: tc.ref, SHA: testSHA, Trigger: tc.trigger,

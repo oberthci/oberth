@@ -374,16 +374,6 @@ func (j *targetJournal) Cancelled(ctx context.Context) (bool, error) {
 	return j.store.ExecutionTargetCancelled(ctx, j.binding.RunID)
 }
 
-func (jobs *ArgoJobs) AwaitRunAdmission(ctx context.Context, request service.WorkflowRequest) error {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forRequest(ctx, request)
-		if err != nil {
-			return err
-		}
-		return child.AwaitAdmission(ctx)
-	}
-	return jobs.AwaitAdmission(ctx)
-}
 func (jobs *ArgoJobs) WorkflowNamespaceForRun(ctx context.Context, run model.Run) (string, error) {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
@@ -393,41 +383,6 @@ func (jobs *ArgoJobs) WorkflowNamespaceForRun(ctx context.Context, run model.Run
 		return child.WorkflowNamespace(), nil
 	}
 	return jobs.WorkflowNamespace(), nil
-}
-
-// ExecutionTargetProfiles keeps each selected controller's own health visible.
-// It performs no discovery, allocation or cluster reads on a health request.
-func (jobs *ArgoJobs) ExecutionTargetProfiles() map[string]*model.ControllerProfileStatus {
-	if jobs.routes == nil {
-		return nil
-	}
-	r := jobs.routes
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	profiles := map[string]*model.ControllerProfileStatus{}
-	for id := range r.definitions {
-		profiles[id] = &model.ControllerProfileStatus{State: "unverified", DispatchBlocked: true}
-	}
-	keys := make([]string, 0, len(r.children))
-	for id := range r.children {
-		keys = append(keys, id)
-	}
-	sort.Strings(keys)
-	observed := map[string]bool{}
-	for _, key := range keys {
-		child := r.children[key]
-		status := child.ControllerProfileStatus()
-		if status == nil {
-			continue
-		}
-		id := child.targetBinding.Target
-		previous := profiles[id]
-		if !observed[id] || (status.DispatchBlocked && !previous.DispatchBlocked) {
-			profiles[id] = status
-		}
-		observed[id] = true
-	}
-	return profiles
 }
 
 // ReconcileTargetCleanup shares the canonical cleanup owner. One terminal run

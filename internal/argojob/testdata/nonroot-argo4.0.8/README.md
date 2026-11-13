@@ -50,13 +50,6 @@ persists a Running Workflow with nodes and an unchanged admitted spec;
 Metadata/status changes are accepted, while policy/template/volume changes are
 rejected without loosening the spec comparison.
 
-`controller-profile.json` is an actual Helm4.2.3 render of authenticated upstream
-chart1.0.24, SHA2567b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50,
-using the current installer's profile values and normal flags. It contains only
-public configuration and a controller Pod template. The verifier regression
-adds fixture identity/status and the enumerated standard API service-account
-projection; no token values or live-cluster objects are read.
-
 The 2026-10-19 recapture for #962 used a combined overlay containing the retained
 isolation, WIF and nonroot capture helpers. Immediately before the controller
 patch call, it invokes both `isolationCapture` and `oberthWIFCapture` when

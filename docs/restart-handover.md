@@ -222,7 +222,7 @@ verification. An earlier caller deadline or SIGINT/SIGTERM cancels observation.
 The local kubectl process is explicitly bounded by the queue-wait context;
 joining inherited output pipes has a separate five-second cleanup bound.
 Timeout, cancellation, persistently unavailable queue state or a killed local
-child aborts before any Helm upgrade or controller-profile mutation. The error identifies
+child aborts before any Helm upgrade . The error identifies
 local `kubectl exec`, elapsed time, the configured limit and that the upgrade
 was not attempted. A failed local `kubectl exec` session is not retried, and
 an unreadable queue is never assumed idle.
@@ -242,7 +242,7 @@ Default all-run waiting retains compatibility with older `wait-idle` servers.
 
 Dry-run describes the selection and both timeouts without waiting or upgrading.
 Refused or failed upgrades return nonzero. An already-installed target with no
-values or controller-profile change requested exits zero and prints
+values or TLS change requested exits zero and prints
 `Already running vX; no upgrade performed`. Successful upgrades, help and
 explicit dry-runs also return zero. To reapply values at the current version,
 supply those values as usual.

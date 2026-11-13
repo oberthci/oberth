@@ -78,14 +78,6 @@ type Config struct {
 	// Empty selects 1Gi; this is separate from the test container private scratch.
 	ExecutorScratchSizeLimit string
 
-	// NonrootProfile selects an exact built-in verification policy, not an
-	// unchecked capability. Empty disables selected nonroot leaves.
-	NonrootProfile string
-	// NonrootProfileConfigMap pins the canonical profile ConfigMap to
-	// verify; empty follows the profile the running controller names, which
-	// is verified against its own digest-derived name (#1517).
-	NonrootProfileConfigMap string
-
 	// Namespace is where every Workflow and its pods are created. It is
 	// deliberately separate from the namespace Oberth itself runs in: the
 	// Vault Kubernetes-auth roles bind (namespace, ServiceAccount) pairs, and
@@ -319,12 +311,6 @@ func (config Config) Validate() error {
 	if config.ReleaseWIF != nil && (len(config.ReleaseWIF.Roles) > 0 || len(config.ReleaseWIF.Repositories) > 0) && config.ReleaseWIF.Namespace != config.Namespace {
 		return errors.New("argojob: release WIF namespace must match the configured pipeline namespace")
 	}
-	if config.NonrootProfile != "" && config.NonrootProfile != argoworkflow.NonrootStaticProfile {
-		return errors.New("argojob: unsupported nonroot controller profile")
-	}
-	if config.NonrootProfileConfigMap != "" && !argoworkflow.ValidNonrootProfileConfigMap(config.NonrootProfileConfigMap) {
-		return errors.New("argojob: nonroot controller profile ConfigMap name is not a profile name")
-	}
 	var problems []error
 	if messages := k8svalidation.IsDNS1123Label(config.Namespace); len(messages) != 0 {
 		problems = append(problems, fmt.Errorf("argojob: namespace %q is invalid: %s",
@@ -541,7 +527,6 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
-	nonrootProof  *nonrootProof
 	PinnedSources []PinnedSourceTree
 
 	// BranchAuthority is native canonical policy resolution, never YAML authority.
@@ -862,7 +847,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := protectReleaseWIFExecutor(wifLeaves); err != nil {
 		return nil, err
 	}
-	if err := applyNonrootLeaves(workflow, config, request); err != nil {
+	if err := applyNonrootLeaves(workflow, config); err != nil {
 		return nil, err
 	}
 

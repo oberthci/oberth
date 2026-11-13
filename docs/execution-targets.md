@@ -79,10 +79,7 @@ retain custody. Accepted DELETE alone does not establish absence. Admission
 expiry cannot authorize new work; observation and fenced disposal retain the
 original cluster anchor and object identities.
 
-The local controller's health remains `controller_profile`. Target controller
-profiles are reported separately in `execution_target_profiles`; run admission
-waits for its selected controller. Canonical run lifecycle and capability
-authorization remain authoritative; Argo owns native queue, priority, locks and
+Canonical run lifecycle and capability authorization remain authoritative; Argo owns native queue, priority, locks and
 authored deadlines, and Kubernetes owns Pod placement. Deployment still requires actual
 target capacity/storage/device and transport qualification, containing source
 review and CI, and operator approval. Offline fake-client tests establish no

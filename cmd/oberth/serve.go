@@ -129,8 +129,6 @@ type serveOptions struct {
 	// off entirely, which is the default: every repository then runs on the
 	// Argo Workflow engine exactly as before.
 	argoNamespace                string
-	argoControllerProfile        string
-	argoControllerProfileCM      string
 	argoExecutorScratchSizeLimit string
 	argoPipelineAccount          string
 	argoCredentialedAccount      string
@@ -272,8 +270,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 		return nil
 	})
 	flags.StringVar(&options.argoExecutorScratchSizeLimit, "argo-executor-scratch-size-limit", "1Gi", "per-Pod Argo executor scratch size limit (Kubernetes quantity)")
-	flags.StringVar(&options.argoControllerProfile, "argo-controller-profile", "", "exact controller profile to verify before nonroot submission; empty disables nonroot")
-	flags.StringVar(&options.argoControllerProfileCM, "argo-controller-profile-configmap", "", "pin the nonroot profile ConfigMap (oberth-argo-nr-<digest>); empty follows the canonical profile the controller names in --configmap")
 	flags.StringVar(&options.argoSourceStorageClass, "argo-source-storage-class", "", "storage class for per-run pipeline source volumes (empty: cluster default)")
 	flags.StringVar(&options.argoPipelineAccount, "argo-pipeline-serviceaccount", "oberth-argo-pipeline", "ServiceAccount for pipeline templates without approved secrets; no Vault role, no token")
 	flags.StringVar(&options.argoCredentialedAccount, "argo-credentialed-serviceaccount", "oberth-argo-credentialed", "ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth")
@@ -892,8 +888,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopReadiness(); <-readinessDone }()
 	health.Version = version
 	health.DatabaseRetries = scheduler.DatabaseRetries
-	health.ControllerProfile = argoJobs.ControllerProfileStatus
-	health.ExecutionTargetProfiles = argoJobs.ExecutionTargetProfiles
 	health.SchemaVersion = store.LatestMigrationVersion()
 	health.Identity = func(ctx context.Context) (string, error) {
 		if err := ctx.Err(); err != nil {

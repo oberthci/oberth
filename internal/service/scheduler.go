@@ -788,10 +788,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return err
 	}
-	if err := scheduler.awaitAdmission(ctx, jobRequest); err != nil {
-		_ = logFile.Close()
-		return err
-	}
 	current, err = scheduler.database().MarkRunSubmissionStarted(ctx, run.ID)
 	if err != nil {
 		_ = logFile.Close()
@@ -1980,18 +1976,6 @@ func workflowNameFragment(value string) string {
 		}
 	}
 	return strings.Trim(result.String(), "-")
-}
-
-func (scheduler *Scheduler) awaitAdmission(ctx context.Context, requests ...WorkflowRequest) error {
-	if gate, ok := scheduler.jobs.(interface {
-		AwaitRunAdmission(context.Context, WorkflowRequest) error
-	}); ok && len(requests) == 1 {
-		return gate.AwaitRunAdmission(ctx, requests[0])
-	}
-	if gate, ok := scheduler.jobs.(interface{ AwaitAdmission(context.Context) error }); ok {
-		return gate.AwaitAdmission(ctx)
-	}
-	return ctx.Err()
 }
 
 // Cleanup is best effort after the durable terminal verdict and index. Active

@@ -159,10 +159,10 @@ func TestCapabilityKeepsOrdinaryControllerPodsTokenless(t *testing.T) {
 				t.Fatal(err)
 			}
 			config := testConfig()
-			config.NonrootProfile = argoworkflow.NonrootStaticProfile
+
 			r := requestWithCapability(t, string(encoded), operatorCapability())
 			r.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
-			built, err := Build(config, nonrootFixtureProof(r))
+			built, err := Build(config, r)
 			if err != nil {
 				t.Fatal(err)
 			}

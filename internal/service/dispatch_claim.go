@@ -10,8 +10,5 @@ func (s *Scheduler) claimDispatchRun(ctx context.Context, _ int) (model.Run, err
 	if err := s.awaitDispatchMutation(ctx); err != nil {
 		return model.Run{}, err
 	}
-	if err := s.awaitDispatchAdmission(ctx); err != nil {
-		return model.Run{}, err
-	}
 	return s.database().ClaimNextRun(ctx)
 }

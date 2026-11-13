@@ -20,7 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -69,25 +68,20 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
-	capabilities    func(context.Context, int64) (*argoworkflow.Capability, error)
-	restartedAt     time.Time
-	profileVerifyMu sync.Mutex
-	profileMu       sync.Mutex
-	profileStatus   model.ControllerProfileStatus
-	profileBackoff  time.Duration
-	profileLogAt    time.Time
-	timings         TimingRecorder
-	nodeBoots       NodeBootRecorder
-	workflows       WorkflowClient
-	kube            kubernetes.Interface
-	logs            PodLogReader
-	followLogs      PodLogFollower
-	logIdentity     podLogIdentityReader
-	logPod          func(context.Context, string, string) (*corev1.Pod, error)
-	seeder          *SourceSeeder
-	config          Config
-	interval        time.Duration
-	readGrace       time.Duration
+	capabilities func(context.Context, int64) (*argoworkflow.Capability, error)
+	restartedAt  time.Time
+	timings      TimingRecorder
+	nodeBoots    NodeBootRecorder
+	workflows    WorkflowClient
+	kube         kubernetes.Interface
+	logs         PodLogReader
+	followLogs   PodLogFollower
+	logIdentity  podLogIdentityReader
+	logPod       func(context.Context, string, string) (*corev1.Pod, error)
+	seeder       *SourceSeeder
+	config       Config
+	interval     time.Duration
+	readGrace    time.Duration
 	// assistSeen remembers the holds the sweep already logged.
 	assistSeen struct {
 		sync.Mutex
@@ -160,11 +154,6 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", err
 	}
 
-	var err error
-	request, err = controller.refreshNonroot(ctx, request)
-	if err != nil {
-		return "", err
-	}
 	if controller.seeder == nil {
 		return "", errors.New("argojob: no source seeder is configured; " +
 			"a pipeline cannot mount the server's own claim across namespaces")
@@ -185,10 +174,6 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
 		if err := recoverHelperStorage(existing, &request); err != nil {
-			return "", err
-		}
-		request, err = controller.refreshNonroot(ctx, request)
-		if err != nil {
 			return "", err
 		}
 		request.SourceVolume = controller.expectedSourceVolume(request)
@@ -215,10 +200,6 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	}
 
 	// Workflow definitively does not exist. Seed the source claim.
-	request, err = controller.refreshNonroot(ctx, request)
-	if err != nil {
-		return "", &beforeWorkflowCreateFailure{cause: err}
-	}
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
 	volume, err := controller.seeder.SeedRequest(ctx, request, credentialed)
 	if err != nil {
@@ -229,11 +210,6 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-ready")
 	request.SourceVolume = volume
-	request, err = controller.refreshNonroot(ctx, request)
-	if err != nil {
-		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
-		return "", &beforeWorkflowCreateFailure{cause: err}
-	}
 
 	intended, err := Build(controller.config, request)
 	if err != nil {
@@ -361,7 +337,7 @@ func (controller *Controller) isSharedServiceAccount(name string) bool {
 type workflowSpecMismatch struct{}
 
 func (*workflowSpecMismatch) Error() string {
-	return "argojob: Workflow spec mismatch: verified policy or profile changed"
+	return "argojob: Workflow spec mismatch: verified policy changed"
 }
 func (*workflowSpecMismatch) AmbiguousCreate() bool      { return true }
 func (*workflowSpecMismatch) WorkflowSpecMismatch() bool { return true }
@@ -387,13 +363,8 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	if err := verifyDeliveredPinnedSources(existing, sources); err != nil {
 		return &workflowSpecMismatch{}
 	}
-	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
-		// Quantity encodings and internal caches can change in Kubernetes
-		// serialization. Compare semantic values while retaining the full
-		// policy, source-volume, executor-patch and controller-profile checks.
-		if existing.Annotations[nonrootProfileAnnotation] != binding || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
-			return &workflowSpecMismatch{}
-		}
+	if intended.Annotations[argoworkflow.NonrootTemplatesAnnotation] != "" && !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
+		return &workflowSpecMismatch{}
 	}
 	// Ordinary pipelines retain the annotation-only identity check. Namespace
 	// Workflow-create RBAC remains part of that trust boundary.

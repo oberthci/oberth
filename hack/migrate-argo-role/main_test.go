@@ -27,13 +27,9 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
-func fixtureRole(t *testing.T, profile string) (*rbacv1.Role, target) {
+func fixtureRole(t *testing.T) (*rbacv1.Role, target) {
 	t.Helper()
-	variant := "default"
-	if profile != "" {
-		variant = "nonroot"
-	}
-	b, err := os.ReadFile("../../cmd/oberth/testdata/argo-role-rules-v0.17.9-" + variant + ".json")
+	b, err := os.ReadFile("../../cmd/oberth/testdata/argo-role-rules-v0.17.9-default.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +45,7 @@ func fixtureRole(t *testing.T, profile string) (*rbacv1.Role, target) {
 		{Manager: "helm", Operation: metav1.ManagedFieldsOperationApply, APIVersion: r.APIVersion, FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:metadata":{"f:labels":{"f:app.kubernetes.io/managed-by":{}}}}`)}},
 		{Manager: "kubectl-patch", Operation: metav1.ManagedFieldsOperationUpdate, APIVersion: r.APIVersion, FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:rules":{},"f:metadata":{"f:labels":{"f:keep":{}}}}`)}},
 	}
-	return r, target{Namespace: "pipelines", Name: "oberth-argo", Release: "oberth", ReleaseNamespace: "server", CredentialedSA: "oberth-argo-credentialed", Profile: profile}
+	return r, target{Namespace: "pipelines", Name: "oberth-argo", Release: "oberth", ReleaseNamespace: "server", CredentialedSA: "oberth-argo-credentialed"}
 }
 
 func patchRole(t *testing.T, role *rbacv1.Role, patch []byte) *rbacv1.Role {
@@ -74,7 +70,7 @@ func patchRole(t *testing.T, role *rbacv1.Role, patch []byte) *rbacv1.Role {
 }
 
 func TestMigrationTransfersOnlyRulesAndIsIdempotent(t *testing.T) {
-	r, spec := fixtureRole(t, "")
+	r, spec := fixtureRole(t)
 	before := r.DeepCopy()
 	p, err := migrationPatch(r, spec)
 	if err != nil || len(p) == 0 {
@@ -124,7 +120,7 @@ func TestMigrationRefusesUnreviewedShape(t *testing.T) {
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
-			r, spec := fixtureRole(t, "")
+			r, spec := fixtureRole(t)
 			change(r)
 			if p, err := migrationPatch(r, spec); err == nil || len(p) != 0 {
 				t.Fatalf("accepted: %s %v", p, err)
@@ -136,7 +132,7 @@ func TestMigrationRefusesUnreviewedShape(t *testing.T) {
 func TestMigrationPatchRejectsConcurrentChange(t *testing.T) {
 	for _, field := range []string{"uid", "resourceVersion", "rules", "managedFields"} {
 		t.Run(field, func(t *testing.T) {
-			r, spec := fixtureRole(t, "")
+			r, spec := fixtureRole(t)
 			p, err := migrationPatch(r, spec)
 			if err != nil {
 				t.Fatal(err)
@@ -181,7 +177,7 @@ func trackedRole(t *testing.T, fm managedfieldstest.TestFieldManager) *rbacv1.Ro
 // Use Kubernetes' real field ownership engine: fake clientsets alone cannot
 // prove that an atomic Role.rules list can be upgraded without force.
 func TestMigrationUpgradeFromCurrentLiveShape(t *testing.T) {
-	for _, profile := range []string{"", "nonroot-static-v1"} {
+	for _, profile := range []string{""} {
 		for _, scenario := range []struct {
 			manager        string
 			apply, coowned bool
@@ -193,7 +189,7 @@ func TestMigrationUpgradeFromCurrentLiveShape(t *testing.T) {
 			{manager: "helm"},
 		} {
 			t.Run(fmt.Sprintf("%s/%s/apply=%t/coowned=%t", profile, scenario.manager, scenario.apply, scenario.coowned), func(t *testing.T) {
-				live, spec := fixtureRole(t, profile)
+				live, spec := fixtureRole(t)
 				fm := managedfieldstest.NewTestFieldManager(managedfields.NewDeducedTypeConverter(), schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "Role"})
 				live.ManagedFields = nil
 				baseline := live.DeepCopy()
@@ -271,7 +267,7 @@ func TestMigrationUpgradeFromCurrentLiveShape(t *testing.T) {
 }
 
 func TestMigrateAPIFailureDoesNotRetryOrSucceed(t *testing.T) {
-	r, spec := fixtureRole(t, "")
+	r, spec := fixtureRole(t)
 	client := fake.NewSimpleClientset(r)
 	patches := 0
 	client.PrependReactor("patch", "roles", func(a ktesting.Action) (bool, runtime.Object, error) {
@@ -286,7 +282,7 @@ func TestMigrateAPIFailureDoesNotRetryOrSucceed(t *testing.T) {
 func TestMigrateRejectsUnexpectedServerResponse(t *testing.T) {
 	for _, changed := range []string{"rules", "uid", "labels", "finalizers", "ownership", "not applied"} {
 		t.Run(changed, func(t *testing.T) {
-			r, spec := fixtureRole(t, "")
+			r, spec := fixtureRole(t)
 			client := fake.NewSimpleClientset(r)
 			client.PrependReactor("patch", "roles", func(a ktesting.Action) (bool, runtime.Object, error) {
 				after := patchRole(t, r, a.(ktesting.PatchAction).GetPatch())
@@ -314,7 +310,7 @@ func TestMigrateRejectsUnexpectedServerResponse(t *testing.T) {
 }
 
 func TestMigrateHTTPDryRunThenApplyThenNoop(t *testing.T) {
-	live, spec := fixtureRole(t, "")
+	live, spec := fixtureRole(t)
 	initial := live.DeepCopy()
 	patches := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -394,7 +390,7 @@ func TestMigrateHTTPDryRunThenApplyThenNoop(t *testing.T) {
 }
 
 func TestMigrationCreatesHelmApplyOwnerAndSupportsConfiguredIdentity(t *testing.T) {
-	r, spec := fixtureRole(t, "nonroot-static-v1")
+	r, spec := fixtureRole(t)
 	spec.CredentialedSA = "custom-release"
 	for i := range r.Rules {
 		if reflect.DeepEqual(r.Rules[i].Resources, []string{"serviceaccounts/token"}) {
@@ -421,7 +417,7 @@ func TestMigrationCLIRequiresExplicitTargetBeforeLoadingKubeconfig(t *testing.T)
 		nil,
 		{"--namespace=pipelines", "--role=oberth-argo", "--release=oberth", "--release-namespace=server"},
 		{"--context=explicit", "--namespace=pipelines", "--role=oberth-argo", "--release=oberth", "--release-namespace=server", "--timeout=0s"},
-		{"--context=explicit", "--namespace=pipelines", "--role=oberth-argo", "--release=oberth", "--release-namespace=server", "--controller-profile=unknown"},
+		{"--context=explicit", "--namespace=pipelines", "--role=oberth-argo", "--release=oberth", "--release-namespace=server", "--unknown=invalid"},
 	} {
 		args = append(args, "--kubeconfig=/does/not/exist")
 		if err := run(t.Context(), args, io.Discard); err == nil || strings.Contains(err.Error(), "does/not/exist") {

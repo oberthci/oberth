@@ -9,10 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
-
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // v0.21.0 changed chart defaults that an existing release, upgraded with
@@ -22,10 +19,6 @@ import (
 //     oldest step logs above the budget, irreversibly (logs are not in a
 //     backup). The previously rendered value is kept unless the operator
 //     sets one.
-//   - argo.controllerProfileConfigMap: a pin the v0.20 installer wrote equals
-//     the profile the controller runs; it is cleared so the server follows the
-//     controller (#1517). A hand-set different name stays.
-//
 
 // changedDefaultsPlan is what reconcileChangedDefaults decided.
 type changedDefaultsPlan struct {
@@ -76,37 +69,7 @@ func reconcileChangedDefaults(ctx context.Context, cfg UpgradeConfig, deps Deps,
 		}
 	}
 
-	if pin, _ := dottedValue(user, "argo.controllerProfileConfigMap"); pin != nil && pin != "" && !operatorSets("argo.controllerProfileConfigMap") {
-		name, _ := pin.(string)
-		namespace, _ := dottedValue(all, "argo.namespace")
-		if running := runningControllerProfile(ctx, deps, fmt.Sprint(namespace)); name != "" && running == name {
-			plan.args = append(plan.args, "--set-string", "argo.controllerProfileConfigMap=")
-			plan.notes = append(plan.notes, fmt.Sprintf("Clearing the installer's profile pin %s: the server follows the profile the controller runs", name))
-		}
-	}
 	return plan, nil
-}
-
-// runningControllerProfile is the profile ConfigMap the running controller
-// names in --configmap, "" when none can be read.
-func runningControllerProfile(ctx context.Context, deps Deps, namespace string) string {
-	if deps.KubeClient == nil || namespace == "" {
-		return ""
-	}
-	pods, err := deps.KubeClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: argoControllerLabelSelector})
-	if err != nil {
-		return ""
-	}
-	for _, pod := range pods.Items {
-		if pod.DeletionTimestamp != nil || len(pod.Spec.Containers) != 1 {
-			continue
-		}
-		args := pod.Spec.Containers[0].Args
-		if len(args) >= 2 && args[0] == "--configmap" && argoworkflow.ValidNonrootProfileConfigMap(args[1]) {
-			return args[1]
-		}
-	}
-	return ""
 }
 
 // operatorSetKeys reports whether the operator's --set or --values name a key
