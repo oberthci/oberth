@@ -21,7 +21,7 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// One test contains the independently observable R2 hostile controls so a
+// One test contains the independently observable hostile controls so a
 // single-package, single-test overlay can exercise the reverted guards.
 func TestS6Round2Guards(t *testing.T) {
 	t.Run("ambient-tokens", func(t *testing.T) {

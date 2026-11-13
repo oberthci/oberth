@@ -285,7 +285,7 @@ page bounds. Cross-attempt tests retain exact owner, Workflow UID, Pod/name,
 node and namespace refusal. Init timing and logical readiness tests preserve
 mixed script / unobserved image-pull semantics and exclude scripts/expressions.
 Store tests cover atomic claim/grant/terminal timestamps, repeated requests,
-parked admission episodes, write-once facts, immutable Workflow/Pod/container
+write-once facts, immutable Workflow/Pod/container
 attempt bindings, restart terminalization without automatic re-fire, explicit
 retry/rerun with new run IDs and independent admission order,
 TTL-independent reopen, legacy StartedAt ambiguity and no-backfill migration

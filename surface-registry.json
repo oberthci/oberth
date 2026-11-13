@@ -2,7 +2,7 @@
   "entries": {
     "flag:active": {
       "doc_anchor": "docs/remote-cli.md",
-      "test_ref": "cmd/oberth/remote_test.go TestRunsActivePrintsTheQueue"
+      "test_ref": "cmd/oberth/remote_test.go TestRunsActivePreservesOrderAndReasons"
     },
     "flag:upstream-name": {
       "doc_anchor": "docs/install-answers.md#upstream-name",
@@ -877,7 +877,7 @@
       "test_ref": "internal/installer/client_cert_test.go TestFirstAdminCSRDoesNotMintBearer"
     },
     "flag:endpoint-address": {
-      "doc_anchor": "docs/plugin-install.md#naming-an-ip-or-load-balancer-endpoint",
+      "doc_anchor": "docs/plugin-install.md#choosing-an-ip-or-naming-an-endpoint",
       "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginDNSRemedyWaitsForNameAndReprobes"
     },
     "flag:wait-load-balancer": {

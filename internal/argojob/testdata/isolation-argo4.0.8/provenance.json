@@ -13,7 +13,7 @@
   "export_generator": "isolation-argo4.0.8/secret-step-export_test.go.txt",
   "export_generator_sha256": "9a9d7e4ea4725532c1c183e912ac1f21f9d01494dc8351c49db18d467e305d03",
   "files": {
-    "README.md": "080b9d7abf4bfd6181d4e555752f3a82e98f779529713522825ec0750254670f",
+    "README.md": "2a3fae7f77e13958917379914298a2a75088bcfdeae71f9034fe465e6fdb02d0",
     "capture-call.go.txt": "4dfc805d82359f3382ae23300e6b70a2c0b21a366933ab9dda58ad8e74f4b687",
     "capture-hook.go.txt": "4dfc805d82359f3382ae23300e6b70a2c0b21a366933ab9dda58ad8e74f4b687",
     "capture_test.go.txt": "519284a582181bb5fcdfe98e32a1857c23952605c336f9b171b5c9ca34281651",

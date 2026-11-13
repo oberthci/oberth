@@ -1386,7 +1386,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   exponential backoff (250ms to 5s), until recovery or owner shutdown. They do
   not return a fatal scheduler completion, replay a Workflow create/Wait/Git
   push, or change an already observed run result. Lost commit acknowledgements
-  resolve the exact claim/requeue/publication identity before retrying.
+  resolve the exact claim/publication identity before retrying.
   Intentional retry backoff is excluded from local dispatch liveness; a DB
   call that ignores its deadline remains detectable as a local wedge. Warnings carry
   `operation`, `retry_pending`, `retries_total` and `retry_in`; unscoped
@@ -1455,18 +1455,15 @@ Original object UID and intent continue to fence recovery and cleanup. See
   Workflow is deleted and only that run fails with phase `infrastructure`;
   the scheduler keeps running. If that deletion also fails, the run stays
   owned for the next restart, exactly as for a submitted run.
-  A missing branch Workflow, or a claimed branch run without a Job, retains
-  the requeue-with-supersede fallback (#270): the old run links to a queued
-  copy of the same commit and any deletion obligation completes before the
-  replacement is claimed. The copy reloads current step grants
-  through normal admission. A replacement inherits the stranded run's
-  `admission_sequence`, retaining its FIFO place while receiving a fresh
-  `queue_sequence` for identity and unchanged history paging (#1092).
+  A confirmed-absent Workflow, or a claimed run without a Workflow name,
+  fails with `interrupted by server restart`. This applies to branch, tag,
+  release, and promotion runs. Recovery never automatically requeues or
+  re-fires them. Existing Workflows are adopted; ambiguous creation remains
+  under bounded observation until adoption or confirmed absence. API read
+  errors do not establish absence. An explicit retry or rerun creates a new
+  run ID with its own queue and admission sequences.
   Argo tag pipelines require the durable release flag; a historical tag Job
-  without that capability keeps its conservative fallback and never gains
-  release/WIF authority from its ref name. A missing promotion/tag/release
-  Workflow, or one that never acquired a Job name, is interrupted without
-  automatic re-fire.
+  without that capability never gains release/WIF authority from its ref name.
   Publication ownership is durable and takes precedence over Workflow
   observation: recovery never submits or adopts that run again.
   A passing adopted promotion uses its immutable target/base/result through
@@ -1481,11 +1478,6 @@ Original object UID and intent continue to fence recovery and cleanup. See
   run/publication/promotion owners permit terminal cleanup. Explicit cancellation and newer-push
   supersession still delete the exact owned Workflow, and terminal runs are
   never adopted or automatically re-fired.
-  Upgrade note: the first upgrade to a release with adoption is still
-  disruptive, because the old process acts on its own SIGTERM: it re-queues
-  its running branch runs, and a process without promotion/tag/release
-  adoption deletes those Workflows and records them as interrupted
-  ("scheduler stopped"). Adoption applies from the next restart onward.
 - Green branch runs force-sync that same branch to the upstream forge. Red
   default-branch and scheduled branch runs create or update one open CI issue
   per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,
@@ -2957,7 +2949,7 @@ the live database size the backup ceiling is measured against.
 
 Owner resume retains the durable run ID and verified Workflow binding. Stranded
 runs fail after restart without resubmission; explicit retries have new IDs.
-Known milestones remain write-once. B4 removes restart timing epochs while
+Known milestones remain write-once. Restart timing epochs are removed while
 retaining current Workflow and step evidence. Queue time is `queued_at` to
 `claimed_at`, not queued to the historically overloaded StartedAt. Checkout
 completion, source seed start and readiness, Workflow creation, and durable
