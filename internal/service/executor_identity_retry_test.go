@@ -24,7 +24,7 @@ func (failure *identityObservationFailure) Error() string {
 func (failure *identityObservationFailure) Unwrap() error               { return failure.cause }
 func (failure *identityObservationFailure) InfrastructureFailure() bool { return !failure.hard }
 
-func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T) {
+func TestExecutorIdentityFailureStopsAsCancelledAndRunRetryApplies(t *testing.T) {
 	fixture := newControlFixture(t)
 	// Manual run_retry remains available when the administrator disables automatic recovery.
 
@@ -41,11 +41,11 @@ func TestExecutorIdentityFailureIsInfrastructureAndRunRetryApplies(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Status != model.RunFailed || failed.Phase != "infrastructure" || failed.FailedStep != "" || !strings.Contains(failed.Error, "reason=deadline") {
+	if failed.Status != model.RunInterrupted || failed.Phase != model.PhaseCancelled || failed.FailedStep != "" || !strings.Contains(failed.Error, "reason=deadline") {
 		t.Fatalf("lost infrastructure cause: %+v", failed)
 	}
 	if len(fixture.jobs.deleted) != 1 {
-		t.Fatal("live Workflow was not deleted before recording infrastructure failure")
+		t.Fatal("live Workflow was not stopped before recording cancellation")
 	}
 	control := fixture.api(t)
 	control.runRetries = fixture.store
@@ -89,7 +89,7 @@ func TestExecutorIdentityFailureKeepsTerminalResultAndDeletionSafety(t *testing.
 	}
 }
 
-func TestExecutorIdentityValidationFailureStaysJob(t *testing.T) {
+func TestExecutorIdentityValidationFailureStopsAsCancelled(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/invalid-identity", strings.Repeat("c", 40))
 	jobs := &recoveryJobs{waitErr: &identityObservationFailure{cause: errors.New("invalid identity target"), hard: true}, terminalErr: ErrJobNotTerminal}
@@ -101,12 +101,12 @@ func TestExecutorIdentityValidationFailureStaysJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Status != model.RunFailed || failed.Phase != "job" || len(jobs.deleted) != 1 {
+	if failed.Status != model.RunInterrupted || failed.Phase != model.PhaseCancelled || len(jobs.deleted) != 1 {
 		t.Fatalf("validation failure was labelled infrastructure or left alive: %+v", failed)
 	}
 }
 
-func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
+func TestExecutorIdentityAdoptedFailureStopsAsCancelled(t *testing.T) {
 	for _, hard := range []bool{false, true} {
 		t.Run(fmt.Sprintf("hard=%t", hard), func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
@@ -138,11 +138,7 @@ func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			phase = "infrastructure"
-			if hard {
-				phase = "job"
-			}
-			if failed.Status != model.RunFailed || failed.Phase != phase || len(jobs.deleted) != 1 {
+			if failed.Status != model.RunInterrupted || failed.Phase != model.PhaseCancelled || len(jobs.deleted) != 1 {
 				t.Fatalf("adoption overrode identity classification: %+v", failed)
 			}
 		})

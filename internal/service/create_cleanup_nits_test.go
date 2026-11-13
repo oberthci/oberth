@@ -62,8 +62,14 @@ func TestWorkflowCreateContractCleanupAfterDefiniteFailure(t *testing.T) {
 				if err != nil || statErr != nil || current.Status != model.RunRunning || !isPendingCreate(current) || !f.scheduler.ownsCreateCleanup(source.ID) {
 					t.Fatalf("uncertain active submission lost its contract: run=%+v err=%v stat=%v", current, err, statErr)
 				}
-			} else if err != nil || !os.IsNotExist(statErr) || current.Status != model.RunFailed {
-				t.Fatalf("terminal failure leaked contract: run=%+v err=%v stat=%v", current, err, statErr)
+			} else {
+				want := model.RunFailed
+				if mode == "submission-record-failed" {
+					want = model.RunInterrupted
+				}
+				if err != nil || !os.IsNotExist(statErr) || current.Status != want {
+					t.Fatalf("terminal failure leaked contract: run=%+v err=%v stat=%v", current, err, statErr)
+				}
 			}
 		})
 	}

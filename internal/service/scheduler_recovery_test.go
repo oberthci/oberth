@@ -647,12 +647,9 @@ func TestStartupReconciliationResetsUnobservedTag(t *testing.T) {
 	}
 }
 
-// ---------- Gap 3: Wait-error path must delete before terminalizing ----------
-
-// TestWaitErrorWithRunningWorkflowDeleteSucceedsFails verifies that when
-// Wait returns an error and TerminalResult reports the Workflow is still
-// running, a successful Delete allows the run to be terminalized as failed.
-func TestWaitErrorWithRunningWorkflowDeleteSucceedsFails(t *testing.T) {
+// A Wait observation failure hands native Stop to the owner, and its observed
+// unsuccessful completion uses interrupted/cancelled rather than CI failure.
+func TestWaitErrorWithRunningWorkflowStopCompletesCancelled(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/wait-err-delete-ok", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
@@ -672,9 +669,9 @@ func TestWaitErrorWithRunningWorkflowDeleteSucceedsFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The run must be terminalized as failed — the Workflow was deleted.
-	if recovered.Status != model.RunFailed {
-		t.Fatalf("run status = %q, want %q", recovered.Status, model.RunFailed)
+	// Native unsuccessful Stop uses the existing cancellation verdict.
+	if recovered.Status != model.RunInterrupted || recovered.Phase != model.PhaseCancelled {
+		t.Fatalf("run status = %q, want %q", recovered.Status, model.RunInterrupted)
 	}
 	if !strings.Contains(recovered.Error, "Stopped with strategy") {
 		t.Fatalf("run error = %q, want original Wait error", recovered.Error)

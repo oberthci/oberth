@@ -130,7 +130,11 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 			}
 			current, err := fixture.store.Run(t.Context(), run.ID)
 			wantRetry := false
-			if err != nil || current.Status != model.RunFailed {
+			wantStatus := model.RunFailed
+			if kind == "submitted-write-failed" {
+				wantStatus = model.RunInterrupted
+			}
+			if err != nil || current.Status != wantStatus {
 				t.Fatal("settled infrastructure/test failure classification", current, err)
 			}
 			counts, err := fixture.store.CountRuns(t.Context())

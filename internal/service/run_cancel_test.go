@@ -307,7 +307,7 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 	assertCancelled(t, fixture.awaitTerminal(t, enqueued.ID), cancelAdmin.Identity, "target frozen")
 	fixture.awaitNoPendingCancellations(t)
 	failed, err := fixture.store.Promotion(t.Context(), promotion.ID)
-	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "stopped by dima@example-node: target frozen") {
+	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "cancelled by dima@example-node: target frozen") {
 		t.Fatalf("promotion after cancel = %#v, %v", failed, err)
 	}
 	if pending, err := fixture.store.PendingPublications(t.Context()); err != nil || len(pending) != 0 {

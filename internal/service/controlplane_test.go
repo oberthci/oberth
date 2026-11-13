@@ -2054,12 +2054,8 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	}
 }
 
-// TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown verifies
-// that a Wait error from an inner observation context (context.Canceled,
-// context.DeadlineExceeded) is recorded as RunFailed — NOT RunInterrupted,
-// which is the scheduler-shutdown pattern. The Workflow finishes Stop before
-// terminalizing (Fix 2: a still-running workflow must not be left untracked
-// while its durable run is recorded as terminal).
+// An inner Wait cancellation requests native Stop and records cancelled only
+// after Argo finishes. It does not initiate scheduler shutdown.
 func TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown(t *testing.T) {
 	for name, waitErr := range map[string]error{
 		"canceled": context.Canceled,
@@ -2082,12 +2078,11 @@ func TestJobObservationCancellationDoesNotImpersonateSchedulerShutdown(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			// The run must be terminalized as RunFailed (not RunInterrupted,
-			// which is the scheduler shutdown pattern).
-			if finished.Status != model.RunFailed || finished.Phase != "job" || !strings.Contains(finished.Error, "Stopped with strategy") {
+			// Accepted Stop uses the existing interrupted/cancelled result.
+			if finished.Status != model.RunInterrupted || finished.Phase != model.PhaseCancelled || !strings.Contains(finished.Error, "Stopped with strategy") {
 				t.Fatalf("inner observation cancellation = %#v, want failed job without scheduler shutdown", finished)
 			}
-			// The workflow must be deleted before terminalizing: a
+			// The Workflow must finish native shutdown before terminalizing: a
 			// still-running workflow must not be left untracked while its
 			// durable run is recorded as terminal.
 			if len(fixture.jobs.deleted) != 1 {

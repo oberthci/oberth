@@ -500,8 +500,8 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- scheduler.Run(ctx) }()
-	current := waitAdoptedStatus(t, fixture.store, run.ID, model.RunFailed)
-	if current.Phase != "infrastructure" || !strings.Contains(current.Error, "Stopped with strategy") {
+	current := waitAdoptedStatus(t, fixture.store, run.ID, model.RunInterrupted)
+	if current.Phase != model.PhaseCancelled || !strings.Contains(current.Error, "Stopped with strategy") {
 		t.Fatalf("adopted observation failure = %#v", current)
 	}
 	select {
@@ -515,7 +515,7 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	scheduler.signalQueue()
-	waitAdoptedStatus(t, fixture.store, next.ID, model.RunFailed)
+	waitAdoptedStatus(t, fixture.store, next.ID, model.RunInterrupted)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
