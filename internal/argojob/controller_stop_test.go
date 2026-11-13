@@ -42,17 +42,14 @@ func TestCancelUsesNativeStopAndKeepsExitHandlers(t *testing.T) {
 				}
 				if action.GetVerb() == "patch" {
 					patches++
-					var body map[string]json.RawMessage
-					if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &body); err != nil {
+					var operations []map[string]any
+					if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &operations); err != nil {
 						t.Fatal(err)
 					}
-					var metadata map[string]string
-					if err := json.Unmarshal(body["metadata"], &metadata); err != nil {
-						t.Fatal(err)
+					if len(operations) != 3 || operations[0]["path"] != "/metadata/uid" || operations[0]["value"] != "workflow-uid" || operations[1]["op"] != "test" || operations[1]["path"] != "/spec" || operations[2]["path"] != "/spec/shutdown" || operations[2]["value"] != "Stop" {
+						t.Fatalf("patch lost its identity or strategy fence: %s", action.(ktesting.PatchAction).GetPatch())
 					}
-					if metadata["uid"] != "workflow-uid" || metadata["resourceVersion"] != "" || string(body["spec"]) != `{"shutdown":"Stop"}` {
-						t.Fatalf("patch lost its identity fence or rewrote a field: %s", action.(ktesting.PatchAction).GetPatch())
-					}
+
 				}
 			}
 			if patches != 1 {
@@ -119,16 +116,14 @@ func TestNativeTerminateSkipsExitHandlersAndCannotBeDowngraded(t *testing.T) {
 		}
 		if action.GetVerb() == "patch" {
 			patches++
-			var body struct {
-				Metadata map[string]string
-				Spec     map[string]string
-			}
-			if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &body); err != nil {
+			var operations []map[string]any
+			if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &operations); err != nil {
 				t.Fatal(err)
 			}
-			if len(body.Metadata) != 1 || body.Metadata["uid"] != "original" || len(body.Spec) != 1 {
-				t.Fatalf("shutdown lost UID-only fence: %+v", body)
+			if operations[0]["op"] != "test" || operations[0]["path"] != "/metadata/uid" || operations[0]["value"] != "original" || operations[len(operations)-1]["path"] != "/spec/shutdown" {
+				t.Fatalf("shutdown lost UID fence: %+v", operations)
 			}
+
 		}
 	}
 	if patches != 2 {

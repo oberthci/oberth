@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	jsonpatch "gopkg.in/evanphx/json-patch.v4"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -15,29 +16,26 @@ func applyWorkflowStopTestPatch(workflow *wfv1.Workflow, kind types.PatchType, d
 	if workflow == nil {
 		return nil, apierrors.NewNotFound(workflowTestResource, "missing")
 	}
-	var patch struct {
-		Metadata struct {
-			UID             types.UID `json:"uid"`
-			ResourceVersion string    `json:"resourceVersion"`
-		} `json:"metadata"`
-		Spec struct {
-			Shutdown wfv1.ShutdownStrategy `json:"shutdown"`
-		} `json:"spec"`
+	if kind != types.JSONPatchType {
+		return nil, errors.New("expected JSONPatch")
 	}
-	if kind != types.MergePatchType {
-		return nil, errors.New("expected MergePatch")
-	}
-	if err := json.Unmarshal(data, &patch); err != nil {
+	patch, err := jsonpatch.DecodePatch(data)
+	if err != nil {
 		return nil, err
 	}
-	if patch.Metadata.UID != workflow.UID || patch.Metadata.ResourceVersion != "" && patch.Metadata.ResourceVersion != workflow.ResourceVersion {
-		return nil, apierrors.NewConflict(workflowTestResource, workflow.Name, errors.New("UID/resourceVersion changed"))
+	body, err := json.Marshal(workflow)
+	if err != nil {
+		return nil, err
 	}
-	if patch.Spec.Shutdown != wfv1.ShutdownStrategyStop {
-		return nil, errors.New("expected native Stop")
+	updated, err := patch.Apply(body)
+	if err != nil {
+		return nil, err
 	}
-	next := workflow.DeepCopy()
-	next.Spec.Shutdown = patch.Spec.Shutdown
+	next := &wfv1.Workflow{}
+	if err := json.Unmarshal(updated, next); err != nil {
+		return nil, err
+	}
+
 	return next, nil
 }
 func (client *staticWorkflowClient) Patch(_ context.Context, _ string, kind types.PatchType, data []byte, _ metav1.PatchOptions, _ ...string) (*wfv1.Workflow, error) {
