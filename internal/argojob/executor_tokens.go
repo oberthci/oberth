@@ -15,6 +15,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -374,7 +375,7 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 			return errors.New("ephemeral container uses a server-owned name")
 		}
 		for _, mount := range container.VolumeMounts {
-			if mount.Name == executorTokenVolume {
+			if mount.Name == executorTokenVolume || argoScratchVolume(mount.Name) {
 				return errors.New("ephemeral container can access executor identity")
 			}
 		}
@@ -389,10 +390,20 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 			}
 			serverNames[container.Name] = true
 		}
+		for _, device := range container.VolumeDevices {
+			if argoScratchVolume(device.Name) {
+				return errors.New("container can access Argo scratch device")
+			}
+		}
 		if container.Name == executorTokenWaiter {
 			found = true
 		}
+		scratchCounts := map[string]int{}
 		for _, mount := range container.VolumeMounts {
+			scratchCounts[mount.Name]++
+			if argoScratchVolume(mount.Name) && (scratchCounts[mount.Name] != 1 || !validArgoScratchMount(container, mount, initializer, resourcePod, serverNames[container.Name])) {
+				return errors.New("pipeline helper can access Argo executor scratch")
+			}
 			if mount.Name != executorTokenVolume || container.Name == executorTokenWaiter {
 				continue
 			}
@@ -536,4 +547,26 @@ func (controller *Controller) requestExecutorIdentity(ctx context.Context, names
 		case <-timer.C:
 		}
 	}
+}
+
+// Argo adds shared scratch after admission. Only the exact native helper
+// runtime mount is tolerated. Resource helpers cannot receive it: a writable
+// argoexec could otherwise replace the operator executor before main starts.
+func validArgoScratchMount(c corev1.Container, mount corev1.VolumeMount, initializer, resourcePod, server bool) bool {
+	if server {
+		return true
+	} // Constructor and position already checked.
+	executor := c.Image == argoworkflow.ExecutorImage && ((initializer && c.Name == "init") || (!initializer && c.Name == "wait") || (!initializer && resourcePod && c.Name == "main"))
+	switch mount.Name {
+	case "var-run-argo":
+		return (!resourcePod || executor) && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "var-run-argo", MountPath: "/var/run/argo"})
+	case "argo-staging":
+		return executor || (!initializer && !resourcePod && c.Name == "main" && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "argo-staging", MountPath: "/argo/staging"}))
+	default:
+		return executor
+	}
+}
+
+func argoScratchVolume(name string) bool {
+	return name == "tmp-dir-argo" || name == "var-run-argo" || name == "argo-staging"
 }

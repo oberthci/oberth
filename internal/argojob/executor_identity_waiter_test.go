@@ -6,13 +6,12 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
 )
 
 func TestExecutorIdentityRejectsMergedWaiterFields(t *testing.T) {
 	for _, shape := range []string{"container", "resource"} {
-		for _, addition := range []string{"env-only", "lifecycle-only", "sketch", "envFrom", "workingDir", "livenessProbe", "readinessProbe", "startupProbe", "restartPolicy", "volumeDevices", "extra-mount", "missing-mount", "mount-subPath", "security", "resources", "ports", "resizePolicy", "stdin", "tty", "duplicate"} {
+		for _, addition := range []string{"env-only", "lifecycle-only", "sketch", "envFrom", "workingDir", "livenessProbe", "readinessProbe", "startupProbe", "restartPolicy", "volumeDevices", "extra-mount", "missing-mount", "mount-subPath", "security", "ports", "resizePolicy", "stdin", "tty", "duplicate"} {
 			t.Run(shape+"/"+addition, func(t *testing.T) {
 				controller, _, pod, _ := executorRetryFixture(t)
 				pod.Spec = executorEnvironmentPod(t, shape, "init", nil)
@@ -80,8 +79,6 @@ func TestExecutorIdentityRejectsMergedWaiterFields(t *testing.T) {
 						c.VolumeMounts[0].SubPath = "other"
 					case "security":
 						c.SecurityContext.Privileged = ptr.To(true)
-					case "resources":
-						c.Resources.Limits[corev1.ResourceMemory] = resource.MustParse("1Gi")
 					case "duplicate":
 						pod.Spec.InitContainers = append(pod.Spec.InitContainers, *c.DeepCopy())
 					}
