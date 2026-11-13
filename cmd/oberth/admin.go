@@ -14,23 +14,22 @@ const administrativeActor = "admin@localhost"
 const defaultUpstreamKeySecret = "oberth-upstream-key"       //nolint:gosec // G101: fixed bundle name, not credential material.
 const defaultUpstreamKnownHostsSecret = "oberth-known-hosts" //nolint:gosec // G101: fixed bundle name, not credential material.
 type gatedAdminTokens struct {
-	*store.Store
-	Gate   func(context.Context, string) error
-	Policy model.UplinkTokenPolicy
+	*store.FirstAdminEnrollment
+	Gate func(context.Context, string) error
 }
 
 func (tokens gatedAdminTokens) CreateTokenCredential(ctx context.Context, spec model.TokenCredentialSpec) (model.TokenCredential, error) {
 	if err := tokens.Gate(ctx, "uplink.token.create"); err != nil {
 		return model.TokenCredential{}, err
 	}
-	return tokens.CreateTokenCredentialWithPolicy(ctx, spec, tokens.Policy)
+	return tokens.FirstAdminEnrollment.CreateTokenCredential(ctx, spec)
 }
 
 func (tokens gatedAdminTokens) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {
 	if err := tokens.Gate(ctx, "uplink.token.activate"); err != nil {
 		return model.TokenCredential{}, err
 	}
-	return tokens.Store.ActivateTokenCredential(ctx, id)
+	return tokens.FirstAdminEnrollment.ActivateTokenCredential(ctx, id)
 }
 
 func upstreamAuthStatus(ctx context.Context, upstream model.Upstream, repository, sharedKey, keyDirectory, knownHosts string) string {

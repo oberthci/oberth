@@ -15,9 +15,13 @@ import (
 )
 
 type KubernetesTarget struct {
-	Context    string `json:"context"`
-	Kubeconfig string `json:"kubeconfig,omitempty"`
-	Namespace  string `json:"namespace"`
+	Context       string `json:"context"`
+	Kubeconfig    string `json:"kubeconfig,omitempty"`
+	Namespace     string `json:"namespace"`
+	APIServer     string `json:"api_server"`
+	CASHA256      string `json:"ca_sha256"`
+	TLSServerName string `json:"tls_server_name,omitempty"`
+	InsecureTLS   bool   `json:"insecure_tls,omitempty"`
 }
 
 func RecordedKubernetesTarget() (KubernetesTarget, error) {
@@ -46,7 +50,7 @@ func RecordedKubernetesTarget() (KubernetesTarget, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var target KubernetesTarget
-	if decoder.Decode(&target) != nil || target.Context == "" || target.Namespace == "" {
+	if decoder.Decode(&target) != nil || target.Context == "" || target.Namespace == "" || target.APIServer == "" || len(target.CASHA256) != 64 {
 		return target, errors.New("invalid recorded Kubernetes install target")
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
@@ -78,6 +82,23 @@ func recordKubernetesTarget(cfg Config, deps Deps) error {
 		if err != nil {
 			return err
 		}
+	}
+	config := deps.RestConfig
+	if config == nil {
+		_, config, err = kubeconfig.Client(kubeconfig.Rules(target.Kubeconfig), target.Context)
+		if err != nil {
+			return err
+		}
+	}
+	if err := verifyRecordedCluster(target.Context, config); err != nil {
+		return err
+	}
+	target.APIServer = config.Host
+	target.TLSServerName = config.ServerName
+	target.InsecureTLS = config.Insecure
+	target.CASHA256, err = clusterCAHash(config)
+	if err != nil {
+		return err
 	}
 	body, err := json.Marshal(target)
 	if err != nil {
@@ -115,6 +136,15 @@ func pinnedKubernetesCommand(name string, args, environment []string) ([]string,
 			configPath = strings.TrimPrefix(arg, "--kubeconfig=")
 		}
 	}
+	if explicitContext && !explicitConfig {
+		target, err := RecordedKubernetesTarget()
+		if err != nil {
+			return nil, nil, nil, func() error { return nil }, err
+		}
+		if target.Kubeconfig != "" {
+			args = append([]string{"--kubeconfig", target.Kubeconfig}, args...)
+		}
+	}
 	local := len(args) > 0 && ((base == "kubectl" && args[0] == "config") || (base == "helm" && (args[0] == "repo" || args[0] == "version" || args[0] == "template" || args[0] == "show" || args[0] == "lint")))
 	if !explicitContext && !local {
 		target, err := RecordedKubernetesTarget()
@@ -147,5 +177,5 @@ func pinnedKubernetesCommand(name string, args, environment []string) ([]string,
 			}
 		}
 	}
-	return kubeconfig.Command(name, args, environment)
+	return verifiedKubernetesCommand(name, args, environment, local)
 }

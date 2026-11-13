@@ -12,7 +12,9 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/auth"
+	"github.com/oberthci/oberth/internal/clientcert"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -43,7 +45,8 @@ func runCreateFirstAdmin(ctx context.Context, input io.Reader, output io.Writer)
 	if authority == nil {
 		return errors.New("client CA unavailable")
 	}
-	if _, _, err := authority.Issue(request.Identity, []byte(request.InstallerCSR), time.Hour); err != nil {
+	_, installerLeaf, err := authority.Issue(request.Identity, []byte(request.InstallerCSR), time.Hour)
+	if err != nil {
 		return errors.New("invalid installer CSR")
 	}
 	if request.CSR != "" {
@@ -69,53 +72,39 @@ func runCreateFirstAdmin(ctx context.Context, input io.Reader, output io.Writer)
 		return err
 	}
 	defer func() { _ = database.Close() }()
-	uplinks, err := database.ListUplinkStatuses(ctx)
+	policy, err := requestLiveUplinkTokenPolicy(ctx, "/data/oberth.sqlite")
 	if err != nil {
 		return err
 	}
-	for _, uplink := range uplinks {
-		if uplink.Admin {
-			return errors.New("first admin already exists; use authenticated administrative APIs")
-		}
-	}
 	result := api.FirstAdminResult{ServerCA: publicCA.String(), ServerCertificate: publicCertificate.String()}
-	if request.CSR != "" && !request.Bearer {
-		if err := gate(ctx, "uplink.register"); err != nil {
-			return err
-		}
-		if _, err := database.RegisterCertificateUplink(ctx, administrativeActor, model.UplinkSpec{Identity: request.Identity, Fingerprint: fingerprint, Admin: true}); err != nil {
-			return err
-		}
-	} else {
-		policy, err := requestLiveUplinkTokenPolicy(ctx, "/data/oberth.sqlite")
-		if err != nil {
-			return err
-		}
-		tokens := gatedAdminTokens{Store: database, Gate: gate, Policy: policy}
+	err = database.CreateFirstAdmin(ctx, administrativeActor, request.Identity, fingerprint, clientcert.Pin(installerLeaf), request.CSR == "" || request.Bearer, policy, func(enrollment *store.FirstAdminEnrollment) error {
 		var token bytes.Buffer
 		defer func() { clear(token.Bytes()) }()
-		issuer := auth.Issuer{Tokens: tokens, Bind: func(ctx context.Context, pending model.TokenCredential) error {
+		issuer := auth.Issuer{Tokens: gatedAdminTokens{FirstAdminEnrollment: enrollment, Gate: gate}, Bind: func(ctx context.Context, pending model.TokenCredential) error {
 			if err := gate(ctx, "uplink.register"); err != nil {
 				return err
 			}
-			_, err := database.RegisterUplink(ctx, administrativeActor, model.UplinkSpec{Identity: request.Identity, Fingerprint: fingerprint, TokenCredentialID: pending.ID, Admin: true})
-			return err
+			return enrollment.Register(ctx, pending)
 		}}
 		if _, err := issuer.Issue(ctx, request.Identity, &token); err != nil {
 			return err
 		}
-		result.Token = strings.TrimSpace(token.String())
-	}
-	if err := gate(ctx, "uplink.cert.issue"); err != nil {
-		return err
-	}
-	if request.CSR != "" {
-		result.Certificate, err = issueUplinkCertificate(ctx, database, request.Identity, fingerprint, []byte(request.CSR), 0)
-		if err != nil {
+		if request.CSR == "" || request.Bearer {
+			result.Token = strings.TrimSpace(token.String())
+		}
+		if err := gate(ctx, "uplink.cert.issue"); err != nil {
 			return err
 		}
-	}
-	result.InstallerCertificate, err = issueUplinkCertificate(ctx, database, request.Identity, fingerprint, []byte(request.InstallerCSR), time.Hour)
+		certIssuer := &service.ClientCertIssuer{Authority: authority, Store: enrollment}
+		if request.CSR != "" {
+			result.Certificate, err = service.IssueClientCert(ctx, certIssuer, administrativeActor, request.Identity, fingerprint, []byte(request.CSR), 0)
+			if err != nil {
+				return err
+			}
+		}
+		result.InstallerCertificate, err = service.IssueClientCert(ctx, certIssuer, administrativeActor, request.Identity, fingerprint, []byte(request.InstallerCSR), time.Hour)
+		return err
+	})
 	if err != nil {
 		return err
 	}

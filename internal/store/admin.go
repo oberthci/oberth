@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -562,6 +563,19 @@ func (s *Store) RemoveUplink(ctx context.Context, actor, identity, fingerprint s
 // identity, revokes any displaced credential, and records who performed the
 // registration. Token activation occurs only after this method commits.
 func (s *Store) RegisterUplink(ctx context.Context, actor string, spec model.UplinkSpec) (model.Uplink, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.Uplink{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	u, err := s.registerUplink(ctx, tx, actor, spec, false)
+	if err != nil {
+		return u, err
+	}
+	return u, tx.Commit()
+}
+
+func (s *Store) registerUplink(ctx context.Context, tx *sql.Tx, actor string, spec model.UplinkSpec, firstAdmin bool) (model.Uplink, error) {
 	if strings.TrimSpace(actor) == "" || strings.TrimSpace(spec.Fingerprint) == "" || strings.TrimSpace(spec.Identity) == "" ||
 		strings.TrimSpace(spec.TokenCredentialID) == "" {
 		return model.Uplink{}, fmt.Errorf("%w: actor and uplink fields are required", ErrInvalid)
@@ -575,18 +589,21 @@ func (s *Store) RegisterUplink(ctx context.Context, actor string, spec model.Upl
 		return model.Uplink{}, err
 	}
 	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Uplink{}, fmt.Errorf("begin uplink registration: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	var displacedCredentialID string
 	var existingID int64
-	_ = tx.QueryRowContext(ctx, `SELECT id, token_credential_id FROM uplinks WHERE fingerprint = ?`,
+	err = tx.QueryRowContext(ctx, `SELECT id, token_credential_id FROM uplinks WHERE fingerprint = ?`,
 		spec.Fingerprint).Scan(&existingID, &displacedCredentialID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return model.Uplink{}, err
+	}
 	var previous []string
 	if existingID != 0 {
 		if previous, err = loadUplinkScopes(ctx, tx, existingID); err != nil {
+			return model.Uplink{}, err
+		}
+	}
+	if existingID != 0 && !firstAdmin {
+		if err := guardLastActiveAdmin(ctx, tx, existingID, now); err != nil {
 			return model.Uplink{}, err
 		}
 	}
@@ -611,10 +628,10 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 	// Re-registering a key without a scope keeps the one it has: a re-add or
 	// onboarding must never widen a scoped uplink (#073). Only uplink scope
 	// --clear widens it.
-	if spec.Admin && (model.MetricsOnly(scopes) || len(scopes) == 0 && model.MetricsOnly(previous)) {
+	if !firstAdmin && spec.Admin && (model.MetricsOnly(scopes) || len(scopes) == 0 && model.MetricsOnly(previous)) {
 		return model.Uplink{}, fmt.Errorf("%w: a %s-scoped uplink reads only /metrics and cannot be an admin", ErrInvalid, model.MetricsScope)
 	}
-	if len(scopes) == 0 {
+	if len(scopes) == 0 && !firstAdmin {
 		scopes = previous
 	} else if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
 		return model.Uplink{}, err
@@ -649,9 +666,6 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 		ResourceID: fmt.Sprint(value.ID), Details: string(details),
 	}, now); err != nil {
 		return model.Uplink{}, fmt.Errorf("audit uplink registration: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return model.Uplink{}, fmt.Errorf("commit uplink registration: %w", err)
 	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	return value, nil

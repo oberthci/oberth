@@ -30,6 +30,9 @@ func WaitClientLoadBalancer(ctx context.Context, plan InstallPlan, namespace str
 	if err != nil {
 		return "", errors.New("cannot load selected plan's kubeconfig")
 	}
+	if err := verifyRecordedCluster(plan.Identity.Context, restConfig); err != nil {
+		return "", err
+	}
 	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return "", errors.New("cannot create selected cluster client")

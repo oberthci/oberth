@@ -35,6 +35,7 @@ type installerCredentialTarget struct {
 	Context   string `json:"context"`
 	Namespace string `json:"namespace"`
 	Server    string `json:"server"`
+	CASHA256  string `json:"ca_sha256"`
 }
 
 func credentialTarget(cfg Config, deps Deps) installerCredentialTarget {
@@ -46,7 +47,8 @@ func credentialTarget(cfg Config, deps Deps) installerCredentialTarget {
 	if deps.RestConfig != nil {
 		server = deps.RestConfig.Host
 	}
-	return installerCredentialTarget{Context: deps.ContextName, Namespace: ns, Server: server}
+	hash, _ := clusterCAHash(deps.RestConfig)
+	return installerCredentialTarget{Context: deps.ContextName, Namespace: ns, Server: server, CASHA256: hash}
 }
 
 type installerEnrollment struct {
@@ -93,6 +95,9 @@ func adminAPI(ctx context.Context, cfg Config, deps Deps) (AdminAPI, func(), err
 	}
 	closeConnection := func() {}
 	if deps.KubeClient != nil && deps.RestConfig != nil {
+		if err := verifyRecordedCluster(deps.ContextName, deps.RestConfig); err != nil {
+			return nil, closeConnection, err
+		}
 		ns := cfg.Namespace
 		if ns == "" {
 			ns = DefaultNamespace
@@ -179,6 +184,9 @@ func createFirstAdmin(ctx context.Context, cfg Config, deps Deps, publicKey []by
 	}
 	if deps.ContextName == "" {
 		return api.FirstAdminResult{}, errors.New("first admin requires the selected Kubernetes context")
+	}
+	if err := persistPendingInstallerEnrollment(&cfg, deps); err != nil {
+		return api.FirstAdminResult{}, err
 	}
 	request := api.FirstAdminRequest{Identity: identity, SSHPublicKey: string(publicKey), CSR: string(cfg.adminCSR), InstallerCSR: string(cfg.enrollment.csr), Bearer: cfg.AdminBearer}
 	body, err := json.Marshal(request)

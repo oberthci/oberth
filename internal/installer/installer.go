@@ -2472,6 +2472,9 @@ func loadFromRules(rules *clientcmd.ClientConfigLoadingRules, contextName string
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("load kubeconfig: %w", err)
 	}
+	if err := verifyRecordedCluster(contextName, restConfig); err != nil {
+		return nil, nil, "", err
+	}
 	client, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("create Kubernetes client: %w", err)

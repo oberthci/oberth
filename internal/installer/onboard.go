@@ -61,8 +61,13 @@ func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 			return err
 		}
 	} else {
+		if err := reusePendingInstallerEnrollment(&cfg, deps); err != nil {
+			return err
+		}
 		var err error
-		cfg.enrollment, err = newInstallerEnrollment()
+		if cfg.enrollment == nil {
+			cfg.enrollment, err = newInstallerEnrollment()
+		}
 		if err != nil {
 			return err
 		}
@@ -1810,23 +1815,30 @@ func orgFromBaseURL(baseURL string) string {
 // not yet fully written — the rename is atomic on POSIX filesystems, so the
 // target is either the old content or the complete new content.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 	file, err := os.CreateTemp(filepath.Dir(path), ".oberth-config-*")
 	if err != nil {
 		return err
 	}
-	tmp := file.Name()
-	defer func() { _ = os.Remove(tmp) }() //nolint:gosec // G703: temporary file created by this function in the selected configuration directory.
+	tmp := filepath.Base(file.Name())
+	defer func() { _ = root.Remove(tmp) }()
 	if err = file.Chmod(perm); err == nil {
 		_, err = file.Write(data)
 	}
-	closeErr := file.Close()
-	if err != nil {
+	if err == nil {
+		err = file.Sync()
+	}
+	if err := errors.Join(err, file.Close()); err != nil {
 		return err
 	}
-	if closeErr != nil {
-		return closeErr
+	if err := root.Rename(tmp, filepath.Base(path)); err != nil {
+		return err
 	}
-	return os.Rename(tmp, path) //nolint:gosec // G703: atomic publication in the operator-selected configuration directory.
+	return syncConfigDirectory(filepath.Dir(path))
 }
 
 // ---------------------------------------------------------------------------

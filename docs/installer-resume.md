@@ -89,3 +89,21 @@ chart change or chart version change still applies. A resume keeps this
 no-op check even when `--upgrade` is present; a separate install with
 `--upgrade` and no recovery input explicitly requests reconciliation. An existing authenticated admin is reused during
 resume; later enrollment uses the admin API and never repeats first-admin exec.
+
+The local `kubernetes.json` install record stores the context name, source
+kubeconfig path when supplied, API server URL and SHA-256 of the CA bundle. Cluster
+commands verify that identity before connecting, including explicit reuse of the
+recorded context name. Changing `KUBECONFIG` cannot redirect that recorded name.
+TLS server-name and verification settings are also checked. A context using the
+system trust store records the digest of an empty explicit CA bundle; TLS still
+uses system trust. An explicit different context selects another target.
+`scripts/setup-secretstore.sh --context NAME --kubeconfig PATH` uses the same
+selection and checks; without those flags it uses the install record, never the
+ambient current-context. Its external TokenReview setup requires an explicit CA
+bundle in the selected kubeconfig.
+
+Keep `installer-pending-*.json` in the owner-only Oberth configuration directory
+for each Kubernetes target. Each contains the locally generated private installer
+key and CSR saved before the first-admin exec. An interrupted installation reuses
+that key to retrieve fresh credentials rather than creating another administrator.
+No bootstrap token is stored in a Kubernetes Secret.

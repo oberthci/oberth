@@ -6,10 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"time"
-
-	"github.com/oberthci/oberth/internal/service"
-	"github.com/oberthci/oberth/internal/store"
 )
 
 func readClientCSR(path string, input io.Reader) ([]byte, error) {
@@ -21,14 +17,6 @@ func readClientCSR(path string, input io.Reader) ([]byte, error) {
 		return raw, nil
 	}
 	return readBoundedFile(path, 64<<10)
-}
-
-func issueUplinkCertificate(ctx context.Context, database *store.Store, identity, fingerprint string, csr []byte, ttl time.Duration) (string, error) {
-	authority, err := loadClientAuthority()
-	if err != nil {
-		return "", err
-	}
-	return service.IssueClientCert(ctx, &service.ClientCertIssuer{Authority: authority, Store: database}, administrativeActor, identity, fingerprint, csr, ttl)
 }
 
 func runUplinkCert(ctx context.Context, args []string, input io.Reader, output io.Writer) error {
