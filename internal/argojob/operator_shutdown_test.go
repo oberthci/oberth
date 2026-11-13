@@ -60,8 +60,8 @@ func TestOperatorShutdownRequiresTerminalAttribution(t *testing.T) {
 		}
 		wf.Status.Phase = wfv1.WorkflowError
 		wf.Status.Message = "Stopped with strategy '" + string(other) + "'"
-		if completionFor(wf).OperatorStopped {
-			t.Fatal("mismatched strategy attributed to shutdown")
+		if got := completionFor(wf); !got.OperatorStopped || got.Reason != wf.Status.Message {
+			t.Fatalf("completed shutdown lost after strategy change: %+v", got)
 		}
 		wf.Spec.OnExit = "cleanup"
 		wf.Status.Message = "exit handler failed"
