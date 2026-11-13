@@ -166,6 +166,15 @@ removed VM `argo` values refuse the upgrade until they are dropped; see
 [removed chart values](../README.md#upgrading). Removed CLI serve flags must be
 removed from custom launch commands.
 
+In v0.22.1, historical capability recovery also requires the original Workflow
+UID, not only its run, name and tested SHA. A forward migration discards the
+v0.22.0 receipts, which lack that UID; it never guesses one from a live object.
+Workflows relying on those old device-grant receipts should finish or be
+cancelled with the old owner before upgrade. Otherwise adoption refuses the
+binding for that run and leaves its Workflow for operator inspection; rerun
+under the current grant when appropriate. Current grants, run records and audit
+history are retained. New submissions never use historical recovery authority.
+
 The earlier technology-specific journal retirement left its inert tables in
 place. That historical statement does not describe all changes in this release:
 v0.22.0 includes forward migrations for target-placement removal, device-grant

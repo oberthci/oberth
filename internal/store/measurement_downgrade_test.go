@@ -10,7 +10,17 @@ import (
 func TestMeasurementDowngradeMatchesHistoricalIndexInventoryAndReceipts(t *testing.T) {
 	s := newMigrationIDTestStore(t)
 	ctx := t.Context()
-	prior := migrations[:len(migrations)-1]
+	const id = "20261113013336-remove-step-measurement-32ae7f0f09084618bddcb8f20fd0fbac"
+	index := -1
+	for i, migration := range migrations {
+		if migration.id == id {
+			index = i
+		}
+	}
+	if index < 0 {
+		t.Fatal("measurement migration missing")
+	}
+	prior := migrations[:index]
 	if err := s.migrateWithMigrations(ctx, nil, prior); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +68,7 @@ func TestMeasurementDowngradeMatchesHistoricalIndexInventoryAndReceipts(t *testi
 		t.Fatal("wrong historical retention index", columns, err)
 	}
 	var removed int
-	if err := s.db.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id=?`, migrations[len(migrations)-1].id).Scan(&removed); err != nil || removed != 0 {
+	if err := s.db.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id=?`, id).Scan(&removed); err != nil || removed != 0 {
 		t.Fatal("measurement removal receipt not rewound", removed, err)
 	}
 	// Replay succeeds once and does not try to create the already-receipted

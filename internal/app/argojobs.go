@@ -74,7 +74,7 @@ type ArgoJobs struct {
 	beforeCreate  func(context.Context, service.WorkflowRequest, argojob.Request) error
 
 	capabilityGrants   func(context.Context, int64) (*argoworkflow.Capability, error)
-	capabilityRecovery func(context.Context, int64, string, string, string) (json.RawMessage, error)
+	capabilityRecovery func(context.Context, int64, string, string, string, string) (json.RawMessage, error)
 	resourceBlobs      workflowpolicy.PolicyGit
 	controller         argoControl
 	auditor            service.Auditor
@@ -198,13 +198,13 @@ func (jobs *ArgoJobs) SetWorkflowCapabilityLoader(load func(context.Context, int
 }
 
 // SetWorkflowCapabilityRecoveryLoader supplies exact in-flight migration receipts.
-func (jobs *ArgoJobs) SetWorkflowCapabilityRecoveryLoader(load func(context.Context, int64, string, string, string) (json.RawMessage, error)) {
+func (jobs *ArgoJobs) SetWorkflowCapabilityRecoveryLoader(load func(context.Context, int64, string, string, string, string) (json.RawMessage, error)) {
 	if jobs.routes != nil {
 		jobs.routes.local.SetWorkflowCapabilityRecoveryLoader(load)
 	}
 	jobs.capabilityRecovery = load
 	if controller, ok := jobs.controller.(interface {
-		WithWorkflowCapabilityRecoveryLoader(func(context.Context, int64, string, string, string) (json.RawMessage, error)) *argojob.Controller
+		WithWorkflowCapabilityRecoveryLoader(func(context.Context, int64, string, string, string, string) (json.RawMessage, error)) *argojob.Controller
 	}); ok {
 		controller.WithWorkflowCapabilityRecoveryLoader(load)
 	}
@@ -1116,7 +1116,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		result.Status, result.Phase = model.RunInterrupted, "interrupted"
 		result.FailedStage, result.FailedStep = "", ""
 	}
-	return result
+	return operatorShutdownResult(result, completion)
 }
 
 // noPipelineError returns a user-facing error when the repository has no

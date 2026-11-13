@@ -54,7 +54,10 @@ func TestPrintedRoutingRemedyRestoresBothVerifiedEndpoints(t *testing.T) {
 				return []byte("NAME KIND URL KEY FINGERPRINT\nforge ssh ssh://git@forge.example.test/acme SHA256:public\n"), nil
 			}
 			if strings.Contains(joined, "admin read-file") && verifying {
-				return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), nil
+				if cert := server.Certificate(); cert != nil {
+					return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}), nil
+				}
+				return ca, nil
 			}
 			if verifying && (strings.Contains(joined, "uplink add") || strings.Contains(joined, "upstream add") || strings.Contains(joined, "enroll")) {
 				t.Fatalf("verify repeated onboarding: %s", joined)
@@ -110,6 +113,32 @@ func TestPrintedRoutingRemedyRestoresBothVerifiedEndpoints(t *testing.T) {
 	}
 	if len(failure.Checks) != 1 || failure.Checks[0].Code != "client_bootstrap_endpoint" {
 		t.Fatalf("wrong failure: %+v", failure)
+	}
+	// The actual --verify --json path must report the same endpoint check and
+	// exact remedy as ExecuteJSON, while retaining SSH's own check identity.
+	verifying = true
+	output.Reset()
+	if err := PrintVerification(t.Context(), cfg, host, true); err == nil {
+		t.Fatal("unreachable endpoints verified")
+	}
+	var verified InstallResult
+	if err := json.Unmarshal(output.Bytes(), &verified); err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, check := range verified.Checks {
+		if check.Code == "client_bootstrap_endpoint" || check.Code == "ssh_reachable" {
+			seen++
+			if check.OK || check.Remedy != failure.Checks[0].Remedy || !strings.Contains(check.Reason, "connection refused") {
+				t.Fatalf("install/verify endpoint contract differs: %+v versus %+v", check, failure.Checks[0])
+			}
+		}
+		if check.Code == "https_tls" {
+			t.Fatal("verify retained a second HTTPS endpoint code", check)
+		}
+	}
+	if seen != 2 {
+		t.Fatal("missing HTTPS/SSH endpoint failure checks", verified.Checks)
 	}
 	certPath := filepath.Join(t.TempDir(), "client.csr.crt")
 	if err := os.WriteFile(certPath, []byte("already issued public certificate"), 0600); err != nil {

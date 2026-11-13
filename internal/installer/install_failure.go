@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const clientEndpointCheckCode = "client_bootstrap_endpoint"
+
 // Only diagnostics produced locally from public configuration belong here.
 // Subprocess errors/output can contain credentials and must not be serialized.
 type installStepError struct {
@@ -42,7 +44,7 @@ func clientEndpointRemedy(cfg Config, deps Deps) string {
 func clientEndpointFailure(cfg Config, deps Deps, err error) *installStepError {
 	_, https := clientPorts(deps)
 	endpoint := "https://" + net.JoinHostPort(clientReachableHost(deps), https)
-	return &installStepError{check: CheckResult{Code: "client_bootstrap_endpoint", Reason: "client bootstrap endpoint verification at " + endpoint + ": " + err.Error(), Remedy: clientEndpointRemedy(cfg, deps)}, endpoint: endpoint}
+	return &installStepError{check: CheckResult{Code: clientEndpointCheckCode, Reason: "client bootstrap endpoint verification at " + endpoint + ": " + err.Error(), Remedy: clientEndpointRemedy(cfg, deps)}, endpoint: endpoint}
 }
 
 func requireClientEndpoint(ctx context.Context, cfg Config, deps Deps) error {

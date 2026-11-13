@@ -228,7 +228,7 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 	}
 	if !ready {
 		blocked := "blocked by: deployment not ready (" + reason + ")"
-		r.check("https_tls", false, blocked)
+		r.check(clientEndpointCheckCode, false, blocked)
 		r.Checks[len(r.Checks)-1].Reason = reason
 		r.check("ssh_reachable", false, blocked)
 		r.Checks[len(r.Checks)-1].Reason = reason
@@ -239,7 +239,7 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		roots.AddCert(ca)
 		dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 		connection, dialErr := dialer.DialContext(ctx, "tcp", net.JoinHostPort(address, https))
-		r.check("https_tls", dialErr == nil, "Make the advertised HTTPS address reachable and ensure its name is on the server certificate.")
+		r.check(clientEndpointCheckCode, dialErr == nil, "Make the advertised HTTPS address reachable and ensure its name is on the server certificate.")
 		if dialErr != nil {
 			failure := clientEndpointFailure(cfg, deps, dialErr)
 			r.Checks[len(r.Checks)-1].Reason = failure.check.Reason

@@ -70,7 +70,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
 	capabilities       func(context.Context, int64) (*argoworkflow.Capability, error)
-	capabilityRecovery func(context.Context, int64, string, string, string) (json.RawMessage, error)
+	capabilityRecovery func(context.Context, int64, string, string, string, string) (json.RawMessage, error)
 	restartedAt        time.Time
 	profileVerifyMu    sync.Mutex
 	profileMu          sync.Mutex

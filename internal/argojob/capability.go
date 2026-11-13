@@ -96,10 +96,10 @@ func (c *Controller) boundCapability(ctx context.Context, wf *wfv1.Workflow, rep
 		return nil, ErrWorkflowCapabilityChanged
 	}
 	if capabilityBinding(binding.RepositoryID, current) != encoded {
-		if c.capabilityRecovery == nil {
+		if c.capabilityRecovery == nil || wf.UID == "" {
 			return nil, ErrWorkflowCapabilityChanged
 		}
-		previous, err := c.capabilityRecovery(ctx, binding.RepositoryID, wf.Annotations[runIDAnnotation], wf.Name, wf.Labels["oberth.ci/sha"])
+		previous, err := c.capabilityRecovery(ctx, binding.RepositoryID, wf.Annotations[runIDAnnotation], wf.Name, string(wf.UID), wf.Labels["oberth.ci/sha"])
 		if err != nil {
 			return nil, fmt.Errorf("argojob: read capability recovery receipt: %w", err)
 		}
