@@ -23,14 +23,10 @@ import (
 func TestForgeProbeWithGroupSignalsRefused(t *testing.T) {
 	const marker = "group-signals-refused"
 	if !slices.Contains(os.Args, marker) {
-		exe, err := os.Executable()
-		if err != nil {
-			t.Fatal(err)
-		}
 		for _, refused := range []unix.Errno{unix.EACCES, unix.EPERM} {
 			t.Run(refused.Error(), func(t *testing.T) {
 				code := strconv.Itoa(int(refused))
-				command := exec.Command("python3", "../../hack/testdata/git-group-permissions/exec.py", code, exe, "-test.run=^TestForgeProbeWithGroupSignalsRefused$", "-test.count=1", "--", marker, code)
+				command := groupSignalCommand(t, refused, "-test.run=^TestForgeProbeWithGroupSignalsRefused$", "-test.count=1", "--", marker, code)
 				if output, err := command.CombinedOutput(); err != nil {
 					t.Fatalf("isolated group-signal refusal: %v\n%s", err, output)
 				}
@@ -127,13 +123,9 @@ func TestForgeProbeWithGroupSignalsRefused(t *testing.T) {
 }
 
 func TestDeniedGroupSignalCancellationReapsDescendants(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, refused := range []unix.Errno{unix.EACCES, unix.EPERM} {
 		t.Run(refused.Error(), func(t *testing.T) {
-			cmd := exec.Command("python3", "../../hack/testdata/git-group-permissions/exec.py", strconv.Itoa(int(refused)), exe, "-test.run=^TestCLICommandReapsCanceledDescendants$", "-test.count=1")
+			cmd := groupSignalCommand(t, refused, "-test.run=^TestCLICommandReapsCanceledDescendants$", "-test.count=1")
 			if raw, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("kernel-denied group cancellation/reaping: %v\n%s", err, raw)
 			}

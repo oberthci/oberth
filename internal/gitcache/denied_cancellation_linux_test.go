@@ -22,7 +22,7 @@ func TestReviewerDeniedGroupSignalStillHonorsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.Contains(os.Args, marker) {
-		cmd := exec.Command("python3", "../../hack/testdata/git-group-permissions/exec.py", "13", exe, "-test.run=^TestReviewerDeniedGroupSignalStillHonorsCancellation$", "-test.count=1", "--", marker)
+		cmd := groupSignalCommand(t, unix.EACCES, "-test.run=^TestReviewerDeniedGroupSignalStillHonorsCancellation$", "-test.count=1", "--", marker)
 		if raw, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("denied-group cancellation: %v\n%s", err, raw)
 		}
