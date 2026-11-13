@@ -280,8 +280,11 @@ win name/path collisions; validated workspace opt-outs remain available.
   and inserts `oberth-executor-token` before Argo's init. Oberth delivers
   a Pod-bound executor token over exec after verifying the exact Pod identity;
   the waiter exposes no token in a Kubernetes object. The token is written
-  under a random, unlistable directory of that volume, never at the in-cluster
-  default `token` path, and the patch sets `KUBECONFIG` on Argo's init and wait
+  under a random 128-bit directory name, fresh per delivery, never at the
+  in-cluster default `token` path; the unguessable name is the protection (a
+  root executor with default capabilities can still list the directory, and
+  nothing lists it today because artifacts, data templates and `archiveLocation`
+  are refused), and the patch sets `KUBECONFIG` on Argo's init and wait
   containers (and the main container of resource and data templates) to the
   delivered kubeconfig that names it (#1564). The init/wait/waiter
   helpers normally request 50m CPU and 64 MiB memory, with 500m/512 MiB limits.

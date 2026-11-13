@@ -390,6 +390,40 @@ func TestExecutorIdentityDeliveryCommandIsAtomicAndReplaySafe(t *testing.T) {
 	}
 }
 
+// A delivery killed before its trap runs may leave staging behind. Any staged
+// token copy must sit under a name carrying the payload's random directory.
+func TestExecutorIdentityKilledDeliveryLeavesNoNameableToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() { unsealExecutorDirectories(t, dir) })
+	command := strings.Replace(executorIdentityDeliveryCommand, executorTokenDir, ".", 1)
+	command = strings.Replace(command, `trap 'rm -rf "$stage"' EXIT; `, "", 1)
+	killed := strings.Replace(command, `mkdir -p "$sealed"; `, `kill -9 $$; `, 1)
+	if killed == command {
+		t.Fatal("kill point not found")
+	}
+	cmd := exec.Command("sh", "-c", killed)
+	cmd.Dir, cmd.Env = dir, executorDeliveryEnv()
+	cmd.Stdin = strings.NewReader("killed-token\nnamespace\n" + base64.StdEncoding.EncodeToString([]byte("public-ca")) + "\n" + testExecutorDirectory + "\n")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("killed delivery reported success")
+	}
+	stages, err := filepath.Glob(filepath.Join(dir, ".identity.*"))
+	if err != nil || len(stages) != 1 {
+		t.Fatal("expected the killed delivery's staging", stages, err)
+	}
+	if !strings.HasSuffix(stages[0], "."+testExecutorDirectory) {
+		t.Fatalf("staged token is reachable without the random name: %s", filepath.Base(stages[0]))
+	}
+	if data, err := os.ReadFile(filepath.Join(stages[0], "token")); err != nil || string(data) != "killed-token" {
+		t.Fatal("kill point did not follow token staging", err)
+	}
+	for _, name := range []string{"token", "kubeconfig"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("killed delivery published", name, err)
+		}
+	}
+}
+
 func TestExecutorIdentityDeliveryBracketsIPv6APIServer(t *testing.T) {
 	dir := t.TempDir()
 	t.Cleanup(func() { unsealExecutorDirectories(t, dir) })
