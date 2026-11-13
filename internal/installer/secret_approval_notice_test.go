@@ -65,11 +65,9 @@ func TestS6Round2Guards(t *testing.T) {
 		}
 		check(reflect.ValueOf(wf), "workflow")
 	})
-	t.Run("unscoped-configmap", func(t *testing.T) {
-		for _, data := range []string{"- repo: upstream/org/repo\n  step: publish\n  secret: oberth/data/release/token\n", "- repo: upstream/org/repo\n  step: publish\n  secret: oberth/data/release/token\n- repo: upstream/org/repo\n  workflow: .oberth/release.yaml\n  step: publish\n  secret: oberth/data/release/other\n"} {
-			if _, err := service.ParseGrants(data); !errors.Is(err, service.ErrUnscopedSecretGrant) {
-				t.Errorf("unscoped ConfigMap approval was not rejected: %v", err)
-			}
+	t.Run("unscoped-grant-key", func(t *testing.T) {
+		if err := service.ValidateGrantEntry(0, service.SecretAccessGrantEntry{Repo: "upstream/org/repo", Step: "publish", Secret: "oberth/data/release/token"}); err == nil {
+			t.Fatal("unscoped grant accepted")
 		}
 	})
 	t.Run("unscoped-installer-fallback", func(t *testing.T) {

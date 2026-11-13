@@ -14,7 +14,7 @@ import (
 
 func TestReleasePreflightWithoutStoreReadsSkipsAccessGate(t *testing.T) {
 	loader := &failingAdmissionGrants{}
-	jobs := &ArgoJobs{secretAccess: loader, reconcilerHealthy: &fakeReconciler{healthy: false}}
+	jobs := &ArgoJobs{secretAccess: loader}
 	const source = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:

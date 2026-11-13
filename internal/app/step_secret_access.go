@@ -27,12 +27,6 @@ func (jobs *ArgoJobs) stepSecretAccess(ctx context.Context, repository model.Rep
 	if jobs.secretAccess == nil {
 		return nil, nil, errors.New("app: secret-consuming steps require a secret access grant loader")
 	}
-	// Snapshot health before reading grants. Initial reconciliation may revoke
-	// stale grants; a read from before that reconciliation must not become
-	// authoritative merely because health turns true while the read completes.
-	jobs.mu.Lock()
-	healthy := jobs.reconcilerHealthy == nil || jobs.reconcilerHealthy.ReconcileHealthy()
-	jobs.mu.Unlock()
 	active, err := jobs.secretAccess.ActiveSecretGrants(ctx, repository.ID, file)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app: load approved secrets for %s: %w", repository.Name, err)
@@ -49,11 +43,7 @@ func (jobs *ArgoJobs) stepSecretAccess(ctx context.Context, repository model.Rep
 			grants[secret][step] = true
 		}
 	}
-	steps, grantErr := argojob.GrantedSecretSteps(workflow, paths, grants)
-	blocked := len(steps) > 0 && !healthy
-	if blocked {
-		return nil, nil, fmt.Errorf("app: access reconciler has not completed initial reconciliation; secret access is blocked for %s", repository.Name)
-	}
+	_, grantErr := argojob.GrantedSecretSteps(workflow, paths, grants)
 	if grantErr != nil {
 		return approved, grants, &argoworkflow.AdmissionError{Cause: grantErr}
 	}

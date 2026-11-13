@@ -95,21 +95,10 @@ func (s *Store) SecretAccessList(ctx context.Context, repo string, includeRevoke
 // concurrent CLI+reconciler race cannot surface a spurious constraint error
 // for a grant that is already durably in effect.
 func (s *Store) Grant(ctx context.Context, repo, workflow, step, secret, actor string) (SecretAccessGrant, error) {
-	if strings.TrimSpace(workflow) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" || strings.TrimSpace(actor) == "" {
-		return SecretAccessGrant{}, fmt.Errorf("%w: repo, workflow, step, secret, and actor are required", ErrInvalid)
+	if err := validateSecretAccessKey(model.SecretAccessKey{Repo: repo, Workflow: workflow, Step: step, Secret: secret}, actor); err != nil {
+		return SecretAccessGrant{}, err
 	}
-	if !grantRepoPattern.MatchString(repo) {
-		return SecretAccessGrant{}, fmt.Errorf("%w: repo %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, repo)
-	}
-	if !grantStepPattern.MatchString(step) {
-		return SecretAccessGrant{}, fmt.Errorf("%w: step must be * or contain only [A-Za-z0-9._/-]", ErrInvalid)
-	}
-	if !grantSecretPattern.MatchString(secret) {
-		return SecretAccessGrant{}, fmt.Errorf("%w: secret %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, secret)
-	}
-	if err := model.ValidateWorkflowFile(workflow); err != nil {
-		return SecretAccessGrant{}, fmt.Errorf("%w: %w", ErrInvalid, err)
-	}
+
 	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -407,4 +396,25 @@ func (s *Store) DismissGrantDeclaration(ctx context.Context, actor, repo, workfl
 		return err
 	}
 	return tx.Commit()
+}
+
+func validateSecretAccessKey(key model.SecretAccessKey, actor string) error {
+	repo, workflow, step, secret := key.Repo, key.Workflow, key.Step, key.Secret
+
+	if strings.TrimSpace(workflow) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" || strings.TrimSpace(actor) == "" {
+		return fmt.Errorf("%w: repo, workflow, step, secret, and actor are required", ErrInvalid)
+	}
+	if !grantRepoPattern.MatchString(repo) {
+		return fmt.Errorf("%w: repo %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, repo)
+	}
+	if !grantStepPattern.MatchString(step) {
+		return fmt.Errorf("%w: step must be * or contain only [A-Za-z0-9._/-]", ErrInvalid)
+	}
+	if !grantSecretPattern.MatchString(secret) {
+		return fmt.Errorf("%w: secret %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, secret)
+	}
+	if err := model.ValidateWorkflowFile(workflow); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	return nil
 }

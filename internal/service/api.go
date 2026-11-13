@@ -89,7 +89,7 @@ type APIConfig struct {
 	ReleaseWIFOverrides       ReleaseWIFOverrideStore
 	ReleaseWIF                ReleaseWIFPolicy
 	SecretStoreVerifier       SecretStoreVerifier
-	SecretAccessReconciler    *AccessReconciler
+	SecretAccessChanged       func(context.Context) error
 	RepositoryArchiver        RepositoryArchiver
 	ChangeRepositoryArchive   func(context.Context, string, bool, func() error) error
 	RepositoryRemover         RepositoryRemover
@@ -171,7 +171,7 @@ type API struct {
 	releaseWIF                ReleaseWIFPolicy
 	releaseWIFMu              *sync.Mutex
 	secretStoreVerifier       SecretStoreVerifier
-	secretAccessReconciler    *AccessReconciler
+	secretAccessChanged       func(context.Context) error
 	repositoryArchiver        RepositoryArchiver
 	changeRepositoryArchive   func(context.Context, string, bool, func() error) error
 	repositoryRemover         RepositoryRemover
@@ -269,7 +269,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		tags: config.Tags, enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
-		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
+		secretAccess: config.SecretAccess, secretAccessChanged: config.SecretAccessChanged,
 		workflowCapabilities: config.WorkflowCapabilities,
 
 		secretStoreVerifier: config.SecretStoreVerifier,
@@ -915,7 +915,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Step     string `json:"step"`
 			Secret   string `json:"secret"`
 		}
-		if err := decodeTool(raw, &arguments); err != nil {
+		if err := decodeAdministration(raw, &arguments); err != nil {
 			return nil, err
 		}
 		return service.accessAllow(ctx, actor, arguments.Repo, arguments.Workflow, arguments.Step, arguments.Secret)
@@ -926,7 +926,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Step     string `json:"step"`
 			Secret   string `json:"secret"`
 		}
-		if err := decodeTool(raw, &arguments); err != nil {
+		if err := decodeAdministration(raw, &arguments); err != nil {
 			return nil, err
 		}
 		return service.accessRevoke(ctx, actor, arguments.Repo, arguments.Workflow, arguments.Step, arguments.Secret)
@@ -3099,7 +3099,7 @@ func (service *API) waitDuration(seconds int) (time.Duration, error) {
 
 // canonicalAccessRepo resolves any accepted repository spelling (bare,
 // org/repo, upstream/org/repo) onto the qualified persisted grant key the
-// v12 migration and the reconciler converge on. An ambiguous bare spelling
+// database stores. An ambiguous bare spelling
 // is refused — it names neither same-name repository. An unregistered or
 // syntactically unresolvable spelling is returned verbatim: grants for
 // unregistered repositories are stored and listed as spelled, and stay
@@ -3208,35 +3208,18 @@ func (service *API) accessAllow(ctx context.Context, actor api.Actor, repo, work
 			}
 		}
 	}
-	// Validate the entry before touching the ConfigMap. Without this check a
-	// malformed entry (glob characters in repo/secret, or a non-wildcard step)
-	// would be written to the ConfigMap, and the next reconciliation would
-	// reject the entire list and revoke every active approval — a single
-	// malformed request causing global secret revocation.
+	// Validate before the audited database mutation.
 	if err := ValidateGrantEntry(0, SecretAccessGrantEntry{Repo: repo, Workflow: workflow, Step: step, Secret: secret}); err != nil {
 		return api.AccessGrantResponse{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
-	}
-	if service.secretAccessReconciler != nil {
-		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.AddGrantCanonical(ctx, repo, workflow, step, secret)); err != nil {
-			return api.AccessGrantResponse{}, fmt.Errorf("update ConfigMap: %w", err)
-		}
-		// Read the grant back from sqlite after reconcile.
-		grants, err := service.secretAccess.SecretAccessList(ctx, repo, false)
-		if err != nil {
-			return api.AccessGrantResponse{}, err
-		}
-		for _, grant := range grants {
-			if grant.Repo == repo && grant.Workflow == workflow && grant.Step == step && grant.Secret == secret {
-				response := wireAccessGrant(grant)
-				response.Warning = grantPolicySyncAdvisory
-				return response, nil
-			}
-		}
-		return api.AccessGrantResponse{}, fmt.Errorf("grant was written to ConfigMap but not found in store after reconcile")
 	}
 	grant, err := service.secretAccess.Grant(ctx, repo, workflow, step, secret, actor.Identity)
 	if err != nil {
 		return api.AccessGrantResponse{}, err
+	}
+	if service.secretAccessChanged != nil {
+		if err := service.secretAccessChanged(ctx); err != nil {
+			return api.AccessGrantResponse{}, fmt.Errorf("%w: grant committed but identity refresh failed: %w", ErrUnavailable, err)
+		}
 	}
 	response := wireAccessGrant(grant)
 	response.Warning = grantPolicySyncAdvisory
@@ -3266,42 +3249,14 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, wor
 	if service.scope != nil && !service.scope.seesAccessKey(repo) {
 		return api.AccessGrantResponse{}, hiddenRepository(repo)
 	}
-	if service.secretAccessReconciler != nil {
-		// Read the grant before removal so we can return it.
-		grants, err := service.secretAccess.SecretAccessList(ctx, repo, false)
-		if err != nil {
-			return api.AccessGrantResponse{}, err
-		}
-		var target *store.SecretAccessGrant
-		for i := range grants {
-			if grants[i].Repo == repo && grants[i].Workflow == workflow && grants[i].Step == step && grants[i].Secret == secret {
-				target = &grants[i]
-				break
-			}
-		}
-		if target == nil {
-			return api.AccessGrantResponse{}, fmt.Errorf("%w: no active grant for %s workflow %s step %s secret %s", ErrInvalidInput, repo, workflow, step, secret)
-		}
-		if err := service.secretAccessReconciler.UpdateConfigMap(ctx, actor.Identity, service.secretAccessReconciler.RemoveGrantCanonical(ctx, repo, workflow, step, secret)); err != nil {
-			return api.AccessGrantResponse{}, fmt.Errorf("update ConfigMap: %w", err)
-		}
-		// Read the revoked grant back.
-		revoked, err := service.secretAccess.SecretAccessList(ctx, repo, true)
-		if err != nil {
-			return api.AccessGrantResponse{}, err
-		}
-		for _, grant := range revoked {
-			if grant.ID == target.ID && grant.RevokedAt != nil {
-				response := wireAccessGrant(grant)
-				response.Warning = revokePolicySyncAdvisory
-				return response, nil
-			}
-		}
-		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "revocation was requested but its committed state could not be confirmed; inspect access_list")
-	}
 	grant, err := service.secretAccess.Revoke(ctx, repo, workflow, step, secret, actor.Identity)
 	if err != nil {
 		return api.AccessGrantResponse{}, err
+	}
+	if service.secretAccessChanged != nil {
+		if err := service.secretAccessChanged(ctx); err != nil {
+			return api.AccessGrantResponse{}, fmt.Errorf("%w: grant committed but identity refresh failed: %w", ErrUnavailable, err)
+		}
 	}
 	response := wireAccessGrant(grant)
 	response.Warning = revokePolicySyncAdvisory

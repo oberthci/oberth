@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"log"
 	"reflect"
 	"testing"
 
@@ -21,7 +19,6 @@ func TestAccessRevokeUsesExactListedPathAndTuple(t *testing.T) {
 	client := fake.NewClientset()
 	service := fixture.api(t)
 	service.secretAccess = fixture.store
-	service.secretAccessReconciler = NewAccessReconciler(client, "oberth", fixture.store, log.New(io.Discard, "", 0))
 	actor := api.Actor{Identity: "admin@fixture", Admin: true}
 	const repo = "codeberg/acme/oberth"
 	const path = "oberth/data/release/cosign-secret"

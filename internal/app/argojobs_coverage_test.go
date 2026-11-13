@@ -67,58 +67,11 @@ func TestNewArgoJobs_ValidConstruction(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// SetReconcilerHealth
+// CI without secret reads
 // ---------------------------------------------------------------------------
 
-type fakeReconciler struct {
-	healthy bool
-}
-
-func (r *fakeReconciler) ReconcileHealthy() bool { return r.healthy }
-
-func TestSetReconcilerHealth(t *testing.T) {
-	t.Parallel()
-	config := argojob.Config{
-		Namespace:                  "test-pipeline",
-		PipelineServiceAccount:     "test-pipeline",
-		CredentialedServiceAccount: "test-credentialed",
-		CISecretsServiceAccount:    "test-ci-secrets",
-		ExecutorServiceAccount:     "test-executor",
-	}
-	jobs, err := NewArgoJobs(newBlockingController(), config, &stubAuditor{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checker := &fakeReconciler{healthy: true}
-	jobs.SetReconcilerHealth(checker)
-	jobs.mu.Lock()
-	if jobs.reconcilerHealthy == nil {
-		t.Fatal("reconciler health checker was not set")
-	}
-	if !jobs.reconcilerHealthy.ReconcileHealthy() {
-		t.Fatal("reconciler should report healthy")
-	}
-	jobs.mu.Unlock()
-}
-
-func TestCreateWorkflow_ReconcilerUnhealthyBlocks(t *testing.T) {
-	t.Parallel()
+func TestCreateCIWithoutSecretReadsDoesNotReadGrants(t *testing.T) {
 	fixture := newRaceFixture(t)
-	checker := &fakeReconciler{healthy: false}
-	fixture.jobs.SetReconcilerHealth(checker)
-
-	request := fixture.request("wf-unhealthy", "run-unhealthy")
-	grantedAdmissionSource(t, fixture.sourceDir)
-	fixture.jobs.secretAccess = &admissionGrants{active: map[string]map[string]bool{"main": {admissionSecretPath: true}}}
-	err := fixture.jobs.CreateWorkflow(context.Background(), request)
-	if err == nil || !strings.Contains(err.Error(), "initial reconciliation") {
-		t.Fatalf("expected reconciler health gate error, got: %v", err)
-	}
-}
-
-func TestCreateCIWithoutSecretReadsBypassesUnhealthyReconciler(t *testing.T) {
-	fixture := newRaceFixture(t)
-	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 	if err := fixture.jobs.CreateWorkflow(t.Context(), fixture.request("plain", "plain-run")); err != nil {
 		t.Fatalf("plain CI blocked: %v", err)
 	}
@@ -127,7 +80,7 @@ func TestCreateCIWithoutSecretReadsBypassesUnhealthyReconciler(t *testing.T) {
 	}
 }
 
-func TestCreateReleaseWithoutSecretReadsIgnoresReconciler(t *testing.T) {
+func TestCreateReleaseWithoutSecretReadsDoesNotReadGrants(t *testing.T) {
 	fixture := newRaceFixture(t)
 	// A release without secret-consuming steps does not consult secret health.
 	source, err := os.ReadFile(filepath.Join(fixture.sourceDir, ".oberth", "build.yaml"))
@@ -135,7 +88,6 @@ func TestCreateReleaseWithoutSecretReadsIgnoresReconciler(t *testing.T) {
 		t.Fatal(err)
 	}
 	writePipeline(t, fixture.sourceDir, "release.yaml", string(source))
-	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 	request := fixture.request("release", "release-run")
 	request.Run.Release = true
 	if err := fixture.jobs.CreateRelease(t.Context(), request); err != nil {
@@ -143,21 +95,6 @@ func TestCreateReleaseWithoutSecretReadsIgnoresReconciler(t *testing.T) {
 	}
 	if len(fixture.controller.created) != 1 {
 		t.Fatal("plain release was not submitted")
-	}
-}
-
-func TestCreatePromotionWithGrantedStepRequiresReconciliation(t *testing.T) {
-	fixture := newRaceFixture(t)
-	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
-	request := fixture.request("promotion", "promotion-run")
-	request.Run.Trigger = "promotion"
-	grantedAdmissionSource(t, fixture.sourceDir)
-	fixture.jobs.secretAccess = &admissionGrants{active: map[string]map[string]bool{"main": {admissionSecretPath: true}}}
-	if err := fixture.jobs.CreateWorkflow(t.Context(), request); err == nil || !strings.Contains(err.Error(), "secret access is blocked") {
-		t.Fatalf("promotion error = %v", err)
-	}
-	if len(fixture.controller.created) != 0 {
-		t.Fatal("credentialed promotion submitted")
 	}
 }
 
