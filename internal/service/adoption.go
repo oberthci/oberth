@@ -53,6 +53,9 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 }
 
 func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter JobAdopter, run model.Run, cause error, require mutationRequirement) error {
+	if errors.Is(cause, argoworkflow.ErrWorkflowCapabilityRequired) {
+		return scheduler.failRetiredRun(ctx, run, require)
+	}
 	failure := adoptionFailure(adopter, run, cause)
 	if !errors.Is(cause, ErrAdoptionRefused) {
 		return failure

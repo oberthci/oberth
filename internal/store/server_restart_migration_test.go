@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 const stopRestartMigrationID = "20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153"
@@ -56,7 +57,7 @@ func TestStopRestartMigrationPreservesWorkflowsAndUncertainCreates(t *testing.T)
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at)VALUES(?,?,'owner_restart',?)`, old.ID, "original-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.
+	if _, err := s.db.Exec(testdb.PostWorkflowStopDowngrade+`-- Reconstruct the old column because this fixture rewinds past its drop migration.
 ALTER TABLE runs ADD COLUMN credentialed INTEGER NOT NULL DEFAULT 0 CHECK (credentialed IN (0, 1));
 DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, stopRestartMigrationID); err != nil {
 		t.Fatal(err)
@@ -104,7 +105,9 @@ func applyStopRestartMigration(t *testing.T, s *Store) {
 	t.Helper()
 	for _, migration := range migrations {
 		if migration.id == stopRestartMigrationID {
-			if _, err := s.db.Exec(migration.sql); err != nil {
+			const retiredColumns = `ALTER TABLE runs ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''; ALTER TABLE run_cancellations ADD COLUMN superseded_by TEXT NOT NULL DEFAULT '';`
+			const removeRetiredColumns = `ALTER TABLE runs DROP COLUMN superseded_by; ALTER TABLE run_cancellations DROP COLUMN superseded_by;`
+			if _, err := s.db.Exec(retiredColumns + migration.sql + removeRetiredColumns); err != nil {
 				t.Fatal(err)
 			}
 			return

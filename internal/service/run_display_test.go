@@ -231,7 +231,7 @@ func TestPromotionRestartDisplaysFailureWithoutCIIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := presentationRun(run)
-	if shown.DisplayStatus != "cancelled" || shown.DisplayReason != "server restart, retry needed" {
+	if shown.DisplayStatus != "failed" || shown.DisplayReason != model.ServerRestartReason {
 		t.Fatalf("restart promotion %+v", shown)
 	}
 	if _, err = recovered.OpenCIIssue(ctx, f.repo.ID, "feature/restart"); !errors.Is(err, store.ErrNotFound) {

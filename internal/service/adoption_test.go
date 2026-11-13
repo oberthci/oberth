@@ -383,7 +383,7 @@ func TestNewBranchWorkflowSurvivesShutdown(t *testing.T) {
 	}
 }
 
-func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
+func TestUnreadableNonAdoptingWorkflowKeepsRunForObservation(t *testing.T) {
 	for _, release := range []bool{false, true} {
 		fixture := newRecoveryFixture(t)
 		spec := model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promotion", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host", Trigger: "promotion"}
@@ -413,8 +413,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		}
 		fixture.setWorkflowName(t, run.ID, "oberth-legacy")
 		jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
-		// A legacy engine exposes no adoption capability. Release runs
-		// reset behind cleanup; promotion work uses its separate retry path.
+		// Without adoption or a terminal read, recovery retains this run.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
 		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("out-of-scope adoption") }); err == nil {
 			t.Fatal("unreadable Workflow was treated as absent")
@@ -423,10 +422,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantStatus, wantDeletes := model.RunFailed, 1
-		if release {
-			wantStatus, wantDeletes = model.RunQueued, 0
-		}
+		wantStatus, wantDeletes := model.RunRunning, 0
 		if current.Status != wantStatus || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
 			t.Fatalf("legacy recovery changed: %#v adopted=%v deleted=%v", current, jobs.adopted, jobs.deleted)
 		}

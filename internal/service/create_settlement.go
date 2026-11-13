@@ -398,6 +398,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context
 			return false, nil
 		}
 	}
+	scheduler.pruneDeferredPodJournal(ctx, run.ID)
 	// Exact external absence and the durable verdict are established. Scratch
 	// cleanup can retry independently.
 	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
