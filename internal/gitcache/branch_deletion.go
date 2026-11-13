@@ -274,8 +274,10 @@ type BranchInventory struct {
 // pending or failed the mirror target can hold commits the forge never
 // received. A branch merged only into those commits is not merged upstream,
 // and deleting it would lose its work there. TargetSHA is the
-// forge-confirmed head.
-func (c *Cache) BranchInventory(ctx context.Context, input, target string) (BranchInventory, error) {
+// forge-confirmed head. A caller that has just verified a published commit may
+// supply its exact targetSHA to avoid a lagging upstream tracking ref. This
+// does not update any refs; the commit must already exist in the mirror.
+func (c *Cache) BranchInventory(ctx context.Context, input, target, targetSHA string) (BranchInventory, error) {
 	_, path, err := c.path(input)
 	if err != nil {
 		return BranchInventory{}, err
@@ -304,18 +306,27 @@ func (c *Cache) BranchInventory(ctx context.Context, input, target string) (Bran
 	if _, err := c.capture(ctx, path, "rev-parse", "--verify", "--quiet", "refs/heads/"+target+"^{commit}"); err != nil {
 		return BranchInventory{}, fmt.Errorf("branch %s does not exist on the mirror", target)
 	}
-	targetRef := upstreamRefPrefix + "heads/" + target
-	targetSHA, err := c.capture(ctx, path, "rev-parse", "--verify", "--quiet", targetRef+"^{commit}")
-	if err != nil {
-		return BranchInventory{}, fmt.Errorf("branch %s has no forge-confirmed head on the mirror, so merged branches cannot be judged; publish the default branch to the forge if it has none yet, or wait for the next upstream refresh, then plan again", target)
+	if targetSHA == "" {
+		targetRef := upstreamRefPrefix + "heads/" + target
+		targetSHA, err = c.capture(ctx, path, "rev-parse", "--verify", "--quiet", targetRef+"^{commit}")
+		if err != nil {
+			return BranchInventory{}, fmt.Errorf("branch %s has no forge-confirmed head on the mirror, so merged branches cannot be judged; publish the default branch to the forge if it has none yet, or wait for the next upstream refresh, then plan again", target)
+		}
 	}
-	inventory := BranchInventory{DefaultBranch: defaultBranch, Target: target, TargetSHA: strings.TrimSpace(targetSHA)}
+	targetSHA = strings.TrimSpace(targetSHA)
+	if err := ValidateSHA(targetSHA); err != nil {
+		return BranchInventory{}, err
+	}
+	if _, err := c.capture(ctx, path, "rev-parse", "--verify", "--quiet", targetSHA+"^{commit}"); err != nil {
+		return BranchInventory{}, fmt.Errorf("target commit %s is not available on the mirror: %w", targetSHA, err)
+	}
+	inventory := BranchInventory{DefaultBranch: defaultBranch, Target: target, TargetSHA: targetSHA}
 	listCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	buf := &boundedio.Buffer{Limit: maxRefsOutput, OnOverflow: cancel}
 	err = c.run(listCtx, commandSpec{dir: path, args: []string{
 		"for-each-ref", fmt.Sprintf("--count=%d", maximumReceiveSnapshotRefs),
-		"--format=%(refname) %(objectname) %(committerdate:unix) %(ahead-behind:" + targetRef + ")", "refs/heads/",
+		"--format=%(refname) %(objectname) %(committerdate:unix) %(ahead-behind:" + targetSHA + ")", "refs/heads/",
 	}, stdout: buf})
 	if buf.Err() != nil {
 		return BranchInventory{}, fmt.Errorf("branch inventory exceeds %d bytes", maxRefsOutput)

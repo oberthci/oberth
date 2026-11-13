@@ -309,7 +309,7 @@ func TestBranchInventoryClassifiesMergedAndPatchEquivalent(t *testing.T) {
 	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
 	// feature/merged is an ancestor of main; feature/gone is not merged.
 	runGit(t, ready.Path, "update-ref", "refs/heads/feature/merged", repository.initialSHA)
-	inventory, err := cache.BranchInventory(t.Context(), "example", "")
+	inventory, err := cache.BranchInventory(t.Context(), "example", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestBranchInventoryJudgesMergedAgainstForgeConfirmedTarget(t *testing.T) {
 	runGit(t, repository.work, "reset", "--hard", repository.initialSHA)
 	seedCacheObject(t, repository.work, ready.Path, unpublished)
 	runGit(t, ready.Path, "update-ref", "refs/heads/main", unpublished)
-	inventory, err := cache.BranchInventory(t.Context(), "example", "")
+	inventory, err := cache.BranchInventory(t.Context(), "example", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,9 +372,28 @@ func TestBranchInventoryJudgesMergedAgainstForgeConfirmedTarget(t *testing.T) {
 	if entry := byName["feature/merged"]; !entry.Merged {
 		t.Fatalf("branch merged upstream judged unmerged: %+v", entry)
 	}
+	// A promotion caller can use the exact result it verified upstream,
+	// without trusting or rewriting the stale tracking ref.
+	verified, err := cache.BranchInventory(t.Context(), "example", "", unpublished)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verified.TargetSHA != unpublished {
+		t.Fatalf("verified target = %s", verified.TargetSHA)
+	}
+	for _, entry := range verified.Branches {
+		if entry.Branch == "feature/gone" && (!entry.Merged || entry.Ahead != 0) {
+			t.Fatalf("published source judged unmerged: %+v", entry)
+		}
+	}
+	for _, target := range []string{"main", strings.Repeat("f", 40)} {
+		if _, err := cache.BranchInventory(t.Context(), "example", "", target); err == nil {
+			t.Fatalf("invalid or missing exact target %q accepted", target)
+		}
+	}
 	// Without a forge-confirmed head the plan refuses instead of guessing.
 	runGit(t, ready.Path, "update-ref", "-d", upstreamRefPrefix+"heads/main")
-	if _, err := cache.BranchInventory(t.Context(), "example", ""); err == nil || !strings.Contains(err.Error(), "no forge-confirmed head") {
+	if _, err := cache.BranchInventory(t.Context(), "example", "", ""); err == nil || !strings.Contains(err.Error(), "no forge-confirmed head") {
 		t.Fatalf("inventory without upstream head = %v", err)
 	}
 }

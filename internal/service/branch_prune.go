@@ -30,7 +30,7 @@ const (
 )
 
 type BranchPruneGit interface {
-	BranchInventory(context.Context, string, string) (gitcache.BranchInventory, error)
+	BranchInventory(context.Context, string, string, string) (gitcache.BranchInventory, error)
 	BranchPatchEquivalence(context.Context, string, string, []gitcache.BranchHead, int) (map[string]bool, error)
 	PruneBranches(context.Context, string, []gitcache.BranchHead, bool) ([]gitcache.PruneOutcome, error)
 }
@@ -45,6 +45,10 @@ type BranchDeletionRecords interface {
 }
 
 type branchPruneArguments struct {
+	// targetSHA is set only after prune_source verifies the promotion result
+	// upstream. Ordinary branch pruning uses the forge tracking ref.
+	targetSHA string
+
 	Repo     string `json:"repo"`
 	Branches []struct {
 		Branch      string `json:"branch"`
@@ -265,7 +269,7 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 		return model.Repository{}, "", BranchPruneResponse{}, nil, err
 	}
 	input := service.cacheInputFor(ctx, repository)
-	inventory, err := service.branchPrune.BranchInventory(ctx, input, "")
+	inventory, err := service.branchPrune.BranchInventory(ctx, input, "", args.targetSHA)
 	if err != nil {
 		return model.Repository{}, "", BranchPruneResponse{}, nil, err
 	}
