@@ -105,10 +105,16 @@ Arguments given to the command: `$ARGUMENTS`
 
    Save the public install JSON result outside the repository: add-repo uses
    its exact `server_url`, `git_url` and `ca_sha256` to bind the selected server.
-   Include the probed client port flags in this reviewed command.
+   Include the probed client port flags, the Review upstream name (change it
+   with `--upstream-name` if requested), and every required port-forward or
+   DNS/hosts step in this reviewed command and explanation. The user performs
+   routing steps; never start a forward or edit hosts yourself.
 
-   The secrets file must be a new file outside any git worktree. The install
-   refuses anything else.
+   For a fresh install the secrets file must be a new file outside any git
+   worktree. For recovery, give only its path to `--resume-secrets-file` and
+   choose a new `--secrets-file` output path. Reusing an existing private
+   `--secrets-file` as production recovery input keeps it intact and reserves a
+   new sibling output file for fresh credentials; keep both when one is saved.
 8. **Run it** exactly as reviewed. It takes several minutes: run it in the
    background or with the longest command timeout, and never interrupt it.
    The output names the secrets file and its SHA-256, and nothing secret.
@@ -117,7 +123,15 @@ Arguments given to the command: `$ARGUMENTS`
 
    When the install stops part-way, the secrets file it names is kept and
    may hold the only copy of the OpenBao root token and unseal key. Leave it
-   where it is, tell the user, and give a rerun a new `--secrets-file` name.
+   where it is, tell the user, and resume with `--resume-secrets-file` naming
+   that input and a new `--secrets-file` output name. Keep all reviewed answers.
+   When `client_bootstrap_endpoint` fails, show its URL, observed error and
+   remedy: installed releases and credentials remain, and the user must make
+   the endpoint reachable before resuming. Run documented verify to check
+   progress after the user fixes routing; an already-issued client certificate
+   is kept. Use the printed verification command to resume without reissuing it.
+   Rerun installation only when verification shows unfinished onboarding; do
+   not repair it through in-Pod administration.
 9. **Add this key at the returned link with write access.** Parse the JSON even
    on exit code 3 (installed, action needed). For `upstream_key_pending`, show
    `upstream.deploy_public_key`, `upstream.fingerprint`, and
@@ -130,9 +144,12 @@ Arguments given to the command: `$ARGUMENTS`
      page: sign in as a **machine user** with write access to the intended
      repositories and add the key there. Do not add it to the operator's personal
      account by default. The same choice applies to other supported forges.
-   - After the key is authorized, run `upstream.next_command` exactly as provided;
-     it includes the selected cluster and upstream. Then verify again. Use the
-     JSON fields, never discarded text output or a guessed upstream name.
+   - After the key is authorized, run the documented installer verify command
+     with the selected context and reviewed endpoint flags. `upstream.next_command`
+     may describe in-Pod administration for an operator: never execute it from
+     this skill. If verification still requires onboarding, use the documented
+     installer resume path or stop and ask the user. Use the JSON fields, never
+     discarded text output or a guessed upstream name.
    - Exit code 0 means all checks passed; exit code 1 is a real failure. Resolve
      failing checks before declaring success. Do not reinstall merely because
      the deploy key is pending.
@@ -157,8 +174,8 @@ Arguments given to the command: `$ARGUMENTS`
   through the command the install printed, which reads the file without
   showing it.
 - Never delete, move, truncate or overwrite a secrets file, from this run or
-  an earlier one. The install refuses a path that exists; choose a new name
-  instead of removing the old file.
+  an earlier one. Use the old file only as installer recovery input and choose
+  a new output name instead of removing the old file.
 - A `--dry-run` prints a plan and installs nothing. After the approved
   install, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" verify --context
   '<context>'` and explain every failing check and remedy.
@@ -341,3 +358,22 @@ files. A changed current context does not establish that another context was
 deleted. The rehearsal's original context loss remains unestablished; inspect
 retained files and commands without attributing a cause or recreating guessed
 credentials. Oberth never updates the operator's kubeconfig files.
+
+## Installer failure guardrail
+
+When the installer fails or gives no clear reason, stay on the installer path:
+read the public result JSON and its checks, endpoint, observed error and remedies.
+Run only the documented installer verify or resume command as printed, preserving
+the reviewed context and answers. If the result has no actionable reason, stop
+and ask the user; never invent a workaround outside the documented commands.
+Never run administrative commands inside the server Pod (including upstream add
+or enrollment), directly or through another helper, to work around an installer
+failure. Do not switch to another skill to bypass this rule.
+Never read, pipe or export the secret store's root token or any value from the
+secrets file. Give only file paths to the documented installer or unseal command;
+the executable reads credentials privately. Never ask the user to paste a token
+or export BAO_TOKEN for the agent.
+Report only verified facts. An installer exit code or an incomplete result does
+not establish whether anything was pushed to the forge. Say what was observed,
+what remains deployed and what is unknown; never claim that nothing was pushed
+without checking evidence that establishes that fact.
