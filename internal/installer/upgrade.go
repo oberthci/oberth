@@ -396,6 +396,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 	if cfg.DryRun {
+		reviewDeps := deps
+		reviewDeps.Input, reviewDeps.IsTerminal = nil, nil
+		if err := prepareUpgradeDryRunValues(ctx, &cfg, reviewDeps); err != nil {
+			return result, err
+		}
 		if prepared.storedSnapshot != nil {
 			cfg.storedValuesFile = "<cleaned-stored-values>"
 		}

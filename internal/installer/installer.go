@@ -1100,6 +1100,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// reconciles produces a run that never starts and never fails.
 	quietArgoDeps := deps
 	quietArgoDeps.Output = io.Discard
+	quietArgoDeps.Input, quietArgoDeps.IsTerminal = nil, nil
 	argo, err := InstallArgoWorkflows(ctx, cfg, quietArgoDeps)
 	if err != nil {
 		tw.WriteFooter()

@@ -28,9 +28,6 @@ func argoSecurityUpgradeRemedy(namespace string, cause error) error {
 }
 
 func planUpgradeArgoSecurity(ctx context.Context, deps Deps, values map[string]any, consent bool) (*upgradeArgoSecurity, error) {
-	if enabled, ok := valueAt(values, "argo", "podPolicy", "enabled").(bool); ok && !enabled {
-		return nil, nil
-	}
 	ns, _ := valueAt(values, "argo", "namespace").(string)
 	if ns == "" {
 		ns = DefaultArgoNamespace
@@ -55,6 +52,13 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 	if err != nil {
 		return nil, argoSecurityUpgradeRemedy(ns, err)
 	}
+	args, review, err := argoSecurityDefaults(stored)
+	if err != nil {
+		return nil, argoSecurityUpgradeRemedy(ns, err)
+	}
+	if err := validateArgoSecurityReview(ns, stored, review); err != nil {
+		return nil, err
+	}
 	plan := &upgradeArgoSecurity{namespace: ns, args: []string{}, consent: consent}
 	// A fresh managed install supplies these values in the same run. Every
 	// existing or external controller is judged by its actual ConfigMap.
@@ -75,14 +79,26 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 	if exists && (canonicalChartVersion(version) == "" || release.Status != "deployed") {
 		return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("the Argo release must have a known chart version and deployed status"))
 	}
-	args, review, err := argoSecurityDefaults(stored)
-	if err != nil {
-		return nil, argoSecurityUpgradeRemedy(ns, err)
-	}
 	if deps.Output != nil {
 		_, _ = fmt.Fprintf(deps.Output, "Argo security review: argo-workflows in namespace %s, chart %s; absent fields only.\n", ns, version)
 	}
 	printArgoSecurityReview(deps.Output, review)
+	if exists && !consent {
+		if deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil {
+			return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("live controller defaults are missing; existing Argo changes require explicit consent"))
+		}
+		if err := approveArgoSecurity(deps); err != nil {
+			return nil, argoSecurityUpgradeRemedy(ns, err)
+		}
+		consent = true
+	}
+	if exists && len(args) == 0 {
+		return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("stored values already contain the defaults but the live controller does not; reconcile the controller configuration before retrying"))
+	}
+	return &upgradeArgoSecurity{namespace: ns, version: version, args: args, review: review, consent: consent}, nil
+}
+
+func validateArgoSecurityReview(ns string, stored map[string]any, review []ArgoSecurityReview) error {
 	// Explicit unsafe settings cannot be overwritten by this absent-only fill.
 	// Refuse before either release changes rather than deploy a policy that
 	// immediately strands ordinary Workflows or the controller itself.
@@ -97,27 +113,15 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 		switch s := entry.Planned.(type) {
 		case *corev1.PodSecurityContext:
 			if s != nil && ((s.SeccompProfile != nil && (s.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault && s.SeccompProfile.Type != corev1.SeccompProfileTypeLocalhost)) || (s.WindowsOptions != nil && s.WindowsOptions.HostProcess != nil && *s.WindowsOptions.HostProcess)) {
-				return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
+				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
 			}
 		case *corev1.SecurityContext:
 			if !argoSecurityContextMeetsFloor(s, entry.Component == "mainContainer" || entry.Component == "executor") {
-				return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
+				return argoSecurityUpgradeRemedy(ns, fmt.Errorf("operator-set %s.%s cannot pass the Pod policy", entry.Component, entry.Field))
 			}
 		}
 	}
-	if exists && !consent {
-		if deps.IsTerminal == nil || !deps.IsTerminal() || deps.Input == nil {
-			return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("live controller defaults are missing; existing Argo changes require explicit consent"))
-		}
-		if err := approveArgoSecurity(deps); err != nil {
-			return nil, argoSecurityUpgradeRemedy(ns, err)
-		}
-		consent = true
-	}
-	if exists && len(args) == 0 {
-		return nil, argoSecurityUpgradeRemedy(ns, fmt.Errorf("stored values already contain the defaults but the live controller does not; reconcile the controller configuration before retrying"))
-	}
-	return &upgradeArgoSecurity{namespace: ns, version: version, args: args, review: review, consent: consent}, nil
+	return nil
 }
 
 func argoSecurityContextMeetsFloor(s *corev1.SecurityContext, requireProfile bool) bool {

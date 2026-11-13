@@ -150,6 +150,9 @@ func readArgoSecurityReview(ctx context.Context, cfg *Config, deps Deps) error {
 	if !cfg.argoReleaseRead {
 		snapshot = nil
 	}
+	if cfg.DryRun {
+		deps.Input, deps.IsTerminal = nil, nil
+	}
 	plan, err := prepareArgoSecurity(ctx, deps, ns, cfg.ArgoSecurityDefaults, !cfg.SkipArgo, snapshot)
 	if err != nil {
 		return err
