@@ -773,32 +773,7 @@ func assertSQLiteFilesEqual(t *testing.T, expected, actual map[string][]byte) {
 	}
 }
 
-func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
-	t.Helper()
-	ctx := context.Background()
-	database, err := store.CreateGenesis(ctx, path, store.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for index := 1; index <= actionCount; index++ {
-		if _, err := database.AppendAuditAction(ctx, model.AuditActionSpec{
-			Actor: "legacy@host", Action: "issue.create", ResourceType: "issue",
-			ResourceID: fmt.Sprintf("%d", index), Details: fmt.Sprintf(`{"title":"legacy-%d"}`, index),
-		}); err != nil {
-			_ = database.Close()
-			t.Fatal(err)
-		}
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	raw, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = raw.Close() }()
-	if _, err := raw.Exec(`
+const predecessorV1DowngradeSQL = `
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
 ` + testdb.PostV38Downgrade + `
@@ -985,7 +960,34 @@ DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_i
 DELETE FROM schema_migrations WHERE version > 1;
 COMMIT;
 PRAGMA foreign_keys = ON;
-`); err != nil {
+`
+
+func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
+	t.Helper()
+	ctx := context.Background()
+	database, err := store.CreateGenesis(ctx, path, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= actionCount; index++ {
+		if _, err := database.AppendAuditAction(ctx, model.AuditActionSpec{
+			Actor: "legacy@host", Action: "issue.create", ResourceType: "issue",
+			ResourceID: fmt.Sprintf("%d", index), Details: fmt.Sprintf(`{"title":"legacy-%d"}`, index),
+		}); err != nil {
+			_ = database.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = raw.Close() }()
+	if _, err := raw.Exec(predecessorV1DowngradeSQL); err != nil {
 		t.Fatal(err)
 	}
 	// The current schema dropped supersede data; ADD COLUMN in the rollback
