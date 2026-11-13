@@ -168,3 +168,59 @@ func TestExecutorTokenDirectoryIsFreshPerDelivery(t *testing.T) {
 		seen[name] = true
 	}
 }
+
+// #1564 review: Argo's progress monitor keeps patching WorkflowTaskResults
+// while wait reads a step's outputs, re-reading the token file on a low
+// descriptor. The server patch must zero both ticks on every executor container
+// and win over the values the controller injects. Repositories cannot reach
+// these containers' env: podSpecPatch is refused at admission and Argo exposes
+// no authored env for init/wait.
+func TestExecutorProgressMonitorIsDisabledOverControllerValues(t *testing.T) {
+	config := testConfig()
+	config.applyDefaults()
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{
+		{Name: "container", Container: &corev1.Container{Image: "busybox"}},
+		{Name: "resource", Resource: &wfv1.ResourceTemplate{Action: "get", Manifest: "{}"}},
+	}}}
+	if err := projectExecutorTokens(wf, config, false); err != nil {
+		t.Fatal(err)
+	}
+	controllerEnv := []corev1.EnvVar{
+		{Name: "ARGO_PROGRESS_FILE", Value: "/var/run/argo/progress"},
+		{Name: "ARGO_PROGRESS_PATCH_TICK_DURATION", Value: "1m0s"},
+		{Name: "ARGO_PROGRESS_FILE_TICK_DURATION", Value: "3s"},
+	}
+	for _, template := range wf.Spec.Templates {
+		executors := []string{"init", "wait"}
+		if template.Resource != nil {
+			executors = []string{"init", "main"}
+		}
+		before := corev1.PodSpec{InitContainers: []corev1.Container{{Name: "init", Env: controllerEnv}}}
+		for _, name := range executors[1:] {
+			before.Containers = append(before.Containers, corev1.Container{Name: name, Env: controllerEnv})
+		}
+		after := applyCredentialWaitPatch(t, before, template.PodSpecPatch)
+		for _, container := range append(append([]corev1.Container{}, after.InitContainers...), after.Containers...) {
+			if container.Name == executorTokenWaiter {
+				continue
+			}
+			values := map[string]string{}
+			for _, env := range container.Env {
+				if _, seen := values[env.Name]; seen {
+					t.Fatalf("%s/%s duplicates %s", template.Name, container.Name, env.Name)
+				}
+				values[env.Name] = env.Value
+			}
+			for _, name := range []string{"ARGO_PROGRESS_PATCH_TICK_DURATION", "ARGO_PROGRESS_FILE_TICK_DURATION"} {
+				// Argo's executor init parses these with time.ParseDuration;
+				// Wait starts monitorProgress only when both are nonzero.
+				if d, err := time.ParseDuration(values[name]); err != nil || d != 0 {
+					t.Fatalf("%s/%s %s = %q", template.Name, container.Name, name, values[name])
+				}
+			}
+			if values["KUBECONFIG"] != executorKubeconfig {
+				t.Fatalf("%s/%s KUBECONFIG = %q", template.Name, container.Name, values["KUBECONFIG"])
+			}
+		}
+	}
+}

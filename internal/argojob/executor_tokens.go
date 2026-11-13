@@ -98,7 +98,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 			if value, ok := item.(map[string]any); ok {
 				if name, ok := value["name"].(string); ok {
 					if name == "init" {
-						setExecutorKubeconfig(value)
+						setExecutorEnvironment(value)
 						if _, exists := value["resources"]; !pinnedProfile && !exists {
 							value["resources"] = helperResources(workflow, t, storage)
 						}
@@ -164,13 +164,13 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 			found := false
 			for _, item := range containers {
 				if value, ok := item.(map[string]any); ok && value["name"] == name {
-					setExecutorKubeconfig(value)
+					setExecutorEnvironment(value)
 					found = true
 				}
 			}
 			if !found {
 				value := map[string]any{"name": name}
-				setExecutorKubeconfig(value)
+				setExecutorEnvironment(value)
 				containers = append(containers, value)
 			}
 		}
@@ -203,17 +203,39 @@ func executorTokenDirectory() string {
 	return hex.EncodeToString(name[:])
 }
 
-// setExecutorKubeconfig points an Argo executor container at the delivered
-// kubeconfig. Env merges by name, so Argo's own variables are kept.
-func setExecutorKubeconfig(container map[string]any) {
+// executorEnvironment is what every Argo executor container that holds the
+// identity gets through the server patch. KUBECONFIG names the delivered
+// kubeconfig. The progress ticks are zero because Argo v4.0.8's wait runs
+// monitorProgress (executor.go Wait) on the command context, so it keeps
+// patching WorkflowTaskResults while wait reads a step's outputs; each patch
+// can re-read the token file, briefly opening it on a low descriptor that a
+// step's /proc/self/fd/N symlink would resolve to. A zero tick disables the
+// monitor (Wait starts it only when both ticks are nonzero), leaving no API
+// call between InitializeOutput and ReportOutputs. Self-reported step
+// progress (N/M) is therefore not shown. Env merges by name, so these values
+// replace anything the controller injected while Argo's other variables stay.
+var executorEnvironment = [][2]string{
+	{"KUBECONFIG", executorKubeconfig},
+	{"ARGO_PROGRESS_PATCH_TICK_DURATION", "0"},
+	{"ARGO_PROGRESS_FILE_TICK_DURATION", "0"},
+}
+
+func setExecutorEnvironment(container map[string]any) {
 	env, _ := container["env"].([]any)
-	for _, item := range env {
-		if value, ok := item.(map[string]any); ok && value["name"] == "KUBECONFIG" {
-			value["value"] = executorKubeconfig
-			return
+	for _, pair := range executorEnvironment {
+		found := false
+		for _, item := range env {
+			if value, ok := item.(map[string]any); ok && value["name"] == pair[0] {
+				value["value"] = pair[1]
+				delete(value, "valueFrom")
+				found = true
+			}
+		}
+		if !found {
+			env = append(env, map[string]any{"name": pair[0], "value": pair[1]})
 		}
 	}
-	container["env"] = append(env, map[string]any{"name": "KUBECONFIG", "value": executorKubeconfig})
+	container["env"] = env
 }
 
 func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool, unavailable func()) error {

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,7 +27,7 @@ import (
 // resolved against wait's filesystem, where the executor token lives. Every
 // parameter carries a default so a closed hole reads back as "absent" instead
 // of failing the step.
-const liveOutputSymlinkDocument = `
+var liveOutputSymlinkDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
@@ -45,6 +46,8 @@ spec:
             template: leak
           - name: honest
             template: honest
+          - name: fdprobe
+            template: fdprobe
           - name: echo-honest
             depends: honest
             template: echo
@@ -66,7 +69,16 @@ spec:
       container:
         image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
         command: [/bin/true]
-    - name: honest
+    - name: fdprobe
+      script:
+        image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+        command: [/bin/sh]
+        source: |
+          mkdir -p /work/artifacts/fd
+          i=3; while [ "$i" -le 64 ]; do ln -sf /proc/self/fd/$i /work/artifacts/fd/$i; i=$((i + 1)); done
+      outputs:
+        parameters:
+` + liveFDProbeParameters + `    - name: honest
       script:
         image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
         command: [/bin/sh]
@@ -108,6 +120,17 @@ spec:
           - name: environ
             valueFrom: {path: /work/artifacts/environ, default: absent}
 `
+
+// liveFDProbeParameters reads every low descriptor of the wait process
+// through /proc/self/fd/N symlinks, the route a token file held open by a
+// concurrent API call would take (#1564 review).
+var liveFDProbeParameters = func() string {
+	var lines strings.Builder
+	for fd := 3; fd <= 64; fd++ {
+		fmt.Fprintf(&lines, "          - name: fd-%d\n            valueFrom: {path: /work/artifacts/fd/%d, default: absent}\n", fd, fd)
+	}
+	return lines.String()
+}()
 
 // TestLiveOutputPathsCannotReadTheExecutorToken submits the hostile step
 // through Oberth's own Build and controller (including the real executor token
@@ -158,7 +181,7 @@ func TestLiveOutputPathsCannotReadTheExecutorToken(t *testing.T) {
 			}
 			honest = true
 		}
-		if node.TemplateName != "leak" {
+		if node.TemplateName != "leak" && node.TemplateName != "fdprobe" {
 			continue
 		}
 		t.Logf("leak node phase=%s message=%q", node.Phase, node.Message)
