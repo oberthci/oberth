@@ -56,7 +56,7 @@ func TestStopRestartMigrationPreservesWorkflowsAndUncertainCreates(t *testing.T)
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at)VALUES(?,?,'owner_restart',?)`, old.ID, "original-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE id IN (?,?)`, stopRestartMigrationID, removeRestartTimingsMigrationID); err != nil {
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, stopRestartMigrationID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(historicalRestartTimingSQL(t)); err != nil {

@@ -493,7 +493,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
   schedule triggers share that identity. Retry, rerun,
-  replacement, stranded-run requeue and Workflow adoption retain it. Legacy
+  replacement and Workflow adoption retain it. Legacy
   rows stay empty; no current file is used to guess their entry. Non-schedule
   runs cannot carry a nonempty entry. `oberth-schedule` is a reserved,
   server-owned Workflow parameter: any repository declaration in
@@ -2985,9 +2985,10 @@ records of older runs, keeps their ordinary run milestones, and their
 timing reads `unavailable=pruned`. `system_status.storage.database_bytes` reports
 the live database size the backup ceiling is measured against.
 
-Owner resume and unexecuted restart can retain the durable run ID. Known
-milestones remain write-once; Workflow and step evidence is bound to its restart
-attempt, with older bindings retained separately. Queue time is `queued_at` to
+Owner resume retains the durable run ID and verified Workflow binding. Stranded
+runs fail after restart without resubmission; explicit retries have new IDs.
+Known milestones remain write-once. B4 removes restart timing epochs while
+retaining current Workflow and step evidence. Queue time is `queued_at` to
 `claimed_at`, not queued to the historically overloaded StartedAt. Checkout
 completion, source seed start and readiness, Workflow creation, and durable
 terminalization have separate timestamps. Source seeding is once per Workflow,

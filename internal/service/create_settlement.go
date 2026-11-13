@@ -32,7 +32,6 @@ type pendingCreate struct {
 	persisted   bool
 	confirmed   bool
 	restarting  bool
-	adopted     bool
 	next, since time.Time
 	attempts    int
 }

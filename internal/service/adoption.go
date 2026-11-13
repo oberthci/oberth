@@ -85,10 +85,6 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 
 func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner) error {
 	defer reservation.cancel()
-	// Observation now owns this grant; uncertain-create custody has ended.
-	scheduler.submissions.mu.Lock()
-	reservation.retained = false
-	scheduler.submissions.mu.Unlock()
 	if err := require(ctx); err != nil {
 		return err
 	}

@@ -38,7 +38,6 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 			requireRestartNoError(t, err)
 			_, err = s.SetRunWorkflowName(ctx, run.ID, "workflow-before")
 			requireRestartNoError(t, err)
-			requireRestartNoError(t, s.RecordAdmissionRequested(ctx, run.ID))
 			requireRestartNoError(t, s.RecordRunTimingMilestone(ctx, run.ID, "source-ready"))
 			workflow := model.WorkflowTiming{RunID: run.ID, Namespace: "pipelines", Name: "workflow-before", UID: "11111111-1111-4111-8111-111111111111", SpecIdentity: strings.Repeat("a", 64), CreatedAt: now, Tasks: []model.TimingTask{}}
 			step := model.StepTiming{Version: 1, RunID: run.ID, Namespace: workflow.Namespace, WorkflowName: workflow.Name, WorkflowUID: workflow.UID, NodeID: "node-before", Ordinal: 0, Stage: "test", Step: "unit", ObservedAt: now, ScriptTiming: "mixed", ImagePullTiming: "not-observed", Init: []model.ContainerTiming{}, Missing: []string{"main"}, Unavailable: "observation-unavailable"}
@@ -72,7 +71,7 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 					appendHistoricalRestart()
 				}
 			}
-			_, err = s.db.Exec(`DELETE FROM schema_migrations WHERE id=?`, removeRestartTimingsMigrationID)
+			_, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version >= (SELECT version FROM schema_migrations WHERE id=?)`, removeRestartTimingsMigrationID)
 			requireRestartNoError(t, err)
 			requireRestartNoError(t, s.migrate(ctx, nil))
 			var retired int
@@ -82,8 +81,8 @@ func TestRemoveRestartTimingsPreservesCurrentDurableEvidence(t *testing.T) {
 			}
 			after, err := s.RunTiming(ctx, run.ID)
 			requireRestartNoError(t, err)
-			if !reflect.DeepEqual(before.ClaimedAt, after.ClaimedAt) || !reflect.DeepEqual(before.SourceReadyAt, after.SourceReadyAt) || !reflect.DeepEqual(before.Admissions, after.Admissions) {
-				t.Fatal("migration lost milestones or admissions", before, after)
+			if !reflect.DeepEqual(before.ClaimedAt, after.ClaimedAt) || !reflect.DeepEqual(before.SourceReadyAt, after.SourceReadyAt) {
+				t.Fatal("migration lost durable milestones", before, after)
 			}
 			switch history {
 			case "ordinary":

@@ -63,8 +63,8 @@ existing statuses and reason lines. Authored deadlines and retry strategies
 belong to Argo. Oberth cancellation and supersession delete the owned Workflow.
 On restart, recovery verifies bindings before adopting existing Workflows.
 Ambiguous creates have a durable cleanup obligation and a background settlement
-task. Stranded runs can be requeued only under the existing execution-evidence
-checks. See [restart handover](restart-handover.md).
+task. After restart, stranded runs fail with a restart reason; Oberth does not
+resubmit them. Existing Workflows are adopted only after binding verification. See [restart handover](restart-handover.md).
 
 ## Promotion and publication
 
