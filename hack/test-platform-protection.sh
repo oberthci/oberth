@@ -23,14 +23,11 @@ render() {
 }
 
 render >"$work/default.yaml"
-test "$(grep -c '^kind: PriorityClass$' "$work/default.yaml")" -eq 2
+test "$(grep -c '^kind: PriorityClass$' "$work/default.yaml")" -eq 1
 grep -Fxq '  name: oberth-oberth-control-plane' "$work/default.yaml"
-grep -Fxq '  name: oberth-argo-oberth-pipeline' "$work/default.yaml"
 test "$(grep -c '^value: 1000000$' "$work/default.yaml")" -eq 1
-test "$(grep -c '^value: 0$' "$work/default.yaml")" -eq 1
-test "$(grep -c '^globalDefault: false$' "$work/default.yaml")" -eq 2
+test "$(grep -c '^globalDefault: false$' "$work/default.yaml")" -eq 1
 test "$(grep -c '^preemptionPolicy: PreemptLowerPriority$' "$work/default.yaml")" -eq 1
-test "$(grep -c '^preemptionPolicy: Never$' "$work/default.yaml")" -eq 1
 test "$(grep -c '^      priorityClassName:' "$work/default.yaml")" -eq 1
 grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/default.yaml"
 
@@ -39,12 +36,11 @@ cp -R -- "$chart" "$work/reused"
 chmod -R u+w "$work/reused"
 awk -f "$script_dir/strip-removed-chart-values.awk" "$script_dir/testdata/chart-values-v0.17.53.yaml" >"$work/reused/values.yaml"
 "$helm_tool" template oberth "$work/reused" --namespace oberth >"$work/reused.yaml"
-test "$(grep -c '^kind: PriorityClass$' "$work/reused.yaml")" -eq 2
+test "$(grep -c '^kind: PriorityClass$' "$work/reused.yaml")" -eq 1
 grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/reused.yaml"
 
 "$helm_tool" template second "$chart" --namespace alternate --set argo.namespace=other-pipelines >"$work/alternate.yaml"
 grep -Fxq '  name: alternate-second-oberth-control-plane' "$work/alternate.yaml"
-grep -Fxq '  name: other-pipelines-oberth-pipeline' "$work/alternate.yaml"
 if render --set platformProtection.enabled=false >"$work/invalid.yaml" 2>&1; then
   echo 'unknown scheduling toggle accepted' >&2
   exit 1

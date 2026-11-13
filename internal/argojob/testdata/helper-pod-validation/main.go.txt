@@ -1,0 +1,65 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apiserver/pkg/admission"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
+	core "k8s.io/kubernetes/pkg/apis/core"
+	v1 "k8s.io/kubernetes/pkg/apis/core/v1"
+	"k8s.io/kubernetes/pkg/apis/core/validation"
+	"k8s.io/kubernetes/plugin/pkg/admission/priority"
+)
+
+type testCase struct {
+	Name             string
+	Pod              corev1.Pod
+	RejectPreemption bool
+}
+
+func main() {
+	body, err := os.ReadFile(os.Args[1])
+	if err != nil {
+		panic(err)
+	}
+	var cases []testCase
+	if err := json.Unmarshal(body, &cases); err != nil {
+		panic(err)
+	}
+	client := fake.NewClientset()
+	plugin := priority.NewPlugin()
+	plugin.SetExternalKubeClientSet(client)
+	plugin.SetExternalKubeInformerFactory(informers.NewSharedInformerFactory(client, 0))
+	if err := plugin.ValidateInitialization(); err != nil {
+		panic(err)
+	}
+	for _, tc := range cases {
+		v1.SetObjectDefaults_Pod(&tc.Pod)
+		var pod core.Pod
+		if err := v1.Convert_v1_Pod_To_core_Pod(&tc.Pod, &pod, nil); err != nil {
+			panic(err)
+		}
+		attrs := admission.NewAttributesRecord(&pod, nil, corev1.SchemeGroupVersion.WithKind("Pod"), pod.Namespace, pod.Name, corev1.SchemeGroupVersion.WithResource("pods"), "", admission.Create, &metav1.CreateOptions{}, false, nil)
+		err := plugin.Admit(context.Background(), attrs, nil)
+		if tc.RejectPreemption {
+			if err == nil || !strings.Contains(err.Error(), "PreemptionPolicy (Never)") {
+				panic(fmt.Sprintf("%s: invalid preemption was not refused: %v", tc.Name, err))
+			}
+		} else {
+			if err != nil {
+				panic(fmt.Sprintf("%s: priority admission: %v", tc.Name, err))
+			}
+			if errs := validation.ValidatePodCreate(&pod, validation.PodValidationOptions{}); len(errs) != 0 {
+				panic(fmt.Sprintf("%s: Pod validation: %v", tc.Name, errs))
+			}
+		}
+		fmt.Println("PASS", tc.Name)
+	}
+}

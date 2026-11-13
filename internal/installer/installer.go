@@ -35,7 +35,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/oberthci/oberth/internal/podpriority"
 	"github.com/oberthci/oberth/internal/releaseverify"
 )
 
@@ -2203,11 +2202,7 @@ func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
 			displayVersion(cfg.ChartVersion), releaseSourceText(cfg.Release))
 	}
 
-	pipelineNamespace := cfg.ArgoNamespace
-	if pipelineNamespace == "" {
-		pipelineNamespace = DefaultArgoNamespace
-	}
-	_, _ = fmt.Fprintf(w, "\n     Establish Helm-owned classes for the Oberth server and helper Pods %s (value %d, PreemptLowerPriority) and %s (value %d, Never).\n\n", controlPlanePriority(cfg), podpriority.ControlPlaneValue, podpriority.PipelineClass(pipelineNamespace), podpriority.PipelineValue)
+	_, _ = fmt.Fprintf(w, "\n     Establish the Helm-owned class for the Oberth server %s (value %d, PreemptLowerPriority).\n\n", controlPlanePriority(cfg), controlPlanePriorityValue)
 	openbaoAddr := ""
 	var rekor RekorResult
 	if cfg.wantsSecretStore() {

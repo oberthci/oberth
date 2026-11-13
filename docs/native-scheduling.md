@@ -329,7 +329,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   mounting the same source PVC at `/seed`, and streams the artifact archive
   back before deleting that Pod. The seed and collect helper request 100m
   CPU, 64 MiB memory and 16 MiB ephemeral storage, with 500m/512 MiB/64 MiB
-  limits. They keep the helper PriorityClass and `preemptionPolicy: Never`.
+  limits. They omit PriorityClass and preemptionPolicy; Kubernetes supplies its defaults.
   **Their resources and source-volume node binding affect scheduling**.
   They do not inherit the ordinary Workflow's authored affinity/selectors;
   collection is tied to the node/topology of that source volume. The running

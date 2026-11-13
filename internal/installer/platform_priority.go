@@ -10,8 +10,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-
-	"github.com/oberthci/oberth/internal/podpriority"
 )
 
 func controlPlanePriority(cfg Config) string {
@@ -19,25 +17,23 @@ func controlPlanePriority(cfg Config) string {
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
-	return podpriority.ControlPlaneClass(namespace, "oberth")
+	return namespace + "-oberth-control-plane"
 }
 
-// Establish the server and helper classes with final Helm ownership so the
+const controlPlanePriorityValue int32 = 1000000
+
+// Establish the server class with final Helm ownership so the
 // Oberth chart adopts them during installation. Dependencies use upstream defaults.
 func ensurePlatformPriorities(ctx context.Context, cfg Config, deps Deps) error {
 	if deps.KubeClient == nil {
 		return errors.New("priority bootstrap requires Kubernetes access")
 	}
-	namespace, pipelineNamespace := cfg.Namespace, cfg.ArgoNamespace
+	namespace := cfg.Namespace
 	if namespace == "" {
 		namespace = DefaultNamespace
 	}
-	if pipelineNamespace == "" {
-		pipelineNamespace = DefaultArgoNamespace
-	}
 	for _, desired := range []*schedulingv1.PriorityClass{
-		{ObjectMeta: metav1.ObjectMeta{Name: controlPlanePriority(cfg)}, Value: podpriority.ControlPlaneValue, PreemptionPolicy: ptr.To(corev1.PreemptLowerPriority)},
-		{ObjectMeta: metav1.ObjectMeta{Name: podpriority.PipelineClass(pipelineNamespace)}, Value: podpriority.PipelineValue, PreemptionPolicy: ptr.To(corev1.PreemptNever)},
+		{ObjectMeta: metav1.ObjectMeta{Name: controlPlanePriority(cfg)}, Value: controlPlanePriorityValue, PreemptionPolicy: ptr.To(corev1.PreemptLowerPriority)},
 	} {
 		desired.Labels = map[string]string{"app.kubernetes.io/managed-by": "Helm"}
 		desired.Annotations = map[string]string{"meta.helm.sh/release-name": "oberth", "meta.helm.sh/release-namespace": namespace, "helm.sh/resource-policy": "keep"}

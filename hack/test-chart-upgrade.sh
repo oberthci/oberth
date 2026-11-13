@@ -85,7 +85,7 @@ chmod -R u+w "$native_chart"
 cp -- "$native_fixture" "$native_chart/values.yaml"
 "$helm_tool" template oberth "$native_chart" --is-upgrade --namespace oberth \
   --set-string "image.ref=$server_image" >"$work/native-upgrade.yaml"
-grep -Fxq '  name: oberth-argo-oberth-pipeline' "$work/native-upgrade.yaml"
+test "$(grep -c '^kind: PriorityClass$' "$work/native-upgrade.yaml")" -eq 1
 grep -Fxq '      priorityClassName: oberth-oberth-control-plane' "$work/native-upgrade.yaml"
 if grep -Eq -- '--admission-|--step-cpu-request-percent' "$work/native-upgrade.yaml"; then
   echo 'native upgrade kept an admission argument' >&2
