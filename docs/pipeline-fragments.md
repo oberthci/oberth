@@ -118,32 +118,13 @@ annotation.
 
 ## Local validation
 
-`oberth validate` cannot resolve fragments: it runs against a checkout with no
-access to the server's git cache. It reports each reference by name and exits
-non-zero rather than passing a document it did not fully check. Admission
-requires the complete document after expansion from the pinned versions;
-skipping a fragment could also skip checks on the consumer's own templates,
-including resource allowlists and workspace isolation.
+`oberth validate` refuses every `templateRef` and `workflowTemplateRef` through
+the ordinary document admission checks. Inline the templates to validate the
+complete document locally. The fragment CLI and the
+`--allow-unresolved-fragments` option have been removed.
 
-For documents without fragments, local validation also runs the server's
-document-only isolation checks. This includes refusing a credential chain with
-a CI cache mount and token opt-outs with credential chains. Release pipelines
-use the release tier's isolation rules. These checks do not need server access; approvals,
-grants, Kubernetes namespace policies, identities and admission receipts still
-require server admission.
-
-The deprecated `--allow-unresolved-fragments` flag is still accepted for
-compatibility, but it no longer permits a successful result with unresolved
-fragments. It cannot bypass admission.
-
-```
-oberth validate                                # names unresolved references, exits non-zero
-oberth validate --allow-unresolved-fragments   # also exits non-zero if fragments cannot resolve offline
-```
-
-On the server:
-
-```
-oberth fragments list                          # repositories publishing fragments, with versions
-oberth fragments show <repository>@<version>   # the document and the commit it resolves to
-```
+Local validation also runs the server's document-only isolation checks. This
+includes refusing a credential chain with a CI cache mount and token opt-outs
+with credential chains. Release pipelines use the release tier's isolation
+rules. Approvals, grants, Kubernetes namespace policies, identities and admission
+receipts still require server admission.

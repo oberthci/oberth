@@ -334,37 +334,6 @@ classed default-branch, tag, unreachable or not-commit; with a selection it plan
 and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream).
 ```
 
-## oberth fragments
-
-```text
-Usage: oberth fragments <list|show> [flags]
-Use oberth fragments <command> --help for command flags.
-```
-
-## oberth fragments list
-
-```text
-Usage: oberth fragments list [flags]
-
-Flags:
-  -data-root string
-        Oberth data root holding the git cache (default "/data")
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
-## oberth fragments show
-
-```text
-Usage: oberth fragments show [flags]
-
-Flags:
-  -data-root string
-        Oberth data root holding the git cache (default "/data")
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
 ## oberth git-ssh
 
 ```text
@@ -2099,8 +2068,6 @@ Flags:
 Usage: oberth validate [flags]
 
 Flags:
-  -allow-unresolved-fragments
-        deprecated: unresolved fragments still fail validation because admission requires their pinned contents
   -runner-image-prefixes string
         comma-separated allowlist of permitted runner image prefixes
 ```

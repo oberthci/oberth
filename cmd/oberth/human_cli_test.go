@@ -44,7 +44,7 @@ func TestUsageErrorIsNotDoubled(t *testing.T) {
 // SQLite's "unable to open database file".
 func TestInPodCommandOffPodNamesWhereToRunIt(t *testing.T) {
 	missing := t.TempDir() + "/absent/oberth.sqlite"
-	for command, remote := range map[string]string{"uplink list": "oberth mcp call uplink_list", "schedules": "oberth schedules list", "fragments list": "no remote form"} {
+	for command, remote := range map[string]string{"uplink list": "oberth mcp call uplink_list", "schedules": "oberth schedules list"} {
 		arguments := append(strings.Fields(command), "--database", missing)
 		err := withInPodHint(arguments, runCLI(t.Context(), arguments, strings.NewReader(""), &bytes.Buffer{}))
 		var hint inPodCommandError

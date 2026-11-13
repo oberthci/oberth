@@ -82,7 +82,7 @@ func cliFailureExitCode(err error) int {
 	return 1
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, unseal, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, release-wif, secretstore, mcp, client, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, unseal, backup, restore, serve, upstream, repo, branch, outbox, schedules, artifacts, runs, run, promotion, publication, log, events, sync, repos, issues, status, uplink, access, release-wif, secretstore, mcp, client, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -135,7 +135,6 @@ Commands:
   branch        Prune mirror branches in batches; read upstream deletion state
   outbox        Show, retry or abandon a receive record that blocks a repository
   schedules     List and manage scheduled runs
-  fragments     Manage pipeline fragments
   artifacts     List and download build artifacts
   runs          List recent CI/CD runs, or cancel a ref's active runs
   run           Show or wait for a run; retry, rerun at the same SHA, cancel one, or purge its retained logs/artifacts
@@ -183,8 +182,6 @@ Commands:
 		return runOutbox(ctx, arguments[1:], output)
 	case "schedules":
 		return runSchedules(ctx, arguments[1:], output)
-	case "fragments":
-		return runFragments(ctx, arguments[1:], output)
 	case "artifacts":
 		return runArtifacts(ctx, arguments[1:], output)
 	case "runs":
