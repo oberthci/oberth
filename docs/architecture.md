@@ -1,354 +1,102 @@
 # Architecture
 
-An authenticated SSH push updates a bare repository cache on the PVC. Oberth
-creates an actor-bound, fsync-backed receive reservation before Git can publish
-the refs. Committed branch and tag events are replayed idempotently from that
-outbox into SQLite, including after a callback failure or process restart.
-The SSH handshake resolves one public-key fingerprint and actor for the lifetime
-of that connection. Receive callbacks carry that bound value directly; a later
-resolver or session-table change cannot reattribute an in-flight push.
-Receive ordering has its own per-repository lock; the Git object lock is
-released before a durable callback runs, so branch and tag admission can inspect
-the accepted object without deadlocking or allowing a later receive to overtake
-the callback. The receive policy and upstream materializer enforce the same
-public branch/tag grammar, and remove invalid refs left by an older cache before
-snapshotting. Each reservation also binds the exact fresh upstream default-branch
-name and SHA used by tag admission, so replay cannot silently switch ancestry
-authority after an upstream default-branch rename.
-Oberth records one durable run, marks any active run for the same branch
-`interrupted` with supersession metadata, retains the Kubernetes cancellation
-obligation, and places the replacement at the tail of a global queue. Claims
-choose the oldest eligible run. A pending
-publication gates only its exact repository, ref kind, and ref, preventing two
-green pushes from publishing that ref concurrently while other refs continue.
+Oberth is a Git ingress, CI record and publication service. Kubernetes places
+Pods and Argo executes Workflows. The [native scheduling](native-scheduling.md)
+page describes authored resources, placement, synchronization and deadlines.
 
-When capacity is available, Oberth creates a detached workspace at the exact
-accepted commit and submits an Argo Workflow from the repository's
-`.oberth/build.yaml` (branch triggers) or `.oberth/release.yaml` (tag
-triggers). Oberth sets metadata, forces the ServiceAccount identity by trigger
-tier, and injects the source checkout into every container template. Each DAG
-task runs in its own container with its own exit code and named log slice.
-CPU, memory, and ephemeral storage have requests and limits;
-the writable private scratch `emptyDir` cannot exceed the same ephemeral-storage limit.
-The shared PVC has a fixed requested capacity, while the intentionally
-persistent CI/release host caches remain separate node-provisioned paths.
+## Git ingress and run records
 
-The Job name is deterministic and persisted before Kubernetes creation. Create
-is idempotent only for the identical intended Job. Graceful shutdown cancels and
-joins active background tasks; owner startup turns every interrupted Job intent into a
-durable deletion obligation before serving new work.
+An authenticated SSH connection binds one public-key fingerprint to an actor.
+Git pushes update a bare repository cache on the persistent data volume. Before
+publishing refs, the receive path records an actor-bound, fsync-backed outbox
+reservation. Callbacks replay accepted branch and tag events idempotently into
+SQLite after failures or restarts. Repository locks preserve receive order;
+network publication happens outside those locks.
 
-Workspace paths are deterministic database-owned resources. Run and promotion
-workspaces remain while their owner, cancellation, or publication is active.
-Terminalization happens before cleanup; startup recovers paginated terminal
-owners and never scans or deletes an unrecognized directory.
+Branch pushes resolve `.oberth/build.yaml`; tag runs resolve
+`.oberth/release.yaml`. A run retains the exact commit, actor and trigger.
+A newer push can supersede an older run on the same branch. The scheduler
+claims eligible records in acceptance order and starts their submission work.
+Archived repositories, unfinished cancellations and pending publication on the
+same ref can delay a claim. Oberth has no capacity scheduler, run ceiling,
+priority queue, resource reservation or queue-position field.
 
-The server watches Job state and streams masked logs to the PVC. A retained-log
-destination failure cancels the Job, while a source transport reset never
-deletes healthy compute. The stream reconnects by verifying and discarding the
-already-retained raw prefix, then verifies one authoritative non-following log
-after termination. Structured step results come from the runner's final
-`oberth-summary` marker record in that verified log; the termination message
-keeps only a minimal status for `kubectl describe`, with the legacy step-array
-message still decoded from runs of older SDK versions. Byte ranges for every
-`[burn/step]` section let one named-step MCP read return exactly that step
-after Kubernetes reaps the pod. A run fails if retained output exceeds the
-configured per-run ceiling (`--run-log-limit-bytes`, 64 MiB by default).
+The cron service resolves scheduled work from the current default-branch
+schedule and enqueues ordinary runs. Promotion work has its own durable order
+for Git merge and publication. These are CI lifecycle policies; Argo controls
+Workflow parallelism and Kubernetes controls Pod scheduling.
 
-The Argo controller starts following pod nodes as soon as they are known,
-including Pending nodes whose containers can start before Argo publishes
-Running. It follows each main container with Kubernetes
-timestamps and serializes complete `[burn/step]` lines with progress records.
-There are at most 32 followers per run; excess pods remain eligible for the
-next observation and final drain. Retry attempts of one logical step drain in
-order. Each attempt has a 32 MiB output ceiling and each timestamped record has a
-1 MiB ceiling; all output and delivery
-metadata share the run ceiling. A final non-following read reconciles the
-inclusive timestamp boundary before delivery completes. Missing boundaries,
-changed pod/container identities, unavailable logs and adoption without a
-cursor produce explicit continuity diagnostics. Delivery failure alone leaves
-the command verdict intact; retained writer failures and aggregate budget
-breaches fail observation. `::oberth-log::` records carry delivery state separately
-from command output. Active step readers build a snapshot index over the same
-retained file, including interleaved ranges; browser disconnects have no effect
-on the controller's followers.
+## Source resolution and Workflow submission
 
-Branch and tag triggers are distinct trust domains. Branch Jobs mount no Secret
-and use `/var/cache/oberth/ci`. Before Git publishes a tag ref, a server-owned
-receive policy rejects deletion, movement, upstream conflict, and any commit not
-reachable from the fresh upstream default-branch snapshot. The Go backend
-checks these rules before CAS ref updates; the compatibility backend uses a
-server-owned hook. Admission resolves full symbolic `HEAD`, avoiding ambiguity
-when a tag shares the branch's short name.
-Release Jobs use
-`/var/cache/oberth/release` and only the configured Secret names. Every mounted
-Secret key is snapshotted at admission, freezing its bytes for the pod lifetime.
-The immutable snapshot is projected as one read-only volume that preserves
-`/secrets/<original-name>/<key>`. It is owned by the Job and garbage-collected
-with it; the server can create snapshots but cannot read or delete arbitrary
-namespace Secrets. Every snapshotted value is masked before retained logs are
-written.
+The source resolver pins the exact source and fragment set in a source receipt.
+Submission checks that binding again. Admission validates dangerous content and
+credential boundaries while preserving admitted native Argo fields. Trusted
+upstream policy refresh can delay submission; it counts no capacity and rewrites
+no requests.
 
-Plan and Apply are a third, explicitly authorized trust domain. Ordinary Test
-and Build remain secretless. An actor authorizes Plan for one exact
-terminal-green SHA only while it fast-forwards onto the exact current target
-base. The repository declares a paired Plan/Apply pipeline, one
-repository-scoped backend identity, bounded regular lock files, and distinct
-operator-owned secret namespaces. Plan credentials live only below
-`oberth/upstream/<org>/<repo>/plan/`; Apply credentials live only below the
-matching `/apply/` subtree. Admission and pre-fetch snapshotting both enforce
-the typed phase before store login, so repository code cannot borrow Apply
-capability during planning. Present empty values survive as zero-byte files but
-do not create an empty redaction rule. Writable module and build caches are
-also split into distinct per-repository `plan` and `apply` trust tiers; neither
-phase can persist executables or credential-derived state into the other's
-cache.
+The server creates a per-run source claim in the pipeline namespace and fills
+it with the resolved checkout through a short-lived seed Pod. Containers receive
+the source read-only. Configured repository/tier caches are separate from that
+checkout. Artifact collection uses a source helper after execution. See
+[pinned sources](pinned-sources.md) and [native scheduling](native-scheduling.md)
+for the current delivery and helper behavior.
 
-The Plan runner writes only the fixed memory-backed path. A mandatory residue
-gate retires escaped repository processes and listeners before server-owned
-`save-plan` capture. The server rejects symlinks and artifacts over 16 MiB,
-binds plaintext digest and the complete repository/source/target/run/tool/
-lock/config/backend/actor identity, and encrypts the bytes through
-verified-HTTPS OpenBao Transit before storing ciphertext in SQLite on the
-Oberth `/data` PVC. Plaintext never reaches the PVC. Terminal transitions clear
-the live ciphertext column while preserving immutable audit metadata; SQLite
-may retain already-encrypted remnants in freed physical pages, so this is
-logical live-storage clearing rather than a claim of physical erasure.
+Branch execution uses its CI identity. Credentialed runs use installer-provisioned
+identities and explicit grants. The server delivers short-lived, Pod-bound
+executor tokens to the Argo helpers. Secret-bearing steps use
+`oberth secretstore exec`; arbitrary Secret access and service identity
+overrides remain refused. See [secret delivery](argo-secret-delivery.md).
 
-An Apply-capable promotion must attach one explicit ready plan while the target
-still equals its bound base and the result equals its planned SHA. Divergence
-requires a new green SHA and Plan. Oberth publishes Git first, records that
-integration result independently, and only then enqueues one exact Apply under
-the durable backend reservation. The Apply init container decrypts and verifies
-the published binding into a memory `emptyDir`; the repository runner receives
-that volume read-only and cannot replace the file or access a delivery socket.
-There is no replan fallback or replay. Scheduler reconciliation recovers a
-stranded post-publication enqueue after restart. Apply can fail after a passed
-promotion, but that failure neither rolls Git back nor changes publication
-evidence.
+## Observation, logs and recovery
 
-The Job substrate is the repository-declared standard golang image
-(`var RunnerImage`, statically parsed and validated against an administrator
-prefix allowlist; absent, derived from go.mod as golang:<version>-alpine). It
-executes the repository's `.oberth` module directly with `go -C .oberth run .`
-— there is no runner binary and no interpreter. Repository-owned setup steps
-fetch and checksum every additional compiler, linter, scanner, chart tool, and
-signer. Writable Go caches are isolated by repository and by CI/release trust
-tier; executable tools always come from the checked-out repository's setup
-definition.
+Argo Workflow and Pod observations drive run and step results. Step progress
+markers and the retained run log keep step status and named log slices
+available after Kubernetes collects the Workflow. A Pod-log continuity journal
+supports resumed following and final log collection. Display rows come from
+`StepResult`; retained Workflow/step timing and termination diagnostics remain
+available through full MCP run details. Admission timing episodes are absent.
+The dashboard uses the compact
+projection and does not load that timing record.
 
-Oberth's own tag pipeline repeats its source gates before publication. It builds
-reproducible multi-platform server executables, creates a clean
-GAR image whose only application executable is that exact build,
-scans and signs their digest references, and performs complete registry
-read-back. The server runtime starts from scratch: a static Go executable,
-CA trust data, embedded timezone database, and numeric user 65534. Git
-transport/plumbing and host-key probing run in Go with explicitly pinned
-known_hosts; the legacy CLI adapter has a separate one-release compatibility
-image. Each platform has a matching pinned scratch substrate; an amd64
-executable is never relabeled as arm64. Its packaged Helm
-chart contains those exact image digests. Binaries and the chart use immutable,
-conditionally-created R2 objects; stable binary aliases, `latest/VERSION`, and
-the classic Helm index advance only after public R2 and GAR verification and use
-ETag compare-and-swap for concurrent finalizers.
+Run observations explain native parallelism, lock and Pending-Pod waits using
+existing statuses and reason lines. Authored deadlines and retry strategies
+belong to Argo. Oberth cancellation and supersession delete the owned Workflow.
+On restart, recovery verifies bindings before adopting existing Workflows.
+Ambiguous creates have a durable cleanup obligation and a background settlement
+task. After restart, stranded runs fail with a restart reason; Oberth does not
+resubmit them. Existing Workflows are adopted only after binding verification. See [restart handover](restart-handover.md).
 
-Every green branch, tag, or promotion creates a pending publication row before
-any publication-side network read or Git mutation. It names the exact ref and
-result object. Ordinary green branches force-sync that result. Tag delivery
-binds the observed missing ref, while promotion already owns an exact predecessor.
-Publication finalization atomically terminalizes the publication, linked run,
-promotion when present, and CI issue projection. Restart recovery compares only
-the recorded ref states once at owner startup. Result present is delivered;
-ordinary branches make one bounded force-sync attempt, while tag/promotion
-predecessor rules remain fail-closed. There is no recurring publication loop.
+## Promotion and publication
 
-The release Job never pre-publishes its admitted tag. Oberth's own repository
-Release DAG holds no upstream-forge mutation credential and makes no forge
-release or ref mutation; it only publishes and verifies immutable artifacts.
-After the DAG is terminal green, the publication owner pushes the exact admitted
-annotated tag object. Equality of peeled commits is insufficient: a forge release
-API can synthesize a lightweight tag whose peel matches while its object identity
-conflicts. Any human-facing forge release therefore happens only after Oberth's
-tag publication, outside the in-band DAG.
+Promotion merges eligible sources with a freshly fetched target in a private
+checkout and tests the candidate when required. Ordered promotion trains test
+their final tree. A publication records the exact tested commit before an
+upstream push; the push is never forced. Target movement and transport failures
+follow the durable promotion/publication retry rules. Parked sources always
+receive merged-tree CI. See [promotion trains](promotion-trains.md) and
+[park provenance](park-promotion.md).
 
-Only default-branch and scheduled branch runs register CI issue work, receiving
-a global admission sequence in the same transaction as the run. Ordinary
-feature-branch runs, promotions, and tag/release runs register none. Per-branch
-and per-origin watermarks keep projections monotonic: delayed older completions
-cannot overwrite newer failures. A finished promotion projects nothing. Red
-creates or updates
-one open issue per repository and branch; green closes it. Projection never
-acquires, renews, or deletes issue locks. Each branch failure projection includes
-the caller-supplied bounded retained-log tail and a command hint for the complete
-failed-step log; the transient tail is not stored on the run record.
-An upstream reconciliation closes stale branch CI issues after a merge into a
-green default branch or a verified upstream deletion. It checks the accepted
-local branch head for ancestry, since a failed newer push may be ahead of the
-last published upstream ref. The close reason is retained in the issue and
-audit history; default-branch issues still require their own green run.
-Manual CI investigation issues can be installation-wide or scoped to an upstream.
-They are not attached to an individual repository or synchronized to the upstream
-forge. See [issue scope and retained compatibility](ci-issue-scope.md).
+## Persistence, audit and service boundaries
 
-Single-source and train promotion share source eligibility: exact green branch
-evidence or authorized [park provenance](park-promotion.md). A red branch run
-cannot be discarded by parking the same SHA. Parked sources always receive full
-merged-tree CI; the promotion and audit record retain skipped branch-CI evidence.
-Single-source promotion reuses the already-tested green branch commit
-only when the fetched target fast-forwards to that exact candidate. A divergent
-target is merged locally and receives a new CI run. Both Git backends share a
-conservative tree merge: overlapping path changes require identical resulting
-objects and modes; otherwise promotion refuses with a `rebase onto <target>`
-hint. There is no content or rename inference; file/directory conflicts and
-ambiguous merge bases also require a rebase. When the fetched target
-already contains the candidate, that fetched target tree also receives a new CI
-run. The final upstream push is never forced, so target movement produces a
-terminal failed promotion rather than overwriting work.
+SQLite stores repository/run history, step results, grants, publications and
+audit records on the server volume. Forward-only migrations have a strict
+sequence and ledger. Existing deployments preserve their schema identity,
+audit domain and witness-key derivation context. Upgrade preflight checks
+stored user values against the target chart schema. When moving to a chart
+without Transit, the installer omits only its retired `secretstore.transit.enabled`,
+`.mount` and `.key` leaves. Other unknown values are refused by the schema.
+Installed compatibility identities remain in the initial stored-user snapshot,
+below requested overlays; restore uses the restored archive's identities.
 
-Repository default branches are discovered from the upstream cache and updated
-durably when the upstream changes. A direct default-branch receive follows the
-same CI and green-publication path as every other branch. Explicit promotion is
-available when an uplink wants Oberth to merge and prove a source against a
-chosen target; its required audit is durable before its CI run becomes claimable.
+Mutations pass the audit integrity gate. The local hash chain is verified on
+startup and during operation. Optional timestamp and Rekor anchoring add
+external evidence and rollback-external continuity; local-only mode does not
+detect a rollback to another internally consistent database. See
+[audit configuration](security.md).
 
-The database retains an explicit schema identity and a strict migration ledger.
-Fresh installations use `oberth-schema-v1`; existing deployments supply their
-original identity through administrator-owned configuration, alongside the
-original audit domain and witness key derivation context. These values remain
-stable across upgrades so persisted schema checks, audit hashes, and signing
-keys keep their original meaning. The schema builder can convert every populated
-version-1 audit row into one gap-free SHA-256 chain inside a single immediate
-transaction; a malformed or missing historical row fails the conversion. The
-live daemon does not run that conversion: it copies the existing database and
-WAL into a private read-only inspection snapshot and accepts only the exact
-current schema. Snapshot verification leaves the source database, WAL, and
-derived WAL index byte-exact. It opens the source writable only after complete
-external continuity verification. A fresh genesis
-is created only after complete immutable intent and completion lists prove empty,
-and it is witnessed before listeners or application mutation paths start. Audit heads receive
-signed timestamps and linked public Rekor witnesses. Before publishing a
-witness, Oberth creates a deterministic immutable intent outside the SQLite
-PVC. Startup recovers and verifies the complete witness history from exact
-Rekor UUID pins; only the single uncompleted intent can require discovery, and
-its deterministic certificate plus exact audit hash form an authenticated AND
-query rather than a floodable public-identity scan. Intent and completed-witness
-sequences are pinned as deterministic immutable ConfigMaps outside the SQLite
-PVC. Initial loading pages those records without a fixed count lifetime;
-steady-state mutation gates retain the canonical immutable prefix and exact-read
-its tips. A pending intent keeps all new mutations closed. If an operation that
-passed its gate earlier finishes after intent creation, recovery witnesses the
-exact intended prefix first and then the newer suffix. The server's namespace
-Role can create, get, and list continuity records but cannot update, patch, or
-delete them, so a crash followed by a complete database rollback cannot erase a
-Rekor side effect. Owner recovery, Git receives, scheduling, and mutating MCP
-calls recheck the local chain, latest signed anchor, verified witness history,
-and rollback-external continuity before changing state. A database with an unknown
-migration or missing immutable identity is rejected before recovery mutates
-anything.
-
-External anchoring is opt-in and off by default. `auditAnchor.tsaURL` and
-`auditAnchor.rekorURL` both default to empty: a fresh install runs the
-complete local hash chain — every action chained, verified at startup, on
-every cycle, and before every mutation — without contacting any external
-service, so an outage of a public free service can never block CI. Setting
-`rekorURL` enables everything above that involves Rekor witnesses, intents,
-and rollback-external continuity; setting `tsaURL` enables RFC 3161 signed
-checkpoints and their freshness gate. Both together restore the full
-externally witnessed, rollback-protected posture, against the public
-instances or self-hosted ones (`rekorCA` / `tsaCA` pin private trust
-anchors). What local-only mode gives up is exactly the external evidence: a
-whole-database rollback to another self-consistent chain is not detectable
-without a witness.
-
-Readiness covers completed startup recovery, the database and configured upstream
-identity. Kubernetes availability and periodic audit health are diagnostics in
-`/api/status`; they do not withdraw an otherwise usable cached Git/SSH endpoint.
-Every mutation still passes its audit integrity gate. Serving prerequisites
-refresh a bounded background snapshot; the HTTP probe performs no network or
-store calls. The sampler owns a separate single-connection read-only WAL pool,
-with a ten-second read budget and five-second cadence. Successful readiness
-samples expire after 90 seconds of elapsed time, regardless of attempt count.
-Ten-second reads overrun the five-second ticker, which drops missed ticks.
-Deadlines retain the last successful sample without extending it; hard errors
-and startup recovery still refuse immediately. This avoids withdrawing HTTP
-readiness for a slow but progressing sampler under CPU contention.
-
-See [readiness under load](readyz-load-flap.md) for the sampling policy and
-remaining Service routing behavior. Shutdown
-removes readiness before stopping admission and drains HTTP/SSE observers. See
-[restart handover](restart-handover.md) for client retries and upgrade behavior.
-Upstream availability is a bounded diagnostic in `/status`, not a readiness
-dependency, so an upstream outage cannot induce a control-plane restart loop.
-
-Go code names execution objects as Workflows and pipeline groups as stages.
-Existing database columns, log markers and serialized JSON fields retain their
-historical `job_name`, `JobName`, `burn` and `Burn` spellings so stored evidence
-and clients remain compatible. These spellings do not select another engine.
-
-Startup tolerates temporary OpenBao failures for up to two minutes with bounded
-backoff. HTTP 400/403 and invalid trust fail immediately. During initialization,
-HTTPS `/healthz` and `/livez` serve probe-only responses using an ephemeral
-in-memory certificate; `/readyz` and application routes remain unavailable. The
-probe identity is discarded before the application listener starts, and bootstrap
-liveness expires after five minutes. ServiceAccount projection gets three attempts
-at two-second intervals. Terminal workspace removal failures are logged and retried
-by a one-minute sweep, without stopping dispatch. Continuous SQLite contention has
-a two-minute total retry budget per operation; exhaustion reaches the owner failure
-path instead of refreshing liveness forever.
-
-A corrupt receive outbox quarantines only its repository. Startup replays healthy
-repositories and retains the corrupt record for operator repair. Refresh, receive
-and publication refuse the affected repository until its record is repaired.
-An unscoped admin repairs it with the `receive_outbox` MCP tool or `oberth outbox`:
-`show` reads the record, `retry` delivers it (an operator-set `quarantined` state
-is restored first when the rest validates), and `abandon` moves it to
-`.receive-outbox/abandoned/` with an audit entry. MCP arguments use `action`
-(not `operation` or `command`), with `repo` exactly as returned by `list`:
-
-```json
-{"action":"list"}
-{"action":"show","repo":"forge/team/project"}
-{"action":"retry","repo":"forge/team/project"}
-{"action":"abandon","repo":"forge/team/project","id":"<record-id-from-show>","reason":"already delivered"}
-```
-
-`list` takes no pagination arguments. An invalid argument names the field and,
-for unknown fields, lists accepted arguments; argument values and private
-storage/transport errors are not included in schema diagnostics.
-
-Branch deletions never wait for the forge. Receive finalization, under the
-repository lock, writes a private `refs/oberth/deleting/heads/<branch>` marker
-for each deleted branch (and drops it for a branch pushed again); the callback
-then commits a pending row in `branch_deletions` together with the receive
-event and returns without any Git call. `branch_delete_many` queues its rows
-not yet due, deletes and marks the refs in one compare-and-delete transaction
-under the receive and repository locks, then releases only the applied rows. A
-background propagator deletes the upstream refs, one push per repository batch
-and one refspec per branch, with no repository lock held across network I/O:
-an upstream ref is deleted only while it still names a deleted head or an
-ancestor (force-with-lease on the observed SHA). A branch still on the mirror
-with its marker is retried later; without one it was pushed again and is
-`skipped`. Each record ends `propagated`, `skipped` or `failed` (six attempts or
-a moved upstream). A failure restores the mirror branch from its upstream
-tracking ref as last fetched, which can lag the forge until the next refresh.
-A push the forge refuses because the upstream repository is archived is final
-at once: the record is `skipped` with an "upstream archived" reason line, and
-the mirror deletion and its marker are kept rather than restored. A failed
-record is resolved (`skipped` with a reason line, no ref change) when a later
-deletion of the same branch propagates, by an hourly sweep once its branch is
-gone from the mirror, or by an unscoped admin with `branch_deletion_resolve`.
-Refs outside `refs/heads/`, `refs/tags/` and Oberth's private `refs/oberth/` and
-`refs/replace/` are never fetched, received or mirrored; the cache's upstream
-remote has no fetch refspec, so git writes no `refs/remotes/upstream/*`. Older
-leftovers are removed by `ref_delete_many`, locally, under the repository lock,
-with a compare-and-delete per ref and an audited plan.
-While the marker exists a refresh does not re-create the branch, and a pending
-feature-branch publication for a branch deleted on the mirror is abandoned
-instead of pushed; its run, whose steps passed, finishes passed with the reason
-line.
-
-Ordered [promotion trains](promotion-trains.md) reuse the same repository/target
-queue. They apply native three-way merges in request order in one private checkout
-and always test the final result once before publication. Per-source eligibility
-and grants are checked before admission. Durable source order, skipped conflicts
-and tree identity survive retries and recovery (schema v53).
+The server exposes Git/SSH, authenticated HTTP/MCP, the dashboard and bounded
+read-only observations. Readiness requires completed recovery, the database and
+configured upstream identity. Kubernetes and audit health remain status
+diagnostics; mutation authorization still checks audit integrity. Shutdown
+withdraws readiness before draining clients. See
+[readiness under load](readyz-load-flap.md).

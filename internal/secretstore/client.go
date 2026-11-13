@@ -1,8 +1,8 @@
-// Package secretstore fetches store-sourced Release, Plan, and Apply secrets from an OpenBao
+// Package secretstore fetches store-sourced pipeline secrets from an OpenBao
 // (or Vault) KV backend. Only the Oberth server process ever holds secret store
 // credentials: it authenticates with its own Kubernetes ServiceAccount token,
 // reads exactly the administrator-allowlisted paths a repository declared, and
-// hands the values to a phase-scoped Job delivery channel. The runner never sees
+// hands the values to a step-scoped delivery channel. The runner never sees
 // a secret store address, role, or token.
 package secretstore
 
@@ -11,8 +11,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,12 +34,6 @@ const (
 	// DefaultKVPath is the conventional KV v2 mount backing both the
 	// administrator allowlist and the virtual oberth/upstream/ namespace.
 	DefaultKVPath = "oberth"
-	// DefaultTransitMountPath is the dedicated engine used only for trusted
-	// promotion artifact envelopes.
-	DefaultTransitMountPath = "oberth-transit"
-	// DefaultTransitKey is the non-exportable symmetric key used by that
-	// engine. Repositories can never select either the mount or key.
-	DefaultTransitKey = "trusted-plan-artifacts"
 
 	defaultTimeout          = 30 * time.Second
 	maxTokenBytes           = 1 << 20
@@ -53,16 +45,10 @@ const (
 	maxSecretTotalBytes     = 8 << 20
 	maxSecretKeysPerPath    = 256
 
-	// A plan itself is capped at 16 MiB by the artifact store. Transit seals a
-	// bounded manifest together with that plan under a 17 MiB envelope ceiling.
-	// OpenBao ciphertext (and the durable SQLite column) has an independent
-	// 32 MiB ceiling for base64 and Transit framing amplification.
-	maxTransitPlaintextBytes  = 17 << 20 // plan + server-owned manifest
-	maxTransitCiphertextBytes = 32 << 20 // durable OpenBao transit ciphertext ceiling
-	maxTransitJSONOverhead    = 64 << 10
-	maxSecretJSONResponse     = 6*maxSecretTotalBytes + maxTransitJSONOverhead
-	maxAuthJSONResponse       = maxTokenBytes + maxTransitJSONOverhead
-	maxRevokeResponse         = 64 << 10
+	maxJSONOverhead       = 64 << 10
+	maxSecretJSONResponse = 6*maxSecretTotalBytes + maxJSONOverhead
+	maxAuthJSONResponse   = maxTokenBytes + maxJSONOverhead
+	maxRevokeResponse     = 64 << 10
 )
 
 // Config carries the operator-supplied OpenBao connection settings.
@@ -89,12 +75,6 @@ type Config struct {
 	ServiceAccountTokenSource func(context.Context) ([]byte, error)
 	// Timeout bounds each HTTP round trip.
 	Timeout time.Duration
-	// TransitMountPath is the administrator-owned transit engine mount used
-	// for trusted plan artifacts. It must be one clean path segment.
-	TransitMountPath string
-	// TransitKey is the administrator-owned transit key. Repositories never
-	// control this value.
-	TransitKey string
 }
 
 // Client fetches KV secrets with a short-lived, per-fetch login.
@@ -104,8 +84,6 @@ type Client struct {
 	role          string
 	tokenPath     string
 	tokenSource   func(context.Context) ([]byte, error)
-	transit       string
-	transitKey    string
 	verifiedHTTPS bool
 }
 
@@ -140,20 +118,6 @@ func New(config Config) (*Client, error) {
 	}
 	if err := pipeline.ValidateSecretStorePath(mount); err != nil {
 		return nil, fmt.Errorf("secret store Kubernetes auth mount: %w", err)
-	}
-	transit := config.TransitMountPath
-	if transit == "" {
-		transit = DefaultTransitMountPath
-	}
-	if err := validateTransitSegment("mount", transit); err != nil {
-		return nil, err
-	}
-	transitKey := config.TransitKey
-	if transitKey == "" {
-		transitKey = DefaultTransitKey
-	}
-	if err := validateTransitSegment("key", transitKey); err != nil {
-		return nil, err
 	}
 	if config.ServiceAccountTokenSource != nil && config.ServiceAccountTokenPath != "" {
 		return nil, errors.New("secret store ServiceAccount token source and path are mutually exclusive")
@@ -203,7 +167,7 @@ func New(config Config) (*Client, error) {
 	resetSDKRequestIdentity(apiClient)
 	return &Client{
 		api: apiClient, mount: mount, role: role, tokenPath: tokenPath, tokenSource: config.ServiceAccountTokenSource,
-		transit: transit, transitKey: transitKey, verifiedHTTPS: parsed.Scheme == "https",
+		verifiedHTTPS: parsed.Scheme == "https",
 	}, nil
 }
 
@@ -243,150 +207,6 @@ func (client *Client) SealStatus(ctx context.Context) (sealed bool, err error) {
 		return false, sanitizeSecretStoreHTTPError("seal-status check", err)
 	}
 	return response.Sealed, nil
-}
-
-// Encrypt seals one non-empty trusted-plan envelope with the fixed,
-// administrator-owned OpenBao transit key. Even when KV development access
-// explicitly permits HTTP, trusted plan bytes never cross an unverified
-// transport.
-func (client *Client) Encrypt(ctx context.Context, plaintext []byte) (string, error) {
-	if err := client.requireVerifiedHTTPS("transit encrypt"); err != nil {
-		return "", err
-	}
-	if err := validateTransitPlaintextSize(len(plaintext)); err != nil {
-		return "", err
-	}
-	session, err := client.login(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer client.logout(ctx, session)
-
-	response, err := client.transitWrite(ctx, session, "encrypt", map[string][]byte{
-		"plaintext": plaintext,
-	}, int64(maxTransitCiphertextBytes+maxTransitJSONOverhead))
-	if err != nil {
-		return "", err
-	}
-	defer clear(response)
-	var envelope struct {
-		Data struct {
-			Ciphertext string `json:"ciphertext"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(response, &envelope); err != nil {
-		return "", fmt.Errorf("secret store transit encrypt returned malformed JSON: %w", err)
-	}
-	if envelope.Data.Ciphertext == "" {
-		return "", errors.New("secret store transit encrypt returned no ciphertext")
-	}
-	if err := validateTransitCiphertextSize(len(envelope.Data.Ciphertext)); err != nil {
-		return "", err
-	}
-	return envelope.Data.Ciphertext, nil
-}
-
-// Decrypt opens one bounded trusted-plan envelope. The caller must still
-// validate the embedded manifest before making the plaintext available to an
-// Apply runner.
-func (client *Client) Decrypt(ctx context.Context, ciphertext string) ([]byte, error) {
-	if err := client.requireVerifiedHTTPS("transit decrypt"); err != nil {
-		return nil, err
-	}
-	if err := validateTransitCiphertextSize(len(ciphertext)); err != nil {
-		return nil, err
-	}
-	session, err := client.login(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer client.logout(ctx, session)
-
-	encodedLimit := int64(base64.StdEncoding.EncodedLen(maxTransitPlaintextBytes) + maxTransitJSONOverhead)
-	response, err := client.transitWrite(ctx, session, "decrypt", map[string]string{
-		"ciphertext": ciphertext,
-	}, encodedLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer clear(response)
-	var envelope struct {
-		Data struct {
-			Plaintext []byte `json:"plaintext"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(response, &envelope); err != nil {
-		return nil, fmt.Errorf("secret store transit decrypt returned malformed JSON: %w", err)
-	}
-	if len(envelope.Data.Plaintext) == 0 {
-		return nil, errors.New("secret store transit decrypt returned no plaintext")
-	}
-	if err := validateTransitPlaintextSize(len(envelope.Data.Plaintext)); err != nil {
-		return nil, err
-	}
-	return envelope.Data.Plaintext, nil
-}
-
-func (client *Client) transitWrite(
-	ctx context.Context,
-	session *vaultapi.Client,
-	operation string,
-	body any,
-	responseLimit int64,
-) ([]byte, error) {
-	encodedBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("encode request: %w", err)
-	}
-	defer clear(encodedBody)
-	response, err := session.Logical().WriteRawWithContext(
-		ctx,
-		fmt.Sprintf("%s/%s/%s", client.transit, operation, client.transitKey),
-		encodedBody,
-	)
-	if err != nil {
-		return nil, sanitizeSecretStoreHTTPError("transit "+operation, err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, responseLimit+1))
-	if err != nil {
-		return nil, errors.New("secret store transit " + operation + " failed: response read error")
-	}
-	if int64(len(raw)) > responseLimit {
-		clear(raw)
-		return nil, fmt.Errorf("secret store transit %s failed: response exceeds %d bytes", operation, responseLimit)
-	}
-	return raw, nil
-}
-
-func validateTransitSegment(label, value string) error {
-	if strings.Contains(value, "/") {
-		return fmt.Errorf("secret store transit %s is required and must be a single clean path segment", label)
-	}
-	if err := pipeline.ValidateSecretStorePath(value); err != nil {
-		return fmt.Errorf("secret store transit %s: %w", label, err)
-	}
-	return nil
-}
-
-func validateTransitPlaintextSize(size int) error {
-	if size <= 0 {
-		return errors.New("secret store transit plaintext must be non-empty")
-	}
-	if size > maxTransitPlaintextBytes {
-		return fmt.Errorf("secret store transit plaintext exceeds %d bytes", maxTransitPlaintextBytes)
-	}
-	return nil
-}
-
-func validateTransitCiphertextSize(size int) error {
-	if size <= 0 {
-		return errors.New("secret store transit ciphertext must be non-empty")
-	}
-	if size > maxTransitCiphertextBytes {
-		return fmt.Errorf("secret store transit ciphertext exceeds %d bytes", maxTransitCiphertextBytes)
-	}
-	return nil
 }
 
 // FetchKV logs in with the Kubernetes ServiceAccount identity, reads every

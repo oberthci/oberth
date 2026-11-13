@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -170,50 +169,6 @@ func TestSecretStoreCmdlineMatchesServeParsing(t *testing.T) {
 	}
 	if !reflect.DeepEqual(discovered, want) {
 		t.Fatalf("discovered = %+v, want the serve-parsed configuration %+v", discovered, want)
-	}
-}
-
-func TestTrustedPlanTransitServeFlagsAreNestedAndFailClosed(t *testing.T) {
-	base := []string{
-		"--argo-namespace=argo-pipelines",
-		"--runner-image-prefixes=golang:",
-		"--secretstore-address=https://store.example:8200",
-		"--secretstore-role=oberth-ci",
-	}
-	valid := append(slices.Clone(base),
-		"--secretstore-transit-mount=oberth-transit",
-		"--secretstore-transit-key=trusted-plan-artifacts",
-	)
-	options, err := parseServeOptions(valid, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options.secretStoreTransitMount != "oberth-transit" || options.secretStoreTransitKey != "trusted-plan-artifacts" {
-		t.Fatalf("transit options = %+v", options)
-	}
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "missing key", args: append(slices.Clone(base), "--secretstore-transit-mount=oberth-transit"), want: "requires both"},
-		{name: "missing mount", args: append(slices.Clone(base), "--secretstore-transit-key=trusted-plan-artifacts"), want: "requires both"},
-		{name: "HTTP development mode", args: []string{
-			"--argo-namespace=argo-pipelines",
-			"--runner-image-prefixes=golang:",
-			"--secretstore-address=http://127.0.0.1:8200", "--secretstore-insecure-http", "--secretstore-role=dev",
-			"--secretstore-transit-mount=oberth-transit", "--secretstore-transit-key=trusted-plan-artifacts",
-		}, want: "verified HTTPS"},
-		{name: "reserved mount", args: append(slices.Clone(base), "--secretstore-transit-mount=sys", "--secretstore-transit-key=trusted-plan-artifacts"), want: "reserved"},
-		{name: "dot key", args: append(slices.Clone(base), "--secretstore-transit-mount=oberth-transit", "--secretstore-transit-key=.."), want: "clean non-empty"},
-		{name: "nested mount", args: append(slices.Clone(base), "--secretstore-transit-mount=transit/plans", "--secretstore-transit-key=trusted-plan-artifacts"), want: "one clean"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if _, err := parseServeOptions(test.args, io.Discard); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("error = %v, want %q", err, test.want)
-			}
-		})
 	}
 }
 

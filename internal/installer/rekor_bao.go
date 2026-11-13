@@ -20,6 +20,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const rekorTransitMount = "oberth-transit"
+
 //go:embed all:rekorchart
 var rekorChart embed.FS
 
@@ -41,7 +43,19 @@ func configureRekorBao(ctx context.Context, cfg Config, deps Deps, store openBao
 			return "", err
 		}
 	}
-	keyPath := defaultTransitMount + "/keys/rekor-" + ns
+	// Only Rekor uses this signing engine. Plan/Apply provisioning is absent.
+	mounts, err := store.listMounts(ctx, token, "secrets")
+	if err != nil {
+		return "", err
+	}
+	if mount, exists := mounts[rekorTransitMount+"/"]; exists {
+		if mount.Type != "transit" {
+			return "", fmt.Errorf("rekor mount %s has type %q, expected transit", rekorTransitMount, mount.Type)
+		}
+	} else if out, err := store.authenticated(ctx, token, nil, "secrets", "enable", "-path="+rekorTransitMount, "transit"); err != nil {
+		return "", fmt.Errorf("enable Rekor signing engine: %w%s", err, commandOutputSuffix(out))
+	}
+	keyPath := rekorTransitMount + "/keys/rekor-" + ns
 	key, err := store.readData(ctx, token, keyPath)
 	if err != nil {
 		return "", err
@@ -125,7 +139,7 @@ func configureRekorBao(ctx context.Context, cfg Config, deps Deps, store openBao
 			policy += fmt.Sprintf("path %q { capabilities = [\"read\"] }\n", defaultKVPrefix+"/data/identities/"+ns+"/rekor-db-root")
 		}
 		if component == "rekor" {
-			policy += fmt.Sprintf("path %q { capabilities = [\"read\"] }\npath %q { capabilities = [\"update\"] }\n", keyPath, defaultTransitMount+"/sign/rekor-"+ns+"/sha2-256")
+			policy += fmt.Sprintf("path %q { capabilities = [\"read\"] }\npath %q { capabilities = [\"update\"] }\n", keyPath, rekorTransitMount+"/sign/rekor-"+ns+"/sha2-256")
 		}
 		if err := store.policyWrite(ctx, token, role, policy); err != nil {
 			return "", err

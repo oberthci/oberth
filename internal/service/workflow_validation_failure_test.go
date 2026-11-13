@@ -20,7 +20,7 @@ type validationFailureJobs struct {
 	creates               int
 }
 
-func (j *validationFailureJobs) PipelineDemandReceipt(context.Context, WorkflowRequest) (*argoworkflow.DemandReceipt, error) {
+func (j *validationFailureJobs) ResolvePipelineSource(context.Context, WorkflowRequest) (*argoworkflow.SourceReceipt, error) {
 	if j.receiptErr != nil {
 		return nil, j.receiptErr
 	}

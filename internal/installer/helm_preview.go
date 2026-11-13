@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -76,6 +77,15 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 	args := append(OberthHelmArgs(previewCfg, openbao, rekor),
 		"--dry-run=server", "--no-hooks", "--output=json")
 
+	work, err := os.MkdirTemp("", "oberth-preview-stored-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(work) }()
+	args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args)
+	if err != nil {
+		return err
+	}
 	raw, err := deps.RunHelm(ctx, args)
 	if err == nil {
 		defer clear(raw)
@@ -280,8 +290,7 @@ func detectFailedHelmRevision(ctx context.Context, deps Deps, namespace string) 
 
 // plannedOpenBaoResult derives, without touching OpenBao, the secret-store
 // values the real upgrade will pass: the installer-managed service address,
-// and the trust anchor and Transit enablement the live release already
-// carries. The OpenBao phase re-verifies both before the real upgrade.
+// and the trust anchor the live release already carries.
 func plannedOpenBaoResult(ctx context.Context, cfg Config, deps Deps, ns string) (OpenBaoResult, error) {
 	planned := OpenBaoResult{ServiceAddress: openBaoServiceAddress(cfg)}
 	if cfg.InstallSecretStoreDev {
@@ -292,7 +301,6 @@ func plannedOpenBaoResult(ctx context.Context, cfg Config, deps Deps, ns string)
 		return planned, fmt.Errorf("read live secret-store values: %w", err)
 	}
 	planned.CACertPEM = live.Secretstore.CACert
-	planned.TrustedTransitVerified = live.Secretstore.Transit.Enabled
 	planned.PKIEnabled = live.TLS.PKI.Enabled
 	return planned, nil
 }

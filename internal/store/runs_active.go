@@ -34,11 +34,7 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
 	orderSQL := submissionOrderSQL()
 	rows, err := s.reader().QueryContext(ctx, `
-WITH queue AS (
- SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY `+orderSQL+`) AS queue_position FROM runs
- WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
-)
-SELECT `+runReadColumns+`, COALESCE(queue_position, 0) FROM runs LEFT JOIN queue ON runs.id = queue.queued_id
+SELECT `+runReadColumns+` FROM runs
 WHERE status IN ('queued', 'running')
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
 ORDER BY CASE WHEN status = 'running' AND started_at IS NOT NULL THEN 0 ELSE 1 END, started_at, `+orderSQL+`
@@ -49,9 +45,7 @@ LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- the restriction is a
 	defer func() { _ = rows.Close() }()
 	runs := make([]model.Run, 0)
 	for rows.Next() {
-		var position int64
-		value, err := scanReadRun(rows, &position)
-		value.QueuePosition = position
+		value, err := scanReadRun(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan run: %w", err)
 		}

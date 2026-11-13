@@ -355,7 +355,7 @@ type LogStore interface {
 }
 
 type WorkflowRequest struct {
-	DemandReceipt *argoworkflow.DemandReceipt
+	SourceReceipt *argoworkflow.SourceReceipt
 	WorkflowName  string `json:"WorkflowName"`
 	Run           model.Run
 	Repository    model.Repository
@@ -372,10 +372,6 @@ type WorkflowRequest struct {
 	// PipelineFile identifies the document under read-only release preflight.
 	PipelineFile string
 	SourceDir    string
-	// Exclusive is the sorted exclusive-class set admission granted (#1499),
-	// read from the fragment-resolved graph. Build refuses a Workflow whose
-	// resolved classes differ.
-	Exclusive []string
 }
 
 type JobResult struct {

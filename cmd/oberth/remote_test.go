@@ -79,16 +79,15 @@ func TestRunDetailMarksTheFailingStep(t *testing.T) {
 	}
 }
 
-func TestRunDetailShowsCapacityWait(t *testing.T) {
+func TestRunDetailShowsControllerWait(t *testing.T) {
 	payload := `{"run":{"id":"run-abc","status":"waiting","ref":"main","sha":"0123456789abcdef"},` +
-		`"scheduling":{"state":"waiting","message":"At the head of the run queue (6 runs running); every later run waits behind it.",` +
-		`"admission":{"state":"waiting","used":6,"capacity":6,"position":1}}}`
+		`"scheduling":{"state":"waiting","message":"Waiting for Argo controller parallelism."}}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer
 	if err := runRunDetail(context.Background(), []string{"run-abc"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"queued", "At the head of the run queue (6 runs running)"} {
+	for _, want := range []string{"queued", "Waiting for Argo controller parallelism."} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("queued detail missing %q: %s", want, out.String())
 		}
@@ -586,15 +585,15 @@ func TestShortRunIDLogReadIsOneRequest(t *testing.T) {
 }
 
 // --active reads the first page of the default view, drops its terminal row,
-// and prints the server's order with each queued run's position and reason.
-func TestRunsActivePrintsTheQueue(t *testing.T) {
+// and prints the server's order with each queued run's reason.
+func TestRunsActivePreservesOrderAndReasons(t *testing.T) {
 	var query string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"runs":[{"id":"run-started","ref":"main","status":"running","started_at":"2026-10-20T11:59:00Z"},` +
-			`{"id":"run-head","ref":"feature/xl","status":"waiting","display_reason":"20 of 20 runs running","scheduling":{"state":"waiting","queue_position":4,"message":"20 of 20 runs running","admission":{"state":"waiting","position":4,"used":20,"capacity":20}}},` +
-			`{"id":"run-queued","ref":"feature/q","status":"queued","scheduling":{"state":"queued","message":"Awaiting scheduler claim.","queue_position":7}},{"id":"run-scoped","status":"queued","scheduling":{"state":"queued"}},{"id":"run-finished","status":"passed"}],"next_before":1}`))
+			`{"id":"run-head","ref":"feature/head","status":"waiting","display_reason":"Waiting for Argo controller parallelism.","scheduling":{"state":"waiting","message":"Waiting for Argo controller parallelism."}},` +
+			`{"id":"run-queued","ref":"feature/q","status":"queued","scheduling":{"state":"queued","message":"Awaiting scheduler claim."}},{"id":"run-scoped","status":"queued","scheduling":{"state":"queued"}},{"id":"run-finished","status":"passed"}],"next_before":1}`))
 	}))
 	defer server.Close()
 	configure(t, server)
@@ -610,10 +609,14 @@ func TestRunsActivePrintsTheQueue(t *testing.T) {
 	if started < 0 || head < started || queued < head {
 		t.Fatalf("order not preserved:\n%s", body)
 	}
-	for _, want := range []string{"20 of 20 runs running", "4    run-head", "7    run-queued", "-    run-scoped"} {
+	for _, want := range []string{"Waiting for Argo controller parallelism.", "run-head", "run-queued", "run-scoped"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("output missing %q:\n%s", want, body)
 		}
+	}
+	header := strings.Fields(strings.SplitN(body, "\n", 2)[0])
+	if strings.Join(header, " ") != "RUN STATUS ELAPSED REF REASON" {
+		t.Fatalf("active header = %q", header)
 	}
 	if err := runRuns(context.Background(), []string{"--active", "--all"}, &out); err == nil {
 		t.Fatal("--active --all accepted")

@@ -26,10 +26,9 @@ func (s *API) observeScheduling(ctx context.Context, run model.Run, steps []mode
 			}
 		}
 	}
-	run = s.runAdmissionContext(ctx, run, force && run.QueuePosition == 0)
 	c := s.schedulingClock()
 	observed := c.Now().UTC()
-	result = &model.RunScheduling{ObservedAt: observed, State: "preparing", Message: "Preparing Workflow submission.", QueuePosition: run.QueuePosition}
+	result = &model.RunScheduling{ObservedAt: observed, State: "preparing", Message: "Preparing Workflow submission."}
 	defer func() {
 		result.AgeSeconds = int64(c.Since(observed) / time.Second)
 		if model.DisplayRunStatus(run) == model.DisplayQueued && reason == "" {
@@ -159,8 +158,4 @@ func lockWaitReason(execution *model.ExecutionObservation) string {
 		return "w" + strings.TrimSuffix(strings.TrimPrefix(message, "W"), ".")
 	}
 	return ""
-}
-
-type queuedRunObserver interface {
-	QueuedRunPosition(context.Context, string) (int64, error)
 }

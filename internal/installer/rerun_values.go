@@ -190,9 +190,6 @@ func readInstallValues(ctx context.Context, cfg *Config, deps Deps) error {
 			if err != nil {
 				return err
 			}
-			if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
-				return err
-			}
 		}
 	}
 	cfg.existingValuesRead = true

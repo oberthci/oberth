@@ -124,8 +124,7 @@ the server daemon uses workload identity; operator-only secretstore sync reads B
 
 2. Inspect it, then run it on the machine where your bao/vault CLI is already
    authenticated. It enables Kubernetes auth, writes a minimal read-only
-   KV policy plus exact Transit encrypt/decrypt grants, creates one
-   non-exportable trusted-plan key, binds a role to the Oberth ServiceAccount,
+   KV policy, binds a role to the Oberth ServiceAccount,
    and prints the exact helm values for step 3.
 
 3. helm upgrade --install with the printed secretstore.* values.

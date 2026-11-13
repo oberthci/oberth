@@ -22,8 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/oberthci/oberth/internal/podpriority"
 )
 
 // A pipeline's containers must see the exact pushed revision, and the server
@@ -500,7 +498,6 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 	falseValue := false
 	trueValue := true
 	rootUser := int64(0)
-	neverPreempt := corev1.PreemptNever
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -508,9 +505,7 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 			Labels:    map[string]string{"oberth.ci/component": "source-seed"},
 		},
 		Spec: corev1.PodSpec{
-			PriorityClassName: podpriority.PipelineClass(seeder.config.Namespace),
-			PreemptionPolicy:  &neverPreempt,
-			RestartPolicy:     corev1.RestartPolicyNever,
+			RestartPolicy: corev1.RestartPolicyNever,
 			// The seeding Pod exists to hold a filesystem open. It must not be
 			// able to talk to the API server it was created by.
 			AutomountServiceAccountToken: &falseValue,

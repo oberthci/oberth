@@ -21,7 +21,7 @@ Website: [oberth.ci](https://oberth.ci)
 - **CI** — each push submits the repository's Argo Workflow YAML
   (`.oberth/build.yaml` for branches, `.oberth/release.yaml` for tags); each
   template runs in its own container with its own exit code and named log
-  slice. A priority-then-FIFO queue; how many Workflows run at once is the
+  slice. Runs are claimed in acceptance order; how many Workflows run at once is the
   Argo controller's parallelism ([where limits live](docs/where-limits-live.md));
   a newer push to the same branch supersedes its own in-flight run.
 - **Issues** — a red run files exactly one issue per repository and branch;
@@ -255,23 +255,9 @@ identities. Stored user values and requested overrides are checked against the
 target chart's schema before the Oberth or Argo controller upgrade begins;
 unknown keys are reported and refused rather than silently removed.
 
-Older Helm 4 installations whose Argo Role rules are owned by a legacy kubectl
-manager can use the [explicit Role ownership migration](docs/argo-role-migration.md)
-before an upgrade. It preserves permissions and unrelated ownership. PVC update
-and list remain required for source-claim adoption and cleanup.
-
-Chart values that no longer exist are refused, never ignored or stripped:
-`gitBackend`, `gitcache`, `maxConcurrentJobs`, `argoSync`, `trustedTests`, `vm`,
-`argo.vmLauncherServiceAccount`, `argo.containerDiskPrefixes`,
-`argo.kubevirtCeiling` and `admission.` `exclusiveClasses`, `sizeWeights`,
-`maxHeadWait`, `declaredResources`, `legacyResources` and `runtimeCapacity`.
-When the stored release values, a `--values` file or a `--set` still sets one,
-`oberth upgrade` names each key with its source and stops before any write.
-Delete the keys from your values files and re-run the upgrade with
-`--set <key>=null` for each named key, for example
-`oberth upgrade --set trustedTests=null --set vm=null`. Helm's
-`--reset-then-reuse-values` merge drops a stored key that an override sets to
-null, so the key is gone from the stored values from then on.
+The server's pipeline permissions live in one base Argo Role. A prior field
+manager owning its rules can cause an SSA conflict on upgrade; resolve that
+ownership first. See [Argo Role ownership](docs/argo-role-migration.md).
 
 When a target chart removes a configured key, export the installed values,
 remove or migrate the unsupported keys in an explicit values file, and reconcile
@@ -282,12 +268,19 @@ the newer chart's keys; reusing newer values directly will be rejected. Database
 migrations remain forward-only: an older binary may require restoring its
 matching database backup before it can run.
 
-Re-running `oberth install` and restoring a backup intentionally retain
-`--reuse-values`: these paths preserve installed chart defaults, while restore
-sets only the database identities it needs. Every newly introduced value must
-therefore have a template fallback. The v0.17.53 raw-values render (without
-the removed values) and actual Helm install/restore tests cover the
-`utilityImage` fallback.
+Upgrade, install re-runs and restore remove only the retired installer-written
+`secretstore.transit.enabled`, `secretstore.transit.mount` and
+`secretstore.transit.key` leaves from stored Helm snapshots and print one note.
+They preserve live feature settings, including operator-set false, empty and
+zero values. Explicit unsupported values in a new values file or override still
+fail schema validation.
+
+Re-running `oberth install` and restoring a backup preserve installed live
+chart defaults. When retired installer keys are present, the CLI passes a
+cleaned snapshot with `--reset-values` so Helm cannot reintroduce them from the
+old chart. Other reuses retain their normal merge behavior. The historical
+v0.22.3 values render and actual Helm upgrade/install/restore tests cover this
+path and the utility image configuration.
 
 ## How it works
 
@@ -429,10 +422,10 @@ tools (a call to one is still refused by the server); available operations are:
 |------|-------------|
 | `status` | Return concise CI status for a full SHA, short SHA, or branch, including the failed step. |
 | `logs` | Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: counts are lower bounds unless scan_complete is true; continue has_more pages with next_byte_offset as byte_offset and offset:0. |
-| `run_get` | Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default (summary): id/repo/ref/sha, queue_position when available, superseded, status/phase/failed_burn/failed_step/error, display_status/display_reason and compact steps (burn, name, status, started_at, finished_at). display_status is one of queued, running, passed, failed, superseded or cancelled; display_reason names the cause. Set summary:false for the full record: step results with diagnostics, versioned retained timing (missing timing is unknown; unavailable=pruned once the run is older than the retained timing window), the repository record and Scheduling. |
+| `run_get` | Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default (summary): id/repo/ref/sha, superseded, status/phase/failed_burn/failed_step/error, display_status/display_reason and compact steps (burn, name, status, started_at, finished_at). display_status is one of queued, running, passed, failed, superseded or cancelled; display_reason names the cause. Set summary:false for the full record: step results with diagnostics, versioned retained Workflow/step timing without admission episodes (missing timing is unknown; unavailable=pruned once the run is older than the retained timing window), the repository record and Scheduling. |
 | `run_retry` | Queue a fresh attempt for the newest interrupted or infrastructure-failed run, retaining repository, ref, SHA and release admission. Workflow-level failures without a failed step qualify. Tag/release retries require an admin, an unchanged tag object and complete credential-aware terminal observations for the entire tag history (or proof of no Workflow intent). Started secret-store/WIF work, old plans, missing evidence, a moved tag or an older source need run_rerun with force. Pending Workflow deletion is refused even with force. Test failures, older runs, promotion/plan/apply runs, published tags and refs with an active run are refused. The caller is recorded as actor. |
 | `publication_abandon` | Abandon one pending upstream publication by its full publication ID. Requires an unscoped admin uplink and a reason. Atomically marks the publication abandoned and its run failed/abandoned (and its promotion failed), with the administrator in the audit chain. Never pushes; earlier pushes may already be visible upstream. Abandoned intents cannot be retried with publish_retry. An in-flight delivery settles before this operation; terminal publications are refused. |
-| `run_cancel` | Cancel one queued or running run (a claimed run that has not started is queued). The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited. |
+| `run_cancel` | Cancel one queued or running run (a claimed run that has not started is queued). The run becomes interrupted with phase cancelled and a reason naming the caller; an in-flight create is cancelled, any claimed Workflow is deleted, and the run is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited. |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref, linked to the original (rerun_of), for what run_retry refuses: a failed step such as a flaky test, a run that is no longer the newest of its ref, and tag/release test failures. SHA-keyed status, wait and promote then follow the newest run for that SHA. Refused while the ref has an active run, when a branch has moved past the run's SHA, and for promotion (use promote_retry), plan and apply runs. A run that passed every step and failed only in upstream publication is not re-executed: its publication is retried as publish_retry does (mode publish_retry, action publication_retry). Responses name the started action and include run_status/run_phase; no-work refusals say nothing started. Non-admin uplinks may rerun branch-push runs; tag/release runs need an admin; force-free replay requires the newest source, an unchanged tag object, current credential-aware plans and complete terminal observations for every tag attempt (or no Workflow intent). Secret-store/WIF starts, incomplete observation, unversioned plans, older sources, moved tags and unknown evidence require force. Pending Workflow deletion is refused even with force. A tag that is already published or green is refused, so it is never published twice. Audited as run.rerun. |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run: step, pod, attempt, held_since, abandon_at (when the server abandons the hold unless someone acts: plan against this), kubelet deadline, whether run_hold_patch can apply files, and whether the hold was already continued or abandoned. Also returns the run's assist record and the installation policy (hold_ttl_s, exec_timeout_s in seconds). A run holds only when it asked for assistance (push option oberth.assist=1 or run_rerun assist), assist.enabled is on, and a credential-free step exited nonzero; the retry Pod parks before its command until run_continue, run_hold_abandon or assist.holdTTL (the server abandons an idle hold past the TTL; each exec, patch or continue restarts it, up to twice the TTL after held_since; the Pod deadline shown also covers the step's own budget after release). Read-only. |
 | `run_hold_exec` | Run one bounded command (argv, no shell) inside the held step's main container, as an uplink whose scope covers the run's repository (who may push to it) or an admin: for diagnosing the failure in the live environment. Bounded by assist.execTimeout and assist.execOutputBytes (the deadline stops the stream; a process the image keeps running is not killed), serialized per run, capped installation-wide, and recorded in the run's assist record and audit (run.assist.exec) before the command runs. Any exec marks the run assisted: it is never evidence from this point, whatever the command did. |

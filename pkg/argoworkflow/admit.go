@@ -102,11 +102,6 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	if len(workflow.Finalizers) != 0 {
 		problems = append(problems, errors.New("argoworkflow: metadata.finalizers must be omitted"))
 	}
-	for name := range workflow.Annotations {
-		if _, removed := removedAnnotations[name]; removed {
-			problems = append(problems, removedAnnotation("metadata", name))
-		}
-	}
 	return problems
 }
 
@@ -724,8 +719,6 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 			if value != "none" {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must be none", location, name))
 			}
-		case "oberth.ci/exclusive":
-			problems = append(problems, removedAnnotation(location, name))
 		default:
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
 		}

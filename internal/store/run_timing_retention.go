@@ -24,7 +24,7 @@ const (
 // older than the newest keepRuns terminal runs. Runs the evidence retention
 // protects (active, release and tag, pending publication or promotion, open
 // issue on the ref, the newest keepNewest per ref) keep their records. The run
-// row, its step results and admission episodes stay; the run's milestones stay
+// row and its step results stay; the run's milestones stay
 // and its timing reads unavailable=pruned. One pass handles at most 200 runs,
 // 20 per transaction, within two seconds; the next sweep continues.
 func (s *Store) PruneRunTiming(ctx context.Context, keepRuns, keepNewest int) (int64, error) {

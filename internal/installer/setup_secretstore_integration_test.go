@@ -83,7 +83,7 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 				if err != nil {
 					t.Fatalf("fresh setup: %v\n%s", err, out)
 				}
-				for _, want := range []string{"enabling Kubernetes auth at kubernetes/", "enabling KV v2 secrets mount at oberth/", "enabling Transit mount at oberth-transit/", "creating non-exportable Transit key trusted-plan-artifacts"} {
+				for _, want := range []string{"enabling Kubernetes auth at kubernetes/", "enabling KV v2 secrets mount at oberth/"} {
 					if !strings.Contains(string(out), want) {
 						t.Errorf("fresh setup omitted %q: %s", want, out)
 					}
@@ -97,33 +97,6 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 				out, err := setup(rootToken)
 				if err != nil || strings.Contains(string(out), "» enabling ") || strings.Contains(string(out), "» writing ") || strings.Contains(string(out), "» creating ") {
 					t.Fatalf("existing setup must be a no-op: %v\n%s", err, out)
-				}
-			})
-			// Exercise the actual key, including encryption/decryption over verified TLS.
-			t.Run("transit", func(t *testing.T) {
-				out, err := run(rootToken, baoPath, "read", "-format=json", "oberth-transit/keys/trusted-plan-artifacts")
-				var key struct {
-					Data map[string]any `json:"data"`
-				}
-				if err != nil || json.Unmarshal(out, &key) != nil {
-					t.Fatalf("read Transit key: %v", err)
-				}
-				for field, want := range map[string]any{
-					"type": "aes256-gcm96", "derived": false, "exportable": false,
-					"allow_plaintext_backup": false, "supports_encryption": true, "supports_decryption": true,
-				} {
-					if key.Data[field] != want {
-						t.Errorf("Transit key %s = %v, want %v", field, key.Data[field], want)
-					}
-				}
-				const plaintext = "b2JlcnRoLWZpeHR1cmU="
-				out, err = run(rootToken, baoPath, "write", "-field=ciphertext", "oberth-transit/encrypt/trusted-plan-artifacts", "plaintext="+plaintext)
-				if err != nil {
-					t.Fatalf("Transit encrypt: %v", err)
-				}
-				out, err = run(rootToken, baoPath, "write", "-field=plaintext", "oberth-transit/decrypt/trusted-plan-artifacts", "ciphertext="+strings.TrimSpace(string(out)))
-				if err != nil || strings.TrimSpace(string(out)) != plaintext {
-					t.Fatalf("Transit round trip failed: %v", err)
 				}
 			})
 			// Compare the stored data, excluding changing response metadata.
@@ -155,7 +128,6 @@ path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
 path "auth/kubernetes/config" { capabilities = ["read", "update"] }
 path "sys/mounts/oberth" { capabilities = ["read"] }
-path "oberth-transit/keys/trusted-plan-artifacts" { capabilities = ["read"] }
 path "sys/policies/acl/oberth-ci" { capabilities = ["read", "update"] }
 path "auth/kubernetes/role/oberth-ci" { capabilities = ["read", "update"] }
 `

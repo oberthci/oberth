@@ -157,7 +157,6 @@ type Run struct {
 	QueueSequence int64
 	// AdmissionSequence retains restart FIFO order; QueueSequence is the cursor.
 	AdmissionSequence int64 `json:"-"`
-	QueuePosition     int64 `json:"QueuePosition,omitempty"`
 	// Display fields are read-side projections; durable Status is unchanged.
 	DisplayStatus string         `json:"display_status,omitempty"`
 	DisplayReason string         `json:"display_reason"`

@@ -69,6 +69,8 @@ func TestRekorBaoProvisioningPreservesCredentials(t *testing.T) {
 		}
 		fields := strings.Fields(command)
 		switch fields[0] {
+		case "secrets":
+			return []byte(`{"oberth-transit/":{"type":"transit"}}`), nil
 		case "read":
 			data, ok := state[fields[2]]
 			if !ok {

@@ -122,7 +122,7 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 				if err := fixture.store.CompleteObservedRunCancellation(t.Context(), cancellations[0]); err != nil {
 					t.Fatal(err)
 				}
-				done, err := scheduler.settleCreateAttempt(t.Context(), &pendingCreate{runID: run.ID, persisted: true, confirmed: true, grant: &submissionOwner{gate: scheduler.submissions}})
+				done, err := scheduler.settleCreateAttempt(t.Context(), &pendingCreate{runID: run.ID, persisted: true, confirmed: true})
 				if err != nil || !done {
 					t.Fatal(done, err)
 				}

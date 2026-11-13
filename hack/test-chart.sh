@@ -34,7 +34,6 @@ insecure_tsa_manifest=$(mktemp)
 secure_secretstore_manifest=$(mktemp)
 rotated_secretstore_manifest=$(mktemp)
 dev_secretstore_manifest=$(mktemp)
-staged_transit_manifest=$(mktemp)
 secretstore_ca=$(mktemp)
 rotated_secretstore_ca=$(mktemp)
 default_service_manifest=$(mktemp)
@@ -48,7 +47,7 @@ ext_netpol=$(mktemp)
 argo_vault_manifest=$(mktemp)
 argo_legacy_manifest=$(mktemp)
 package_dir=$(mktemp -d)
-trap 'rm -f "$manifest" "$empty_release_manifest" "$generated_secrets_manifest" "$custom_anchor_manifest" "$custom_rekor_manifest" "$rotated_rekor_manifest" "$custom_rekor_deployment" "$rotated_rekor_deployment" "$rekor_public_key" "$rotated_rekor_public_key" "$empty_rekor_public_key" "$insecure_rekor_manifest" "$insecure_tsa_manifest" "$secure_secretstore_manifest" "$rotated_secretstore_manifest" "$dev_secretstore_manifest" "$staged_transit_manifest" "$secretstore_ca" "$rotated_secretstore_ca" "$default_service_manifest" "$default_nodeport_manifest" "$adoption_service_manifest" "$desired_service_manifest" "$clusterip_service_manifest" "$netpol_manifest" "$alt_netpol" "$ext_netpol" "$argo_vault_manifest" "$argo_legacy_manifest"; find "$package_dir" -delete' EXIT
+trap 'rm -f "$manifest" "$empty_release_manifest" "$generated_secrets_manifest" "$custom_anchor_manifest" "$custom_rekor_manifest" "$rotated_rekor_manifest" "$custom_rekor_deployment" "$rotated_rekor_deployment" "$rekor_public_key" "$rotated_rekor_public_key" "$empty_rekor_public_key" "$insecure_rekor_manifest" "$insecure_tsa_manifest" "$secure_secretstore_manifest" "$rotated_secretstore_manifest" "$dev_secretstore_manifest" "$secretstore_ca" "$rotated_secretstore_ca" "$default_service_manifest" "$default_nodeport_manifest" "$adoption_service_manifest" "$desired_service_manifest" "$clusterip_service_manifest" "$netpol_manifest" "$alt_netpol" "$ext_netpol" "$argo_vault_manifest" "$argo_legacy_manifest"; find "$package_dir" -delete' EXIT
 cat >"$rekor_public_key" <<'EOF'
 -----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4XEptRLUdhdCPBXSRJWiuCYQZ3HO
@@ -116,10 +115,9 @@ render --set auditAnchor.rekorInsecureHTTP=true --set-string auditAnchor.rekorUR
 render --set auditAnchor.tsaInsecureHTTP=true --set-string auditAnchor.tsaURL=http://tsa.tsa-system.svc:3000 >"$insecure_tsa_manifest"
 render --set secretstore.enabled=true --set-file secretstore.caCert="$secretstore_ca" >"$secure_secretstore_manifest"
 render --set secretstore.enabled=true --set-file secretstore.caCert="$rotated_secretstore_ca" >"$rotated_secretstore_manifest"
-render --set secretstore.enabled=true --set secretstore.transit.enabled=false \
+render --set secretstore.enabled=true \
   --set secretstore.insecureHTTPForDev=true \
   --set-string secretstore.address=http://openbao.openbao.svc:8200 >"$dev_secretstore_manifest"
-render --set secretstore.enabled=true --set secretstore.transit.enabled=true >"$staged_transit_manifest"
 render --show-only templates/service.yaml >"$default_service_manifest"
 render --show-only templates/service.yaml \
   --set service.type=LoadBalancer \
@@ -210,17 +208,13 @@ grep -Fq -- '--audit-rekor-url=http://rekor.rekor-system.svc:3000' "$insecure_re
 grep -Fq -- '--audit-rekor-insecure-http' "$insecure_rekor_manifest"
 grep -Fq -- '--audit-tsa-url=http://tsa.tsa-system.svc:3000' "$insecure_tsa_manifest"
 grep -Fq -- '--audit-tsa-insecure-http' "$insecure_tsa_manifest"
-# Secret-store TLS remains independently usable with Transit disabled. The
-# composed trusted-plan runtime emits both fixed identifiers only after its
-# nested capability is explicitly enabled.
+# Secret-store TLS and development HTTP render without trusted-plan options.
 grep -Fq -- '--secretstore-address=https://openbao.openbao.svc:8200' "$secure_secretstore_manifest"
 grep -Fq -- '--secretstore-ca-cert=/etc/oberth/secretstore-ca/ca.crt' "$secure_secretstore_manifest"
 grep -Fq -- 'name: oberth-secretstore-ca' "$secure_secretstore_manifest"
 if grep -Fq -- '--secretstore-transit-' "$secure_secretstore_manifest"; then
   exit 1
 fi
-grep -Fq -- '--secretstore-transit-mount=oberth-transit' "$staged_transit_manifest"
-grep -Fq -- '--secretstore-transit-key=trusted-plan-artifacts' "$staged_transit_manifest"
 if grep -Fq -- '--secretstore-insecure-http' "$secure_secretstore_manifest"; then
   exit 1
 fi
@@ -234,30 +228,7 @@ rotated_secretstore_checksum=$(awk '$1 == "checksum/secretstore-ca:" { print $2 
 test -n "$secretstore_checksum"
 test -n "$rotated_secretstore_checksum"
 test "$secretstore_checksum" != "$rotated_secretstore_checksum"
-# Transit payloads can never be enabled over the KV-only HTTP development
-# escape hatch, and both Transit identifiers are single path segments.
-if render --set secretstore.enabled=true --set secretstore.transit.enabled=true --set secretstore.insecureHTTPForDev=true >/dev/null 2>&1; then
-  exit 1
-fi
-if render --set secretstore.enabled=true --set secretstore.transit.enabled=true --set secretstore.insecureHTTPForDev=true \
-  --set-string secretstore.address=http://openbao.openbao.svc:8200 >/dev/null 2>&1; then
-  exit 1
-fi
-if render --set secretstore.enabled=true --set secretstore.transit.enabled=true --set-string secretstore.transit.mount=bad/mount >/dev/null 2>&1; then
-  exit 1
-fi
-if render --set secretstore.enabled=true --set secretstore.transit.enabled=true --set-string secretstore.transit.key= >/dev/null 2>&1; then
-  exit 1
-fi
-if render --set secretstore.enabled=true --set secretstore.transit.enabled=true --set-string secretstore.transit.mount=.. >/dev/null 2>&1; then
-  exit 1
-fi
-if render --set secretstore.enabled=true --set secretstore.transit.enabled=true --set-string secretstore.transit.mount=sys >/dev/null 2>&1; then
-  exit 1
-fi
-if render --set secretstore.enabled=true --set secretstore.transit.enabled=true --set-string secretstore.transit.key=. >/dev/null 2>&1; then
-  exit 1
-fi
+# Credentials are not accepted in the secret-store address.
 if render --set secretstore.enabled=true --set-string 'secretstore.address=https://user@openbao.openbao.svc:8200' >/dev/null 2>&1; then
   exit 1
 fi

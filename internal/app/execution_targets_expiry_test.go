@@ -41,10 +41,10 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			request := f.request
-			if _, err := jobs.PipelineDemandReceipt(ctx, request); err != nil {
+			if _, err := jobs.ResolvePipelineSource(ctx, request); err != nil {
 				t.Fatal(err)
 			}
-			request.DemandReceipt, err = jobs.PipelineDemandReceipt(ctx, request)
+			request.SourceReceipt, err = jobs.ResolvePipelineSource(ctx, request)
 			if err != nil {
 				t.Fatal(err)
 			}

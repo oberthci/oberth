@@ -69,7 +69,8 @@ type UpgradeConfig struct {
 	verifiedChart bool
 	// defaultPins keep previously rendered values of changed chart defaults
 	// (upgrade_defaults.go); the operator's --values/--set still win.
-	defaultPins []string
+	defaultPins      []string
+	storedValuesFile string
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -267,12 +268,6 @@ func validateUserSetAgainstValues(valuesYAML []byte, userSet []string) error {
 		if err != nil {
 			return err
 		}
-		if clearsRemovedValue(kv) {
-			continue
-		}
-		if removed, ok := removedChartValue(key); ok {
-			return removedValuesError(map[string]string{removed: "--set " + key})
-		}
 		if !keyPathExists(values, key) {
 			return &ErrSchemaValidation{Detail: fmt.Sprintf("key %q does not exist in the chart values; check for typos", key)}
 		}
@@ -362,21 +357,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	if cfg.DryRun {
-		revision, err := deployedUpgradeRevision(ctx, cfg.Namespace, deps)
-		if err != nil {
-			return result, err
-		}
-		values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
-		if err != nil {
-			return result, err
-		}
-		if err := checkRemovedUpgradeValues(cfg, values); err != nil {
-			return result, err
-		}
-		if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
-			return result, err
-		}
-		if _, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values); err != nil {
+		if err := prepareUpgradeDryRunValues(ctx, &cfg, deps); err != nil {
 			return result, err
 		}
 		return printUpgradeDryRun(w, cfg, result, retryFailed)
@@ -423,6 +404,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err != nil {
 		return result, err
 	}
+	cleanupStored, err := prepared.configureStoredSnapshot(&cfg)
+	if err != nil {
+		return result, err
+	}
+	defer cleanupStored()
 	defaults, err := reconcileChangedDefaults(ctx, cfg, deps, prepared.revision, valuesYAML)
 	if err != nil {
 		return result, err
@@ -681,6 +667,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 	prefix = []string{"upgrade", "oberth", chart, "-n", cfg.Namespace}
 	// Merge new defaults below stored configuration and user overrides.
 	args := []string{"--reset-then-reuse-values"}
+	if cfg.storedValuesFile != "" {
+		args = []string{"--reset-values", "--values", cfg.storedValuesFile}
+	}
 	args = append(args,
 		"--set-string", "image.ref="+imageRef,
 		"--set-string", "compatibility.schemaIdentity="+compatibility.SchemaIdentity,

@@ -880,22 +880,14 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 	restriction += statusSQL
 	restrictionArgs = append(restrictionArgs, statusArgs...)
 	scopeArgs := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
-	collect := func(what string, rows *sql.Rows, err error, withPosition bool) ([]model.Run, error) {
+	collect := func(what string, rows *sql.Rows, err error) ([]model.Run, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list %s runs: %w", what, err)
 		}
 		defer func() { _ = rows.Close() }()
 		runs := make([]model.Run, 0)
 		for rows.Next() {
-			var value model.Run
-			var scanErr error
-			if withPosition {
-				var position int64
-				value, scanErr = scanReadRun(rows, &position)
-				value.QueuePosition = position
-			} else {
-				value, scanErr = scanReadRun(rows)
-			}
+			value, scanErr := scanReadRun(rows)
 			if scanErr != nil {
 				return nil, fmt.Errorf("scan %s run: %w", what, scanErr)
 			}
@@ -914,14 +906,10 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 		priorityOrder := submissionOrderSQL()
 		// Keep the queue in the same effective-priority and FIFO order as ClaimNextRun.
 		rows, err := tx.QueryContext(ctx, `
-WITH queue AS (
-  SELECT *, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
-  WHERE `+queuedRunSQL+`
-)
-SELECT `+runReadColumns+`, queue_position FROM queue AS runs
-WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
+SELECT `+runReadColumns+` FROM runs
+WHERE (`+queuedRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
 ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
-		queued, err := collect("queued", rows, err, true)
+		queued, err := collect("queued", rows, err)
 		if err != nil {
 			return nil, err
 		}
@@ -931,7 +919,7 @@ SELECT `+runReadColumns+` FROM runs
 WHERE status = 'running' AND started_at IS NOT NULL
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
 ORDER BY started_at DESC, id DESC LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
-		running, err := collect("running", rows, err, false)
+		running, err := collect("running", rows, err)
 		if err != nil {
 			return nil, err
 		}
@@ -955,7 +943,7 @@ WHERE status NOT IN ('queued', 'running')
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
 ORDER BY `+runEndTimeSQL+` DESC, id DESC
 LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed columns and parameterized restriction.
-	terminal, err := collect("terminal", rows, err, false)
+	terminal, err := collect("terminal", rows, err)
 	if err != nil {
 		return nil, err
 	}

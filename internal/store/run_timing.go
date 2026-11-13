@@ -44,32 +44,6 @@ func (s *Store) RecordRunTimingMilestone(ctx context.Context, runID, phase strin
 	return tx.Commit()
 }
 
-// RecordAdmissionRequested starts a new episode only after a prior grant was
-// parked. Repeated observations and owner resumes do not rewrite an episode.
-func (s *Store) RecordAdmissionRequested(ctx context.Context, runID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id=? AND status='running'`, runID).Scan(&active); err != nil {
-		return err
-	}
-	if active != 1 {
-		return fmt.Errorf("%w: timing run is not active", ErrInvalidState)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO run_timings(run_id,version) VALUES(?,1)`, runID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO run_admission_timings(run_id,episode,requested_at)
-SELECT ?,COALESCE(MAX(episode),0)+1,? FROM run_admission_timings WHERE run_id=?
-HAVING NOT EXISTS(SELECT 1 FROM run_admission_timings WHERE run_id=? AND closed_at IS NULL)`, runID, unixNano(s.now()), runID, runID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func (s *Store) RecordWorkflowTiming(ctx context.Context, value model.WorkflowTiming) error {
 	if err := value.Validate(); err != nil {
 		return fmt.Errorf("%w: invalid Workflow timing", ErrInvalid)
@@ -223,7 +197,7 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	if err != nil {
 		return model.RunTiming{}, err
 	}
-	value := model.RunTiming{Version: model.TimingVersion, RunID: id, QueuedAt: run.QueuedAt, Admissions: []model.AdmissionTiming{}, Steps: []model.StepTiming{}}
+	value := model.RunTiming{Version: model.TimingVersion, RunID: id, QueuedAt: run.QueuedAt, Steps: []model.StepTiming{}}
 	var claimed, checkout, seed, source, created, terminal sql.NullInt64
 	var workflow sql.NullString
 	err = s.reader().QueryRowContext(ctx, `SELECT claimed_at,checkout_ready_at,source_seed_started_at,source_ready_at,workflow_created_at,terminal_at,workflow_json FROM run_timings WHERE run_id=?`, id).Scan(&claimed, &checkout, &seed, &source, &created, &terminal, &workflow)
@@ -249,27 +223,11 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 		}
 		value.Workflow = &binding
 	}
-	rows, err := s.reader().QueryContext(ctx, `SELECT episode,requested_at,granted_at,closed_at FROM run_admission_timings WHERE run_id=? ORDER BY episode`, id)
-	if err != nil {
-		return value, err
-	}
-	for rows.Next() {
-		var episode model.AdmissionTiming
-		var requested, granted, closed sql.NullInt64
-		if err := rows.Scan(&episode.Episode, &requested, &granted, &closed); err != nil {
-			_ = rows.Close()
-			return value, err
-		}
-		episode.RequestedAt, episode.GrantedAt, episode.ClosedAt = nullableTime(requested), nullableTime(granted), nullableTime(closed)
-		value.Admissions = append(value.Admissions, episode)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return value, err
-	}
+
 	if pruned {
 		return value, nil
 	}
-	rows, err = s.reader().QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM step_timings WHERE run_id=? ORDER BY ordinal,node_id`, id)
+	rows, err := s.reader().QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM step_timings WHERE run_id=? ORDER BY ordinal,node_id`, id)
 	if err != nil {
 		return value, err
 	}

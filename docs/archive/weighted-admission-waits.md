@@ -2,7 +2,7 @@
 
 This document describes the retired weighted gate and its compatibility tests.
 It does not describe current serving admission or recommend current capacity
-settings. See [workflow admission](../declared-admission.md),
+settings. See [workflow admission](../native-scheduling.md),
 [host pressure](../native-scheduling.md) and
 [execution priority](../release-priority.md) for current behavior.
 

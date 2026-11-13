@@ -186,7 +186,7 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 		t.Run(shape, func(t *testing.T) {
 			before := nonrootControllerFixture(t, shape+"-before-patch.json")
 			observed := nonrootControllerFixture(t, shape+"-submitted.json")
-			assertHistoricalPipelinePriority(t, observed)
+			assertHistoricalWorkflowPriority(t, observed)
 			// Apply the current policy to authenticated upstream Pod input.
 			// Compare all fields except helper budgets, which deliberately changed.
 			wf := nonrootBuiltWithScratch(t, shape == "script", "128Mi")

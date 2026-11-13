@@ -80,8 +80,7 @@ repository uses; Oberth imposes no repository prefix rule.
 A repository semaphore may read only the `oberth-sync-limits` ConfigMap in the
 run's namespace, using a key of the author's choice. Other ConfigMap references
 remain refused because Argo's failure text can expose their data. Oberth no
-longer creates or manages this ConfigMap. Upgrade preserves an existing object
-and its data with Helm ownership removed; new installs create none. Operators
+longer creates or manages this ConfigMap. The installer neither creates it nor removes prior Helm ownership. Operators
 apply and maintain semaphore limits themselves.
 
 Order Trivy steps that share a cache with `depends`, or use a synchronization mutex.
@@ -148,10 +147,9 @@ sets 100m/128Mi requests or its control-plane class on either. A secret-store
 StatefulSet using OnDelete picks up this change only when its Pod is recreated.
 Oberth's own server Deployment keeps its control-plane class.
 
-The pipeline PriorityClass object remains for Workflows submitted by v0.21.10:
-their later Pods still reference it. New user Workflows do not receive that
-class. Source/executor helper Pods still use it. The object can be removed in
-the release after those old Workflows end.
+Source and executor identity helpers use Kubernetes default priority. The chart
+and installer no longer create a pipeline PriorityClass. A class retained by
+an older chart's `keep` annotation can remain unused.
 
 Oberth has no automatic infrastructure retry. Authors choose native Argo
 `retryStrategy`, such as `retryPolicy: OnError`, on Workflow/templates. Manual
@@ -329,7 +327,7 @@ win name/path collisions; validated workspace opt-outs remain available.
   mounting the same source PVC at `/seed`, and streams the artifact archive
   back before deleting that Pod. The seed and collect helper request 100m
   CPU, 64 MiB memory and 16 MiB ephemeral storage, with 500m/512 MiB/64 MiB
-  limits. They keep the helper PriorityClass and `preemptionPolicy: Never`.
+  limits. They omit PriorityClass and preemptionPolicy; Kubernetes supplies its defaults.
   **Their resources and source-volume node binding affect scheduling**.
   They do not inherit the ordinary Workflow's authored affinity/selectors;
   collection is tied to the node/topology of that source volume. The running

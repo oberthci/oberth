@@ -112,7 +112,6 @@ type RunSummaryResponse struct {
 	Repo          string           `json:"repo"`
 	Ref           string           `json:"ref"`
 	SHA           string           `json:"sha"`
-	QueuePosition int64            `json:"queue_position,omitempty"`
 	Superseded    bool             `json:"superseded"`
 	ID            string           `json:"id"`
 	Status        model.RunStatus  `json:"status"`
@@ -138,7 +137,7 @@ func summarizeRun(run model.Run, steps []model.StepResult) RunSummaryResponse {
 		ID: run.ID, Status: run.Status, Phase: run.Phase,
 		DisplayStatus: run.DisplayStatus, DisplayReason: run.DisplayReason,
 		Repo: run.Repo, Ref: run.Ref, SHA: run.SHA,
-		QueuePosition: run.QueuePosition, Superseded: run.Superseded,
+		Superseded:  run.Superseded,
 		FailedStage: run.FailedStage, FailedStep: run.FailedStep, Error: run.Error,
 		Steps: make([]RunStepSummary, len(steps)),
 	}

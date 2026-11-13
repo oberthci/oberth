@@ -80,8 +80,6 @@ oberth run cancel <run-id> [--reason TEXT] [--force] [--json]
 oberth promotion create --repo <repo> --branch main --sources-file sources.json [--skip-conflicting] [--json]
 oberth promotion retry <promotion-id> [--json]
 oberth runs cancel --repo NAME --ref BRANCH [--reason TEXT] [--force] [--json]
-oberth admission [--json]
-oberth admission release <run-id> [--force] [--json]
 oberth log <run-id> --burn B --step S [--pattern P] [--context N] [--offset N] [--limit N] [--tail] [--byte-offset N]
 oberth artifacts <run-id> [name]
 oberth repos
@@ -162,18 +160,16 @@ prints `{"runs": [...], "next_before": N}`, the envelope of `GET
 the next page (a scoped uplink gets `next_cursor`, a run ID, instead). After the
 oldest run neither field is present. `--all --json` prints every page's rows in
 one envelope. If a cursor run was
-pruned, restart from the first page. Queue positions are global even when a
-repository or ref filter is used, and withheld for scoped uplinks. The deprecated
-`oberth runs --active` compatibility view stays unpaged and uses the same server
-queue positions. Elapsed time begins at the admission grant, includes preflight,
-and resets at re-admission after a VM-capacity park. Interrupted results neither
-open nor resolve CI-red issues.
+pruned, restart from the first page. Run lists preserve the server's acceptance
+order without exposing a queue position. `oberth runs --active` shows queued
+and running work with its reason. Elapsed time begins at submission start and
+includes preflight. Interrupted results neither open nor resolve CI-red issues.
 
 `oberth run cancel` calls the `run_cancel` MCP tool with the same uplink
 token. It cancels one queued, waiting or running run: the run becomes
 `interrupted` with phase `cancelled` (shown as `cancelled` by `oberth runs`
 and `oberth run`) and a reason naming the caller; a claimed run's Workflow is
-deleted and its admission capacity released immediately; it is never re-fired
+deleted; it is never re-fired
 and opens no CI issue. A non-admin uplink may cancel only branch-push runs
 in repositories it can see. An admin may cancel
 any run, but a tag/release or apply run needs `--force`, because anything its

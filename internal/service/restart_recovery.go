@@ -45,7 +45,7 @@ func (scheduler *Scheduler) completeRestartCreateObservation(ctx context.Context
 }
 
 func (scheduler *Scheduler) registerRestartCreate(run model.Run) {
-	scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
+	scheduler.registerCreateCleanup(run, isPendingCreate(run))
 	scheduler.createMu.Lock()
 	scheduler.createPending[run.ID].restarting = true
 	scheduler.createMu.Unlock()
@@ -89,14 +89,15 @@ func (scheduler *Scheduler) observeRestartCreate(ctx context.Context, pending *p
 		return false, err
 	}
 	if found {
-		scheduler.submissions.mu.Lock()
-		pending.grant.submitted = true
-		scheduler.submissions.mu.Unlock()
+		owner, err := scheduler.submissions.adopt(run)
+		if err != nil {
+			return false, err
+		}
 		select {
-		case scheduler.recoveredWorkflows <- adoptedRun{run: run, reservation: pending.grant}:
-			pending.adopted = true
+		case scheduler.recoveredWorkflows <- adoptedRun{run: run, reservation: owner}:
 			return true, nil
 		case <-ctx.Done():
+			owner.cancel()
 			return false, ctx.Err()
 		}
 	}

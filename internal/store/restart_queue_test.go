@@ -51,7 +51,6 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 				if named {
 					_, err = s.SetRunWorkflowName(ctx, claimed.ID, "workflow-"+kind)
 					requireRestartNoError(t, err)
-					requireRestartNoError(t, s.RecordAdmissionRequested(ctx, claimed.ID))
 				}
 				originals = append(originals, claimed)
 			}

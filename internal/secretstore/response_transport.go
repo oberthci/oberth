@@ -106,10 +106,6 @@ func (err *StatusError) Error() string {
 
 func secretStoreResponseLimit(path string) int64 {
 	switch {
-	case strings.Contains(path, "/encrypt/"):
-		return int64(maxTransitCiphertextBytes + maxTransitJSONOverhead)
-	case strings.Contains(path, "/decrypt/"):
-		return int64(base64EncodedLength(maxTransitPlaintextBytes) + maxTransitJSONOverhead)
 	case strings.HasSuffix(path, "/login"):
 		return int64(maxAuthJSONResponse)
 	case strings.HasSuffix(path, "/auth/token/revoke-self"):
@@ -117,10 +113,6 @@ func secretStoreResponseLimit(path string) int64 {
 	default:
 		return int64(maxSecretJSONResponse)
 	}
-}
-
-func base64EncodedLength(size int) int {
-	return (size + 2) / 3 * 4
 }
 
 type zeroingResponseBody struct {
