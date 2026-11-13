@@ -146,19 +146,10 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	if err := controller.verifyCapabilityGrant(ctx, request.RepositoryID, request.Capability); err != nil {
 		return "", err
 	}
-	if err := controller.config.ExecutionPlacement.selectRequest(controller.config, request); err != nil {
-		return "", err
-	}
-	if err := controller.config.ExecutionPlacement.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
-		return "", err
-	}
 
 	if controller.seeder == nil {
 		return "", errors.New("argojob: no source seeder is configured; " +
 			"a pipeline cannot mount the server's own claim across namespaces")
-	}
-	if controller.config.ExecutionPlacement != nil && (controller.seeder.config.ExecutionPlacement == nil || controller.seeder.config.ExecutionPlacement.digest != controller.config.ExecutionPlacement.digest) {
-		return "", errors.New("argojob: source seeder and Build placement authority differ")
 	}
 	// Seed store assets only for admitted consumers, using Build's grant rule.
 	needsSecretStore := requestNeedsSecretStore(request)
@@ -198,9 +189,6 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
 	volume, err := controller.seeder.SeedRequest(ctx, request, needsSecretStore)
 	if err != nil {
-		if controller.config.Custody != nil {
-			return "", fmt.Errorf("%w: source delivery: %w", ErrTargetUncertain, err)
-		}
 		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-ready")

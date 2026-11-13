@@ -120,9 +120,6 @@ func (loader *PinnedSourceLoader) prepare(ctx context.Context, consumer, parent 
 func (jobs *ArgoJobs) SetPinnedSources(loader *PinnedSourceLoader, recorder PinnedSourceRecorder) {
 	jobs.pinnedSources = loader
 	jobs.sourceRecorder = recorder
-	if jobs.routes != nil {
-		jobs.routes.local.SetPinnedSources(loader, recorder)
-	}
 }
 
 func sourcesForAudit(trees []argojob.PinnedSourceTree) []pipeline.PinnedSource {

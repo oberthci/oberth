@@ -249,17 +249,6 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 				continue
 			}
 		}
-		if p := controller.config.ExecutionPlacement; p != nil {
-			if err := p.verifyWorkflowIdentity(ctx, controller.config, wf); err != nil {
-				return identityFailure("target_validation", err)
-			}
-			if err := p.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
-				return identityFailure("target_validation", err)
-			}
-			if err := p.verifyPodIdentity(pod); err != nil {
-				return identityFailure("target_validation", err)
-			}
-		}
 		resourceAccount := ""
 		if capability != nil {
 			resourceAccount = capability.ServiceAccount

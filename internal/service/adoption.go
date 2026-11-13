@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/store"
 )
 
 type adoptedRun struct {
@@ -30,19 +28,6 @@ func workflowRunAdoptable(run model.Run) bool {
 // Workflow-read failures remain startup errors rather than inferred results.
 func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 	namespace := adopter.WorkflowNamespace()
-	if target, ok := adopter.(interface {
-		WorkflowNamespaceForRun(context.Context, model.Run) (string, error)
-	}); ok {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		selected, selectErr := target.WorkflowNamespaceForRun(ctx, run)
-		if selectErr != nil {
-			failure := fmt.Errorf("adopt run %s: Workflow %s: original execution target unavailable: %w", run.ID, run.WorkflowName, err)
-			log.Printf("ERROR: %v", failure)
-			return failure
-		}
-		namespace = selected
-	}
 	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.WorkflowName, err)
 	if errors.Is(err, ErrAdoptionRefused) {
 		failure = fmt.Errorf("%w; recovery refused for this run; inspect the original Workflow (kubectl -n %s get workflow %s); no automatic deletion or resubmission",
@@ -58,9 +43,6 @@ func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter J
 		return failure
 	}
 	message := failure.Error()
-	if errors.Is(cause, store.ErrExecutionTargetQuarantined) {
-		message = "execution target quarantined: " + message
-	}
 	return scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: message}, require)
 }
 

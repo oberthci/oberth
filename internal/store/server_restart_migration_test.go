@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 const stopRestartMigrationID = "20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153"
@@ -54,6 +55,9 @@ func TestStopRestartMigrationPreservesWorkflowsAndUncertainCreates(t *testing.T)
 		}
 	}
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at)VALUES(?,?,'owner_restart',?)`, old.ID, "original-workflow", unixNano(now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(testdb.PostExecutionTargetRemovalDowngrade); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`-- Reconstruct the old column because this fixture rewinds past its drop migration.

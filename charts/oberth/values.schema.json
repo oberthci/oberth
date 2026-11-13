@@ -1015,21 +1015,6 @@
             }
           ],
           "additionalProperties": false
-        },
-        "executionPlacementConfigMap": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
-          "maxLength": 253
-        },
-        "executionTargetConfigMap": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
-          "maxLength": 253
-        },
-        "executionTargetCredentialsSecret": {
-          "type": "string",
-          "pattern": "^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$",
-          "maxLength": 253
         }
       }
     },

@@ -29,7 +29,6 @@ import (
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -68,11 +67,6 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
-	// Custody journals remote effects; it is not serialized operator authority.
-	Custody TargetCustody `json:"-"`
-	// ExecutionPlacement selects an immutable isolated administrator profile.
-	ExecutionPlacement *ExecutionPlacement
-
 	// ExecutorScratchSizeLimit bounds Argo emissary output and control files.
 	// Empty selects 1Gi; this is separate from the test container private scratch.
 	ExecutorScratchSizeLimit string
@@ -273,18 +267,8 @@ func (config *Config) applyDefaults() {
 	}
 }
 
-// DefaultedConfig freezes the same defaults used by the native controller.
-func DefaultedConfig(config Config) (Config, error) {
-	config.applyDefaults()
-	return config, config.Validate()
-}
-
-// Validate checks engine configuration, including retained custody after expiry.
-// Build and allocation separately require a currently valid placement admission.
+// Validate checks engine configuration.
 func (config Config) Validate() error {
-	if err := config.ExecutionPlacement.validate(); err != nil {
-		return err
-	}
 	if err := config.Assist.Validate(); err != nil {
 		return err
 	}
@@ -525,10 +509,8 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 type Request struct {
 	PinnedSources []PinnedSourceTree
 
-	// BranchAuthority is native canonical policy resolution, never YAML authority.
-	BranchAuthority *workflowpolicy.BranchAuthority `json:"-"`
-	Capability      *argoworkflow.Capability
-	SourceReceipt   *argoworkflow.SourceReceipt
+	Capability    *argoworkflow.Capability
+	SourceReceipt *argoworkflow.SourceReceipt
 
 	RunID        string
 	RepositoryID int64
@@ -609,17 +591,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	config.applyDefaults()
 	if request.PipelineFile == "" {
 		request.PipelineFile, _ = argoworkflow.TriggerFile(request.Trigger)
-	}
-	if err := config.ExecutionPlacement.selectRequest(config, request); err != nil {
-		return nil, err
-	}
-	if config.ExecutionPlacement != nil {
-		expected := (&Controller{config: config}).expectedSourceVolume(request)
-		if request.SourceVolume != (SourceVolume{}) && request.SourceVolume != expected {
-			return nil, errors.New("argojob: isolated source volume differs from server delivery")
-		}
-		// Audit and submission predict the same server-owned delivery before seed.
-		request.SourceVolume = expected
 	}
 	// When the caller supplies a snapshot, overlay it onto the config copy.
 	// Config is received by value, so this does not mutate the original.
@@ -833,10 +804,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 	workflow.Annotations[helperStorageAnnotation] = helperStoragePolicy
 	if err := projectExecutorTokens(workflow, config); err != nil {
-		return nil, err
-	}
-
-	if err := applyExecutionPlacement(workflow, config, request); err != nil {
 		return nil, err
 	}
 

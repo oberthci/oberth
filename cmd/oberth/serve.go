@@ -46,6 +46,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/pipeline"
 
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
@@ -137,8 +138,6 @@ type serveOptions struct {
 	argoVaultCredentialedRole    string
 	argoVaultCISecretsRole       string
 	argoVaultCACert              string
-	argoExecutionPlacementConfig string
-	argoExecutionTargetConfig    string
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 
@@ -277,8 +276,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI granted steps at admission)")
 	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors granted step containers verify --argo-vault-address against")
 	flags.StringVar(&options.argoReleaseTagRoutesConfig, "argo-release-tag-routes-config", "", "absolute path to administrator-owned release tag pattern -> workflow file JSON")
-	flags.StringVar(&options.argoExecutionPlacementConfig, "argo-execution-placement-config", "", "absolute path to administrator-owned isolated execution placement JSON")
-	flags.StringVar(&options.argoExecutionTargetConfig, "argo-execution-target-config", "", "absolute path to administrator-owned branch execution target policy")
 	flags.StringVar(&options.argoReleaseWIFConfig, "argo-release-wif-config", "", "absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)")
 	flags.StringVar(&options.argoGoProxyListen, "argo-goproxy-listen", "", "listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)")
 	flags.StringVar(&options.argoGoProxyCert, "argo-goproxy-cert", "", "TLS certificate for the Go module proxy")
@@ -555,7 +552,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 	}
 	restConfig = serverKubernetesConfig(restConfig, options)
-	kube, targets, err := schedulingClients(ctx, restConfig, &options)
+	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
@@ -791,10 +788,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	releaseWIF := argoJobs.ReleaseWIFRuntime()
-	argoJobs, err = app.WithExecutionTargets(argoJobs, database, targets)
-	if err != nil {
-		return err
-	}
 	argoJobs.SetReleaseWIFRuntime(releaseWIF)
 	inactiveWIF, err := service.ReloadReleaseWIF(ctx, database, releaseWIF)
 	if err != nil {
