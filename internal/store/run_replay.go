@@ -112,7 +112,10 @@ func (s *Store) recordTerminalObservationTx(ctx context.Context, tx *sql.Tx, run
 	if observation == nil || (!run.Release && run.RefKind != model.RefTag) {
 		return nil
 	}
-	if observation.Version != 1 || observation.WorkflowName == "" || observation.WorkflowName != run.WorkflowName || observation.Nodes < 0 || observation.Nodes > 4096 || len(observation.Steps) > observation.Nodes || run.Status == model.RunInterrupted {
+	if observation.Nodes > 4096 || len(observation.NodeIDs) > 4096 || len(observation.Steps) > 4096 {
+		return nil
+	}
+	if observation.Version != 1 || observation.WorkflowName == "" || observation.WorkflowName != run.WorkflowName || observation.Nodes < 0 || len(observation.Steps) > observation.Nodes || run.Status == model.RunInterrupted {
 		return fmt.Errorf("%w: invalid terminal observation", ErrInvalid)
 	}
 	for _, step := range observation.Steps {
@@ -125,7 +128,9 @@ func (s *Store) recordTerminalObservationTx(ctx context.Context, tx *sql.Tx, run
 		return err
 	}
 	if len(body) > 1<<20 {
-		return fmt.Errorf("%w: terminal observation too large", ErrInvalid)
+		// Evidence is optional. Its absence refuses automatic replay, while
+		// Argo's terminal verdict must still finish the run.
+		return nil
 	}
 	_, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: "oberth", Action: "run.observed-terminal", ResourceType: "run", ResourceID: run.ID, Details: string(body)}, now)
 	return err
