@@ -62,7 +62,7 @@ func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.Frag
 	}
 	_, _, _, err := gitcache.ParseRepoPath(key.Repo)
 	if err != nil {
-		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s: %w", key, err)
+		return argoworkflow.Fragment{}, &argoworkflow.AdmissionError{Cause: fmt.Errorf("app: fragment %s: %w", key, err)}
 	}
 	registered, err := loader.registry.RepositoryRegistered(ctx, key.Repo)
 	if err != nil {

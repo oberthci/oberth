@@ -101,7 +101,10 @@ func ResolveRunSource(source []byte, fragments map[FragmentKey]Fragment, binding
 	}
 	lock, err := Resolve(wf, fragments)
 	if err != nil {
-		return nil, err
+		// Binding/integrity failures above are internal. Once those checks pass,
+		// Resolve only evaluates authored references and template contents; no I/O
+		// or operator configuration is involved.
+		return nil, &AdmissionError{Cause: err}
 	}
 	encoded, err := json.Marshal(struct {
 		Spec    wfv1.WorkflowSpec
