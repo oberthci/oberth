@@ -35,7 +35,7 @@ func TestArgoJobsRefusesExternalTemplateReferences(t *testing.T) {
 				if err := fixture.jobs.CreateWorkflow(t.Context(), request); !errors.As(err, &refusal) {
 					t.Fatalf("external reference was not a document refusal: %v", err)
 				}
-				if _, err := fixture.jobs.PipelineDemandReceipt(t.Context(), request); err == nil {
+				if _, err := fixture.jobs.ResolvePipelineSource(t.Context(), request); err == nil {
 					t.Fatal("external reference received admission receipt")
 				}
 				if _, err := fixture.jobs.PreflightRelease(t.Context(), request, []byte(source)); err == nil {

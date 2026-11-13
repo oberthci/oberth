@@ -1147,14 +1147,11 @@ func normalizeSourceVolume(workflow *wfv1.Workflow) {
 	}
 }
 
-// requestNeedsSecretStore mirrors Build's resolved grant decision for seeding.
+// requestNeedsSecretStore mirrors Build's authored grant decision for seeding.
 // Build reports malformed declarations and denied grants before submission.
 func requestNeedsSecretStore(request Request) bool {
 	workflow, err := argoworkflow.Decode(request.Source)
 	if err != nil {
-		return false
-	}
-	if _, err := argoworkflow.Resolve(workflow, request.Fragments); err != nil {
 		return false
 	}
 	paths, err := argoworkflow.DeclaredSecretPaths(workflow)
