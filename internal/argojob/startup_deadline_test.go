@@ -217,7 +217,9 @@ type blockedStartupWorkflow struct {
 
 func (w *blockedStartupWorkflow) Get(ctx context.Context, _ string, _ metav1.GetOptions) (*wfv1.Workflow, error) {
 	w.reads++
-	w.deadline, _ = ctx.Deadline()
+	if w.reads == 1 {
+		w.deadline, _ = ctx.Deadline()
+	}
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
@@ -229,12 +231,12 @@ func TestStartupDeadlineFirstWorkflowReadIsBounded(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
+		ctx, cancel := context.WithTimeout(t.Context(), 61*time.Second)
 		defer cancel()
 		begin := time.Now()
 		hub := newControlledWaitHub(nil)
 		_, err = controller.WithWatchHub(hub).Wait(ctx, "missing", "run", io.Discard)
-		if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != 15*time.Minute || client.reads != 1 || client.deadline.Sub(begin) != executorIdentityAttemptTimeout || hub.subscriptions() != 0 {
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(begin) != 61*time.Second || client.reads != 4 || client.deadline.Sub(begin) != executorIdentityAttemptTimeout || hub.subscriptions() != 0 {
 			t.Fatalf("first read/outage: elapsed=%s calls=%d read deadline=%s subscriptions=%d err=%v", time.Since(begin), client.reads, client.deadline.Sub(begin), hub.subscriptions(), err)
 		}
 	})
