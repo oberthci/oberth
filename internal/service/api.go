@@ -1284,6 +1284,7 @@ func (service *API) RunLog(ctx context.Context, actor api.Actor, id, stage, step
 }
 
 func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, stage, step string, filter runlog.Filter) (value any, resultErr error) {
+	var availablePairs []string
 	ctx = withRunLogCaller(ctx, actor)
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
@@ -1293,6 +1294,9 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 		}
 		resultErr = boundedRunReadError(resultErr)
 		if resultErr != nil {
+			if len(availablePairs) != 0 {
+				resultErr = fmt.Errorf("%w; available burn/step pairs: %s", resultErr, strings.Join(availablePairs, ", "))
+			}
 			value = nil
 		}
 		cancel()
@@ -1316,7 +1320,6 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	var availablePairs []string
 	if stage == "" && step == "" && run.Status == model.RunPassed && len(steps) > 0 {
 		stage, step = steps[0].Stage, steps[0].Step
 		for _, result := range steps {

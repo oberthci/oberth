@@ -468,3 +468,11 @@ func TestClientRepositoryRejectsAmbiguousSlugAndAcceptsQualifiedSelection(t *tes
 		t.Fatalf("qualified selection: %+v %v", got, err)
 	}
 }
+
+func TestClientRepositoryRefusesRelativeTrustCADefault(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "relative-config")
+	_, err := configureClientRepository(t.Context(), repositoryClientOptions{Path: t.TempDir(), Installation: "public-install.json", RegisteredRepo: "project", SSHKey: "local-push-key", ClientCert: "client.crt", ClientKey: "client.key", Mode: "remote"})
+	if err == nil || !strings.Contains(err.Error(), "CLAUDE_CONFIG_DIR must be absolute") {
+		t.Fatalf("relative CA selection: %v", err)
+	}
+}

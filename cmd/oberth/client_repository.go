@@ -111,6 +111,9 @@ func configureClientRepository(ctx context.Context, o repositoryClientOptions) (
 	}
 	if o.CAFile == "" {
 		directory := os.Getenv("CLAUDE_CONFIG_DIR")
+		if directory != "" && !filepath.IsAbs(directory) {
+			return binding, errors.New("CLAUDE_CONFIG_DIR must be absolute when selecting the stored trust CA")
+		}
 		if directory == "" {
 			home, err := os.UserHomeDir()
 			if err != nil {

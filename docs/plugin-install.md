@@ -70,6 +70,7 @@ helper. Supply the selected public install result, the server's registered
 `git_path` or unique registered slug, and explicit local TLS certificate/key
 and SSH identity paths. The CA defaults to the trust step's saved
 `${CLAUDE_CONFIG_DIR:-~/.claude}/oberth/ca.crt`; `--ca-file` overrides it.
+A relative `CLAUDE_CONFIG_DIR` is refused when selecting this default CA.
 Only paths enter chat or argv; keys are read by the CLI/OpenSSH, never printed.
 No ambient bearer credential or global `oberth` SSH alias selects the server.
 

@@ -112,3 +112,23 @@ func TestRunLogsPassedDefaultsToFirstStepAndListsAvailablePairs(t *testing.T) {
 		})
 	}
 }
+
+func TestRunLogsPassedDefaultErrorIncludesAvailablePairs(t *testing.T) {
+	f := newControlFixture(t)
+	run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/missing-logs", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, pair := range []struct{ burn, step string }{{"build", "compile"}, {"test", "unit"}} {
+		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), model.StepResult{RunID: run.ID, Stage: pair.burn, Step: pair.step, Ordinal: i, Status: model.StepPassed}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.api(t).CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID)))
+	if err == nil || !strings.Contains(err.Error(), "available burn/step pairs: build/compile, test/unit") {
+		t.Fatalf("default log read lost discovery: %v", err)
+	}
+}
