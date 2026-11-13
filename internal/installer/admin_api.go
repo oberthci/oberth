@@ -248,7 +248,7 @@ func reuseInstallerEnrollment(cfg *Config, deps Deps) error {
 	if err := client.TrustClientFiles(root); err != nil {
 		return err
 	}
-	metadata, err := os.ReadFile(metadataPath) // #nosec G304 -- fixed owner-only installer target record.
+	metadata, err := os.ReadFile(metadataPath) //nolint:gosec // G304: fixed owner-only installer target record.
 	if err != nil {
 		return err
 	}
@@ -275,16 +275,16 @@ func reuseInstallerEnrollment(cfg *Config, deps Deps) error {
 	if err := client.TrustClientFiles(root); err != nil {
 		return err
 	}
-	key, err := os.ReadFile(filepath.Join(root, "installer-client.key")) // #nosec G304 -- fixed credential name in validated owner-only configuration directory.
+	key, err := os.ReadFile(filepath.Join(root, "installer-client.key")) //nolint:gosec // G304: fixed credential name in validated owner-only configuration directory.
 	if err != nil {
 		return err
 	}
-	cert, err := os.ReadFile(filepath.Join(root, "installer-client.crt")) // #nosec G304 -- fixed credential name in validated owner-only configuration directory.
+	cert, err := os.ReadFile(filepath.Join(root, "installer-client.crt")) //nolint:gosec // G304: fixed credential name in validated owner-only configuration directory.
 	if err != nil {
 		clear(key)
 		return err
 	}
-	ca, err := os.ReadFile(filepath.Join(root, "installer-ca.crt")) // #nosec G304 -- fixed credential name in validated owner-only configuration directory.
+	ca, err := os.ReadFile(filepath.Join(root, "installer-ca.crt")) //nolint:gosec // G304: fixed credential name in validated owner-only configuration directory.
 	if err != nil {
 		clear(key)
 		return err

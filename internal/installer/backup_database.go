@@ -66,7 +66,7 @@ func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, des
 		return "", err
 	}
 	defer closeConnection()
-	file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- exclusive private backup staging destination selected by the operator.
+	file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // G304: Exclusive private staging file in an operator-selected working directory.
 	if err != nil {
 		return "", err
 	}
@@ -231,7 +231,7 @@ func extractDatabaseFiles(ctx context.Context, path, work string, maxBytes int64
 		if header.Name == "oberth.sqlite-wal" {
 			destination += "-wal"
 		}
-		file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- exclusive private backup staging destination selected by the operator. // #nosec G304 -- one of two exact names in fresh private directory.
+		file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) //nolint:gosec // G304: Exclusive private staging file in an operator-selected working directory.
 		if err != nil {
 			return db, err
 		}

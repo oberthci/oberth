@@ -30,7 +30,7 @@ const (
 type Config struct {
 	ServerName           string
 	ClientCertificatePEM []byte
-	// #nosec G117 -- Caller-owned inline client key, used only for the TLS handshake.
+	//nolint:gosec // G117: Caller-owned inline client key, used only for the TLS handshake.
 	ClientKeyPEM []byte
 
 	ClientCert   string

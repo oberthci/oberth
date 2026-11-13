@@ -30,6 +30,11 @@ import (
 )
 
 func TestInstallJSONOnboardingAndResume(t *testing.T) {
+	testJSONFirstOnboarding(t)
+	testJSONDependencyResume(t)
+	testJSONOberthResume(t)
+}
+func testJSONFirstOnboarding(t *testing.T) {
 	for _, pending := range []bool{false, true} {
 		t.Run(fmt.Sprintf("FirstRunPending=%t", pending), func(t *testing.T) {
 			public, _ := newEd25519HostKey(t)
@@ -154,6 +159,9 @@ func TestInstallJSONOnboardingAndResume(t *testing.T) {
 			}
 		})
 	}
+}
+
+func testJSONDependencyResume(t *testing.T) {
 	for _, name := range []string{"openbao", "argo-workflows"} {
 		for _, changed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("DependencyResume/%s/changed=%t", name, changed), func(t *testing.T) {
@@ -206,6 +214,9 @@ func TestInstallJSONOnboardingAndResume(t *testing.T) {
 		}
 	}
 
+}
+
+func testJSONOberthResume(t *testing.T) {
 	for _, change := range []string{"none", "values", "manifest", "force", "resume-upgrade"} {
 		t.Run("HelmResume/"+change, func(t *testing.T) {
 			chart := t.TempDir()

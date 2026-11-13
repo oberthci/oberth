@@ -26,7 +26,7 @@ type UpstreamAddRequest struct {
 type UpstreamKeyRequest struct {
 	Name         string `json:"name"`
 	DedicatedKey bool   `json:"dedicated_key,omitempty"`
-	// #nosec G117 -- Request-only key import over authenticated TLS; never returned or audited.
+	//nolint:gosec // G117: Request-only key import over authenticated TLS; never returned or audited.
 	PrivateKey string `json:"private_key"`
 }
 
@@ -129,7 +129,7 @@ type FirstAdminRequest struct {
 }
 
 type FirstAdminResult struct {
-	// #nosec G117 -- Once-only first-admin enrollment response over operator-authorized exec.
+	//nolint:gosec // G117: Once-only first-admin enrollment response over operator-authorized exec.
 	Token                string `json:"token,omitempty"`
 	Certificate          string `json:"certificate,omitempty"`
 	InstallerCertificate string `json:"installer_certificate"`
@@ -152,7 +152,7 @@ type UplinkAddResult struct {
 	Fingerprint string   `json:"fingerprint"`
 	Admin       bool     `json:"admin"`
 	Scope       []string `json:"scope"`
-	// #nosec G117 -- Once-only credential issued to an authenticated administrator.
+	//nolint:gosec // G117: Once-only credential issued to an authenticated administrator.
 	Token       string `json:"token,omitempty"`
 	Certificate string `json:"certificate,omitempty"`
 }

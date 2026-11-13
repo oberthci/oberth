@@ -11,8 +11,8 @@ import (
 )
 
 const administrativeActor = "admin@localhost"
-const defaultUpstreamKeySecret = "oberth-upstream-key"       // #nosec G101 -- fixed bundle name, not credential material.
-const defaultUpstreamKnownHostsSecret = "oberth-known-hosts" // #nosec G101 -- fixed bundle name, not credential material.
+const defaultUpstreamKeySecret = "oberth-upstream-key"       //nolint:gosec // G101: fixed bundle name, not credential material.
+const defaultUpstreamKnownHostsSecret = "oberth-known-hosts" //nolint:gosec // G101: fixed bundle name, not credential material.
 type gatedAdminTokens struct {
 	*store.Store
 	Gate   func(context.Context, string) error

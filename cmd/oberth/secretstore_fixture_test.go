@@ -38,7 +38,7 @@ func runSecretStoreVerify(ctx context.Context, arguments []string, output io.Wri
 }
 
 func secretStoreConfigFromServeCmdline(path string) (secretStoreVerifyConfig, error) {
-	raw, err := os.ReadFile(path) // #nosec G304 -- fixed /proc/1/cmdline, overridden only by tests.
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: fixed /proc/1/cmdline, overridden only by tests.
 	if err != nil {
 		return secretStoreVerifyConfig{}, fmt.Errorf("read serve process command line: %w", err)
 	}
@@ -128,7 +128,7 @@ func secretStoreConfigFromServeCmdline(path string) (secretStoreVerifyConfig, er
 }
 
 func releaseTierConfigFromServeCmdline(path string) (releaseTierVerifyConfig, error) {
-	raw, err := os.ReadFile(path) // #nosec G304 -- fixed /proc/1/cmdline, overridden only by tests.
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: fixed /proc/1/cmdline, overridden only by tests.
 	if err != nil {
 		return releaseTierVerifyConfig{}, fmt.Errorf("read serve process command line: %w", err)
 	}

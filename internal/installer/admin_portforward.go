@@ -18,7 +18,7 @@ import (
 )
 
 // Use the configured Kubernetes HTTP transport for the upgrade. Its request
-// cancellation covers reading the response headers; the legacy SPDY transport
+// cancellation covers reading the response headers; the client-go SPDY transport
 // reads those headers directly from a socket without observing cancellation.
 type adminPortForwardDialer struct {
 	ctx      context.Context

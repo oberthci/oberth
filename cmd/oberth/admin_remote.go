@@ -179,7 +179,7 @@ func runUpstream(ctx context.Context, args []string, output io.Writer) error {
 	}
 }
 func readAdminLocalKey(path string) ([]byte, error) {
-	info, err := os.Lstat(path) // #nosec G703 -- operator-selected local private key; owner-only regular-file check below.
+	info, err := os.Lstat(path) //nolint:gosec // G703: operator-selected local private key; owner-only regular-file check below.
 	if err != nil {
 		return nil, err
 	}

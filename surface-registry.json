@@ -1007,6 +1007,58 @@
     "value:uplink_add": {
       "doc_anchor": "docs/mcp-setup.md#1-create-an-uplink",
       "test_ref": "internal/service/administration_test.go TestAdministrationSecurity/EveryActionAudited"
+    },
+    "flag:clear": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:details": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:release-tier": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:keys": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:tier": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:revoked": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:key-file": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:default-branch": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:admin": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:replacement-fingerprint": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:repo": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:dedicated-key": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
+    },
+    "flag:wait-for": {
+      "doc_anchor": "docs/cli-reference.md",
+      "test_ref": "cmd/oberth/admin_remote_test.go TestAdminRemoteCommands"
     }
   }
 }

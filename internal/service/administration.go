@@ -202,6 +202,10 @@ func (s *API) performAdministration(ctx context.Context, actor api.Actor, name s
 		}
 		return s.administration.VerifyRepository(ctx, qualified)
 	}
+	return s.performCatalogAdministration(ctx, actor, name, raw)
+}
+
+func (s *API) performCatalogAdministration(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
 	catalog, ok := s.runs.(adminCatalog)
 	if !ok {
 		return nil, refuse(ErrUnavailable, "administration catalog")

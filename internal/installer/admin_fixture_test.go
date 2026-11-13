@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/recordjson"
 )
 
@@ -214,7 +215,7 @@ func fixtureClientRoot() func() (string, error) {
 	return func() (string, error) { return root, nil }
 }
 func testAdminDeps(deps Deps) Deps {
-	if deps.ClientConfigRoot == nil && os.Getenv("HOME") == filepath.Dir(fixtureAdminRoot) && os.Getenv("XDG_CONFIG_HOME") == filepath.Join(filepath.Dir(fixtureAdminRoot), ".config") {
+	if deps.ClientConfigRoot == nil && usesPackageFixtureHome() {
 		deps.ClientConfigRoot = fixtureClientRoot()
 	}
 	if deps.Admin == nil && deps.RunCommand != nil {
@@ -223,7 +224,7 @@ func testAdminDeps(deps Deps) Deps {
 	return deps
 }
 func testAdminInstallDeps(deps InstallDeps) InstallDeps {
-	if deps.ClientConfigRoot == nil && os.Getenv("HOME") == filepath.Dir(fixtureAdminRoot) && os.Getenv("XDG_CONFIG_HOME") == filepath.Join(filepath.Dir(fixtureAdminRoot), ".config") {
+	if deps.ClientConfigRoot == nil && usesPackageFixtureHome() {
 		deps.ClientConfigRoot = fixtureClientRoot()
 	}
 	if deps.Admin == nil && deps.RunCommand != nil {
@@ -298,4 +299,10 @@ func refreshFixtureAdmin(deps any) {
 			d.Admin = f
 		}
 	}
+}
+
+func usesPackageFixtureHome() bool {
+	home, _ := os.UserHomeDir()
+	root, _ := client.ConfigDir()
+	return home == filepath.Dir(fixtureAdminRoot) && root == filepath.Join(home, ".config", "oberth")
 }
