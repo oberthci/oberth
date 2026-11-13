@@ -71,8 +71,11 @@ node. Ordinary repositories may author tolerations too, so taints alone do not
 establish exclusive access to a trusted node. See [execution targets](execution-targets.md).
 Granted device resources still require a bounded aggregate device authorization
 proof; this does not schedule CPU or memory.
-Server-owned executor/identity helpers have their own requests; these do not
-rewrite the author's container resources. Opted-in assisted holds retain their
+Server-owned executor/identity helpers keep their existing resources. Their
+measured Pod-level effect is an additional **50m CPU, 64Mi memory and 256Mi
+ephemeral storage requested by every Pod of a run**, beyond what its author
+wrote. A Pod whose author declares no requests is therefore **Burstable, not
+BestEffort**. The author's container resources are unchanged. Opted-in assisted holds retain their
 private scratch resources, retry/hold behavior and hold-lifetime deadlines.
 
 ## Security waits before submission
