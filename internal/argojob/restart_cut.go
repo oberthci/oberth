@@ -72,7 +72,7 @@ func recordRestartCut(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1
 // parallel step lost its exit evidence during adoption.
 func (completion *Completion) classifyRestartCut() {
 	completion.Interrupted = false
-	if completion.Succeeded {
+	if completion.Succeeded || completion.OperatorStopped {
 		return
 	}
 	var cut *StepResult

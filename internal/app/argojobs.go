@@ -1116,7 +1116,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		result.Status, result.Phase = model.RunInterrupted, "interrupted"
 		result.FailedStage, result.FailedStep = "", ""
 	}
-	return result
+	return operatorShutdownResult(result, completion)
 }
 
 // noPipelineError returns a user-facing error when the repository has no

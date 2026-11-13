@@ -910,13 +910,13 @@ func (s *Store) finishRunTx(ctx context.Context, tx *sql.Tx, id string, result m
 	}
 	value, err := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
-SET status = ?, phase = ?,
+SET status = ?, phase = ?, reason = CASE WHEN ? THEN ? ELSE reason END,
     tested_sha = CASE WHEN ? = '' THEN tested_sha ELSE ? END,
     base_sha = CASE WHEN ? = '' THEN base_sha ELSE ? END,
     failed_burn = ?, failed_step = ?, error = ?, failure_cause = ?, finished_at = ?, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns,
-		result.Status, phase,
+		result.Status, phase, result.Status == model.RunInterrupted && phase == model.PhaseCancelled, result.Error,
 		result.TestedSHA, result.TestedSHA,
 		result.BaseSHA, result.BaseSHA,
 		result.FailedStage, result.FailedStep, result.Error, result.FailureCause, now, now, id))

@@ -140,7 +140,7 @@ func boundedKubeletMessage(message string) string {
 }
 
 func (completion *Completion) classifyInfrastructure() {
-	if completion.Succeeded {
+	if completion.Succeeded || completion.OperatorStopped {
 		return
 	}
 	reason, storage := "", ""
