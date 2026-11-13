@@ -40,3 +40,44 @@ func TestChangingClusterDoesNotRetainDiscoveredTLSNames(t *testing.T) {
 		}
 	}
 }
+
+func TestClientIPChoiceCarriesSANsIntoReviewAndSummary(t *testing.T) {
+	for _, host := range []string{"192.0.2.10", "2001:db8::10", "127.0.0.1", "::1"} {
+		t.Run(host, func(t *testing.T) {
+			state := newWizardState(Options{})
+			state.ClusterInfo = clusterInfoMsg{server: "https://api.example.test:6443", nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "first"}}, {ObjectMeta: metav1.ObjectMeta{Name: "second"}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeExternalIP, Address: host}}}}}}
+			q := questionByID(t, "tls.client")
+			if err := q.save(state, []string{host}); err != nil {
+				t.Fatal("detected IP not offered", err)
+			}
+			state.done[stepTLS] = true
+			cfg := installConfig(state)
+			review := installer.Review(cfg)
+			if cfg.ClientHost != host || review.ClientHost != host || !slices.Contains(cfg.TLSExtraIPs, host) || !slices.Contains(review.IPs, host) {
+				t.Fatal("chosen IP or SAN lost", review)
+			}
+			for _, text := range []string{BuildCommandLine(state), stepSummary(state, stepTLS)} {
+				if !strings.Contains(text, host) {
+					t.Fatal("review/summary omitted IP", text)
+				}
+			}
+			if !strings.Contains(BuildCommandLine(state), "--tls-extra-ip=") {
+				t.Fatal("install command missing IP SAN")
+			}
+			if !strings.Contains(q.explain(state), "NAT isolation") || !strings.Contains(q.explain(state), "port-forward") {
+				t.Fatal("routing advice overpromises", q.explain(state))
+			}
+			// A user can name an address not discovered on any node, such as an LB IP.
+			custom := newWizardState(Options{})
+			if err := questionByID(t, "tls.names").save(custom, []string{host}); err != nil {
+				t.Fatal(err)
+			}
+			if err := q.save(custom, []string{host}); err != nil {
+				t.Fatal("custom IP not offered", err)
+			}
+			if !slices.Contains(installConfig(custom).TLSExtraIPs, host) {
+				t.Fatal("custom IP missing from certificate")
+			}
+		})
+	}
+}

@@ -50,9 +50,9 @@ Arguments given to the command: `$ARGUMENTS`
       fingerprint from a scan of the forge yourself: that is trust on first
       use.
    3. How do clients reach the server? On this machine: `--client-host
-      localhost`. From other machines: this host's DNS name or `<host>.local`;
-      clients never connect by IP address. Keep the CA's DNS-only constraints;
-      IP constraints remain deferred until Bun releases its fix. When the
+      localhost` with a local mapping or forward. From other machines: a routable
+      DNS name or IP; an IP choice must be covered by an IP SAN. Reachability
+      depends on the network between client and node, including NAT isolation. When the
       NodePorts are forwarded to other ports, the next step proposes `--client-ssh-port` and
       `--client-https-port`; the user does not need to discover these numbers.
    4. Turn on assisted continuation (`--assist`), so a failed step of a run
@@ -62,7 +62,7 @@ Arguments given to the command: `$ARGUMENTS`
    plan file, rerunning it with the chosen address/options if needed. Run:
 
    ```sh
-   sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<chosen DNS name>'
+   sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<chosen hostname or IP>'
    ```
 
    Pass explicit client port overrides and `--service-type` too when selected.
@@ -75,7 +75,8 @@ Arguments given to the command: `$ARGUMENTS`
    Show `kind_remedy` in full before install when present (see below).
    When `load_balancer` is returned, offer its flags in the same Review and
    follow the bounded address wait below after the approved install starts.
-   For an IP or load-balancer address, follow the DNS naming remedy below.
+   For an IP or load-balancer address, offer the direct IP or optional DNS
+   naming path below; preserve the user's choice.
    Otherwise, if `needs_action` is true, explain: "NodePorts are not reachable from this
    host; map them or use port-forward." Offer that network choice, then repeat
    the probe with the resulting client ports. The probe is advisory: a fresh
@@ -188,19 +189,30 @@ Arguments given to the command: `$ARGUMENTS`
 - Never disable TLS verification, and never trust the server's CA any other
   way than `/oberth:connect` with the pin.
 
-### Naming an IP or load-balancer endpoint
+### Choosing an IP or naming an endpoint
 
-When the only endpoint is an IP or load-balancer address, pass it as
-`--endpoint-address '<detected address>'` to `scripts/install ports`. If no
-name was chosen, propose `--client-host oberth.test` (the user may choose their
-own DNS name). Show the returned `dns.hosts_line` verbatim for `/etc/hosts` on
-each client, or `dns.dns_record` for the DNS administrator. A hostname endpoint
-uses a CNAME record; IP endpoints print an A/AAAA record and a hosts line.
-Never edit these automatically. Wait for the user to configure the name, then
-rerun with the chosen `--client-host` and the same `--endpoint-address`.
-Continue when `dns.resolves_to_endpoint` is true. This checks name resolution
-separately from TCP: a fresh service need not listen yet. Keep DNS-only CA
-constraints and include the chosen name in the install Review.
+Clients may use a routable IPv4 or IPv6 address directly. Pass it as
+`--client-host '<chosen IP>'`; the probe keeps it and needs no DNS change.
+The installer adds the choice to the leaf certificate's IP SANs and shows it
+in plan, Review and the install summary. IPv6 URL authorities use brackets,
+for example `https://[2001:db8::10]:30443/mcp`. A matching CA pin alone does
+not suffice: the leaf must cover the exact IP. Verification remains required.
+The CA generator and its existing DNS name constraints are unchanged.
+
+Alternatively choose a DNS name, for example `--client-host oberth.test`, and
+pass the detected node or load-balancer address as `--endpoint-address` to
+`scripts/install ports`. Show the returned `dns.hosts_line` verbatim for
+`/etc/hosts` on each client, or `dns.dns_record` for the DNS administrator.
+A hostname endpoint uses CNAME; an IP endpoint prints A/AAAA and a hosts line.
+Never edit these automatically. Wait for the user's naming change, then rerun
+with the chosen name and the same endpoint address. Continue when
+`dns.resolves_to_endpoint` is true. Resolution is separate from TCP readiness.
+Include the chosen DNS name and its certificate coverage in Review.
+
+NodePort reachability by node IP depends on the network between client and
+node. Guests behind NAT isolation cannot reach each other. Use port-forward,
+or a DNS name or IP that is routable from the client; naming an unreachable
+address does not create a route. A fresh server may not listen until install.
 
 ### No reachable node: LoadBalancer proposal
 
@@ -209,7 +221,7 @@ address answers its NodePorts. Missing node addresses and failed probes are
 advisory generic signals, including on managed clusters; no provider detection
 or new admission gate is used. Offer `--service-type LoadBalancer` with
 `--client-https-port 443 --client-ssh-port 2222`, or port mapping/forwarding.
-Use the operator's chosen DNS name (propose `oberth.test`) in the same Review.
+Use the operator's chosen routable DNS name or known IP in the same Review.
 Include all flags in that Review and wait for "install" before any mutation.
 
 For LoadBalancer, start the approved install in the background, retaining its
@@ -217,13 +229,16 @@ public output and process status. Then run the read-only address wait against
 the saved plan and the reviewed namespace:
 
 ```sh
-sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<hostname approved in Review>' --client-https-port '<approved HTTPS port>' --client-ssh-port '<approved SSH port>' --service-type LoadBalancer --wait-load-balancer --wait-timeout 2m --namespace '<approved namespace>'
+sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<host or IP approved in Review>' --client-https-port '<approved HTTPS port>' --client-ssh-port '<approved SSH port>' --service-type LoadBalancer --wait-load-balancer --wait-timeout 2m --namespace '<approved namespace>'
 ```
 
 The helper waits for Service `oberth` to exist and receive an ingress address,
-with a bounded timeout (maximum 10m). It never creates a Service. Show the
-returned DNS remedy, wait for the user's DNS/hosts change, and re-probe with
-`--endpoint-address` set to that ingress address. Do not rerun the installer
+with a bounded timeout (maximum 10m). It never creates a Service. For a chosen
+DNS name, show the returned DNS remedy and wait for the user's DNS/hosts change
+before re-probing with `--endpoint-address` set to the ingress address. An IP
+choice is preserved directly. If the address differs from the reviewed choice,
+review the new host and its certificate SAN before using it; discovery alone
+does not update an already-issued certificate. Do not rerun the installer
 while the original process is still running. On timeout inspect that Service
 and its events, keep the install status and secrets file, then retry the wait
 or review a forwarding remedy. Do not claim success until the original install

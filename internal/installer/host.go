@@ -503,10 +503,9 @@ func certificateNamesForLoopback(dnsNames, ips []string) ([]string, []string) {
 	return appendMissing(dnsNames, "localhost"), appendMissing(appendMissing(ips, "127.0.0.1"), "::1")
 }
 
-// certificateNamesForClientHost adds the address host-side clients are told
-// to use: localhost (with 127.0.0.1) for a local API server, otherwise the API
-// server's own host, as an IP or a DNS name.
-func certificateNamesForClientHost(host string, dnsNames, ips []string) ([]string, []string) {
+// CertificateNamesForClientHost adds the chosen client address to the leaf
+// certificate SANs. It does not change the CA name constraints.
+func CertificateNamesForClientHost(host string, dnsNames, ips []string) ([]string, []string) {
 	switch {
 	case host == "" || host == "localhost":
 		return certificateNamesForLoopback(dnsNames, ips)
@@ -524,13 +523,12 @@ var clientHostNameRegexp = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9
 // NormalizeClientHost checks an address clients are told to use (#061) and
 // returns its canonical form: a lower-case DNS name or a normalized IP. An
 // unspecified address (0.0.0.0, ::) is refused with the reason: it is where a
-// server listens, not where a client connects, and NodePorts already listen
-// on every address of the node.
+// server listens, not where a client connects.
 func NormalizeClientHost(raw string) (string, error) {
 	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(raw), "."))
 	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
 		if ip.IsUnspecified() {
-			return "", fmt.Errorf("%s is a listen address, not one a client can connect to; NodePorts 30022 and 30443 already listen on every address of the node, so name the node's IP or DNS name", raw)
+			return "", fmt.Errorf("%s is a listen address, not one a client can connect to; choose a node IP or DNS name routable from the client, or use port-forward; NodePort reachability depends on the network between client and node", raw)
 		}
 		return ip.String(), nil
 	}

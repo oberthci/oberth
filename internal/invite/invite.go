@@ -53,8 +53,8 @@ func ValidateURL(address string) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "/mcp" || u.RawPath != "" {
 		return errors.New("invite server URL must be an HTTPS /mcp URL without credentials, query or fragment")
 	}
-	if _, err := netip.ParseAddr(u.Hostname()); err == nil {
-		return errors.New("invite server URL must use a DNS name, not an IP address")
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && ip.Zone() != "" {
+		return errors.New("invite server URL cannot use a scoped IP address: certificate IP SANs have no zone")
 	}
 	return nil
 }

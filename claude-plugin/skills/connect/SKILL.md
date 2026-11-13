@@ -8,7 +8,10 @@ allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/trust" *)
 # Connect Claude Code to Oberth
 
 Claude Code reads its TLS trust once, when it starts. This command stores the
-Oberth server's CA for it; the MCP tools work after one restart.
+Oberth server's CA for it; the MCP tools work after one restart. The server URL
+may use a DNS name or an IP address (IPv6 hosts use brackets). A matching CA
+pin and a valid leaf identity are both required: an IP must be in the leaf's
+IP SANs. A DNS SAN containing IP text is insufficient. Never bypass a mismatch.
 
 Configured values of this plugin:
 
@@ -134,3 +137,9 @@ Report only verified facts. An installer exit code or an incomplete result does
 not establish whether anything was pushed to the forge. Say what was observed,
 what remains deployed and what is unknown; never claim that nothing was pushed
 without checking evidence that establishes that fact.
+
+Plugin connect requires an OpenSSL with `verify_ip` and `verify_hostname`.
+It uses a capable `openssl`/`openssl3` on PATH or the standard Homebrew
+`openssl@3` location on macOS. System LibreSSL without these checks is refused;
+install OpenSSL outside Oberth (on macOS, `brew install openssl@3`) and retry.
+The helper never installs tools or skips identity verification.

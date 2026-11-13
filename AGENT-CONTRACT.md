@@ -3404,11 +3404,17 @@ and owned units/enable paths, uses private explicit k3s paths, and exclusively
 creates units/binaries. Disposable-VM provisioning/reboot acceptance remains
 unqualified; the contract cell grants no publisher privileges or tool-pin bypass.
 
-IP-only client endpoints produce a DNS proposal with the exact hosts line or
-A/AAAA record. Load-balancer hostnames can be named by CNAME. The plugin waits
-for the user's naming change and re-probes the chosen name against the detected
-endpoint; no hosts file or DNS is edited automatically. TCP checks remain
-advisory and DNS-only CA constraints remain unchanged.
+IP client choices are preserved by the port probe and added to the leaf IP
+SANs by the installer, including in plan, Review and summary. Connect checks
+the pinned CA and the leaf's exact IP SAN before saving trust; invitation
+clients perform chain, identity and exact pin verification before sending HTTP.
+IPv6 URL authorities are bracketed. CA generation and constraints are unchanged.
+Optional DNS naming produces the exact hosts line or A/AAAA record; an endpoint
+hostname can use CNAME. For that DNS choice, the plugin waits for the user's
+naming change and re-probes; it never edits hosts or DNS automatically.
+NodePort reachability depends on client-to-node routing (NAT-isolated guests
+cannot reach each other); offer port-forward or a routable name/IP. TCP checks
+remain advisory.
 
 Installer NetworkPolicy preflight reports measured TCP egress behavior against
 its own server Pod, with explicit node/namespace scope. Six randomized selection

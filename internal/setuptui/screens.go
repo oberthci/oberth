@@ -185,7 +185,7 @@ func stepSummary(st *WizardState, step stepID) string {
 		if len(extra) > 0 {
 			s += " incl. " + strings.Join(extra, ", ")
 		}
-		return s + " · clients use " + clientHost(st)
+		return s + " · clients use " + clientHost(st) + " (covered by certificate)"
 	case stepForge:
 		key := "generated upstream key"
 		if st.ForgeAuth == forgeAuthExisting {

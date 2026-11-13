@@ -25,13 +25,13 @@ func TestCertificateNamesForClientHost(t *testing.T) {
 		{"10.0.0.5", nil, []string{"10.0.0.5"}},
 		{"k8s.example.test", []string{"k8s.example.test"}, nil},
 	} {
-		dns, ips := certificateNamesForClientHost(tc.host, nil, nil)
+		dns, ips := CertificateNamesForClientHost(tc.host, nil, nil)
 		if !slices.Equal(dns, tc.wantDNS) || !slices.Equal(ips, tc.wantIPs) {
 			t.Errorf("host %q: got %v %v, want %v %v", tc.host, dns, ips, tc.wantDNS, tc.wantIPs)
 		}
 	}
 	// Operator-supplied names keep their order; the advertised host is appended once.
-	dns, ips := certificateNamesForClientHost("localhost", []string{"example-node", "localhost"}, []string{"192.0.2.193"})
+	dns, ips := CertificateNamesForClientHost("localhost", []string{"example-node", "localhost"}, []string{"192.0.2.193"})
 	if !slices.Equal(dns, []string{"example-node", "localhost"}) || !slices.Equal(ips, []string{"192.0.2.193", "127.0.0.1", "::1"}) {
 		t.Fatalf("got %v %v", dns, ips)
 	}

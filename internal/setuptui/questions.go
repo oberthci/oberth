@@ -14,6 +14,8 @@ import (
 
 	"github.com/oberthci/oberth/internal/kubeconfig"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"golang.org/x/crypto/ssh"
 
 	"github.com/oberthci/oberth/internal/installer"
@@ -321,15 +323,16 @@ func displayUpstream(baseURL string) string {
 
 // clientHostOptions are the addresses a client could be told to use: the
 // node's address and name and every extra certificate name, then localhost.
-// A kind cluster publishes on 127.0.0.1 only, so it offers localhost alone.
+// Detected addresses still need a route from each client.
 func clientHostOptions(st *WizardState) []option {
 	local := option{value: "localhost", label: "localhost", detail: "this machine only"}
 
 	var opts []option
-	seen := map[string]bool{"localhost": true, "127.0.0.1": true}
+	seen := map[string]bool{"localhost": true}
 	addOpt := func(value, detail string) {
-		value = strings.ToLower(value)
-		if value == "" || seen[value] {
+		var err error
+		value, err = installer.NormalizeClientHost(value)
+		if err != nil || seen[value] {
 			return
 		}
 		seen[value] = true
@@ -338,14 +341,22 @@ func clientHostOptions(st *WizardState) []option {
 	if api := apiServerHost(st); api != "" {
 		addOpt(api, "the Kubernetes API server's host")
 	}
-	addOpt(st.ClusterInfo.nodeIP, "the node's address · machines that can reach this host, such as a VM's host or your LAN")
+	addOpt(st.ClusterInfo.nodeIP, "the node's address · requires a route from the client")
 	addOpt(st.ClusterInfo.nodeName, "the node's name · other machines need it in DNS or /etc/hosts")
+	for _, node := range st.ClusterInfo.nodes {
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeInternalIP || address.Type == corev1.NodeExternalIP {
+				addOpt(address.Address, "a node address · requires a route from the client")
+			}
+		}
+	}
 	for _, name := range st.Config.TLSExtraIPs {
 		addOpt(name, "an address on the certificate")
 	}
 	for _, name := range st.Config.TLSExtraDNSNames {
 		addOpt(name, "a name on the certificate")
 	}
+	addOpt(st.Config.ClientHost, "the chosen client address · confirm routing from each client")
 	// A .local name goes after the addresses that need no mDNS (#066).
 	var mdns []option
 	opts = slices.DeleteFunc(opts, func(o option) bool {
@@ -403,7 +414,8 @@ func tlsCertificateDescription(state *WizardState) string {
 // Derive detected names from the current probe without saving them as answers.
 // Changing clusters must not carry another node's names into the next CA.
 func wizardTLSNames(state *WizardState) ([]string, []string) {
-	return installer.SingleHostTLSNames(state.ClusterInfo.nodes, state.Config.TLSExtraDNSNames, state.Config.TLSExtraIPs)
+	dns, ips := installer.SingleHostTLSNames(state.ClusterInfo.nodes, slices.Clone(state.Config.TLSExtraDNSNames), slices.Clone(state.Config.TLSExtraIPs))
+	return installer.CertificateNamesForClientHost(clientHost(state), dns, ips)
 }
 
 // serverCertificateNames is the name set the server certificate covers.
@@ -696,7 +708,7 @@ func buildQuestions() []*question {
 				dnsNames, ips := secretstore.ServerTLSNames(st.namespace(), nil)
 				text := "Oberth serves a " + tlsCertificateDescription(st) + ". It is always valid for " +
 					strings.Join(append(dnsNames, ips...), ", ") + ". Add every name or IP address clients reach this server by — " +
-					"a name missing here appears later as a hostname mismatch no client can fix."
+					"a missing name or IP SAN causes a certificate mismatch no client can fix. Enter a custom node or load-balancer address here to offer it in the client-address choice next."
 
 				return text
 			},
@@ -738,7 +750,7 @@ func buildQuestions() []*question {
 			id: "tls.client", step: stepTLS, heading: "Which address do clients use?",
 			explain: func(st *WizardState) string {
 
-				text := "Clone URLs, the CLI and MCP settings and the dashboard link name this address, and the certificate covers it. On k3s and most clusters, ports 30022 and 30443 already listen on every address of the node, so pick the one your other machines (a laptop, the VM's host) reach this server by. localhost works on this machine only."
+				text := "Clone URLs, the CLI and MCP settings and the dashboard link name this address, and the certificate covers it. An IP choice is added as an IP SAN. NodePort reachability after install depends on the network between client and node; guests behind NAT isolation cannot reach each other. Choose a DNS name or IP routable from each client, or use port-forward. localhost works on this machine only and needs a local port mapping or forward."
 				if warning := installer.LocalNameWarning(defaultClientHost(st)); warning != "" {
 					text += " " + warning
 				}

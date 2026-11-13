@@ -77,7 +77,7 @@ func runClientPorts(ctx context.Context, arguments []string, output io.Writer) e
 		if cfg.ClientHost == "" {
 			cfg.ClientHost = plan.Review.ClientHost
 			if cfg.ClientHost == "" {
-				cfg.ClientHost = "oberth.test"
+				cfg.ClientHost = address
 			}
 		}
 		if cfg.ClientHTTPSPort == "" {

@@ -21,9 +21,10 @@ contents in an agent session. The file contains a random 32-byte one-time
 credential, the HTTPS MCP URL, the server CA's DER SHA-256 pin, the identity,
 scope and expiry. The `secret` field is unpadded base64url of the 32 random
 bytes; `secret_digest` is lowercase hex SHA-256 of those decoded bytes.
-Use a DNS name such as `localhost`, the host name or `host.local` in the
-server URL. IP connections are refused; IP name constraints remain deferred
-until Bun releases its fix, and DNS CA constraints remain enforced.
+Use a DNS name or an IPv4/IPv6 address in the server URL. The leaf certificate
+must cover that name or carry the exact IP SAN, and the CA pin must be correct.
+IPv6 URL hosts use brackets; scoped IPv6 addresses are refused because IP SANs
+have no zone. Existing CA constraints remain enforced.
 The default lifetime is 24 hours; the maximum is 168 hours.
 The invitation grants regular uplink access, with the selected upstream
 scope; it cannot grant admin rights or replace an existing identity/key.

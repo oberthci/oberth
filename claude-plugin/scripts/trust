@@ -27,11 +27,28 @@ umask 077
 LC_ALL=C
 export LC_ALL
 
+openssl_tool=openssl
 variable=NODE_EXTRA_CA_CERTS
 
 fail() {
 	echo "oberth: $*" >&2
 	exit 1
+}
+
+# The macOS system LibreSSL lacks verify_ip/verify_hostname. Prefer a capable
+# installed tool; discovering it never installs a dependency or weakens TLS.
+identity_openssl() {
+ for candidate in "$(command -v openssl || true)" "$(command -v openssl3 || true)" /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
+  if [ -z "$candidate" ] || [ ! -x "$candidate" ]; then
+   continue
+  fi
+  openssl_help=$("$candidate" verify -help 2>&1 || true)
+  case "$openssl_help" in *-verify_ip*) ;; *) continue ;; esac
+  case "$openssl_help" in *-verify_hostname*) ;; *) continue ;; esac
+  printf '%s\n' "$candidate"
+  return 0
+ done
+ fail "connect requires OpenSSL with verify_ip and verify_hostname support. Install a supported OpenSSL outside Oberth (on macOS: brew install openssl@3), then retry. Nothing was changed."
 }
 
 # normal_pin prints a pin as 64 lowercase hex digits, or nothing when it is
@@ -49,14 +66,14 @@ normal_pin() {
 
 # fingerprint prints the SHA-256 of the first certificate of a PEM file.
 fingerprint() {
-	openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//' | tr -d ':\r\n' | tr 'A-F' 'a-f'
+	"$openssl_tool" x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | sed 's/^.*=//' | tr -d ':\r\n' | tr 'A-F' 'a-f'
 }
 
 # constrained reports whether the certificate of a PEM file carries critical
-# name constraints that permit DNS names: only then is trusting it limited
-# to those names.
+# name constraints that limit DNS identities. These do not restrict IP
+# identities; an IP connection still requires its exact IP SAN on the leaf.
 constrained() {
-	openssl x509 -in "$1" -noout -text 2>/dev/null | awk '
+	"$openssl_tool" x509 -in "$1" -noout -text 2>/dev/null | awk '
 		/^[ \t]*X509v3 Name Constraints:/ { section = ($0 ~ /critical/) ? 1 : 0; permitted = 0; next }
 		/^[ \t]*X509v3 [A-Za-z ]+:/ { section = 0 }
 		section && /^[ \t]*Permitted:/ { permitted = 1; next }
@@ -328,7 +345,7 @@ hint() {
   variable=NODE_EXTRA_CA_CERTS
   if [ -z "$cert" ] || [ ! -r "$cert" ]; then
    echo "Oberth plugin: no client certificate is configured. Use /oberth:connect for certificate enrollment, or configure an explicit bearer setup."
-  elif ! openssl x509 -in "$cert" -checkend 2592000 -noout >/dev/null 2>&1; then
+  elif ! "$openssl_tool" x509 -in "$cert" -checkend 2592000 -noout >/dev/null 2>&1; then
    echo "Oberth plugin: client certificate is missing, expired or expires within 30 days. Run the plugin scripts/trust renew command (oberth client renew with the configured connection paths) before expiry; expired certificates require admin enrollment."
   fi
  fi
@@ -376,7 +393,7 @@ connect() {
 		esac
 		shift || true
 	done
-	command -v openssl >/dev/null 2>&1 || fail "openssl is not installed; it reads the server's certificates"
+	openssl_tool=$(identity_openssl)
 	pin=$(normal_pin "$given")
 	[ -n "$pin" ] || fail "no CA pin: a pin is the SHA-256 fingerprint of the server's CA certificate (64 hex digits). Ask your Oberth admin for it (oberth client pin), save it with /plugin configure oberth or pass it to /oberth:connect. Nothing was changed."
 
@@ -423,7 +440,7 @@ connect() {
 	# The handshake is read without verification: what it presents is only
 	# a candidate until its fingerprint equals the pin.
 	# shellcheck disable=SC2086
-	$bound openssl s_client -connect "$target" $name -showcerts </dev/null >"$work/handshake" 2>/dev/null || true
+	$bound "$openssl_tool" s_client -connect "$target" $name -showcerts </dev/null >"$work/handshake" 2>/dev/null || true
 	presented=$(split_certificates "$work" chain <"$work/handshake")
 	[ "$presented" -gt 0 ] || fail "no certificate was read from $target: the server did not answer a TLS handshake. Nothing was changed."
 
@@ -460,7 +477,7 @@ connect() {
   seen:$seen
   $advice Nothing was changed."
 	fi
-	openssl x509 -in "$anchor" -noout -text 2>/dev/null | grep -q 'CA:TRUE' ||
+	"$openssl_tool" x509 -in "$anchor" -noout -text 2>/dev/null | grep -q 'CA:TRUE' ||
 		fail "refused: the pinned certificate is not a CA certificate. Nothing was changed."
 	warning=
 	constrained "$anchor" ||
@@ -477,8 +494,20 @@ connect() {
 	# Only the pinned CA anchors this check: the default trust locations of
 	# openssl are replaced by a directory that holds no hashed certificate, so
 	# a leaf some other CA issued never passes.
-	SSL_CERT_DIR="$work" SSL_CERT_FILE="$work/no-default" openssl verify -CAfile "$anchor" -CApath "$work" -untrusted "$work/others.pem" "$work/chain-1.pem" 2>/dev/null | grep -q ': OK$' ||
+	SSL_CERT_DIR="$work" SSL_CERT_FILE="$work/no-default" "$openssl_tool" verify -CAfile "$anchor" -CApath "$work" -untrusted "$work/others.pem" "$work/chain-1.pem" 2>/dev/null | grep -q ': OK$' ||
 		fail "refused: the certificate $target presents is not issued by the pinned CA. Nothing was changed."
+
+	# Chain ownership alone does not bind the endpoint to this host. OpenSSL
+	# must check IP SANs for literals and DNS identity for names before saving trust.
+	identity_flag=-verify_hostname
+	identity_kind="DNS identity"
+	case "$host" in
+	*:*) identity_flag=-verify_ip; identity_kind="IP SAN" ;;
+	*[!0-9.]*) ;;
+	*) identity_flag=-verify_ip; identity_kind="IP SAN" ;;
+	esac
+	SSL_CERT_DIR="$work" SSL_CERT_FILE="$work/no-default" "$openssl_tool" verify -CAfile "$anchor" -CApath "$work" -untrusted "$work/others.pem" -purpose sslserver "$identity_flag" "$host" "$work/chain-1.pem" 2>/dev/null | grep -q ': OK$' ||
+		fail "refused: the server certificate does not cover $host with a valid $identity_kind for TLS server use. Nothing was changed."
 
 	settings_file="$claude/settings.json"
 	current=$(current_trust "$settings_file") || fail "$settings_file was not read. Nothing was changed."
@@ -560,17 +589,17 @@ keygen() {
  if [ -L "$store/current" ]; then
   [ "$(cat "$store/current/.oberth-client-identity" 2>/dev/null)" = oberth-client-identity-v1 ] || fail "current directory is not a managed client identity"
   if ! { [ -f "$store/current/client.key" ] && [ -f "$store/current/client.csr" ]; }; then fail "incomplete client key/CSR pair"; fi
-  openssl req -in "$store/current/client.csr" -verify -noout >/dev/null 2>&1 || fail "invalid client CSR"
-  csrpub=$(openssl req -in "$store/current/client.csr" -pubkey -noout 2>/dev/null) || fail "invalid client CSR"
-  keypub=$(openssl pkey -in "$store/current/client.key" -pubout 2>/dev/null) || fail "invalid client key"
+  "$openssl_tool" req -in "$store/current/client.csr" -verify -noout >/dev/null 2>&1 || fail "invalid client CSR"
+  csrpub=$("$openssl_tool" req -in "$store/current/client.csr" -pubkey -noout 2>/dev/null) || fail "invalid client CSR"
+  keypub=$("$openssl_tool" pkey -in "$store/current/client.key" -pubout 2>/dev/null) || fail "invalid client key"
   [ "$csrpub" = "$keypub" ] || fail "client CSR does not match local key"
  else
   [ ! -e "$store/current" ] || fail "current identity must be a symlink"
   work=$(mktemp -d "$store/identity-XXXXXX")
   printf 'oberth-client-identity-v1\n' >"$work/.oberth-client-identity"
-  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out "$work/client.key" 2>/dev/null || fail "cannot generate client key"
+  "$openssl_tool" genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve -out "$work/client.key" 2>/dev/null || fail "cannot generate client key"
   chmod 600 "$work/client.key"
-  openssl req -new -sha256 -key "$work/client.key" -subj /CN=oberth-client -out "$work/client.csr" 2>/dev/null || fail "cannot generate CSR"
+  "$openssl_tool" req -new -sha256 -key "$work/client.key" -subj /CN=oberth-client -out "$work/client.csr" 2>/dev/null || fail "cannot generate CSR"
   ln -s "$work" "$store/current" || fail "client identity already exists"
  fi
  chmod 600 "$store/current/client.key"
@@ -581,9 +610,9 @@ credentials() {
  claude=$(claude_directory); store="$claude/oberth"
  cert=${1:-$store/current/client.csr.crt}; key=${2:-$store/current/client.key}
  if ! { [ -f "$key" ] && [ ! -L "$key" ]; }; then fail "client key must be a regular file"; fi
- openssl x509 -in "$cert" -checkend 0 -noout >/dev/null 2>&1 || fail "missing, invalid or expired client certificate"
- certpub=$(openssl x509 -in "$cert" -pubkey -noout 2>/dev/null) || fail "invalid client certificate"
- keypub=$(openssl pkey -in "$key" -pubout 2>/dev/null) || fail "invalid client key"
+ "$openssl_tool" x509 -in "$cert" -checkend 0 -noout >/dev/null 2>&1 || fail "missing, invalid or expired client certificate"
+ certpub=$("$openssl_tool" x509 -in "$cert" -pubkey -noout 2>/dev/null) || fail "invalid client certificate"
+ keypub=$("$openssl_tool" pkey -in "$key" -pubout 2>/dev/null) || fail "invalid client key"
  [ "$certpub" = "$keypub" ] || fail "client certificate does not match local key"
  chmod 600 "$key"
  mkdir -p "$claude"

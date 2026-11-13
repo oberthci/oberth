@@ -415,6 +415,23 @@ final scan must still terminate under its independent failure-scan alarm.
 The real CLI plan must refuse zero available disk with exit 1 and the named hard
 check; a synthetic green JSON result with a nonzero exit must still fail.
 
+IP client endpoints (#1559): `TestClientPortProbePreservesIPChoice` preserves
+IPv4/IPv6 literals without DNS and checks conditional routing advice. Literal
+IP choices never borrow Docker wildcard mappings from another address family.
+`TestClientIPChoiceCarriesSANsIntoReviewAndSummary` checks detected and custom
+IP choices through setup, SAN flags, Review and summary; the multiple-node
+plan regression checks explicit IP SANs without single-node discovery.
+`TestIPClientSANPinTrustAndSettings` issues the production leaf name set under
+a fixture CA with DNS constraints, connects over real IPv4/IPv6 sockets using
+the exact pin and REST client, runs sh/bash connect and configure, and checks
+CA/settings merges and exact MCP URLs. Missing IP SANs and wrong pins are
+refused before HTTP; trust/settings remain unchanged. DNS identity mismatch
+is also refused. Unsupported OpenSSL stops before saving trust with a dependency
+remedy; native macOS tests exercise the installed Homebrew fallback.
+`TestClientRepositoryIPHostsPushWithPinnedIdentity` binds
+real IPv4/IPv6 mTLS registration and strict SSH host keys, then pushes through
+the saved Git remote into a local bare fixture. No live cluster is exercised.
+
 Plugin macOS onboarding: `TestPluginDNSRemedyWaitsForNameAndReprobes` covers
 IPv4, IPv6, hostname targets and the before/after resolution boundary.
 `TestPluginDNSRejectsStaleOrInvalidAddresses` rejects invalid endpoints and
