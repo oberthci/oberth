@@ -84,7 +84,7 @@ func reportMode(mode string) {
 // remoteSubcommands lists the verbs a command dispatches before parsing its
 // own flags, so --help shows every form the command accepts.
 var remoteSubcommands = map[string]string{
-	"run":  "       oberth run wait|resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)",
+	"run":  "       oberth run wait|resources|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)",
 	"runs": "       oberth runs cancel --repo <repo> --ref <branch> [flags] (see oberth runs cancel --help)",
 }
 
@@ -371,9 +371,6 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if len(arguments) > 0 && arguments[0] == "purge" {
 		return runRunPurge(ctx, arguments[1:], output)
 	}
-	if len(arguments) > 0 && arguments[0] == "retry" {
-		return runRunRetry(ctx, arguments[1:], output)
-	}
 	if len(arguments) > 0 && arguments[0] == "cancel" {
 		return runRunCancel(ctx, arguments[1:], output)
 	}
@@ -393,7 +390,7 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: run <run-id>", errUsage)
 	}
-	if err := refuseVerbAsRunID("run", flags.Arg(0), "<run-id>, or a subcommand: wait, resources, retry, rerun, cancel, purge or hold"); err != nil {
+	if err := refuseVerbAsRunID("run", flags.Arg(0), "<run-id>, or a subcommand: wait, resources, rerun, cancel, purge or hold"); err != nil {
 		return err
 	}
 	api, err := remoteClient(ctx, transport)
@@ -505,31 +502,6 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 		}
 	}
 	return nil
-}
-
-func runRunRetry(ctx context.Context, arguments []string, output io.Writer) error {
-	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
-		_, err := fmt.Fprintln(output, "Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]")
-		return err
-	}
-	forwarded := make([]string, 0, len(arguments))
-	for _, argument := range arguments {
-		// The MCP tool already returns the run as JSON. Consume the shared
-		// CLI flag here instead of forwarding it as an unknown transport flag.
-		if argument != "--json" && argument != "-json" {
-			forwarded = append(forwarded, argument)
-		}
-	}
-	arguments = forwarded
-	if len(arguments) == 0 || strings.HasPrefix(arguments[0], "-") {
-		return fmt.Errorf("%w: run retry <run-id>", errUsage)
-	}
-	encoded, err := json.Marshal(map[string]string{"id": arguments[0]})
-	if err != nil {
-		return err
-	}
-	toolArguments := append([]string{"run_retry", string(encoded)}, arguments[1:]...)
-	return runMCPCall(ctx, toolArguments, output)
 }
 
 type remoteLog struct {

@@ -42,7 +42,7 @@ func TestGoProxyRefusalLogAttribution(t *testing.T) {
 			}
 			// The live path applies the same annotation after timestamp dedup.
 			output.Reset()
-			logs := newStepLogFollowers(context.Background(), nil, &output, nil)
+			logs := newFixtureLogFollowers(context.Background(), nil, &output, nil)
 			defer logs.close()
 			logs.goProxyURL = test.proxy
 			worker := &stepLogFollower{owner: logs, step: step}

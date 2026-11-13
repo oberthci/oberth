@@ -155,7 +155,7 @@ an older chart's `keep` annotation can remain unused.
 
 Oberth has no automatic infrastructure retry. Authors choose native Argo
 `retryStrategy`, such as `retryPolicy: OnError`, on Workflow/templates. Manual
-`run_retry` and `run_rerun` remain. Argo cannot retry a preparation failure that
+`run_rerun` remain. Argo cannot retry a preparation failure that
 happens before a Workflow exists; retry that failed run manually.
 
 ## Source delivery and load
@@ -415,7 +415,6 @@ No new label was added for this release.
 | `oberth.ci/assist` | Assisted Workflow | Hold TTL in seconds |
 | `oberth.ci/assist-hold` | Assisted template/Pod | Held-attempt deadline binding |
 | `oberth.ci/executor-identity-retry-at` | Owned step Pod on identity retry | Issuance retry timestamp, not a workload-start deadline |
-| `workflows.argoproj.io/pod-name-format` | Workflow | Pinned Argo Pod naming format `v2` |
 
 Author-facing annotations for source/workspace declarations, secret paths,
 Go-proxy choice, nonroot templates and release-WIF roles remain documented in
@@ -483,3 +482,8 @@ Block PVCs use ordinary Kubernetes fields: a container may declare
 This does not grant host device access or permission to mount an existing PVC;
 those volume sources remain refused. Device paths follow the same absolute-path
 and reserved-helper-path rules as volume mounts.
+
+Step Pod names belong to Argo. Oberth discovers Pods through their
+`workflows.argoproj.io/node-id` annotation and Workflow controller UID,
+without pinning a naming format. A document may set the native
+`spec.workflowMetadata.annotations.workflows.argoproj.io/pod-name-format`.

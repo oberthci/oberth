@@ -93,7 +93,7 @@ func TestRunTimingWorkflowAndPodAttemptSurviveReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	main := &model.ContainerTiming{Name: "main", ContainerID: "containerd://" + strings.Repeat("c", 64), StartedAt: now, FinishedAt: now.Add(time.Second)}
-	value := model.StepTiming{Version: 1, RunID: run.ID, Namespace: binding.Namespace, WorkflowName: binding.Name, WorkflowUID: binding.UID, NodeID: "node-1234", PodName: "pod-1234", Stage: "test", Step: "unit", ObservedAt: now.Add(2 * time.Second), ScriptTiming: "mixed", ImagePullTiming: "not-observed", Init: []model.ContainerTiming{}, Missing: []string{"main"}, Unavailable: "observation-unavailable"}
+	value := model.StepTiming{Version: 1, RunID: run.ID, Namespace: binding.Namespace, WorkflowName: binding.Name, WorkflowUID: binding.UID, NodeID: "node-1234", PodName: "", Stage: "test", Step: "unit", ObservedAt: now.Add(2 * time.Second), ScriptTiming: "mixed", ImagePullTiming: "not-observed", Init: []model.ContainerTiming{}, Missing: []string{"main"}, Unavailable: "observation-unavailable"}
 	if err = s.RecordStepTimings(ctx, []model.StepTiming{value}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +122,7 @@ func TestRunTimingWorkflowAndPodAttemptSurviveReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	value.PodName = "pod-1234"
 	value.Available = true
 	value.Unavailable = ""
 	value.PodUID = "22222222-2222-4222-8222-222222222222"
@@ -134,7 +135,7 @@ func TestRunTimingWorkflowAndPodAttemptSurviveReopen(t *testing.T) {
 	if err = s.RecordStepTimings(ctx, []model.StepTiming{value}); err != nil {
 		t.Fatal("idempotent observation", err)
 	}
-	for _, mode := range []string{"pod", "workflow", "container", "ordinal", "step", "time"} {
+	for _, mode := range []string{"pod", "pod-name", "workflow", "container", "ordinal", "step", "time"} {
 		t.Run(mode, func(t *testing.T) {
 			changed := value
 			copyMain := *main
@@ -142,6 +143,8 @@ func TestRunTimingWorkflowAndPodAttemptSurviveReopen(t *testing.T) {
 			switch mode {
 			case "pod":
 				changed.PodUID = "33333333-3333-4333-8333-333333333333"
+			case "pod-name":
+				changed.PodName = "other-pod"
 			case "workflow":
 				changed.WorkflowUID = "33333333-3333-4333-8333-333333333333"
 			case "container":
@@ -158,6 +161,14 @@ func TestRunTimingWorkflowAndPodAttemptSurviveReopen(t *testing.T) {
 			}
 		})
 	}
+	missing := value
+	missing.Available, missing.PodName, missing.PodUID = false, "", ""
+	missing.Main, missing.Unavailable = nil, "pod-absent"
+	missing.Missing = []string{"main"}
+	if err := s.RecordStepTimings(ctx, []model.StepTiming{missing}); err != nil {
+		t.Fatal("a collected Pod erased its observed name binding", err)
+	}
+
 	changed := binding
 	changed.UID = "33333333-3333-4333-8333-333333333333"
 	if err = s.RecordWorkflowTiming(ctx, changed); !errors.Is(err, ErrInvalidState) {

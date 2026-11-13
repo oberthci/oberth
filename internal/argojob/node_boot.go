@@ -31,12 +31,13 @@ func (controller *Controller) nodeRebootReasons(ctx context.Context, workflow *w
 		return reasons
 	}
 	nodes := map[string]*corev1.Node{}
+	stepPods := ownedStepPods(workflow, pods)
 	runID, _, _ := WorkflowMeta(workflow)
 	for _, node := range workflow.Status.Nodes {
 		if node.Type != wfv1.NodeTypePod {
 			continue
 		}
-		pod := pods[PodName(workflow, node)]
+		pod := stepPods[node.ID]
 		if !stepPodIdentityBound(workflow, node, pod) || pod.Spec.NodeName == "" {
 			continue
 		}

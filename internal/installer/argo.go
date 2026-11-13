@@ -30,14 +30,6 @@ const (
 	// argoControllerLabelSelector matches the workflow-controller Pod the
 	// chart deploys.
 	argoControllerLabelSelector = "app.kubernetes.io/name=argo-workflows-workflow-controller"
-
-	// podNamesEnv pins the controller's pod naming scheme. Oberth stamps
-	// workflows.argoproj.io/pod-name-format: v2 on every submission so it can
-	// compute a step Pod's name to stream its log; if the controller disagrees,
-	// nothing errors — the logs simply never appear. Pinning both ends removes
-	// the disagreement rather than relying on a shared default.
-	podNamesEnv    = "POD_NAMES"
-	podNamesFormat = "v2"
 )
 
 // ArgoResult describes the outcome of the Argo Workflows install phase.
@@ -213,8 +205,6 @@ func ArgoHelmArgs(cfg Config) []string {
 		"--set", "crds.install=true",
 		"--set", "crds.keep=true",
 		"--set", "crds.full=false",
-		"--set", "controller.extraEnv[0].name=" + podNamesEnv,
-		"--set-string", "controller.extraEnv[0].value=" + podNamesFormat,
 		"--version", chartVersion,
 		// Idempotent re-runs must not reset values set on a previous install;
 		// the --set flags above still override reused values.

@@ -43,7 +43,7 @@ func admitWorkflowMetadata(location string, metadata *wfv1.WorkflowMetadata) []e
 					location, field, key, ReservedMetadataPrefix, ReservedMetadataPrefix))
 				continue
 			}
-			if strings.HasPrefix(key, ArgoMetadataPrefix) {
+			if strings.HasPrefix(key, ArgoMetadataPrefix) && (field != "annotations" || key != ArgoMetadataPrefix+"pod-name-format") {
 				problems = append(problems, fmt.Errorf(
 					"argoworkflow: %s.%s[%q] is refused: keys under %s are assigned by the Argo controller and decide which controller runs the Workflow; remove the key or rename it outside %s",
 					location, field, key, ArgoMetadataPrefix, ArgoMetadataPrefix))

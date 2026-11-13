@@ -53,6 +53,6 @@ authored requests and placement. See [native scheduling](native-scheduling.md).
 ## Infrastructure failures
 
 Oberth does not automatically retry infrastructure failures. Authors configure
-native Argo `retryStrategy`; manual `run_retry` and `run_rerun` remain. A source
+native Argo `retryStrategy`; manual `run_rerun` remains. A source
 preparation failure happens before Workflow creation and needs manual retry.
 See [infrastructure failures and retries](infrastructure-retries.md).

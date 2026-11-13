@@ -112,9 +112,6 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	if service.history != nil {
 		scoped.history = scopedHistory{inner: service.history, scope: scope}
 	}
-	if service.runRetries != nil {
-		scoped.runRetries = scopedRunRetries{inner: service.runRetries, history: scoped.history}
-	}
 	if service.runCancels != nil {
 		scoped.runCancels = scopedRunCancels{inner: service.runCancels, history: scoped.history}
 	}
@@ -146,21 +143,6 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	// them to a scoped actor, and this copy could not reach them anyway.
 	scoped.secretStoreVerifier = nil
 	return &scoped, nil
-}
-
-type scopedRunRetries struct {
-	inner   RunRetryStore
-	history RunHistory
-}
-
-func (retry scopedRunRetries) RetryRun(ctx context.Context, request model.RunRetryRequest) (model.EnqueueRunResult, error) {
-	if retry.history == nil {
-		return model.EnqueueRunResult{}, refuse(ErrUnavailable, "run retry history")
-	}
-	if _, err := retry.history.ResolveRunID(ctx, request.RunID); err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	return retry.inner.RetryRun(ctx, request)
 }
 
 type scopedRunCancels struct {

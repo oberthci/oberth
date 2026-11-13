@@ -1240,7 +1240,7 @@ Guide: https://github.com/oberthci/oberth/blob/main/docs/backup-restore.md
 
 ```text
 Usage: oberth run <run-id> [flags]
-       oberth run wait|resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
+       oberth run wait|resources|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
   -ca-file string
         PEM CA certificate for TLS verification (default: OBERTH_CA_CERT, ~/.config/oberth/ca.crt)
   -client-cert string
@@ -1365,12 +1365,6 @@ Usage: oberth run purge <run-id> --what logs|artifacts|both --reason <text> [--j
 ```text
 Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-```
-
-## oberth run retry
-
-```text
-Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
 ## oberth runs

@@ -85,18 +85,15 @@ func TestArgoHelmArgsLeavesWorkflowIdentitiesToTheOberthChart(t *testing.T) {
 	}
 }
 
-// If the controller computes step Pod names differently from the server, log
-// capture fails silently — no error, just missing logs. Both ends are pinned.
-func TestArgoHelmArgsPinsThePodNameFormat(t *testing.T) {
+func TestArgoHelmArgsDoesNotPinPodNames(t *testing.T) {
 	t.Parallel()
 	cfg := Config{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	args := strings.Join(ArgoHelmArgs(cfg), " ")
-	if !strings.Contains(args, "controller.extraEnv[0].name=POD_NAMES") ||
-		!strings.Contains(args, "controller.extraEnv[0].value=v2") {
-		t.Fatalf("argo helm args must pin POD_NAMES=v2:\n%s", args)
+	if strings.Contains(args, "POD_NAMES") {
+		t.Fatalf("installer pins Argo Pod naming: %s", args)
 	}
 }
 

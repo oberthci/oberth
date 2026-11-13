@@ -64,9 +64,9 @@ func TestAdmitRefusesReservedWorkflowMetadata(t *testing.T) {
 			name: "workflowMetadata argo annotation",
 			spec: `  workflowMetadata:
     annotations:
-      workflows.argoproj.io/pod-name-format: v1
+      workflows.argoproj.io/controller-instanceid: elsewhere
 `,
-			expect: `spec.workflowMetadata.annotations["workflows.argoproj.io/pod-name-format"] is refused`,
+			expect: `spec.workflowMetadata.annotations["workflows.argoproj.io/controller-instanceid"] is refused`,
 		},
 		{
 			name: "workflowMetadata templated annotation key",
@@ -161,4 +161,11 @@ func indent(text, prefix string) string {
 		}
 	}
 	return strings.Join(lines, "")
+}
+
+func TestAdmitAllowsNativePodNameFormat(t *testing.T) {
+	for _, format := range []string{"v1", "v2"} {
+		document := reservedBase + "  workflowMetadata:\n    annotations:\n      workflows.argoproj.io/pod-name-format: " + format + "\n  templates:" + reservedLeaf
+		mustAdmit(t, document, Policy{})
+	}
 }

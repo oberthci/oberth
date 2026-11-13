@@ -3,11 +3,10 @@ package argojob
 import (
 	"context"
 	"errors"
-	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,7 +25,7 @@ const seedObservationTimeout = 100 * time.Millisecond
 // ObserveScheduling reads shared Workflow and step-Pod caches. A missing
 // Workflow may use the bounded, exact source-seed diagnostic read.
 // AI-CONTRACT: arbitrary Kubernetes/Argo status text is untrusted: output only
-// fixed summaries, never raw messages (which may contain secrets or commands).
+// fixed summaries, except bounded printable Argo synchronization messages.
 func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID, sha string) (*model.ExecutionObservation, error) {
 	if controller.hub == nil || !controller.hub.Healthy() {
 		return controller.observationUnavailable(), nil
@@ -148,14 +147,26 @@ func safePhase(phase string) string {
 }
 
 func safeWorkflowMessage(message string) string {
-	// Only recognize controller vocabulary. Even a recognized message contributes
-	// no original bytes to the response: resource names and error suffixes can be
-	// user-controlled and are intentionally withheld.
+	// Synchronization waits retain Argo's own message. Other messages use
+	// curated vocabulary.
 	switch {
 	case strings.HasPrefix(message, "Waiting for a PVC to be created."):
 		return "Waiting for a persistent volume claim to be created."
 	case waitingForLock(message):
-		return lockWaitMessage(message)
+		message = strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return ' '
+			}
+			if !unicode.IsPrint(r) {
+				return -1
+			}
+			return r
+		}, message)
+		message = strings.Join(strings.Fields(message), " ")
+		if runes := []rune(message); len(runes) > 200 {
+			message = string(runes[:199]) + "…"
+		}
+		return message
 	case strings.HasPrefix(message, "Pending "):
 		return "Workflow node is pending."
 	case model.IsExecutionDeadlineReason(message):
@@ -278,22 +289,4 @@ func podRequest(pod corev1.Pod, name corev1.ResourceName) string {
 		return "no explicit"
 	}
 	return total.String()
-}
-
-// lockWaitPattern is the controller's synchronization wait with its lock key
-// (<namespace>/<Kind>/<name>[/<key>], Kind one of ConfigMap, Mutex, Database)
-// and "free/limit" status. Only a key in this grammar reaches the message,
-// without its namespace; anything else gets the fixed form.
-var lockWaitPattern = regexp.MustCompile(`^Waiting for [A-Za-z0-9][A-Za-z0-9_.-]{0,62}/((?:ConfigMap|Mutex|Database)/[A-Za-z0-9][A-Za-z0-9_.-]{0,252}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,252})?) lock\. Lock status: ([0-9]{1,6})/([0-9]{1,6})`)
-
-// lockWaitMessage renders Argo's "Waiting for <ns>/<Kind>/<name>[/<key>]
-// lock. Lock status: a/b" as "Waiting for lock <Kind>/<name>[/<key>] (a/b
-// free).", naming the operator-defined semaphore key or the repository's
-// mutex so the reason line says what the step is queued behind.
-func lockWaitMessage(message string) string {
-	match := lockWaitPattern.FindStringSubmatch(message)
-	if match == nil {
-		return model.LockWaitMessagePrefix + "(synchronization)."
-	}
-	return fmt.Sprintf("%s%s (%s/%s free).", model.LockWaitMessagePrefix, match[1], match[2], match[3])
 }

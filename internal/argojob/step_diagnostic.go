@@ -30,6 +30,14 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	pods, snapshotReason := controller.timingPodSnapshot(readCtx, workflow)
+	observedPodNodes := make(map[string]bool)
+	for _, pod := range pods {
+		if pod != nil {
+			observedPodNodes[pod.Annotations["workflows.argoproj.io/node-id"]] = true
+		}
+	}
+	bindStepPodNames(workflow, completion.Steps, pods)
+	bindStepPodNames(workflow, completion.ReplayAttempts, pods)
 	reboots := controller.nodeRebootReasons(readCtx, workflow, pods, restartedAt)
 	for i := range completion.Steps {
 		step := &completion.Steps[i]
@@ -50,10 +58,12 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 			}
 			if reason == "" {
 				switch {
-				case node.Type != wfv1.NodeTypePod || step.PodName == "":
+				case node.Type != wfv1.NodeTypePod || (node.StartedAt.IsZero() && step.PodName == ""):
 					reason = "not-executed"
 				case snapshotReason != "":
 					reason = snapshotReason
+				case step.PodName == "" && observedPodNodes[step.NodeID]:
+					reason = "binding-mismatch"
 				default:
 					pod = pods[step.PodName]
 					if pod == nil {
@@ -290,7 +300,7 @@ func stepPodBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod
 }
 func stepPodIdentityBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) bool {
 	_, _, ok := WorkflowMeta(workflow)
-	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Name != PodName(workflow, node) || node.Type != wfv1.NodeTypePod || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
+	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Name == "" || node.Type != wfv1.NodeTypePod || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
 		return false
 	}
 	owners := 0

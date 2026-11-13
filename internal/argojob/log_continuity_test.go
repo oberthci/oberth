@@ -18,7 +18,10 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -51,7 +54,7 @@ func TestContinuityAdoptsDurableCursorAndRepeatedRecords(t *testing.T) {
 	sink := durableLogFixture(t)
 	wf := singleStepWorkflow()
 	wf.UID = "workflow-uid"
-	step := stepAttempts(wf)[0]
+	step := fixtureStepAttempts(wf)[0]
 	key := string(wf.UID) + "/" + step.NodeID + "/" + step.PodName
 	first := testLogWorker(&runBudgetWriter{destination: sink, remaining: 1 << 20})
 	first.step = step
@@ -71,7 +74,7 @@ func TestContinuityAdoptsDurableCursorAndRepeatedRecords(t *testing.T) {
 	defer j.Close()
 	events := []runprogress.Event{{Stage: step.Stage, Step: step.Step, Status: runprogress.StepPassed}}
 	reads := 0
-	logs := newStepLogFollowers(context.Background(), func(_ context.Context, _, _ string, o corev1.PodLogOptions) (io.ReadCloser, error) {
+	logs := newFixtureLogFollowers(context.Background(), func(_ context.Context, _, _ string, o corev1.PodLogOptions) (io.ReadCloser, error) {
 		reads++
 		if o.SinceTime == nil {
 			t.Error("adopted cursor missing")
@@ -85,7 +88,7 @@ func TestContinuityAdoptsDurableCursorAndRepeatedRecords(t *testing.T) {
 		t.Fatalf("replayed/missing output (%d): %s", reads, raw)
 	}
 	// A complete checkpoint never fetches or duplicates a terminal Pod on a later adoption.
-	again := newStepLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
+	again := newFixtureLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 		t.Error("complete cursor fetched again")
 		return nil, errors.New("Pod GCd")
 	}, &runBudgetWriter{destination: sink, remaining: 1 << 20}, events)
@@ -100,8 +103,8 @@ func TestContinuityKeepsStreamedLinesWhenPodGone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var output bytes.Buffer
 		wf := singleStepWorkflow()
-		step := stepAttempts(wf)[0]
-		logs := newStepLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
+		step := fixtureStepAttempts(wf)[0]
+		logs := newFixtureLogFollowers(context.Background(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 			return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, step.PodName)
 		}, &runBudgetWriter{destination: &output, remaining: 1 << 20}, nil)
 		worker := &stepLogFollower{owner: logs, step: step, done: make(chan struct{})}
@@ -145,7 +148,7 @@ func TestContinuitySlowFinalEndpointAndSharedDrainBudget(t *testing.T) {
 			n.DisplayName = n.Name
 			wf.Status.Nodes[n.ID] = n
 		}
-		logs := newStepLogFollowers(context.Background(), func(ctx context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
+		logs := newFixtureLogFollowers(context.Background(), func(ctx context.Context, _, _ string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}, &runBudgetWriter{destination: io.Discard, remaining: 1 << 20}, nil)
@@ -171,7 +174,7 @@ func TestContinuityFailedInitLogsExitAndMessage(t *testing.T) {
 	var output bytes.Buffer
 	var mu sync.Mutex
 	calls := 0
-	controller, err := NewController(&staticWorkflowClient{workflow: wf}, nil, testConfig())
+	controller, err := NewController(&staticWorkflowClient{workflow: wf}, fixtureKube(wf), testConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +314,7 @@ func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
 	sink := durableLogFixture(t)
 	wf := singleStepWorkflow()
 	wf.UID = "retry-workflow"
-	wf.Annotations[PodNameVersionAnnotation] = "v1"
+	wf.Annotations["workflows.argoproj.io/pod-name-format"] = "v1"
 	prototype := wf.Status.Nodes["compile-pod"]
 	delete(wf.Status.Nodes, "compile-pod")
 	wf.Status.Nodes["retry"] = wfv1.NodeStatus{ID: "retry", Name: "wf.build.compile", Type: wfv1.NodeTypeRetry, BoundaryID: "build-burn", Children: []string{"attempt-0", "attempt-1"}}
@@ -323,7 +326,7 @@ func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
 		node.Phase = wfv1.NodeFailed
 		wf.Status.Nodes[id] = node
 	}
-	firstStep := stepAttempts(wf)[0]
+	firstStep := fixtureStepAttempts(wf)[0]
 	first := testLogWorker(&runBudgetWriter{destination: sink, remaining: 1 << 20})
 	first.step = firstStep
 	first.workflow = wf
@@ -336,7 +339,7 @@ func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
 	if err := first.flush(true); err != nil {
 		t.Fatal(err)
 	}
-	logs := newStepLogFollowers(t.Context(), func(_ context.Context, _, pod string, o corev1.PodLogOptions) (io.ReadCloser, error) {
+	logs := newFixtureLogFollowers(t.Context(), func(_ context.Context, _, pod string, o corev1.PodLogOptions) (io.ReadCloser, error) {
 		if pod != "attempt-1" {
 			t.Errorf("replayed completed attempt: %s", pod)
 		}
@@ -365,4 +368,78 @@ func TestAdoptedRetryRetainsScriptFailureBeforeHold(t *testing.T) {
 		t.Fatal("per-step reader lost the script failure")
 	}
 
+}
+
+func TestCompletedSavedLogSurvivesUnavailableDiscovery(t *testing.T) {
+	for _, mode := range []string{"present", "collected", "list-error", "incomplete", "foreign-workflow", "foreign-node", "foreign-container"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				workflow, _, pod, _ := diagnosticFixture()
+				pod.Name = "opaque-retained-pod"
+				controller := &Controller{kube: fake.NewClientset(pod)}
+				step := controller.observedStepAttempts(t.Context(), workflow)[0]
+				sink := durableLogFixture(t)
+				first := testLogWorker(&runBudgetWriter{destination: sink, remaining: 1 << 20})
+				first.step, first.workflow = step, workflow
+				if mode == "foreign-node" {
+					first.step.NodeID = "different-node-id"
+				}
+				first.key = string(workflow.UID) + "/" + first.step.NodeID + "/" + step.PodName
+				first.container = "main"
+				if mode == "foreign-container" {
+					first.container = "wait"
+				}
+				if err := first.consume(strings.NewReader(stamped("already retained output"))); err != nil {
+					t.Fatal(err)
+				}
+				first.complete = mode != "incomplete"
+				if err := first.flush(true); err != nil {
+					t.Fatal(err)
+				}
+				if err := sink.journal.Close(); err != nil {
+					t.Fatal(err)
+				}
+				journal, err := runlog.OpenPodLogJournal(sink.file, 1<<20)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sink.journal = journal
+				defer journal.Close()
+				before, err := os.ReadFile(sink.file.Name())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode != "present" {
+					controller.kube = fake.NewClientset()
+				}
+				if mode == "list-error" {
+					controller.kube.(*fake.Clientset).PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
+						return true, nil, context.DeadlineExceeded
+					})
+				}
+				if mode == "foreign-workflow" {
+					workflow.UID = "different-workflow-uid"
+				}
+				events := []runprogress.Event{{Stage: step.Stage, Step: step.Step, Status: step.Status}}
+				live := newStepLogFollowers(t.Context(), func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
+					t.Error("must not fetch a completed saved log or guess an absent Pod")
+					return nil, errors.New("unexpected log request")
+				}, &runBudgetWriter{destination: sink, remaining: 1 << 20}, events)
+				live.steps = controller.observedStepAttempts
+				live.drain(workflow)
+				live.close()
+				after, err := os.ReadFile(sink.file.Name())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode == "incomplete" || strings.HasPrefix(mode, "foreign-") {
+					if !bytes.Contains(after[len(before):], []byte(`"state":"unavailable"`)) {
+						t.Fatalf("missing delivery diagnostic: %s", after[len(before):])
+					}
+				} else if !bytes.Equal(before, after) {
+					t.Fatalf("completed saved output was degraded after restart: %s", after[len(before):])
+				}
+			})
+		})
+	}
 }

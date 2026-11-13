@@ -69,7 +69,7 @@ transport/server response text stays out of public errors and logs. A real
 terminal CI result takes precedence, and ownership-checked Workflow deletion
 must succeed before an observation failure terminalizes the run. Unsuccessful
 deletion leaves the run owned for recovery. Existing replay authorization and
-evidence rules still apply to `run_retry`.
+evidence rules still apply to `run_rerun`.
 
 Bounded `executor_identity` logs record the Workflow, Pod UID, stage, reason
 class and attempt, never token bytes or raw response bodies. A delivery error

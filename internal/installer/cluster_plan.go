@@ -71,7 +71,6 @@ type NodeIdentity struct {
 	Name              string   `json:"name"`
 	Architecture      string   `json:"architecture"`
 	KubernetesVersion string   `json:"kubernetes_version"`
-	AvailableBytes    *uint64  `json:"available_bytes,omitempty"`
 }
 
 type ClusterIdentity struct {
@@ -230,33 +229,13 @@ func inspectCluster(ctx context.Context, cfg *Config, deps Deps, identity *Clust
 			}
 		}
 		r.check("architecture/"+node.Name, item.Architecture == "amd64" || item.Architecture == "arm64", "Use an amd64 or arm64 node supported by the published Oberth images.")
-		ready, diskPressure := false, false
+		ready := false
 		for _, condition := range node.Status.Conditions {
 			if condition.Type == corev1.NodeReady {
 				ready = condition.Status == corev1.ConditionTrue
 			}
-			if condition.Type == corev1.NodeDiskPressure {
-				diskPressure = condition.Status == corev1.ConditionTrue
-			}
 		}
 		r.check("node_ready/"+node.Name, ready, "Restore node readiness before installing.")
-		args := []string{"--context", deps.ContextName, "get", "--raw", "/api/v1/nodes/" + url.PathEscape(node.Name) + "/proxy/stats/summary"}
-		if cfg.KubeconfigPath != "" {
-			args = append([]string{"--kubeconfig", cfg.KubeconfigPath}, args...)
-		}
-		raw, readErr := deps.RunCommand(ctx, nil, "kubectl", args...)
-		var stats struct {
-			Node struct {
-				FS struct {
-					AvailableBytes *uint64 `json:"availableBytes"`
-				} `json:"fs"`
-			} `json:"node"`
-		}
-		if readErr == nil && json.Unmarshal(raw, &stats) == nil {
-			item.AvailableBytes = stats.Node.FS.AvailableBytes
-		}
-		r.check("disk/"+node.Name, !diskPressure && item.AvailableBytes != nil && *item.AvailableBytes >= 1<<30, "Free at least 1 GiB on the node filesystem and allow the administrator to read node stats; unknown free space fails this check.")
-		inspectHostPrep(ctx, *cfg, deps, node, r)
 		identity.Nodes = append(identity.Nodes, item)
 	}
 	classes, err := deps.KubeClient.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})

@@ -55,6 +55,7 @@ type stepLogFollowers struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	reader         PodLogFollower
+	steps          func(context.Context, *wfv1.Workflow) []StepResult
 	identity       podLogIdentityReader
 	pod            func(context.Context, string, string) (*corev1.Pod, error)
 	restored       map[string]runlog.PodLogCursor
@@ -107,17 +108,21 @@ func newStepLogFollowers(ctx context.Context, reader PodLogFollower, output io.W
 	if sink, ok := output.(runlog.PodLogSink); ok {
 		restored = sink.PodLogCursors()
 	}
-	return &stepLogFollowers{restored: restored, ctx: ctx, cancel: cancel, reader: reader, output: output, workers: map[string]*stepLogFollower{}, resumed: resumed, resumedAt: time.Now().UTC()}
+	return &stepLogFollowers{restored: restored, ctx: ctx, cancel: cancel, reader: reader, steps: func(_ context.Context, workflow *wfv1.Workflow) []StepResult { return stepAttempts(workflow) }, output: output, workers: map[string]*stepLogFollower{}, resumed: resumed, resumedAt: time.Now().UTC()}
 }
 
 func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
+	logs.observeSteps(workflow, logs.steps(logs.ctx, workflow))
+}
+
+func (logs *stepLogFollowers) observeSteps(workflow *wfv1.Workflow, observed []StepResult) {
 	// A journaled earlier attempt proves this logical step uses durable cursors.
 	// A later attempt without a cursor has never been retained and must start
 	// at its beginning, even if it started before controller adoption.
 	if logs.journaledSteps == nil {
 		logs.journaledSteps = map[string]bool{}
 	}
-	for _, step := range stepAttempts(workflow) {
+	for _, step := range observed {
 		saved, ok := logs.restored[string(workflow.UID)+"/"+step.NodeID+"/"+step.PodName]
 		if ok && saved.WorkflowUID == string(workflow.UID) && saved.Node == step.NodeID && saved.Pod == step.PodName {
 			logs.journaledSteps[step.Stage+"/"+step.Step] = true
@@ -133,7 +138,7 @@ func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
 			busySteps[worker.step.Stage+"/"+worker.step.Step] = true
 		}
 	}
-	for _, step := range stepAttempts(workflow) {
+	for _, step := range observed {
 		if step.PodName == "" || (step.Status != runprogress.StepQueued && step.Status != runprogress.StepRunning && !terminal(step.Status)) {
 			continue
 		}
@@ -194,10 +199,47 @@ func (logs *stepLogFollowers) drain(workflow *wfv1.Workflow) {
 			<-worker.done
 		}
 		before := len(logs.workers)
-		logs.observe(workflow)
+		observed := logs.steps(logs.ctx, workflow)
+		logs.observeSteps(workflow, observed)
 		if len(logs.workers) == before {
+			logs.reportUnbound(workflow, observed)
 			return
 		}
+	}
+}
+
+// An unbound terminal Pod must leave an explicit delivery observation, even
+// when discovery never managed to start a follower. It is never "complete".
+func (logs *stepLogFollowers) reportUnbound(workflow *wfv1.Workflow, steps []StepResult) {
+	for _, step := range steps {
+		if step.PodName != "" || workflow.Status.Nodes[step.NodeID].Type != wfv1.NodeTypePod {
+			continue
+		}
+		retained := false
+		for _, worker := range logs.workers {
+			if worker.step.NodeID == step.NodeID {
+				retained = true
+				break
+			}
+		}
+		// A completed durable copy survives Pod collection and discovery
+		// outages. Its validated identity is enough to preserve those bytes;
+		// never invent a Pod name or fetch the container again.
+		if !retained && workflow.UID != "" && step.NodeID != "" {
+			for key, saved := range logs.restored {
+				if saved.Complete && saved.WorkflowUID == string(workflow.UID) && saved.Node == step.NodeID && saved.Container == mainContainerName && saved.Pod != "" && saved.Key == key && key == saved.WorkflowUID+"/"+saved.Node+"/"+saved.Pod {
+					retained = true
+					break
+				}
+			}
+		}
+		if retained {
+			continue
+		}
+		worker := &stepLogFollower{owner: logs, step: step}
+		message := "Pod identity could not be observed"
+		worker.status("unavailable", message)
+		writeLine(logs.output, step, "oberth: step log unavailable: "+message)
 	}
 }
 
@@ -426,7 +468,7 @@ func (worker *stepLogFollower) open(ctx context.Context, options corev1.PodLogOp
 		if err != nil {
 			return nil, err
 		}
-		if !stepPodIdentityBound(worker.workflow, node, pod) {
+		if !stepPodIdentityBound(worker.workflow, node, pod) || pod.Name != worker.step.PodName {
 			return nil, errLogIdentity
 		}
 		var status *corev1.ContainerStatus

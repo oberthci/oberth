@@ -74,7 +74,6 @@ oberth run <run-id>
 oberth run wait <run-id> [--until finished|held|any] [--timeout SECONDS] [--json]
 oberth events [--since ID] [--wait] [--timeout SECONDS] [--kind K]... [--repo R]... [--run ID]... [--own] [--json]
 oberth sync status [--lock KEY] [--since 24h] [--json]
-oberth run retry <run-id> [--json]
 oberth run rerun <run-id> [--reason TEXT] [--force] [--json]
 oberth run cancel <run-id> [--reason TEXT] [--force] [--json]
 oberth promotion create --repo <repo> --branch main --sources-file sources.json [--skip-conflicting] [--json]
@@ -87,14 +86,7 @@ oberth issues [--state open|closed|all] [--work-status S] [--limit N] [--before 
 oberth status
 ```
 
-The list and detail commands are read-only. `oberth run retry` calls the
-`run_retry` MCP tool using the same uplink token; it queues a fresh attempt
-for an interrupted or infrastructure-failed run and records the caller as actor.
-Workflow-level failures without a failed step are eligible. The source must still
-be the newest run for its ref, and the ref must have no active run. An admin can
-also retry tag/release infrastructure failures before credentialed/publication
-work started; the tag object, tested commit and release admission are retained.
-Test failures, older runs and promotion/plan/apply runs cannot be retried this way.
+The list and detail commands are read-only.
 
 `oberth issues` prints one page (at most 50, `--limit N`) and its full matching
 count, such as `1–50 of 93`, followed by `more: oberth issues --before <id> (or
@@ -105,9 +97,8 @@ dashboard shows the same page range and state/kind counts.
 
 `oberth run rerun` calls the `run_rerun` MCP tool with the same uplink
 token. It reruns a failed or interrupted run at the same SHA and ref without
-a push, for the cases `run retry` refuses: a failed test step, a run that is
-no longer the newest of its branch (as long as the branch head is still that
-SHA), and tag/release runs. The new run is linked to the original (`oberth
+a push, including infrastructure failures, failed tests and tag/release runs.
+Branch sources must be the newest run for the ref and still match its head. The new run is linked to the original (`oberth
 run` prints `rerun of`), and `status`, `wait` and `promote` on the SHA follow
 it. A non-admin uplink may rerun branch-push runs; a tag/release rerun needs
 an admin. Force-free tag replay requires the newest run, an unchanged exact tag
@@ -119,7 +110,7 @@ outages or synthesized interruption), legacy plan, missing evidence, older
 source or moved tag requires `--force`. A missing journal is unknown unless
 an observed terminal Workflow explicitly had zero nodes. Pre-intent attempts
 with no step evidence can be replayed without a plan. These rules also apply
-to tag infrastructure retries; `run retry` has no force override.
+to tag infrastructure failures.
 Pending Workflow deletion blocks retry and rerun even with force, until cleanup
 is confirmed. A published/green tag remains refused. When every step passed and
 only the upstream push failed, the push is retried instead of executing the

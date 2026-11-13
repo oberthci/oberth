@@ -1,8 +1,6 @@
 package argojob
 
 import (
-	"fmt"
-	"hash/fnv"
 	"io"
 	"testing"
 	"time"
@@ -14,68 +12,13 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
-// upstreamGeneratePodName is a transcription of
-// argo-workflows/workflow/util.GeneratePodName. Keeping an independent copy
-// here means PodName is checked against the upstream algorithm rather than
-// against itself; importing workflow/util directly would pull the whole
-// controller into the server binary.
-func upstreamGeneratePodName(workflowName, nodeName, templateName, nodeID string, v1 bool) string {
-	if v1 {
-		return nodeID
-	}
-	if workflowName == nodeName {
-		return workflowName
-	}
-	prefix := workflowName
-	if templateName != "" {
-		prefix = fmt.Sprintf("%s-%s", prefix, templateName)
-	}
-	if len(prefix) > 253-10-1 {
-		prefix = prefix[0 : 253-10-1]
-	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(nodeName))
-	return fmt.Sprintf("%s-%v", prefix, h.Sum32())
-}
-
-// TestPodNameMatchesArgo pins the reimplementation. Getting this wrong does not
-// fail loudly -- it silently produces a run with no step logs, which is how the
-// first live run against a real controller surfaced it.
-func TestPodNameMatchesArgo(t *testing.T) {
-	cases := []struct {
-		workflow, node, template, id string
-	}{
-		{"oberth-run-abc", "oberth-run-abc.setup.prepare", "say", "oberth-run-abc-3592249494"},
-		{"oberth-run-abc", "oberth-run-abc", "", "oberth-run-abc"},
-		{"oberth-run-abc", "oberth-run-abc.verify", "", "oberth-run-abc-99"},
-		{"a-very-long-workflow-name-" + string(make([]byte, 300)), "n", "t", "id"},
-	}
-	for _, testCase := range cases {
-		workflow := &wfv1.Workflow{}
-		workflow.Name = testCase.workflow
-		node := wfv1.NodeStatus{Name: testCase.node, TemplateName: testCase.template, ID: testCase.id}
-
-		want := upstreamGeneratePodName(testCase.workflow, testCase.node, testCase.template, testCase.id, false)
-		if got := PodName(workflow, node); got != want {
-			t.Errorf("PodName(%q, %q, %q) = %q, want %q", testCase.workflow, testCase.node, testCase.template, got, want)
-		}
-
-		workflow.Annotations = map[string]string{PodNameVersionAnnotation: "v1"}
-		wantV1 := upstreamGeneratePodName(testCase.workflow, testCase.node, testCase.template, testCase.id, true)
-		if got := PodName(workflow, node); got != wantV1 {
-			t.Errorf("v1 PodName = %q, want %q", got, wantV1)
-		}
-	}
-}
-
-func TestBuildPinsThePodNameVersion(t *testing.T) {
+func TestBuildDoesNotPinPodNames(t *testing.T) {
 	built, err := Build(testConfig(), testRequest("ci", greedyDocument))
 	if err != nil {
-		t.Fatalf("build: %v", err)
+		t.Fatal(err)
 	}
-	if built.Annotations[PodNameVersionAnnotation] != podNameVersionV2 {
-		t.Fatalf("pod name version annotation = %q, want %q",
-			built.Annotations[PodNameVersionAnnotation], podNameVersionV2)
+	if _, pinned := built.Annotations["workflows.argoproj.io/pod-name-format"]; pinned {
+		t.Fatal("submission pins Argo Pod naming", built.Annotations)
 	}
 }
 
@@ -145,7 +88,7 @@ func nestedWorkflow() *wfv1.Workflow {
 // TestStepResultsMapsNestedDAGsOntoBurnsAndSteps proves the two-level model
 // falls out of an idiomatic Argo pipeline without any Oberth-specific naming.
 func TestStepResultsMapsNestedDAGsOntoStagesAndSteps(t *testing.T) {
-	results := StepResults(nestedWorkflow())
+	results := fixtureStepResults(nestedWorkflow())
 	found := map[string]string{}
 	for _, result := range results {
 		found[result.Step] = result.Stage
@@ -255,7 +198,7 @@ func TestStepResultsStripsRetryAttemptSuffix(t *testing.T) {
 		},
 	}
 
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	if len(results) != 2 {
 		t.Fatalf("got %d results, want 2: %+v", len(results), results)
 	}
@@ -313,7 +256,7 @@ func TestStepResultsDoesNotStripNonRetryNodes(t *testing.T) {
 		},
 	}
 
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	if len(results) != 1 {
 		t.Fatalf("got %d results, want 1", len(results))
 	}
@@ -370,7 +313,7 @@ func TestRetrySuccessDoesNotSetFailedStep(t *testing.T) {
 		},
 	}
 
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	if len(results) != 1 {
 		t.Fatalf("got %d results, want 1 (deduplicated to final attempt): %+v", len(results), results)
 	}
@@ -986,7 +929,7 @@ func TestSkippedInlineStepBecomesStepResult(t *testing.T) {
 		},
 	}
 
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	found := false
 	for _, result := range results {
 		if result.Step == "optional-scan" {
@@ -1012,7 +955,7 @@ func TestSkippedDAGWrapperNotMistakenForStep(t *testing.T) {
 	workflow := nestedWorkflow()
 	// The "unreached" node is a skipped DAG-template invocation with
 	// TemplateName="unreached" and Children. It should NOT become a step.
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	for _, result := range results {
 		if result.Step == "unreached" {
 			t.Fatalf("a skipped DAG wrapper became a step: %+v", result)
@@ -1053,7 +996,7 @@ func TestSkippedInlineDAGWithChildrenNotMistakenForStep(t *testing.T) {
 		},
 	}
 
-	results := StepResults(workflow)
+	results := fixtureStepResults(workflow)
 	for _, result := range results {
 		if result.Step == "inline-dag" {
 			t.Fatalf("a skipped inline DAG wrapper with children became a step: %+v", result)

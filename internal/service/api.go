@@ -66,7 +66,6 @@ type APIConfig struct {
 	SchedulingObserver     SchedulingObserver
 	Runs                   RunResolver
 	History                RunHistory
-	RunRetries             RunRetryStore
 	Repositories           RepositoryReader
 	Issues                 IssueRepository
 	Promotions             PromotionRepository
@@ -144,7 +143,6 @@ type API struct {
 	schedulingObserver     SchedulingObserver
 	runs                   RunResolver
 	history                RunHistory
-	runRetries             RunRetryStore
 	repositories           RepositoryReader
 	issues                 IssueRepository
 	promotions             PromotionRepository
@@ -259,7 +257,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver,
 		branchCounts:       &branchCountCache{},
-		runs:               config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
+		runs:               config.Runs, history: config.History, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		tags: config.Tags, enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
@@ -487,14 +485,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		// The summary is the default; the full record (timing, diagnostics,
 		// the repository record) only on an explicit summary:false.
 		return service.readRun(ctx, actor, arguments.ID, arguments.Summary == nil || *arguments.Summary)
-	case "run_retry":
-		var arguments struct {
-			ID string `json:"id"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		return service.retryRun(ctx, actor, arguments.ID)
 	case "publication_abandon":
 		return service.abandonPublication(ctx, actor, raw)
 	case "run_cancel":
@@ -3058,7 +3048,7 @@ func MutatingTool(name string) bool {
 		return true
 	case "issue_unlock", "issue_close_many":
 		return true
-	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_rerun", "run_cancel", "run_purge", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke",
 

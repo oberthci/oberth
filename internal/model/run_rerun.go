@@ -68,14 +68,6 @@ type RunReplayEvidence struct {
 	PublicationStarted bool
 }
 
-// RunRetryRequest queues an eligible newest infrastructure/interrupted attempt.
-type RunRetryRequest struct {
-	RunID, Actor string
-	ReplayAudit  *RunReplayAudit
-	// Authorize is required for tag/release retries and runs inside the transaction.
-	Authorize func(Run, RunReplayEvidence) error
-}
-
 // RunRerunRequest asks the store to queue a new run at the same SHA and ref
 // as a terminal, undelivered run (#1098). Authorization is the caller's; the
 // store re-applies Authorize to the run as it is inside the rerun transaction.
@@ -101,7 +93,7 @@ type RunRerunResult struct {
 	Warning  string
 }
 
-// IsInfrastructureRunFailure is the terminal failure class accepted by run_retry.
+// IsInfrastructureRunFailure identifies failures outside a step command.
 // Cancellation/interruption and publication replay have separate policies.
 func IsInfrastructureRunFailure(status RunStatus, phase, failedStep string) bool {
 	return status == RunFailed && (phase == "infrastructure" || phase == "job") && failedStep == ""

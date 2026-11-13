@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestRetryRunKeepsSourceAndAuditsActor(t *testing.T) {
+func TestUnifiedRerunKeepsSourceAndAuditsActor(t *testing.T) {
 	for _, result := range []model.RunResult{
 		{Status: model.RunInterrupted, Phase: "interrupted"},
 		{Status: model.RunFailed, Phase: "infrastructure", Error: "checkout unavailable"},
@@ -30,42 +30,40 @@ func TestRetryRunKeepsSourceAndAuditsActor(t *testing.T) {
 			if _, err := s.FinishRun(ctx, source.ID, result); err != nil {
 				t.Fatal(err)
 			}
-			retried, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: source.ID, Actor: "reviewer@host"})
+			replay, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: source.ID, Actor: "reviewer@host"})
 			if err != nil {
 				t.Fatal(err)
 			}
+			retried := replay.Enqueued
 			if retried.ID == source.ID || retried.RepoID != repo.ID || retried.Ref != source.Ref ||
 				retried.SHA != sha || retried.TestedSHA != sha || retried.Actor != "reviewer@host" ||
 				retried.Status != model.RunQueued || retried.Trigger != "branch" {
 				t.Fatalf("retry changed run identity or admission: %#v", retried.Run)
 			}
-			audit, err := s.LatestAuditActionByType(ctx, "run.retry", "run")
+			audit, err := s.LatestAuditActionByType(ctx, "run.rerun", "run")
 			if err != nil || audit.Actor != "reviewer@host" || audit.ResourceID != retried.ID ||
 				!strings.Contains(audit.Details, source.ID) {
 				t.Fatalf("retry audit = %#v, %v", audit, err)
 			}
-			if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: source.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
+			if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: source.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
 				t.Fatalf("retry displaced active branch run: %v", err)
 			}
 			if _, err := s.FinishRun(ctx, retried.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: source.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
+			if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: source.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
 				t.Fatalf("source retried again after newer run finished: %v", err)
 			}
 		})
 	}
 }
 
-func TestRetryRunRefusesTestFailuresAndUnauthorizedReleaseRuns(t *testing.T) {
+func TestUnifiedRerunRefusesUnauthorizedReleaseRuns(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		spec   model.RunSpec
 		result model.RunResult
 	}{
-		{name: "test failure", result: model.RunResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit"}},
-		{name: "fake infrastructure phase", result: model.RunResult{Status: model.RunFailed, Phase: "infrastructure", FailedStage: "test", FailedStep: "unit"}},
-		{name: "job phase with failed step", result: model.RunResult{Status: model.RunFailed, Phase: "job", FailedStage: "test", FailedStep: "unit"}},
 		{name: "release", spec: model.RunSpec{RefKind: model.RefTag, Ref: "v1", Release: true, Trigger: "release"}, result: model.RunResult{Status: model.RunInterrupted}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,7 +83,7 @@ func TestRetryRunRefusesTestFailuresAndUnauthorizedReleaseRuns(t *testing.T) {
 			if _, err := s.FinishRun(ctx, source.ID, tc.result); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: source.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
+			if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: source.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
 				t.Fatalf("ineligible run retried: %v", err)
 			}
 			counts, err := s.CountRuns(ctx)
@@ -96,7 +94,7 @@ func TestRetryRunRefusesTestFailuresAndUnauthorizedReleaseRuns(t *testing.T) {
 	}
 }
 
-func TestRetryRunRefusesOlderBranchRunAfterNewerRunFinishes(t *testing.T) {
+func TestUnifiedRerunRefusesOlderBranchRunAfterNewerRunFinishes(t *testing.T) {
 	for _, newerSHA := range []string{strings.Repeat("b", 40), strings.Repeat("a", 40)} {
 		t.Run(newerSHA[:1], func(t *testing.T) {
 			now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
@@ -119,7 +117,7 @@ func TestRetryRunRefusesOlderBranchRunAfterNewerRunFinishes(t *testing.T) {
 			if _, err := s.FinishRun(ctx, newer.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: old.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
+			if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: old.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
 				t.Fatalf("older run retry = %v", err)
 			}
 			latest, err := s.ResolveRunByRefKind(ctx, repo.ID, old.Ref, model.RefBranch)
@@ -134,7 +132,7 @@ func TestRetryRunRefusesOlderBranchRunAfterNewerRunFinishes(t *testing.T) {
 	}
 }
 
-func TestRetryRunRefusesSupersededSource(t *testing.T) {
+func TestUnifiedRerunRefusesSupersededSource(t *testing.T) {
 	now := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	ctx := context.Background()
@@ -159,7 +157,7 @@ func TestRetryRunRefusesSupersededSource(t *testing.T) {
 	if _, err := s.FinishRun(ctx, replacement.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: old.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
+	if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: old.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("superseded source retried: %v", err)
 	}
 }
@@ -192,15 +190,12 @@ func TestTagReplayEvidenceAndPublicationGuardAreTransactional(t *testing.T) {
 		}
 		return denied
 	}
-	if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: source.ID, Actor: "admin", Authorize: authorize}); !errors.Is(err, denied) {
-		t.Fatalf("retry bypassed evidence: %v", err)
-	}
 	if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: source.ID, Actor: "admin", Authorize: func(run model.Run, evidence model.RunReplayEvidence) (string, error) {
 		return "", authorize(run, evidence)
 	}}); !errors.Is(err, denied) {
 		t.Fatalf("rerun bypassed evidence: %v", err)
 	}
-	if _, err := s.RetryRun(ctx, model.RunRetryRequest{RunID: source.ID, Actor: "admin", Authorize: func(model.Run, model.RunReplayEvidence) error { return nil }}); !errors.Is(err, ErrInvalidState) {
+	if _, err := s.RerunRun(ctx, model.RunRerunRequest{RunID: source.ID, Actor: "admin", Authorize: func(model.Run, model.RunReplayEvidence) (string, error) { return "", nil }}); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("retry bypassed tag publication fence: %v", err)
 	}
 	counts, err := s.CountRuns(ctx)
@@ -208,7 +203,7 @@ func TestTagReplayEvidenceAndPublicationGuardAreTransactional(t *testing.T) {
 		t.Fatalf("refused replay queued work: %+v %v", counts, err)
 	}
 	var audits int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_actions WHERE action IN ('run.retry','run.rerun')`).Scan(&audits); err != nil || audits != 0 {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_actions WHERE action = 'run.rerun'`).Scan(&audits); err != nil || audits != 0 {
 		t.Fatalf("refused replay left an audit action: %d %v", audits, err)
 	}
 }

@@ -53,7 +53,7 @@ func TestSchedulingObservationIsBoundedAndReadOnly(t *testing.T) {
 	workflow.Status.Message = private
 	for i := 0; i < 40; i++ {
 		id := fmt.Sprintf("%02d", i)
-		workflow.Status.Nodes[id] = wfv1.NodeStatus{Name: private, Phase: wfv1.NodePending, Message: "Waiting for " + private + " lock. Lock status: 0/1"}
+		workflow.Status.Nodes[id] = wfv1.NodeStatus{Name: private, Phase: wfv1.NodePending, Message: "Waiting for pipeline/Mutex/step lock. Lock status: 0/1"}
 	}
 	pod := schedulingPod("own", workflow.UID)
 	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu " + private}}
@@ -240,20 +240,27 @@ func TestPendingCPUMessageUsesPodRequests(t *testing.T) {
 	}
 }
 
-// The reason line says which lock a run is queued behind, in the controller's
-// own lock-key grammar; anything outside it falls back to the fixed form.
-func TestLockWaitMessageNamesTheLockWithoutFreeText(t *testing.T) {
-	for message, want := range map[string]string{
-		"Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1": "Waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free).",
-		"Waiting for pipeline/Mutex/oberth-release lock. Lock status: 0/1 ":            "Waiting for lock Mutex/oberth-release (0/1 free).",
-		"Waiting for pipeline/ConfigMap/limits/heavy-go lock. Lock status: 1/2":        "Waiting for lock ConfigMap/limits/heavy-go (1/2 free).",
-		"Waiting for SENSITIVE-command-env-token lock. Lock status: 0/1":               "Waiting for lock (synchronization).",
-		"Waiting for $(curl evil) lock. Lock status: 0/1":                              "Waiting for lock (synchronization).",
-		"Waiting for pipeline/Secret/token lock. Lock status: 0/1":                     "Waiting for lock (synchronization).",
-		"Waiting for pipeline/Mutex/name;rm -rf lock. Lock status: 0/1":                "Waiting for lock (synchronization).",
+// Argo owns synchronization message wording and lock status formatting.
+func TestSchedulingPreservesArgoLockMessage(t *testing.T) {
+	for _, message := range []string{
+		"Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1",
+		"Waiting for pipeline/Mutex/oberth-release lock. Lock status: 0/1 ",
+		"Waiting for pipeline/Database/build lock. Lock status: 1/2; controller detail",
 	} {
-		if got := safeWorkflowMessage(message); got != want {
-			t.Fatalf("safeWorkflowMessage(%q) = %q, want %q", message, got, want)
+		if got := safeWorkflowMessage(message); got != strings.TrimSpace(message) {
+			t.Fatalf("safeWorkflowMessage(%q) = %q", message, got)
 		}
+	}
+}
+
+func TestSchedulingBoundsUntrustedArgoLockMessage(t *testing.T) {
+	message := "Waiting for pipeline/Mutex/" + strings.Repeat("界", 300) + "\n\t\x1b\x00 lock. Lock status: 0/1"
+	got := safeWorkflowMessage(message)
+	if len([]rune(got)) != 200 || !strings.HasSuffix(got, "…") || strings.ContainsAny(got, "\n\t\x1b\x00") {
+		t.Fatalf("unsafe lock display: %q", got)
+	}
+	message = "Waiting for pipeline/Mutex/a\n\t\x1b\x00b lock. Lock status: 0/1  "
+	if got := safeWorkflowMessage(message); got != "Waiting for pipeline/Mutex/a b lock. Lock status: 0/1" {
+		t.Fatalf("lock wording changed beyond display sanitation: %q", got)
 	}
 }

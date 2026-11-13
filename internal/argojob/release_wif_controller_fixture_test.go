@@ -94,6 +94,7 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 				// preserve every other captured field and isolation assertion.
 				capturedComparison := wifCaptureWithReadOnlyInitializers(t, &input)
 				currentComparison := current.DeepCopy()
+				historicalPodNameInput(t, currentComparison)
 				withoutCapturedWorkflowRunFacts(t, capturedComparison)
 				withoutCapturedWorkflowRunFacts(t, currentComparison)
 				capturedJSON, _ := json.Marshal(capturedComparison)
