@@ -9,7 +9,7 @@ import (
 
 func TestFinishCancellationPreservesReasonWithoutNewError(t *testing.T) {
 	const original = "cancelled by operator: stop requested"
-	const stopped = "stopped by operator: Stopped with strategy 'Stop'"
+	const stopped = "Workflow stopped: Stopped with strategy 'Stop'"
 	for _, running := range []bool{false, true} {
 		for _, tc := range []struct {
 			name, message, want string

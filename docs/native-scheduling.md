@@ -8,6 +8,10 @@ Existing queued/running statuses and reason lines reflect those observations.
 Supersede, branch deletion, cancellation, publication and recovery remain CI
 lifecycle operations.
 
+A Workflow can stop through `argo stop` or `argo terminate` on a live Workflow
+or through `spec.shutdown` in its Workflow spec; Oberth reports
+`Workflow stopped: <Argo message>` without attributing who initiated it.
+
 ## Repository authors
 
 Use ordinary Argo Workflow YAML: container, script, containerSet, init-container

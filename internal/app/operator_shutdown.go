@@ -10,7 +10,7 @@ func operatorShutdownResult(result service.JobResult, completion argojob.Complet
 	if completion.OperatorStopped {
 		result.Status, result.Phase = model.RunInterrupted, model.PhaseCancelled
 		result.FailedStage, result.FailedStep = "", ""
-		result.Error = "stopped by operator: " + completion.Reason
+		result.Error = "Workflow stopped: " + completion.Reason
 	}
 	return result
 }

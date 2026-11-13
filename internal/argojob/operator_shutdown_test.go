@@ -1,7 +1,12 @@
 package argojob
 
 import (
+	"strings"
 	"testing"
+
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/oberthci/oberth/pkg/pipeline"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 )
@@ -69,5 +74,31 @@ func TestOperatorShutdownRequiresTerminalAttribution(t *testing.T) {
 		if got := completionFor(wf); got.OperatorStopped || got.Reason != "exit handler failed" {
 			t.Fatalf("exit failure replaced: %+v", got)
 		}
+	}
+}
+
+func TestCreateSubmitsAuthoredShutdownUnchanged(t *testing.T) {
+	for _, strategy := range []wfv1.ShutdownStrategy{wfv1.ShutdownStrategyStop, wfv1.ShutdownStrategyTerminate} {
+		t.Run(string(strategy), func(t *testing.T) {
+			config := seedTestConfig()
+			kube := fake.NewClientset()
+			runningSeedPods(kube)
+			client := &createRetryWorkflowClient{}
+			controller, err := NewController(client, kube, config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var seeds []seedExecCall
+			controller.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seeds), config))
+			source := strings.Replace(greedyDocument, "spec:\n", "spec:\n  shutdown: "+string(strategy)+"\n", 1)
+			request := testRequest(pipeline.TriggerCI, source)
+			request.SourceDir = writeCheckout(t)
+			if _, err = controller.Create(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			if len(client.posts) != 1 || client.posts[0].Spec.Shutdown != strategy || client.stored.Spec.Shutdown != strategy {
+				t.Fatal("production submission changed authored shutdown", client.posts)
+			}
+		})
 	}
 }

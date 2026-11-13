@@ -582,3 +582,12 @@ utilities and Oberth's production TerminalResult API in a disposable test module
 The required rest driver runs this proof before the complete package group and
 fails if it fails; proof output goes to stderr to preserve Go JSON on stdout.
 Upstream controller-only test dependencies never enter the shipped go.mod/go.sum.
+
+Neutral native-stop display: `TestAuthoredShutdownIsAdmittedSubmittedAndShownNeutrally`
+checks authored Stop/Terminate through admission, Build and the Workflow API,
+then recreates the controller and verifies the neutral Argo message after adoption.
+`TestCreateSubmitsAuthoredShutdownUnchanged` also exercises the production Create
+path, including source seeding and the actual Workflow API post for both strategies.
+`TestOperatorShutdownRetainsReasonWithoutInfrastructureHint` covers the durable
+reason, cancelled display and agent event without an infrastructure retry hint.
+The isolated real-Argo B1/B2 race proofs retain their classification protections.

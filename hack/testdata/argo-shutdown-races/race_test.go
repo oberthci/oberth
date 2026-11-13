@@ -82,7 +82,7 @@ func TestReviewerStopRacePreservesGenuineFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("pinned Argo patch after terminal failure: status=%s phase=%s error=%q", result.Status, result.Phase, result.Error)
-			if result.Status != model.RunFailed || result.FailedStage != "main" || result.FailedStep != "main" || result.Error != got.Status.Message || strings.Contains(result.Error, "stopped by operator") {
+			if result.Status != model.RunFailed || result.FailedStage != "main" || result.FailedStep != "main" || result.Error != got.Status.Message || strings.Contains(result.Error, "Workflow stopped") {
 				t.Fatalf("genuine terminal failure mislabeled after late %s patch: %+v", strategy, result)
 			}
 		})
@@ -148,7 +148,7 @@ func TestReviewerShutdownEscalationKeepsCompletedStop(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("pinned Argo strategy change after real stop completed: status=%s phase=%s error=%q", result.Status, result.Phase, result.Error)
-			if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "stopped by operator: "+stoppedMessage {
+			if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped: "+stoppedMessage {
 				t.Fatalf("completed operator stop mislabeled after late %s patch: %+v", strategy, result)
 			}
 		})
