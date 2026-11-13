@@ -43,7 +43,12 @@ reserved, as are the installed selector keys `app.kubernetes.io/name`,
 `openbao-active`, `openbao-internal`, and `kubernetes.io/metadata.name`; the exact Argo-owned
 `kubectl.kubernetes.io/default-container` key is also reserved. This
 protects the installed policies and Services without restricting native affinity
-selectors. Author Pod annotations are not admitted: they can switch runtime, CNI and
+selectors. Repository YAML cannot set `priorityClassName`, `podPriorityClassName` or
+`schedulerName`, including through Pod patches or nested templates. These
+refusals guard against one repository pre-empting another's Pods or bypassing
+the default scheduler. Native Workflow `spec.priority` remains available.
+
+Author Pod annotations are not admitted: they can switch runtime, CNI and
 injection-webhook behavior, including weakening security, and cannot be secured
 with an enumerated deny-list. Existing validated template controls for workspace
 mounts/env and release WIF remain author-facing configuration, as before this
