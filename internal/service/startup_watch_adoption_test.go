@@ -88,7 +88,7 @@ func TestStartupWatchAdoptionWaitsThroughBootOutage(t *testing.T) {
 			f := newRecoveryFixture(t)
 			run := f.enqueueAndClaim(t, "feature/boot", strings.Repeat("a", 40))
 			f.setWorkflowName(t, run.ID, "original-workflow")
-			argo := argofake.NewSimpleClientset(&wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "original-workflow", Namespace: "pipeline", UID: types.UID("native-uid"), Labels: map[string]string{"oberth.ci/engine": "argo"}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}})
+			argo := argofake.NewSimpleClientset(&wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "original-workflow", Namespace: "pipeline", UID: types.UID("native-uid"), Labels: map[string]string{"oberth.ci/engine": "argo"}, Annotations: map[string]string{"oberth.ci/run-id": run.ID}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}})
 			kube := kubefake.NewClientset()
 			var unavailable atomic.Bool
 			unavailable.Store(true)

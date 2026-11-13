@@ -145,8 +145,8 @@ func (scheduler *Scheduler) adoptStartupWorkflow(ctx context.Context, adopter Jo
 		if ctx.Err() != nil {
 			return false, nil, fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, adopter.WorkflowNamespace(), run.WorkflowName, errors.Join(ctx.Err(), err))
 		}
-		if err := waitDatabaseRetry(ctx, ctx, delay); err != nil {
-			return false, nil, err
+		if waitErr := waitDatabaseRetry(ctx, ctx, delay); waitErr != nil {
+			return false, nil, fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, adopter.WorkflowNamespace(), run.WorkflowName, errors.Join(waitErr, err))
 		}
 		delay = min(2*delay, databaseRetryMaximum)
 	}

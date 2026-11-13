@@ -160,6 +160,7 @@ func (f quarantinedStartupFixture) scheduler(t *testing.T, c *targetRecoveryCont
 	if err != nil {
 		t.Fatal(err)
 	}
+	local.SetWatchHub(startupRecoveryWatchHub(t, "pipelines"))
 	jobs, err := WithExecutionTargets(local, f.db, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +289,7 @@ func assertQuarantineIsInert(t *testing.T, f quarantinedStartupFixture, jobs *Ar
 	}
 }
 
-func TestTargetRecoveryReadFailuresRemainFatal(t *testing.T) {
+func TestTargetRecoveryReadFailuresKeepStartupPending(t *testing.T) {
 	for _, kind := range []string{"database", "transport", "other-invalid-state"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newQuarantinedStartupFixture(t)
@@ -310,9 +311,12 @@ func TestTargetRecoveryReadFailuresRemainFatal(t *testing.T) {
 			defer cancel()
 			err := scheduler.Run(ctx)
 			if err == nil || scheduler.Recovered() || errors.Is(err, service.ErrAdoptionRefused) {
-				t.Fatal("genuine read failure did not stop startup", err)
+				t.Fatal("read failure changed recovery classification", err)
 			}
 			if kind != "database" {
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatal("recovery did not wait for shutdown", err)
+				}
 				if !errors.Is(err, failure) {
 					t.Fatal("read failure cause lost", err)
 				}

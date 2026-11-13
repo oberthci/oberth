@@ -11,12 +11,46 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type adoptionCache struct {
 	workflow *wfv1.Workflow
 	healthy  bool
+}
+
+func TestStartupAdoptionWaitsThroughCapabilityAPIOutage(t *testing.T) {
+	grant := operatorCapability()
+	submission := requestWithCapability(t, operatorResourceDocument, grant)
+	workflow, err := Build(testConfig(), submission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow.UID = "operator-workflow-uid"
+	workflow.Status.Phase = wfv1.WorkflowRunning
+	kube := operatorKubeClient(grant)
+	reads := 0
+	kube.PrependReactor("get", "serviceaccounts", func(clienttesting.Action) (bool, runtime.Object, error) {
+		reads++
+		if reads == 1 {
+			return true, nil, apierrors.NewServiceUnavailable("API unavailable")
+		}
+		return false, nil, nil
+	})
+	client := &adoptionLiveClient{readErr: errors.New("cached running adoption made a Workflow GET")}
+	controller := &Controller{kube: kube, workflows: client, config: testConfig(), hub: adoptionCache{workflow: workflow, healthy: true}}
+	bindCapabilityLoader(t, controller, func(context.Context, int64) (*argoworkflow.Capability, error) { return grant, nil })
+	request := AdoptionRequest{Name: submission.Name, RunID: submission.RunID, Ref: submission.Ref, SHA: submission.SHA, Trigger: submission.Trigger, RunTrigger: argoworkflow.RunTriggerBranch, RepositoryID: submission.RepositoryID}
+	if _, found, err := controller.Adopt(t.Context(), request); err == nil || found || errors.Is(err, ErrAdoptionRefused) {
+		t.Fatal("temporary capability read became a permanent refusal", found, err)
+	}
+	if _, found, err := controller.Adopt(t.Context(), request); err != nil || !found || client.reads != 0 || reads != 2 {
+		t.Fatal("capability recovery changed Workflow observation", found, err, client.reads, reads)
+	}
 }
 
 func (h adoptionCache) Workflow(name string) (*wfv1.Workflow, bool) {

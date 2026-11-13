@@ -52,6 +52,9 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 			return Adoption{}, false, fmt.Errorf("%w: missing capability repository binding", ErrAdoptionRefused)
 		}
 		if _, err := controller.boundCapability(ctx, workflow, request.RepositoryID); err != nil {
+			if retryExecutorIdentityRead(err) || errors.Is(err, context.Canceled) {
+				return Adoption{}, false, fmt.Errorf("argojob: verify adoption capability: %w", err)
+			}
 			return Adoption{}, false, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
 		}
 	}
