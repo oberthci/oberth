@@ -43,7 +43,7 @@ func hotfixHelm(t *testing.T, values map[string]any, output *bytes.Buffer) (Deps
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps := Deps{Output: output, RunHelm: func(ctx context.Context, args []string) ([]byte, error) {
+	deps := Deps{Output: output, KubeClient: argoSecurityTestClient(), RunHelm: func(ctx context.Context, args []string) ([]byte, error) {
 		switch args[0] {
 		case "version":
 			return []byte("v4.2.3"), nil
@@ -56,6 +56,11 @@ func hotfixHelm(t *testing.T, values map[string]any, output *bytes.Buffer) (Deps
 				return json.Marshal(map[string]any{"compatibility": values["compatibility"], "defaultMustNotBecomeStored": true})
 			}
 			return bytes.Clone(raw), nil
+		case "upgrade":
+			if !slices.Contains(args, "--dry-run=server") {
+				t.Fatalf("preview attempted a write: %v", args)
+			}
+			return json.Marshal(map[string]any{"config": map[string]any{"argo": map[string]any{"namespace": DefaultArgoNamespace}}})
 		case "show", "template":
 			cmd := exec.CommandContext(ctx, "helm", args...)
 			data, err := cmd.CombinedOutput()
@@ -121,7 +126,7 @@ func TestUpgradeDryRunValidatesCleanedStoredValues(t *testing.T) {
 			_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.22.5", ChartOverride: chart, DryRun: true, NoBackup: true}, deps)
 			if unknown {
 				var schemaErr *ErrSchemaValidation
-				if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "operatorUnknown") {
+				if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "additional properties 'operatorUnknown' not allowed") {
 					t.Fatalf("dry run missed schema failure: %v", err)
 				}
 			} else if err != nil {
@@ -133,8 +138,13 @@ func TestUpgradeDryRunValidatesCleanedStoredValues(t *testing.T) {
 
 func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
 	values := hotfixStoredValues(t)
+	// Proxy retirement has a separate refusal; this fixture isolates old chart-owned values.
+	delete(values["argo"].(map[string]any), "goProxy")
 	before, _ := json.Marshal(values)
 	deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		if args[0] == "get" {
+			return bytes.Clone(before), nil
+		}
 		if args[0] != "show" {
 			t.Fatalf("old target must retain stored values: %v", args)
 		}
@@ -147,10 +157,22 @@ func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, _ := json.Marshal(values)
-	if !bytes.Equal(before, after) || !slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
+	if !slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
 		t.Fatal("old-chart restore rewrote owned values", args)
 	}
+	index := slices.Index(args, "-f")
+	if index < 0 {
+		t.Fatal("restore overlay missing", args)
+	}
+	body, err := os.ReadFile(args[index+1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := json.Marshal(map[string]any{"compatibility": values["compatibility"]})
+	if !bytes.Equal(body, want) {
+		t.Fatalf("restore wrote values beyond its overlay: %s", body)
+	}
+
 }
 
 func TestRetiredProfileCleanupKeepsOpaqueTransit(t *testing.T) {

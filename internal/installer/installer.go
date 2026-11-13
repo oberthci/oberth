@@ -872,10 +872,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	if cfg.DryRun {
-		if deps.installResolved != nil {
-			deps.installResolved(cfg)
-		}
-		return printDryRunPlan(cfg, deps.Output, cluster)
+		return runInstallDryRun(ctx, cfg, deps, cluster)
 	}
 	cleanupRelease, err := preflightInstallRelease(ctx, &cfg, deps)
 	if err != nil {

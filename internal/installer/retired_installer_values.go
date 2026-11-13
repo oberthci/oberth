@@ -120,9 +120,9 @@ func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, wor
 	return storedSnapshotHelmArgs(args, path), nil
 }
 
-// Restore targets the installed chart, which can still own Transit flags.
-// Removing its values would reactivate that chart's disabled Transit default.
-func targetChartRetainsTransit(ctx context.Context, deps Deps, chart string) (bool, error) {
+// Older restore charts still own retired Transit, profile or execution-target
+// values. Keep those settings when their target chart still declares them.
+func targetChartRetainsRetiredInstallerValues(ctx context.Context, deps Deps, chart string) (bool, error) {
 	raw, err := deps.RunHelm(ctx, []string{"show", "values", chart})
 	if err != nil {
 		return false, fmt.Errorf("read restore chart defaults: %w", err)
@@ -132,6 +132,14 @@ func targetChartRetainsTransit(ctx context.Context, deps Deps, chart string) (bo
 		return false, fmt.Errorf("decode restore chart defaults: %w", err)
 	}
 	store, _ := values["secretstore"].(map[string]any)
-	_, exists := store["transit"]
-	return exists, nil
+	if _, exists := store["transit"]; exists {
+		return true, nil
+	}
+	argo, _ := values["argo"].(map[string]any)
+	for _, key := range []string{"controllerProfile", "controllerProfileConfigMap", "executionPlacementConfigMap", "executionTargetConfigMap", "executionTargetCredentialsSecret"} {
+		if _, exists := argo[key]; exists {
+			return true, nil
+		}
+	}
+	return false, nil
 }

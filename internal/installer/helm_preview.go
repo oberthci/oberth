@@ -31,6 +31,22 @@ type ssaConflict struct {
 	Field   string // e.g. ".data.ca.crt"
 }
 
+// Resolve and validate the same chart used by apply before printing a dry-run plan.
+func runInstallDryRun(ctx context.Context, cfg Config, deps Deps, cluster ClusterInfo) error {
+	cleanup, err := preflightInstallRelease(ctx, &cfg, deps)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if err := previewHelmUpgrade(ctx, cfg, deps, OpenBaoResult{}); err != nil {
+		return err
+	}
+	if deps.installResolved != nil {
+		deps.installResolved(cfg)
+	}
+	return printDryRunPlan(cfg, deps.Output, cluster)
+}
+
 // previewHelmUpgrade runs a nonmutating Helm server-side preview with the
 // same arguments the real upgrade will use, WITHOUT --take-ownership. When
 // the preview reports SSA field-ownership conflicts, the installer refuses
@@ -52,8 +68,8 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return nil // fresh install — no existing objects to conflict with
+	if !exists && !cfg.DryRun {
+		return nil // Fresh apply has no existing objects to conflict with.
 	}
 
 	// The preview runs before the OpenBao phase, so callers pass a zero
@@ -82,13 +98,18 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 		return err
 	}
 	defer func() { _ = os.RemoveAll(work) }()
-	args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args)
-	if err != nil {
-		return err
+	if exists {
+		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args)
+		if err != nil {
+			return err
+		}
 	}
 	raw, err := deps.RunHelm(ctx, args)
 	if err == nil {
 		defer clear(raw)
+		if !exists {
+			return nil
+		}
 		return printHelmValueChanges(ctx, deps, ns, raw)
 	}
 
