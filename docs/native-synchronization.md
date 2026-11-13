@@ -24,7 +24,7 @@ spec:
 ```
 
 Operators own and create the semaphore ConfigMap themselves. Oberth does not
-render it or accept `--argo-sync-limit`. Its removal on upgrade requires the
+render it or accept `--argo-sync-limit`. The existing object is orphaned on upgrade with data unchanged; follow the
 [release-note handoff](releases/v0.22.0.md#action-required-semaphore-configmap-ownership)
 before semaphore Workflows run. Missing ConfigMaps fail in Argo. Authored mutex
 names and semaphore references are not rewritten or reserved for an injected

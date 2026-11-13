@@ -20,7 +20,6 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type controlGit struct {
@@ -898,7 +897,6 @@ type fakeJobs struct {
 	createdPlans    []WorkflowRequest
 	createdApplies  []WorkflowRequest
 	deleted         []string
-	size            pipeline.Size
 	plan            []runprogress.PlannedStep
 	planErr         error
 }
@@ -1063,10 +1061,6 @@ func (jobs *fakeJobs) CreateWorkflow(_ context.Context, request WorkflowRequest)
 	defer jobs.mu.Unlock()
 	jobs.createdCI = append(jobs.createdCI, request)
 	return nil
-}
-
-func (jobs *fakeJobs) PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error) {
-	return jobs.size.Effective(), nil
 }
 
 func (jobs *fakeJobs) CreateRelease(_ context.Context, request WorkflowRequest) error {
@@ -1372,7 +1366,6 @@ func TestSchedulerDoesNotUseStaticSizeForWorkflowAdmission(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
-	fixture.jobs.size = pipeline.L
 	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
 		EventID: "sized-run", Repository: fixture.repo, Branch: "feature/sized",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",

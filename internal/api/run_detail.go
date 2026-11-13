@@ -24,10 +24,7 @@ type RunDetailResponse struct {
 // response and step values remain intact for MCP and other readers.
 type dashboardStep struct {
 	model.StepResult
-	MeasuredUsage          any `json:"MeasuredUsage,omitempty"`
-	MeasuredUsageTruncated any `json:"MeasuredUsageTruncated,omitempty"`
-	MeasuredSizeComparison any `json:"MeasuredSizeComparison,omitempty"`
-	Termination            any `json:"Termination,omitempty"`
+	Termination any `json:"Termination,omitempty"`
 }
 
 func dashboardRunDetail(value RunDetailResponse) any {

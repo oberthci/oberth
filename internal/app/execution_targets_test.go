@@ -631,7 +631,7 @@ func TestExecutionTargetLocalAdmissionIndependentOfRemoteHealth(t *testing.T) {
 	if len(f.kube.Actions()) != 0 {
 		t.Fatal("local admission touched remote controller")
 	}
-	if profile := f.jobs.ExecutionTargetProfiles()["remote"]; profile == nil || !profile.AdmissionPaused || profile.State != "unverified" {
+	if profile := f.jobs.ExecutionTargetProfiles()["remote"]; profile == nil || !profile.DispatchBlocked || profile.State != "unverified" {
 		t.Fatal("unverified remote health hidden", profile)
 	}
 }

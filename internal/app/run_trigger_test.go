@@ -42,7 +42,7 @@ func TestRunKindReadsOnlyTheDurableRun(t *testing.T) {
 	if _, err := jobs.PipelineDemandReceipt(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Trigger: "apply"}, Repository: model.Repository{Name: "infra"}, SourceDir: writeBuild(t, perTriggerBuild),
 	}); err == nil {
-		t.Fatal("PipelineSize sized an apply run")
+		t.Fatal("source receipt inspected an apply run")
 	}
 }
 

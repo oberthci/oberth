@@ -255,7 +255,7 @@ func validAdminOperation(operation string) bool {
 		"repository.database.open", "repository.register", "repository.remove",
 		"uplink.database.open", "uplink.register", "uplink.remove", "uplink.scope", "uplink.token.create", "uplink.token.activate",
 		"access.database.open", "access.allow", "access.revoke", "audit.database.open", "audit.record",
-		"size.grant", "size.revoke", "run.cancel":
+		"run.cancel":
 		return true
 	}
 	// These suffixes name OpenBao identity records, never secret material.

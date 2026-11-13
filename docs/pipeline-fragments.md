@@ -130,7 +130,7 @@ document-only isolation and Trivy cache checks. This includes refusing a
 credential chain with a CI cache mount, token opt-outs with credential chains,
 and unordered Trivy steps sharing a cache. Release pipelines use the release
 tier's isolation rules. These checks do not need server access; approvals,
-grants, deployment resource ceilings, identities and admission receipts still
+grants, Kubernetes namespace policies, identities and admission receipts still
 require server admission.
 
 The deprecated `--allow-unresolved-fragments` flag is still accepted for

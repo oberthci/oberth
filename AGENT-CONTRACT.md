@@ -400,47 +400,14 @@ trust assumptions and complete invalidation rules.
   publish the TLS config, then roll the chart's OnDelete pod before Transit is
   enabled.
 
-### Isolated execution placement
+### Authenticated execution targets
 
-Administrator-only `--argo-execution-placement-config` selects an immutable
-closed run/repository/source/intent/cluster/node binding shared by Build and
-direct source seeding. Empty configuration preserves existing behavior. The
-selected profile requires authenticated controller owner-chain and immutable
-admission-profile readbacks, an exact transport/binary/config identity, scoped
-1Gi/64Mi executor scratch and explicit provisional helper resources. Whole
-protected-Pod checks and exact native expected-leaf selectors remain mandatory.
-Final tolerations compare the complete role-specific canonical set, separately
-from native templates; unknown profiles and changed identities refuse. Local
-controller/admission fixtures confer no managed-cluster authority. See
-[execution placement](docs/execution-placement.md) for schema and runtime inputs.
-
-The opt-in primary `protected-v2` contract binds one canonical parent and two
-exact phase Workflows to a dynamically journaled generic protected intent.
-Admission/config/capacity/audit are atomic before allocation; source-volume UID
-custody is chained before seed/Workflow creation. Current authority includes
-live authenticated target/environment checks at scheduler delivery/publication,
-even when current source removes the protected contract. Recovery uses retained
-configuration only for observation and original-UID cleanup; group removal,
-revocation or mode changes grant no new create authority. The normal phase records
-its full intended Workflow before POST and binds its original observed UID in
-the audit chain. Uncertain submission retains its late-commit boundary until
-Workflow, owned Pods and the exact source claim are absent; retries cannot
-reseed or recreate a phase with recorded source custody. Expired placements and
-removed recipe approvals retain cleanup ownership only. An absent recipe flag
-or explicit empty recipe array starts a recovery-only executor, never a grant.
-Direct scope remains credential-free branch execution. Imported templates require
-exact fragment keys, commits, byte digests, resolved graph and lock digests in
-placement. Version 2 placement admissions retain the original root and fragment
-bytes atomically with runtime/config/capacity/audit, within the existing 512 KiB
-admission bound; fragment-free version 1 custody remains compatible. Current
-allocation, receipt and publication recheck the existing fragment trust policy
-and exact source graph. Protected tag lookup uses private authenticated upstream
-refs after a successful fresh producer fetch; deleted/moved tags refuse even
-when public cached tags still resolve to reachable commits. These checks do not
-materialize public tags or change ordinary fragment/replay lookup. Cleanup
-reconstructs original bytes after resolver or
-policy removal and cannot authorize new work. External bootstrap, installed
-containing CI and real workload qualification remain separately required.
+Administrator approval fixes the cluster, namespace, controller and service
+identity, authenticated transport and original source/custody records. It does
+not fix a worker node. Repository placement passes through unchanged; operators
+isolate dedicated nodes with Kubernetes taints and admission/namespace policy.
+Original object UID and intent continue to fence recovery and cleanup. See
+[execution targets](docs/execution-targets.md).
 
 ### Repository contract
 
@@ -530,64 +497,12 @@ containing CI and real workload qualification remain separately required.
   absent and runs simply start cold.
 - The server reads YAML statically at submission -- it never executes
   repository code in the server process.
-- Every limit on what runs at once lives in Argo (#1517, v0.20.0;
-  [where limits live](docs/where-limits-live.md)). Oberth has no run ceiling:
-  it submits every admitted run, and the Argo controller's `parallelism` /
-  `namespaceParallelism` (argo-workflows release values, `oberth install
-  --argo-parallelism`, default none) postpones the excess. A postponed
-  Workflow (Pending, no `startedAt`, Argo's exact message `Workflow processing
-  has been postponed because too many workflows are already running`) is
-  exempt from `admission.stallTimeout` and the pre-start watchdog like a
-  workflow-level lock wait, and reads `waiting for an Argo workflow slot
-  (controller parallelism)` in the existing reason line. An admitted Workflow
-  holds its slot while it waits for a workflow-level lock (including
-  `oberth-release`) and while an assisted retry hold parks it. Kubernetes
-  places step Pods by their requests. Oberth reads nothing from a workflow document to decide
-  whether a run may start: there are no size weights, declared budgets,
-  exclusive classes or backfill. The removed `oberth.ci/size` and
-  `oberth.ci/size-by-trigger` annotations are refused. Explicit requests and
-  limits remain in git. Missing requests use the documented per-container
-  defaults. See [admission and native synchronization](docs/native-synchronization.md).
-- Execution priority has four canonical classes: `low < standard < promotion < high`.
-  Ordinary builds default to standard. Server-classified promotions and the oldest
-  eligible waiting tag/release per repository use promotion, as do admin RC globs.
-  Standard work ages into promotion after 60 minutes at its original FIFO place;
-  neither a ref, tag, promotion, pattern nor aging can create high urgency.
-  High requires an explicit unscoped-admin or unexpired priority-grant request.
-  A promotion-only grant cannot authorize high. SSH checks the exact authenticated
-  key fingerprint, never an identity alias; scoped admins need a grant.
-  Low is deliberate background work and never ages. Every explicit admin override
-  pins its class. `run_priority {id, priority, reason}` sets any waiting class,
-  including lowering high to promotion/standard/low; it cannot preempt admitted work.
-  Audit records retain actor, prior/selected class and reason. Admission FIFO,
-  pressure, per-container resource, group and hold checks, and bounded dispatch
-  capacity remain. Local changes refresh waiters immediately; polling is 15s.
-  Tag eligibility still honors oldest-waiter, exact-checkout size and size-revoke
-  rules; losing an automatic boost retains authorized explicit fallback, otherwise
-  standard. Release execution itself is not refused by that advisory lookup.
-  Submission transports and schedules accept the four names. Promotion/high need
-  authenticated authority; low/standard need no urgency grant. A standard request
-  does not lower natural delivery priority. Sync only raises an existing waiting
-  build; explicit lowering uses admin run_priority. Accepted priority and automatic
-  protection survive replay, restart and eligible infrastructure
-  refire, retaining original FIFO and reasons. A new branch-head push replaces
-  queued, not-started runs at older SHAs in the same repo/ref/schedule lane, at
-  every priority class. The latest explicit admin override carries to the new
-  head, with its actor and reason but a fresh FIFO place. Running work retains
-  requester/admin supersession protection. Publication/cleanup guards remain.
-  Requests take only the four names; `normal` and `highest` are refused. Stored
-  normal/highest rows read as standard/high. Automatic high/highest protection
-  rows with an empty requested field confer no high authority. The timestamp migration
-  `20261104190000-priority-four-classes` extends CHECK vocabularies and preserves
-  raw historical rows and audit chains. Shipped migration 39 and admin-lowering SQL
-  remain unchanged. API/CLI/MCP/dashboard input and output use only the four names.
-  No run status or layout changes. See [release-priority.md](docs/release-priority.md)
-  for the exact compatibility, resource and fairness rules.
-- Waiting admission uses run slots, the enabled PSI hard-limit valve and
-  the configured data-root disk floor. There is no measured backfill, resource
-  head reservation, drain forecast or starvation bypass of hard pressure.
-  Historical head-wait records remain evidence; nothing writes them any more. Priority changes retain the existing audited transaction
-  and admission mutex boundary. Current queue reasons identify the real blocker.
+- Argo owns Workflow concurrency, locks and the queue; Kubernetes owns Pod
+  placement. Oberth submits each validated run without an application capacity,
+  pressure or disk-floor gate, request defaults, automatic release lock or
+  priority mapping. Repository YAML owns requests, limits, placement, native
+  priority, retries, optional deadlines and synchronization. See
+  [native scheduling](docs/native-scheduling.md).
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
   schedule triggers share that identity. Retry, rerun,
@@ -598,8 +513,7 @@ containing CI and real workload qualification remain separately required.
   `spec.arguments.parameters` is refused. Named schedules always receive it;
   other runs receive empty only when their document references it, otherwise
   it is absent. Named entries have separate same-branch supersession domains.
-  Due cron entries queue even when the repository has active runs; resource
-  admission and explicit groups bound execution. Cron atomically checks the
+  Due cron entries queue even when the repository has active runs; Argo and Kubernetes policy govern execution. Cron atomically checks the
   consumed cursor and all active runs of that entry/branch before enqueue:
   overlap records `coalesced` and advances the cursor without replacing the
   live run; `fired` commits its run/receive/audit/cursor together. Read failures
@@ -608,15 +522,10 @@ containing CI and real workload qualification remain separately required.
   retain their busy-repository guard unless forced. Run list/detail expose
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
-- Size grants/revocations remain the historical automatic tag-priority policy
-  record; they gate nothing and no size tier caps automatic tag priority.
-  Automatic tag priority still uses its existing eligibility checks and never
-  supplies high urgency. Kubernetes decides Pod placement, with operator-owned namespace
-  quotas bounding resources created through generic workflow capabilities.
-- Workflow graph analysis and declared Pod demand remain available for validation,
-  provenance and diagnostic metadata. They do not create a serving CPU/memory
-  packing budget. Existing demand receipts remain evidence; read paths do not
-  recompute historical records from newer git declarations.
+
+- Source receipts bind the exact reviewed source and fragments to submission.
+  They carry no aggregate resource authorization or packing budget.
+
 - Native resources and placement are preserved as authored. Oberth has no
   compute admission, numeric grants or resource resizing. See
   [native scheduling](docs/native-scheduling.md).
@@ -1271,18 +1180,10 @@ containing CI and real workload qualification remain separately required.
   not persisted and never changes run state or constitutes execution evidence.
   `observed_at` and `age_seconds` describe snapshot freshness (including time
   spent in MCP long-poll); underlying controller state can lag reality.
-- Scheduling queue position is one-based effective priority then FIFO order among all durable
-  queued runs, not an ETA or execution order: publication-gated refs can be
-  bypassed. Admission position is separately one-based among live workflow
-  reservations, with `preparing`, `waiting`, and `admitted` states. Missing
-  reservations or Workflows never imply a cause or a scheduler failure.
-  An unparked reservation behind the queue head (the first claimed,
-  prepared, unparked run the disk floor or host pressure holds back) carries
-  `blocked_by` (`run_id`, `repo`, `ref`, `disk_floor`, `used`,
-  `waiting_since`, `pressure`), and its message, like every unclaimed queued
-  run's, ends "blocked behind <repo>/<ref> (<reason>)." The head itself sets `head_of_queue`. Unscoped `/api/status`
-  reports the same as `admission_blocker` (#1021). A scoped actor sees the
-  blocker only when its repository is in scope, without the budget's use.
+- Scheduling reasons come from exact source-seed or Workflow/Pod observations:
+  native Argo parallelism, locks and suspension, and curated Kubernetes Pending
+  reasons. An observation is not an ETA or a resource reservation.
+
 - `system_status`, `GET /api/status` and `oberth status` report pipeline
   NetworkPolicy configuration in the Kubernetes diagnostic (`cluster_detail`).
   The chart passes `networkPolicy.enabled` as `--pipeline-network-policy-enabled`:
@@ -1290,31 +1191,9 @@ containing CI and real workload qualification remain separately required.
   enforcement unmeasured. An omitted flag reports configuration unavailable.
   This installation-wide diagnostic is also visible to scoped uplinks; it
   contains no repository or namespace details and never gates readiness or admission.
-- `system_status` / `GET /api/status` carry `admission` (#1099): `used`,
-  `runs`, `blocker`, `hold`, `pressure` and `reservations[]` (`run_id`,
-  `repo`, `ref`, `workflow`, `state`, `position`, `since`). `state` is one of
-  `preparing`, `waiting`, `granted`, `retained`. `capacity`, `max_runs`,
-  `configuration` and `groups[]` are gone since v0.20.0. It is the live
-  process's in-memory gate, never durable evidence. A scoped uplink sees only
-  its repositories' reservations, without the run count, positions or the
-  blocker. Admin-only, unscoped MCP
-  `admission_release {id, force}` (CLI `oberth admission release`,
-  remote only; `oberth admission` prints the view) releases a reservation no
-  owner will release. The practical case is a granted reservation still held
-  for a run that is already terminal because its owner hung or was lost; an
-  ungranted reservation of a terminal run qualifies too. A `retained`
-  reservation belongs to a stopping scheduler or an uncertain Workflow create.
-  Cleanup must be confirmed before its owner releases it. A reservation of an active owned run is
-  refused (use `run_cancel`), and so is one without a durable run unless
-  `force`. Before a granted reservation is released the run's recorded
-  Workflow is deleted through the engine and an accepted deletion is the
-  proof; a granted run with no recorded Workflow cannot be proven gone, and
-  it, like a failed deletion, needs `force`, which releases unverified. The
-  outcome is audited as `admission.release` (`run_id`, `state`, `weight`,
-  `group`, `workflow`, `verified`, `force`) under the gate lock once the
-  reservation is known to be still held and before its weight and group are
-  freed; a reservation its owner released meanwhile is reported as not found
-  and not audited. The same grant pass admits the runs behind it.
+- Controller identity verification can block new dispatch. Status exposes its
+  bounded reason and remedy; it is independent of resource quantities.
+
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
   dashboard use one default order in three groups, top to bottom. The queue
   first: every not-yet-admitted run, capped at 500, in scheduler claim order:
@@ -1368,40 +1247,22 @@ containing CI and real workload qualification remain separately required.
   is `running`.
   The dashboard reverses only the queued block: last-to-start at the top,
   next-in-line directly above running rows, also in the queued filter. API/MCP
-  retain claim order. Queued badges name low priority, high priority or priority
-  promotion; standard has no priority label.
-  A queued run's `display_reason` shows its peak concurrent pod requests and
-  one blocker, computed by the server for list, detail, status, live-log and
-  active views: `needs 9.9 CPU, 16 GiB · host CPU busy`, `host IO busy`,
-  `6 of 6 runs running`, `behind org/app/main`, `next in line` or `position 3`.
-  Workflow graph accounting includes dependencies, parallelism and resource
-  helper pods. Requests are independent of limits and retired weighted charges.
-  Waiting runs use the bound receipt; unclaimed runs read the selected commit
-  and fragments without a checkout, with one shared 2-second demand budget per list. A bounded LRU
-  keeps successful run/SHA results without expiry; failures and timeouts
-  are cached for 30 seconds. Unknown figures are omitted, never reported as zero.
-  Scoped viewers may see their own demand and public host-pressure reason;
-  global counts, queue positions and hidden repository identities stay hidden.
-  Unknown scoped positions read `in line`, not `next in line`. Other blockers
-  retain plain explanations for group waits, disk space, administrator holds
-  and workflow startup. The queued line omits priority prefixes and park-policy
-  fallback diagnostics; priority fields, durable reasons and audit retain them.
-  `Scheduling.requests` and `Scheduling.admission.requests` expose the pod
-  requests. Other scheduling fields keep the detailed machine observation.
-  Running pending pods report, for example,
-  `pod pending: insufficient cpu (4 CPU requested)`.
+  retain claim order. A queued run's display reason reports native Argo parallelism, lock or
+  suspension state, or a curated Kubernetes Pending reason. Source-seed waits
+  are observable before Workflow creation. No aggregate request figure,
+  priority class, pressure blocker or resource reservation is projected.
 
   | Durable cause | `display_status` | `display_reason` |
   | --- | --- | --- |
   | queued, claimed before admission | `queued` | what the run waits for (above) |
   | admitted and started | `running` | empty |
   | uncertain Workflow create (phase `infrastructure-pending`) | `running` | `Workflow create outcome uncertain; cleanup pending` |
-  | running past its execution deadline | `running` | `Execution deadline exceeded.` (plus priority prefix) |
+  | running past its execution deadline | `running` | `Execution deadline exceeded.` |
   | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
   | passed CI / published release | `passed` | empty |
   | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
-  | queued publication retry | `running` | publication attempt/backoff message; not replaced by queue priority |
+  | queued publication retry | `running` | publication attempt/backoff message; from publication state |
   | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
   | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `superseded` | `server restart, re-queued as <run12>` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
@@ -1810,13 +1671,9 @@ containing CI and real workload qualification remain separately required.
   repository-chosen object names, repository-set Pod or container security
   contexts, and any `claimName`. Documents are decoded strictly, and exactly one
   YAML document per file is accepted.
-- Admission enforces administrator-owned resource ceilings before submission:
-  per-container CPU (8), memory (16Gi), ephemeral-storage (32Gi); retry limit
-  (10, a literal integer, required on every `retryStrategy`: templates, template defaults and the
-  workflow-wide `spec.retryStrategy`); DAG tasks (64), step invocations (64); withItems/withSequence
-  cardinality (100); workflow/template parallelism (32); memory-backed emptyDir
-  sizeLimit (8Gi, required when medium is Memory); PVC capacity (64Gi). GPU and
-  custom resource types are not admitted.
+- Kubernetes namespace ResourceQuota and admission policies govern resource
+  quantities. Oberth grants only API-kind/action authority for resource templates.
+
 - Synchronization mutex names are server-scoped at Build time to
   `<trigger>/<repo>/<name>`. A CI workflow's mutex `chart-index` becomes
   `ci/repo/chart-index`; a release workflow's becomes `release/repo/chart-index`.
@@ -1852,7 +1709,7 @@ containing CI and real workload qualification remain separately required.
   publication evidence, runs bound to promotions or trusted plans/applies,
   pending promotion source/result evidence, open CI issue branch evidence, or
   evidence covered by an active promotion grant. Protected evidence may exceed
-  a budget; configure retention before relying on disk-floor recovery.
+  a budget; configure retention to keep sufficient working space.
 - Purges retain immutable run/step rows and receipts. A committed
   `run.purge.pending` audit intent precedes file removal; local scheduler
   writers are excluded (including cancelled runs still closing their logs).
@@ -1864,19 +1721,15 @@ containing CI and real workload qualification remain separately required.
   explicitly report unconfirmed completion and can be retried. Logs include
   indexes, progress journals and plans. Installation status (`system_status`
   and `/api/status`) includes retained log/artifact bytes, available bytes,
-  the admission floor, the live database size (`database_bytes`, database plus
+  the live database size (`database_bytes`, database plus
   WAL) and last sweep/error under `storage`; scoped status omits
   installation-wide storage information. The same sweep keeps Workflow and step
   timing records for the newest 2000 terminal runs and the runs evidence
   retention protects, pruning older ones in bounded passes (`timing_pruned`).
-- The administrator-only `/metrics` endpoint also exports the status values an
-  operator alerts on: `oberth_queue_not_started`, `oberth_queue_max_not_started`,
-  `oberth_queue_deferred`, `oberth_admission_paused`, `oberth_database_bytes`,
-  `oberth_data_free_bytes`, `oberth_data_below_disk_floor`,
-  `oberth_last_backup_timestamp_seconds`,
-  `oberth_audit_anchor_timestamp_seconds` and
-  `oberth_admin_token_earliest_expiry_seconds`. A source that cannot be read is
-  left out, never exported as zero.
+- The administrator-only `/metrics` endpoint exports controller verification
+  status (`oberth_controller_verification_blocked`), database/free bytes,
+  backup/audit-anchor timestamps and admin-token expiry. An unavailable source
+  is omitted, never reported as zero.
 - One bearer credential holds at most 64 blocking calls (`wait`,
   `promote_status`, `run_wait`, `events_wait`) at once; a further call is
   refused immediately with a tool error naming the limit. `events_wait` with
@@ -2317,15 +2170,6 @@ path backed by the workspace VCT (when `workspace-mounts` is absent or
 inside `/work/cache` and `workspace-mounts != none`), or by a repo-declared VCT
 mount at the same path.
 
-### Disk floor admission (#673)
-
-Opt-in, fail-closed disk-space admission input. When `--admission-disk-floor-bytes`
-(chart value `admission.diskFloorBytes`) is positive, admission is held until the
-filesystem containing the data root has at least that many free bytes. The check
-uses `statfs` (sub-microsecond kernel read, cached 5 s). When held, the scheduling
-observation reports the floor and current free bytes. Default 0 = disabled.
-No taints, deletions, evictions, or security bypasses.
-
 ### secretstore_plan MCP tool (#611)
 
 Admin-only read-only MCP tool `secretstore_plan`: given the approved grants
@@ -2612,7 +2456,6 @@ remain required, with no public listener or insecure fallback.
 | Change a scheduling or placement default (`admission.stepStartupAllowance`, `admission.stallTimeout`, `argo.defaultWorkflowTimeout`, `schedules.*`), or add such a setting without a Helm value | Breaking |
 | Let a repository choose the step start-up allowance or write `oberth.ci/step-start-allowance-seconds` | Forbidden |
 | Admit a `volumeClaimTemplate` with `dataSource`, `dataSourceRef`, or `selector` | Forbidden |
-| Reduce a resource ceiling without verifying all known pipeline documents remain admissible | Breaking |
 | Admit a construct that reaches the node (`hostPort`, `hostPath`, `hostNetwork`, `nodeSelector`, `affinity`) or the cluster (`workflowTemplateRef`, `imagePullSecrets`) | Forbidden |
 | Bind an OpenBao role to a wildcard ServiceAccount name or namespace, or grant the CI tier a ServiceAccount token | Forbidden |
 | Change the RunnerImage declaration shape or widen the default prefix allowlist | Breaking security change |
@@ -3307,10 +3150,10 @@ Migration v30 stacks after #1102's repository-archive migration v29. Shipped
 migration bodies and existing ledger rows remain unchanged; older backups
 replay v29 and v30 in order on restore.
 
-Controller profile verification failures keep all new admission paused. Unscoped
+Controller profile verification failures keep all new controller verification required. Unscoped
 status exposes the fixed verifier `controller_profile.reason` (never raw API
 errors); unchanged failure logs are limited to once per 30 seconds. Recovery
-clears the reason and resumes admission without changing existing background tasks.
+clears the reason and resumes dispatch without changing existing background tasks.
 
 Live-log SSE streams revalidate their original bearer credential every 30 seconds
 with a five-second authentication deadline. Revocation, rotation, lookup failure
@@ -3377,7 +3220,7 @@ Argo and Kubernetes own waiting. Pause the controller at zero replicas or use
 `argo suspend`; parallelism zero is unlimited. See
 [native scheduling](docs/native-scheduling.md).
 
-### Evicted controller replacement and visible admission holds (#1214)
+### Evicted controller replacement and visible verification waits (#1214)
 
 Incomplete kubelet eviction/shutdown controller history is ignored only after exact live
 profile verification and a converged controlling ReplicaSet (observed generation,
@@ -3388,7 +3231,7 @@ is not eligible for replacement evidence. Uncertain live
 or historical authority stays blocked. ReplicaSet API failures retain the
 profile-read retry class and five-second per-attempt budget. The chart grants
 only namespaced ReplicaSet GET in a new Role, preserving frozen existing rules.
-`controller_profile.admission_paused`, reason and remedy are exposed in status;
+`controller_profile.dispatch_blocked`, reason and remedy are exposed in status;
 the dashboard shows a runs-list banner and Status card, refreshing aggregate
 status in the background at most every five minutes; direct Status visits remain
 fresh. Existing work is not

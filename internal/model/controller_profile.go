@@ -2,10 +2,10 @@ package model
 
 import "time"
 
-// ControllerProfileStatus reports admission verification without exposing API
+// ControllerProfileStatus reports controller identity verification without exposing API
 // error bodies. ReadFailuresTotal is process-local and cumulative.
 type ControllerProfileStatus struct {
-	AdmissionPaused   bool      `json:"admission_paused"`
+	DispatchBlocked   bool      `json:"dispatch_blocked"`
 	Remedy            string    `json:"remedy,omitempty"`
 	State             string    `json:"state"`
 	Object            string    `json:"object,omitempty"`

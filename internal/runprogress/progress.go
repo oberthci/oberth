@@ -10,8 +10,6 @@ import (
 	"io"
 	"strings"
 	"time"
-
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // LogDeliveryPrefix identifies retained delivery observations outside command output.
@@ -47,15 +45,14 @@ func (status Status) terminal() bool {
 // It deliberately excludes commands, arguments, environment, errors, and
 // output so the progress channel can never carry credentials.
 type Event struct {
-	Version      int           `json:"version"`
-	Stage        string        `json:"burn"`
-	Step         string        `json:"step"`
-	Ordinal      int           `json:"ordinal"`
-	Status       Status        `json:"status"`
-	DeclaredSize pipeline.Size `json:"declared_size,omitempty"`
-	ExitCode     int           `json:"exit_code,omitempty"`
-	StartedAt    *time.Time    `json:"started_at,omitempty"`
-	FinishedAt   *time.Time    `json:"finished_at,omitempty"`
+	Version    int        `json:"version"`
+	Stage      string     `json:"burn"`
+	Step       string     `json:"step"`
+	Ordinal    int        `json:"ordinal"`
+	Status     Status     `json:"status"`
+	ExitCode   int        `json:"exit_code,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
 func (event Event) Validate() error {
@@ -64,9 +61,6 @@ func (event Event) Validate() error {
 	}
 	if !validName(event.Stage) || !validName(event.Step) || event.Ordinal < 0 {
 		return errors.New("progress burn, step, or ordinal is invalid")
-	}
-	if !event.DeclaredSize.Valid() {
-		return fmt.Errorf("progress declared size %q is invalid", event.DeclaredSize)
 	}
 	switch event.Status {
 	case StepQueued:
@@ -133,18 +127,23 @@ func ParseMarker(line []byte) (event Event, found bool, err error) {
 func Decode(body []byte) (Event, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
-	var event Event
-	if err := decoder.Decode(&event); err != nil {
+	// Old retained journals can contain the former class field. Consume it only
+	// while reading history; the event type and all new writers have no class.
+	var record struct {
+		Event
+		HistoricalClass json.RawMessage `json:"declared_size"`
+	}
+	if err := decoder.Decode(&record); err != nil {
 		return Event{}, fmt.Errorf("decode step progress: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return Event{}, errors.New("step progress contains trailing JSON")
 	}
-	if err := event.Validate(); err != nil {
+	if err := record.Validate(); err != nil {
 		return Event{}, err
 	}
-	return event, nil
+	return record.Event, nil
 }
 
 func (event Event) Terminal() bool { return event.Status.terminal() }

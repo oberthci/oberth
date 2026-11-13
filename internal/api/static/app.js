@@ -721,7 +721,7 @@ async function renderRuns(seq) {
   replaceApp(`
   <section class="screen">
     <h1 class="sr-only">Runs</h1>
-    ${admissionPausedBanner(state.status?.controller_profile)}
+    ${controllerVerificationBanner(state.status?.controller_profile)}
     <div class="runs-layout">
         <div class="toolbar runs-toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
@@ -1605,13 +1605,13 @@ function svcCard(name, value, sub, mood) {
 }
 function controllerProfileStatusCard(profile) {
  if (!profile) return "";
- const paused = profile.admission_paused ?? profile.state !== "verified";
+ const paused = profile.dispatch_blocked ?? profile.state !== "verified";
  const detail = [profile.reason || (paused ? "Controller profile is unverified" : "Controller profile verified"), profile.remedy || ""].filter(Boolean).join(" · ");
- return svcCard("workflow admission", paused ? "admission paused" : "accepting new admissions", esc(detail), paused ? "warn" : "ok");
+ return svcCard("controller verification", paused ? "controller verification required" : "controller verified", esc(detail), paused ? "warn" : "ok");
 }
-function admissionPausedBanner(profile) {
- if (!profile || !(profile.admission_paused ?? profile.state !== "verified")) return "";
- return `<div role="status" class="svc warn"><strong>Admission paused</strong><div>${esc(profile.reason || "Controller profile is unverified")}</div><div>${esc(profile.remedy || "Check controller profile and ReplicaSet readiness in Status.")}</div></div>`;
+function controllerVerificationBanner(profile) {
+ if (!profile || !(profile.dispatch_blocked ?? profile.state !== "verified")) return "";
+ return `<div role="status" class="svc warn"><strong>Controller verification required</strong><div>${esc(profile.reason || "Controller profile is unverified")}</div><div>${esc(profile.remedy || "Check controller profile and ReplicaSet readiness in Status.")}</div></div>`;
 }
 function uplinkExpiryWarnings(data) {
   if (!data) return "";

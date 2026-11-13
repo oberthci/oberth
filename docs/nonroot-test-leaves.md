@@ -243,12 +243,12 @@ rejection reason `NodeShutdown`. Its exact kubelet message must be
 replacement-proof path; generic Terminated history remains fail-closed.
 Kubernetes source: https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubelet/nodeshutdown/nodeshutdown_manager.go
 
-`system_status.controller_profile` now reports `admission_paused`, a bounded
-reason and an operator remedy. The dashboard shows the hold in Status and above
+`system_status.controller_profile` now reports `dispatch_blocked`, a bounded
+reason and an operator remedy. The dashboard shows the verification wait in Status and above
 the runs list; aggregate status refreshes in the background at most every five
 minutes, without making log/run rendering wait for those reads. A banner can
 therefore lag by up to five minutes; visiting Status fetches a fresh observation. Restoring the
-supported controller profile/readiness clears the hold on the existing retry
+supported controller profile/readiness clears the verification wait on the existing retry
 loop. Running work keeps its observation and cleanup authority.
 
 The chart adds a separate, namespaced `-argo-controller-history` Role and binding

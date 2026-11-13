@@ -284,19 +284,19 @@ assert.equal(run(`summaryLines({run:{id:'original',status:'failed',display_reaso
 
 // Controller-profile holds must be visible and refresh without delaying logs.
 assert.equal(run(`controllerProfileStatusCard(null)`), '');
-const pausedProfile = `{state:'blocked',admission_paused:true,reason:'ReplicaSet <not-ready>',remedy:'Restore one Ready replacement'}`;
+const pausedProfile = `{state:'blocked',dispatch_blocked:true,reason:'ReplicaSet <not-ready>',remedy:'Restore one Ready replacement'}`;
 const profileCard = run(`controllerProfileStatusCard(${pausedProfile})`);
-const pauseBanner = run(`admissionPausedBanner(${pausedProfile})`);
-for (const text of ['admission paused','ReplicaSet &lt;not-ready&gt;','Restore one Ready replacement']) assert.ok(profileCard.includes(text), text);
-assert.ok(pauseBanner.includes('Admission paused') && pauseBanner.includes('ReplicaSet &lt;not-ready&gt;'));
-assert.equal(run(`admissionPausedBanner({state:'verified',admission_paused:false})`), '');
-assert.ok(run(`admissionPausedBanner({state:'unverified'})`).includes('Admission paused'));
+const pauseBanner = run(`controllerVerificationBanner(${pausedProfile})`);
+for (const text of ['controller verification required','ReplicaSet &lt;not-ready&gt;','Restore one Ready replacement']) assert.ok(profileCard.includes(text), text);
+assert.ok(pauseBanner.includes('Controller verification required') && pauseBanner.includes('ReplicaSet &lt;not-ready&gt;'));
+assert.equal(run(`controllerVerificationBanner({state:'verified',dispatch_blocked:false})`), '');
+assert.ok(run(`controllerVerificationBanner({state:'unverified'})`).includes('Controller verification required'));
 run(`
  const capacityStatusSavedAPI = api;
  let profileStatusCalls = 0;
  state.status = {version:'test',controller_profile:${pausedProfile}};
  state.statusLoadedAt = Date.now(); state.statusFailedAt = 0;
- api = async () => { profileStatusCalls++; return {version:'test',controller_profile:{state:'verified',admission_paused:false}}; };
+ api = async () => { profileStatusCalls++; return {version:'test',controller_profile:{state:'verified',dispatch_blocked:false}}; };
  statusRefreshPromise = ensureStatus();
 `);
 await run('statusRefreshPromise');
@@ -308,7 +308,7 @@ run(`state.statusLoadedAt = Date.now()-300001; statusRefreshPromise = ensureStat
 assert.equal(run('statusRefreshPromise === secondRefreshPromise'), true, 'concurrent background refreshes coalesce');
 await run('statusRefreshPromise');
 assert.equal(run('profileStatusCalls'), 1);
-assert.equal(run('admissionPausedBanner(state.status.controller_profile)'), '', 'recovery clears cached admission banner');
+assert.equal(run('controllerVerificationBanner(state.status.controller_profile)'), '', 'recovery clears cached admission banner');
 run(`statusRefreshPromise=loadStatus();`);
 await run('statusRefreshPromise');
 assert.equal(run('profileStatusCalls'), 2, 'visiting Status must fetch fresh data during the background cooldown');

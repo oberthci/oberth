@@ -118,7 +118,7 @@ A refusal names the volume, available bytes and required bytes. Grow/free the
 PVC or use a read-only compatibility copy on a larger workstation volume.
 Restore's live-target preview uses this same guard: it reports unavailable
 counts on refusal, without retrying or bypassing the guard. The reserve does
-not enlarge the PVC or replace the scheduler's separate optional disk floor.
+not enlarge the PVC or reserve disk space for subsequent source preparation.
 These are repeated free-space observations, not an OS quota: unrelated writers
 can still consume space between checks. The operation retains its ten-minute
 deadline, and a pinned read can retain growing WAL pages until it finishes.

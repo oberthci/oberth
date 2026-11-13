@@ -163,12 +163,12 @@ func TestInvalidProfilePausesAdmissionWithRateLimitedReason(t *testing.T) {
 		}
 		time.Sleep(29 * time.Second)
 		synctest.Wait()
-		if count := strings.Count(output.String(), "admission=paused"); count != 1 || !strings.Contains(output.String(), reason) {
+		if count := strings.Count(output.String(), "dispatch=blocked"); count != 1 || !strings.Contains(output.String(), reason) {
 			t.Fatalf("reason not rate limited: %s", &output)
 		}
 		time.Sleep(12 * time.Second)
 		synctest.Wait()
-		if count := strings.Count(output.String(), "admission=paused"); count != 2 {
+		if count := strings.Count(output.String(), "dispatch=blocked"); count != 2 {
 			t.Fatalf("missing periodic reason: %s", &output)
 		}
 		select {

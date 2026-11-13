@@ -13,10 +13,6 @@ import (
 // adminOnlyArguments are the arguments an admin-only tool needs before its
 // admin check; every other admin-only tool refuses with empty arguments.
 var adminOnlyArguments = map[string]map[string]any{
-	"size_grant":                 {"repo": "oberth", "max": "L"},
-	"size_revoke":                {"repo": "oberth"},
-	"resource_grant":             {"repo": "oberth", "requests": map[string]string{"cpu": "1", "memory": "1Gi"}, "limits": map[string]string{"cpu": "2", "memory": "2Gi"}},
-	"resource_revoke":            {"repo": "oberth"},
 	"workflow_capability_grant":  {"repo": "oberth", "capability": map[string]any{"namespace": "pipelines", "service_account": "operator-worker"}},
 	"workflow_capability_revoke": {"repo": "oberth"},
 }

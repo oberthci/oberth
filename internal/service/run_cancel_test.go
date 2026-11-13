@@ -16,7 +16,6 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 var (
@@ -163,8 +162,6 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 // gone.
 func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	fixture := newGroupFixture(t, 1)
-	fixture.engine.declare("busy", "", pipeline.M)
-	fixture.engine.declare("heavy", "", pipeline.XL)
 	running := fixture.branch(t, fixture.exampleService, "busy", "a")
 	fixture.start(t)
 	if created := fixture.awaitCreated(t, 1); !created[running.ID] {

@@ -3,35 +3,6 @@
 // CLI admission checks.
 package pipeline
 
-// Size is the declared resource tier of one pipeline step.
-type Size string
-
-const (
-	S  Size = "S"
-	M  Size = "M"
-	L  Size = "L"
-	XL Size = "XL"
-)
-
-// Effective returns the declared size, or M for an undeclared step.
-func (s Size) Effective() Size {
-	if s == "" {
-		return M
-	}
-	return s
-}
-
-// Valid reports whether the size is one of the public resource tiers. The
-// zero value is valid because undeclared steps are M for compatibility.
-func (s Size) Valid() bool {
-	switch s {
-	case "", S, M, L, XL:
-		return true
-	default:
-		return false
-	}
-}
-
 // MaxSourceBytes is the largest accepted pipeline definition file.
 const MaxSourceBytes = 1 << 20
 

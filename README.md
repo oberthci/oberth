@@ -371,20 +371,14 @@ Each template is a container with its own exit code, timeout, and named log
 slice. Oberth reads the YAML statically at submission -- it never executes
 repository code in the server process.
 
-Kubernetes places step Pods using their requests. Every limit on what runs at
-once lives in Argo ([where limits live](docs/where-limits-live.md)): the
-controller's `parallelism` bounds running Workflows, shared step limits are
-native Argo `synchronization` against the ConfigMap `oberth-sync-limits` the
-argo-workflows release renders, and `releases.serialize` runs releases one at
-a time with a native mutex. Oberth submits every admitted run at once and keeps
-only host safety that reads nothing from a workflow: the hard CPU/IO PSI valve
-and the disk-space floor. The removed `oberth.ci/size`,
-`oberth.ci/size-by-trigger`, `oberth.ci/concurrency-group`,
-`oberth.ci/concurrency-limit` and `oberth.ci/exclusive` annotations are refused
-at admission, naming their replacement. Missing requests receive the documented defaults;
-explicit requests and limits remain owned by the workflow in git. See
-[admission and native synchronization](docs/native-synchronization.md) and
-[measured resource advice](docs/measured-requests.md).
+Kubernetes places step Pods using authored requests and cluster policy. Argo
+owns the Workflow queue and concurrency: controller `parallelism`, native mutexes
+and semaphores. Operators own the semaphore ConfigMap `oberth-sync-limits`.
+Oberth submits each validated run without CPU/memory capacity, pressure or
+disk-floor gating, automatic release locks, priority mapping or request defaults.
+Missing requests remain subject to Kubernetes defaults. See
+[native scheduling](docs/native-scheduling.md) and
+[native synchronization](docs/native-synchronization.md).
 
 A run that must not overlap another declares a native mutex, shared by name
 across repositories and triggers:
@@ -395,20 +389,6 @@ spec:
     mutexes:
       - name: terraform-state
 ```
-
-Size grants (`oberth size`, MCP `size_grant`, `size_revoke`, `size_grant_get`)
-no longer change admission: Oberth reads no size from a workflow. Their one
-remaining effect is automatic tag priority. A repository whose size grant was
-revoked gets no automatic boost for its tags; `never_granted` and `granted`
-keep it. Only the oldest waiting tag per repository gets the boost, so it caps
-waiting tags, not a continuous stream. To check a repository:
-
-```bash
-oberth mcp call size_grant_get '{"repo":"example"}'
-```
-
-`revoked` disables the automatic boost; an admin re-enables it with
-`size_grant` (any accepted maximum).
 
 To skip heavy work on a branch run, guard it with the server-set
 `oberth-trigger` workflow parameter (`branch`, `promotion`, `schedule` or
@@ -434,10 +414,8 @@ spec:
 The `oberth.ci/size` and `oberth.ci/size-by-trigger` annotations are removed
 and refused at admission.
 
-Numeric resource ceilings use `oberth resource grant/get/revoke` or MCP
-`resource_grant`, `resource_grant_get`, `resource_revoke`. Migration 40 copies
-existing size grants; later size changes affect only automatic tag priority.
-Declared workflows never fall back to sizes. See
+GPUs and other extended resources need no Oberth grant or amount bound.
+Operators enforce namespace ResourceQuota and admission policy. See
 [declared resources](docs/declared-resources.md).
 
 ## MCP tools

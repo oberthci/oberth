@@ -12,7 +12,6 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // concurrentJobs holds every run inside Wait so the test can observe how many
@@ -21,15 +20,13 @@ import (
 // execution object anywhere, which is precisely the state this test guards.
 type concurrentJobs struct {
 	mu       sync.Mutex
-	size     pipeline.Size
 	created  []string
 	admitted chan string
 	release  chan struct{}
 }
 
-func newConcurrentJobs(size pipeline.Size, capacity int) *concurrentJobs {
+func newConcurrentJobs(capacity int) *concurrentJobs {
 	return &concurrentJobs{
-		size:     size,
 		admitted: make(chan string, capacity),
 		release:  make(chan struct{}),
 	}
@@ -44,10 +41,6 @@ func (jobs *concurrentJobs) CreateWorkflow(_ context.Context, request WorkflowRe
 }
 
 func (jobs *concurrentJobs) CreateRelease(context.Context, WorkflowRequest) error { return nil }
-
-func (jobs *concurrentJobs) PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error) {
-	return jobs.size.Effective(), nil
-}
 
 func (jobs *concurrentJobs) Wait(ctx context.Context, _ string, _ io.Writer) (JobResult, error) {
 	select {
@@ -74,7 +67,7 @@ type concurrencyFixture struct {
 	scheduler *Scheduler
 }
 
-func newConcurrencyFixture(t *testing.T, size pipeline.Size, maxConcurrentJobs int) *concurrencyFixture {
+func newConcurrencyFixture(t *testing.T, maxConcurrentJobs int) *concurrencyFixture {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -101,7 +94,7 @@ func newConcurrencyFixture(t *testing.T, size pipeline.Size, maxConcurrentJobs i
 	}
 	// The admitted channel is unbounded relative to the budget so an
 	// over-admission is recorded rather than blocked into invisibility.
-	jobs := newConcurrentJobs(size, maxConcurrentJobs+2)
+	jobs := newConcurrentJobs(maxConcurrentJobs + 2)
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: database, Signals: NewSignals(),

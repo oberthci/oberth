@@ -1118,7 +1118,7 @@ func noPipelineError(err error, trigger pipeline.Trigger, repoName string) error
 }
 
 // PipelineCredentialed reports whether the checked-out pipeline declares
-// secret-store paths by decoding the same document PipelineSize reads.
+// secret-store paths by statically decoding the reviewed document.
 func (jobs *ArgoJobs) PipelineCredentialed(ctx context.Context, request service.WorkflowRequest) (bool, error) {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forRequest(ctx, request)

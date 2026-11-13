@@ -12,7 +12,7 @@ import (
 )
 
 // WriteStatusMetrics exports the system_status values an operator alerts on:
-// queue pressure, a paused admission, backup and audit-anchor age, admin token
+// controller identity verification, backup and audit-anchor age, admin token
 // expiry and the database size the backup ceiling is measured against. Every
 // value is read from the same sources as Status; a source that fails is left
 // out rather than reported as zero. No probe here touches the network.
@@ -28,7 +28,7 @@ func (health Health) WriteStatusMetrics(ctx context.Context, w io.Writer) {
 	}
 	if health.ControllerProfile != nil {
 		if profile := health.ControllerProfile(); profile != nil {
-			gauge("oberth_admission_paused", "1 while the controller profile check pauses dispatch", flag(profile.AdmissionPaused))
+			gauge("oberth_controller_verification_blocked", "1 while controller identity verification blocks new dispatch", flag(profile.DispatchBlocked))
 		}
 	}
 	if health.Storage != nil {

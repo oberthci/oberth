@@ -308,19 +308,6 @@ func inlinedName(key FragmentKey, template string) (string, error) {
 	return name, nil
 }
 
-// FragmentTemplateOwner resolves server-expanded template provenance from the
-// recorded lock. Hashes alone do not identify a source repository.
-func FragmentTemplateOwner(name string, lock Lock) (repo, sha string) {
-	for _, f := range lock {
-		digest := sha256.Sum256([]byte(f.Key.String()))
-		prefix := fragmentNamePrefix + hex.EncodeToString(digest[:4]) + "-"
-		if strings.HasPrefix(name, prefix) {
-			return f.Key.Repo, f.SHA
-		}
-	}
-	return "", ""
-}
-
 func rebindLocalTemplates(template *wfv1.Template, mapping map[string]string) {
 	for group := range template.Steps {
 		for index := range template.Steps[group].Steps {

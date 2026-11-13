@@ -20,7 +20,6 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
@@ -237,9 +236,8 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	})
 	for _, tc := range []struct {
 		tag, file string
-		size      pipeline.Size
 		release   bool
-	}{{"deploy-1", ".oberth/deploy.yaml", pipeline.M, true}, {"v1.2.3", ".oberth/release.yaml", pipeline.M, true}, {"test-1", ".oberth/build.yaml", pipeline.M, false}} {
+	}{{"deploy-1", ".oberth/deploy.yaml", true}, {"v1.2.3", ".oberth/release.yaml", true}, {"test-1", ".oberth/build.yaml", false}} {
 		git(work, "tag", "-a", tc.tag, "-m", tc.tag)
 		object := git(work, "rev-parse", "refs/tags/"+tc.tag)
 		commit := git(work, "rev-parse", "refs/tags/"+tc.tag+"^{commit}")

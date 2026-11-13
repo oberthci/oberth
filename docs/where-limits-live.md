@@ -28,6 +28,6 @@ security controls; do not edit a digest-named profile's content in place.
 
 Operators create and own semaphore ConfigMaps with `kubectl`; see
 [native synchronization](native-synchronization.md). The v0.22.0 upgrade stops
-rendering `oberth-sync-limits`; recreate required keys before resuming users.
+rendering `oberth-sync-limits` and orphans the existing object with data unchanged; new installs create required keys themselves.
 The managed installer preserves unrelated `extraObjects`, including the nonroot
 controller profile. Oberth's own pipelines use named mutexes, not semaphore keys.

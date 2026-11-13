@@ -186,7 +186,7 @@ Draining MCP `wait`/`promote_status` observers receive JSON-RPC error `-32001`
 (`server restarting`) in their final JSON/SSE response. Other MCP clients can
 reconnect those observations using the same SHA/run/promotion identity. An SSE
 connection that ends before a result can also be retried for these reads.
-Mutations such as `promote`, `sync`, `run_cancel` and `admission_release`, and
+Mutations such as `promote`, `sync`, `run_cancel`, and
 unknown tools, are never automatically retried, even after 503. If a mutation's
 reply is lost, inspect its durable result before deciding what to do next.
 

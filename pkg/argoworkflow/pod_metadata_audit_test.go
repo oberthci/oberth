@@ -141,7 +141,7 @@ func TestPodMetadataInvocationTable(t *testing.T) {
 					leaf.PodSpecPatch = `{"hostNetwork":true}`
 				}
 				hooks := wfv1.LifecycleHooks{"exit": wfv1.LifecycleHook{Template: "leaf"}}
-				main := wf.Spec.Templates[0]
+				var main wfv1.Template
 				switch site {
 				case "workflow-exit":
 					wf.Spec.OnExit = "leaf"

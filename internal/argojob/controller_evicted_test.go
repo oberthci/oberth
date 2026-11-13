@@ -191,7 +191,7 @@ func TestControllerEvictedHistoryIncompleteListAndRSReadFailClosed(t *testing.T)
 		})
 	}
 }
-func TestControllerEvictedHistoryAdmissionPauseIsObservableAndRecovers(t *testing.T) {
+func TestControllerEvictedHistoryVerificationWaitIsObservableAndRecovers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		live, old, cm, rs := evictedControllerFixture()
 		rs.Status.ReadyReplicas = 0
@@ -206,7 +206,7 @@ func TestControllerEvictedHistoryAdmissionPauseIsObservableAndRecovers(t *testin
 			t.Fatal("unready replacement accepted")
 		}
 		status := c.ControllerProfileStatus()
-		if !status.AdmissionPaused || status.Remedy == "" || !strings.Contains(status.Reason, "ReplicaSet") {
+		if !status.DispatchBlocked || status.Remedy == "" || !strings.Contains(status.Reason, "ReplicaSet") {
 			t.Fatal("pause invisible", status)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
@@ -227,7 +227,7 @@ func TestControllerEvictedHistoryAdmissionPauseIsObservableAndRecovers(t *testin
 			t.Fatal(err)
 		}
 		status = c.ControllerProfileStatus()
-		if status.AdmissionPaused || status.State != "verified" || status.Remedy != "" || status.Reason != "" {
+		if status.DispatchBlocked || status.State != "verified" || status.Remedy != "" || status.Reason != "" {
 			t.Fatal("pause did not clear", status)
 		}
 	})

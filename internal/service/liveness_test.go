@@ -281,7 +281,7 @@ func TestLivenessDispatchPauseSurvivesOtherGoroutine(t *testing.T) {
 	}()
 	awaitLivenessSignal(t, otherDone)
 	if err := scheduler.dispatchProgress.CheckAt(time.Now().Add(24 * time.Hour)); err != nil {
-		t.Fatal("background promotion context cleared dispatch's admission pause", err)
+		t.Fatal("background promotion context cleared dispatch's controller verification wait", err)
 	}
 	cancel()
 	select {

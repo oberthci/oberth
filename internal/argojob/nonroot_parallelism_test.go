@@ -51,7 +51,7 @@ func TestNonrootVerifierAcceptsTheParallelismProfile(t *testing.T) {
 }
 
 // Without a pin the server follows the profile the controller runs, so an
-// Argo limits change needs no Oberth release first and no admission pause:
+// Argo limits change needs no Oberth release first and no interruption for controller verification:
 // the profile verifies under its digest name, and the proof binds its digest.
 func TestNonrootVerifierFollowsTheRunningProfile(t *testing.T) {
 	profile, err := argoworkflow.NewNonrootProfile(4, 2)

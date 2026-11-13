@@ -21,19 +21,22 @@ retired test contract is absent at both the candidate and fresh upstream default
 
 The operator also pins:
 
-- The namespace, pipeline ServiceAccount, node name/UID, provider, zone, pool,
-  taint and complete kubelet version.
+- The namespace, pipeline ServiceAccount and operator admission evidence. The node_version
+  value remains admission evidence, not a worker-node guarantee.
 - Cluster creation time and anchor UID, authenticated API endpoint/CA identity,
   control-plane version and immutable admission configuration.
 - Controller Pod, ReplicaSet, Deployment and configuration names and UIDs.
 - Running native binary, dependency configuration and admission-policy digests,
   plus an expiry time.
 
-Source delivery and Workflow generation check the same selection. Templates
-receive the fixed selectors and tolerations. Nonroot controller proof, readonly
-source, private scratch, helper budgets and ordinary resource admission remain
-mandatory. No device capability is inferred from placement. Operator resource
-and extended-resource grants are independent.
+Source delivery and Workflow generation check the same authenticated selection.
+Repository selectors, affinity and tolerations pass through unchanged. The
+retired node/location/taint configuration fields are refused and their stored
+snapshots are scrubbed by a forward migration. Oberth does not guarantee a
+particular worker node. Operators isolate dedicated nodes using taints plus
+Kubernetes admission or namespace policies; repository YAML carries selectors
+and tolerations. Resource templates still need an API-kind/action capability;
+extended resources are vanilla Kubernetes requests without an Oberth grant.
 
 The canonical target journal records the selected cluster, exact source capsule,
 created object UIDs and observations. Recovery uses the retained target snapshot

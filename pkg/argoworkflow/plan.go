@@ -41,7 +41,7 @@ const MaxPlannedSteps = 512
 // PlannedSteps enumerates every step the document declares, in declaration
 // order, from the already-decoded object.
 //
-// It reads and never evaluates, exactly like DeclaredSize and
+// It reads and never evaluates, alongside
 // DeclaredSecretPaths: the plan is a statement about the reviewed bytes, not a
 // prediction about the run. A planned step may legitimately never execute --
 // a `when` guard, an unsatisfied `depends`, or a failure upstream of it -- and

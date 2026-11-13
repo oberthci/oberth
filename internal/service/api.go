@@ -355,7 +355,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if name == "run_logs" || name == "logs" {
 		ctx = withRunLogCaller(ctx, actor)
 	}
-	if name == "run_get" || name == "run_logs" || name == "logs" || name == "run_resources" {
+	if name == "run_get" || name == "run_logs" || name == "logs" {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, runReadBudget)
 		defer func() {

@@ -62,12 +62,12 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 	// generic step branch below advised fixing the code.
 	switch {
 	case strings.Contains(message, "exceeded its declared ephemeral-storage budget"):
-		return code("resource_limit", "raise the step's ephemeral-storage limit in git (run_resources)", boundedText(message, 200))
+		return code("resource_limit", "raise the step's ephemeral-storage limit in git", boundedText(message, 200))
 	case run.FailedStep != "" && (message == "Evicted" || strings.HasPrefix(message, "Evicted: ")):
 		// The same kubelet message classification as the step-less line.
 		reason := evictionDisplayReason(model.Run{Phase: "infrastructure", Error: message})
 		if strings.Contains(reason, "storage limit") {
-			return code("resource_limit", "raise the step's ephemeral-storage limit in git (run_resources)", reason)
+			return code("resource_limit", "raise the step's ephemeral-storage limit in git", reason)
 		}
 		return infrastructure("eviction", "run_retry", reason)
 	}
@@ -81,7 +81,7 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 	case model.IsNodeRebootReason(message):
 		return infrastructure("node_reboot", "run_retry", message)
 	case strings.HasPrefix(message, "OOM kill at "):
-		return code("oom", "raise the step's memory limit in git (run_resources)", "the step exceeded its memory limit")
+		return code("oom", "raise the step's memory limit in git", "the step exceeded its memory limit")
 	}
 	if model.IsExecutionDeadlineReason(message) {
 		if limit, observed, ok := deadlineRuntime(message); ok && observed < limit*9/10 {

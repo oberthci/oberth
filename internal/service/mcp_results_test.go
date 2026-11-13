@@ -124,7 +124,7 @@ func TestMCPRefusalReasonsAndScope(t *testing.T) {
 				t.Fatal("promotion revealed an out-of-scope repository")
 			}
 
-			for _, tool := range []string{"promote_grant_list", "size_grant_get"} {
+			for _, tool := range []string{"promote_grant_list"} {
 				hidden := resultCall(t, server, tool, map[string]any{"repo": hiddenRepoName})
 				missing := resultCall(t, server, tool, map[string]any{"repo": "does-not-exist"})
 				if !hidden.IsError || fmt.Sprint(hidden.Content) != fmt.Sprint(missing.Content) {

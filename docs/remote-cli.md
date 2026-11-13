@@ -181,21 +181,9 @@ Workflow already published stays published. Cancelling promotion CI fails the
 promotion without merging. A terminal run is refused. `oberth runs cancel`
 cancels every active run of one ref the same way, reporting each refusal.
 
-`oberth admission` prints the server's admission gate from `system_status`:
-how many runs are admitted (Argo controller `parallelism` bounds how many
-Workflows run; Oberth keeps no run ceiling), an active administrator hold with
-its whole reason, host pressure, the queue-head run every later run waits
-behind, and every reservation with its state (`preparing`, `waiting`,
-`granted`, `retained`), repository/ref and age. There are no sizes, weights or
-concurrency groups: shared step limits are native Argo `synchronization`
-([where limits live](where-limits-live.md)). `oberth admission release <run-id>` calls the admin-only
-`admission_release` MCP tool to free a reservation no owner will release,
-typically a granted one still held for a run that is already terminal. It
-deletes the run's Workflow first as proof; `--force` releases without that
-proof (a failed deletion, or a run in a trusted preflight that has no recorded
-Workflow), and the audit records it unverified. A live run's reservation is
-refused: cancel the run instead. The gate lives in the server process, so both
-are remote-only.
+Uncertain Workflow creation retains its authenticated original-object custody.
+Inspect the run and use run_cancel to request cleanup; no resource reservation
+release command exists.
 
 Inside the server pod, pass `--database /data/oberth.sqlite` instead of the
 MCP flags: the command then passes the live daemon's audit mutation gate,

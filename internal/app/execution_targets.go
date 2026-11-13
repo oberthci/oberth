@@ -406,7 +406,7 @@ func (jobs *ArgoJobs) ExecutionTargetProfiles() map[string]*model.ControllerProf
 	defer r.mu.Unlock()
 	profiles := map[string]*model.ControllerProfileStatus{}
 	for id := range r.definitions {
-		profiles[id] = &model.ControllerProfileStatus{State: "unverified", AdmissionPaused: true}
+		profiles[id] = &model.ControllerProfileStatus{State: "unverified", DispatchBlocked: true}
 	}
 	keys := make([]string, 0, len(r.children))
 	for id := range r.children {
@@ -422,7 +422,7 @@ func (jobs *ArgoJobs) ExecutionTargetProfiles() map[string]*model.ControllerProf
 		}
 		id := child.targetBinding.Target
 		previous := profiles[id]
-		if !observed[id] || (status.AdmissionPaused && !previous.AdmissionPaused) {
+		if !observed[id] || (status.DispatchBlocked && !previous.DispatchBlocked) {
 			profiles[id] = status
 		}
 		observed[id] = true

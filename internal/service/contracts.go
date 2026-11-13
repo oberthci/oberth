@@ -452,10 +452,10 @@ type ReleaseJobController interface {
 }
 
 // PipelinePlanner enumerates the steps the immutable checked-out pipeline
-// declares, by the same static read PipelineSizer makes: the server reads the
+// declares: the server reads the
 // reviewed document, never evaluates it.
 //
-// It is optional exactly as PipelineSizer is. An engine that cannot enumerate
+// It is optional. An engine that cannot enumerate
 // its own format simply has no plan, and its runs behave as they always have:
 // steps appear as execution reaches them.
 type PipelinePlanner interface {
@@ -463,7 +463,7 @@ type PipelinePlanner interface {
 }
 
 // PipelineCredentialDetector reports whether the checked-out pipeline declares
-// secret-store paths. Like PipelineSizer, it reads the reviewed document
+// secret-store paths. It reads the reviewed document
 // without evaluating it. An engine that does not implement this interface is
 // assumed to have no credentialed CI pipelines; release runs are always
 // credentialed regardless.

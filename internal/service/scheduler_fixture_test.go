@@ -17,7 +17,6 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // groupEngine is an execution engine that holds every created Job until the
@@ -27,7 +26,6 @@ import (
 type groupEngine struct {
 	numericCPU map[string]int64
 	mu         sync.Mutex
-	sizes      map[string]pipeline.Size
 	jobs       map[string]*groupEngineJob // Job name -> job
 	byRun      map[string]*groupEngineJob // run ID -> job
 	violations []string
@@ -54,18 +52,10 @@ type groupEngineJob struct {
 
 func newGroupEngine() *groupEngine {
 	return &groupEngine{
-		numericCPU: map[string]int64{}, sizes: map[string]pipeline.Size{},
-		jobs: map[string]*groupEngineJob{}, byRun: map[string]*groupEngineJob{},
+		numericCPU: map[string]int64{},
+		jobs:       map[string]*groupEngineJob{}, byRun: map[string]*groupEngineJob{},
 		created: make(chan string, 64), deleteErrs: map[string]error{},
 	}
-}
-
-// declare records the historical size of ref's document; the retired group
-// argument has no effect.
-func (engine *groupEngine) declare(ref, _ string, size pipeline.Size) {
-	engine.mu.Lock()
-	defer engine.mu.Unlock()
-	engine.sizes[ref] = size
 }
 
 func (engine *groupEngine) create(request WorkflowRequest) error {
@@ -87,15 +77,6 @@ func (engine *groupEngine) CreateWorkflow(_ context.Context, request WorkflowReq
 
 func (engine *groupEngine) CreateRelease(_ context.Context, request WorkflowRequest) error {
 	return engine.create(request)
-}
-
-func (engine *groupEngine) PipelineSize(_ context.Context, request WorkflowRequest) (pipeline.Size, error) {
-	engine.mu.Lock()
-	defer engine.mu.Unlock()
-	if size, ok := engine.sizes[request.Run.Ref]; ok {
-		return size, nil
-	}
-	return pipeline.M, nil
 }
 
 func (engine *groupEngine) Wait(ctx context.Context, name string, _ io.Writer) (JobResult, error) {
@@ -243,8 +224,7 @@ func newGroupFixture(t *testing.T, _ int) *groupFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// These fixtures exercise admission mechanics with XL runs; XL takes a
-	// size grant since #1021.
+	// The fake engine records native creation and cancellation only.
 	return &groupFixture{store: database, terraform: terraform, exampleService: exampleService, engine: engine, scheduler: scheduler, control: control, git: git}
 }
 

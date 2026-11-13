@@ -87,8 +87,8 @@ agentEvents:
   heartbeat: 20s
 
 # The chart always creates control-plane and non-preempting pipeline
-# PriorityClasses. The installer assigns the same control-plane class to its
-# Argo controller and OpenBao releases. See docs/platform-protection.md.
+# PriorityClasses for installed-object continuity. The control-plane class belongs to the
+# server. Argo and OpenBao have no injected class. See docs/platform-protection.md.
 
 # Prometheus Operator scrape of the server's /metrics (default off). Mint a
 # metrics-scoped token (oberth uplink add --scope metrics), which reads
@@ -522,8 +522,7 @@ secretstore:
   # Grant this ServiceAccount system:auth-delegator so OpenBao can validate
   # its tokens via TokenReview without storing a reviewer JWT. This binding is
   # cluster-scoped, like the chart's ValidatingAdmissionPolicy and its binding,
-  # the scheduling PriorityClasses;
-  # disable it if the binding is
+  # and PriorityClasses. Disable it if the binding is
   # managed elsewhere.
   createAuthDelegatorBinding: true
   # null detects .svc / .svc.cluster.local endpoints as in-cluster. Override

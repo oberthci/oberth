@@ -1,11 +1,11 @@
 # Qualifying platform recovery under pressure
 
-Oberth platform protection covers Oberth, its Argo controller and OpenBao.
+The server retains its control-plane priority class. Argo and OpenBao have no\ninjected requests or priority class; operators configure their cluster policy.
 Operators must qualify the actual target cluster before relying on it for
 recovery. An isolated fixture can exercise scheduling and Pod recreation, but
 pause-container results do not establish application health or recovery.
 
-Use a disposable cluster to verify memory and disk pressure admission,
+Use a disposable cluster to verify Kubernetes behavior under memory and disk pressure,
 configured PriorityClasses and tolerations, recreation with new Pod UIDs,
 and recovery after pressure clears. Preserve sanitized effective kubelet
 configuration, node conditions, Pod priority, QoS and readiness as evidence.

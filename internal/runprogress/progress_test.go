@@ -5,15 +5,13 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
-
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestMarkerRoundTripAndStrictValidation(t *testing.T) {
 	started := time.Now().UTC()
 	event := Event{
 		Version: Version, Stage: "test", Step: "unit", Ordinal: 2,
-		Status: StepRunning, DeclaredSize: pipeline.L, StartedAt: &started,
+		Status: StepRunning, StartedAt: &started,
 	}
 	marker, err := MarshalMarker(event)
 	if err != nil {
@@ -83,7 +81,7 @@ func TestEventValidate(t *testing.T) {
 	valid := func(status Status, started, finished *time.Time) Event {
 		return Event{
 			Version: Version, Stage: "test", Step: "unit", Ordinal: 0,
-			Status: status, DeclaredSize: pipeline.M,
+			Status:    status,
 			StartedAt: started, FinishedAt: finished,
 		}
 	}
@@ -144,13 +142,6 @@ func TestEventValidate(t *testing.T) {
 		e.Ordinal = -1
 		if err := e.Validate(); err == nil {
 			t.Fatal("accepted negative ordinal")
-		}
-	})
-	t.Run("invalid declared size", func(t *testing.T) {
-		e := valid(StepQueued, nil, nil)
-		e.DeclaredSize = pipeline.Size("XXXL")
-		if err := e.Validate(); err == nil {
-			t.Fatal("accepted invalid declared size")
 		}
 	})
 	t.Run("queued with timestamps", func(t *testing.T) {
@@ -332,5 +323,16 @@ func TestPlannedStepSecretsIsAdditive(t *testing.T) {
 	}
 	if len(legacy.Steps) != 1 || legacy.Steps[0].Secrets {
 		t.Fatalf("legacy plan decoded as %+v, want one step without secrets", legacy.Steps)
+	}
+}
+
+func TestHistoricalProgressClassIsDiscarded(t *testing.T) {
+	event, err := Decode([]byte(`{"version":1,"burn":"test","step":"unit","ordinal":0,"status":"queued","declared_size":"XL"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := MarshalMarker(event)
+	if err != nil || bytes.Contains(marker, []byte("declared_size")) {
+		t.Fatal("class re-emitted", string(marker), err)
 	}
 }

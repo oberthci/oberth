@@ -152,7 +152,7 @@ func TestRunSelectorsAreID(t *testing.T) {
 			t.Errorf("%s publishes run_id", name)
 		}
 	}
-	for _, name := range []string{"run_get", "run_resources", "run_priority", "admission_release", "wait", "run_wait"} {
+	for _, name := range []string{"run_get", "wait", "run_wait"} {
 		for _, definition := range toolDefinitions() {
 			if definition["name"] != name {
 				continue

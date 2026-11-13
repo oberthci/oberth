@@ -50,14 +50,14 @@ func (controller *Controller) ControllerProfileStatus() *model.ControllerProfile
 	if status.State == "" {
 		status.State = "unverified"
 	}
-	status.AdmissionPaused = status.State != "verified"
-	if status.AdmissionPaused {
+	status.DispatchBlocked = status.State != "verified"
+	if status.DispatchBlocked {
 		status.Remedy = "Restore one Ready controller matching the pinned profile and its immutable ConfigMap; verify ReplicaSet readiness and server read permissions. Obsolete Failed/Evicted or Failed/NodeShutdown records are accepted automatically when replacement is proven."
 	}
 	return &status
 }
 
-// AwaitAdmission pauses new work while profile verification is unavailable.
+// AwaitAdmission waits for authenticated controller identity before dispatch.
 // Existing background tasks retain their contexts and cleanup/publication authority.
 func (controller *Controller) AwaitAdmission(ctx context.Context) error {
 	status := controller.ControllerProfileStatus()
@@ -126,7 +126,7 @@ func (controller *Controller) verifyNonrootWithRetry(ctx context.Context, reques
 			controller.profileBackoff = min(profileRetryMaximum, max(profileRetryMinimum, controller.profileBackoff*2))
 			status.RetryAt = time.Now().Add(controller.profileBackoff)
 			if previousReason != status.Reason || time.Since(controller.profileLogAt) >= profileLogInterval {
-				log.Printf("controller profile unverified: object=%q class=%s reason=%q admission=paused retry_in=%s read_failures_total=%d", status.Object, status.ErrorClass, status.Reason, controller.profileBackoff, status.ReadFailuresTotal)
+				log.Printf("controller profile unverified: object=%q class=%s reason=%q dispatch=blocked retry_in=%s read_failures_total=%d", status.Object, status.ErrorClass, status.Reason, controller.profileBackoff, status.ReadFailuresTotal)
 				controller.profileLogAt = time.Now()
 			}
 		}

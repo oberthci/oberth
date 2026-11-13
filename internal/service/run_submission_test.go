@@ -47,6 +47,6 @@ func TestSchedulerStartsRunAtWeightedAdmission(t *testing.T) {
 	}
 	run, err := fixture.store.Run(ctx, enqueued.ID)
 	if err != nil || !observed || run.StartedAt == nil || run.StartedAt.Before(run.QueuedAt) {
-		t.Fatalf("weighted admission did not start run: %#v, observed=%v, err=%v", run, observed, err)
+		t.Fatalf("native submission did not start run: %#v, observed=%v, err=%v", run, observed, err)
 	}
 }

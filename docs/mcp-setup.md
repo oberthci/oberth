@@ -1070,7 +1070,7 @@ cannot downgrade HTTPS to HTTP.
 Run and promotion ID arguments accept a full hexadecimal ID or a unique prefix
 of at least 8 characters. Ambiguous prefixes list the matching visible full IDs;
 use a longer prefix or the full ID. This also applies to ID pagination cursors,
-`run_priority`, `admission_release`, `promote_status`, and `promote_retry`.
+`promote_status`, and `promote_retry`.
 Issue IDs and grant IDs are decimal integers and must be supplied in full.
 Publication IDs (for `publication_abandon`) remain exact IDs.
 

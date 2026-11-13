@@ -212,7 +212,7 @@ roleRef:
 # --configmap argument (#1517). Its name is oberth-argo-nr-<content digest>,
 # so the server reads whichever profile the controller runs and verifies the
 # content against that digest; no name is pinned here, so an Argo limits
-# change needs no ordered second release and no admission pause. GET only (no
+# change needs no ordered second release and no interruption for controller verification. GET only (no
 # list or watch, no write): the pipeline namespace holds only public
 # ConfigMaps (profiles, sync limits, the cluster root CA), never Secrets.
 apiVersion: rbac.authorization.k8s.io/v1
