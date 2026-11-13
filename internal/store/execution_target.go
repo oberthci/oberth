@@ -11,6 +11,10 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
+// ErrExecutionTargetQuarantined identifies retained migration evidence that
+// cannot authorize routing or effects. Other invalid states are not quarantine.
+var ErrExecutionTargetQuarantined = fmt.Errorf("%w: execution target binding is quarantined", ErrInvalidState)
+
 // BindExecutionTarget atomically checks the canonical run and creates one
 // immutable route. Identical calls are idempotent; no table grants authority.
 func (s *Store) BindExecutionTarget(ctx context.Context, binding model.ExecutionTargetBinding) error {
@@ -402,7 +406,7 @@ func (s *Store) CompleteExecutionTargetCleanup(ctx context.Context, runID string
 }
 
 func executionTargetQuarantineError() error {
-	return fmt.Errorf("%w: execution target binding is quarantined; %s", ErrInvalidState, model.ExecutionTargetRecoveryRemedy)
+	return fmt.Errorf("%w; %s", ErrExecutionTargetQuarantined, model.ExecutionTargetRecoveryRemedy)
 }
 
 func requireUsableExecutionTarget(ctx context.Context, tx *sql.Tx, runID string) error {

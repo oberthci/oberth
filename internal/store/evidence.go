@@ -98,6 +98,7 @@ const evidenceProtectionSQL = `
  r.status IN ('queued','waiting','running') OR r.release = 1 OR r.ref_kind = 'tag'
  OR r.trigger IN ('tag','release','plan','apply')
  OR EXISTS(SELECT 1 FROM run_cancellations c WHERE c.run_id=r.id AND c.completed_at IS NULL)
+ OR EXISTS(SELECT 1 FROM execution_target_bindings b WHERE b.run_id=r.id AND b.quarantine_reason<>'')
  OR EXISTS(SELECT 1 FROM promotions p WHERE p.run_id=r.id
    OR (p.repo_id=r.repo_id AND p.status='pending' AND (p.source_sha=r.sha OR p.source_sha=r.tested_sha OR p.result_sha=r.tested_sha)))
  OR EXISTS(SELECT 1 FROM publications p WHERE p.run_id=r.id AND p.status='pending')

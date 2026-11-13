@@ -8,7 +8,8 @@ import (
 
 // RunWorkspaceCleanupEligible reports whether the durable run owner can no
 // longer use its workspace. Pending publications and incomplete cancellation
-// obligations keep ownership even when the run projection is terminal.
+// obligations and quarantined target evidence keep ownership even when the run
+// projection is terminal.
 func (s *Store) RunWorkspaceCleanupEligible(ctx context.Context, id string) (bool, error) {
 	if strings.TrimSpace(id) == "" {
 		return false, fmt.Errorf("%w: run workspace owner is required", ErrInvalid)
@@ -19,6 +20,10 @@ SELECT EXISTS (
     SELECT 1 FROM runs
     WHERE id = ?
       AND status IN ('passed', 'failed', 'interrupted')
+      AND NOT EXISTS (
+          SELECT 1 FROM execution_target_bindings b
+          WHERE b.run_id=runs.id AND b.quarantine_reason<>''
+      )
       AND NOT EXISTS (
           SELECT 1 FROM publications
           WHERE publications.run_id = runs.id AND publications.status = 'pending'
@@ -46,6 +51,10 @@ SELECT EXISTS (
     WHERE id = ?
       AND status IN ('passed', 'failed', 'interrupted')
       AND NOT EXISTS (
+          SELECT 1 FROM execution_target_bindings b
+          WHERE b.run_id=promotions.run_id AND b.quarantine_reason<>''
+      )
+      AND NOT EXISTS (
           SELECT 1 FROM publications
           WHERE publications.promotion_id = promotions.id AND publications.status = 'pending'
       )
@@ -63,6 +72,10 @@ func (s *Store) RunWorkspaceCleanupCandidates(ctx context.Context, afterID strin
 SELECT id FROM runs
 WHERE id > ?
   AND status IN ('passed', 'failed', 'interrupted')
+  AND NOT EXISTS (
+      SELECT 1 FROM execution_target_bindings b
+      WHERE b.run_id=runs.id AND b.quarantine_reason<>''
+  )
   AND NOT EXISTS (
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
@@ -94,6 +107,10 @@ func (s *Store) PromotionWorkspaceCleanupCandidates(ctx context.Context, afterID
 SELECT id FROM promotions
 WHERE id > ?
   AND status IN ('passed', 'failed', 'interrupted')
+  AND NOT EXISTS (
+      SELECT 1 FROM execution_target_bindings b
+      WHERE b.run_id=promotions.run_id AND b.quarantine_reason<>''
+  )
   AND NOT EXISTS (
       SELECT 1 FROM publications
       WHERE publications.promotion_id = promotions.id AND publications.status = 'pending'

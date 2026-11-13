@@ -714,6 +714,9 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
 		if err != nil {
+			if errors.Is(err, store.ErrExecutionTargetQuarantined) {
+				return false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)
+			}
 			return false, err
 		}
 		found, err := child.Adopt(ctx, run)

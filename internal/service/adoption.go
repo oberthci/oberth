@@ -38,7 +38,9 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 		defer cancel()
 		selected, selectErr := target.WorkflowNamespaceForRun(ctx, run)
 		if selectErr != nil {
-			return fmt.Errorf("adopt run %s: original execution target unavailable: %w", run.ID, err)
+			failure := fmt.Errorf("adopt run %s: Workflow %s: original execution target unavailable: %w", run.ID, run.WorkflowName, err)
+			log.Printf("ERROR: %v", failure)
+			return failure
 		}
 		namespace = selected
 	}
@@ -56,7 +58,11 @@ func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter J
 	if !errors.Is(cause, ErrAdoptionRefused) {
 		return failure
 	}
-	return scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()}, require)
+	message := failure.Error()
+	if errors.Is(cause, store.ErrExecutionTargetQuarantined) {
+		message = "execution target quarantined: " + message
+	}
+	return scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: message}, require)
 }
 
 // adopt restores submission ownership for work already running.

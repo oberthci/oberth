@@ -81,7 +81,7 @@ func TestTargetPlacementMigrationQuarantinesInconsistentCustody(t *testing.T) {
 				t.Fatal("retained binding vanished")
 			}
 			if quarantined {
-				if !errors.Is(err, ErrInvalidState) || !strings.Contains(err.Error(), "quarantined") {
+				if !errors.Is(err, ErrInvalidState) || !errors.Is(err, ErrExecutionTargetQuarantined) {
 					t.Fatal("inconsistent binding usable", err)
 				}
 				var saved string
