@@ -463,6 +463,8 @@ Flags:
         upstream organization
   -plan
         inspect the selected cluster and preflight checks without installing
+  -probe
+        with --verify, run the live NetworkPolicy enforcement probe (creates a scratch namespace and Pods)
   -push-banner-url string
         push feedback URL; omitted preserves the live URL, explicit empty clears it
   -reissue-server-ca
@@ -516,7 +518,7 @@ Flags:
   -values value
         helm values file applied to the Oberth release (repeatable, applied in order); the installer's own settings still win, so a value it computed cannot be overridden by a stale one in a file
   -verify
-        check an existing installation without changing it
+        read an existing installation; add --probe to measure NetworkPolicy enforcement
   -yes
         confirm the reviewed install on the selected kubeconfig context
 ```

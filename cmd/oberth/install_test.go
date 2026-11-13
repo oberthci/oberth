@@ -216,3 +216,12 @@ func TestInstallReviewAcceptsNativeArgoLimits(t *testing.T) {
 		t.Fatal("review lost chosen Argo values", err, output.String())
 	}
 }
+
+func TestInstallProbeRequiresExplicitVerification(t *testing.T) {
+	for _, args := range [][]string{{"--probe"}, {"--plan", "--probe"}, {"--verify", "--dry-run", "--probe"}} {
+		err := runInstall(t.Context(), args, strings.NewReader(""), io.Discard)
+		if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "--probe requires --verify") {
+			t.Fatal(args, err)
+		}
+	}
+}

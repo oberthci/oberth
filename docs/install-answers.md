@@ -153,8 +153,11 @@ never claim enforcement. The probe has a 120-second bound and always attempts
 cleanup with its own 30-second bound, including after cancellation. Cleanup
 failure names the exact scratch namespace and refuses a successful check.
 Plan makes no cluster mutations and reports that enforcement will be checked
-first at install, after approval. Install and explicit verification create and
-clean up short-lived probe resources. They do not change the selected kubeconfig.
+first at install, after approval. Verify is read-only by default and reports
+that enforcement was measured at install; this verification did not re-test it. Use
+`oberth install --verify --probe` to create and clean up short-lived probe
+resources for a new measurement. Install still probes after approval and
+refuses absent or unverified enforcement on fresh installs. They do not change the selected kubeconfig.
 
 ## Upstream name
 

@@ -125,6 +125,7 @@ func VerifyInstall(ctx context.Context, cfg Config, host InstallDeps) InstallRes
 func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenance bool) InstallResult {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	progress := host.Output
 	host.Output = io.Discard
 	host = host.withDefaults()
 	r := InstallResult{Version: 1, OK: true, Context: cfg.ContextName, Checks: []CheckResult{}}
@@ -193,8 +194,18 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		return r
 	}
 	preflightDeps := deps
+	preflightDeps.Output = progress
 	preflightDeps.RunCommand = host.RunCommand
-	inspectCluster(ctx, &cfg, preflightDeps, &identity, &r, maintenance, true)
+	inspectCluster(ctx, &cfg, preflightDeps, &identity, &r, maintenance, host.VerifyProbe)
+	if !maintenance && !host.VerifyProbe {
+		for i := range r.Checks {
+			check := &r.Checks[i]
+			if check.Code == "network_policy" && check.Warning && check.Reason == "unverified" {
+				check.OK, check.Warning, check.Reason, check.Remedy = true, false, "not-retested", ""
+				check.Evidence = "NetworkPolicy enforcement was measured at install; this verification did not re-test it. Use oberth install --verify --probe to run a live measurement."
+			}
+		}
+	}
 	review := Review(cfg)
 	r.Review = &review
 	r.Cluster = &identity
@@ -308,16 +319,20 @@ func readinessRemedy(reason string) string {
 }
 
 func PrintVerification(ctx context.Context, cfg Config, deps InstallDeps, asJSON bool) error {
+	output := deps.Output
+	if asJSON {
+		deps.Output = io.Discard
+	}
 	result := VerifyInstall(ctx, cfg, deps)
 	if asJSON {
-		if err := json.NewEncoder(deps.Output).Encode(result); err != nil {
+		if err := json.NewEncoder(output).Encode(result); err != nil {
 			return err
 		}
 	} else {
 		for _, check := range result.Checks {
-			_, _ = fmt.Fprintf(deps.Output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
+			_, _ = fmt.Fprintf(output, "%s: ok=%t %s %s\n", check.Code, check.OK, check.Reason, check.Remedy)
 			if check.Code == "network_policy" && check.Evidence != "" {
-				_, _ = fmt.Fprintln(deps.Output, check.Evidence)
+				_, _ = fmt.Fprintln(output, check.Evidence)
 			}
 		}
 	}
@@ -342,6 +357,18 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	deps.UplinkCreated = func(value string) { identity = value }
 	deps.upstreamResult = func(upstream InstallUpstream) { deps.upstream = &upstream }
 	deps.installResolved = func(resolved Config) { cfg = resolved }
+	// Keep this invocation's measurement when maintenance verification only
+	// reads state. An informational failed probe must not become a pass.
+	var measured *NetworkPolicyProbeResult
+	probe := deps.ProbeNetworkPolicy
+	if probe == nil {
+		probe = ProbeNetworkPolicy
+	}
+	deps.ProbeNetworkPolicy = func(ctx context.Context, cfg Config, raw Deps) NetworkPolicyProbeResult {
+		value := probe(ctx, cfg, raw)
+		measured = &value
+		return value
+	}
 	installErr := execute(ctx, cfg, deps)
 	if cfg.DryRun {
 		if installErr != nil {
@@ -362,6 +389,14 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	result := InstallResult{Version: 1, OK: installErr == nil, Context: cfg.ContextName, Checks: []CheckResult{}}
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
 		result = verifyInstall(ctx, cfg, deps, cfg.existingRelease)
+		if cfg.existingRelease && measured != nil {
+			for i := range result.Checks {
+				check := &result.Checks[i]
+				if check.Code == "network_policy" && check.Warning && check.Reason == "unverified" {
+					*check = CheckResult{Code: "network_policy", OK: measured.Status == "enforced", Warning: measured.Status != "enforced", Reason: measured.Status, Remedy: measured.Remedy, Evidence: measured.Evidence}
+				}
+			}
+		}
 	}
 	var preflight *installPreflightError
 	if errors.As(installErr, &preflight) {

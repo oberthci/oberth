@@ -42,6 +42,8 @@ type InteractiveRunner func(ctx context.Context, name string, args ...string) er
 // InstallDeps holds injectable host and cluster dependencies for the CLI-level
 // install orchestration.
 type InstallDeps struct {
+	// VerifyProbe opts verification into the mutating live policy measurement.
+	VerifyProbe        bool
 	installResolved    func(Config)
 	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
 	Output             io.Writer

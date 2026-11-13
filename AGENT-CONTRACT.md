@@ -3262,9 +3262,11 @@ Each round deletes its created NetworkPolicy with a UID precondition. The
 random ownership-labelled namespace is also cleaned with a UID precondition,
 under a separate bounded cleanup context even after cancellation. The pinned
 utility image and restricted, non-root, tokenless Pods are shared across CPU
-architectures. Install (after approval) and verification create these scratch
-resources and never mutate the operator's kubeconfig. Plan makes no cluster
-mutations and reports that enforcement will run first at install.
+architectures. Install (after approval) and explicit `install --verify --probe`
+create these scratch resources and never mutate the operator's kubeconfig.
+Default verification creates no cluster objects and reports that enforcement
+was measured at install; this verification did not re-test it. Plan makes no
+cluster mutations and reports that enforcement will run first at install.
 
 Mac onboarding #1549: selected kubeconfig files are immutable installer inputs.
 No step changes the current context or merges/replaces operator files. The Go
@@ -3291,9 +3293,10 @@ kubeconfig target. Validation and address waiting do not change settings.
 Mac onboarding R3 #1548: existing-release maintenance reads stored values before
 capability probing and preserves true, false or unspecified policy configuration.
 Unverified capability is information during maintenance; fresh installs and
-explicit verification remain fail-closed. Cleanup carries the observed UID,
+explicit `install --verify --probe` remain fail-closed. Cleanup carries the observed UID,
 revalidates expiry and binds deletion to resource version; unknown or replaced
-objects stay untouched. The live scratch-resource probe is the accepted default.
+objects stay untouched. The live scratch-resource probe runs during install and
+only when explicitly requested for verification.
 
 Mac onboarding R3 #1549: transient kubeconfig copies carry a complete ownership
 marker and inherited kernel lease in an owner-only user-cache directory. Handled

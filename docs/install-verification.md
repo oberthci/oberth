@@ -57,9 +57,19 @@ means the read-only checks passed; it does not establish enforcement.
 Install runs a new measurement before creating release namespaces, installing
 charts or writing server credentials. Fresh installs refuse absent or unverified
 enforcement. Existing-release maintenance preserves the stored policy choice
-and treats the observation as information. Explicit verification still measures
-enforcement and refuses failures. No plan measurement receipts are written or
-read; receipts from older versions are unused.
+and treats the observation as information.
+
+Verification is read-only by default and creates no cluster objects. Its
+`network_policy` check reports `reason: not-retested`: enforcement was measured
+at install; this verification did not re-test it. Use
+`oberth install --verify --probe` to explicitly
+run the live measurement and refuse absent or unverified enforcement.
+Maintenance JSON retains the status, warning, evidence and remedy measured
+during that install, including absent or unverified enforcement; a subsequent
+read-only check does not turn it into a successful measurement.
+`--probe` requires `--verify` and cannot be combined with `--plan` or `--dry-run`.
+No plan measurement receipts are written or read; receipts from older versions
+are unused.
 
 Runtime identity certificates constrain their DNS names and each IP SAN.
 IPv4 constraints are exact /32 ranges; IPv6 constraints are exact /128 ranges.
