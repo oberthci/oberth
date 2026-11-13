@@ -37,7 +37,7 @@ up() {
     curl --fail --silent --show-error --location \
         --proto '=https' --tlsv1.2 \
         --connect-timeout 10 --max-time 120 \
-        --max-filesize 10485760 \
+        --max-filesize 16777216 \
         --output "$manifest_file" \
         "$ARGO_MANIFEST"
     manifest_sha="$(sha256sum "$manifest_file" | cut -d ' ' -f 1)"

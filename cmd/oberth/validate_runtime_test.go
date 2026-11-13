@@ -70,6 +70,28 @@ spec:
 		mutate  func(*wfv1.Workflow)
 		refusal string
 	}{
+		{"server-waiter-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].InitContainers = []wfv1.UserContainer{{Container: corev1.Container{Name: "oberth-executor-token", Image: wf.Spec.Templates[0].Container.Image, Env: []corev1.EnvVar{{Name: "LD_PRELOAD", Value: "/loot/x.so"}}}}}
+		}, "reserved server-owned oberth- prefix"},
+		{"executor-sidecar-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].Sidecars = []wfv1.UserContainer{{Container: corev1.Container{Name: "wait", Image: wf.Spec.Templates[0].Container.Image}}}
+		}, "reserved for the Argo executor"},
+		{"executor-init-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].InitContainers = []wfv1.UserContainer{{Container: corev1.Container{Name: "main", Image: wf.Spec.Templates[0].Container.Image}}}
+		}, "reserved for the Argo executor"},
+		{"executor-token-mount-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: argoworkflow.ExecutorTokenVolumeName, MountPath: "/identity"}}
+		}, "reserved executor identity volume"},
+		{"executor-token-mount-path", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: "scratch", MountPath: argoworkflow.ExecutorTokenMountPath}}
+		}, "reserved server helper path"},
+		{"templated-env-name", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].Container.Env = []corev1.EnvVar{{Name: "{{='ARGO_'+'PROGRESS_PATCH_TICK_DURATION'}}", Value: "0"}}
+		}, "environment names must be literal"},
+		{"templated-env-value", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.Templates[0].Container.Name = "main"
+			wf.Spec.Templates[0].Container.Env = []corev1.EnvVar{{Name: "CUSTOM", Value: "{{workflow.name}}"}}
+		}, ""},
 		{"plain", pipeline.TriggerCI, func(*wfv1.Workflow) {}, ""},
 		{"tokenless-cache", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
 			mounts(wf, "cache")

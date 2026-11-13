@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,10 +28,10 @@ import (
 const executorTokenWaiter = "oberth-executor-token"
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenVolume = "exec-sa-token"
+const executorTokenVolume = argoworkflow.ExecutorTokenVolumeName
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+const executorTokenDir = argoworkflow.ExecutorTokenMountPath
 
 // executorKubeconfig is the only fixed name the executor identity has inside
 // the tmpfs. Argo's wait container reads outputs.parameters valueFrom.path and
@@ -78,7 +80,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 		}
 		volumes, _ := patch["volumes"].([]any)
 		patch["volumes"] = append(volumes, map[string]any{"name": executorTokenVolume, "secret": nil, "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "1Mi"}})
-		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: helperResources(workflow, t), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
+		waiter := executorWaiterContainer(config.SourceSeedImage, helperResources(workflow, t))
 		initializers, _ := patch["initContainers"].([]any)
 		if len(initializers) == 0 {
 			initializers = []any{map[string]any{"name": "init"}}
@@ -169,8 +171,11 @@ func executorTokenDirectory() string {
 // step's /proc/self/fd/N symlink would resolve to. A zero tick disables the
 // monitor (Wait starts it only when both ticks are nonzero), leaving no API
 // call between InitializeOutput and ReportOutputs. Self-reported step
-// progress (N/M) is therefore not shown. Env merges by name, so these values
-// replace anything the controller injected while Argo's other variables stay.
+// progress (N/M) is therefore not shown. Strategic merge replaces only the
+// first duplicate env entry; validateExecutorTokenTarget checks the live Pod
+// before delivery so controller configuration or Argo drift cannot win.
+// On every Argo bump, re-audit all go statements in workflow/executor/executor.go
+// for API calls during output collection and re-run the #1564 hostile tests.
 var executorEnvironment = [][2]string{
 	{"KUBECONFIG", executorKubeconfig},
 	{"ARGO_PROGRESS_PATCH_TICK_DURATION", "0"},
@@ -366,25 +371,63 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 		return errors.New("executor token target is not memory-backed")
 	}
 	for _, container := range pod.Spec.EphemeralContainers {
+		if strings.HasPrefix(container.Name, "oberth-") {
+			return errors.New("ephemeral container uses a server-owned name")
+		}
 		for _, mount := range container.VolumeMounts {
-			if mount.Name == executorTokenVolume {
+			if mount.Name == executorTokenVolume || argoScratchVolume(mount.Name) {
 				return errors.New("ephemeral container can access executor identity")
 			}
 		}
 	}
 	found := false
-	for _, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
-		if container.Name == executorTokenWaiter {
-			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || container.Command[2] != executorTokenWaitCommand {
-				return errors.New("executor identity waiter was modified")
+	serverNames := map[string]bool{}
+	for position, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
+		initializer := position < len(pod.Spec.InitContainers)
+		if strings.HasPrefix(container.Name, "oberth-") {
+			if serverNames[container.Name] || !validServerContainer(container, image, initializer) {
+				return errors.New("server-added container was modified or duplicated")
 			}
+			serverNames[container.Name] = true
+		}
+		for _, device := range container.VolumeDevices {
+			if argoScratchVolume(device.Name) {
+				return errors.New("container can access Argo scratch device")
+			}
+		}
+		if container.Name == executorTokenWaiter {
 			found = true
 		}
+		scratchCounts := map[string]int{}
 		for _, mount := range container.VolumeMounts {
-			if mount.Name != executorTokenVolume || container.Name == executorTokenWaiter || container.Name == "init" || container.Name == "wait" {
+			scratchCounts[mount.Name]++
+			if argoScratchVolume(mount.Name) && (scratchCounts[mount.Name] != 1 || !validArgoScratchMount(container, mount, initializer, resourcePod, serverNames[container.Name])) {
+				return errors.New("pipeline helper can access Argo executor scratch")
+			}
+			if mount.Name != executorTokenVolume || container.Name == executorTokenWaiter {
 				continue
 			}
-			if resourcePod && container.Name == "main" && container.Image == argoworkflow.ExecutorImage {
+			for _, expected := range executorEnvironment {
+				count := 0
+				for _, env := range container.Env {
+					if env.Name == expected[0] {
+						count++
+						if env.Value != expected[1] || env.ValueFrom != nil {
+							return fmt.Errorf("executor container %q has unsafe %s", container.Name, expected[0])
+						}
+					}
+				}
+				if count != 1 {
+					return fmt.Errorf("executor container %q must have exactly one %s", container.Name, expected[0])
+				}
+			}
+			// Names alone do not identify Argo helpers: a resource Pod may
+			// have authored containers named init or wait. Verify their image
+			// and the position in which Argo actually creates each executor.
+			if container.Image == argoworkflow.ExecutorImage && ((initializer && container.Name == "init") || (!initializer && container.Name == "wait")) {
+				continue
+			}
+			if !initializer && resourcePod && container.Name == "main" && container.Image == argoworkflow.ExecutorImage {
 				continue
 			}
 			return errors.New("pipeline container can access executor identity")
@@ -504,4 +547,26 @@ func (controller *Controller) requestExecutorIdentity(ctx context.Context, names
 		case <-timer.C:
 		}
 	}
+}
+
+// Argo adds shared scratch after admission. Only the exact native helper
+// runtime mount is tolerated. Resource helpers cannot receive it: a writable
+// argoexec could otherwise replace the operator executor before main starts.
+func validArgoScratchMount(c corev1.Container, mount corev1.VolumeMount, initializer, resourcePod, server bool) bool {
+	if server {
+		return true
+	} // Constructor and position already checked.
+	executor := c.Image == argoworkflow.ExecutorImage && ((initializer && c.Name == "init") || (!initializer && c.Name == "wait") || (!initializer && resourcePod && c.Name == "main"))
+	switch mount.Name {
+	case "var-run-argo":
+		return (!resourcePod || executor) && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "var-run-argo", MountPath: "/var/run/argo"})
+	case "argo-staging":
+		return executor || (!initializer && !resourcePod && c.Name == "main" && apiequality.Semantic.DeepEqual(mount, corev1.VolumeMount{Name: "argo-staging", MountPath: "/argo/staging"}))
+	default:
+		return executor
+	}
+}
+
+func argoScratchVolume(name string) bool {
+	return name == "tmp-dir-argo" || name == "var-run-argo" || name == "argo-staging"
 }

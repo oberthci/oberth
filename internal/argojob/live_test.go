@@ -2,11 +2,15 @@ package argojob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/oberthci/oberth/internal/runprogress"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -678,6 +683,159 @@ func (cluster liveCluster) execStreamer() ExecStreamer {
 		}
 		return executor.StreamWithContext(ctx, remotecommand.StreamOptions{
 			Stdin: stdin, Stdout: stdout, Stderr: stderr,
+		})
+	}
+}
+
+// TestLiveExecutorIdentityDefaulting proves delivery against actual controller
+// Pods and API defaults. It submits exactly two Workflows; no source claim is
+// needed for these commands, so the same Build and delivery paths run directly.
+func TestLiveExecutorIdentityDefaulting(t *testing.T) {
+	cluster := requireLiveCluster(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	cluster.ensureServiceAccounts(t, ctx)
+	config := cluster.config()
+	grant := &argoworkflow.Capability{Namespace: cluster.namespace, ServiceAccount: "oberth-live-resource", ResourceKinds: []argoworkflow.ResourceKindCapability{{APIVersion: "v1", Kind: "ConfigMap", Actions: []string{"get"}}}}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := cluster.kube.CoreV1().ServiceAccounts(cluster.namespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: grant.ServiceAccount}}, metav1.CreateOptions{})
+	must(err)
+	_, err = cluster.kube.CoreV1().Secrets(cluster.namespace).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: grant.ServiceAccount + ".service-account-token", Annotations: map[string]string{"kubernetes.io/service-account.name": grant.ServiceAccount}}, Type: corev1.SecretTypeServiceAccountToken}, metav1.CreateOptions{})
+	must(err)
+	_, err = cluster.kube.RbacV1().Roles(cluster.namespace).Create(ctx, &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: grant.ServiceAccount}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"configmaps"}, ResourceNames: []string{"oberth-live-proof"}, Verbs: []string{"get"}}, {APIGroups: []string{"argoproj.io"}, Resources: []string{"workflowtaskresults"}, Verbs: []string{"create", "patch"}}}}, metav1.CreateOptions{})
+	must(err)
+	_, err = cluster.kube.RbacV1().RoleBindings(cluster.namespace).Create(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: grant.ServiceAccount}, RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: grant.ServiceAccount}, Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: grant.ServiceAccount, Namespace: cluster.namespace}}}, metav1.CreateOptions{})
+	must(err)
+	_, err = cluster.kube.CoreV1().ConfigMaps(cluster.namespace).Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "oberth-live-proof"}, Data: map[string]string{"proof": "resource-identity"}}, metav1.CreateOptions{})
+	must(err)
+	for _, shape := range []string{"ordinary", "resource"} {
+		t.Run(shape, func(t *testing.T) {
+			must := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() {
+				if !t.Failed() {
+					return
+				}
+				diagnosticCtx, stop := context.WithTimeout(context.Background(), 15*time.Second)
+				defer stop()
+				pods, listErr := cluster.kube.CoreV1().Pods(cluster.namespace).List(diagnosticCtx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=oberth-live-token-" + shape})
+				if listErr != nil {
+					t.Logf("read failed Pods: %v", listErr)
+					return
+				}
+				for _, pod := range pods.Items {
+					for _, c := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
+						t.Logf("target %s/%s image=%s mounts=%v", pod.Name, c.Name, c.Image, c.VolumeMounts)
+					}
+				}
+				if dir := os.Getenv("OBERTH_ARGO_LIVE_EVIDENCE"); dir != "" {
+					body, marshalErr := json.MarshalIndent(pods, "", "  ")
+					if marshalErr == nil {
+						if writeErr := os.WriteFile(filepath.Join(dir, shape+"-failed-pods.json"), body, 0o600); writeErr != nil {
+							t.Log(writeErr)
+						}
+					}
+				}
+			})
+			source := `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 300
+  templates:
+  - name: main
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /tmp
+      command: [sh, -c]
+      args: ["echo ordinary-identity-proof"]
+`
+			if shape == "resource" {
+				source = fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 300
+  templates:
+  - name: main
+    resource:
+      action: get
+      manifest: |
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: oberth-live-proof
+          namespace: %s
+`, cluster.namespace)
+			}
+			request := liveRequest("oberth-live-token-"+shape, pipeline.TriggerCI, source)
+			request.RepositoryID = 1
+			if shape == "resource" {
+				request.Capability = grant
+			}
+			workflow, buildErr := Build(config, request)
+			must(buildErr)
+			controller, controllerErr := NewController(cluster.workflows, cluster.kube, config)
+			must(controllerErr)
+			controller = controller.WithWorkflowCapabilityLoader(func(context.Context, int64) (*argoworkflow.Capability, error) { return grant, nil })
+			var deliveries atomic.Int32
+			streamer := cluster.execStreamer()
+			controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, func(ctx context.Context, ns, pod, container string, command []string, stdin io.Reader, stdout, stderr io.Writer) error {
+				err := streamer(ctx, ns, pod, container, command, stdin, stdout, stderr)
+				if container == executorTokenWaiter && err == nil {
+					deliveries.Add(1)
+				}
+				return err
+			}, config))
+			_, createErr := cluster.workflows.Create(ctx, workflow, metav1.CreateOptions{})
+			must(createErr)
+			completion, waitErr := controller.Wait(ctx, request.Name, request.RunID, &recordingWriter{})
+			must(waitErr)
+			if !completion.Succeeded || deliveries.Load() != 1 {
+				t.Fatalf("phase=%s reason=%s deliveries=%d", completion.Phase, completion.Reason, deliveries.Load())
+			}
+			pods, listErr := cluster.kube.CoreV1().Pods(cluster.namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + request.Name})
+			must(listErr)
+			checked := 0
+			for i := range pods.Items {
+				pod := &pods.Items[i]
+				if pod.Labels["oberth.ci/role"] == "executor-identity" {
+					continue
+				}
+				for _, c := range pod.Spec.InitContainers {
+					if c.Name == executorTokenWaiter {
+						checked++
+						if c.ImagePullPolicy == "" || c.TerminationMessagePath == "" || c.TerminationMessagePolicy == "" {
+							t.Fatal("real API defaults were not observed")
+						}
+						must(validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, shape == "resource"))
+						t.Logf("Pod %s: defaulted waiter policy=%s path=%s termination=%s; token deliveries=%d; Workflow %s", pod.Name, c.ImagePullPolicy, c.TerminationMessagePath, c.TerminationMessagePolicy, deliveries.Load(), completion.Phase)
+					}
+				}
+			}
+			if checked != 1 {
+				t.Fatalf("checked %d workflow Pods, want one", checked)
+			}
+			if dir := os.Getenv("OBERTH_ARGO_LIVE_EVIDENCE"); dir != "" {
+				// Pod specs contain references and public trust, never delivered token data.
+				body, marshalErr := json.MarshalIndent(pods, "", "  ")
+				must(marshalErr)
+				must(os.WriteFile(filepath.Join(dir, shape+"-pods.json"), body, 0o600))
+				stored, getErr := cluster.workflows.Get(ctx, request.Name, metav1.GetOptions{})
+				must(getErr)
+				body, marshalErr = json.MarshalIndent(stored, "", "  ")
+				must(marshalErr)
+				must(os.WriteFile(filepath.Join(dir, shape+"-workflow.json"), body, 0o600))
+			}
 		})
 	}
 }
