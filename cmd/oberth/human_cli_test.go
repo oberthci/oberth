@@ -22,7 +22,7 @@ func TestVerbInRunIDPositionIsRefused(t *testing.T) {
 }
 
 func TestRunAndRunsHelpListSubcommands(t *testing.T) {
-	for command, want := range map[string]string{"run": "resources|retry|rerun|cancel|purge|hold", "runs": "oberth runs cancel", "issues": "oberth issues update"} {
+	for command, want := range map[string]string{"run": "resources|rerun|cancel|purge|hold", "runs": "oberth runs cancel", "issues": "oberth issues update"} {
 		var out bytes.Buffer
 		if err := runCLI(t.Context(), []string{command, "--help"}, strings.NewReader(""), &out); err != nil {
 			t.Fatal(err)

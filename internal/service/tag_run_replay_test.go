@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
@@ -94,7 +95,7 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, tool := range []string{"run_rerun", "run_retry"} {
+			for _, tool := range []string{"run_rerun"} {
 				if _, err := harness.call(rerunAdmin, tool, map[string]any{"id": failed.ID}); err == nil {
 					t.Fatalf("%s ignored started credentialed work", tool)
 				}
@@ -113,29 +114,29 @@ func TestTagRunRetryInfrastructureKeepsReleaseAdmission(t *testing.T) {
 			harness := newRerunHarness(t, observedTagResult(JobResult{Status: model.RunFailed, Phase: phase, Error: "executor identity unavailable"}), greenResult)
 			harness.fixture.jobs.plan = tagReplayPlan()
 			failed := admitRerunTag(t, harness)
-			if _, err := harness.call(rerunUplink, "run_retry", map[string]any{"id": failed.ID}); !errors.Is(err, ErrForbidden) {
+			if _, err := harness.call(rerunUplink, "run_rerun", map[string]any{"id": failed.ID}); !errors.Is(err, ErrForbidden) {
 				t.Fatalf("tag retry lost admin gate: %v", err)
 			}
-			value, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": failed.ID[:8]})
+			value, err := harness.call(rerunAdmin, "run_rerun", map[string]any{"id": failed.ID[:8]})
 			if err != nil {
 				t.Fatal(err)
 			}
-			audit, err := harness.fixture.store.LatestAuditActionByType(t.Context(), "run.retry", "run")
+			audit, err := harness.fixture.store.LatestAuditActionByType(t.Context(), "run.rerun", "run")
 			if err != nil || !strings.Contains(audit.Details, `"replay_basis":"observed-terminal-no-credential-start"`) {
 				t.Fatalf("tag retry audit basis: %+v %v", audit, err)
 			}
-			retried := value.(model.Run)
+			retried := harness.run(t, value.(api.RunRerunResponse).RunID)
 			if !retried.Release || retried.SHA != failed.SHA || retried.TestedSHA != failed.TestedSHA || retried.Trigger != failed.Trigger || retried.Ref != failed.Ref || retried.Actor != rerunAdmin.Identity {
 				t.Fatalf("retry changed tag admission: %+v", retried)
 			}
-			if _, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrInvalidState) {
+			if _, err := harness.call(rerunAdmin, "run_rerun", map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrInvalidState) && !errors.Is(err, ErrInvalidInput) {
 				t.Fatalf("retry beside active/newer run: %v", err)
 			}
 			harness.process(t)
 			if harness.run(t, retried.ID).Status != model.RunPassed || harness.git.tagAttempts() != 1 {
 				t.Fatal("tag retry did not execute release/publish once")
 			}
-			if _, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrInvalidState) {
+			if _, err := harness.call(rerunAdmin, "run_rerun", map[string]any{"id": failed.ID}); err == nil {
 				t.Fatalf("old tag retry accepted: %v", err)
 			}
 		})
@@ -183,10 +184,10 @@ func TestTagRunRetryBeforeWorkflowIntentNeedsNoPlan(t *testing.T) {
 	if _, err := harness.fixture.store.FinishRun(t.Context(), queued.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "checkout unavailable"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": queued.ID}); err != nil {
+	if _, err := harness.call(rerunAdmin, "run_rerun", map[string]any{"id": queued.ID}); err != nil {
 		t.Fatal(err)
 	}
-	audit, err := harness.fixture.store.LatestAuditActionByType(t.Context(), "run.retry", "run")
+	audit, err := harness.fixture.store.LatestAuditActionByType(t.Context(), "run.rerun", "run")
 	if err != nil || !strings.Contains(audit.Details, `"replay_basis":"pre-intent"`) || !strings.Contains(audit.Details, `"replay_steps_checked":0`) {
 		t.Fatalf("pre-intent basis: %+v %v", audit, err)
 	}
@@ -199,9 +200,6 @@ func TestTagRunPublicationFailureStillNeedsForce(t *testing.T) {
 	failed := admitRerunTag(t, harness)
 	if _, err := harness.call(rerunAdmin, "run_rerun", map[string]any{"id": failed.ID}); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), "force") {
 		t.Fatalf("publication rerun lost confirmation: %v", err)
-	}
-	if _, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrInvalidState) {
-		t.Fatalf("publication was re-executed by run_retry: %v", err)
 	}
 	response := harness.rerun(t, rerunAdmin, map[string]any{"id": failed.ID, "force": true})
 	if response.Mode != "publish_retry" || len(harness.fixture.jobs.createdReleases) != 1 || harness.git.tagAttempts() != 2 {

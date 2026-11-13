@@ -57,7 +57,7 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 		return infrastructure("git_transport", "run_rerun (retries only the publication)", "every step passed; only the upstream publication failed")
 	}
 	if reason := evictionDisplayReason(run); reason != "" {
-		return infrastructure("eviction", "run_retry", reason)
+		return infrastructure("eviction", "run_rerun", reason)
 	}
 	// Only a positively identified authored-container budget failure warrants
 	// changing the step's limit. A named step can also have a Pod/helper eviction.
@@ -67,17 +67,17 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 	case run.FailedStep != "" && (message == "Evicted" || strings.HasPrefix(message, "Evicted: ")):
 		// The same kubelet message classification as the step-less line.
 		reason := evictionDisplayReason(model.Run{Phase: "infrastructure", Error: message})
-		return infrastructure("eviction", "run_retry", reason)
+		return infrastructure("eviction", "run_rerun", reason)
 	}
 	switch {
 	case strings.Contains(lower, "executor identity"):
-		return infrastructure("executor_identity", "run_retry", "executor identity delivery failed before the step ran")
+		return infrastructure("executor_identity", "run_rerun", "executor identity delivery failed before the step ran")
 	case strings.Contains(message, "ImagePullBackOff") || strings.Contains(message, "ErrImagePull") || strings.Contains(lower, "pull image") || strings.Contains(lower, "image pull"):
 		return infrastructure("image_pull", "run_rerun", "the step image could not be pulled")
 	case model.IsStartupDeadlineReason(message):
-		return infrastructure("startup_deadline", "run_retry", "the step never started within its startup allowance")
+		return infrastructure("startup_deadline", "run_rerun", "the step never started within its startup allowance")
 	case model.IsNodeRebootReason(message):
-		return infrastructure("node_reboot", "run_retry", message)
+		return infrastructure("node_reboot", "run_rerun", message)
 	case strings.HasPrefix(message, "OOM kill at "):
 		return code("oom", "raise the step's memory limit in git", "the step exceeded its memory limit")
 	}
@@ -86,15 +86,15 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 			return infrastructure("deadline_artifact", "run_rerun", "deadline reported well below the step budget (observed "+observed.String()+" of "+limit.String()+")")
 		}
 		if run.FailedStep == "" && run.FailedStage == "" {
-			return infrastructure("deadline", "run_retry", "execution deadline before any step was identified")
+			return infrastructure("deadline", "run_rerun", "execution deadline before any step was identified")
 		}
 		return code("deadline", "inspect run_logs; a hung or slow step needs a fix or a reviewed deadline in git", "the step ran out of its deadline")
 	}
 	if upstreamConfigurationFailure(message) {
-		return code("upstream_configuration", "set the repository's default branch on the forge, then run_retry", boundedText(message, 200))
+		return code("upstream_configuration", "set the repository's default branch on the forge, then run_rerun", boundedText(message, 200))
 	}
 	if model.IsInfrastructureRunFailure(run.Status, run.Phase, run.FailedStep) {
-		return infrastructure("infrastructure", "run_retry", "the run failed outside any step")
+		return infrastructure("infrastructure", "run_rerun", "the run failed outside any step")
 	}
 	if run.Status == model.RunInterrupted {
 		return infrastructure("interrupted", "run_rerun", "the run was interrupted, not failed")

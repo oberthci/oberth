@@ -94,7 +94,6 @@ run hold list
 run hold patch
 run purge
 run rerun
-run retry
 runs
 runs cancel
 schedules

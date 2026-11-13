@@ -1010,7 +1010,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		UplinkLifecycle:    database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		SchedulingObserver: argoJobs,
-		Runs:               database, History: database, RunRetries: database, Repositories: database, Issues: database,
+		Runs:               database, History: database, Repositories: database, Issues: database,
 		IssueStaleAfter: options.issueStaleAfter, IssueActiveStaleAfter: options.issueActiveStaleAfter,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
 		Refs: git, Logs: logs, Artifacts: artifactStore, Auditor: database, Health: health, Signals: signals,

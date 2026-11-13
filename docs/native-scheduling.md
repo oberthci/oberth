@@ -154,7 +154,7 @@ an older chart's `keep` annotation can remain unused.
 
 Oberth has no automatic infrastructure retry. Authors choose native Argo
 `retryStrategy`, such as `retryPolicy: OnError`, on Workflow/templates. Manual
-`run_retry` and `run_rerun` remain. Argo cannot retry a preparation failure that
+`run_rerun` remain. Argo cannot retry a preparation failure that
 happens before a Workflow exists; retry that failed run manually.
 
 ## Source delivery and load

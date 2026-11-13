@@ -122,8 +122,8 @@ func TestRunPrefixArtifactsWaitAndHTTP(t *testing.T) {
 
 func TestRunPrefixScopeAcrossTools(t *testing.T) {
 	f := newScopeFixture(t)
-	f.service.runRetries, f.service.enqueues = f.store, &retryEnqueueObserver{}
-	for _, tool := range []string{"run_get", "run_logs", "run_cancel", "run_rerun", "run_retry", "wait", "artifacts", "artifact_get"} {
+	f.service.runReruns, f.service.enqueues = f.store, &retryEnqueueObserver{}
+	for _, tool := range []string{"run_get", "run_logs", "run_cancel", "run_rerun", "wait", "artifacts", "artifact_get"} {
 		for _, size := range []int{8, 32} {
 			var messages []string
 			for _, id := range []string{f.runs["codeberg"][0].ID[:size], strings.Repeat("f", size)} {

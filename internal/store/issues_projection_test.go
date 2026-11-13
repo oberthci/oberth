@@ -75,13 +75,13 @@ func TestInfrastructureRunRetriesWithoutProjectingCIRedIssue(t *testing.T) {
 	if _, err := database.OpenCIIssue(ctx, repository.ID, branch); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("infrastructure failure opened CI-red issue: %v", err)
 	}
-	retry, err := database.RetryRun(ctx, model.RunRetryRequest{RunID: run.ID, Actor: "reviewer@host"})
-	if err != nil || retry.SHA != run.SHA {
+	retry, err := database.RerunRun(ctx, model.RunRerunRequest{RunID: run.ID, Actor: "reviewer@host"})
+	if err != nil || retry.Enqueued.SHA != run.SHA {
 		t.Fatalf("infrastructure retry = %#v, %v", retry, err)
 	}
 	// A real test failure still opens an issue. A later infrastructure failure
 	// neither updates its evidence nor resolves it.
-	if _, err := database.FinishRun(ctx, retry.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit"}); err != nil {
+	if _, err := database.FinishRun(ctx, retry.Enqueued.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit"}); err != nil {
 		t.Fatal(err)
 	}
 	issue, err := database.OpenCIIssue(ctx, repository.ID, branch)
@@ -208,9 +208,6 @@ func TestContainerMemoryLimitOOMProjectsCIRedIssue(t *testing.T) {
 	issue, err := database.OpenCIIssue(t.Context(), repository.ID, repository.DefaultBranch)
 	if err != nil || !strings.Contains(issue.Body, "OOMKilled") {
 		t.Fatalf("container OOM missing from issue: %#v, %v", issue, err)
-	}
-	if _, err := database.RetryRun(t.Context(), model.RunRetryRequest{RunID: run.ID, Actor: "reviewer@host"}); !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("container OOM became infrastructure-retryable: %v", err)
 	}
 }
 
