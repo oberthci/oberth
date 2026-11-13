@@ -2,9 +2,17 @@ package argojob
 
 import wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
-// Native stop/terminate intent is structured Workflow state, not a substring
-// inferred from a step error. Preserve Argo's message through diagnostics.
+// Argo v4.0.8's controller attributes a failed/error outcome to shutdown with
+// this exact message (workflow/controller/operator.go). Intent alone is not
+// evidence: its shutdown utility can patch spec after a genuine failure ends.
 func operatorShutdown(workflow *wfv1.Workflow) bool {
-	return workflow.Status.Phase.Completed() && workflow.Status.Phase != wfv1.WorkflowSucceeded &&
-		(workflow.Spec.Shutdown == wfv1.ShutdownStrategyStop || workflow.Spec.Shutdown == wfv1.ShutdownStrategyTerminate)
+	if !workflow.Status.Phase.Completed() || workflow.Status.Phase == wfv1.WorkflowSucceeded {
+		return false
+	}
+	switch workflow.Spec.Shutdown {
+	case wfv1.ShutdownStrategyStop, wfv1.ShutdownStrategyTerminate:
+		return workflow.Status.Message == "Stopped with strategy '"+string(workflow.Spec.Shutdown)+"'"
+	default:
+		return false
+	}
 }
