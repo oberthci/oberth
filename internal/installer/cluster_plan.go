@@ -27,6 +27,26 @@ const k3sCopyCommand = `mkdir -p "$HOME/.kube" && chmod 700 "$HOME/.kube" && sud
 
 var errInstallPreflight = errors.New("install preflight failed")
 
+// Keep the apply observation intact when reporting a failed install as JSON.
+// A read-only plan cannot reconstruct live measurement or cleanup evidence.
+type installPreflightError struct {
+	checks  []CheckResult
+	cluster ClusterIdentity
+	review  InstallReview
+}
+
+func (e *installPreflightError) Error() string {
+	var failures []string
+	for _, check := range e.checks {
+		if !check.OK && !check.Warning {
+			failures = append(failures, check.Code+": "+check.Remedy)
+		}
+	}
+	return errInstallPreflight.Error() + ":\n" + strings.Join(failures, "\n")
+}
+
+func (e *installPreflightError) Unwrap() error { return errInstallPreflight }
+
 var errFreshK3s = errors.New("fresh k3s has no user kubeconfig")
 
 // Only suggest the operator's copy command when no user configuration exists.
@@ -154,18 +174,18 @@ func PlanInstall(ctx context.Context, cfg Config, host InstallDeps) InstallPlan 
 		plan.OK, plan.Checks = r.OK, r.Checks
 		return plan
 	}
-	cfg.policyProbePlan = true
 	run := host.RunCommand
-	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy, policyProbeCacheDir: host.policyProbeCacheDir}
-	inspectInstallPreflight(ctx, &cfg, deps, host, selected, &plan.Identity, &r)
+	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, RunCommand: run}
+	inspectInstallPreflight(ctx, &cfg, deps, host, selected, &plan.Identity, &r, false)
 	plan.Review = Review(cfg)
 	plan.Review.Context = selected
 	plan.OK, plan.Checks = r.OK, r.Checks
 	return plan
 }
 
-// Maintenance discovers the release before deciding whether capability is a gate.
-func inspectInstallPreflight(ctx context.Context, cfg *Config, deps Deps, host InstallDeps, selected string, identity *ClusterIdentity, r *InstallResult) {
+// Discover stored configuration before checking capability. Planning only reads;
+// apply measures enforcement before any release or namespace mutation.
+func inspectInstallPreflight(ctx context.Context, cfg *Config, deps Deps, host InstallDeps, selected string, identity *ClusterIdentity, r *InstallResult, measure bool) {
 	if err := readInstallValues(ctx, cfg, installPolicyDeps(host, *cfg, selected)); err != nil {
 		r.check("installed_values", false, "Read the existing Helm release values before choosing policy configuration.")
 		return
@@ -173,10 +193,10 @@ func inspectInstallPreflight(ctx context.Context, cfg *Config, deps Deps, host I
 	if cfg.existingRelease {
 		cfg.NetworkPolicy = "auto"
 	}
-	inspectCluster(ctx, cfg, deps, identity, r, cfg.existingRelease)
+	inspectCluster(ctx, cfg, deps, identity, r, cfg.existingRelease, measure)
 }
 
-func inspectCluster(ctx context.Context, cfg *Config, deps Deps, identity *ClusterIdentity, r *InstallResult, maintenance bool) {
+func inspectCluster(ctx context.Context, cfg *Config, deps Deps, identity *ClusterIdentity, r *InstallResult, maintenance, measure bool) {
 	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	r.check("nodes", err == nil && len(nodes.Items) > 0, "Grant read access to nodes and bring at least one node Ready.")
 	if err != nil {
@@ -245,12 +265,20 @@ func inspectCluster(ctx context.Context, cfg *Config, deps Deps, identity *Clust
 		r.Checks[len(r.Checks)-1].Reason = "disabled"
 		return
 	}
+	if !measure {
+		r.Checks = append(r.Checks, CheckResult{Code: "network_policy", Warning: true, Reason: "unverified", Remedy: "NetworkPolicy enforcement check will run first at install, after approval. It creates temporary probe Pods and their scratch namespace and cleans them up; fresh installs refuse unless enforcement is measured."})
+		return
+	}
 	if !r.OK {
 		r.check("network_policy", false, "NetworkPolicy enforcement is unverified; resolve the earlier cluster checks and repeat the live probe.")
 		r.Checks[len(r.Checks)-1].Reason = "unverified"
 		return
 	}
-	enforcement := networkPolicyForInstall(ctx, *cfg, deps, nodes.Items)
+	probe := deps.ProbeNetworkPolicy
+	if probe == nil {
+		probe = ProbeNetworkPolicy
+	}
+	enforcement := probe(ctx, *cfg, deps)
 	if maintenance {
 		r.Checks = append(r.Checks, CheckResult{Code: "network_policy", OK: enforcement.Status == "enforced", Warning: enforcement.Status != "enforced", Reason: enforcement.Status, Remedy: enforcement.Remedy, Evidence: enforcement.Evidence})
 		return

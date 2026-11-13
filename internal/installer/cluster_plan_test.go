@@ -35,7 +35,7 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 	deps := Deps{KubeClient: kube, ContextName: "chosen", RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture}
 	identity := ClusterIdentity{}
 	result := InstallResult{OK: true}
-	inspectCluster(context.Background(), &Config{}, deps, &identity, &result, false)
+	inspectCluster(context.Background(), &Config{}, deps, &identity, &result, false, true)
 	if !result.OK || len(identity.Nodes) != 1 || identity.Nodes[0].AvailableBytes == nil || identity.Distribution != "k3s" {
 		t.Fatalf("preflight facts missing: %v", result.Checks)
 	}
@@ -45,13 +45,13 @@ func TestPreflightReportsFactsAndRemedies(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps.ProbeNetworkPolicy = func(context.Context, Config, Deps) NetworkPolicyProbeResult {
-		return NetworkPolicyProbeResult{Status: "absent", Remedy: "Enable data-plane enforcement and repeat plan."}
+		return NetworkPolicyProbeResult{Status: "absent", Remedy: "Enable data-plane enforcement and retry install."}
 	}
 	deps.RunCommand = func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return nil, errors.New("private diagnostic")
 	}
 	result = InstallResult{OK: true}
-	inspectCluster(context.Background(), &Config{}, deps, &ClusterIdentity{}, &result, false)
+	inspectCluster(context.Background(), &Config{}, deps, &ClusterIdentity{}, &result, false, true)
 	failed := map[string]bool{}
 	for _, check := range result.Checks {
 		if !check.OK {
@@ -150,15 +150,16 @@ func TestPlanReportsSelectedRemoteClusterWithoutAnotherGate(t *testing.T) {
 	}
 	var output bytes.Buffer
 	deps.Output = &output
-	evidence := "Measured egress enforcement: 6/6 rounds on node. Traffic measurements cannot prove causality."
+	evidence := "NetworkPolicy enforcement check will run first at install, after approval."
 	deps.ProbeNetworkPolicy = func(context.Context, Config, Deps) NetworkPolicyProbeResult {
-		return NetworkPolicyProbeResult{Status: "enforced", Evidence: evidence}
+		t.Fatal("plan ran the enforcement probe")
+		return NetworkPolicyProbeResult{}
 	}
 	if err := PrintPlan(t.Context(), Config{ContextName: "chosen"}, deps, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), evidence) {
-		t.Fatal("human plan omitted measurement scope", output.String())
+		t.Fatal("human plan omitted deferred enforcement check", output.String())
 	}
 
 }
@@ -170,7 +171,7 @@ func TestExecuteRefusesUnknownNetworkPolicyBeforeHelm(t *testing.T) {
 	deps := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil }, LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 		return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 	}, ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
-		return NetworkPolicyProbeResult{Status: "unverified", Remedy: "Allow the probe and repeat plan."}
+		return NetworkPolicyProbeResult{Status: "unverified", Remedy: "Allow the probe and retry install."}
 	}, RunCommand: preflightStats, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
 			return []byte("[]"), nil
@@ -214,7 +215,7 @@ func TestPolicyPreflightUsesLiveEvidenceForEveryDistribution(t *testing.T) {
 			deps := Deps{KubeClient: fake.NewClientset(node, preflightStorage()), RunCommand: preflightStats, ProbeNetworkPolicy: func(context.Context, Config, Deps) NetworkPolicyProbeResult {
 				return NetworkPolicyProbeResult{Status: status, Remedy: "Repeat the live probe."}
 			}}
-			inspectCluster(t.Context(), &Config{}, deps, &ClusterIdentity{}, &result, false)
+			inspectCluster(t.Context(), &Config{}, deps, &ClusterIdentity{}, &result, false, true)
 			if result.OK != (status == "enforced") || result.Checks[len(result.Checks)-1].Reason != status {
 				t.Fatalf("%s: %+v", providerID, result)
 			}

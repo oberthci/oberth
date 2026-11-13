@@ -19,7 +19,7 @@ func TestStoredDisabledPolicySurvivesPreflightAndUpgrade(t *testing.T) {
 	var output bytes.Buffer
 	deps := Deps{Output: &output, KubeClient: fake.NewClientset(preflightNode(), preflightStorage()), RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture}
 	result := InstallResult{OK: true}
-	inspectCluster(t.Context(), &cfg, deps, &ClusterIdentity{}, &result, false)
+	inspectCluster(t.Context(), &cfg, deps, &ClusterIdentity{}, &result, false, true)
 	if !result.OK {
 		t.Fatal(result.Checks)
 	}
@@ -47,7 +47,7 @@ func TestStoredDisabledPolicySurvivesPreflightAndUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	result = InstallResult{OK: true}
-	inspectCluster(t.Context(), &cfg, deps, &ClusterIdentity{}, &result, false)
+	inspectCluster(t.Context(), &cfg, deps, &ClusterIdentity{}, &result, false, true)
 	if result.OK || result.Checks[len(result.Checks)-1].Reason != "disabled" {
 		t.Fatal("verification reported flag default instead of installed false", result)
 	}

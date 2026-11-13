@@ -3440,8 +3440,9 @@ Each round deletes its created NetworkPolicy with a UID precondition. The
 random ownership-labelled namespace is also cleaned with a UID precondition,
 under a separate bounded cleanup context even after cancellation. The pinned
 utility image and restricted, non-root, tokenless Pods are shared across CPU
-architectures. Plan/verification create these scratch resources before the
-release install Review and never mutate the operator's kubeconfig.
+architectures. Install (after approval) and verification create these scratch
+resources and never mutate the operator's kubeconfig. Plan makes no cluster
+mutations and reports that enforcement will run first at install.
 
 Mac onboarding #1549: selected kubeconfig files are immutable installer inputs.
 No step changes the current context or merges/replaces operator files. The Go
@@ -3479,8 +3480,9 @@ is known; active, unmarked, malformed and future-dated objects are preserved.
 Cleanup errors are surfaced. A surviving child or absent next startup extends
 the residual window; this is neither a hard wall-clock bound nor secure erasure.
 
-Combined bootstrap contract: a loopback API that refuses scratch writes cannot
-qualify a fresh installation. Its existing-release maintenance plans may remain
-green only with the stored choice and an explicit unverified warning. The cell
-requires the corresponding fresh plan to fail its hard NetworkPolicy check; it
-does not manufacture enforcement evidence or weaken verification semantics.
+Combined bootstrap contract: the loopback API refuses every mutation, including
+scratch namespace creation. Fresh and maintenance plans pass their read-only
+checks with an explicit unverified warning that enforcement runs first at
+install after approval; maintenance preserves its stored policy choice. Plans
+provide no enforcement evidence. Fresh install apply and explicit verification
+retain their enforcement gates.

@@ -101,6 +101,7 @@ func PrintReview(w io.Writer, cfg Config) { printReview(w, Review(cfg)) }
 func printReview(w io.Writer, review InstallReview) {
 	_, _ = fmt.Fprintf(w, "Review install: context %q, namespace %q, pipeline namespace %q\nSecret store: production=%t dev=%t; client address=%q; admin identity=%q\nTLS DNS names: %v; IP addresses: %v\n", review.Context, review.Namespace, review.ArgoNamespace, review.ProductionStore, review.DevStore, review.ClientHost, review.AdminIdentity, review.DNSNames, review.IPs)
 	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
+	_, _ = fmt.Fprintln(w, "NetworkPolicy enforcement check runs first at install, after approval, using temporary probe Pods and their scratch namespace; fresh installs refuse unless enforcement is measured.")
 	for _, requirement := range review.ClientRequirements {
 		_, _ = fmt.Fprintln(w, requirement)
 	}
@@ -173,7 +174,7 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 	}
 	preflightDeps := deps
 	preflightDeps.RunCommand = host.RunCommand
-	inspectCluster(ctx, &cfg, preflightDeps, &identity, &r, maintenance)
+	inspectCluster(ctx, &cfg, preflightDeps, &identity, &r, maintenance, true)
 	review := Review(cfg)
 	r.Review = &review
 	r.Cluster = &identity
@@ -329,11 +330,12 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	if installErr == nil || errors.Is(installErr, ErrOnboardingPartial) {
 		result = verifyInstall(ctx, cfg, deps, cfg.existingRelease)
 	}
-	if errors.Is(installErr, errInstallPreflight) {
-		plan := PlanInstall(ctx, cfg, deps)
-		result.Checks = plan.Checks
-		result.Cluster = &plan.Identity
-		result.Review = &plan.Review
+	var preflight *installPreflightError
+	if errors.As(installErr, &preflight) {
+		result.Checks = slices.Clone(preflight.checks)
+		result.Cluster = &preflight.cluster
+		result.Review = &preflight.review
+		cfg.ContextName = preflight.review.Context
 	}
 	if result.Review == nil {
 		review := Review(cfg)

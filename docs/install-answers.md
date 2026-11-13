@@ -129,22 +129,24 @@ clusters must be provisioned by the operator before selecting their kubeconfig.
 
 Preflight fails with a remedy for unavailable prerequisites, unknown cluster
 CA, unreadable or unready nodes, unsupported architecture, less than 1 GiB
-available node filesystem space, missing default StorageClass, and unknown
-NetworkPolicy enforcement. Free space comes from the kubelet stats API, not
-from capacity or allocatable estimates; unreadable stats fail the check.
-NetworkPolicy enforcement is measured with two short-lived Pods in a uniquely
-labelled scratch namespace, using the installer's pinned multi-architecture
-utility image (or the selected `--utility-image` mirror). The probe checks
+available node filesystem space and missing default StorageClass. Install also
+refuses unknown NetworkPolicy enforcement on fresh installs before making
+release changes. Free space comes from the kubelet stats API, not from capacity
+or allocatable estimates; unreadable stats fail the check. NetworkPolicy
+enforcement is measured with a server Pod and two source Pods per Ready,
+schedulable, untainted node in an owned scratch namespace, using the installer's
+pinned multi-architecture utility image (or the selected `--utility-image` mirror). The probe checks
 allowed traffic, applies default-deny, requires blocked fresh connections,
 removes the policy, and requires traffic to recover. It does not infer security
 from a CNI/controller name. Plain kind can pass with its own enforcing network.
 Unblocked traffic after the convergence window is `absent` and installation is
 refused. Pull/RBAC/exec/readiness failures are `unverified` with a remedy; they
-never claim enforcement. The probe has a 90-second bound and always attempts
+never claim enforcement. The probe has a 120-second bound and always attempts
 cleanup with its own 30-second bound, including after cancellation. Cleanup
 failure names the exact scratch namespace and refuses a successful check.
-Plan and verification therefore create short-lived probe resources; they do not
-install an Oberth release or change the selected kubeconfig.
+Plan makes no cluster mutations and reports that enforcement will be checked
+first at install, after approval. Install and explicit verification create and
+clean up short-lived probe resources. They do not change the selected kubeconfig.
 
 ## Upstream name
 

@@ -32,7 +32,8 @@ Arguments given to the command: `$ARGUMENTS`
    explicit release version). It uses the plugin's pinned release key, OpenSSL
    and SHA-256 to verify before installing into `~/.local/bin`. It needs no
    sudo, cosign, jq or Python. A verification failure stops the flow.
-3. **The cluster.** Explain that plan runs the bounded short-lived NetworkPolicy probe below.
+3. **The cluster.** Explain that plan only reads the cluster. The bounded
+   NetworkPolicy probe below runs first at install, after approval.
    Run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" plan` with the
    chosen `--context` and answers file when available. Show its kubeconfig
    files, API URL, CA pin, node facts and remedies. Any chosen context is a valid
@@ -95,8 +96,10 @@ Arguments given to the command: `$ARGUMENTS`
    copy only the CSR and SSH public key and return the issued certificate over
    that authenticated SSH connection. Never set `--admin-bearer` by default.
 
-7. **Review.** Show the complete command and wait for the user to say
-   "install". The Oberth release is installed only after that approval.
+7. **Review.** Explain that the bounded enforcement check runs first after
+   approval, creating a scratch namespace, Pods and deny policies and cleaning
+   them up. A fresh install refuses absent or unverified enforcement. Show the
+   complete command and wait for the user to say "install".
 
    ```sh
    sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" run --yes --json --context '<context>' --install-secretstore \
@@ -270,7 +273,7 @@ for the next plan/install; choose unused names if either already exists.
 
 ### Live NetworkPolicy enforcement check
 
-Plan, install preflight and verification use a bounded traffic measurement on
+Install preflight (after approval) and verification use a bounded traffic measurement on
 the operator's cluster against Oberth's own server Pod. They do not identify CNI
 brands or try to defend against a hostile server. A server and two differently
 labelled sources per Ready, schedulable, untainted node run in an owned scratch
@@ -331,11 +334,14 @@ finds ownership-labelled leftovers and removes only an expired object with the
 same listed UID, rechecking its expiry and binding deletion to UID/resource
 version. Replacements, renewed lifetimes and missing/malformed expiry metadata
 are preserved and reported as unverified. Recent or active probes stay until expiry. Foreign ownership
-is reported and left untouched. Disclose these scratch writes before plan;
-Review remains the approval for installing the release.
+is reported and left untouched. Plan makes no cluster mutations and reports
+enforcement as unverified. Disclose these scratch writes in Review; the
+enforcement check is the first cluster mutation after approval, before release
+changes. No measurement receipt is written or reused.
 
 Capability is separate from configuration. Plan/install discover the existing
-release and stored values before probing. Existing-release maintenance preserves
+release and stored values before applying. Plan only reads those values; install
+then runs a fresh probe before release changes. Existing-release maintenance preserves
 that choice and needs no new scratch-probe privileges: an unverified observation
 remains unverified, shown as information, and does not block maintenance. Review
 shows true, false or unspecified (preserved), with disabled/unknown warnings.

@@ -41,26 +41,17 @@ reading recovery credentials. Existing admin certificate and secrets output
 files are allowed and left untouched. A real install still protects existing
 outputs from overwrite.
 
-A successful `install --plan` NetworkPolicy measurement can be reused once by
-the following install for up to five minutes. The private local receipt is bound
-to the verified API endpoint and CA, cluster UID, selected context, pipeline
-namespace name/UID/labels, node names/UIDs/labels, install namespace and probe
-image. Namespace creation/replacement or changed labels/nodes invalidate it.
-Every other preflight check still runs. Missing, expired, failed, malformed or
-unreadable receipts require the complete live measurement; public plan JSON is
-not accepted as proof. An install without a recent successful plan still has
-the full fresh-install NetworkPolicy gate.
+`oberth install --plan --context <context>` makes no cluster mutations. It
+reports NetworkPolicy capability as unverified and explains that the live
+enforcement check runs first when installation is approved. A successful plan
+means the read-only checks passed; it does not establish enforcement.
 
-The plan receipt is a convenience cache that saves the time of a second live
-measurement. It is writable by the same local user running the installer,
-including an agent with that user's privileges; it is not a security boundary
-against that user. Private file permissions and binding checks prevent accidental
-reuse and cross-user access, but do not attest the receipt against its owner.
-Install still re-runs every other preflight against the current cluster.
-
-Plan receipts from the earlier measurement protocol are not reused after the
-probe-container and Pod/NetworkPolicy UID checks were added. A new measurement
-is required; fresh receipts retain the same five-minute, single-use window.
+Install runs a new measurement before creating release namespaces, installing
+charts or writing server credentials. Fresh installs refuse absent or unverified
+enforcement. Existing-release maintenance preserves the stored policy choice
+and treats the observation as information. Explicit verification still measures
+enforcement and refuses failures. No plan measurement receipts are written or
+read; receipts from older versions are unused.
 
 Runtime identity certificates constrain their DNS names and each IP SAN.
 IPv4 constraints are exact /32 ranges; IPv6 constraints are exact /128 ranges.

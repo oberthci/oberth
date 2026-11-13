@@ -235,8 +235,6 @@ type Config struct {
 	// leave the pod serving the retired certificate.
 	rotatedServerCertSHA256 string
 
-	policyProbePlan bool
-
 	// ChartPath installs the Oberth chart from a local directory or archive
 	// instead of the published repository (--chart). This is the loop the
 	// rollout depends on: build the server image, install the working tree's
@@ -489,10 +487,9 @@ type Deps struct {
 	// Host installs verify the advertised endpoint after server readiness.
 	checkClientReachability bool
 
-	policyProbeCacheDir func() (string, error)
-	ProbeNetworkPolicy  func(context.Context, Config, Deps) NetworkPolicyProbeResult
-	baoToken            string
-	baoTokenCaptured    bool
+	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
+	baoToken           string
+	baoTokenCaptured   bool
 	// ClientConfigRoot overrides where this machine's CLI/MCP client files
 	// live (default ~/.config/oberth); tests point it at their own directory.
 	ClientConfigRoot func() (string, error)
