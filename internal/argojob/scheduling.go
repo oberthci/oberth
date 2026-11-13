@@ -11,7 +11,6 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -20,23 +19,35 @@ import (
 
 const maxSchedulingItems = 16
 
-// ObserveScheduling performs only an exact Workflow GET and one scoped, bounded
-// Pod LIST. It never submits, repairs, reads logs, events, or pod specs for output.
+// Seed diagnostics remain live until source delivery removes them. They must
+// never inherit the cluster client timeout on a synchronous run-list read.
+const seedObservationTimeout = 100 * time.Millisecond
+
+// ObserveScheduling reads shared Workflow and step-Pod caches. A missing
+// Workflow may use the bounded, exact source-seed diagnostic read.
 // AI-CONTRACT: arbitrary Kubernetes/Argo status text is untrusted: output only
 // fixed summaries, never raw messages (which may contain secrets or commands).
 func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID, sha string) (*model.ExecutionObservation, error) {
-	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
+	if controller.hub == nil || !controller.hub.Healthy() {
+		return controller.observationUnavailable(), nil
+	}
+	workflow, found := controller.hub.Workflow(name)
+	if !found {
+		// Source seed Pods have a separate, short-lived observation path (S1 row
+		// 10); they are deliberately outside the step-Pod informer selector.
 		if controller.seeder != nil {
-			observation, seedErr := controller.seeder.observeScheduling(ctx, name, runID, sha)
-			if seedErr != nil || observation != nil {
-				return observation, seedErr
+			seedCtx, cancel := context.WithTimeout(ctx, seedObservationTimeout)
+			observation, err := controller.seeder.observeScheduling(seedCtx, name, runID, sha)
+			timedOut := errors.Is(seedCtx.Err(), context.DeadlineExceeded)
+			cancel()
+			if timedOut {
+				return controller.observationUnavailable(), nil
+			}
+			if err != nil || observation != nil {
+				return observation, err
 			}
 		}
 		return &model.ExecutionObservation{State: "not_observed", Message: "No Workflow was observed; startup or scheduling cause is unknown."}, nil
-	}
-	if err != nil {
-		return nil, err
 	}
 	if workflow.Name != name || workflow.Namespace != controller.config.Namespace ||
 		workflow.Annotations[runIDAnnotation] != runID || workflow.Labels["oberth.ci/sha"] != labelValue(sha) {
@@ -52,7 +63,7 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 	if workflow.Status.Message == "" && workflow.Status.Phase == wfv1.WorkflowRunning {
 		result.Message = "Workflow execution is running."
 	}
-	// Suspension is observed from the exact live Workflow, never inferred from
+	// Suspension is observed from the cached Workflow, never inferred from
 	// missing progress or copied from arbitrary controller messages.
 	defer func() {
 		if workflow.Status.Phase == wfv1.WorkflowSucceeded || workflow.Status.Phase == wfv1.WorkflowFailed || workflow.Status.Phase == wfv1.WorkflowError {
@@ -104,26 +115,20 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		result.Pods = []model.SchedulingReason{{Phase: "Unknown", Reason: "Unavailable", Message: "Pod observation is unavailable."}}
 		return result, nil
 	}
-	pods, err := controller.kube.CoreV1().Pods(controller.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "workflows.argoproj.io/workflow=" + name, Limit: maxSchedulingItems,
-	})
-	if err != nil {
-		result.Pods = []model.SchedulingReason{{Phase: "Unknown", Reason: "Unavailable", Message: "Pod observation is unavailable."}}
-		return result, nil
-	}
-	result.Truncated = result.Truncated || pods.Continue != "" || len(pods.Items) > maxSchedulingItems
+	pods := controller.hub.PodsOf(name)
+	result.Truncated = result.Truncated || len(pods) > maxSchedulingItems
 	var deadlineNodes map[string]bool
 	if deadlineVerdictVisible(workflow, result) {
 		deadlineNodes = currentDeadlineNodes(workflow)
 	}
-	for _, pod := range pods.Items[:min(len(pods.Items), maxSchedulingItems)] {
-		owner := metav1.GetControllerOf(&pod)
+	for _, pod := range pods[:min(len(pods), maxSchedulingItems)] {
+		owner := metav1.GetControllerOf(pod)
 		if owner == nil || owner.UID != workflow.UID || owner.Name != name || owner.Kind != "Workflow" || owner.APIVersion != "argoproj.io/v1alpha1" {
 			continue
 		}
-		reason := podSchedulingReason(pod)
+		reason := podSchedulingReason(*pod)
 		result.Pods = append(result.Pods, reason)
-		if reason.Reason == "Unschedulable" && (podCapacityPending(&pod) || schedulerPlacementReason(pod) != "") {
+		if reason.Reason == "Unschedulable" && (podCapacityPending(pod) || schedulerPlacementReason(*pod) != "") {
 			result.Message = reason.Message
 		}
 		if reason.Reason == "DeadlineExceeded" && deadlineNodes[pod.Annotations["workflows.argoproj.io/node-id"]] {

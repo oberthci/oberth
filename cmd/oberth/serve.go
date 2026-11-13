@@ -1163,6 +1163,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("go module proxy: %s → %s (%d repo mappings)", options.argoGoProxyListen, options.argoGoProxyURL, len(repoMap))
 	}
 	activateScheduler := func(activationCtx context.Context) error {
+		if err := argoJobs.WaitForWatchSync(activationCtx); err != nil {
+			return err
+		}
 		// During a witness outage the writable handle was opened without
 		// recovery. Verify the original history before repairing it here.
 		if witnessRecoveryDeferred {
@@ -1215,7 +1218,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
 	adminServer := withAdminReadiness(withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), health.Ready)
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, adminServer, activateScheduler, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, adminServer, activateScheduler, argoJobs.RunWatch, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {
@@ -1615,6 +1618,7 @@ func runComponents(
 	goProxyServer *http.Server,
 	adminServer *http.Server,
 	activateScheduler func(context.Context) error,
+	runWatch func(context.Context),
 	accessReconciler *service.AccessReconciler,
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
@@ -1667,7 +1671,7 @@ func runComponents(
 		name string
 		err  error
 	}
-	results := make(chan componentResult, 6)
+	results := make(chan componentResult, 7)
 	var workers sync.WaitGroup
 	start := func(name string, operation func() error) {
 		workers.Add(1)
@@ -1683,6 +1687,7 @@ func runComponents(
 			}
 		}()
 	}
+	start("Argo watch", func() error { runWatch(runCtx); return nil })
 	schedulerActivated := make(chan struct{})
 	start("scheduler", func() error {
 		if activateScheduler != nil {
