@@ -23,6 +23,7 @@ func TestPluginNetworkPolicyLiveProbeAndCleanup(t *testing.T) {
 	for _, mode := range []string{"enforced", "absent", "namespace forbidden", "image unavailable", "exec forbidden", "cancelled", "cleanup forbidden", "create response lost"} {
 		t.Run(mode, func(t *testing.T) {
 			kube := fake.NewClientset(preflightNode())
+			probePolicyUIDFixture(kube)
 			namespace := ""
 			createdPods := 0
 			cleanupSeen := false

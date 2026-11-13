@@ -226,7 +226,8 @@ coincidences; it does not eliminate false passes. Read `enforced` as the wire
 status for a completed measurement, not a proof of isolation. Evidence records
 the actual selection order, per-round sample counts and node/namespace scope;
 remedies describe observed failures. Elapsed measurement time includes owned
-cleanup.
+cleanup. Every round deletes its policy with the UID returned by creation; a
+same-name replacement makes deletion fail and the result stays unverified.
 
 The public check's `evidence` states the scratch and pipeline namespaces,
 client/control nodes and server node. The scratch namespace keeps only its

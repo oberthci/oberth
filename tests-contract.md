@@ -546,3 +546,15 @@ Semaphore retirement checks the live retention marker before Helm removes a
 previously managed object. An operator replacement is left untouched and upgrade
 refuses unless it was explicitly marked keep; missing observation clients refuse
 too. The regression models the pinned Helm deletion path.
+
+NetworkPolicy measurement hardening: injected default-container annotations do
+not redirect execs from the named probe container. Scratch namespace fixtures
+include privileged admission, mesh and arbitrary injection labels; none is
+copied, and restricted enforce/audit/warn is set explicitly. No pipeline
+namespace label is needed by the owned Pod selector; name/label-specific
+exemptions are disclosed as outside the measurement. Pod replacement fixtures
+retain names, labels, ready state and IPs but change UIDs at readiness, baseline,
+selection and final recovery; they cannot complete verified measurements.
+Policy deletion fixtures enforce API UID preconditions across all six rounds
+and reject a replacement inserted immediately before deletion. Namespace UID
+cleanup, overlap/fresh-connection and randomized fault counterexamples remain.

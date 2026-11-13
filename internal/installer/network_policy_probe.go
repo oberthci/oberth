@@ -179,9 +179,13 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 		}
 		result.Evidence += fmt.Sprintf(" Round %d selects %s Pods.", round+1, selected)
 		phase = "egress policy programming"
-		_, err = policies.Create(ctx, &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "default-deny", Namespace: namespace}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{policyProbeLabel: selector}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}, metav1.CreateOptions{})
+		createdPolicy, err := policies.Create(ctx, &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "default-deny", Namespace: namespace}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{policyProbeLabel: selector}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}, metav1.CreateOptions{})
 		if err != nil {
 			result.Remedy = policyProbeFailure(err)
+			return
+		}
+		if createdPolicy.UID == "" {
+			result.Remedy = "Created measurement NetworkPolicy has no verified UID."
 			return
 		}
 		phase = "egress convergence (a bounded delay does not prove absence)"
@@ -191,7 +195,7 @@ func probeNetworkPolicyWithRandom(ctx context.Context, cfg Config, deps Deps, ti
 		}
 		result.Evidence += fmt.Sprintf(" %d paired denial measurements: held overlap and fresh unselected connections succeeded.", policyProbeSamples*len(nodes))
 		phase = "egress policy removal"
-		if err = policies.Delete(ctx, "default-deny", metav1.DeleteOptions{}); err != nil {
+		if err = policies.Delete(ctx, "default-deny", metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &createdPolicy.UID}}); err != nil {
 			result.Remedy = policyProbeFailure(err)
 			return
 		}

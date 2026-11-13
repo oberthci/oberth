@@ -3435,7 +3435,8 @@ status means the measurement completed: traffic cannot prove causality, and
 independent coincident fault windows can still pass. Public evidence and human
 output state this residual. Work stays bounded to 120s plus 30s cleanup, with
 20s traffic phases, 12s paired attempts and the existing command/hold caps.
-Only the random ownership-labelled namespace is cleaned with a UID precondition,
+Each round deletes its created NetworkPolicy with a UID precondition. The
+random ownership-labelled namespace is also cleaned with a UID precondition,
 under a separate bounded cleanup context even after cancellation. The pinned
 utility image and restricted, non-root, tokenless Pods are shared across CPU
 architectures. Plan/verification create these scratch resources before the

@@ -2,12 +2,14 @@ package installer
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -95,6 +97,7 @@ func TestProbeReconcilesStaleNamespacesAndProtectsActiveAndForeign(t *testing.T)
 }
 
 func probeNamespaceUIDFixture(kube *fake.Clientset) {
+	probePolicyUIDFixture(kube)
 	kube.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		ns := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace)
 		ns.UID = types.UID(ns.Name)
@@ -322,4 +325,14 @@ func policyPairPods(t *testing.T) policyPairFixture {
 		pods.uids[name] = pod.UID
 	}
 	return policyPairFixture{kube, pods}
+}
+
+func probePolicyUIDFixture(kube *fake.Clientset) {
+	sequence := 0
+	kube.PrependReactor("create", "networkpolicies", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		policy := action.(k8stesting.CreateAction).GetObject().(*networkingv1.NetworkPolicy)
+		sequence++
+		policy.UID = types.UID(policy.Name + "-" + strconv.Itoa(sequence))
+		return false, nil, nil
+	})
 }
