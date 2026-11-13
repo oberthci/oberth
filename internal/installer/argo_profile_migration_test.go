@@ -1,8 +1,10 @@
 package installer
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -87,4 +89,49 @@ func nativeArgoConfigHasCap(t *testing.T, objects []map[string]any, want int) bo
 		}
 	}
 	return false
+}
+
+func TestOldArgoProfileExecutorResourcesNoticeWithoutParallelism(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		resources any
+		label     string
+	}{
+		{"missing", nil, "installer defaults"},
+		{"stored", map[string]any{"requests": map[string]any{"cpu": "75m"}}, "stored value kept"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			values := map[string]any{"controller": map[string]any{"configMap": map[string]any{"create": false, "name": "old-profile"}}}
+			if test.resources != nil {
+				values["executor"] = map[string]any{"resources": test.resources}
+			}
+			raw, err := json.Marshal(values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output strings.Builder
+			deps := Deps{Output: &output, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				switch args[0] {
+				case "list":
+					return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil
+				case "get":
+					return raw, nil
+				case "upgrade":
+					for _, arg := range args {
+						if test.resources != nil && strings.HasPrefix(arg, "executor.resources=") {
+							t.Fatal("stored resources replaced", args)
+						}
+					}
+				}
+				return nil, nil
+			}}
+			if _, err := InstallArgoWorkflows(t.Context(), Config{}, deps); err != nil {
+				t.Fatal(err)
+			}
+			text := output.String()
+			if strings.Count(text, "controller.configMap.create=false:") != 1 || !strings.Contains(text, "executor.resources") || !strings.Contains(text, "docs/releases/v0.22.5.md") || !strings.Contains(text, test.label) {
+				t.Fatal("old profile silently ignored native resources", text)
+			}
+		})
+	}
 }

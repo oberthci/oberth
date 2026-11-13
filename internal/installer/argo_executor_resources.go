@@ -15,6 +15,7 @@ import (
 // install. Stored operator values are retained as supplied, including an empty
 // resources map; they are never completed with installer defaults.
 type ArgoExecutorResourcesReview struct {
+	// OperatorSet marks a stored setting; its original writer is unknown.
 	OperatorSet bool `json:"operator_set"`
 	Resources   any  `json:"resources"`
 }
@@ -76,7 +77,7 @@ func printArgoExecutorResources(w io.Writer, review *ArgoExecutorResourcesReview
 	}
 	label := "installer defaults"
 	if review.OperatorSet {
-		label = "keeping the operator-set value"
+		label = "stored value kept"
 	}
 	resources, _ := json.Marshal(review.Resources)
 	_, _ = fmt.Fprintf(w, "Argo executor.resources: %s %s\n", label, resources)

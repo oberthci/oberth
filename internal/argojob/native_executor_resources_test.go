@@ -137,7 +137,7 @@ func TestWorkflowPatchPreservesNativeOperatorExecutorResources(t *testing.T) {
 	before := nativeBudgetControllerShape(credentialWaitControllerShape(main))
 	for i := range before.Containers {
 		if before.Containers[i].Name == "wait" {
-			before.Containers[i].Resources.Limits[corev1.ResourceMemory] = resource.MustParse("2Gi")
+			before.Containers[i].Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi"), corev1.ResourceEphemeralStorage: resource.MustParse("2Gi")}
 		}
 	}
 	after := applyCredentialWaitPatch(t, before, wf.Spec.Templates[0].PodSpecPatch)
@@ -150,40 +150,27 @@ func TestWorkflowPatchPreservesNativeOperatorExecutorResources(t *testing.T) {
 	}
 }
 
-func TestNativeExecutorStorageLimitIsUniform(t *testing.T) {
-	for _, declared := range []bool{false, true} {
-		resources := "      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi}\n"
-		want := int64(512 << 20)
-		if declared {
-			resources = "      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi, ephemeral-storage: 128Mi}\n"
-			want += (128 << 20)
+func TestNativeExecutorDefaultsLeaveUndeclaredStepsUncapped(t *testing.T) {
+	resources := "      resources:\n        requests: {cpu: 125m, memory: 128Mi, ephemeral-storage: 64Mi}\n        limits: {memory: 256Mi}\n"
+	cfg := testConfig()
+	cfg.RunnerImagePrefixes = []string{"example.invalid/"}
+	wf, err := Build(cfg, resourceBoundsRequest(resourceBoundsSource(resources)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := *wf.Spec.Templates[0].Container.DeepCopy()
+	main.Name = "main"
+	before := nativeBudgetControllerShape(credentialWaitControllerShape(main))
+	after := applyCredentialWaitPatch(t, before, wf.Spec.Templates[0].PodSpecPatch)
+	for _, container := range append(after.InitContainers, after.Containers...) {
+		if container.Name != "init" && container.Name != "wait" {
+			continue
 		}
-		cfg := testConfig()
-		cfg.RunnerImagePrefixes = []string{"example.invalid/"}
-		wf, err := Build(cfg, resourceBoundsRequest(resourceBoundsSource(resources)))
-		if err != nil {
-			t.Fatal(err)
+		if len(container.Resources.Requests) != 2 || container.Resources.Requests.Cpu().MilliValue() != 50 || container.Resources.Requests.Memory().Value() != 64<<20 || len(container.Resources.Limits) != 0 {
+			t.Fatalf("native executor %s has more than CPU/memory requests: %+v", container.Name, container.Resources)
 		}
-		main := *wf.Spec.Templates[0].Container.DeepCopy()
-		main.Name = "main"
-		before := nativeBudgetControllerShape(credentialWaitControllerShape(main))
-		after := applyCredentialWaitPatch(t, before, wf.Spec.Templates[0].PodSpecPatch)
-		if got := podStorageLimit(after); got != want {
-			t.Fatalf("uniform native limit gives Pod cap %d, want %d", got, want)
-		}
-		if !declared {
-			for i := range before.Containers {
-				if before.Containers[i].Name == "wait" {
-					delete(before.Containers[i].Resources.Limits, corev1.ResourceEphemeralStorage)
-				}
-			}
-			for i := range before.InitContainers {
-				delete(before.InitContainers[i].Resources.Limits, corev1.ResourceEphemeralStorage)
-			}
-			after = applyCredentialWaitPatch(t, before, wf.Spec.Templates[0].PodSpecPatch)
-			if got := podStorageLimit(after); got != 0 {
-				t.Fatal("operator's omitted native storage limit was replaced", got)
-			}
-		}
+	}
+	if got := podStorageLimit(after); got != 0 {
+		t.Fatalf("native defaults created a Pod storage cap of %d", got)
 	}
 }

@@ -160,7 +160,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	if err != nil {
 		return result, err
 	}
-	if err := noticeArgoExternalConfigMap(ctx, cfg, deps, ns, exists); err != nil {
+	if err := noticeArgoExternalConfigMap(ctx, deps, ns, exists); err != nil {
 		return result, err
 	}
 	if (argoLimitsRequested(cfg) || retiredValues || dependencyChanged || imageMissing || cfg.argoExecutorResources == nil) && action == actionSkip {

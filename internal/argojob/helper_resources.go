@@ -25,7 +25,10 @@ func validateHelperStorage(wf *wfv1.Workflow) error {
 // The Oberth token waiter reserves storage and adds a limit only when the step
 // declares one. Argo-generated executors use native controller resources.
 func helperResources(workflow *wfv1.Workflow, t *wfv1.Template) corev1.ResourceRequirements {
-	resources := argoworkflow.ExecutorResources()
+	resources := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("256Mi")},
+		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("512Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("512Mi")},
+	}
 	if !stepDeclaresStorageLimit(workflow, t) {
 		delete(resources.Limits, corev1.ResourceEphemeralStorage)
 	}

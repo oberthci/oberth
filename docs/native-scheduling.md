@@ -287,18 +287,21 @@ win name/path collisions; validated workspace opt-outs remain available.
 
   Argo-generated init/wait containers, and executor main containers for resource
   and data templates, inherit native controller `executor.resources`. The managed
-  installer supplies requests of 50m CPU, 64 MiB memory and 256 MiB ephemeral
-  storage, with limits of 500m CPU, 512 MiB memory and 512 MiB ephemeral storage.
-  Workflow patches carry no resource overrides for those containers. An existing
-  operator-set `executor.resources` is kept exactly, including a partial or empty
-  map; install review shows the selected resources and whether they are preserved.
+  installer supplies only requests of 50m CPU and 64 MiB memory. It sets no
+  ephemeral-storage request and no CPU, memory or storage limits.
+  Workflow patches carry no resource overrides for those containers. Any stored
+  `executor.resources` is kept exactly, including a partial or empty map; install review shows the selected resources and labels an existing setting as
+  "stored value kept", without claiming who originally supplied it.
+  This includes settings written by earlier installer runs; remove stored limits
+  explicitly when choosing to adopt the requests-only defaults.
 
-  The native storage limit is uniform. A step without its own storage limit can
-  therefore run in a Pod capped by the helper's 512 MiB limit, including shared
-  disk EmptyDir usage. Operators can omit or change that limit in their Argo Helm
-  values. Oberth does not add main-container limits to compensate. Pod-total
-  storage evictions remain infrastructure observations because the total can
-  include operator-controlled helpers; a named authored container exceeding its
+  Native defaults add no helper storage limit, so they do not create a Pod
+  storage cap for a step that declares none. Operator-set limits can still create
+  such a cap. Steps that declare storage limits get no native helper-limit
+  headroom by default: account for shared control files, logs and disk EmptyDirs
+  when choosing those limits or explicitly configuring native helper resources.
+  Oberth leaves authored requests and limits alone. Pod-total storage evictions
+  remain infrastructure observations; a named authored container exceeding its
   own declared limit still reports a step resource failure.
 
   The Oberth-owned `oberth-executor-token` waiter keeps requests of 50m CPU,
