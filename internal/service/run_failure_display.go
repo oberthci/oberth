@@ -25,6 +25,9 @@ func displayFailureText(message string) string {
 }
 
 func failedRunDisplayReason(run model.Run) string {
+	if run.Phase == model.PhaseCancelled {
+		return run.Error
+	}
 	// A step whose held retry the sweep abandoned failed at its first
 	// attempt; the assisted fragment (assistDisplayReason) names that step,
 	// the attempt's exit code and the hold. The held Pod's runtime and

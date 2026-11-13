@@ -251,7 +251,7 @@ func assertQuarantineIsInert(t *testing.T, f quarantinedStartupFixture, jobs *Ar
 	if err := jobs.CreateWorkflow(ctx, service.WorkflowRequest{Run: f.run, Repository: f.repo, WorkflowName: f.run.WorkflowName}); !errors.Is(err, store.ErrExecutionTargetQuarantined) {
 		t.Fatal("quarantine authorized a submission", err)
 	}
-	if err := jobs.Delete(ctx, f.run.WorkflowName, f.run.ID); !errors.Is(err, store.ErrExecutionTargetQuarantined) {
+	if err := jobs.Stop(ctx, f.run.WorkflowName, f.run.ID); !errors.Is(err, store.ErrExecutionTargetQuarantined) {
 		t.Fatal("quarantine authorized deletion", err)
 	}
 	if err := jobs.ReconcileTargetCleanup(ctx); err != nil {

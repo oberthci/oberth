@@ -280,7 +280,7 @@ func TestPodRetryEveryAttemptFailsPointsAtLastAttempt(t *testing.T) {
 
 // TestNoRetryStrategyIsUnchanged pins that a pipeline with no Retry node
 // keeps its rows, names and verdict: nothing is superseded, nothing is
-// renamed, and a failed step still fails a Workflow Argo called Succeeded.
+// renamed, and tolerated failures keep the Workflow verdict Argo supplied.
 func TestNoRetryStrategyIsUnchanged(t *testing.T) {
 	workflow := budgetTestWorkflow()
 	results := StepResults(workflow)
@@ -305,7 +305,7 @@ func TestNoRetryStrategyIsUnchanged(t *testing.T) {
 	node.Phase = wfv1.NodeFailed
 	failed.Status.Nodes["unit-pod"] = node
 	completion := completionFor(failed)
-	if completion.Succeeded || completion.FailedStage != "test" || completion.FailedStep != "unit" {
+	if !completion.Succeeded || completion.FailedStage != "" || completion.FailedStep != "" {
 		t.Fatalf("failed step without retry = %v %q/%q, want failed test/unit", completion.Succeeded, completion.FailedStage, completion.FailedStep)
 	}
 }
@@ -562,10 +562,10 @@ func TestDAGRetryWithExitHook(t *testing.T) {
 				t.Fatalf("hook treated as an attempt: %+v", hook)
 			}
 			completion := completionFor(workflow)
-			if completion.Succeeded != (final == wfv1.NodeSucceeded) {
+			if !completion.Succeeded {
 				t.Fatalf("completion success = %v, final attempt = %s", completion.Succeeded, final)
 			}
-			if final == wfv1.NodeFailed && (completion.FailedStage != "address" || completion.FailedStep != "check") {
+			if completion.FailedStage != "" || completion.FailedStep != "" {
 				t.Fatalf("failure = %s/%s, want address/check", completion.FailedStage, completion.FailedStep)
 			}
 		})

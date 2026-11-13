@@ -1323,46 +1323,6 @@ func TestDistinctBranchRefsForSHA(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CompleteSupersededRunCancellationWithoutJob
-// ---------------------------------------------------------------------------
-
-func TestCompleteSupersededRunCancellationWithoutJob(t *testing.T) {
-	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
-	repo := createRepo(t, s)
-	ctx := context.Background()
-
-	// Validation.
-	if err := s.CompleteSupersededRunCancellationWithoutJob(ctx, ""); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("empty ID = %v, want ErrInvalid", err)
-	}
-
-	// Enqueue, claim, supersede.
-	first, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/no-job-cancel", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(time.Second)
-	if _, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/no-job-cancel", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")); err != nil {
-		t.Fatal(err)
-	}
-
-	// The first run is now interrupted with no job name.
-	// CompleteSupersededRunCancellationWithoutJob should close it.
-	if err := s.CompleteSupersededRunCancellationWithoutJob(ctx, first.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// Nonexistent: no error, just a no-op.
-	if err := s.CompleteSupersededRunCancellationWithoutJob(ctx, "nonexistent"); err != nil {
-		t.Fatalf("nonexistent = %v", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // SetRepositoryDefaultBranch
 // ---------------------------------------------------------------------------
 
@@ -1586,7 +1546,7 @@ func TestCompleteRunCancellationIdempotent(t *testing.T) {
 	repo := createRepo(t, s)
 	ctx := context.Background()
 
-	// Create a run, claim it, set job name, supersede it.
+	// Create a run, claim it, set its Workflow name and request Stop.
 	first, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/cancel-idempotent", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 	if err != nil {
 		t.Fatal(err)
@@ -1598,7 +1558,7 @@ func TestCompleteRunCancellationIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Second)
-	if _, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/cancel-idempotent", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")); err != nil {
+	if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: first.ID, Actor: "operator"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2068,9 +2028,7 @@ func TestEnqueueRunTagRefSkipsSupersession(t *testing.T) {
 	if !result.Release || result.RefKind != model.RefTag {
 		t.Fatalf("tag run = %#v", result.Run)
 	}
-	if len(result.Cancellations) != 0 {
-		t.Fatal("tag runs should not supersede")
-	}
+
 }
 
 // ---------------------------------------------------------------------------

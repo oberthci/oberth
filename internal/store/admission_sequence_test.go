@@ -121,8 +121,12 @@ func TestRestartRefireKeepsOriginalAdmissionOrderAndHistoryCursor(t *testing.T) 
 		t.Fatal(err)
 	}
 	superseded, err := s.Run(ctx, copy.ID)
-	if err != nil || superseded.Status != model.RunInterrupted || superseded.SupersededBy != newPush.ID {
-		t.Fatalf("new push did not supersede re-fired copy: %+v, %v", superseded, err)
+	if err != nil || superseded.Status != model.RunRunning || superseded.FinishedAt != nil {
+		t.Fatalf("new push changed earlier run: %+v, %v", superseded, err)
+	}
+	_ = newPush
+	if _, err := s.FinishRun(ctx, copy.ID, model.RunResult{Status: model.RunFailed}); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.FinishRun(ctx, b.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 		t.Fatal(err)

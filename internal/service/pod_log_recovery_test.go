@@ -331,7 +331,7 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 		t.Fatalf("uncertain physical cleanup hidden: pending=%+v %v", pending, err)
 	}
 	current, err := fixture.store.Run(context.Background(), run.ID)
-	if err != nil || !current.Status.Terminal() {
+	if err != nil || current.Status != model.RunRunning {
 		t.Fatal(current, err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -339,6 +339,7 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	}
 	// The dispatch pass that later deletes the Workflow prunes the journal.
 	jobs.deleteErr = nil
+	scheduler.settleOneCreate(t.Context())
 	if err := scheduler.completePendingCancellationsWithGate(context.Background(), scheduler.requireMutation); err != nil {
 		t.Fatal(err)
 	}

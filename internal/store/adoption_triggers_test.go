@@ -63,7 +63,7 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 				t.Fatal(err)
 			}
 			pending, err := s.PendingRunCancellations(ctx)
-			if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].Reason != "superseded" || pending[0].WorkflowName != "workflow" {
+			if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].Reason != "cancelled" || pending[0].WorkflowName != "workflow" {
 				t.Fatalf("explicit deletion was retired: %+v %v", pending, err)
 			}
 			if counts, err := s.CountRuns(ctx); err != nil || counts.Total != 1 {

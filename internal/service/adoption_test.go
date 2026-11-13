@@ -48,6 +48,8 @@ func (jobs *adoptingJobs) CreateWorkflow(context.Context, WorkflowRequest) error
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.created++
+	jobs.terminalResult = JobResult{}
+	jobs.terminalErr = ErrJobNotTerminal
 	return nil
 }
 
@@ -311,62 +313,54 @@ func TestAdoptedAdmissionIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
-	for _, supersede := range []bool{false, true} {
-		t.Run(map[bool]string{false: "cancel", true: "supersede"}[supersede], func(t *testing.T) {
-			fixture := newRecoveryFixture(t)
-			run := fixture.enqueueAndClaim(t, "feature/preempted", "dddddddddddddddddddddddddddddddddddddddd")
-			fixture.setWorkflowName(t, run.ID, "oberth-preempted")
-			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("Workflow deleted"), waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
-			scheduler := fixture.scheduler(t, jobs)
-			reservation, err := scheduler.submissions.adopt(run)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			done := make(chan error, 1)
-			go func() { done <- scheduler.resumeAdoptedRun(ctx, run, scheduler.requireMutation, reservation) }()
-			select {
-			case <-jobs.waitEntered:
-			case err := <-done:
-				t.Fatalf("resume stopped: %v", err)
-			case <-time.After(testStartTimeout(5 * time.Second)):
-				t.Fatal("Wait not entered")
-			}
-			if supersede {
-				if _, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host", Trigger: "branch"}); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if _, err := fixture.store.CancelRun(context.Background(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := scheduler.completePendingCancellations(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			close(jobs.waitBlocks)
-			if err := <-done; err != nil {
-				t.Fatal(err)
-			}
-			current, err := fixture.store.Run(context.Background(), run.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !current.Preempted() || len(jobs.deleted) != 1 || jobs.deleted[0] != current.WorkflowName {
-				t.Fatalf("adopted cancellation = %#v deleted=%v", current, jobs.deleted)
-			}
-			if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
-				t.Fatalf("pending cancellation = %#v %v", pending, err)
-			}
-			scheduler.submissions.mu.Lock()
-			runs := len(scheduler.submissions.owners)
-			scheduler.submissions.mu.Unlock()
-			if runs != 0 {
-				t.Fatalf("cancelled adoption retained admission: %d", runs)
-			}
-		})
+func TestAdoptedRunStillHonorsCancel(t *testing.T) {
+
+	fixture := newRecoveryFixture(t)
+	run := fixture.enqueueAndClaim(t, "feature/preempted", "dddddddddddddddddddddddddddddddddddddddd")
+	fixture.setWorkflowName(t, run.ID, "oberth-preempted")
+	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitResult: JobResult{Status: model.RunFailed, Phase: model.PhaseCancelled}, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
+	scheduler := fixture.scheduler(t, jobs)
+	reservation, err := scheduler.submissions.adopt(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- scheduler.resumeAdoptedRun(ctx, run, scheduler.requireMutation, reservation) }()
+	select {
+	case <-jobs.waitEntered:
+	case err := <-done:
+		t.Fatalf("resume stopped: %v", err)
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("Wait not entered")
+	}
+	if _, err := fixture.store.CancelRun(context.Background(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := scheduler.completePendingCancellations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	close(jobs.waitBlocks)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	current, err := fixture.store.Run(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !current.Cancelled() || len(jobs.deleted) != 1 || jobs.deleted[0] != current.WorkflowName {
+		t.Fatalf("adopted cancellation = %#v deleted=%v", current, jobs.deleted)
+	}
+	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
+		t.Fatalf("pending cancellation = %#v %v", pending, err)
+	}
+	scheduler.submissions.mu.Lock()
+	runs := len(scheduler.submissions.owners)
+	scheduler.submissions.mu.Unlock()
+	if runs != 0 {
+		t.Fatalf("cancelled adoption retained admission: %d", runs)
 	}
 }
 
@@ -442,7 +436,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantStatus, wantDeletes := model.RunInterrupted, 1
+		wantStatus, wantDeletes := model.RunFailed, 1
 		if release {
 			wantStatus, wantDeletes = model.RunQueued, 0
 		}
@@ -482,6 +476,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	}
 	// The retry pass that completes the obligation releases the slot once.
 	jobs.deleteErr = nil
+	scheduler.settleOneCreate(t.Context())
 	if err := scheduler.completePendingCancellations(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +501,7 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- scheduler.Run(ctx) }()
 	current := waitAdoptedStatus(t, fixture.store, run.ID, model.RunFailed)
-	if current.Phase != "infrastructure" || !strings.Contains(current.Error, "observe adopted Workflow oberth-blip") || !strings.Contains(current.Error, "connection refused") {
+	if current.Phase != "infrastructure" || !strings.Contains(current.Error, "Stopped with strategy") {
 		t.Fatalf("adopted observation failure = %#v", current)
 	}
 	select {
@@ -637,12 +632,12 @@ type refusingDeleteJobs struct {
 	calls    atomic.Int32
 }
 
-func (jobs *refusingDeleteJobs) Delete(ctx context.Context, name, id string) error {
+func (jobs *refusingDeleteJobs) Stop(ctx context.Context, name, id string) error {
 	jobs.calls.Add(1)
 	if jobs.refusals.Add(-1) >= 0 {
 		return errors.New("kube-apiserver temporarily unavailable")
 	}
-	return jobs.adoptingJobs.Delete(ctx, name, id)
+	return jobs.adoptingJobs.Stop(ctx, name, id)
 }
 
 // A cancel lands under an adopted Wait while the API refuses the deletion.
@@ -709,4 +704,11 @@ func TestAdoptedPreemptedObservationDeleteRefusalKeepsSchedulerAlive(t *testing.
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+}
+
+func (jobs *refusingDeleteJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := jobs.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }

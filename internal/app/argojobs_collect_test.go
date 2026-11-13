@@ -169,8 +169,8 @@ func (j *collectJobs) Wait(ctx context.Context, name string, w io.Writer) (servi
 	return j.adapter.Wait(ctx, name, w)
 }
 
-func (j *collectJobs) Delete(ctx context.Context, name, runID string) error {
-	return j.adapter.Delete(ctx, name, runID)
+func (j *collectJobs) Stop(ctx context.Context, name, runID string) error {
+	return j.adapter.Stop(ctx, name, runID)
 }
 func (j *collectJobs) TerminalResult(ctx context.Context, name string) (service.JobResult, error) {
 	return j.adapter.TerminalResult(ctx, name)

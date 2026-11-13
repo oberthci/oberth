@@ -188,9 +188,7 @@ func TestNewBranchRunWaitsForPendingPublicationOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(replacement.Cancellations) != 0 {
-		t.Fatalf("publication owner cancellations = %#v, want none", replacement.Cancellations)
-	}
+
 	unrelated, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, otherBranch, unrelatedSHA))
 	if err != nil {
 		t.Fatal(err)

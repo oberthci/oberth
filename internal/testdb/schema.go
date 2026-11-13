@@ -386,7 +386,7 @@ DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-
 `
 
 // PostWorkflowCapabilityUIDDowngrade reconstructs an empty UID-less table only in disposable historical fixtures.
-const PostWorkflowCapabilityUIDDowngrade = `
+const PostWorkflowCapabilityUIDDowngrade = PostWorkflowStopDowngrade + `
 DELETE FROM schema_migrations WHERE id='20261113073438-remove-unused-capability-recovery-842b529121af8cb6b818c84fa78a5024';
 DROP TABLE IF EXISTS workflow_capability_recoveries;
 CREATE TABLE workflow_capability_recoveries (
@@ -479,4 +479,24 @@ CREATE TABLE resource_attempts (
 );
 
 DELETE FROM schema_migrations WHERE id='20261113013336-remove-step-measurement-32ae7f0f09084618bddcb8f20fd0fbac';
+`
+
+// PostWorkflowStopDowngrade reconstructs the prior ledger only in disposable
+// historical-schema fixtures. Production migrations remain forward-only.
+const PostWorkflowStopDowngrade = `
+CREATE TEMP TABLE stop_fixture AS SELECT * FROM run_cancellations;
+DROP TABLE run_cancellations;
+CREATE TABLE run_cancellations (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    job_name TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL CHECK (reason IN ('superseded', 'owner_restart')),
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+INSERT INTO run_cancellations SELECT run_id,job_name,superseded_by,
+ CASE WHEN reason='cancelled' THEN 'superseded' ELSE reason END,created_at,completed_at FROM stop_fixture;
+DROP TABLE stop_fixture;
+CREATE INDEX run_cancellations_pending_idx ON run_cancellations(completed_at, created_at, run_id);
+DELETE FROM schema_migrations WHERE id='20261113184359-native-workflow-stop-9ebb4e6c64856dd49504e94f638069ef';
 `

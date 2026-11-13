@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ktesting "k8s.io/client-go/testing"
@@ -148,26 +148,25 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 			}
 			if owner == "running" {
 				f.remote.err = errors.New("fixture read denied")
-				if err := jobs.Delete(ctx, request.WorkflowName, request.Run.ID); err == nil || f.remote.deletes != 0 {
+				if err := jobs.Stop(ctx, request.WorkflowName, request.Run.ID); err == nil || f.remote.deletes != 0 {
 					t.Fatal("denied read released custody", err)
 				}
 				f.remote.err = nil
-				if cancelled, err := f.db.ExecutionTargetCancelled(ctx, request.Run.ID); err != nil || !cancelled {
+				if cancelled, err := f.db.ExecutionTargetCancelled(ctx, request.Run.ID); err != nil || cancelled {
 					t.Fatal(cancelled, err)
 				}
 				original := f.remote.object.DeepCopy()
 				f.remote.object.UID = "replacement-workflow"
-				if err := jobs.Delete(ctx, request.WorkflowName, request.Run.ID); err == nil || f.remote.deletes != 0 || f.remote.object.UID != "replacement-workflow" {
+				if err := jobs.Stop(ctx, request.WorkflowName, request.Run.ID); err == nil || f.remote.deletes != 0 || f.remote.object.UID != "replacement-workflow" {
 					t.Fatal("expired cleanup deleted a replacement Workflow", err)
 				}
 				f.remote.object = original
 			}
-			// The POST horizon still retains canonical custody after deletion.
-			if err := jobs.Delete(ctx, request.WorkflowName, request.Run.ID); !errors.Is(err, argojob.ErrTargetUncertain) {
-				t.Fatal("cleanup horizon lost", err)
+			if err := jobs.Stop(ctx, request.WorkflowName, request.Run.ID); err != nil {
+				t.Fatal(err)
 			}
-			if f.remote.object != nil || f.remote.deletes != 1 {
-				t.Fatal("original Workflow survived cleanup", f.remote.deletes)
+			if f.remote.object == nil || f.remote.deletes != 0 || f.remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop {
+				t.Fatal("native Stop lost original Workflow")
 			}
 			for _, row := range rows {
 				var resource string
@@ -179,21 +178,15 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 				default:
 					continue
 				}
-				_, err := f.kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource(resource), row.Namespace, row.Name)
-				if !apierrors.IsNotFound(err) {
-					t.Fatal("original resource survived cleanup", row.Kind, err)
+				if _, err := f.kube.Tracker().Get(corev1.SchemeGroupVersion.WithResource(resource), row.Namespace, row.Name); err != nil {
+					t.Fatal("Stop removed onExit resources", err)
 				}
 			}
 			after, found, err := f.db.ExecutionTarget(ctx, request.Run.ID, request.WorkflowName)
 			if err != nil || !found || !reflect.DeepEqual(binding, after) {
 				t.Fatal("retained authority changed", err)
 			}
-			if cancelled, err := f.db.ExecutionTargetCancelled(ctx, request.Run.ID); err != nil || !cancelled {
-				t.Fatal(cancelled, err)
-			}
-			if retained, err := f.db.ExecutionTargetResources(ctx, request.Run.ID); err != nil || !reflect.DeepEqual(rows, retained) {
-				t.Fatal("original UIDs or custody horizon changed", err)
-			}
+
 			if f.remote.posts != 1 {
 				t.Fatal("duplicate Workflow allocation", f.remote.posts)
 			}

@@ -21,7 +21,7 @@ func (*admissionExpiredFailure) ExecutorIdentityExpired() bool { return true }
 
 type expiredCleanupJobs struct{ *pendingCreateJobs }
 
-func (*expiredCleanupJobs) Delete(context.Context, string, string) error {
+func (*expiredCleanupJobs) Stop(context.Context, string, string) error {
 	return errors.New("API unavailable")
 }
 

@@ -381,7 +381,7 @@ func (ingestor *PushIngestor) ensureRepository(ctx context.Context, name string)
 
 func pushRunResult(repository model.Repository, enqueued model.EnqueueRunResult) PushResult {
 	run := presentationRun(enqueued.Run)
-	return PushResult{Repository: repository, Run: &run, Cancellations: enqueued.Cancellations, SupersededCount: enqueued.SupersededCount, Duplicate: enqueued.Duplicate}
+	return PushResult{Repository: repository, Run: &run, Duplicate: enqueued.Duplicate}
 }
 
 func receiveSpec(id, actor string, repoID int64, kind model.RefKind, ref, oldSHA, objectSHA, commitSHA, outcome string) model.ReceiveEventSpec {

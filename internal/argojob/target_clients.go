@@ -493,6 +493,24 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 			return false, err
 		}
 	}
+	// Journal rows need not list the Workflow before its children. Establish
+	// native terminality first, so onExit retains every Pod and PVC it needs.
+	for _, r := range rows {
+		if r.Kind != "Workflow" {
+			continue
+		}
+		workflow, err := c.WorkflowClient().Get(ctx, r.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !workflow.Status.Phase.Completed() {
+			_, err := requestWorkflowStop(ctx, c.workflows, workflow)
+			return false, err
+		}
+	}
 	allAbsent := true
 	for _, r := range rows {
 		notBefore = maxTargetTime(notBefore, r.NotBefore)
@@ -593,6 +611,15 @@ func (c *TargetClients) VerifyResultCustody(ctx context.Context) error {
 		return err
 	}
 	if cancelled {
+		// Source cleanup follows Stop; it cannot invalidate the original
+		// Workflow's native verdict after its exit handlers have finished.
+		workflow, err := c.WorkflowClient().Get(ctx, c.journal.Binding().Workflow, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if workflow.Status.Phase.Completed() {
+			return nil
+		}
 		return ErrTargetUncertain
 	}
 	b := c.journal.Binding()

@@ -101,12 +101,12 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		reservation.retain()
 		return err
 	}
-	if current.Preempted() {
+	if current.Cancelled() {
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
 			reservation.retain()
-			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
+			scheduler.deferCreateCleanup(ctx, current, run.WorkflowName, reservation, err)
+			return nil
 		}
-		return nil
 	}
 	file, events, retained, err := scheduler.logs.Resume(run.ID)
 	if err != nil {
@@ -149,21 +149,19 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 }
 
 // Retired execution is terminal, rather than a reason to stop the new owner.
-// Delete only the owned Argo Workflow; operators own any external resources.
+// Stop only the owned Argo Workflow; operators own any external resources.
 func (scheduler *Scheduler) failRetiredRun(ctx context.Context, run model.Run, require mutationRequirement) error {
 	if err := require(ctx); err != nil {
 		return err
 	}
-	if err := scheduler.jobs.Delete(ctx, run.WorkflowName, run.ID); err != nil {
-		return fmt.Errorf("stop retired Workflow %s: %w", run.WorkflowName, err)
-	}
-	if err := scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: argoworkflow.ErrWorkflowCapabilityRequired.Error()}, require); err != nil {
+	if err := scheduler.jobs.Stop(ctx, run.WorkflowName, run.ID); err != nil {
 		return err
 	}
-	if err := scheduler.database().CompleteRunCancellation(ctx, run.ID, run.WorkflowName); err != nil && !errors.Is(err, store.ErrNotFound) {
+	// Refused recovery still owns a live Workflow until its exit handlers finish.
+	grant, err := scheduler.submissions.adopt(run)
+	if err != nil {
 		return err
 	}
-	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
-	defer cancel()
-	return scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
+	scheduler.deferCreateCleanup(ctx, run, run.WorkflowName, grant, argoworkflow.ErrWorkflowCapabilityRequired)
+	return nil
 }

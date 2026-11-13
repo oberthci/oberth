@@ -59,18 +59,6 @@ func (database schedulerDatabase) CompleteObservedRunCancellation(ctx context.Co
 	})
 }
 
-func (database schedulerDatabase) RearmRunCancellation(ctx context.Context, runID string, workflowName string) error {
-	return retryDatabaseError(ctx, "RearmRunCancellation", func(ctx context.Context) error {
-		return database.SchedulerStore.RearmRunCancellation(ctx, runID, workflowName)
-	})
-}
-
-func (database schedulerDatabase) CompleteSupersededRunCancellationWithoutJob(ctx context.Context, runID string) error {
-	return retryDatabaseError(ctx, "CompleteSupersededRunCancellationWithoutJob", func(ctx context.Context) error {
-		return database.SchedulerStore.CompleteSupersededRunCancellationWithoutJob(ctx, runID)
-	})
-}
-
 func (database schedulerDatabase) FinishRun(ctx context.Context, runID string, result model.RunResult) (model.Run, error) {
 	return retryDatabase(ctx, "FinishRun", func(ctx context.Context) (model.Run, error) {
 		return database.SchedulerStore.FinishRun(ctx, runID, result)

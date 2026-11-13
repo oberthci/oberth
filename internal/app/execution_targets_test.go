@@ -580,11 +580,11 @@ func TestExecutionTargetCancellationAndDeniedCleanupRetainOriginalBundle(t *test
 		t.Fatal(err)
 	}
 	f.remote.err = apierrors.NewForbidden(schema.GroupResource{Resource: "workflows"}, f.request.WorkflowName, errors.New("denied"))
-	if err := restarted.Delete(ctx, f.request.WorkflowName, f.request.Run.ID); err == nil {
+	if err := restarted.Stop(ctx, f.request.WorkflowName, f.request.Run.ID); err == nil {
 		t.Fatal("denied remote cleanup became success")
 	}
-	if cancelled, err := f.db.ExecutionTargetCancelled(ctx, f.request.Run.ID); err != nil || !cancelled {
-		t.Fatal("durable cancellation missing", cancelled, err)
+	if cancelled, err := f.db.ExecutionTargetCancelled(ctx, f.request.Run.ID); err != nil || cancelled {
+		t.Fatal("Stop must retain live result custody", cancelled, err)
 	}
 	if _, err := restarted.TerminalResult(ctx, f.request.WorkflowName); err == nil {
 		t.Fatal("unresolved cleanup allowed native result")
@@ -593,8 +593,8 @@ func TestExecutionTargetCancellationAndDeniedCleanupRetainOriginalBundle(t *test
 	if done, err := restarted.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, time.Now().Add(time.Hour)); err != nil || done {
 		t.Fatal("accepted delete counted as late-commit absence", done, err)
 	}
-	if f.remote.deletes != 1 {
-		t.Fatal("original remote Workflow not deleted")
+	if f.remote.deletes != 0 || f.remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop {
+		t.Fatal("native Stop did not retain the original Workflow")
 	}
 	if rows, err := f.db.ExecutionTargetResources(ctx, f.request.Run.ID); err != nil || len(rows) < 3 {
 		t.Fatal("source/seed/Workflow custody discarded", rows, err)

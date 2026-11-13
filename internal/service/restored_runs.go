@@ -28,8 +28,6 @@ const RestoredRunsFile = ".oberth-restored-runs.json"
 // errRestoredRun keeps a restored run out of the stranded-run requeue.
 var errRestoredRun = fmt.Errorf("%w: run was running when the restored backup was taken", store.ErrRequeueIneligible)
 
-const restoredRunInterruption = "run was running when the restored backup was taken; restored without re-executing it"
-
 // loadRestoredRuns reads the marker; a missing file is an empty set. An
 // unreadable or malformed marker is refused rather than ignored, because
 // ignoring it would re-execute the runs it names.
@@ -88,7 +86,7 @@ func retireRestoredRunsMarker(path string) error {
 const restoredRunCancelReason = "restored from a backup; not dispatched again"
 
 // cancelRestoredRun cancels one restored active run through the ordinary
-// cancel path (interrupted, phase cancelled, audited, Workflow-deletion
+// cancel path (audited Stop intent, with a Workflow-Stop
 // obligation for a claimed run). A run already terminal or absent is left.
 func (scheduler *Scheduler) cancelRestoredRun(ctx context.Context, id string, require mutationRequirement) error {
 	canceller, ok := scheduler.store.(interface {

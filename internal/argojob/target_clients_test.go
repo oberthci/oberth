@@ -359,3 +359,61 @@ func TestTargetConfigurationMigrationRetainsOriginalObjectIdentity(t *testing.T)
 		t.Fatal("migration repeated POST, deleted or failed to Stop", remote.posts, remote.deletes)
 	}
 }
+
+func TestTargetStopKeepsChildrenUntilExitHandlersFinish(t *testing.T) {
+	j := newCustodyJournal(t, "exit-workflow")
+	remote := &custodyWorkflows{}
+	kube := fake.NewClientset()
+	clients, err := NewTargetClients(remote, kube, j, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = clients.WorkflowClient().Create(t.Context(), custodyWorkflow(t, j), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// PVC kinds sort before Workflow in the journal. Their presence must never
+	// let settlement clean source storage before it has checked onExit.
+	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "exit-source", Namespace: j.b.Namespace, UID: "source-uid"}}
+	if err = kube.Tracker().Add(pvc); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(pvc)
+	if _, err = j.Prepare(t.Context(), model.ExecutionTargetResource{RunID: j.b.RunID, Kind: "PersistentVolumeClaim", Namespace: pvc.Namespace, Name: pvc.Name, NotBefore: time.Now(), Object: body}); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Observe(t.Context(), "PersistentVolumeClaim", pvc.Namespace, pvc.Name, string(pvc.UID)); err != nil {
+		t.Fatal(err)
+	}
+	clients.now = func() time.Time { return time.Now().Add(time.Hour) }
+	if done, err := clients.Settle(t.Context(), time.Time{}); err != nil || done {
+		t.Fatal(done, err)
+	}
+	if remote.object == nil || remote.object.Spec.Shutdown != wfv1.ShutdownStrategyStop || remote.deletes != 0 {
+		t.Fatal("Stop did not retain Workflow")
+	}
+	for _, action := range kube.Actions() {
+		if action.GetVerb() == "delete" {
+			t.Fatal("Stop deleted onExit storage", action)
+		}
+	}
+	remote.object.Status.Phase = wfv1.WorkflowFailed
+	if _, err = clients.Settle(t.Context(), time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = kube.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(t.Context(), pvc.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatal("terminal cleanup kept source", err)
+	}
+	if remote.deletes != 0 || remote.object == nil {
+		t.Fatal("terminal cleanup deleted Workflow")
+	}
+	if err := j.db.CancelExecutionTarget(t.Context(), j.b.RunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, strategy := range []wfv1.ShutdownStrategy{wfv1.ShutdownStrategyStop, ""} {
+		remote.object.Spec.Shutdown = strategy
+		if err := clients.VerifyResultCustody(t.Context()); err != nil {
+			t.Fatal("cleanup lost original native terminal verdict", err)
+		}
+	}
+
+}

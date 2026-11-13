@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -99,43 +100,22 @@ type ArgoJobs struct {
 	intents map[string]argoIntent
 }
 
-// argoIntent tracks the lifecycle of one in-flight Workflow submission.
-//
-// State machine (all transitions under jobs.mu):
-//
-//	reserved  ──controller.Create()──▸  created=true
-//	    │                                   │
-//	    ▼                                   ▼
-//	cancelled=true                     cancelled=true
-//	(Delete before Create)             (Delete after Create)
-//
-// Delete arriving before Create marks the intent cancelled and returns
-// success. The in-flight create() checks cancelled between reservation and
-// seeding (cheap early abort) and again after controller.Create returns. If
-// the workflow was created but the intent was cancelled in the meantime,
-// create() cancels the live workflow and returns ErrSuperseded.
-//
-// Wait() is unaffected: it reads the intent for its runID and then removes
-// the intent on completion. A cancelled-but-created intent is cleaned up by
-// create(), not by Wait(), because create() is the only goroutine that
-// transitions from reserved to created.
-//
-// The failure-cleanup defer in create() must NOT remove an intent that
-// Delete has marked cancelled: Delete owns the intent's lifecycle once it
-// sets cancelled=true.
+// argoIntent preserves the submission identity through Stop and terminal observation.
+// A Stop before creation records intent; a successful late creation is stopped
+// and remains observable by Wait, including its exit handlers.
 type argoIntent struct {
 	sources   []pipeline.PinnedSource
 	adoption  *argojob.Adoption
 	runID     string
 	trigger   pipeline.Trigger
 	created   bool // true once controller.Create has returned successfully
-	cancelled bool // true once Delete has requested cancellation
+	cancelled bool // true once Stop has requested cancellation
 }
 
-// ErrSuperseded is returned by create() when Delete() cancelled the intent
+// ErrCreationCancelled is returned by create() when Stop() cancelled the intent
 // while the Workflow was being created. The scheduler records the run as
 // cancelled rather than as a creation failure.
-var ErrSuperseded = errors.New("app: Workflow superseded during creation")
+var ErrCreationCancelled = errors.New("app: Workflow cancelled before creation")
 
 // SetReconcilerHealth wires the reconciler health check after construction.
 // This exists because the reconciler may be created after the engine in the
@@ -341,8 +321,8 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 
 	// Everything below runs outside the lock. On failure, remove the
 	// reservation so a retry or a different run can claim the name —
-	// UNLESS Delete has already marked the intent cancelled, in which case
-	// Delete owns the intent lifecycle and this defer must not remove it.
+	// UNLESS Stop has already marked the intent cancelled, in which case
+	// Stop owns the intent lifecycle and this defer must not remove it.
 	success := false
 	defer func() {
 		if !success {
@@ -354,14 +334,14 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		}
 	}()
 
-	// Early abort: Delete arrived between reservation and seeding.
+	// Early abort: Stop arrived between reservation and seeding.
 	jobs.mu.Lock()
 	if jobs.intents[request.WorkflowName].cancelled {
 		// Delete already marked the intent cancelled and owns cleanup.
 		// Remove the tombstone now — no workflow exists to cancel.
 		delete(jobs.intents, request.WorkflowName)
 		jobs.mu.Unlock()
-		return ErrSuperseded
+		return ErrCreationCancelled
 	}
 	jobs.mu.Unlock()
 
@@ -510,25 +490,19 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		return fmt.Errorf("app: Argo created Workflow %q, expected %q", createdName, request.WorkflowName)
 	}
 
-	// Post-create check: if Delete arrived while controller.Create was
-	// running, the live Workflow must be cancelled. The intent is removed
-	// here because Delete left the tombstone for create() to clean up.
 	jobs.mu.Lock()
-	if intent, ok := jobs.intents[request.WorkflowName]; ok && intent.cancelled {
-		delete(jobs.intents, request.WorkflowName)
-		jobs.mu.Unlock()
-		if jobs.targetBinding == nil {
-			_ = jobs.controller.Cancel(ctx, createdName, request.Run.ID)
-		}
-		return ErrSuperseded
-	}
-	// Mark the intent as created so Delete (and Wait) know the Workflow
-	// exists and can be cancelled via the controller.
-	if intent, ok := jobs.intents[request.WorkflowName]; ok && intent.runID == request.Run.ID {
-		intent.created = true
-		jobs.intents[request.WorkflowName] = intent
-	}
+	intent := jobs.intents[request.WorkflowName]
+	intent.created = true
+	jobs.intents[request.WorkflowName] = intent
 	jobs.mu.Unlock()
+	if intent.cancelled {
+		// A successful create must remain observable through onExit.
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := jobs.controller.Cancel(stopCtx, createdName, request.Run.ID); err != nil {
+			log.Printf("Workflow %s: Stop deferred to the durable cancellation owner: %v", createdName, err)
+		}
+	}
 
 	success = true
 	return nil
@@ -864,36 +838,17 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 	return result, err
 }
 
-func (jobs *ArgoJobs) Delete(ctx context.Context, name, runID string) error {
+func (jobs *ArgoJobs) Stop(ctx context.Context, name, runID string) error {
 	if jobs.routes != nil {
 		child, err := jobs.routes.forName(ctx, name, runID)
 		if err != nil {
 			return err
 		}
-		if child.targetBinding == nil {
-			return child.Delete(ctx, name, runID)
-		}
-		if err := jobs.routes.store.CancelExecutionTarget(ctx, runID); err != nil {
-			return err
-		}
-		child.mu.Lock()
-		if intent, exists := child.intents[name]; exists {
-			intent.cancelled = true
-			child.intents[name] = intent
-		}
-		child.mu.Unlock()
-		done, err := child.targetClients.Settle(ctx, time.Time{})
-		if err != nil {
-			return err
-		}
-		if !done {
-			return argojob.ErrTargetUncertain
-		}
-		return jobs.routes.completeCleanup(ctx, runID)
+		return child.Stop(ctx, name, runID)
 	}
 
 	if strings.TrimSpace(runID) == "" {
-		return errors.New("app: durable run ID is required to delete a Workflow")
+		return errors.New("app: durable run ID is required to stop a Workflow")
 	}
 
 	jobs.mu.Lock()
@@ -918,21 +873,11 @@ func (jobs *ArgoJobs) Delete(ctx context.Context, name, runID string) error {
 	}
 	jobs.mu.Unlock()
 
-	// Intent is either created=true (workflow exists) or absent (no
-	// in-flight create). Cancel the controller object, then remove the
-	// intent.
-	if err := jobs.controller.Cancel(ctx, name, runID); err != nil {
-		return err
-	}
-	jobs.mu.Lock()
-	if current, ok := jobs.intents[name]; ok && current.runID == runID {
-		delete(jobs.intents, name)
-	}
-	jobs.mu.Unlock()
-	return nil
+	// Keep the intent until Wait observes Argo's terminal phase.
+	return jobs.controller.Cancel(ctx, name, runID)
 }
 
-// SettleCreate bypasses the in-flight Delete shortcut: an ambiguous POST may
+// SettleCreate bypasses the in-flight Stop shortcut: an ambiguous POST may
 // still commit even after an earlier Cancel returned NotFound.
 func (jobs *ArgoJobs) SettleCreate(ctx context.Context, name, runID string, notBefore time.Time) (bool, error) {
 	if jobs.routes != nil {
@@ -986,9 +931,14 @@ func (jobs *ArgoJobs) TerminalResult(ctx context.Context, name string) (service.
 			return service.JobResult{}, err
 		}
 		if child.targetClients != nil {
+			result, err := child.TerminalResult(ctx, name)
+			if err != nil {
+				return result, err
+			}
 			if err := child.targetClients.VerifyResultCustody(ctx); err != nil {
 				return service.JobResult{}, err
 			}
+			return result, nil
 		}
 		return child.TerminalResult(ctx, name)
 	}
@@ -1079,10 +1029,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		result.Phase = "infrastructure"
 		result.FailedStage, result.FailedStep = "", ""
 	}
-	if completion.Interrupted && completion.Infrastructure && !completion.Succeeded && completion.FailedStep == "" {
-		result.Status, result.Phase = model.RunInterrupted, "interrupted"
-		result.FailedStage, result.FailedStep = "", ""
-	}
+
 	return operatorShutdownResult(result, completion)
 }
 

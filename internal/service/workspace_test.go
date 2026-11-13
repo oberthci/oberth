@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
@@ -255,168 +254,6 @@ func TestWorkspaceStartupRecoveryPreservesPendingPublication(t *testing.T) {
 	}
 }
 
-func TestSupersededWorkspaceWaitsForCancellationCompletion(t *testing.T) {
-	fixture := newControlFixture(t)
-	ctx := context.Background()
-	first := enqueueWorkspaceRun(t, fixture, "feature/superseded-workspace", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	workflowName, err := deterministicWorkflowName(fixture.repo.Name, first.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.store.SetRunWorkflowName(ctx, first.ID, workflowName); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
-		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: first.Ref,
-		SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: first.Actor, Trigger: "branch",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	interrupted, err := fixture.store.Run(ctx, first.ID)
-	if err != nil || interrupted.Status != model.RunInterrupted || interrupted.Phase != "interrupted" || interrupted.SupersededBy == "" {
-		t.Fatalf("superseded workspace owner = %#v, %v", interrupted, err)
-	}
-	workspace := filepath.Join(fixture.root, "work", first.ID)
-	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := fixture.scheduler.recoverOwnedWorkspaces(ctx); err != nil {
-		t.Fatal(err)
-	}
-	assertWorkspaceExists(t, workspace)
-	if err := fixture.scheduler.completePendingCancellations(ctx); err != nil {
-		t.Fatal(err)
-	}
-	assertWorkspaceMissing(t, workspace)
-}
-
-func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
-	fixture := newControlFixture(t)
-	ctx := context.Background()
-	root := filepath.Join(fixture.root, "work")
-	databasePath := filepath.Join(fixture.root, "oberth.sqlite")
-	first := enqueueWorkspaceRun(t, fixture, "feature/pre-job-supersede", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	workspace := filepath.Join(root, first.ID)
-	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
-		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: first.Ref,
-		SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: first.Actor, Trigger: "branch",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	interrupted, err := fixture.store.Run(ctx, first.ID)
-	if err != nil || interrupted.Status != model.RunInterrupted || interrupted.Phase != "interrupted" || interrupted.SupersededBy == "" {
-		t.Fatalf("pre-Job superseded workspace owner = %#v, %v", interrupted, err)
-	}
-	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].WorkflowName != "" {
-		t.Fatalf("pre-Job cancellation = %#v, %v", pending, err)
-	}
-	// The original process may still be checking out until owner shutdown, so
-	// ordinary startup recovery cannot complete or clean this empty-name owner.
-	if err := fixture.scheduler.completePendingCancellations(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := fixture.scheduler.recoverOwnedWorkspaces(ctx); err != nil {
-		t.Fatal(err)
-	}
-	assertWorkspaceExists(t, workspace)
-
-	if err := fixture.store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := storetest.Open(ctx, databasePath, store.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = reopened.Close() })
-	pending, err = reopened.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("owner-restart cancellation = %#v, %v", pending, err)
-	}
-	restarted, err := NewScheduler(SchedulerConfig{
-		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
-		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: root})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := restarted.recoverOwnedWorkspaces(ctx); err != nil {
-		t.Fatal(err)
-	}
-	assertWorkspaceMissing(t, workspace)
-}
-
-func TestWorkerJoinCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
-	fixture := newControlFixture(t)
-	ctx := context.Background()
-	root := filepath.Join(fixture.root, "work")
-	git := &blockingCheckoutGit{
-		controlGit: fixture.git, started: make(chan struct{}), release: make(chan struct{}),
-		err: errors.New("checkout failed after supersede"),
-	}
-	scheduler, err := NewScheduler(SchedulerConfig{
-		Store: fixture.store, Git: git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
-		Auditor: fixture.store, Signals: fixture.signals, WorkspaceRoot: root})
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, err := scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "worker-join-first", Repository: fixture.repo, Branch: "feature/worker-join",
-		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processed := make(chan error, 1)
-	go func() { processed <- scheduler.ProcessNext(ctx) }()
-	select {
-	case <-git.started:
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		close(git.release)
-		t.Fatal("checkout did not start")
-	}
-	workspace := filepath.Join(root, first.ID)
-	if _, err := scheduler.EnqueueCI(ctx, CIRequest{
-		EventID: "worker-join-second", Repository: fixture.repo, Branch: "feature/worker-join",
-		OldSHA: first.SHA, SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host",
-	}); err != nil {
-		close(git.release)
-		t.Fatal(err)
-	}
-	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].WorkflowName != "" {
-		close(git.release)
-		t.Fatalf("live empty-name cancellation = %#v, %v", pending, err)
-	}
-	if err := scheduler.recoverOwnedWorkspaces(ctx); err != nil {
-		close(git.release)
-		t.Fatal(err)
-	}
-	assertWorkspaceExists(t, workspace)
-	close(git.release)
-	select {
-	case err := <-processed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(testStartTimeout(5 * time.Second)):
-		t.Fatal("superseded worker did not return")
-	}
-	pending, err = fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("worker-join cancellation = %#v, %v", pending, err)
-	}
-	assertWorkspaceMissing(t, workspace)
-}
-
 func TestPromotionOnlyTerminalPathsCleanExactWorkspace(t *testing.T) {
 	const (
 		sourceSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -566,22 +403,6 @@ func TestOwnedWorkspacePathsRejectUnboundedTargets(t *testing.T) {
 type workspaceAuditRecorder struct {
 	Auditor
 	actions []model.AuditActionSpec
-}
-
-type blockingCheckoutGit struct {
-	*controlGit
-	started chan struct{}
-	release chan struct{}
-	err     error
-}
-
-func (git *blockingCheckoutGit) Checkout(_ context.Context, _, _ string, destination string) error {
-	if err := os.MkdirAll(destination, 0o700); err != nil {
-		return err
-	}
-	close(git.started)
-	<-git.release
-	return git.err
 }
 
 func (recorder *workspaceAuditRecorder) AppendAuditAction(ctx context.Context, spec model.AuditActionSpec) (model.AuditAction, error) {

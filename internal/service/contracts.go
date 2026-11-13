@@ -102,8 +102,6 @@ type RunQueueStore interface {
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
 	CompleteRunCancellation(context.Context, string, string) error
 	CompleteObservedRunCancellation(context.Context, model.RunCancellation) error
-	RearmRunCancellation(context.Context, string, string) error
-	CompleteSupersededRunCancellationWithoutJob(context.Context, string) error
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
 	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)
 	RunningRunsWithJobs(context.Context) ([]model.Run, error)
@@ -415,7 +413,7 @@ var ErrJobNotTerminal = errors.New("service: job has not reached terminal state"
 type JobController interface {
 	CreateWorkflow(context.Context, WorkflowRequest) error
 	Wait(context.Context, string, io.Writer) (JobResult, error)
-	Delete(context.Context, string, string) error
+	Stop(context.Context, string, string) error
 	// TerminalResult checks whether a named K8s Job has reached a terminal
 	// state. Returns (result, nil) when the Job completed or failed; returns
 	// (_, ErrJobNotTerminal) when the Job is absent or still active; returns
@@ -499,14 +497,12 @@ type TagPush struct {
 }
 
 type PushResult struct {
-	Repository      model.Repository        `json:"repository"`
-	Run             *model.Run              `json:"run,omitempty"`
-	SupersededCount int64                   `json:"superseded_count,omitempty"`
-	Cancellations   []model.RunCancellation `json:"cancellations,omitempty"`
-	Deleted         bool                    `json:"deleted"`
-	Admitted        bool                    `json:"admitted"`
-	Duplicate       bool                    `json:"duplicate"`
-	Reason          string                  `json:"reason,omitempty"`
+	Repository model.Repository `json:"repository"`
+	Run        *model.Run       `json:"run,omitempty"`
+	Deleted    bool             `json:"deleted"`
+	Admitted   bool             `json:"admitted"`
+	Duplicate  bool             `json:"duplicate"`
+	Reason     string           `json:"reason,omitempty"`
 }
 
 type StatusResponse struct {

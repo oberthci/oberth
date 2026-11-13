@@ -16,19 +16,8 @@ import (
 // ErrInvalidState so callers that only distinguish the class keep working.
 var ErrRunNotActive = fmt.Errorf("%w: run is not active", ErrInvalidState)
 
-// CancelRun terminalizes one active run on an actor's explicit request, in the
-// same transaction as its audit action. Authorization is the caller's.
-//
-// The run becomes interrupted with phase cancelled and a reason naming the
-// actor; it is never re-fired, because restart requeue and supersede select
-// only active runs. A claimed run (waiting or running) additionally receives
-// the durable Workflow-deletion obligation a supersede records, with no
-// successor: the scheduler's cancellation pass deletes its Workflow (an
-// absent one included) exactly as for a superseded run, and its owner then
-// settles without recording a result. A run that owns a pending publication is
-// refused: the publication, not the run, owns that outcome. A cancelled
-// promotion run fails its promotion, so nothing is merged or pushed. No CI
-// issue is projected: a cancel is not a red build.
+// CancelRun records an audited Stop request. Claimed work remains active until
+// Argo completes; queued work cannot own a Workflow and finishes immediately.
 func (s *Store) CancelRun(ctx context.Context, request model.RunCancelRequest) (model.RunCancelResult, error) {
 	request.Reason = strings.TrimSpace(request.Reason)
 	if strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.Actor) == "" {
@@ -50,19 +39,28 @@ func (s *Store) CancelRun(ctx context.Context, request model.RunCancelRequest) (
 	if err != nil {
 		return model.RunCancelResult{}, fmt.Errorf("load run for cancel: %w", err)
 	}
+	if current.Cancelled() || current.Status.Active() {
+		if request.Authorize != nil {
+			warning, err := request.Authorize(current)
+			if err != nil {
+				return model.RunCancelResult{}, err
+			}
+			request.Warning = warning
+		}
+	}
+	if current.Cancelled() {
+		result := model.RunCancelResult{Run: current, PreviousState: current.Status}
+		row := tx.QueryRowContext(ctx, `SELECT run_id,job_name,superseded_by,reason,created_at,completed_at FROM run_cancellations WHERE run_id=? AND completed_at IS NULL`, current.ID)
+		if pending, err := scanRunCancellation(row); err == nil {
+			result.Cancellations = []model.RunCancellation{pending}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return result, err
+		}
+		return result, tx.Commit()
+	}
 	if !current.Status.Active() {
 		state := string(current.Status)
-		if current.Cancelled() {
-			state = "cancelled (" + current.Reason + ")"
-		}
 		return model.RunCancelResult{}, fmt.Errorf("%w: run %s is already %s; nothing to cancel", ErrRunNotActive, current.ID, state)
-	}
-	if request.Authorize != nil {
-		warning, err := request.Authorize(current)
-		if err != nil {
-			return model.RunCancelResult{}, err
-		}
-		request.Warning = warning
 	}
 	var pendingPublications int
 	if err := tx.QueryRowContext(ctx, `
@@ -76,13 +74,16 @@ SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, curr
 	if current.Status == model.RunRunning && current.StartedAt == nil {
 		previous = model.RunWaiting
 	}
-	text := "cancelled by " + request.Actor
+	text := "cancelling by " + request.Actor
+	if current.Status == model.RunQueued {
+		text = "cancelled by " + request.Actor
+	}
 	if request.Reason != "" {
 		text += ": " + request.Reason
 	}
 	cancelled, err := scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
-SET status = 'interrupted', phase = ?, reason = ?, error = CASE WHEN phase='infrastructure-pending' THEN error ELSE ? END, finished_at = ?, updated_at = ?
+SET status = CASE WHEN status='queued' THEN 'interrupted' ELSE status END, phase = ?, reason = ?, error = CASE WHEN status='queued' THEN ? ELSE error END, finished_at = CASE WHEN status='queued' THEN ? ELSE NULL END, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns, model.PhaseCancelled, text, text, now, now, current.ID))
 	if err != nil {
@@ -90,13 +91,13 @@ RETURNING `+runColumns, model.PhaseCancelled, text, text, now, now, current.ID))
 	}
 	result := model.RunCancelResult{Run: cancelled, PreviousState: previous}
 	if current.Status == model.RunRunning {
-		cleanupReason := "superseded"
+		cleanupReason := "cancelled"
 		if current.Phase == "infrastructure-pending" {
 			cleanupReason = "owner_restart"
 		}
-		// The same obligation a supersede records, without a successor. An
+		// A claimed owner retains a durable Stop obligation. An
 		// empty Job name means the owner has not published one yet; it does
-		// so through SetRunJobName, or settles the obligation when it exits.
+		// so through SetRunWorkflowName, or settles the obligation when it exits.
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
 VALUES(?, ?, '', ?, ?)
@@ -117,10 +118,12 @@ ON CONFLICT(run_id) DO UPDATE SET
 		if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, ErrNotFound) {
 			return model.RunCancelResult{}, fmt.Errorf("load promotion for cancelled run: %w", err)
 		}
-		if err == nil && promotion.Status == model.PromotionPending {
+		if err == nil && promotion.Status == model.PromotionPending && cancelled.Status.Terminal() {
 			if _, err := finishPromotionTx(ctx, tx, promotion, model.PromotionFailed, cancelled.ID, "promotion CI "+text, now); err != nil {
 				return model.RunCancelResult{}, err
 			}
+		}
+		if err == nil {
 			result.PromotionID = promotion.ID
 		}
 	}
@@ -143,27 +146,6 @@ ON CONFLICT(run_id) DO UPDATE SET
 	return result, nil
 }
 
-// RearmRunCancellation makes the deletion obligation for a preempted run's
-// Workflow pending again. The run's owner calls it when it created the
-// Workflow after a cancellation pass had already settled the obligation and
-// its own deletion failed: the next pass (or restart) then retries it instead
-// of leaving the Workflow orphaned.
-func (s *Store) RearmRunCancellation(ctx context.Context, runID, workflowName string) error {
-	if strings.TrimSpace(runID) == "" || strings.TrimSpace(workflowName) == "" {
-		return fmt.Errorf("%w: run ID and job name are required", ErrInvalid)
-	}
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-SELECT id, ?, superseded_by, 'superseded', ?
-FROM runs
-WHERE id = ? AND status = 'interrupted' AND (superseded_by != '' OR phase = 'cancelled')
-ON CONFLICT(run_id) DO UPDATE SET job_name = excluded.job_name, completed_at = NULL`,
-		workflowName, unixNano(s.now()), runID); err != nil {
-		return fmt.Errorf("re-arm run cancellation: %w", err)
-	}
-	return nil
-}
-
 // ValidateCancelReason bounds the free-text reason recorded with a cancel:
 // at most model.MaximumCancelReasonBytes of printable text on one line.
 func ValidateCancelReason(reason string) error {
@@ -174,6 +156,44 @@ func ValidateCancelReason(reason string) error {
 		if unicode.IsControl(character) || character == unicode.ReplacementChar {
 			return fmt.Errorf("%w: cancel reason must be printable text on one line", ErrInvalid)
 		}
+	}
+	return nil
+}
+
+// recoverCancellationObligationsTx retires only observations whose previous
+// owner is gone; live or uncertain Workflows keep their Stop custody.
+func recoverCancellationObligationsTx(ctx context.Context, tx *sql.Tx, now int64) error {
+	// An earlier owner may have recorded the old unconditional restart
+	// deletion. A resumable Workflow is now owned by reconciliation;
+	// only explicit Stop obligations still authorize stopping it.
+	if _, err := tx.ExecContext(ctx, `
+UPDATE run_cancellations SET completed_at = ?
+WHERE reason = 'owner_restart' AND completed_at IS NULL
+  AND EXISTS (
+      SELECT 1 FROM runs
+      WHERE runs.id = run_cancellations.run_id AND status = 'running'
+        AND phase NOT IN ('infrastructure-pending','cancelled')
+        AND job_name != ''
+
+  )`, now); err != nil {
+		return fmt.Errorf("retire Workflow restart cancellation observations: %w", err)
+	}
+	// A cancel can win after ClaimNextRun but before the background task
+	// publishes its deterministic Job name. The live background task may still be checking out in that
+	// window, so ordinary startup recovery must leave the empty-name obligation
+	// pending. Owner startup proves that background task is gone and can terminalize the
+	// unsubmitted cancellation without an unbound Kubernetes mutation.
+	if _, err := tx.ExecContext(ctx, `
+UPDATE run_cancellations
+SET completed_at = ?
+WHERE completed_at IS NULL AND job_name = '' AND reason = 'cancelled'
+  AND EXISTS (
+      SELECT 1 FROM runs
+      WHERE runs.id = run_cancellations.run_id
+        AND runs.status = 'interrupted'
+        AND runs.phase = 'cancelled'
+  )`, now); err != nil {
+		return fmt.Errorf("complete owner-restart no-Job cancellations: %w", err)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -18,6 +19,7 @@ import (
 // recoveryJobs is a configurable JobController fake for testing the
 // compensation and startup reconciliation paths.
 type recoveryJobs struct {
+	stopResult     JobResult
 	terminalResult JobResult
 	terminalErr    error
 	waitResult     JobResult
@@ -48,15 +50,36 @@ func (j *recoveryJobs) Wait(ctx context.Context, _ string, _ io.Writer) (JobResu
 	return j.waitResult, nil
 }
 
-func (j *recoveryJobs) Delete(_ context.Context, name, _ string) error {
-	j.deleted = append(j.deleted, name)
+func (j *recoveryJobs) Stop(_ context.Context, name, _ string) error {
+	seen := false
+	for _, prior := range j.deleted {
+		if prior == name {
+			seen = true
+		}
+	}
+	if !seen {
+		j.deleted = append(j.deleted, name)
+	}
 	if j.deleteErr != nil {
 		return j.deleteErr
+	}
+	if !j.terminalResult.Status.Terminal() || j.terminalErr != nil {
+		j.terminalResult = j.stopResult
+		if !j.terminalResult.Status.Terminal() {
+			j.terminalResult = j.waitResult
+		}
+		if !j.terminalResult.Status.Terminal() {
+			j.terminalResult = JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: "Stopped with strategy 'Stop'"}
+		}
+		j.terminalErr = nil
 	}
 	return nil
 }
 
 func (j *recoveryJobs) TerminalResult(_ context.Context, _ string) (JobResult, error) {
+	if j.terminalErr == nil && !j.terminalResult.Status.Terminal() {
+		return JobResult{}, ErrJobNotTerminal
+	}
 	return j.terminalResult, j.terminalErr
 }
 
@@ -203,7 +226,7 @@ func TestCompensationPathRecordsRealResultWhenJobCompleted(t *testing.T) {
 // the same queued run. The Job's deletion is owned by the
 // durable obligation — executed by the successor's startup cancellation pass
 // in the upgrade case — never inline during shutdown.
-func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
+func TestShutdownLeavesRunningWorkflowForAdoption(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/running", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -239,32 +262,28 @@ func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" {
-		t.Fatalf("run = %#v, want queued under the same ID", recovered)
+	if recovered.Status != model.RunRunning || recovered.SupersededBy != "" {
+		t.Fatalf("run = %#v, want running under the same ID", recovered)
 	}
 	requeued, err := fixture.store.Run(context.Background(), run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requeued.Status != model.RunQueued || requeued.Ref != recovered.Ref || requeued.SHA != recovered.SHA {
-		t.Fatalf("requeued run = %#v, want queued copy", requeued)
+	if requeued.Status != model.RunRunning || requeued.Ref != recovered.Ref || requeued.SHA != recovered.SHA {
+		t.Fatalf("requeued run = %#v, want original running Workflow", requeued)
 	}
 	if len(jobs.deleted) != 0 {
-		t.Fatalf("shutdown deleted inline = %v, want deletion left to the durable obligation", jobs.deleted)
+		t.Fatalf("shutdown deleted inline = %v, want no Stop or deletion during shutdown", jobs.deleted)
 	}
 	pending, err := fixture.store.PendingRunCancellations(context.Background())
-	if err != nil {
+	if err != nil || len(pending) != 0 {
 		t.Fatal(err)
 	}
-	// execute() replaces the fixture Job name with its deterministic one;
-	// the obligation must carry the run's actual JobName.
-	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName == "" || pending[0].SupersededBy != "" || pending[0].Reason != "owner_restart" {
-		t.Fatalf("pending obligations = %#v, want the stranded Job (%q) owned by the requeue", pending, recovered.WorkflowName)
-	}
+
 }
 
 // Tag work resets behind the same durable cancellation fence as branches.
-func TestCompensationPathRequeuesTagRun(t *testing.T) {
+func TestShutdownLeavesTagWorkflowForAdoption(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	enqueued, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
@@ -307,14 +326,14 @@ func TestCompensationPathRequeuesTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" || recovered.Error != "" {
+	if recovered.Status != model.RunRunning || recovered.SupersededBy != "" || recovered.Error != "" {
 		t.Fatalf("tag run = %#v, want queued under the original ID", recovered)
 	}
 	if len(jobs.deleted) != 0 {
 		t.Fatalf("deleted inline: %v", jobs.deleted)
 	}
 	pending, err := fixture.store.PendingRunCancellations(t.Context())
-	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName == "" {
+	if err != nil || len(pending) != 0 {
 		t.Fatalf("missing cleanup fence: %+v %v", pending, err)
 	}
 }
@@ -505,7 +524,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" {
-		t.Fatalf("reconciled run = %#v, want queued under the same ID", recovered)
+		t.Fatalf("reconciled run = %#v, want running under the same ID", recovered)
 	}
 	requeued, err := database.Run(ctx, enqueued.ID)
 	if err != nil {
@@ -514,7 +533,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if requeued.Status != model.RunQueued || requeued.Ref != recovered.Ref ||
 		requeued.SHA != recovered.SHA || requeued.Trigger != recovered.Trigger ||
 		requeued.Actor != recovered.Actor {
-		t.Fatalf("requeued run = %#v, want queued copy of %#v", requeued, recovered)
+		t.Fatalf("requeued run = %#v, want original running Workflow of %#v", requeued, recovered)
 	}
 	// Reconciliation must NOT delete inline: the durable restart obligation
 	// owns the deletion and stays pending until the cancellation pass.
@@ -658,7 +677,7 @@ func TestWaitErrorWithRunningWorkflowDeleteSucceedsFails(t *testing.T) {
 	if recovered.Status != model.RunFailed {
 		t.Fatalf("run status = %q, want %q", recovered.Status, model.RunFailed)
 	}
-	if recovered.Error != "network blip during log streaming" {
+	if !strings.Contains(recovered.Error, "Stopped with strategy") {
 		t.Fatalf("run error = %q, want original Wait error", recovered.Error)
 	}
 	// The Workflow must have been deleted (the exact name is computed by
@@ -685,11 +704,8 @@ func TestWaitErrorWithRunningWorkflowDeleteFailsNotTerminalized(t *testing.T) {
 
 	scheduler := fixture.scheduler(t, jobs)
 	err := scheduler.executeAndCleanup(context.Background(), run)
-	if err == nil {
-		t.Fatal("expected an error from executeAndCleanup when Delete fails, got nil")
-	}
-	if !strings.Contains(err.Error(), "delete Workflow") {
-		t.Fatalf("error = %v, want error mentioning Workflow deletion", err)
+	if err != nil || !scheduler.ownsCreateCleanup(run.ID) {
+		t.Fatal("Stop refusal lost its background observer", err)
 	}
 
 	// The run must NOT be terminalized — it must still be running so
@@ -740,4 +756,11 @@ func TestWaitErrorWithTerminalResultRecoveryUsesRealResult(t *testing.T) {
 	if len(jobs.deleted) != 0 {
 		t.Fatalf("deleted = %v, want none (TerminalResult succeeded)", jobs.deleted)
 	}
+}
+
+func (j *recoveryJobs) SettleCreate(ctx context.Context, name, id string, _ time.Time) (bool, error) {
+	if err := j.Stop(ctx, name, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }

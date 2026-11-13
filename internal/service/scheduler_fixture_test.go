@@ -39,7 +39,8 @@ type groupEngine struct {
 	deleteErrs map[string]error
 	// deleted records every accepted Delete by Workflow name, including
 	// deletions of Workflows this engine never created.
-	deleted []string
+	holdStop bool
+	deleted  []string
 }
 
 type groupEngineJob struct {
@@ -98,12 +99,8 @@ func (engine *groupEngine) Wait(ctx context.Context, name string, _ io.Writer) (
 	}
 }
 
-// Delete ends a created Job the way a Workflow deletion does: the Job stops
-// holding its group the moment the deletion is accepted, and a Wait still
-// observing it returns. The scheduler does not always Wait on a Job it deletes:
-// a run superseded between Job creation and its post-creation re-read is
-// deleted and released without one, so the deletion itself must end the hold.
-func (engine *groupEngine) Delete(_ context.Context, name, _ string) error {
+// Stop requests native shutdown; holdStop keeps exit handlers open until finish.
+func (engine *groupEngine) Stop(_ context.Context, name, _ string) error {
 	engine.runProbe("delete", name)
 	engine.mu.Lock()
 	job := engine.jobs[name]
@@ -114,9 +111,9 @@ func (engine *groupEngine) Delete(_ context.Context, name, _ string) error {
 	}
 	engine.deleted = append(engine.deleted, name)
 	engine.mu.Unlock()
-	if job != nil {
+	if job != nil && !engine.holdStop {
 		select {
-		case job.result <- JobResult{Status: model.RunInterrupted, Phase: "interrupted", Error: "deleted"}:
+		case job.result <- JobResult{Status: model.RunFailed, Phase: model.PhaseCancelled, Error: "Stopped with strategy Stop"}:
 		default:
 		}
 	}

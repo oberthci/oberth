@@ -6,10 +6,9 @@ func (reservation *submissionOwner) markSubmitted() {
 	reservation.submitted = true
 }
 
-// Accepted deletion releases a submitted Workflow synchronously, without waiting
-// for its observer. During creation, Delete may only record cancellation intent;
-// the creating background task must finish cleanup before its reservation can be released.
-func (gate *submissionRegistry) releaseDeletedRun(runID string) {
+// Terminal observation releases retained submission ownership. Stop acceptance
+// alone cannot release a Workflow while its exit handlers still run.
+func (gate *submissionRegistry) releaseTerminalRun(runID string) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	for _, reservation := range gate.owners {
