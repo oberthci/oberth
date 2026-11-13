@@ -493,7 +493,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
   schedule triggers share that identity. Retry, rerun,
-  replacement and Workflow adoption retain it. Legacy
+  replacement and Workflow adoption retain it. Historical
   rows stay empty; no current file is used to guess their entry. Non-schedule
   runs cannot carry a nonempty entry. `oberth-schedule` is a reserved,
   server-owned Workflow parameter: any repository declaration in
