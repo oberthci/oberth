@@ -226,24 +226,6 @@ func TestContinuityTerminationMessageBoundAndInitMainFence(t *testing.T) {
 		t.Fatal("failed init displaced main that actually ran")
 	}
 }
-func TestContinuityWorkflowRetentionExceedsFinalDrain(t *testing.T) {
-	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{PodGC: &wfv1.PodGC{Strategy: wfv1.PodGCOnPodCompletion}}}
-	cfg := testConfig()
-	cfg.TTLSeconds = 1
-	applyServerBounds(wf, cfg)
-	if wf.Spec.PodGC != nil || time.Duration(*wf.Spec.TTLStrategy.SecondsAfterCompletion)*time.Second < finalLogDrainBudget+30*time.Second {
-		t.Fatal("Pod retention shorter than bounded final read")
-	}
-	if *wf.Spec.TTLStrategy.SecondsAfterCompletion != 180 {
-		t.Fatal("unexpected retention floor")
-	}
-	// An admin's longer bounded ownership window survives unchanged.
-	cfg.TTLSeconds = 3600
-	applyServerBounds(wf, cfg)
-	if *wf.Spec.TTLStrategy.SecondsAfterCompletion != 3600 {
-		t.Fatal("configured retention lost")
-	}
-}
 
 func TestContinuityProvidedInitErrorStatusDumps(t *testing.T) {
 	raw, err := os.ReadFile("testdata/log-continuity/init-error.json")

@@ -1577,8 +1577,6 @@ Flags:
         OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI granted steps at admission)
   -argo-vault-credentialed-role string
         OpenBao Kubernetes auth role for granted release step containers; bound to the credentialed ServiceAccount and namespace
-  -argo-workflow-ttl int
-        finished Workflow retention in seconds (default 3600)
   -artifact-retention duration
         maximum age of terminal run artifacts (0 disables age retention)
   -artifacts-budget-bytes int

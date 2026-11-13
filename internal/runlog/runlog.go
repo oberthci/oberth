@@ -41,9 +41,11 @@ type Range struct {
 }
 
 type Index struct {
-	RunID  string  `json:"run_id"`
-	Size   int64   `json:"size"`
-	Ranges []Range `json:"ranges"`
+	Format     string         `json:"format,omitempty"`
+	Containers []ContainerLog `json:"containers,omitempty"`
+	RunID      string         `json:"run_id"`
+	Size       int64          `json:"size"`
+	Ranges     []Range        `json:"ranges"`
 }
 
 // DefaultWindowLines bounds an unfiltered interactive log read.
@@ -99,6 +101,7 @@ type Meta struct {
 }
 
 type Store struct {
+	containerMu    sync.Mutex
 	directory      string
 	progressMu     sync.RWMutex
 	runningMu      sync.Mutex
@@ -156,6 +159,20 @@ func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, 
 }
 
 func (store *Store) BuildIndex(runID string) (Index, error) {
+	store.containerMu.Lock()
+	defer store.containerMu.Unlock()
+	if index, err := store.loadIndexContext(context.Background(), runID); err == nil && index.Format == "containers" {
+		path, err := store.logPath(runID)
+		if err != nil {
+			return Index{}, err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return Index{}, err
+		}
+		index.Size = info.Size()
+		return index, store.writeIndex(runID, index)
+	}
 	store.ForgetActiveIndex(runID)
 	defer store.ForgetActiveIndex(runID)
 	path, err := store.logPath(runID)

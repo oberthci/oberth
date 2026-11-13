@@ -572,7 +572,6 @@ func TestParseServeOptionsRejectsInvalidArgoWorkflowTimings(t *testing.T) {
 	t.Parallel()
 	_, err := parseServeOptions([]string{
 		"--argo-namespace", "argo-pipelines",
-		"--argo-workflow-ttl", "0",
 	}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "positive") {
 		t.Fatalf("zero TTL error = %v", err)

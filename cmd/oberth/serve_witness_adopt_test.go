@@ -464,7 +464,6 @@ func minimalValidServeOptions() serveOptions {
 		argoCISecretsAccount:    "oberth-argo-ci-secrets",
 		argoExecutorAccount:     "oberth-argo-executor",
 
-		argoWorkflowTTL:      3600,
 		secretStoreAuthMount: secretstore.DefaultAuthMountPath,
 		secretStoreKVPath:    secretstore.DefaultKVPath,
 	}

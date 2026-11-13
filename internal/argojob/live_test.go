@@ -93,7 +93,6 @@ func (cluster liveCluster) config() Config {
 		ExecutorServiceAccount:     "oberth-argo-executor",
 		RunnerImagePrefixes:        []string{"golang:", "alpine:", "busybox:"},
 
-		TTLSeconds: 120,
 	}
 }
 

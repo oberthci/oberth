@@ -92,8 +92,6 @@ func buildArgoEngine(
 
 		Assist: options.assist,
 
-		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.
-		TTLSeconds:          int32(options.argoWorkflowTTL),
 		PerRepoIdentities:   perRepoIdentities,
 		PerRepoCIIdentities: buildPerRepoCIIdentities(perRepoIdentities),
 	}
@@ -155,9 +153,6 @@ func validateArgoServeOptions(options serveOptions) error {
 	}
 	if options.argoNamespace == options.namespace {
 		return errors.New("serve: --argo-namespace must differ from --namespace; pipeline identities must not share a namespace with the server")
-	}
-	if options.argoWorkflowTTL <= 0 || options.argoWorkflowTTL > 1<<31-1 {
-		return errors.New("serve: --argo-workflow-ttl must be positive")
 	}
 	if options.argoVaultCredentialedRole != "" && options.argoVaultAddress == "" {
 		return errors.New("serve: --argo-vault-credentialed-role needs --argo-vault-address")
