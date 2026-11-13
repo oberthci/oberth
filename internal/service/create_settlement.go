@@ -295,36 +295,38 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context
 		if err != nil {
 			return false, err
 		}
-		if !done {
-			if run.Status.Active() && run.Error != argoworkflow.ErrWorkflowCapabilityRequired.Error() {
-				if adopter, ok := scheduler.jobs.(JobAdopter); ok {
-					found, err := adopter.Adopt(ctx, run)
-					if errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired) {
-						if persistErr := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName, argoworkflow.ErrWorkflowCapabilityRequired.Error()); persistErr != nil {
-							return false, persistErr
-						}
-						pending.reason = argoworkflow.ErrWorkflowCapabilityRequired.Error()
-						return false, scheduler.jobs.Terminate(ctx, run.WorkflowName, run.ID)
+		// Completion still needs final logs, step evidence and identity retirement.
+		if run.Status.Active() && run.Error != argoworkflow.ErrWorkflowCapabilityRequired.Error() {
+			if adopter, ok := scheduler.jobs.(JobAdopter); ok {
+				found, err := adopter.Adopt(ctx, run)
+				if errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired) {
+					if persistErr := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName, argoworkflow.ErrWorkflowCapabilityRequired.Error()); persistErr != nil {
+						return false, persistErr
 					}
+					pending.reason = argoworkflow.ErrWorkflowCapabilityRequired.Error()
+					return false, scheduler.jobs.Terminate(ctx, run.WorkflowName, run.ID)
+				}
+				if err != nil {
+					return false, err
+				}
+				if found {
+					reservation, err := scheduler.submissions.adopt(run)
 					if err != nil {
 						return false, err
 					}
-					if found {
-						reservation, err := scheduler.submissions.adopt(run)
-						if err != nil {
-							return false, err
-						}
-						pending.observer = make(chan error, 1)
-						done := pending.observer
-						scheduler.createObservers.Add(1)
-						go func() {
-							defer scheduler.createObservers.Done()
-							done <- scheduler.resumeObservedRun(observerCtx, run, scheduler.requireMutation, reservation, true)
-							scheduler.signalCreateCleanup()
-						}()
-					}
+					pending.observer = make(chan error, 1)
+					done := pending.observer
+					scheduler.createObservers.Add(1)
+					go func() {
+						defer scheduler.createObservers.Done()
+						done <- scheduler.resumeObservedRun(observerCtx, run, scheduler.requireMutation, reservation, true)
+						scheduler.signalCreateCleanup()
+					}()
+					return false, nil
 				}
 			}
+		}
+		if !done {
 			return false, nil
 		}
 		if err := scheduler.store.CompleteObservedRunCancellation(ctx, *observed); err != nil {

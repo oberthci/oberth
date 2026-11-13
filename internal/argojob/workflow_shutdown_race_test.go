@@ -34,7 +34,7 @@ func TestStopCannotOverwriteConcurrentTerminate(t *testing.T) {
 					if err := client.Tracker().Update(wfv1.SchemeGroupVersion.WithResource("workflows"), current, workflow.Namespace); err != nil {
 						t.Fatal(err)
 					}
-					return false, nil, nil // Apply the real client-go fake merge patch.
+					return false, nil, nil // Apply the actual JSON Patch in the client tracker.
 				})
 			}
 			controller := &Controller{workflows: client.ArgoprojV1alpha1().Workflows(workflow.Namespace)}
