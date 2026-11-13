@@ -1061,10 +1061,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		// example after a controller error or stop). Their progress remains
 		// in the journal; the result store accepts only observed outcomes.
 		if step.Status == runprogress.StepQueued || step.Status == runprogress.StepRunning {
-			if result.Status == model.RunPassed {
-				result.Status, result.Phase = model.RunFailed, "job"
-				result.Error = fmt.Sprintf("terminal Workflow has unfinished step %s/%s", step.Stage, step.Step)
-			}
+
 			continue
 		}
 		result.Steps = append(result.Steps, model.StepResult{
@@ -1073,15 +1070,11 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 		})
 	}
-	if completion.FailedStep != "" {
+	if !completion.Succeeded && completion.FailedStep != "" {
 		result.FailedStage, result.FailedStep = completion.FailedStage, completion.FailedStep
 		result.Phase = completion.FailedStage
 	}
-	if result.Status == model.RunPassed && result.FailedStep != "" {
-		result.Status = model.RunFailed
-		result.Phase = result.FailedStage
-		result.Error = "successful Workflow reported a failed step"
-	}
+
 	if result.Status == model.RunFailed && completion.Infrastructure {
 		result.Phase = "infrastructure"
 		result.FailedStage, result.FailedStep = "", ""

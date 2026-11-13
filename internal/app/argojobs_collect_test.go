@@ -25,7 +25,7 @@ import (
 // including PutStepResult in a file-backed store. Controller completion and
 // progress emission are supplied by the fixture; source planning and admission
 // are outside this test. Unfinished nodes are progress, never durable outcomes.
-func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
+func TestArgoCollectUnfinishedNodesPreservesWorkflowVerdict(t *testing.T) {
 	for _, phase := range []wfv1.NodePhase{wfv1.NodePending, wfv1.NodeRunning} {
 		for _, succeeded := range []bool{false, true} {
 			t.Run(string(phase)+"/succeeded="+map[bool]string{true: "true", false: "false"}[succeeded], func(t *testing.T) {
@@ -60,10 +60,10 @@ func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
 					n.StartedAt = metav1.Time{}
 					wf.Status.Nodes["unfinished"] = n
 				}
-				if succeeded {
-					delete(wf.Status.Nodes, "failed")
-				}
 				completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: succeeded, Phase: "Failed", Reason: "original workflow failure", Steps: argojob.StepResults(wf)}
+				if succeeded {
+					completion.Phase, completion.Reason = "Succeeded", ""
+				}
 				if !succeeded {
 					completion.FailedStage, completion.FailedStep = "verify", "verify"
 				}
@@ -85,23 +85,24 @@ func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if finished.Status != model.RunFailed || finished.Phase == "collect" {
-					t.Fatalf("failure replaced by collection or success: %+v", finished)
+				wantStatus := model.RunFailed
+				if succeeded {
+					wantStatus = model.RunPassed
+				}
+				if finished.Status != wantStatus || finished.Phase == "collect" {
+					t.Fatalf("Workflow verdict replaced by node projection: %+v", finished)
 				}
 				if !succeeded && (finished.FailedStage != "verify" || finished.FailedStep != "verify" || finished.Error != "original workflow failure") {
 					t.Fatalf("failure evidence changed: %+v", finished)
 				}
-				if succeeded && !strings.Contains(finished.Error, "unfinished") {
-					t.Fatalf("partial success was not explained: %+v", finished)
+				if succeeded && finished.Error != "" {
+					t.Fatalf("invented failure for a succeeded Workflow: %+v", finished)
 				}
 				rows, err := db.StepResults(ctx, run.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
 				want := 2
-				if succeeded {
-					want = 1
-				}
 				if len(rows) != want {
 					t.Fatalf("results=%+v, want %d terminal rows", rows, want)
 				}
@@ -132,6 +133,10 @@ func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
 }
 
 type collectGit struct{ service.WorkspaceGit }
+
+func (collectGit) RemoteRef(context.Context, string, string) (string, bool, error) {
+	return strings.Repeat("a", 40), true, nil
+}
 
 func (collectGit) Checkout(_ context.Context, _, _, path string) error {
 	return os.MkdirAll(path, 0700)

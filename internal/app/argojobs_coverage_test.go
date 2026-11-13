@@ -796,15 +796,14 @@ func TestResultMapping(t *testing.T) {
 			wantPhase:  "test",
 		},
 		{
-			name: "succeeded but reports failed step -- inconsistent",
+			name: "succeeded with tolerated failed step",
 			completion: argojob.Completion{
 				Succeeded:   true,
 				FailedStage: "build",
 				FailedStep:  "compile",
 			},
-			wantStatus: model.RunFailed,
-			wantPhase:  "build",
-			wantError:  "successful Workflow reported a failed step",
+			wantStatus: model.RunPassed,
+			wantPhase:  "passed",
 		},
 		{
 			name: "with step results",
@@ -826,7 +825,7 @@ func TestResultMapping(t *testing.T) {
 			if tc.completion.Infrastructure && (result.FailedStage != "" || result.FailedStep != "") {
 				t.Fatal("infrastructure failure retained test-failure attribution")
 			}
-			if !tc.completion.Infrastructure && result.FailedStep != tc.completion.FailedStep {
+			if !tc.completion.Infrastructure && !tc.completion.Succeeded && result.FailedStep != tc.completion.FailedStep {
 				t.Fatal("test failure lost step attribution")
 			}
 			if result.Status != tc.wantStatus {
