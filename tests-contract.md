@@ -1,14 +1,7 @@
-Declared parallelism: `TestPodParallelismFanouts` covers workflow/template/default
-limits for steps and DAG item, parameter and sequence loops, including dynamic
-counts. Scope/multiplicity, inline helpers, sequence extremes and VM launcher
-checks guard against reducing the wrong level or dropping allowances.
-`TestPodParallelismNeverUndercountsSmallDAGs` enumerates all four-node DAG edge
-sets and feasible concurrent subsets under every limit. Unlimited workflows
-retain the existing exhaustive antichain tests and legacy sequence fallback.
-`TestParallelismAdmissionMatrixSharesAndReportsConcurrency` checks immutable
-receipt analysis, helper charges, host sharing and the separate run notice.
-Submission rejects changed parallelism; notices survive create recovery,
-Workflow timing and the batched history query without rewriting old timing.
+Native submission: `TestNativeArgoCapDoesNotHoldBackAnyOfTenSubmissions`
+submits all ten accepted runs while Argo owns its controller parallelism limit.
+Authored Workflow/template parallelism, requests and placement pass through
+the compiler; Oberth does not compute run demand or a concurrency receipt.
 
 Schedule entry identity: `TestScheduleEntryCronAndManualKeepTheSameResolvedIdentity`
 compares cron and manual enqueue on one SHA and preserves a plan after file edits.
@@ -16,7 +9,7 @@ compares cron and manual enqueue on one SHA and preserves a plan after file edit
 entry isolation, immutable identity, retry/rerun and stranded-run preservation;
 `TestScheduleEntryMigrationPreservesLegacyIdentityAcrossReopen` upgrades an old
 schema without inventing historical names. Schedule-entry service/API tests,
-CreateCI/adoption and trusted-preflight adapter tests cover durable forwarding.
+CreateCI/adoption adapter tests cover durable forwarding.
 Workflow builder/admission tests reject repository defaults and non-schedule
 forgery, distinguish two entries, and refuse mismatched restart adoption.
 
@@ -39,10 +32,13 @@ Run list views: `TestListActiveRunsOrdersByStartThenAdmissionThenQueue` puts
 an older claimed waiting run after newer started runs and ahead of the queue,
 never in history, and applies ref and uplink repository restrictions;
 `TestListRecentRunsTerminalPagination` pages history past interleaved active
-runs. `TestActiveRunsOrderAndWaitReasons` drives the real admission gate with
-a VM-parked run, a group waiter and a head that does not fit, and checks each
-reason, weight and position; `TestScopedActiveRunsStayInScope` withholds
-sequences and positions. `TestRunListMCPMatchesHTTPOrderAndPassedAlias` compares
+runs. `TestFirstRunListReadReportsNativeQueueAndSuspensionWithoutStepHistory`
+and `TestRunListsObserveArgoWithoutDependingOnLocalStepHistory` read native
+Argo queue/suspension state. `TestExecutionDisplayNamesTheSynchronizationLock`
+names native lock waits; `TestScopedRunListUnknownPositionDoesNotInventQueueHead`
+withholds global sequences and positions.
+
+`TestRunListMCPMatchesHTTPOrderAndPassedAlias` compares
 the default MCP/HTTP ordering and preserves the passed-status wire alias.
 `TestRunsPageIsOneFlatFilteredList` pins the flat dashboard: grey queued/waiting pills, plain-language wait reasons, no position number, head badge or red tint on queued rows.
 `TestFlatRunsUseOneSnapshotAcrossAdmission` admits a queued run between the two
@@ -63,18 +59,19 @@ fixtures use the default branch for issue-bearing status and publication checks;
 failures retain durable results without filing issues. Legacy issue reconciliation
 remains covered without a schema migration.
 
-Run cancel and supersede admission release:
-`TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass` (real
-SQLite, fake engine) supersedes an XL group member waiting at the FIFO head
-behind an L holder and proves the group member and another repository's run
-are admitted on the next grant pass, with no restart; it failed before the fix.
-`TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations` pins the gate
-primitive. Store tests (`run_cancel_test.go`) cover queued/waiting/running/
+Run cancel and supersede submission release:
+`TestSupersedingAWaitingRunReleasesItsReservationWithoutDrain` uses real
+SQLite and a fake engine to supersede work during preparation, release its
+submission ownership and let other runs proceed without restarting.
+`TestAdoptedAdmissionIsIdempotent` proves adopted ownership is counted once
+and does not delay new submissions.
+
+Store tests (`run_cancel_test.go`) cover queued/waiting/running/
 terminal cancels, the no-successor obligation and its Job name, no re-fire by
 owner restart recovery, no CI issue, promotion failure blocking publication,
 pending-publication refusal and reason bounds. Service tests
 (`run_cancel_test.go`) drive `run_cancel` end to end: queued runs are never
-claimed, a cancelled waiting XL head releases admission at once, a running
+claimed, a cancelled waiting run releases submission ownership at once, a running
 run's Workflow is deleted and the owner never overwrites the cancel, the
 permission/force matrix, idempotent refusal, promotion cancel without merge or
 push, and no re-fire across a restart while an uncancelled stranded run is
@@ -150,13 +147,8 @@ path with no file left. `TestOversizedArtifactCollectionStoresNothingToDownload`
 covers the per-run collection limit, and `TestArtifactDownloadAbortsInsteadOfEndingShort`
 proves the handler aborts rather than ending a short body cleanly.
 
-Protected harness QMP readiness #1143: `TestHarnessProtectedTransportIntegration`
-keeps the pass inventory, forged guest output, failure, timeout, changed-guest,
-process-join and sandbox assertions. Its native host-driver fixture waits for
-the QMP socket within the existing two-second readiness budget before exiting
-a successful case. The missing-QMP regression supplies a successful guest
-response but requires readiness failure, proving guest readiness alone cannot
-complete a case.
+Technology-specific execution is refused by current validation and recovery;
+its former guest/QMP execution tests do not describe the current native model.
 
 Workspace cache mode #1093: `TestWorkspaceCacheMountsOnlyTheCache` builds a
 `work`-VCT pipeline with delivered artifacts and proves a
@@ -172,8 +164,8 @@ credentialed release leaves, Pod-leaf placement and every container shape;
 `TestWorkspaceCacheRefusedOnCredentialedCILeaf` refuses `cache` on a CI-tier
 `secretstore exec` leaf, admits `none` there, and admits `cache` on the same
 leaf on the release tier.
-`TestAdmitWorkspaceMountsValues` refuses unknown values; `TestAdmitKVMRefusesWorkspaceCache`
-and `TestAdmitNonrootRefusesWorkspaceCache` refuse `cache` on leaves that take no
+`TestAdmitWorkspaceMountsValues` refuses unknown values;
+`TestAdmitNonrootRefusesWorkspaceCache` refuses `cache` on leaves that take no
 host cache; `TestTrivyGuardWorkspaceCache` isolates scratch storage per Pod and
 `/work/cache` as shared for cache leaves.
 
@@ -202,22 +194,23 @@ appends between head and page reads, bursts exceeding 200 matches, and appends
 during pagination that must remain eligible for the next poll.
 
 Branch Workflow adoption #1172: startup restores each existing branch Workflow
-under its durable run ID, queue/admission sequences and admitted size/group,
+under its durable run ID, queue/admission sequences and exact execution binding,
 including Workflows completed
 while the owner was down. Missing Workflows still requeue; API and binding
-failures preserve ownership. Shutdown preserves new and adopted non-terminal
+refusals fail only their run; Workflow read failures preserve ownership. Shutdown preserves new and adopted non-terminal
 branch Workflows and their workspaces. Explicit cancel and supersede still
 delete adopted Workflows. Resumed observation retains progress and log bytes,
 replays only unrecorded steps, enforces the remaining aggregate budget, and
 refuses Workflow UID/spec replacement. Executor identity delivery resumes for
 Pods in the token waiter and skips Pods past it. Idempotent adoption cannot
-double-count admission, and restored groups block new grants until release.
+double-count submission ownership or block new submissions.
 Transient Workflow read failures are retried within a bounded grace; a
 persistent observation failure deletes the Workflow and fails only that
 adopted run while the scheduler keeps dispatching. A terminal Workflow whose
 observation errored keeps its real result and collects artifacts. Refused
-adoptions log and return the run and `<namespace>/<name>` to delete; read
-failures name it without a deletion instruction.
+adoptions record a failed run with the exact `<namespace>/<name>` to inspect,
+without deleting it or stopping adoption of other Workflows. Native
+suspend/resume/stop/terminate preserve the recovered execution identity.
 
 Retry verdicts #1176: `TestDAGRetryThenPassIsPassed` reproduces a retried
 DAG whose first attempt failed and second passed: the steps carry the planned
@@ -232,27 +225,13 @@ reports and replays each attempt once, with no retry suffix in any key, and
 not again from a restored reporter; `TestWaitResumedRetriedDAGIsGreen` adopts
 such a Workflow after a restart and reports only the passing retry.
 
-KubeVirt admission #1173: `TestKubeVirtAdmissionAccountsEveryDimension` admits
-concurrent runs up to each VM/core/memory boundary, parks excess demand and
-releases it without blocking another repository.
-`TestKubeVirtCapacityKeepsFIFOAndDeclaredGroup` prevents smaller demands or
-ordinary members of a declared group from overtaking the capacity waiter.
-`TestKubeVirtSchedulerConcurrentRunsAndQueueReason` checks the actual scheduler
-and flat run list, including the exact queued reason and absence of an implicit
-group. `TestKubeVirtCancelAndSupersedeReleaseBeforeObserverReturns` holds the
-observer tail while accepted deletion frees admission.
-`TestKubeVirtDeletionDuringCreationKeepsCapacity` keeps capacity until in-flight
-creation settles and verifies that a late observer cannot release its successor.
-The oversized-run test
-proves refusal before submission. Static demand tests cover trigger-specific
-documents, live grants, server ceilings and invalid quantities.
-
-`TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird` reopens durable state,
-adopts two live Workflows under their original run IDs, and parks a third until
-one completes. `TestKubeVirtAdoptionCountsOnceAndDrainsReducedCapacity` checks
-idempotence, conflicting-demand refusal and release under a reduced grant.
-Controller and adapter tests bind restored demand to the verified Workflow
-spec without requiring a current grant or repository checkout.
+Capability recovery: the actual old-base Workflow with a device grant passes
+`TestOldDeviceGrantWorkflowRecoversThroughRealMigration`. Migration receipts
+are scoped to pre-existing in-flight run/Workflow/SHA and the unchanged grant
+epoch; changed or revoked grants and new submissions cannot reuse them.
+`TestStartupAdoptsOtherWorkflowsAfterOneBindingRefusal` proves startup and
+other adoption continue; `TestAdoptedNativeControlsPreserveRecoveryIdentity`
+covers native controls after restart.
 
 Promotion/tag/release adoption #1172 slice 2: each trigger keeps the same run,
 queue/admission order and credential classification through two owner restarts.
@@ -270,12 +249,12 @@ Workflows and promotion workspaces. A non-adopting engine retains all original
 conservative recovery assertions; only its capability fixture changes, because
 capable engines now adopt these triggers. Store tests retire old owner_restart
 obligations for all triggers but keep explicit cancellation obligations and
-immutable promotion ownership. App tests reconstruct exact trigger/size/group/
+immutable promotion ownership. App tests reconstruct exact trigger/source/
 tested-SHA bindings; actual server-built credentialed promotion and WIF release
 Workflows survive changed current identity/policy configuration unchanged, and
 resumed Wait refuses changed service accounts, WIF projections/environment,
 Workflow UIDs or spec identities. Existing resume/log-budget, executor-token,
-publication serialization, KVM recovery and migration assertions remain.
+publication serialization and migration assertions remain.
 
 Retained timing #1128: `TestTimingPaginatedLargeDAG` collects 65 leaves in two
 bounded LIST pages; the blocking transport test retains its five-second API
@@ -292,8 +271,8 @@ TTL-independent reopen, legacy StartedAt ambiguity and no-backfill migration
 replay. Native run_get returns the durable versioned observations without a
 cluster. Existing migration fixtures drop timing objects before reconstructing
 older schemas; exact schema, ledger, gap and preservation assertions remain.
-VMI failure tests check run/name/UID scoping, typed conditions and recent Events,
-unknown/API failure handling and exclusion of free-form messages. Artifact tests
+Pod termination diagnostics retain exact run/Workflow/Pod identity and exclude
+free-form messages. Artifact tests
 preserve user files, enforce bounds/collision/tier gates and retain diagnostics
 when user collection fails. Chart tests pin the separate Event LIST Role and
 binding while retaining frozen Role assertions.
@@ -324,24 +303,11 @@ windows, and dial timeouts as transient. `hack/test-chart.sh` checks the
 one shorter than the drain. Idle-wait tests observe queued and running
 work, fail closed, and bind the upgrade check to the selected Deployment.
 
-# Trusted preflight owner restart (#1172 slice 3)
+# Retired execution recovery
 
-Trusted conductor attachment remains one-use; restart recovery cannot infer a
-positive receipt or reattach its stream. `internal/app/trusted_restart_test.go`
-checks exact bound cleanup, negative evidence before cleanup, retention after
-cleanup failure and ambiguous-create refusal. Store restart tests cover owner
-recovery ordering, immutable receipts, durable one-retry limits across reopen
-and across a replacement's pre-reservation restart, cancellation/newer-work and
-publication guards, active promotion authority/grants, and rollback when audit
-persistence fails. `TestTrustedRestartInterruptsThenRunsFreshPreflightBeforeDelivery`
-loses an in-flight observer and verifies fresh evidence before exactly one main
-Workflow and delivery. `TestTrustedRestartPromotionStillChecksMainBeforePush`
-keeps the immutable promotion plan and proves a moved target prevents its push.
-`TestTrustedShutdownAfterCleanupLeavesParentForRecovery` stops the owner after
-exact cleanup and requires the parent to stay running for startup recovery,
-which then shows it as `server restart, re-queued as <run12>`.
-`TestTrustedRestartRecoveryHasOwnBoundWithoutCallerDeadline` requires the
-two-minute per-execution recovery bound when startup has no deadline.
+Old preflight execution is terminalized rather than reattached. Native
+execution keeps exact source, UID, target and operator identity custody;
+historical execution journals do not authorize new work.
 
 Upgrade idle-probe retries: `TestUpgradeWaitRetriesTimeoutBeforeUpgrade` uses a
 fake HTTP transport and clock through the real installer wait path: a five-second
@@ -368,18 +334,10 @@ committed queue state, see the next commit immediately, and verify read-only,
 bounded reader lifetime. Error-body tests cover bounded draining of HTTP 5xx;
 the local deadline test also rejects the retry-progress suffix in its final cause.
 
-Queue priority: `TestQueuePriorityClassificationAndFIFO` checks server-owned
-classes, tag/promotion precedence, administrator RC globs, FIFO and queue-position
-agreement across durable views. Boundary and restart tests cover the 60-minute
-starvation boost, schema v33 upgrades, durable bumps and retained restart age.
-`TestQueuePriorityToolsAdminOnlyAuditedAndGated` refuses ordinary/scoped actors
-and blocked audit gates. Admission tests count runs against the ceiling
-(`TestAdmissionEnforcesRunCeiling`, `TestAdmissionIsFIFO`). The complete
-scheduler regression
-`TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue` puts an RC
-behind ordinary claimed runs and proves it reaches the spare slot first,
-then preserves ordinary FIFO. Cross-trigger group tests retain the live holder
-while a waiting tag takes priority over a waiting branch.
+Native queue semantics: priority inputs and Oberth run ceilings are refused.
+Submission follows durable admission/queue sequence without class weights,
+backfill or per-group grants. `TestNativeArgoCapDoesNotHoldBackAnyOfTenSubmissions`
+keeps native Argo execution parallelism separate from submission.
 
 Upstream publication retry uses conservative server/transport classification,
 five durable attempts and 2/4/8/16-minute backoff. Tests cover permanent hook,
@@ -409,35 +367,12 @@ exhausts the bounded attempts. Prune plans, stale confirmation, merged-only,
 reserved-branch and typed-confirmation refusals, per-batch audit and outbox repair
 have their own tests.
 
-Scheduling and placement Helm values: `TestStepStartupAllowanceIsConfigurable`
-covers factor, floor, ceiling, disabling, overflow and bounds;
-`TestStartupDeadlineUsesTheRecordedAllowance` classifies from the recorded
-allowance, not the current setting; `TestDefaultWorkflowTimeoutIsConfigurable`;
-`TestServeStepStartupAllowanceFlags`;
-`TestChartSchedulingValuesDefaultToBinaryDefaults` parses the default chart's
-args and requires them to equal the binary defaults;
-`TestChartSchedulingValuesReachTheServer` round-trips each value and refuses
-out-of-range values; chart unittest `execution_target_test.yaml`.
-
-Step deadline start-up allowance #1499: `TestBuildFloorsStepDeadlinesAndRecordsDeclaredBudget`
-checks the floored Pod deadline and server-owned declared budget on named and
-inline leaves, `TestStepDeadlineAnnotationIsServerOwned` refuses a repository
-copy, and `TestStartupDeadlineKillIsInfrastructure` /
-`TestStartupDeadlineRequiresServerBudgetAndStepScope` keep genuine, capped,
-workflow and foreign-Pod deadlines as the step's own failure.
-`TestStartupDeadlineNeverStartedShapes` accepts kubelet's TerminatePod
-`ContainerStatusUnknown`/137 shape and refuses image/config waiting reasons;
-`TestStartupDeadlineRequiresTheDeadlineToStopMain` keeps an early nonzero or
-OOM exit a genuine failure.
-`TestStartupDeadlineStepAutomaticallyRetriesOnce` runs the scheduler and SQLite
-store end to end: one automatic retry, never an `Execution deadline exceeded.`
-reason. Native synchronization (v0.18.0): `TestAdmitPassesNativeSynchronizationThrough`
-and `TestBuildSubmitsSynchronizationUntouched` keep semaphores and mutexes as
-written; `TestAdmissionDeadlineLeavesSynchronizationWaitToArgo` exempts lock
-waits from the stall bound and the pre-start watchdog;
-`TestLockWaitMessageNamesTheLockWithoutFreeText` and
-`TestExecutionDisplayNamesTheSynchronizationLock` bound the reason line;
-`TestBuildAssistHoldKeepsTemplateSynchronization` keeps a held retry's lock;
-`TestBuildSerializesReleasesWithOneNativeMutex` covers `releases.serialize`;
-`TestBuildIgnoresRetiredExclusiveAnnotationInFragments` keeps the retired
-annotation inert.
+Native deadlines and synchronization:
+`TestPendingWorkloadHasNoServerStartupDeadline` and
+`TestNativeWaitingWorkflowHasNoServerWatchdog` leave pending work to Kubernetes
+and Argo. `TestBuildPreservesTheDocumentDeadline` keeps authored deadlines;
+`TestNativeMissingDeadlineRemainsMissing` leaves them optional.
+`TestBuildSubmitsSynchronizationUntouched` and
+`TestExecutionDisplayNamesTheSynchronizationLock` cover authored locks and
+curated native reason lines. Server startup allowances, automatic infrastructure
+retries and the pipeline-wide release mutex are absent.

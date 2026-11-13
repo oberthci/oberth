@@ -324,10 +324,9 @@ func (scheduler *Scheduler) completeCancellations(ctx context.Context, cancellat
 
 func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, cancellations []model.RunCancellation, require mutationRequirement) error {
 	// A run that is cancelled while it is still preparing or waiting holds
-	// an admission reservation but owns no Workflow. Withdraw it first, and
-	// regardless of the audit gate: it is in-memory scheduling state only,
-	// and leaving it in place keeps the run at the head of the FIFO (or ahead
-	// of its group) until a restart.
+	// in-memory submission ownership but may own no Workflow. Withdraw that
+	// unsubmitted ownership first, independently of the audit gate. Durable
+	// cancellation cleanup still verifies the original Workflow identity.
 	scheduler.abandonAdmissions(ctx, cancellations)
 	for _, cancellation := range cancellations {
 		forgetActiveLogIndex(scheduler.logs, cancellation.RunID)

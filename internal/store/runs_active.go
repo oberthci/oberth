@@ -7,10 +7,9 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// MaxActiveRuns bounds ListActiveRuns. Active work is capped by the queue,
-// not by retention, so one bounded page holds it in practice; a server with
-// more than this many non-terminal runs shows the first MaxActiveRuns in the
-// same order.
+// MaxActiveRuns bounds this read-only view to 500 rows. Active execution is
+// unbounded by Oberth; larger installations receive the first page in the
+// documented started/submission order.
 const MaxActiveRuns = 500
 
 // ListActiveRuns returns every non-terminal run (queued, or claimed and
@@ -18,13 +17,11 @@ const MaxActiveRuns = 500
 // restriction, in the order the scheduler works through them:
 //
 //  1. runs whose Workflow has started, oldest start first;
-//  2. every run that has not started, claimed or not, as one queue in the
-//     scheduler's own order (priorityOrderSQL: effective class, then
-//     admission_sequence, then queue_sequence), the same order ClaimNextRun
-//     claims in and the weighted gate grants in. A claimed normal run never
-//     lists ahead of an unclaimed high run the gate will admit first; the
-//     flat and latest-per-ref lists number this same queue.
+//  2. every run that has not started, claimed or not, in submissionOrderSQL:
+//     admission_sequence, then queue_sequence. ClaimNextRun uses that same
+//     order, and the flat/latest-per-ref views number the same queue.
 //
+// Argo controls execution parallelism after submission.
 // Before, Limit and Terminal are ignored: the view is one bounded list.
 func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
 	statusSQL, statusArgs, err := runStatusRestriction(filter.Status)
@@ -35,16 +32,16 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	restriction += statusSQL
 	restrictionArgs = append(restrictionArgs, statusArgs...)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
-	priorityOrder := submissionOrderSQL()
+	orderSQL := submissionOrderSQL()
 	rows, err := s.reader().QueryContext(ctx, `
 WITH queue AS (
- SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
+ SELECT id AS queued_id, ROW_NUMBER() OVER (ORDER BY `+orderSQL+`) AS queue_position FROM runs
  WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
 )
 SELECT `+runReadColumns+`, COALESCE(queue_position, 0) FROM runs LEFT JOIN queue ON runs.id = queue.queued_id
 WHERE status IN ('queued', 'running')
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
-ORDER BY CASE WHEN status = 'running' AND started_at IS NOT NULL THEN 0 ELSE 1 END, started_at, `+priorityOrder+`
+ORDER BY CASE WHEN status = 'running' AND started_at IS NOT NULL THEN 0 ELSE 1 END, started_at, `+orderSQL+`
 LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list active runs: %w", err)

@@ -11,7 +11,7 @@ deferred (`lastRetry` zeroed), and applies it with the same strategic merge,
 proving pause, deadline, writable source, read-only cache and scratch cache
 variables land on every retry attempt and never on attempt 1.
 `TestBuildAssistBoundsInheritedTemplateDefaultsDeadline` proves a leaf without
-its own deadline takes the floored `templateDefaults.activeDeadlineSeconds` as
+its own deadline takes the authored `templateDefaults.activeDeadlineSeconds` as
 hold deadline and retry bound (a leaf's own still wins; a non-literal default
 means no hold). `TestAssistRetryRefusesDeadlineKills` evaluates the injected
 `retryStrategy.expression` with Argo's own evaluator in the
@@ -103,21 +103,21 @@ authority hooks, added non-label metadata and a wrong owner index after plan
 entry reordering. A public open-descriptor replacement control proves running
 inode byte binding. All new checks are UNRUN.
 
-Queue priority tests use real SQLite for classification, queue views, audited
-admin bumps, persistence, v33 migration and starvation/restart boundaries. Gate
-tests control grants and time deterministically for class/FIFO order, class-local
-backfill and head-wait drains. Service tests reject non-admin/scoped changes and
-mutation-gate bypass. A running scheduler with a fake engine reproduces the
-release-candidate dispatch-ceiling problem: an S RC enters the remaining 1/4
-weight while older ordinary L claims wait, then normal work resumes in FIFO.
+Native submission tests use real SQLite and a fake engine to submit all
+accepted runs under durable sequence ordering, independently of Argo's
+parallelism limit. Priority classes, weights and admission groups no longer
+describe current coverage. Adoption tests retain exact source/UID/identity
+bindings and isolate one refused Workflow from scheduler startup.
 
 Load-tolerant regressions use virtual time for MCP proxy idle deadlines,
 immutable module retry budgets and audit mutation gate expiry/cancellation.
 The proxy still parses real HTTP over in-memory connections; separate TLS
 and HTTP/2 tests retain transport coverage. Held-writer reads and per-commit
 handshakes cover all 16 × 32 status and step writes without a continuous reader
-loop. Global resource retention checks exact oldest-first persisted rows across
-bounded partial sweeps, then requires a completed no-op sweep of fresh rows.
+loop. Measurement-history removal tests preserve outcomes, logs, timestamps,
+termination diagnostics and audit while dropping usage tables and counters.
+The historical-schema fixture reconstructs the old retention index and retains
+its migration receipt before replaying measurement removal.
 
 MCP agent loop (#1514): store tests cover the migration, the fresh-schema
 object list and the downgrade fixture. `TestAgentEventRunFinishedOnceWithReasonAndHint`

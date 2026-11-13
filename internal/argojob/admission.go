@@ -12,7 +12,7 @@ import (
 // ValidateDocument runs Build's document-only isolation and Trivy admission
 // checks after argoworkflow.Admit. It normalizes a copy, leaving the caller's
 // document unchanged. It does not check server state such as approvals, grants,
-// resource ceilings, identities or admission receipts.
+// identities or admission receipts.
 func ValidateDocument(workflow *wfv1.Workflow, trigger pipeline.Trigger) error {
 	if workflow == nil {
 		return &argoworkflow.AdmissionError{Cause: errors.New("argojob: no Workflow to validate")}

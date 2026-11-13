@@ -28,7 +28,7 @@ func workflowRunAdoptable(run model.Run) bool {
 
 // adoptionFailure names the exact Workflow that could not be recovered.
 // A binding refusal fails only its run; no deletion or replacement is authorized.
-// Read failures remain startup errors so unavailable APIs do not become results.
+// Workflow-read failures remain startup errors rather than inferred results.
 func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 	namespace := adopter.WorkflowNamespace()
 	if target, ok := adopter.(interface {
@@ -59,7 +59,7 @@ func (scheduler *Scheduler) handleAdoptionFailure(ctx context.Context, adopter J
 	return scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()}, require)
 }
 
-// adopt restores the grant of work already running.
+// adopt restores submission ownership for work already running.
 func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 	order := run.AdmissionSequence
 	if order <= 0 {

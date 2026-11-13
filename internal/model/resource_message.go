@@ -14,8 +14,8 @@ func resourceBytes(n *int64) string {
 	return resource.NewQuantity(*n, resource.BinarySI).String()
 }
 
-// ResourceFailureMessage uses only bound pod-spec diagnostics and external
-// sampler values. Self-reported peaks and raw termination messages are ignored.
+// ResourceFailureMessage uses bound Pod-spec termination diagnostics.
+// Raw termination messages are ignored.
 // Only failed final steps participate; a successful retry keeps its verdict.
 func ResourceFailureMessage(runID string, steps []StepResult, deadline bool) string {
 	if !diagnosticRun.MatchString(runID) {

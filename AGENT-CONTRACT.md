@@ -1368,11 +1368,10 @@ Original object UID and intent continue to fence recovery and cleanup. See
   would need a `runs` CHECK-constraint table rebuild. A queued run simply
   never gets claimed. A claimed run receives the existing supersede obligation
   with no successor (`run_cancellations.reason = 'superseded'`, empty
-  `superseded_by`): its admission reservation, weight and group position are
-  withdrawn at once if ungranted, and its Workflow is deleted through the
-  normal Delete path; the owner then
-  settles without recording a result, releasing a granted reservation only
-  after the deletion was accepted. The record is terminal before the deletion
+  `superseded_by`): its in-memory submission ownership is withdrawn if work
+  has not been submitted, and its owned Workflow is deleted through the normal
+  Delete path. The owner settles without recording another result and releases
+  submitted ownership only after deletion is accepted. The record is terminal before the deletion
   finishes, exactly as for a supersede; a failed deletion stays a pending
   obligation for the cancellation pass, including after a restart. The MCP
   request performs the Workflow deletion synchronously on its own context
@@ -1554,8 +1553,8 @@ Original object UID and intent continue to fence recovery and cleanup. See
   remain available. An explicitly cancelled run (or promotion) projects no CI
   issue and leaves an existing one unchanged. Transient kubelet evictions,
   including node memory/storage pressure and executor scratch eviction, also
-  leave CI issues unchanged. Scheduler-side infrastructure failures (checkout
-  or size-grant refusal) still open/update default-branch and
+  leave CI issues unchanged. Scheduler-side infrastructure failures (such as checkout
+  failure) still open/update default-branch and
   scheduled-run issues. A container killed at its own memory limit remains a
   test failure; `OOMKilled` alone does not establish node pressure. A periodic
   reconciliation also
