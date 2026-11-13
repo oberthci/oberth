@@ -64,3 +64,30 @@ func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing
 		}
 	}
 }
+
+func TestRunReadersDoNotSerializeGrantEvidence(t *testing.T) {
+	step := model.StepResult{NodeID: "node", Status: model.StepRunning, Credentialed: true, CredentialEvidenceKnown: true, ReplayEvidenceComplete: true, GrantEvidence: []string{"secret:private-path", "capability:private-account", "wif:private-role"}}
+	detail := RunDetailResponse{Run: model.Run{ID: "run"}, Steps: []model.StepResult{step}}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard, err := json.Marshal(dashboardRunDetail(detail))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcp := callOutputContract(t, "run_get", detail)
+	if mcp.IsError {
+		t.Fatal(mcp)
+	}
+	for _, body := range []string{string(raw), string(dashboard), string(mcp.Structured), string(mcp.Content)} {
+		for _, private := range []string{"private-path", "private-account", "private-role", "grant_evidence", "GrantEvidence", "credential_evidence_known", "CredentialEvidenceKnown", "replay_evidence_complete", "ReplayEvidenceComplete"} {
+			if strings.Contains(body, private) {
+				t.Fatal("private grant evidence reached ordinary run reader", private)
+			}
+		}
+	}
+	if len(step.GrantEvidence) != 3 || !step.CredentialEvidenceKnown {
+		t.Fatal("serialization changed replay evidence")
+	}
+}

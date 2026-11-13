@@ -105,3 +105,13 @@ and missing attempt coverage still refuse advice. Independent attempt inventory
 is stored through an additive migration; it adds no caller argument or run status.
 An omitted limit in an available current declaration cannot be replaced by a
 finite historical limit.
+
+Compact run steps are paged. `run_get` returns at most 100 Argo nodes per
+summary, with `step_count` and, when more nodes remain, `next_step_offset`.
+Pass that value as `step_offset` on the next read; `step_limit` may reduce the
+page size to 1–100 (0 uses the default of 100). Pages follow the current stored
+node order, so offsets can shift while Argo adds nodes to a running run.
+`summary:false` returns the full node history. Node messages have terminal
+escape sequences and control characters removed and are limited to 512 Unicode
+characters. Passed nodes omit messages in compact summaries. Frozen grant and
+replay evidence stays internal and is omitted from run responses.

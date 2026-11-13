@@ -107,19 +107,21 @@ func wireIssueMutation(issue model.Issue, appendedBytes int) api.IssueMutationRe
 // RunSummaryResponse deliberately excludes retained Timing, full repository data,
 // diagnostics and telemetry. Unknown step times remain null.
 type RunSummaryResponse struct {
-	DisplayStatus string           `json:"display_status"`
-	DisplayReason string           `json:"display_reason"`
-	Repo          string           `json:"repo"`
-	Ref           string           `json:"ref"`
-	SHA           string           `json:"sha"`
-	Superseded    bool             `json:"superseded"`
-	ID            string           `json:"id"`
-	Status        model.RunStatus  `json:"status"`
-	Phase         string           `json:"phase"`
-	FailedStage   string           `json:"failed_burn"`
-	FailedStep    string           `json:"failed_step"`
-	Error         string           `json:"error"`
-	Steps         []RunStepSummary `json:"steps"`
+	DisplayStatus  string           `json:"display_status"`
+	DisplayReason  string           `json:"display_reason"`
+	Repo           string           `json:"repo"`
+	Ref            string           `json:"ref"`
+	SHA            string           `json:"sha"`
+	Superseded     bool             `json:"superseded"`
+	ID             string           `json:"id"`
+	Status         model.RunStatus  `json:"status"`
+	Phase          string           `json:"phase"`
+	FailedStage    string           `json:"failed_burn"`
+	FailedStep     string           `json:"failed_step"`
+	Error          string           `json:"error"`
+	Steps          []RunStepSummary `json:"steps"`
+	StepCount      int              `json:"step_count"`
+	NextStepOffset *int             `json:"next_step_offset,omitempty"`
 	// RetryHint classifies a run that did not pass (#1514).
 	RetryHint *model.RetryHint `json:"retry_hint,omitempty"`
 }
@@ -129,7 +131,7 @@ type RunStepSummary struct {
 	DisplayName string           `json:"display_name"`
 	Template    string           `json:"template"`
 	Phase       string           `json:"phase"`
-	Message     string           `json:"message"`
+	Message     string           `json:"message,omitempty"`
 	PodName     string           `json:"pod_name"`
 	Stage       string           `json:"burn"`
 	Name        string           `json:"name"`
@@ -139,17 +141,34 @@ type RunStepSummary struct {
 }
 
 func summarizeRun(run model.Run, steps []model.StepResult) RunSummaryResponse {
+	return summarizeRunPage(run, steps, 0, 0)
+}
+
+func summarizeRunPage(run model.Run, steps []model.StepResult, offset, limit int) RunSummaryResponse {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	offset = min(max(offset, 0), len(steps))
+	end := offset + min(limit, len(steps)-offset)
 	response := RunSummaryResponse{
-		ID: run.ID, Status: run.Status, Phase: run.Phase,
+		StepCount: len(steps),
+		ID:        run.ID, Status: run.Status, Phase: run.Phase,
 		DisplayStatus: run.DisplayStatus, DisplayReason: run.DisplayReason,
 		Repo: run.Repo, Ref: run.Ref, SHA: run.SHA,
 		Superseded:  run.Superseded,
 		FailedStage: run.FailedStage, FailedStep: run.FailedStep, Error: run.Error,
-		Steps: make([]RunStepSummary, len(steps)),
+		Steps: make([]RunStepSummary, end-offset),
 	}
-	for i, step := range steps {
+	if end < len(steps) {
+		response.NextStepOffset = &end
+	}
+	for i, step := range steps[offset:end] {
+		message := ""
+		if step.Status != model.StepPassed {
+			message = model.SanitizeNodeMessage(step.Message)
+		}
 		response.Steps[i] = RunStepSummary{
-			NodeID: step.NodeID, DisplayName: step.DisplayName, Template: step.Template, Phase: step.Phase, Message: step.Message, PodName: step.PodName,
+			NodeID: step.NodeID, DisplayName: step.DisplayName, Template: step.Template, Phase: step.Phase, Message: message, PodName: step.PodName,
 			Stage: step.Stage, Name: step.Step, Status: step.Status,
 			StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 		}

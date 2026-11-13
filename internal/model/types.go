@@ -341,14 +341,14 @@ type StepCredentialEvidence struct {
 // StepResult is one observed Argo status node, keyed by RunID and NodeID.
 // Display and template names never establish step identity.
 type StepResult struct {
-	ReplayEvidenceComplete bool
+	ReplayEvidenceComplete bool `json:"-"`
 	// LocalTemplate binds the observed node to a template in this admitted
 	// Workflow. Referenced/external templates cannot borrow a same-name
 	// inline template's credential-free evidence.
-	LocalTemplate           bool `json:"-"`
-	CredentialEvidenceKnown bool
-	Credentialed            bool
-	GrantEvidence           []string
+	LocalTemplate           bool     `json:"-"`
+	CredentialEvidenceKnown bool     `json:"-"`
+	Credentialed            bool     `json:"-"`
+	GrantEvidence           []string `json:"-"`
 	NodeID                  string
 	DisplayName             string
 	Template                string

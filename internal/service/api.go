@@ -470,19 +470,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.logsFor(ctx, arguments.Repo, arguments.SHA, arguments.Step, filter)
 
 	case "run_get":
-		var arguments struct {
-			ID      string `json:"id"`
-			Summary *bool  `json:"summary"`
-		}
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		if strings.TrimSpace(arguments.ID) == "" {
-			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
-		}
-		// The summary is the default; the full record (timing, diagnostics,
-		// the repository record) only on an explicit summary:false.
-		return service.readRun(ctx, actor, arguments.ID, arguments.Summary == nil || *arguments.Summary)
+		return service.getRunTool(ctx, actor, raw)
 	case "publication_abandon":
 		return service.abandonPublication(ctx, actor, raw)
 	case "run_cancel":
@@ -1162,15 +1150,36 @@ func (service *API) resolveReadRunID(ctx context.Context, id string) (model.Run,
 	return run, err
 }
 
+func (service *API) getRunTool(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
+	var arguments struct {
+		ID         string `json:"id"`
+		Summary    *bool  `json:"summary"`
+		StepOffset int    `json:"step_offset"`
+		StepLimit  int    `json:"step_limit"`
+	}
+	if err := decodeTool(raw, &arguments); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(arguments.ID) == "" {
+		return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
+	}
+	if arguments.StepOffset < 0 || arguments.StepLimit < 0 || arguments.StepLimit > 100 {
+		return nil, fmt.Errorf("%w: step_offset must be nonnegative and step_limit must be between 0 and 100", ErrInvalidInput)
+	}
+	// The summary is the default; the full record (timing, diagnostics,
+	// the repository record) only on an explicit summary:false.
+	return service.readRun(ctx, actor, arguments.ID, arguments.Summary == nil || *arguments.Summary, arguments.StepOffset, arguments.StepLimit)
+}
+
 // Run is the read-only dashboard view of one exact run: the durable record,
 // its recorded step results, and the owning repository. Unlike the MCP status
 // tool it resolves by run ID, never renews an issue lock, and has no other
 // side effects, so an idle dashboard cannot hold agent coordination state.
 func (service *API) Run(ctx context.Context, actor api.Actor, id string) (any, error) {
-	return service.readRun(ctx, actor, id, false)
+	return service.readRun(ctx, actor, id, false, 0, 0)
 }
 
-func (service *API) readRun(ctx context.Context, actor api.Actor, id string, summary bool) (value any, resultErr error) {
+func (service *API) readRun(ctx context.Context, actor api.Actor, id string, summary bool, stepOffset, stepLimit int) (value any, resultErr error) {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
 	defer func() {
@@ -1209,7 +1218,7 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 			return nil, err
 		}
 		run.DisplayStatus, run.DisplayReason = shown.DisplayStatus, shown.DisplayReason
-		summarized := summarizeRun(run, steps)
+		summarized := summarizeRunPage(run, steps, stepOffset, stepLimit)
 		// The compact summary keeps the hint's class, cause and action.
 		if hint := runRetryHint(run, service.runPublicationRetry(ctx, run)); hint != nil {
 			hint.Detail = ""
@@ -1924,7 +1933,16 @@ func matchesFailedStep(step model.StepResult, run model.Run) bool {
 // stepsForRun reads observed native nodes, including retained historical rows.
 // Plans and log text do not manufacture, merge or override execution state.
 func (service *API) stepsForRun(ctx context.Context, run model.Run) ([]model.StepResult, error) {
-	return service.history.StepResults(ctx, run.ID)
+	steps, err := service.history.StepResults(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	// Work on a copy: history implementations may share retained snapshots.
+	steps = append([]model.StepResult(nil), steps...)
+	for i := range steps {
+		steps[i].Message = model.SanitizeNodeMessage(steps[i].Message)
+	}
+	return steps, nil
 }
 
 func toolLogFilter(pattern string, context, offset, limit int, tail bool) (runlog.Filter, error) {

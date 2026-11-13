@@ -266,7 +266,7 @@ func TestRunGetSummary(t *testing.T) {
 			t.Fatalf("summary identity or unknown admission context: %#v", got)
 		}
 		// retry_hint (class, cause, action) is the fourteenth field of a red run.
-		if len(fields) != 14 || fields["retry_hint"] == nil || len(fields["steps"].([]any)[0].(map[string]any)) != 11 || len(encoded) > 1536 {
+		if len(fields) != 15 || fields["retry_hint"] == nil || len(fields["steps"].([]any)[0].(map[string]any)) != 10 || len(encoded) > 1536 {
 			t.Fatalf("summary includes extra data: %s", encoded)
 		}
 	}

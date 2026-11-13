@@ -1007,7 +1007,7 @@ function summaryLines(detail) {
 async function stepLogContent(runID, step, active) {
   if (step.status === "pending") return renderLogLines([`step: ${stepDisplay(step)} · pending`, "", "step is declared by the pipeline and has not been reached yet"]);
   if (statusKind(step.status) === "pending") return renderLogLines([`step: ${stepDisplay(step)} · queued`, "", "step is waiting for its turn"]);
-  const cacheKey = `${runID}|${step.burn}|${step.step}|${step.finished_at || ""}`;
+  const cacheKey = `${runID}|${step.node_id}|${step.burn}|${step.step}|${step.finished_at || ""}`;
   if (!active && state.logCache.has(cacheKey)) return state.logCache.get(cacheKey);
   let html;
   try {
