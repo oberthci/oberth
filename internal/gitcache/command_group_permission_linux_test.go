@@ -81,8 +81,8 @@ func TestForgeProbeWithGroupSignalsRefused(t *testing.T) {
 		t.Fatal("forge failure lost its own result", err)
 	}
 
-	// Keep a living descendant behind an exited leader. This refusal must
-	// still fail cleanup; the probe cannot release its lock over a live child.
+	// A living descendant behind an exited leader requires real cleanup.
+	// The individual-signal fallback must terminate and reap it before return.
 	leafFile := filepath.Join(root, "leaf.pid")
 	child := exec.Command(exe, "internal-gitcache-fixture", "reap-child")
 	child.Env = append(os.Environ(), "CHILD_PID="+filepath.Join(root, "child.pid"), "LEAF_PID="+leafFile)
@@ -118,7 +118,25 @@ func TestForgeProbeWithGroupSignalsRefused(t *testing.T) {
 	if err = unix.Waitid(unix.P_PID, child.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err = reapCLIGroup(child.Process.Pid, time.Now().Add(time.Second)); !errors.Is(err, refused) {
-		t.Fatal("living descendant cleanup refusal was hidden", err)
+	if err = reapCLIGroup(child.Process.Pid, time.Now().Add(time.Second)); err != nil {
+		t.Fatal("individual descendant cleanup failed", err)
+	}
+	if err := unix.Kill(leaf, 0); !errors.Is(err, unix.ESRCH) {
+		t.Fatal("descendant retained after cleanup", err)
+	}
+}
+
+func TestDeniedGroupSignalCancellationReapsDescendants(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, refused := range []unix.Errno{unix.EACCES, unix.EPERM} {
+		t.Run(refused.Error(), func(t *testing.T) {
+			cmd := exec.Command("python3", "../../hack/testdata/git-group-permissions/exec.py", strconv.Itoa(int(refused)), exe, "-test.run=^TestCLICommandReapsCanceledDescendants$", "-test.count=1")
+			if raw, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("kernel-denied group cancellation/reaping: %v\n%s", err, raw)
+			}
+		})
 	}
 }
