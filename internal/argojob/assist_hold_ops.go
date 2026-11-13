@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/holdfs"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kexec "k8s.io/client-go/util/exec"
@@ -206,7 +208,7 @@ func (controller *Controller) ReleaseAssistHold(ctx context.Context, pod string)
 	}
 	argv := []string{"touch", AssistReleasePath}
 	if hold.PatchCapable {
-		argv = []string{assistBinPath, "internal-hold-fs", "release", "--path", AssistReleasePath}
+		argv = []string{holdfs.HelperPath, "internal-hold-fs", "release", "--path", AssistReleasePath}
 	}
 	result, err := controller.ExecAssistHold(ctx, model.AssistExecRequest{Pod: pod, Argv: argv, Timeout: 30 * time.Second, OutputLimit: 4096})
 	if err != nil {

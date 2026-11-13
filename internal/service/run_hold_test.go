@@ -89,7 +89,7 @@ func (operator *holdOperator) ListAssistHolds(context.Context, string) ([]model.
 
 func (operator *holdOperator) ExecAssistHold(_ context.Context, request model.AssistExecRequest) (model.AssistExecResult, error) {
 	operator.execs = append(operator.execs, request.Argv)
-	if request.Argv[0] == assistHoldHelperPath && len(request.Argv) > 3 {
+	if request.Argv[0] == holdfs.HelperPath && len(request.Argv) > 3 {
 		args := append([]string{}, request.Argv[2:]...)
 		for index := range args {
 			if args[index] == assistHoldHelperRoot {

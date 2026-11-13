@@ -426,11 +426,11 @@ func injectAssistHelperMounts(workflow *wfv1.Workflow, request Request) {
 		}
 		mounts := main.VolumeMounts[:0:0]
 		for _, m := range main.VolumeMounts {
-			if m.MountPath != assistBinMountPath {
+			if m.MountPath != holdfs.HelperMountPath {
 				mounts = append(mounts, m)
 			}
 		}
-		main.VolumeMounts = append(mounts, corev1.VolumeMount{Name: SourceVolumeName, MountPath: assistBinMountPath, SubPath: request.SourceVolume.BinarySubPath, ReadOnly: true})
+		main.VolumeMounts = append(mounts, corev1.VolumeMount{Name: SourceVolumeName, MountPath: holdfs.HelperMountPath, SubPath: request.SourceVolume.BinarySubPath, ReadOnly: true})
 	})
 }
 
@@ -552,7 +552,7 @@ func assistScratchResources(containers []any, main *corev1.Container, scratch in
 
 func hasAssistBinary(main *corev1.Container) bool {
 	return slices.ContainsFunc(main.VolumeMounts, func(m corev1.VolumeMount) bool {
-		return m.Name == SourceVolumeName && m.MountPath == assistBinMountPath && m.ReadOnly
+		return m.Name == SourceVolumeName && m.MountPath == holdfs.HelperMountPath && m.ReadOnly
 	})
 }
 
@@ -645,9 +645,6 @@ func AssistHoldPod(pod *corev1.Pod) bool {
 	}
 	return false
 }
-
-const assistBinMountPath = "/run/oberth/assist"
-const assistBinPath = assistBinMountPath + "/oberth"
 
 func assistContainer(t *wfv1.Template) *corev1.Container {
 	if t.Container != nil {

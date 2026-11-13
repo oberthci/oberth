@@ -13,6 +13,10 @@ import (
 	"strings"
 )
 
+// HelperMountPath and HelperPath bind the held-Pod mount to service execution.
+const HelperMountPath = "/run/oberth/assist"
+const HelperPath = HelperMountPath + "/oberth"
+
 // The Pod-side helper: `oberth internal-hold-fs <read|write|release> ...`.
 // It runs through pods/exec inside a held attempt's main container with the
 // server's own static executable, so no image shell or coreutils is needed.

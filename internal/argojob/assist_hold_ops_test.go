@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/holdfs"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -39,7 +41,7 @@ func heldPodFixture(name, workflow, step string, startedAgo time.Duration, helpe
 	main := corev1.Container{Name: mainContainerName, Image: "golang", Command: []string{"go", "test"},
 		Env: []corev1.EnvVar{{Name: assistPauseEnv, Value: "true"}, {Name: AssistHoldEnv, Value: "1"}, {Name: "OBERTH_STEP", Value: step}}}
 	if helper {
-		main.VolumeMounts = []corev1.VolumeMount{{Name: SourceVolumeName, MountPath: assistBinMountPath, SubPath: "bin", ReadOnly: true}}
+		main.VolumeMounts = []corev1.VolumeMount{{Name: SourceVolumeName, MountPath: holdfs.HelperMountPath, SubPath: "bin", ReadOnly: true}}
 	}
 	deadline := int64(2100)
 	started := metav1.NewTime(time.Now().Add(-startedAgo))
@@ -115,7 +117,7 @@ func TestExecAssistHoldBoundsOutputAndReportsExitCode(t *testing.T) {
 	if err := controller.ReleaseAssistHold(context.Background(), "wf-a-test-1"); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) < 4 || seen[0] != assistBinPath || seen[1] != "internal-hold-fs" || seen[2] != "release" || seen[4] != AssistReleasePath {
+	if len(seen) < 4 || seen[0] != holdfs.HelperPath || seen[1] != "internal-hold-fs" || seen[2] != "release" || seen[4] != AssistReleasePath {
 		t.Fatalf("release argv = %v", seen)
 	}
 	if _, err := controller.ExecAssistHold(context.Background(), model.AssistExecRequest{Pod: "missing", Argv: []string{"true"}}); err == nil {

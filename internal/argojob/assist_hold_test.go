@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/holdfs"
+
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"github.com/argoproj/argo-workflows/v4/util/expr/argoexpr"
 	argoexprenv "github.com/argoproj/argo-workflows/v4/util/expr/env"
@@ -623,7 +625,7 @@ spec:
 		if !hasAssistBinary(main) {
 			t.Fatalf("%s lost the patch helper mount: %+v", name, main.VolumeMounts)
 		}
-		if len(main.Command) > 0 && main.Command[0] == assistBinPath {
+		if len(main.Command) > 0 && main.Command[0] == holdfs.HelperPath {
 			t.Fatalf("%s had its authored command rewritten: %v", name, main.Command)
 		}
 	}

@@ -45,7 +45,6 @@ const (
 	maxAssistStdinBytes   = 1 << 20
 	// assistHoldHelperRoot is the writable source tree of a held attempt.
 	assistHoldHelperRoot = "/work/src"
-	assistHoldHelperPath = "/run/oberth/usage/oberth"
 )
 
 // maxConcurrentHoldActions bounds in-flight hold actions (exec, patch,
@@ -382,7 +381,7 @@ func (service *API) patchRunHold(ctx context.Context, actor api.Actor, id, step,
 		return RunHoldPatchResponse{}, err
 	}
 	if !hold.PatchCapable {
-		return RunHoldPatchResponse{}, refuse(ErrInvalidInput, "step %s is inspect-only: its held Pod has no server helper mount (/run/oberth/usage); run_hold_exec still works", hold.Step)
+		return RunHoldPatchResponse{}, refuse(ErrInvalidInput, "step %s is inspect-only: its held Pod has no server helper mount (%s); run_hold_exec still works", hold.Step, holdfs.HelperMountPath)
 	}
 	digest := holdfs.Digest([]byte(diff))
 	files := make([]string, 0, len(patches))
@@ -459,7 +458,7 @@ func (service *API) applyHoldPatch(ctx context.Context, hold model.AssistHold, p
 }
 
 func (service *API) holdHelper(ctx context.Context, hold model.AssistHold, args []string, stdin []byte, policy model.AssistPolicy) ([]byte, error) {
-	argv := append([]string{assistHoldHelperPath, "internal-hold-fs"}, args...)
+	argv := append([]string{holdfs.HelperPath, "internal-hold-fs"}, args...)
 	result, err := service.assistHolds.ExecAssistHold(ctx, model.AssistExecRequest{Pod: hold.Pod, Argv: argv, Stdin: stdin, Timeout: policy.ExecTimeout, OutputLimit: max(policy.PatchMaxBytes*2+(1<<20), policy.ExecOutputBytes)})
 	if err != nil {
 		return nil, fmt.Errorf("hold helper: %w", err)
