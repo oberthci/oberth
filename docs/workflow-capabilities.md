@@ -166,14 +166,15 @@ removed VM `argo` values refuse the upgrade until they are dropped; see
 [removed chart values](../README.md#upgrading). Removed CLI serve flags must be
 removed from custom launch commands.
 
-In v0.22.1, historical capability recovery also requires the original Workflow
-UID, not only its run, name and tested SHA. A forward migration discards the
-v0.22.0 receipts, which lack that UID; it never guesses one from a live object.
-Workflows relying on those old device-grant receipts should finish or be
-cancelled with the old owner before upgrade. Otherwise adoption refuses the
-binding for that run and leaves its Workflow for operator inspection; rerun
-under the current grant when appropriate. Current grants, run records and audit
-history are retained. New submissions never use historical recovery authority.
+In v0.22.1 the unused historical capability-recovery loader and receipt table
+are removed. There is no production issuer for UID-bearing receipts. The forward
+migration discards the old receipts; it never guesses authority from a live object.
+Workflows relying on old device-grant receipts should finish or be cancelled with
+the old owner before upgrade. Otherwise adoption refuses the binding for that run
+and leaves its Workflow for operator inspection; scheduler startup and unrelated
+adoption continue. Rerun under the current grant when appropriate. Current grants,
+run records and audit history are retained. New submissions require the current
+exact capability binding and never use historical recovery authority.
 
 The earlier technology-specific journal retirement left its inert tables in
 place. That historical statement does not describe all changes in this release:

@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,7 +19,7 @@ import (
 
 // The fixture is the compiler output captured from e5421125, with a device
 // map in its operator grant. Its Workflow and capability annotation are intact.
-func TestOldDeviceGrantWorkflowRecoversThroughRealMigration(t *testing.T) {
+func TestOldDeviceGrantWorkflowIsRefusedAfterRealMigration(t *testing.T) {
 	var fixture struct {
 		Workflow *wfv1.Workflow
 		Adoption AdoptionRequest
@@ -79,70 +78,8 @@ func TestOldDeviceGrantWorkflowRecoversThroughRealMigration(t *testing.T) {
 	if _, _, err = c.Adopt(ctx, fixture.Adoption); !errors.Is(err, ErrWorkflowCapabilityChanged) {
 		t.Fatal("fixture did not exercise the changed grant hash", err)
 	}
-	c.WithWorkflowCapabilityRecoveryLoader(db.WorkflowCapabilityRecovery)
-	if _, _, err := c.Adopt(ctx, fixture.Adoption); !errors.Is(err, ErrWorkflowCapabilityChanged) {
-		t.Fatal("UID-less migration receipt was trusted", err)
-	}
-	// Only trusted storage evidence that ALREADY names the original UID can
-	// recover authority. Production migration never infers it from a live object.
-	seed, err = sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = seed.Exec(`INSERT INTO workflow_capability_recoveries
- (run_id,repo_id,workflow_name,workflow_uid,sha,capability_json,projected_json,granted_by,granted_at)
- SELECT ?,repo_id,?,?,?,?,capability_json,granted_by,granted_at
- FROM workflow_capability_grants WHERE repo_id=?`, fixture.Adoption.RunID, fixture.Workflow.Name, string(fixture.Workflow.UID), fixture.Adoption.SHA, string(fixture.Grant), repo.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = seed.Close(); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := json.Marshal(fixture.Workflow)
-	if _, found, err := c.Adopt(ctx, fixture.Adoption); err != nil || !found {
-		t.Fatal("authorized old-base Workflow lost on upgrade", found, err)
-	}
-	after, _ := json.Marshal(fixture.Workflow)
-	if !bytes.Equal(before, after) {
-		t.Fatal("adoption rewrote the Workflow")
-	}
-	// Ongoing executor-token recovery uses the same receipt and current scope.
-	if _, err = c.boundCapability(ctx, fixture.Workflow, repo.ID); err != nil {
-		t.Fatal("recovered executor identity lost its binding", err)
-	}
-	// A same-name replacement must not inherit an old Workflow's capability.
-	replacement := fixture.Workflow.DeepCopy()
-	replacement.UID = "replacement-workflow-uid"
-	c.workflows = &staticWorkflowClient{workflow: replacement}
-	if _, _, err := c.Adopt(ctx, fixture.Adoption); !errors.Is(err, ErrWorkflowCapabilityChanged) {
-		t.Fatal("replacement Workflow inherited recovery authority", err)
-	}
-	replacement.UID = ""
-	if _, err := c.boundCapability(ctx, replacement, repo.ID); !errors.Is(err, ErrWorkflowCapabilityChanged) {
-		t.Fatal("empty Workflow UID inherited recovery authority", err)
-	}
-	c.workflows = &staticWorkflowClient{workflow: fixture.Workflow}
-	for _, mutation := range []string{"run", "workflow", "uid", "empty uid", "sha", "repo"} {
-		r, name, uid, sha, id := fixture.Adoption.RunID, fixture.Workflow.Name, string(fixture.Workflow.UID), fixture.Adoption.SHA, repo.ID
-		switch mutation {
-		case "run":
-			r += "-new"
-		case "workflow":
-			name += "-new"
-		case "uid":
-			uid += "-replacement"
-		case "empty uid":
-			uid = ""
-		case "sha":
-			sha = "different"
-		case "repo":
-			id++
-		}
-		receipt, err := db.WorkflowCapabilityRecovery(ctx, id, r, name, uid, sha)
-		if err != nil || len(receipt) != 0 {
-			t.Fatal("receipt escaped its submission", mutation, string(receipt), err)
-		}
+	if _, err := c.boundCapability(ctx, fixture.Workflow, repo.ID); !errors.Is(err, ErrWorkflowCapabilityChanged) {
+		t.Fatal("old grant authorized token recovery", err)
 	}
 	// New compiler output binds the current grant, without the device map.
 	request := requestWithCapability(t, operatorResourceDocument, current)

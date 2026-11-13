@@ -14,13 +14,21 @@ import (
 func admitHelperMounts(location string, mounts []corev1.VolumeMount, devices []corev1.VolumeDevice) []error {
 	var problems []error
 	for i, mount := range mounts {
+		if !path.IsAbs(mount.MountPath) {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeMounts[%d].mountPath %q must be an absolute path", location, i, mount.MountPath))
+			continue
+		}
 		if helperPathMayBeShadowed(mount.MountPath) {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeMounts[%d].mountPath %q may shadow a server helper; use a literal path outside /run/oberth and /var/run/oberth", location, i, mount.MountPath))
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeMounts[%d].mountPath %q uses a reserved server helper path; /run/oberth and /var/run/oberth and their descendants are reserved", location, i, mount.MountPath))
 		}
 	}
 	for i, device := range devices {
+		if !path.IsAbs(device.DevicePath) {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeDevices[%d].devicePath %q must be an absolute path", location, i, device.DevicePath))
+			continue
+		}
 		if helperPathMayBeShadowed(device.DevicePath) {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeDevices[%d].devicePath %q may shadow a server helper; use a literal path outside /run/oberth and /var/run/oberth", location, i, device.DevicePath))
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.volumeDevices[%d].devicePath %q uses a reserved server helper path; /run/oberth and /var/run/oberth and their descendants are reserved", location, i, device.DevicePath))
 		}
 	}
 	return problems
@@ -34,7 +42,7 @@ func helperPathMayBeShadowed(value string) bool {
 	}
 	cleaned := path.Clean(value)
 	for _, root := range []string{"/run/oberth", "/var/run/oberth"} {
-		if cleaned == "/" || cleaned == root || strings.HasPrefix(cleaned, root+"/") || strings.HasPrefix(root, cleaned+"/") {
+		if cleaned == root || strings.HasPrefix(cleaned, root+"/") {
 			return true
 		}
 	}

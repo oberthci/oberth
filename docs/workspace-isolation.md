@@ -192,10 +192,15 @@ when upgrading the controller; see `internal/argojob/testdata/isolation-argo4.0.
 
 ## Server helper mounts
 
-Authored mounts cannot overlap `/run/oberth` or its conventional image alias
-`/var/run/oberth`. This includes the assist helper, nested files and directories,
-and parent mounts such as `/run` or `/`. Read-only mounts can hide the helper
-just as writable mounts can. Volume-device paths have the same restriction.
+Authored mounts cannot use `/run/oberth`, its conventional image alias
+`/var/run/oberth`, or anything beneath either path. This includes read-only mounts
+and volume-device paths. Parent mounts such as `/run`, `/var/run`, `/var` and `/`
+remain available, including a writable tmpfs at `/run` for a read-only image root.
+The compiler appends the dedicated read-only assist helper mount after authored
+mounts, and the pinned Argo Pod builder preserves that parent-before-child order.
+This proves generated mount ordering, not the behavior of arbitrary runtime
+implementations or filesystem symlinks in repository images.
+Every authored mountPath and devicePath must be absolute, as Kubernetes requires.
 Runtime-templated mount and device paths are refused because their resolved
 paths cannot be checked at admission. Literal segment siblings such as
 `/run/oberth-other` and `/run/oberth-gar` remain available.

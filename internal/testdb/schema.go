@@ -387,7 +387,8 @@ DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-
 
 // PostWorkflowCapabilityUIDDowngrade reconstructs an empty UID-less table only in disposable historical fixtures.
 const PostWorkflowCapabilityUIDDowngrade = `
-DROP TABLE workflow_capability_recoveries;
+DELETE FROM schema_migrations WHERE id='20261113073438-remove-unused-capability-recovery-842b529121af8cb6b818c84fa78a5024';
+DROP TABLE IF EXISTS workflow_capability_recoveries;
 CREATE TABLE workflow_capability_recoveries (
  run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
  repo_id INTEGER NOT NULL REFERENCES repositories(id),

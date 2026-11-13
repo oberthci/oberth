@@ -226,22 +226,27 @@ not again from a restored reporter; `TestWaitResumedRetriedDAGIsGreen` adopts
 such a Workflow after a restart and reports only the passing retry.
 
 Helper mount isolation: `TestAuthoredMountsCannotShadowServerHelpers` covers
-literal, normalized, runtime-templated, parent, nested and conventional alias
-paths across all admitted Pod container forms. `TestAuthoredBlockDeviceCannotShadowServerHelper`
-extends the boundary to block devices. `TestBuildProtectsHeldPodHelperFromAuthoredShadows`
-checks actual held-Pod construction, and `TestExistingHeldPodShadowIsNotPatchCapable`
-checks retained Pods and release through the image fallback. Segment siblings
-remain supported and existing own-PVC device admission stays unchanged.
+literal, normalized, runtime-templated, nested and conventional alias paths across
+all admitted Pod container forms. Parents `/run`, `/var/run`, `/var` and `/` remain
+admitted, including writable tmpfs at `/run`. `TestBuildParentMountsLeaveHelperLast`
+and `hack/test-helper-mounts.py` prove parent-before-helper ordering through the
+actual pinned Argo Pod builder for both normal and held retries. This proves
+mount ordering, not arbitrary runtime or image-symlink behavior.
+`TestAuthoredBlockDeviceCannotShadowServerHelper` extends the reserved-path rule
+to devices. `TestAuthoredMountPathsMustBeAbsolute` and
+`TestAuthoredDevicePathsMustBeAbsolute` reject relative paths.
+`TestExistingHeldPodShadowIsNotPatchCapable` checks retained Pods and fallback
+release; segment siblings and own-PVC device admission remain supported.
 
-Capability recovery: `TestWorkflowCapabilityUIDMigrationDiscardsUnboundReceipts`
-runs the forward migration twice, discards UID-less authority and keeps grants,
-runs and audit history. `TestOldDeviceGrantWorkflowRecoversThroughRealMigration`
-first proves that real migration refuses an old UID-less receipt, then uses an
-explicit trusted UID-bound test fixture to exercise adoption and token recovery.
-A same-name replacement, missing UID, changed tuple, grant epoch/revocation and
-same-ID requeue cannot inherit authority; new submissions remain strict.
-`TestStartupAdoptsOtherWorkflowsAfterOneBindingRefusal` proves startup and
-other adoption continue; `TestAdoptedNativeControlsPreserveRecoveryIdentity`
+Capability recovery removal:
+`TestUnusedCapabilityRecoveryRemovalPreservesRunsGrantsAndAudit` upgrades both
+UID-less and UID-bearing historical fixtures, drops the unused table and run
+trigger, and preserves current grants, runs and audit history. There is no
+production issuer for UID-bearing receipts; the historical loader is removed.
+`TestOldDeviceGrantWorkflowIsRefusedAfterRealMigration` verifies that old grant
+hashes cannot authorize adoption or token recovery; new submissions bind the
+current grant. `TestStartupAdoptsOtherWorkflowsAfterOneBindingRefusal` proves
+startup and other adoption continue; `TestAdoptedNativeControlsPreserveRecoveryIdentity`
 covers native controls after restart.
 
 Promotion/tag/release adoption #1172 slice 2: each trigger keeps the same run,

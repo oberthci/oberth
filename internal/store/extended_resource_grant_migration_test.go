@@ -87,68 +87,12 @@ func TestExtendedResourceGrantRemovalPreservesOperatorAuthorityAndHistory(t *tes
 	if err := s.migrateWithMigrations(ctx, nil, migrations); err != nil {
 		t.Fatal(err)
 	}
-	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, active.ID, "submitted-workflow", "workflow-uid", strings.Repeat("a", 40)); err != nil || len(receipt) != 0 {
-		t.Fatal("UID-less historical authority survived", string(receipt), err)
+	var remaining int
+	if err := s.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='workflow_capability_recoveries'`).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatal("unused recovery table remains", remaining, err)
 	}
 	after, err := s.VerifyAuditChain(ctx)
 	if err != nil || !reflect.DeepEqual(audit, after) {
 		t.Fatal("audit rewritten", err)
-	}
-}
-
-func TestCapabilityRecoveryDoesNotSurviveSameIDRequeue(t *testing.T) {
-	s := newMigrationIDTestStore(t)
-	ctx := t.Context()
-	index := -1
-	for i, m := range migrations {
-		if m.id == "20261113010858-remove-extended-resource-grants-1523724f34af80938b4963079df78930" {
-			index = i
-		}
-	}
-	if index < 0 {
-		t.Fatal("grant migration missing")
-	}
-	if err := s.migrateWithMigrations(ctx, nil, migrations[:index]); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.configureLiveReaders(ctx, 0); err != nil {
-		t.Fatal(err)
-	}
-	repo := createRepo(t, s)
-	old := `{"namespace":"pipelines","service_account":"operator-worker","extended_resources":{"example.com/gpu":2}}`
-	if _, err := s.db.Exec(`INSERT INTO workflow_capability_grants(repo_id,capability_json,granted_by,granted_at) VALUES(?,?,'operator',123)`, repo.ID, old); err != nil {
-		t.Fatal(err)
-	}
-	run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/requeue", strings.Repeat("a", 40)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.SetRunWorkflowName(ctx, run.ID, "same-name"); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.migrateWithMigrations(ctx, nil, migrations); err != nil {
-		t.Fatal(err)
-	}
-	seedCapabilityRecoveryUID(t, s, run.ID, repo.ID, "same-name", "workflow-uid", run.SHA, old)
-	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, run.ID, "same-name", "workflow-uid", run.SHA); err != nil || len(receipt) == 0 {
-		t.Fatal("original receipt missing", string(receipt), err)
-	}
-	if _, err = s.RequeueStrandedRun(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err = s.CompleteRunCancellation(ctx, run.ID, "same-name"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.SetRunWorkflowName(ctx, run.ID, "same-name"); err != nil {
-		t.Fatal(err)
-	}
-	if receipt, err := s.WorkflowCapabilityRecovery(ctx, repo.ID, run.ID, "same-name", "workflow-uid", run.SHA); err != nil || len(receipt) != 0 {
-		t.Fatal("replacement attempt revived original receipt", string(receipt), err)
 	}
 }
