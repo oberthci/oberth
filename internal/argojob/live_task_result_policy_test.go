@@ -27,7 +27,7 @@ import (
 
 func installLiveTaskResultPolicy(t *testing.T, cluster liveCluster) {
 	t.Helper()
-	body, err := exec.CommandContext(t.Context(), "helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@sha256:"+strings.Repeat("1", 64), "--set", "argo.namespace="+cluster.namespace, "--show-only", "templates/argo-task-result-policy.yaml").CombinedOutput()
+	body, err := exec.CommandContext(t.Context(), "helm", "template", "oberth", "../../charts/oberth", "--namespace", "oberth", "--set", "image.ref=example.invalid/oberth@sha256:"+strings.Repeat("1", 64), "--set", "argo.namespace="+cluster.namespace, "--show-only", "templates/argo-task-result-policy.yaml").CombinedOutput()
 	if err != nil {
 		t.Fatalf("render policy: %v: %s", err, body)
 	}
@@ -84,6 +84,11 @@ func installLiveTaskResultPolicy(t *testing.T, cluster liveCluster) {
 func liveTaskResultAccount(t *testing.T, cluster liveCluster, account string) {
 	t.Helper()
 	ctx := t.Context()
+	t.Cleanup(func() {
+		_ = cluster.kube.RbacV1().RoleBindings(cluster.namespace).Delete(context.Background(), account, metav1.DeleteOptions{})
+		_ = cluster.kube.RbacV1().Roles(cluster.namespace).Delete(context.Background(), account, metav1.DeleteOptions{})
+		_ = cluster.kube.CoreV1().ServiceAccounts(cluster.namespace).Delete(context.Background(), account, metav1.DeleteOptions{})
+	})
 	if _, err := cluster.kube.CoreV1().ServiceAccounts(cluster.namespace).Create(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: account}}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -189,6 +194,14 @@ func liveTaskResultCases(t *testing.T, cluster liveCluster, workflow, foreign *w
 		"foreign-owner": func(o *wfv1.WorkflowTaskResult) { o.OwnerReferences[0].UID = foreign.UID },
 		"foreign-label": func(o *wfv1.WorkflowTaskResult) { o.Labels["workflows.argoproj.io/workflow"] = foreign.Name },
 		"foreign-name":  func(o *wfv1.WorkflowTaskResult) { o.Name = foreign.Name },
+		"ambiguous-holder-segments": func(o *wfv1.WorkflowTaskResult) {
+			controller := &Controller{config: cluster.config()}
+			role := strings.Split(controller.identityPodName(workflow, account), ".")[2]
+			o.OwnerReferences[0].UID = types.UID(string(workflow.UID) + "." + role)
+			o.OwnerReferences[0].Name = foreign.Name
+			o.Labels["workflows.argoproj.io/workflow"] = foreign.Name
+			o.Name = foreign.Name
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			object := own.DeepCopy()
@@ -227,7 +240,7 @@ func liveTaskResultCases(t *testing.T, cluster liveCluster, workflow, foreign *w
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "oberth-executor.forged.executor.run"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main", Image: defaultSourceSeedImage}}}}
 		if generated {
 			pod.Name = ""
-			pod.GenerateName = "oberth-executor."
+			pod.GenerateName = "oberth-executor.forged-"
 		}
 		_, err := kube.CoreV1().Pods(cluster.namespace).Create(t.Context(), pod, dry)
 		livePolicyDenies(t, err, "argo-executor-holders")
@@ -245,11 +258,12 @@ func TestLiveWorkflowTaskResultPolicy(t *testing.T) {
 	cluster := requireLiveCluster(t)
 	installLiveTaskResultPolicy(t, cluster)
 	var workflows []*wfv1.Workflow
-	for _, name := range []string{"r6-policy-own", "r6-policy-foreign"} {
+	for _, name := range []string{"executor.r6-policy-own", "r6-policy-own"} {
 		wf, err := cluster.workflows.Create(t.Context(), &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: wfv1.WorkflowSpec{Entrypoint: "pause", Suspend: ptr.To(true), Templates: []wfv1.Template{{Name: "pause", Suspend: &wfv1.SuspendTemplate{}}}}}, metav1.CreateOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = cluster.workflows.Delete(context.Background(), wf.Name, metav1.DeleteOptions{}) })
 		workflows = append(workflows, wf)
 	}
 	for i, account := range []string{"oberth-argo-executor", "r6-operator-capability", "r6-per-step"} {

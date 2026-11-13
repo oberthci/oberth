@@ -209,7 +209,7 @@ func TestExecutorIdentityPodNamesAreReserved(t *testing.T) {
 				}
 				copy := pod.DeepCopy()
 				copy.Name = ""
-				copy.GenerateName = "oberth-executor."
+				copy.GenerateName = "oberth-executor.forged-"
 				if policy.accepts(t, r, copy, nil) {
 					t.Fatal("pipeline identity can generate a reserved holder name")
 				}

@@ -11,8 +11,12 @@ import (
 	"testing"
 	"time"
 
+	wfclientset "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -21,6 +25,20 @@ import (
 // Run before and after separately against the same disposable kind cluster.
 func TestLiveExecutorTemplateRaceMeasurement(t *testing.T) {
 	cluster := requireLiveCluster(t)
+	// Eight concurrent test observers should not share client-go's five-QPS
+	// default. This changes only the measurement client, never server policy.
+	config := rest.CopyConfig(cluster.restConfig)
+	config.QPS, config.Burst = 40, 80
+	kube, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argo, err := wfclientset.NewForConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster.kube, cluster.restConfig = kube, config
+	cluster.workflows = argo.ArgoprojV1alpha1().Workflows(cluster.namespace)
 	cluster.ensureServiceAccounts(t, t.Context())
 	for _, phase := range []string{"before", "after"} {
 		t.Run(phase, func(t *testing.T) {
@@ -45,11 +63,12 @@ func measureLiveTemplateRace(t *testing.T, cluster liveCluster, phase string) {
 	t.Helper()
 	var mutex sync.Mutex
 	observations := make([]templateRaceObservation, 0, 300)
+	prefix := fmt.Sprintf("r6-race-%s-%d", phase, time.Now().Unix())
 	t.Run("runs", func(t *testing.T) {
 		for i := range 300 {
 			t.Run(fmt.Sprintf("%03d", i), func(t *testing.T) {
 				t.Parallel()
-				observation := observeLiveTemplateRace(t, cluster, fmt.Sprintf("r6-race-%s-%03d", phase, i))
+				observation := observeLiveTemplateRace(t, cluster, fmt.Sprintf("%s-%03d", prefix, i))
 				mutex.Lock()
 				observations = append(observations, observation)
 				done := len(observations)
@@ -128,16 +147,30 @@ spec:
 		return
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	if _, err = cluster.workflows.Create(ctx, workflow, metav1.CreateOptions{}); err != nil {
-		observation.Error = err.Error()
-		return
-	}
-	completion, err := controller.Wait(ctx, request.Name, request.RunID, &recordingWriter{})
+	current, err := cluster.workflows.Create(ctx, workflow, metav1.CreateOptions{})
 	if err != nil {
 		observation.Error = err.Error()
 		return
 	}
-	observation.Phase = string(completion.Phase)
+	delivered := map[types.UID]bool{}
+	for !current.Status.Phase.Completed() {
+		if err = controller.deliverExecutorTokensObserved(ctx, current, delivered, nil); err != nil {
+			observation.Error = err.Error()
+			return
+		}
+		select {
+		case <-ctx.Done():
+			observation.Error = ctx.Err().Error()
+			return
+		case <-time.After(time.Second):
+		}
+		current, err = cluster.workflows.Get(ctx, request.Name, metav1.GetOptions{})
+		if err != nil {
+			observation.Error = err.Error()
+			return
+		}
+	}
+	observation.Phase = string(current.Status.Phase)
 	pods, err := cluster.kube.CoreV1().Pods(cluster.namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + name})
 	if err != nil {
 		observation.Error = err.Error()
@@ -148,8 +181,12 @@ spec:
 			continue
 		}
 		for _, container := range []string{"main", "wait"} {
-			logs, err := cluster.kube.CoreV1().Pods(cluster.namespace).GetLogs(pod.Name, &corev1.PodLogOptions{Container: container}).DoRaw(ctx)
+			logs, err := templateRaceLogs(ctx, cluster, pod.Name, container)
 			if err != nil {
+				observation.Error = err.Error()
+				return
+			}
+			if err = os.WriteFile(filepath.Join(t.ArtifactDir(), container+".log"), logs, 0o600); err != nil {
 				observation.Error = err.Error()
 				return
 			}
@@ -164,10 +201,6 @@ spec:
 				observation.Marker = strings.Contains(line, "templateName=r6-marker")
 				observation.Original = strings.Contains(line, "templateName=main")
 			}
-			if err = os.WriteFile(filepath.Join(t.ArtifactDir(), "wait.log"), logs, 0o600); err != nil {
-				observation.Error = err.Error()
-				return
-			}
 		}
 	}
 	if !observation.Marker && !observation.Original {
@@ -177,4 +210,27 @@ spec:
 		observation.Error = "main did not complete template swap"
 	}
 	return
+}
+
+func templateRaceLogs(ctx context.Context, cluster liveCluster, pod, container string) ([]byte, error) {
+	marker := "Executor initialized"
+	if container == "main" {
+		marker = "r6-template-swap-complete"
+	}
+	var body []byte
+	for attempt := range 5 {
+		var err error
+		body, err = cluster.kube.CoreV1().Pods(cluster.namespace).GetLogs(pod, &corev1.PodLogOptions{Container: container}).DoRaw(ctx)
+		if err != nil || strings.Contains(string(body), marker) {
+			return body, err
+		}
+		if attempt < 4 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	}
+	return body, nil
 }
