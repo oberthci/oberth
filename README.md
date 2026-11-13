@@ -386,16 +386,13 @@ spec:
 
 To skip heavy work on a branch run, guard it with the server-set
 `oberth-trigger` workflow parameter (`branch`, `promotion`, `schedule` or
-ordinary `tag` in build.yaml, and `tag` in release.yaml). The server replaces
-the declared default with the durable event identity. That parameter never
-grants release authority:
+ordinary `tag` in build.yaml, and `tag` in release.yaml). The server sets it
+from the durable event identity on every Workflow. Reference it without an
+authored declaration; the `oberth-` parameter prefix is reserved. That
+parameter never grants release authority:
 
 ```yaml
 spec:
-  arguments:
-    parameters:
-    - name: oberth-trigger
-      value: promotion   # replaced by the server with the run's trigger
   templates:
   - name: ci
     dag:
@@ -404,6 +401,9 @@ spec:
         template: kernel-matrix
         when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"
 ```
+
+[Run facts](docs/run-facts.md) describes the other server-owned parameters and
+how to map them into an authored environment.
 
 The `oberth.ci/size` and `oberth.ci/size-by-trigger` annotations are removed
 and refused at admission.

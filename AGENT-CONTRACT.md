@@ -508,16 +508,22 @@ trust assumptions and complete invalidation rules.
   compute admission, numeric grants or resource resizing. See
   [native scheduling](docs/native-scheduling.md).
 
-- The server-owned workflow parameter `oberth-trigger`
-  (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
-  every document that declares or mentions it, so `when:` guards can skip
-  work per trigger, e.g.
-  `when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"`. A
-  document may declare it in `spec.arguments.parameters` only as a plain
-  vocabulary `value` (the default an older server, which never sets it,
-  evaluates); this server replaces that value. `valueFrom`, `default`,
-  `enum`, a duplicate, or an out-of-vocabulary value is refused. A document
-  that never mentions the parameter is submitted byte-identical to before.
+- Every compiled Workflow receives server-owned parameters `oberth-repo`,
+  `oberth-ref`, `oberth-sha` and `oberth-trigger` (`branch|promotion|schedule|tag`).
+  Release-tier runs also receive `oberth-release-tag` and `oberth-release-sha`;
+  these copy the exact ref and SHA. Missing ref/SHA facts are refused at Build,
+  rather than submitted empty. They are absent on ordinary CI runs, including ordinary tags.
+  The entire `oberth-` parameter prefix is reserved: authored parameter
+  declarations are refused in workflow arguments, template inputs/outputs and
+  invocation arguments. References are allowed without declaring defaults.
+  For example, `when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"`
+  selects work by trigger. The run name is `{{workflow.name}}`.
+  Branches, refs and tags share the allowlist
+  `^[A-Za-z0-9][A-Za-z0-9._/+@=,-]*$` at receive and Build; already-stored
+  refs outside it fail Build with the same plain refusal. Version-tag
+  classification bounds its suffix by this alphabet and anchors both ends.
+  Ref/tag facts must go through env, never `when:`. Output `globalName` also
+  reserves the `oberth-` prefix. Assisted step selection uses Argo node names.
   A run that must not overlap another declares a native Argo mutex or
   semaphore. Retired Workflow annotations are inert metadata. The
   `concurrency_groups` tool, `oberth admission groups` and
@@ -527,11 +533,13 @@ trust assumptions and complete invalidation rules.
 - Workflow resources, placement, parallelism, synchronization, priority, deadlines and retries are authored in repository YAML. Oberth configures only Argo global parallelism; it does not inject release locks or priority, manage semaphore ConfigMaps, or apply CPU/pressure/disk/hold/startup gates. Requests and deadlines are optional.
 - Assisted lifecycle settings (`assist.*`), cron entry settings (`schedules.*`), and security profile configuration remain operator-owned. Assisted holds retain their explicit deadline extension and keep their Argo slot and locks.
 - Semaphore limits are operator-owned in `oberth-sync-limits` in the pipeline namespace. The fixed name and same-namespace restriction protect ConfigMap data from disclosure through Argo errors. The installer leaves existing semaphore objects and their ownership to operators. Named mutexes and native Argo priority pass unchanged; no release mutex is reserved or injected.
-- Pipeline steps receive `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`,
-  `OBERTH_TRIGGER`, and `OBERTH_STEP` (the Argo template name), plus the
-  documented Go cache variables. `OBERTH_STEP` is set on every template for
-  observability and diagnostic correlation with per-step grant denials; it is
-  NOT a security control (the value is self-declared by the workflow document).
+- Oberth does not inject run-fact environment variables (`OBERTH_REPO`,
+  `OBERTH_REF`, `OBERTH_SHA`, `OBERTH_TRIGGER`, `OBERTH_RUN_ID`,
+  `OBERTH_RELEASE_TAG`, `OBERTH_RELEASE_SHA` or `OBERTH_STEP`). Authors map
+  native workflow parameters to env explicitly; authored env names and values
+  pass through unchanged. Toolchain/workspace variables, `OBERTH_ARTIFACTS`,
+  assist hold controls and secret-store coordinates remain with their live
+  mechanisms. See [run facts](docs/run-facts.md).
   The SDK itself is configured through `OBERTH_SOURCE_DIR`,
   `OBERTH_STEP_TIMEOUT`, `OBERTH_SECRET_DIR`, `OBERTH_SECRETSTORE_DIR`, and
   (Apply only) `OBERTH_PLAN_DIGEST`/`OBERTH_PLAN_SIZE`.
@@ -1574,8 +1582,7 @@ trust assumptions and complete invalidation rules.
   supplies steps, DAG, images and commands, and Oberth forces namespace,
   ServiceAccount, a non-root container security baseline, the source mount, the
   per-repository build cache mount and its `GOMODCACHE`/`GOCACHE`, the
-  `OBERTH_REPO`/`REF`/`SHA`/`TRIGGER` environment, the active deadline and the
-  TTL. A document's own `serviceAccountName` is never honoured — Vault validates
+  server-owned run-fact workflow parameters, the active deadline and the TTL. A document's own `serviceAccountName` is never honoured — Vault validates
   identity, not intent, so a branch push that could name the release identity
   would defeat the tier gate before OpenBao ever saw it.
 - Current per-step grants select secret identity and delivery. A recognized

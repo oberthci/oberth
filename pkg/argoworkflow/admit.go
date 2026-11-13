@@ -77,8 +77,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
 		problems = append(problems, err)
 	}
-	problems = append(problems, admitTriggerParameter(&workflow.Spec)...)
-	problems = append(problems, admitScheduleParameter(&workflow.Spec)...)
 	return errors.Join(problems...)
 }
 
@@ -662,19 +660,26 @@ func admitPodSecurityContext(location string, security *corev1.PodSecurityContex
 			"baseline (user, group, seccomp profile) is not repository-configurable", location)}
 }
 
-// admitParameters refuses a parameter that sources its value from a Kubernetes
+// admitParameters reserves the oberth- prefix for server-owned run facts and
+// refuses a parameter that sources its value from a Kubernetes
 // ConfigMap. A parameter value is interpolated into step commands and can be
 // emitted as an output, so a ConfigMap read here is an exfiltration path that
 // the container-level envFrom denial alone does not close.
 func admitParameters(location string, parameters []wfv1.Parameter) []error {
 	var problems []error
 	for index, parameter := range parameters {
-		if parameter.ValueFrom == nil || parameter.ValueFrom.ConfigMapKeyRef == nil {
-			continue
-		}
 		where := fmt.Sprintf("%s[%d]", location, index)
 		if parameter.Name != "" {
 			where = fmt.Sprintf("%s[%q]", location, parameter.Name)
+		}
+		if strings.HasPrefix(parameter.Name, "oberth-") {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s is server-owned; the oberth- parameter prefix is reserved; reference workflow parameters without declaring them", where))
+		}
+		if strings.HasPrefix(parameter.GlobalName, "oberth-") {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.globalName is server-owned; the oberth- parameter prefix is reserved", where))
+		}
+		if parameter.ValueFrom == nil || parameter.ValueFrom.ConfigMapKeyRef == nil {
+			continue
 		}
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.valueFrom.configMapKeyRef reads a Kubernetes ConfigMap and is not admitted", where))
 	}

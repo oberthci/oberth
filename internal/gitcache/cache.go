@@ -656,7 +656,8 @@ func (c *Cache) materialize(ctx context.Context, path string, old map[string]str
 }
 
 // cleanInvalidPublicRefsLocked removes public refs with names that fail
-// validation and returns the count of valid public refs remaining. The scan
+// structural storage validation and returns the remaining public-ref count.
+// Run-fact alphabet restrictions never delete stored refs. The scan
 // is bounded by maximumReceiveSnapshotRefs to stay within the capture buffer
 // while accommodating both the normal cap and one recovery deletion batch.
 func (c *Cache) cleanInvalidPublicRefsLocked(ctx context.Context, path string) (int, error) {
@@ -666,7 +667,7 @@ func (c *Cache) cleanInvalidPublicRefsLocked(ctx context.Context, path string) (
 	}
 	var invalidRefs []string
 	for ref := range public {
-		if !publicReceiveRef(ref) {
+		if reversePublicRef(ref) == "" {
 			invalidRefs = append(invalidRefs, ref)
 		}
 	}
@@ -683,13 +684,13 @@ func publicRef(tracking string) (string, bool) {
 	switch {
 	case strings.HasPrefix(tracking, upstreamRefPrefix+"heads/"):
 		branch := strings.TrimPrefix(tracking, upstreamRefPrefix+"heads/")
-		if ValidateBranch(branch) != nil {
+		if validateStoredRefPart("branch", branch) != nil {
 			return "", false
 		}
 		return "refs/heads/" + branch, true
 	case strings.HasPrefix(tracking, upstreamRefPrefix+"tags/"):
 		tag := strings.TrimPrefix(tracking, upstreamRefPrefix+"tags/")
-		if ValidateTag(tag) != nil {
+		if validateStoredRefPart("tag", tag) != nil {
 			return "", false
 		}
 		return "refs/tags/" + tag, true
@@ -720,13 +721,13 @@ func reversePublicRef(ref string) string {
 	switch {
 	case strings.HasPrefix(ref, "refs/heads/"):
 		branch := strings.TrimPrefix(ref, "refs/heads/")
-		if ValidateBranch(branch) != nil {
+		if validateStoredRefPart("branch", branch) != nil {
 			return ""
 		}
 		return upstreamRefPrefix + "heads/" + branch
 	case strings.HasPrefix(ref, "refs/tags/"):
 		tag := strings.TrimPrefix(ref, "refs/tags/")
-		if ValidateTag(tag) != nil {
+		if validateStoredRefPart("tag", tag) != nil {
 			return ""
 		}
 		return upstreamRefPrefix + "tags/" + tag

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/gitoid"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 var (
@@ -215,6 +216,15 @@ func ValidateUpstream(value string) error {
 }
 
 func validateRefPart(kind, value string) error {
+	if err := model.ValidateRunRef(value); err != nil {
+		return err
+	}
+	return validateStoredRefPart(kind, value)
+}
+
+// Stored ref names remain uninterpreted Git data. Tightening run admission must
+// not turn cache refresh into deletion of an existing branch or tag.
+func validateStoredRefPart(kind, value string) error {
 	if value == "" || len(value) > maximumRefPartBytes {
 		return fmt.Errorf("%s name has invalid length", kind)
 	}

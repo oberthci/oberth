@@ -414,3 +414,17 @@ func TestEnforceAssistHoldsTTLExtendsOnActivity(t *testing.T) {
 		t.Fatalf("held Pod deadline = %s, want budget %d + %d TTLs of %ds", got, budget, AssistHoldMaxAgeFactor, ttlSeconds)
 	}
 }
+
+func TestAssistHoldStepIgnoresAuthoredEnvironment(t *testing.T) {
+	pod := heldPodFixture("wf-a-real-1", "wf-a", "real", time.Minute, false)
+	pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{Name: "OBERTH_STEP", Value: "forged"})
+	hold, ok := assistHoldOf(pod)
+	if !ok || hold.Step != "real" {
+		t.Fatalf("running hold = %+v, %v", hold, ok)
+	}
+	pod.Status.Phase, pod.Status.Reason = corev1.PodFailed, "Evicted"
+	hold, ok = assistEvictedOf(pod)
+	if !ok || hold.Step != "real" {
+		t.Fatalf("evicted hold = %+v, %v", hold, ok)
+	}
+}

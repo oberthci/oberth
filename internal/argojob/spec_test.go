@@ -130,7 +130,7 @@ func TestBuildRefusesUnknownTriggers(t *testing.T) {
 	}
 }
 
-func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
+func TestBuildInjectsVaultCoordinatesAndKeepsAuthoredEnvironment(t *testing.T) {
 	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
@@ -142,11 +142,7 @@ func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
 	environment := environmentOf(t, release, "main")
 	assertStoreAddress(t, *release.Spec.Templates[0].Container, testVaultAddress)
 	for name, expected := range map[string]string{
-		"OBERTH_REPO":       "oberth",
-		"OBERTH_REF":        "refs/heads/main",
-		"OBERTH_SHA":        testSHA,
 		"OBERTH_TRIGGER":    string(pipeline.TriggerRelease),
-		"OBERTH_RUN_ID":     "run-abc123",
 		"VAULT_ADDR":        testVaultAddress,
 		"OBERTH_VAULT_ROLE": testVaultCredentialedRole,
 		"KEEP_ME":           "yes-please",
@@ -157,16 +153,15 @@ func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
 	}
 }
 
-// TestBuildOverridesRunIdentityTheDocumentTriesToSet proves a document cannot
-// lie to its own steps about which trigger they are running under.
-func TestBuildOverridesRunIdentityTheDocumentTriesToSet(t *testing.T) {
+// TestBuildPreservesAuthoredRunFactEnvironment keeps env under author control.
+func TestBuildPreservesAuthoredRunFactEnvironment(t *testing.T) {
 	branch, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	environment := environmentOf(t, branch, "main")
-	if environment["OBERTH_TRIGGER"] != string(pipeline.TriggerCI) {
-		t.Fatalf("OBERTH_TRIGGER = %q, want ci", environment["OBERTH_TRIGGER"])
+	if environment["OBERTH_TRIGGER"] != "release" {
+		t.Fatalf("OBERTH_TRIGGER = %q, want authored release", environment["OBERTH_TRIGGER"])
 	}
 	if _, present := environment["VAULT_ADDR"]; present {
 		t.Fatal("a CI submission was given Vault coordinates")
@@ -621,7 +616,7 @@ spec:
 	for _, variable := range inline.Container.Env {
 		found[variable.Name] = variable.Value
 	}
-	if found["OBERTH_SHA"] != testSHA {
+	if _, injected := found["OBERTH_SHA"]; injected {
 		t.Fatalf("inline env = %v", found)
 	}
 }
@@ -1029,10 +1024,8 @@ func TestReleaseWithNoPathsGetsPipelineIdentityAndNoVaultWiring(t *testing.T) {
 			t.Fatal("release (no paths) mounts the release token")
 		}
 	}
-	// Release env vars (OBERTH_RELEASE_TAG, OBERTH_RELEASE_SHA) are still
-	// set because they are gated on trigger, not on credentialing.
-	if environment["OBERTH_RELEASE_TAG"] == "" {
-		t.Fatal("release (no paths) is missing OBERTH_RELEASE_TAG")
+	if _, injected := environment["OBERTH_RELEASE_TAG"]; injected {
+		t.Fatal("release (no paths) received an injected run-fact env variable")
 	}
 }
 
@@ -1753,9 +1746,8 @@ spec:
 	}
 }
 
-// TestOberthStepEnvironmentInjected proves that OBERTH_STEP is set to the
-// template name on every template after Build. Issue #623.
-func TestOberthStepEnvironmentInjected(t *testing.T) {
+// TestOberthStepEnvironmentNotInjected checks that template names stay native.
+func TestOberthStepEnvironmentNotInjected(t *testing.T) {
 	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
@@ -1773,17 +1765,10 @@ func TestOberthStepEnvironmentInjected(t *testing.T) {
 		if tmpl.Container == nil {
 			continue
 		}
-		var found bool
 		for _, env := range tmpl.Container.Env {
 			if env.Name == "OBERTH_STEP" {
-				if env.Value != tmpl.Name {
-					t.Fatalf("template %q: OBERTH_STEP = %q, want %q", tmpl.Name, env.Value, tmpl.Name)
-				}
-				found = true
+				t.Fatalf("template %q received injected OBERTH_STEP", tmpl.Name)
 			}
-		}
-		if !found {
-			t.Fatalf("template %q: OBERTH_STEP not found in container env", tmpl.Name)
 		}
 	}
 }
