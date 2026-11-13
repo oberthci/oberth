@@ -617,6 +617,7 @@ the exact annotated tag only after the run is green.
 
 - [docs/mcp-setup.md](docs/mcp-setup.md) — connect Claude Code or any MCP client
 - [docs/architecture.md](docs/architecture.md) — run lifecycle and recovery
+- [Watch observation](docs/watch-observation.md) — disposable live cases and ten-run API/memory measurement
 - [docs/security.md](docs/security.md) — security invariants
 - [docs/credential-lifecycle.md](docs/credential-lifecycle.md) — remote uplink and grant administration
 - [docs/secretstore-verification.md](docs/secretstore-verification.md) — three-tier secret-store verification
