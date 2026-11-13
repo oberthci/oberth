@@ -56,6 +56,7 @@ func readResumeRootToken(ctx context.Context, path, identity string) ([]byte, er
 		var plain resumeBuffer
 		defer func() { clear(plain.Bytes()) }()
 		command := exec.CommandContext(ctx, "age", "--decrypt", "--identity", "/dev/fd/3")
+		command.Env = installerChildEnvironment()
 		command.ExtraFiles = []*os.File{key}
 		command.Stdin = f
 		command.Stdout = &plain
@@ -84,7 +85,7 @@ func readResumeRootToken(ctx context.Context, path, identity string) ([]byte, er
 		token = append([]byte(nil), value...)
 	}
 	if token == nil {
-		return nil, errors.New("install recovery file has no root token; encrypted files require --resume-age-identity")
+		return nil, errors.New("install recovery file has no OPENBAO_ROOT_TOKEN; encrypted files require --resume-age-identity")
 	}
 	return token, nil
 }

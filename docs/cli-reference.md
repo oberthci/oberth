@@ -488,7 +488,7 @@ Flags:
   -secrets-age-recipient string
         age recipient for encrypting --secrets-file; requires age on PATH
   -secrets-file string
-        write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) to this new file (mode 0600; refused when it exists or lies in a git worktree) and print only its path and SHA-256; required when the output is not a terminal
+        write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) to this new file (mode 0600, outside a git worktree) and print only its path and SHA-256; with --install-secretstore or --upgrade an existing private file supplies recovery input and new credentials use a new sibling file; required when the output is not a terminal
   -service-type string
         Oberth Service type: NodePort (default for a fresh install; clients use NodePorts 30022/30443), LoadBalancer (on k3s, servicelb also takes host ports 2222 and 443 on the node) or ClusterIP; an upgrade keeps the release's current type unless this is set
   -skip-argo-workflows

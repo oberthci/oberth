@@ -15,6 +15,15 @@ oberth install --answers answers.yaml --context chosen-context --yes \
 The recovery input must be an owner-only regular file owned by the current user,
 without symbolic or hard links. It is never modified. The output credentials file
 must be a new path outside a Git worktree; it receives any newly created credentials.
+For both resume and `install --upgrade`, every PKI and secret-store step reads
+the root token privately from that file; `BAO_TOKEN` remains an operator option.
+An existing `--secrets-file PATH` with `--install-secretstore` or `--upgrade` can supply the
+recovery input. It is kept intact; any new credentials go to a separately reserved
+`PATH.new-<random>` file, reported only by path and SHA-256. An empty new file is
+removed when no credentials were created. Keep both files when a new one is saved.
+A recovery file without `OPENBAO_ROOT_TOKEN` reports that missing key and the
+accepted input flags; agents must never extract it themselves.
+
 For an age-encrypted recovery file, also pass `--resume-age-identity /private/age-key`.
 The installed `age` executable decrypts in memory using the identity file; neither
 the token nor the identity is passed on argv or printed. A sealed OpenBao must be

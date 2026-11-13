@@ -316,11 +316,13 @@ type Config struct {
 	ClientHTTPSPort string
 	// SecretsFile receives the credentials the install creates once (OpenBao
 	// root token and unseal key, the first uplink's bearer token) instead of
-	// the output. It must be a new file outside any git worktree.
+	// the output. New credentials go outside any git worktree. An existing
+	// production-store file is recovery input; new output uses a new sibling.
 	SecretsFile       string
 	ResumeSecretsFile string
 	ResumeAgeIdentity string
 	resumeRootToken   []byte
+	secretsFileInput  bool
 	// AdminSSHPublicKeyPath explicitly provisions the first admin from a public
 	// key generated on the client machine. '-' reads the key from stdin.
 	AdminSSHPublicKeyPath string

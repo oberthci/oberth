@@ -180,8 +180,8 @@ func TestInstallReservesTheSecretsFileFirst(t *testing.T) {
 		t.Fatalf("dry run with existing output: %v", err)
 	}
 	err = Execute(context.Background(), Config{InstallSecretStore: true, SecretsFile: path}, noClusterInstallDeps(t, false))
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("an existing secrets file: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no OPENBAO_ROOT_TOKEN") {
+		t.Fatalf("an existing recovery file without a root token: %v", err)
 	}
 }
 

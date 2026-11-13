@@ -478,10 +478,7 @@ func setupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 		return SecretStoreResult{}, fmt.Errorf("OpenBao in namespace %s is initialized but sealed. Run /oberth:unseal or oberth unseal --context <chosen-context> --secrets-file <saved-file> --openbao-namespace %s, then re-run oberth install. See deploy/systemd/README.md for optional TPM2 host-bound recovery", openbao.Namespace, openbao.Namespace)
 	default:
 		_, _ = fmt.Fprintln(interactiveDeps.Output, "OpenBao is already initialized and unsealed; skipping operator init (credentials were printed once at first initialization).")
-		rootToken = string(cfg.resumeRootToken)
-		if rootToken == "" {
-			rootToken = installerBaoToken(interactiveDeps)
-		}
+		rootToken = installRootToken(cfg, interactiveDeps)
 		if rootToken == "" && isInteractive(interactiveDeps) && interactiveDeps.ReadPassword != nil {
 			_, _ = fmt.Fprint(interactiveDeps.Output, "Root token (echo disabled): ")
 			tokenBytes, err := interactiveDeps.ReadPassword()
@@ -500,7 +497,7 @@ func setupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Keep every install flag unchanged, especially --namespace, --openbao-namespace, --chart-version and --openbao-chart-version.")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Or run scripts/setup-secretstore.sh from an already-authenticated bao CLI session.")
-			return SecretStoreResult{}, fmt.Errorf("%s is required to verify production Transit provisioning before Oberth can be enabled", baoTokenEnvVar)
+			return SecretStoreResult{}, missingRootToken()
 		}
 		_, _ = fmt.Fprintf(interactiveDeps.Output, "Using the root token to verify the secret-store configuration.\n")
 	}

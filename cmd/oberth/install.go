@@ -86,7 +86,7 @@ func installFlags() (*flag.FlagSet, *installer.Config, *installFlagOptions) {
 	flags.StringVar(&cfg.ResumeAgeIdentity, "resume-age-identity", "", "age identity file for an encrypted install recovery file")
 	flags.StringVar(&cfg.SecretsFile, "secrets-file", "",
 		"write the credentials this install creates once (OpenBao root token and unseal key, the first uplink's bearer token) "+
-			"to this new file (mode 0600; refused when it exists or lies in a git worktree) and print only its path and SHA-256; "+
+			"to this new file (mode 0600, outside a git worktree) and print only its path and SHA-256; with --install-secretstore or --upgrade an existing private file supplies recovery input and new credentials use a new sibling file; "+
 			"required when the output is not a terminal")
 	flags.BoolVar(&cfg.InstallSecretStoreDev, "install-secretstore-dev", false,
 		"also install a dev-mode OpenBao (in-memory, auto-unsealed, well-known root token) and configure it "+

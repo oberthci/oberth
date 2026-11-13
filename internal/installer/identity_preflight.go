@@ -155,7 +155,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	w := deps.Output
 
 	// Resolve the admin token and OpenBao exec client.
-	token := installerBaoToken(deps)
+	token := installRootToken(*cfg, deps)
 	if token == "" && cfg.InstallSecretStoreDev {
 		token = devRootToken
 	}
@@ -205,12 +205,10 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		}
 
 		if token == "" {
-			return fmt.Errorf("the existing Oberth deployment uses Kubernetes Secret volumes for identities; " +
-				"upgrading requires --install-secretstore with " + baoTokenEnvVar + " set so the installer " +
-				"can verify the identities are seeded in OpenBao before replacing the Deployment")
+			return fmt.Errorf("the existing Oberth deployment uses Kubernetes Secret volumes for identities; upgrading requires --install-secretstore to verify its seeded identities before replacing the Deployment: %w", missingRootToken())
 		}
 		if !haveStore {
-			return fmt.Errorf(baoTokenEnvVar+" is set but the OpenBao pod in namespace %s could not be found: %w",
+			return fmt.Errorf("an OpenBao root credential is available but the OpenBao pod in namespace %s could not be found: %w",
 				openbaoNS, podLookupErr)
 		}
 
@@ -309,7 +307,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	// re-issue and client trust checks below do not apply.
 	if cfg.serverPKI {
 		if !haveStore {
-			return errors.Join(errors.New("cannot check server PKI: set BAO_TOKEN and ensure the OpenBao pod is available"), podLookupErr)
+			return unavailableServerPKI(token, podLookupErr)
 		}
 		return checkServerPKIRole(ctx, *cfg, deps, store, token, cfg.InstallSecretStore)
 	}

@@ -222,9 +222,9 @@ func checkServerPKIRole(ctx context.Context, cfg Config, deps Deps, store openBa
 }
 
 func serverPKIAccess(ctx context.Context, cfg Config, deps Deps) (openBaoExec, string, error) {
-	token := installerBaoToken(deps)
+	token := installRootToken(cfg, deps)
 	if token == "" {
-		return openBaoExec{}, "", errors.New("server PKI inspection requires BAO_TOKEN")
+		return openBaoExec{}, "", missingRootToken()
 	}
 	if deps.KubeClient == nil {
 		return openBaoExec{}, "", errors.New("server PKI inspection requires a Kubernetes client")

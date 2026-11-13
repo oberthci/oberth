@@ -213,6 +213,7 @@ func TestDryRunPreservesExistingAdminOutputs(t *testing.T) {
 	}
 	cfg.DryRun = false
 	cfg.ResumeSecretsFile = ""
+	cfg.SecretsFile = secretsPath + "-new"
 	if err := Execute(t.Context(), cfg, noClusterInstallDeps(t, false)); err == nil || !strings.Contains(err.Error(), "admin certificate output already exists") {
 		t.Fatalf("real install failed to protect existing certificate: %v", err)
 	}

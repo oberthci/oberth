@@ -1014,8 +1014,8 @@ func TestPreflightLegacyTokenSetPodNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing OpenBao pod")
 	}
-	if !strings.Contains(err.Error(), baoTokenEnvVar) {
-		t.Fatalf("error should mention %s: %v", baoTokenEnvVar, err)
+	if !strings.Contains(err.Error(), "root credential is available") {
+		t.Fatalf("error should distinguish a missing Pod from a missing credential: %v", err)
 	}
 	if !strings.Contains(err.Error(), "could not be found") {
 		t.Fatalf("error should say the pod could not be found: %v", err)
