@@ -74,3 +74,30 @@ func TestRunSourceReceiptPreservesAuthoredGraph(t *testing.T) {
 		t.Fatal("receipt exposed its admitted graph to caller mutation")
 	}
 }
+
+func TestRunSourceReceiptRejectsChangedSourceAfterReservation(t *testing.T) {
+	binding := RunSourceBinding{RunID: "run", RepositoryID: 1, SHA: strings.Repeat("a", 40), File: BuildFile, Trigger: RunTriggerBranch}
+	admit := func(source string) *DemandReceipt {
+		t.Helper()
+		resolved, err := ResolveRunSource([]byte(source), binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt, err := resolved.Receipt(Policy{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return receipt
+	}
+	reserved := admit(admissibleDocument)
+	if err := reserved.Verify(admit(admissibleDocument)); err != nil {
+		t.Fatal("unchanged submission refused", err)
+	}
+	changed := strings.Replace(admissibleDocument, "      container:", "      retryStrategy: {limit: 1}\n      container:", 1)
+	if changed == admissibleDocument {
+		t.Fatal("source mutation did not change fixture")
+	}
+	if err := reserved.Verify(admit(changed)); err == nil || !strings.Contains(err.Error(), "changed after reservation") {
+		t.Fatal("changed source reused the reserved admission receipt", err)
+	}
+}

@@ -45,6 +45,20 @@ func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.Work
 	submission := argojob.Request{Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Source: source, PipelineFile: request.PipelineFile, Trigger: pipeline.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants}
 	submission.RepositoryID = request.Repository.ID
+	workflow, err := argoworkflow.Decode(source)
+	if err != nil {
+		return service.ReleasePreflightResult{}, err
+	}
+	if argoworkflow.CapabilityUsage(workflow) && jobs.capabilityGrants != nil {
+		capability, err := jobs.capabilityGrants(ctx, request.Repository.ID)
+		if err != nil {
+			return service.ReleasePreflightResult{}, err
+		}
+		if capability != nil && capability.Namespace != jobs.config.Namespace {
+			return service.ReleasePreflightResult{}, fmt.Errorf("app: workflow capability belongs to a different execution namespace")
+		}
+		submission.Capability = capability
+	}
 	if identities != nil {
 		submission.Identities = identities.Snapshot()
 	}
