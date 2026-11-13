@@ -916,7 +916,7 @@ SET status = ?, phase = ?, reason = CASE WHEN ? THEN ? ELSE reason END,
     failed_burn = ?, failed_step = ?, error = ?, failure_cause = ?, finished_at = ?, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns,
-		result.Status, phase, result.Status == model.RunInterrupted && phase == model.PhaseCancelled, result.Error,
+		result.Status, phase, result.Status == model.RunInterrupted && phase == model.PhaseCancelled && strings.TrimSpace(result.Error) != "", result.Error,
 		result.TestedSHA, result.TestedSHA,
 		result.BaseSHA, result.BaseSHA,
 		result.FailedStage, result.FailedStep, result.Error, result.FailureCause, now, now, id))
