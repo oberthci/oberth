@@ -23,6 +23,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/clientcert"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -72,7 +73,16 @@ func administrationCases(t *testing.T) []adminTestCase {
 	if err != nil {
 		t.Fatal(err)
 	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enroll, err := json.Marshal(api.UplinkAddRequest{Identity: "new-operator@host", SSHPublicKey: string(ssh.MarshalAuthorizedKey(signer.PublicKey())), Admin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return []adminTestCase{
+		{"uplink-add", "uplink_add", string(enroll)},
 		{"uplink-scope", "uplink_scope", `{"identity":"operator@host","scope":[]}`},
 		{"upstream-add", "upstream_add", `{"name":"south","base_url":"ssh://source.invalid/team"}`},
 		{"upstream-list", "upstream_list", `{"check":true}`},
@@ -212,7 +222,15 @@ func testAdministrationRejectsPaths(t *testing.T) {
 		return map[string]any{"verified": true}, nil
 	}
 	keyMaterial := ""
+	publicKey := ""
 	for _, test := range administrationCases(t) {
+		if test.action == "uplink-add" {
+			var args api.UplinkAddRequest
+			if json.Unmarshal([]byte(test.body), &args) != nil {
+				t.Fatal("bad enrollment fixture")
+			}
+			publicKey = args.SSHPublicKey
+		}
 		if test.action == "upstream-provide-key" {
 			var args api.UpstreamKeyRequest
 			if err := json.Unmarshal([]byte(test.body), &args); err != nil {
@@ -223,13 +241,15 @@ func testAdministrationRejectsPaths(t *testing.T) {
 	}
 	for _, path := range []string{"../private", "/new-repo", "/etc/private", "..\\private", "%2e%2e%2fprivate", "name/../../private"} {
 		fields := []struct{ action, field string }{
-			{"public-identity", "name"}, {"upstream-add", "name"}, {"upstream-remove", "name"},
+			{"uplink-add", "ssh_public_key"}, {"uplink-add", "csr"}, {"public-identity", "name"}, {"upstream-add", "name"}, {"upstream-remove", "name"},
 			{"upstream-provide-key", "name"}, {"repo-add", "repo"}, {"repo-add", "upstream"}, {"repo-add", "default_branch"}, {"repo-verify", "repo"},
 			{"upstream-add", "check_repo"}, {"upstream-add", "base_url"}, {"upstream-provide-key", "private_key"},
 		}
 		for _, field := range fields {
 			args := map[string]any{"name": "south", "base_url": "ssh://source.invalid/team"}
 			switch field.action {
+			case "uplink-add":
+				args = map[string]any{"identity": "new-operator@host", "ssh_public_key": publicKey}
 			case "public-identity", "upstream-remove":
 				args = map[string]any{"name": "server-ca"}
 			case "upstream-provide-key":
@@ -379,6 +399,7 @@ func TestAdministrationSecurity(t *testing.T) {
 	t.Run("PublicFileConfinement", testAdministrationPublicFileConfinement)
 	t.Run("UplinkScopeUpdates", testAdministrationUplinkScopeUpdates)
 	t.Run("RequiresJSONContentType", testAdministrationRequiresJSONContentType)
+	t.Run("CertificateOnlyEnrollment", testAdministrationCertificateOnlyEnrollment)
 }
 
 func testAdministrationUplinkScopeUpdates(t *testing.T) {
@@ -413,5 +434,76 @@ func testAdministrationRequiresJSONContentType(t *testing.T) {
 				t.Errorf("%s content type %q: %d %s", test.action, contentType, out.Code, out.Body)
 			}
 		}
+	}
+}
+
+func testAdministrationCertificateOnlyEnrollment(t *testing.T) {
+	control, _, handler := newAdministrationFixture(t)
+	files, err := clientcert.GenerateAuthority()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(files["ca.key"])
+	authority, err := clientcert.Load(files["ca.crt"], files["ca.key"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, ok := control.runs.(ClientCertStore)
+	if !ok {
+		t.Fatal("missing client certificate store")
+	}
+	control.clientCertificates = &ClientCertIssuer{Authority: authority, Store: database}
+	public, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(key)
+	sshKey, err := ssh.NewPublicKey(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := api.UplinkAddRequest{Identity: "new-admin@host", SSHPublicKey: string(ssh.MarshalAuthorizedKey(sshKey)), CSR: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csr})), Admin: true}
+	raw, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := adminRequest(handler, "uplink-add", "admin", string(raw))
+	if response.Code != http.StatusOK {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var result api.UplinkAddResult
+	if json.Unmarshal(response.Body.Bytes(), &result) != nil || result.Token != "" || result.Certificate == "" {
+		t.Fatal("certificate-only enrollment returned an invalid credential result")
+	}
+	leafBlock, _ := pem.Decode([]byte(result.Certificate))
+	if leafBlock == nil {
+		t.Fatal("missing public certificate")
+	}
+	leaf, err := x509.ParseCertificate(leafBlock.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := leaf.CheckSignatureFrom(authority.Certificate); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CertificateUplink(t.Context(), request.Identity, result.Fingerprint); err != nil {
+		t.Fatal("enrollment was not registered", err)
+	}
+	request.Identity = "invalid-lifetime@host"
+	request.TTL = "15m"
+	raw, err = json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = adminRequest(handler, "uplink-add", "admin", string(raw))
+	if response.Code != http.StatusBadRequest {
+		t.Fatal("invalid lifetime accepted", response.Code)
+	}
+	if _, err := database.CertificateUplink(t.Context(), request.Identity, result.Fingerprint); err == nil {
+		t.Fatal("invalid certificate request created an uplink")
 	}
 }

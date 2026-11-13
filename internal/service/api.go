@@ -409,7 +409,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
-	case "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record", "uplink_scope":
+	case "upstream_add", "upstream_list", "upstream_remove", "upstream_provide_key", "repo_add", "repo_verify", "admin_access_list", "admin_public_identity", "admin_readiness", "admin_version", "admin_idle", "admin_audit_record", "uplink_scope", "uplink_add":
 		return service.administrationTool(ctx, actor, name, raw)
 	// Credential and grant lifecycle (#1105).
 	case "uplink_invite":

@@ -17,7 +17,7 @@ import (
 // interrupted response may follow a committed change and needs observation.
 func (client *Client) Admin(ctx context.Context, action string, arguments, into any) error {
 	switch action {
-	case "uplink-scope", "upstream-add", "upstream-list", "upstream-remove", "upstream-provide-key", "repo-add", "repo-verify", "access-list", "public-identity", "readiness", "version", "idle", "audit-record":
+	case "uplink-add", "uplink-scope", "upstream-add", "upstream-list", "upstream-remove", "upstream-provide-key", "repo-add", "repo-verify", "access-list", "public-identity", "readiness", "version", "idle", "audit-record":
 	default:
 		return fmt.Errorf("client: unknown administration action")
 	}
@@ -53,7 +53,7 @@ func (client *Client) Admin(ctx context.Context, action string, arguments, into 
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return statusError("administration", response)
+		return &AdminError{StatusCode: response.StatusCode, Cause: statusError("administration", response)}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseSize+1))
 	if err != nil {
@@ -100,7 +100,7 @@ func (client *Client) DownloadAdminBackup(ctx context.Context, maxDatabaseBytes 
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
-		return statusError("database backup", response)
+		return &AdminError{StatusCode: response.StatusCode, Cause: statusError("database backup", response)}
 	}
 	limit := maxDatabaseBytes + (64 << 10)
 	if response.ContentLength > limit {
@@ -115,3 +115,12 @@ func (client *Client) DownloadAdminBackup(ctx context.Context, maxDatabaseBytes 
 	}
 	return nil
 }
+
+// AdminError preserves the HTTP refusal for caller-owned observation loops.
+type AdminError struct {
+	StatusCode int
+	Cause      error
+}
+
+func (e *AdminError) Error() string { return e.Cause.Error() }
+func (e *AdminError) Unwrap() error { return e.Cause }

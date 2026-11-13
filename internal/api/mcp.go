@@ -602,6 +602,7 @@ func knownTool(name string) bool { return registeredToolNames()[name] }
 // is not offered 46 tools it can only be refused; a call is still answered
 // with the server's refusal.
 var adminOnlyTools = map[string]bool{
+	"uplink_add":   true,
 	"uplink_scope": true,
 	"upstream_add": true, "upstream_list": true, "upstream_remove": true, "upstream_provide_key": true,
 	"repo_add": true, "repo_verify": true, "admin_access_list": true, "admin_public_identity": true,
@@ -694,6 +695,7 @@ func toolDefinitions() []map[string]any {
 		return map[string]any{"name": name, "description": description, "inputSchema": schema, "outputSchema": toolOutputSchema(name)}
 	}
 	return append([]map[string]any{
+		tool("uplink_add", "Enroll an uplink under an existing unscoped admin. Public SSH key and optional CSR only; private keys stay local. CSR enrollment mints no bearer unless requested. Administrator grants are explicit; audited without credential material.", object(map[string]any{"identity": stringProperty("Uplink identity@host"), "ssh_public_key": stringProperty("One bare SSH public key, never a path"), "csr": stringProperty("Optional public PEM CSR"), "admin": map[string]any{"type": "boolean"}, "bearer": map[string]any{"type": "boolean"}, "ttl": stringProperty("Credential lifetime, bounded by server policy"), "scope": map[string]any{"type": "array", "maxItems": 128, "items": stringProperty("Upstream name or metrics")}}, "identity", "ssh_public_key")),
 		tool("uplink_scope", "Set an uplink repository scope; an empty array clears it. Unscoped admin only; audited. Requires an existing admin identity.", object(map[string]any{"identity": stringProperty("Uplink identity@host"), "fingerprint": stringProperty("Optional SHA256 SSH public-key fingerprint to disambiguate"), "scope": map[string]any{"type": "array", "maxItems": 128, "items": stringProperty("Registered upstream name or metrics")}}, "identity", "scope")),
 		tool("upstream_add", "Register an upstream using the server identity store. Unscoped admin only; audited. Requires an existing admin identity. SSH bootstrap uses pinned host keys and fixed identity bundles.", object(map[string]any{
 			"name": stringProperty("Upstream name"), "base_url": stringProperty("SSH repository namespace URL; local filesystem paths are refused"),

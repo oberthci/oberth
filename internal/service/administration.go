@@ -26,6 +26,7 @@ import (
 // Every adapter receives validated values after the admin and audit gates. No
 // adapter accepts command arguments, filesystem paths or a Kubernetes context.
 type Administration struct {
+	TokenPolicy       model.UplinkTokenPolicy
 	DatabaseBackup    func(context.Context, io.Writer, int64) error
 	Version           string
 	EnsureUpstream    func(context.Context, api.UpstreamAddRequest) (api.UpstreamIdentity, error)
@@ -83,6 +84,8 @@ func (s *API) administrationTool(ctx context.Context, actor api.Actor, name stri
 
 func (s *API) performAdministration(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
 	switch name {
+	case "uplink_add":
+		return s.adminUplinkAdd(ctx, actor, raw)
 	case "uplink_scope":
 		return s.adminUplinkScope(ctx, actor, raw)
 	case "admin_database_backup":

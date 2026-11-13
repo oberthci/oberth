@@ -47,6 +47,7 @@ type RepoAddRequest struct {
 
 // adminRoutes is shared by registration and the client action inventory.
 var adminRoutes = map[string]string{
+	"uplink-add":   "uplink_add",
 	"uplink-scope": "uplink_scope",
 	"upstream-add": "upstream_add", "upstream-list": "upstream_list",
 	"upstream-remove": "upstream_remove", "upstream-provide-key": "upstream_provide_key",
@@ -115,4 +116,43 @@ func (s *Server) handleAdministration(w http.ResponseWriter, r *http.Request, na
 	}
 	value, err := s.tools.CallTool(r.Context(), actor, name, body)
 	s.writeView(w, value, err)
+}
+
+// FirstAdminRequest contains only public enrollment inputs. It travels through
+// the one operator-authorized installation exec, never an unauthenticated API.
+type FirstAdminRequest struct {
+	Identity     string `json:"identity"`
+	SSHPublicKey string `json:"ssh_public_key"`
+	CSR          string `json:"csr,omitempty"`
+	InstallerCSR string `json:"installer_csr"`
+	Bearer       bool   `json:"bearer,omitempty"`
+}
+
+type FirstAdminResult struct {
+	// #nosec G117 -- Once-only first-admin enrollment response over operator-authorized exec.
+	Token                string `json:"token,omitempty"`
+	Certificate          string `json:"certificate,omitempty"`
+	InstallerCertificate string `json:"installer_certificate"`
+	ServerCA             string `json:"server_ca"`
+	ServerCertificate    string `json:"server_certificate"`
+}
+
+// UplinkAddRequest enrolls later identities under an existing administrator.
+type UplinkAddRequest struct {
+	Identity     string   `json:"identity"`
+	SSHPublicKey string   `json:"ssh_public_key"`
+	CSR          string   `json:"csr,omitempty"`
+	Admin        bool     `json:"admin,omitempty"`
+	Bearer       bool     `json:"bearer,omitempty"`
+	TTL          string   `json:"ttl,omitempty"`
+	Scope        []string `json:"scope,omitempty"`
+}
+type UplinkAddResult struct {
+	Identity    string   `json:"identity"`
+	Fingerprint string   `json:"fingerprint"`
+	Admin       bool     `json:"admin"`
+	Scope       []string `json:"scope"`
+	// #nosec G117 -- Once-only credential issued to an authenticated administrator.
+	Token       string `json:"token,omitempty"`
+	Certificate string `json:"certificate,omitempty"`
 }
