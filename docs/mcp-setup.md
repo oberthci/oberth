@@ -764,14 +764,15 @@ Terminal runs display
 `passed` (including published releases), `failed` (a deadline or memory
 kill is the reason), `superseded` with the superseding SHA,
 or `cancelled` with the cancelling actor or restart action.
-After a server restart, a
-running branch run whose Argo Workflow still exists is adopted first: it keeps
-its run ID and continues to its real result (#1172). Re-queueing remains the
-fallback when that Workflow is missing; such restart re-fires carry the durable
-reason `re-queued after restart`, which is distinct from supersession even when
-the successor has the same SHA. The first upgrade to a release with adoption
-still re-queues running branch runs, because the old process does so on its own
-SIGTERM; adoption applies from the next restart. Interrupted results neither
+After a server restart, an existing Argo Workflow is adopted: it keeps its run
+ID and continues to its real result. Oberth does not stop or delete a live
+Workflow merely because its observer restarted. A claimed run whose Workflow
+is definitely absent, including work never submitted, fails with the reason
+`interrupted by server restart`. Creation with an uncertain outcome retains its
+observation window and checks the original Workflow identity before concluding
+absence. Failed reads preserve ownership; they do not authorize a replacement.
+Use `run_retry` or `run_rerun` to request another attempt explicitly.
+Interrupted results neither
 open nor resolve CI-red issues. Retry and rerun eligibility continues to use the durable status
 and cause. The `status`/`wait` tool's `status: "delivered"` remains the legacy
 alias of `passed` for all passed runs; its `display_status` is `passed`.

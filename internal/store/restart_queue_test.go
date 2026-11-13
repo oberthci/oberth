@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -65,18 +66,27 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 			for _, original := range append(originals, later.Run) {
 				current, err := s.Run(ctx, original.ID)
 				requireRestartNoError(t, err)
-				if current.Status != model.RunQueued || current.ID != original.ID ||
-					current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence ||
-					!current.QueuedAt.Equal(original.QueuedAt) ||
-
-					current.SupersededBy != "" || current.StartedAt != nil || current.FinishedAt != nil || current.Error != "" {
-					t.Errorf("restart changed waiting identity/order/priority: before=%+v after=%+v", original, current)
+				want := model.RunFailed
+				if original.ID == later.ID {
+					want = model.RunQueued
+				} else if named {
+					want = model.RunRunning
+				}
+				if current.Status != want || current.ID != original.ID || current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence || !current.QueuedAt.Equal(original.QueuedAt) || current.SupersededBy != "" {
+					t.Fatal("restart changed queue identity", current)
+				}
+				if want == model.RunFailed && current.Error != model.ServerRestartReason {
+					t.Fatal(current)
 				}
 			}
 			currentPromotion, err := s.Promotion(ctx, promotion.ID)
 			requireRestartNoError(t, err)
-			if currentPromotion != promotion {
-				t.Errorf("restart changed pending promotion: before=%+v after=%+v", promotion, currentPromotion)
+			wantPromotion := model.PromotionFailed
+			if named {
+				wantPromotion = model.PromotionPending
+			}
+			if currentPromotion.Status != wantPromotion || currentPromotion.RunID != promotion.RunID {
+				t.Fatal(currentPromotion)
 			}
 			counts, err := s.CountRuns(ctx)
 			requireRestartNoError(t, err)
@@ -88,18 +98,11 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 			if len(pending) != 0 {
 				t.Errorf("unsubmitted waiting work needs no Workflow deletion: %+v", pending)
 			}
-			// Highest-priority work keeps admission order: the oldest tag,
-			// the next release, then the promotion. The bumped branch still
-			// leads ordinary queued work.
-			for _, index := range []int{0, 1, 2, 3, 4} {
-				want := append(originals, later.Run)[index]
-				claimed, err := s.ClaimNextRun(ctx)
-				if err != nil || claimed.ID != want.ID {
-					t.Fatalf("queue order: got %s (%v), want %s", claimed.ID, err, want.ID)
-				}
-				_, err = s.MarkRunSubmissionStarted(ctx, claimed.ID)
-				requireRestartNoError(t, err)
+			claimed, err := s.ClaimNextRun(ctx)
+			if err != nil || claimed.ID != later.ID {
+				t.Fatal("claimed run was resubmitted", claimed, err)
 			}
+
 		})
 	}
 }
@@ -152,16 +155,96 @@ func TestOwnerRestartKeepsAdmittedRecovery(t *testing.T) {
 						t.Fatalf("submitted run changed before Workflow reconciliation: before=%+v after=%+v", before, after)
 					}
 				} else if kind == "promotion" {
-					if after.Status != model.RunInterrupted || after.FinishedAt == nil {
+					if after.Status != model.RunFailed || after.FinishedAt == nil {
 						t.Fatalf("admitted promotion lost its interruption behavior: %+v", after)
 					}
 					current, err := s.Promotion(ctx, promotion.ID)
 					requireRestartNoError(t, err)
-					if current.Status != model.PromotionInterrupted {
+					if current.Status != model.PromotionFailed {
 						t.Fatalf("admitted promotion not interrupted: %+v", current)
 					}
-				} else if after.Status != model.RunQueued || after.Reason != RestartRequeueReason || after.QueueSequence != before.QueueSequence || after.AdmissionSequence != before.AdmissionSequence {
+				} else if after.Status != model.RunFailed || after.Error != model.ServerRestartReason || after.QueueSequence != before.QueueSequence || after.AdmissionSequence != before.AdmissionSequence {
 					t.Fatalf("admitted run lost its existing reset behavior: %+v", after)
+				}
+			})
+		}
+	}
+}
+
+func TestServerRestartRunSupportsExplicitRetryAndRerun(t *testing.T) {
+	for _, kind := range []model.RefKind{model.RefBranch, model.RefTag} {
+		for _, operation := range []string{"retry", "rerun"} {
+			t.Run(string(kind)+"/"+operation, func(t *testing.T) {
+				now := time.Now()
+				s := testStore(t, &now)
+				repo := createRepo(t, s)
+				spec := testRunSpec(repo.ID, "feature/restart", strings.Repeat("a", 40))
+				spec.RefKind = kind
+				if kind == model.RefTag {
+					spec.Ref = "v1-restart"
+					spec.Trigger = "tag"
+				}
+				source, err := s.EnqueueRun(t.Context(), spec)
+				requireRestartNoError(t, err)
+				_, err = s.ClaimNextRun(t.Context())
+				requireRestartNoError(t, err)
+				requireRestartNoError(t, s.RecoverOwnerState(t.Context()))
+				failed, err := s.Run(t.Context(), source.ID)
+				requireRestartNoError(t, err)
+				if failed.Status != model.RunFailed || failed.Error != model.ServerRestartReason {
+					t.Fatal(failed)
+				}
+				if _, err := s.ClaimNextRun(t.Context()); !errors.Is(err, ErrNotFound) {
+					t.Fatal("restart automatically queued work", err)
+				}
+				audit := &model.RunReplayAudit{Basis: "pre-intent"}
+				authorize := func(run model.Run, evidence model.RunReplayEvidence) error {
+					if run.ID != source.ID || run.Error != model.ServerRestartReason || !evidence.ChainComplete || !evidence.Newest || evidence.PublicationStarted {
+						t.Fatal(run, evidence)
+					}
+					audit.RunsChecked = len(evidence.Chain)
+					audit.StepsChecked = len(evidence.Steps)
+					return nil
+				}
+				var next model.Run
+				if operation == "retry" {
+					if kind == model.RefTag {
+						if _, err := s.RetryRun(t.Context(), model.RunRetryRequest{RunID: source.ID, Actor: "operator"}); !errors.Is(err, ErrInvalidState) {
+							t.Fatal("tag retry bypassed authorization", err)
+						}
+					}
+					result, err := s.RetryRun(t.Context(), model.RunRetryRequest{RunID: source.ID, Actor: "operator", ReplayAudit: audit, Authorize: authorize})
+					requireRestartNoError(t, err)
+					next = result.Run
+				} else {
+					if kind == model.RefTag {
+						if _, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: source.ID, Actor: "operator"}); !errors.Is(err, ErrInvalidState) {
+							t.Fatal("tag rerun bypassed authorization", err)
+						}
+					}
+					result, err := s.RerunRun(t.Context(), model.RunRerunRequest{RunID: source.ID, Actor: "operator", Reason: "retry after restart", ReplayAudit: audit, Authorize: func(run model.Run, evidence model.RunReplayEvidence) (string, error) {
+						return "", authorize(run, evidence)
+					}})
+					requireRestartNoError(t, err)
+					next = result.Enqueued.Run
+				}
+				if next.ID == source.ID || next.Status != model.RunQueued || next.RefKind != kind || next.Ref != source.Ref || next.SHA != source.SHA || next.TestedSHA != source.TestedSHA || next.Actor != "operator" || next.Error != "" {
+					t.Fatal(next)
+				}
+				unchanged, err := s.Run(t.Context(), source.ID)
+				requireRestartNoError(t, err)
+				if unchanged.Status != model.RunFailed || unchanged.Error != model.ServerRestartReason {
+					t.Fatal("explicit replay rewrote failed source", unchanged)
+				}
+				claimed, err := s.ClaimNextRun(t.Context())
+				requireRestartNoError(t, err)
+				if claimed.ID != next.ID {
+					t.Fatal(claimed)
+				}
+				count, err := s.CountRuns(t.Context())
+				requireRestartNoError(t, err)
+				if count.Total != 2 {
+					t.Fatal(count)
 				}
 			})
 		}

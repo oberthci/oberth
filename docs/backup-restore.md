@@ -451,8 +451,8 @@ three times. Without a terminal it needs `--yes`.
    and would otherwise keep running and hold pipeline slots. Runs the backup
    recorded as running are listed in the plan and named in a marker on the
    volume (`/data/.oberth-restored-runs.json`); at startup the server marks
-   each one whose Workflow is not on this cluster `interrupted` ("restored
-   without re-executing it") instead of requeueing it; a restored run that was
+   each one whose Workflow is confirmed absent `failed` ("interrupted by
+   server restart") without re-executing it; a restored run that was
    admitted but had not started, or was caught mid-submission, is cancelled
    (reason "restored from a backup; not dispatched again"). Runs still queued
    in the backup are dispatched as usual by a plain `oberth restore`; the

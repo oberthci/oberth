@@ -90,16 +90,8 @@ func (s *Store) RecordWorkflowTiming(ctx context.Context, value model.WorkflowTi
 	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO run_timings(run_id,version) VALUES(?,1)`, value.RunID); err != nil {
 		return err
 	}
-	epoch, err := runTimingEpoch(ctx, tx, value.RunID)
-	if err != nil {
-		return err
-	}
 	var existing sql.NullString
-	if epoch == 0 {
-		err = tx.QueryRowContext(ctx, `SELECT workflow_json FROM run_timings WHERE run_id=?`, value.RunID).Scan(&existing)
-	} else {
-		err = tx.QueryRowContext(ctx, `SELECT workflow_json FROM restart_workflow_timings WHERE run_id=? AND epoch=?`, value.RunID, epoch).Scan(&existing)
-	}
+	err = tx.QueryRowContext(ctx, `SELECT workflow_json FROM run_timings WHERE run_id=?`, value.RunID).Scan(&existing)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -116,11 +108,7 @@ func (s *Store) RecordWorkflowTiming(ctx context.Context, value model.WorkflowTi
 		return fmt.Errorf("%w: Workflow timing attempt changed", ErrInvalidState)
 	}
 	if !existing.Valid {
-		if epoch == 0 {
-			_, err = tx.ExecContext(ctx, `UPDATE run_timings SET workflow_json=?,workflow_created_at=? WHERE run_id=?`, string(body), unixNano(value.CreatedAt), value.RunID)
-		} else {
-			_, err = tx.ExecContext(ctx, `INSERT INTO restart_workflow_timings(run_id,epoch,workflow_created_at,workflow_json) VALUES(?,?,?,?)`, value.RunID, epoch, unixNano(value.CreatedAt), string(body))
-		}
+		_, err = tx.ExecContext(ctx, `UPDATE run_timings SET workflow_json=?,workflow_created_at=? WHERE run_id=?`, string(body), unixNano(value.CreatedAt), value.RunID)
 		if err != nil {
 			return err
 		}
@@ -155,7 +143,6 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 	// Cache only inside this transaction, preserving the atomic binding checks.
 	type workflowBinding struct {
 		UID, Name, Namespace string
-		epoch                int
 	}
 	workflows := make(map[string]workflowBinding)
 	counts := make(map[string]int)
@@ -163,15 +150,7 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 		workflow, found := workflows[value.RunID]
 		if !found {
 			var workflowJSON sql.NullString
-			epoch, err := runTimingEpoch(ctx, tx, value.RunID)
-			if err != nil {
-				return err
-			}
-			if epoch == 0 {
-				err = tx.QueryRowContext(ctx, `SELECT workflow_json FROM run_timings WHERE run_id=?`, value.RunID).Scan(&workflowJSON)
-			} else {
-				err = tx.QueryRowContext(ctx, `SELECT workflow_json FROM restart_workflow_timings WHERE run_id=? AND epoch=?`, value.RunID, epoch).Scan(&workflowJSON)
-			}
+			err := tx.QueryRowContext(ctx, `SELECT workflow_json FROM run_timings WHERE run_id=?`, value.RunID).Scan(&workflowJSON)
 			if err != nil {
 				return err
 			}
@@ -179,7 +158,7 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 			if !workflowJSON.Valid || json.Unmarshal([]byte(workflowJSON.String), &decoded) != nil || decoded.Validate() != nil {
 				return fmt.Errorf("%w: step timing Workflow binding mismatch", ErrInvalidState)
 			}
-			workflow = workflowBinding{UID: decoded.UID, Name: decoded.Name, Namespace: decoded.Namespace, epoch: epoch}
+			workflow = workflowBinding{UID: decoded.UID, Name: decoded.Name, Namespace: decoded.Namespace}
 			workflows[value.RunID] = workflow
 		}
 		if workflow.UID != value.WorkflowUID || workflow.Name != value.WorkflowName || workflow.Namespace != value.Namespace {
@@ -187,11 +166,7 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 		}
 		var oldJSON string
 		var err error
-		if workflow.epoch == 0 {
-			err = tx.QueryRowContext(ctx, `SELECT timing_json FROM step_timings WHERE run_id=? AND node_id=?`, value.RunID, value.NodeID).Scan(&oldJSON)
-		} else {
-			err = tx.QueryRowContext(ctx, `SELECT timing_json FROM restart_step_timings WHERE run_id=? AND epoch=? AND node_id=?`, value.RunID, workflow.epoch, value.NodeID).Scan(&oldJSON)
-		}
+		err = tx.QueryRowContext(ctx, `SELECT timing_json FROM step_timings WHERE run_id=? AND node_id=?`, value.RunID, value.NodeID).Scan(&oldJSON)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -220,11 +195,7 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 		} else {
 			count, found := counts[value.RunID]
 			if !found {
-				if workflow.epoch == 0 {
-					err = tx.QueryRowContext(ctx, `SELECT count(*) FROM step_timings WHERE run_id=?`, value.RunID).Scan(&count)
-				} else {
-					err = tx.QueryRowContext(ctx, `SELECT count(*) FROM restart_step_timings WHERE run_id=? AND epoch=?`, value.RunID, workflow.epoch).Scan(&count)
-				}
+				err = tx.QueryRowContext(ctx, `SELECT count(*) FROM step_timings WHERE run_id=?`, value.RunID).Scan(&count)
 				if err != nil {
 					return err
 				}
@@ -238,13 +209,8 @@ func (s *Store) RecordStepTimings(ctx context.Context, values []model.StepTiming
 		if value.Available {
 			available = 1
 		}
-		if workflow.epoch == 0 {
-			_, err = tx.ExecContext(ctx, `INSERT INTO step_timings(run_id,node_id,workflow_uid,pod_uid,available,ordinal,timing_json)
+		_, err = tx.ExecContext(ctx, `INSERT INTO step_timings(run_id,node_id,workflow_uid,pod_uid,available,ordinal,timing_json)
 VALUES(?,?,?,?,?,?,?) ON CONFLICT(run_id,node_id) DO UPDATE SET pod_uid=excluded.pod_uid,available=excluded.available,timing_json=excluded.timing_json`, value.RunID, value.NodeID, value.WorkflowUID, value.PodUID, available, value.Ordinal, bodies[i])
-		} else {
-			_, err = tx.ExecContext(ctx, `INSERT INTO restart_step_timings(run_id,epoch,node_id,workflow_uid,pod_uid,available,ordinal,timing_json)
-VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(run_id,epoch,node_id) DO UPDATE SET pod_uid=excluded.pod_uid,available=excluded.available,timing_json=excluded.timing_json`, value.RunID, workflow.epoch, value.NodeID, value.WorkflowUID, value.PodUID, available, value.Ordinal, bodies[i])
-		}
 		if err != nil {
 			return err
 		}
@@ -271,17 +237,6 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	// PruneRunTiming keeps the milestones and drops the Workflow and step
 	// records; a Workflow creation time without its record marks that.
 	pruned := created.Valid && !workflow.Valid
-	epoch, err := runTimingEpoch(ctx, s.reader(), id)
-	if err != nil {
-		return value, err
-	}
-	if epoch > 0 {
-		workflow, created = sql.NullString{}, sql.NullInt64{}
-		err = s.reader().QueryRowContext(ctx, `SELECT workflow_created_at,workflow_json FROM restart_workflow_timings WHERE run_id=? AND epoch=?`, id, epoch).Scan(&created, &workflow)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return value, err
-		}
-	}
 	value.ClaimedAt, value.CheckoutReadyAt, value.SourceSeedStartedAt, value.SourceReadyAt, value.WorkflowCreatedAt, value.TerminalAt = nullableTime(claimed), nullableTime(checkout), nullableTime(seed), nullableTime(source), nullableTime(created), nullableTime(terminal)
 	if pruned {
 		value.Unavailable = "pruned"
@@ -314,11 +269,7 @@ func (s *Store) RunTiming(ctx context.Context, id string) (model.RunTiming, erro
 	if pruned {
 		return value, nil
 	}
-	if epoch == 0 {
-		rows, err = s.reader().QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM step_timings WHERE run_id=? ORDER BY ordinal,node_id`, id)
-	} else {
-		rows, err = s.reader().QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM restart_step_timings WHERE run_id=? AND epoch=? ORDER BY ordinal,node_id`, id, epoch)
-	}
+	rows, err = s.reader().QueryContext(ctx, `SELECT node_id,workflow_uid,pod_uid,available,ordinal,timing_json FROM step_timings WHERE run_id=? ORDER BY ordinal,node_id`, id)
 	if err != nil {
 		return value, err
 	}
@@ -351,10 +302,4 @@ func decodeTiming(raw string, value any) error {
 		return errors.New("noncanonical timing record")
 	}
 	return nil
-}
-
-func runTimingEpoch(ctx context.Context, queryer auditQueryer, runID string) (int, error) {
-	var epoch int
-	err := queryer.QueryRowContext(ctx, `SELECT count(*) FROM audit_actions WHERE resource_type='run' AND resource_id=? AND action='run.restart'`, runID).Scan(&epoch)
-	return epoch, err
 }

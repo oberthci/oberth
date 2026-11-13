@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type adoptedRun struct {
@@ -86,6 +85,10 @@ func (gate *submissionRegistry) adopt(run model.Run) (*submissionOwner, error) {
 
 func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner) error {
 	defer reservation.cancel()
+	// Observation now owns this grant; uncertain-create custody has ended.
+	scheduler.submissions.mu.Lock()
+	reservation.retained = false
+	scheduler.submissions.mu.Unlock()
 	if err := require(ctx); err != nil {
 		reservation.retain()
 		return err
@@ -114,7 +117,7 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		return err
 	}
 	// A previous owner can stop between Workflow creation and this transition.
-	if run.Phase == "waiting" {
+	if run.Phase == "waiting" || isPendingCreate(run) {
 		run, err = scheduler.database().MarkRunSubmitted(ctx, run.ID)
 		if err != nil {
 			_ = file.Close()
@@ -146,24 +149,4 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		}
 	}
 	return errors.Join(err, cleanupErr)
-}
-
-// Retired execution is terminal, rather than a reason to stop the new owner.
-// Delete only the owned Argo Workflow; operators own any external resources.
-func (scheduler *Scheduler) failRetiredRun(ctx context.Context, run model.Run, require mutationRequirement) error {
-	if err := require(ctx); err != nil {
-		return err
-	}
-	if err := scheduler.jobs.Delete(ctx, run.WorkflowName, run.ID); err != nil {
-		return fmt.Errorf("stop retired Workflow %s: %w", run.WorkflowName, err)
-	}
-	if err := scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: argoworkflow.ErrWorkflowCapabilityRequired.Error()}, require); err != nil {
-		return err
-	}
-	if err := scheduler.database().CompleteRunCancellation(ctx, run.ID, run.WorkflowName); err != nil && !errors.Is(err, store.ErrNotFound) {
-		return err
-	}
-	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
-	defer cancel()
-	return scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
 }

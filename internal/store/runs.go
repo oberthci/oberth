@@ -54,144 +54,6 @@ func (s *Store) RunsByIDs(ctx context.Context, ids []string) (map[string]model.R
 	return result, nil
 }
 
-// ErrRequeueIneligible marks work whose execution/publication evidence or
-// newer work prevents an automatic restart reset.
-var ErrRequeueIneligible = errors.New("store: stranded run is not eligible for restart requeue")
-
-// RestartRequeueReason is server-owned and identifies an in-place restart.
-const RestartRequeueReason = "re-queued after restart"
-
-// RequeueStrandedRun retains the existing scheduler interface.
-func (s *Store) RequeueStrandedRun(ctx context.Context, runID string) (model.Run, error) {
-	return s.ResetStrandedRunToQueued(ctx, runID)
-}
-
-// ResetStrandedRunToQueued preserves the run ID and both ordering sequences.
-// It records any prior Workflow cleanup obligation atomically with the reset.
-func (s *Store) ResetStrandedRunToQueued(ctx context.Context, runID string) (model.Run, error) {
-	if strings.TrimSpace(runID) == "" {
-		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Run{}, fmt.Errorf("begin stranded run requeue: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, runID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return model.Run{}, fmt.Errorf("%w: run", ErrNotFound)
-	}
-	if err != nil {
-		return model.Run{}, fmt.Errorf("load stranded run: %w", err)
-	}
-	if run.Status != model.RunRunning {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	var pendingPublications int
-	if err := tx.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, run.ID).Scan(&pendingPublications); err != nil {
-		return model.Run{}, fmt.Errorf("check stranded run publications: %w", err)
-	}
-	if pendingPublications > 0 {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	requeued, err := s.requeueStrandedRunTx(ctx, tx, run, now)
-	if err != nil {
-		return model.Run{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return requeued, fmt.Errorf("commit stranded run requeue: %w", err)
-	}
-	return requeued, nil
-}
-
-// requeueStrandedRunTx is shared by scheduler reconciliation and owner startup.
-func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
-	if run.Status != model.RunRunning || run.Trigger == "promotion" || (run.RefKind != model.RefBranch && run.RefKind != model.RefTag) {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	if err := requireRepositoryActive(ctx, tx, run.RepoID); err != nil {
-		if errors.Is(err, ErrRepositoryArchived) {
-			return model.Run{}, ErrRequeueIneligible
-		}
-		return model.Run{}, err
-	}
-	var safe bool
-	if err := tx.QueryRowContext(ctx, `SELECT
- NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)`, run.ID, run.ID).Scan(&safe); err != nil {
-		return model.Run{}, err
-	}
-	if !safe {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	// Evidence/publication exclusions above apply to every run.
-	var activeSiblings int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs
- WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND id!=?
- AND status IN ('queued','running')`, run.RepoID, run.RefKind, run.Ref, run.ScheduleEntry, run.ID).Scan(&activeSiblings); err != nil {
-		return model.Run{}, fmt.Errorf("check active restart siblings: %w", err)
-	}
-	if activeSiblings > 0 {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	if run.RefKind == model.RefTag {
-		if err := requireUnpublishedTagTx(ctx, tx, run); err != nil {
-			if errors.Is(err, ErrInvalidState) {
-				return model.Run{}, ErrRequeueIneligible
-			}
-			return model.Run{}, err
-		}
-	}
-	if run.WorkflowName != "" {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at,completed_at)
-  VALUES(?,?,'','owner_restart',?,NULL)
-  ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name,superseded_by='',reason='owner_restart',created_at=excluded.created_at,completed_at=NULL`, run.ID, run.WorkflowName, now); err != nil {
-			return model.Run{}, err
-		}
-	}
-	return s.resetRunAfterRestartTx(ctx, tx, run, now)
-}
-
-// A claim is persisted as running before Workflow submission. Owner startup
-// proves the claiming worker is gone. Restore that claim for every trigger,
-// including promotion, without creating a new run or interrupting its promotion.
-// The deterministic Workflow name is recorded before admission, so its presence
-// alone does not imply submission or authorize a Kubernetes deletion.
-func (s *Store) recoverWaitingRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (bool, error) {
-	if run.Status != model.RunRunning || run.Phase != "waiting" || run.StartedAt != nil {
-		return false, nil
-	}
-	var safe bool
-	if err := tx.QueryRowContext(ctx, `SELECT
- NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)`, run.ID, run.ID).Scan(&safe); err != nil {
-		return false, err
-	}
-	if !safe {
-		return false, nil
-	}
-	_, err := s.resetRunAfterRestartTx(ctx, tx, run, now)
-	return err == nil, err
-}
-
-func (s *Store) resetRunAfterRestartTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
-	// Preserve prior timing evidence while closing the abandoned admission episode.
-	if _, err := tx.ExecContext(ctx, `UPDATE run_admission_timings SET closed_at=? WHERE run_id=? AND closed_at IS NULL`, now, run.ID); err != nil {
-		return model.Run{}, err
-	}
-	reason := RestartRequeueReason
-	reset, err := scanRun(tx.QueryRowContext(ctx, `UPDATE runs SET status='queued',phase='queued',job_name='',credentialed=0,started_at=NULL,finished_at=NULL,error='',failed_burn='',failed_step='',reason=?,updated_at=? WHERE id=? AND status='running' RETURNING `+runColumns, reason, now, run.ID))
-	if err != nil {
-		return model.Run{}, err
-	}
-	if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: "oberth", Action: "run.restart", ResourceType: "run", ResourceID: run.ID, Details: `{"reason":"owner restart","same_id":true}`}, now); err != nil {
-		return model.Run{}, err
-	}
-	return reset, nil
-}
-
 func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 	if spec.RepoID <= 0 || !spec.RefKind.Valid() || strings.TrimSpace(spec.Ref) == "" ||
 		!validOID(spec.SHA) || strings.TrimSpace(spec.Actor) == "" || strings.TrimSpace(spec.Trigger) == "" {
@@ -210,7 +72,7 @@ func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 	return spec, nil
 }
 
-func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now, inheritedAdmissionSequence int64) (model.EnqueueRunResult, error) {
+func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now int64) (model.EnqueueRunResult, error) {
 	if err := requireRepositoryActive(ctx, tx, spec.RepoID); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
@@ -227,11 +89,6 @@ RETURNING `+runColumns,
 	value, err := scanRun(row)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
-	}
-	guard := ""
-	if inheritedAdmissionSequence > 0 {
-		// Recovery replaces only its stranded source, preserving every newer push.
-		guard = " AND COALESCE(admission_sequence,queue_sequence)=" + fmt.Sprint(inheritedAdmissionSequence)
 	}
 	var cancellations []model.RunCancellation
 	var supersededCount int64
@@ -252,7 +109,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running') AND (status = 'running' OR job_name != '')
- `+guard+` ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry)
+ ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry)
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("find running superseded runs: %w", err)
 		}
@@ -281,9 +138,6 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
 	}
 
 	admissionSequence := value.QueueSequence
-	if inheritedAdmissionSequence > 0 {
-		admissionSequence = inheritedAdmissionSequence
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission_sequence = ? WHERE id = ?`, admissionSequence, id); err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("set run admission sequence: %w", err)
 	}
@@ -302,7 +156,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
-  AND status IN ('queued', 'running')`+guard,
+  AND status IN ('queued', 'running')`,
 			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry)
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("supersede earlier runs: %w", err)
@@ -401,8 +255,8 @@ func (s *Store) MarkRunSubmitted(ctx context.Context, id string) (model.Run, err
 	}
 	now := unixNano(s.now())
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
-UPDATE runs SET phase = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
-WHERE id = ? AND status = 'running' AND phase = 'waiting' AND job_name != ''
+UPDATE runs SET error=CASE WHEN phase='infrastructure-pending' THEN '' ELSE error END, phase = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
+WHERE id = ? AND status = 'running' AND phase IN ('waiting','infrastructure-pending') AND job_name != ''
 RETURNING `+runColumns, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		current, lookupErr := s.Run(ctx, id)

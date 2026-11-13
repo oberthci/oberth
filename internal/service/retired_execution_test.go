@@ -10,6 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -23,7 +24,7 @@ func TestRetiredWorkflowFailsRunWithoutStoppingOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := f.store.Run(t.Context(), run.ID)
-	if err != nil || got.Status != model.RunFailed || !strings.Contains(got.Error, "workflow capability grant") || len(jobs.deleted) != 1 {
+	if err != nil || got.Status != model.RunFailed || !strings.Contains(got.Error, "workflow capability grant") || len(jobs.deleted) != 0 {
 		t.Fatalf("run=%+v delete=%v err=%v", got, jobs.deleted, err)
 	}
 	if err := s.reconcileStrandedRunsWithGate(t.Context(), s.requireMutation, nil); err != nil {
@@ -31,7 +32,7 @@ func TestRetiredWorkflowFailsRunWithoutStoppingOwner(t *testing.T) {
 	}
 }
 
-func TestRetiredUnsubmittedRunFailsAfterRequeue(t *testing.T) {
+func TestRetiredUnsubmittedRunFailsWithoutExecution(t *testing.T) {
 	f := newControlFixture(t)
 	run, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "retired-restart", Repository: f.repo, Branch: "feature/retired", SHA: strings.Repeat("a", 40), Actor: "owner"})
 	if err != nil {
@@ -47,11 +48,11 @@ func TestRetiredUnsubmittedRunFailsAfterRequeue(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.scheduler.git = &policyTestGit{controlGit: f.git, candidate: []byte("historical execution contract")}
-	if err := f.scheduler.ProcessNext(t.Context()); err != nil {
+	if err := f.scheduler.ProcessNext(t.Context()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatal(err)
 	}
 	got, err := f.store.Run(t.Context(), run.ID)
-	if err != nil || got.Status != model.RunFailed || !strings.Contains(got.Error, "workflow capability grant") || got.WorkflowName != "" {
+	if err != nil || got.Status != model.RunFailed || got.Error != model.ServerRestartReason || got.WorkflowName != "" {
 		t.Fatalf("run=%+v err=%v", got, err)
 	}
 }

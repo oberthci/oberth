@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ import (
 )
 
 // A run the restored backup recorded as running, whose Workflow does not
-// exist here, is interrupted instead of requeued: a restore never
+// exist here, is never dispatched again: a restore never
 // re-executes a pipeline by itself. The marker is retired afterwards.
 func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	t.Parallel()
@@ -89,9 +90,9 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Admitted but not started (phase waiting): cancelled, like a run caught
-	// mid-submission; a started one is interrupted (restoredRunInterruption).
-	if run.Status != model.RunInterrupted || (run.Error != restoredRunInterruption && !strings.Contains(run.Reason, restoredRunCancelReason)) {
-		t.Fatalf("restored run = %s %q, want interrupted, not requeued", run.Status, run.Error)
+	// mid-submission.
+	if !run.Cancelled() || !strings.Contains(run.Reason, restoredRunCancelReason) {
+		t.Fatalf("restored run = %s %q, want cancelled", run.Status, run.Error)
 	}
 	cancelled, err := database.Run(ctx, queued.ID)
 	if err != nil {
@@ -110,5 +111,53 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	}
 	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, nil); err == nil {
 		t.Fatal("malformed marker ignored")
+	}
+}
+
+// Activation constructs the scheduler before owner recovery. A marker outside
+// the database directory must preserve unnamed restored claims for cancellation.
+func TestOwnerRecoveryPreservesUnnamedRestoredRunForCancellation(t *testing.T) {
+	ctx := t.Context()
+	f := newRecoveryFixture(t)
+	restored := f.enqueueAndClaim(t, "feature/restored-unnamed", strings.Repeat("a", 40))
+	ordinary := f.enqueueAndClaim(t, "feature/ordinary-unnamed", strings.Repeat("b", 40))
+	marker := filepath.Join(t.TempDir(), RestoredRunsFile)
+	if err := os.WriteFile(marker, []byte(`{"runs":["`+restored.ID+`"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := runlog.Open(filepath.Join(f.root, "logs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := &recoveryJobs{terminalErr: ErrJobNotTerminal}
+	scheduler, err := NewScheduler(SchedulerConfig{Store: f.store, Git: &controlGit{}, Logs: logs, Jobs: jobs,
+		Auditor: f.store, Signals: NewSignals(), WorkspaceRoot: filepath.Join(f.root, "work"), RestoredRunsFile: marker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RecoverOwnerState(ctx); err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := f.store.Run(ctx, restored.ID)
+	if err != nil || preserved.Status != model.RunRunning {
+		t.Fatal("restore-owned claim failed before cancellation", preserved, err)
+	}
+	failed, err := f.store.Run(ctx, ordinary.ID)
+	if err != nil || failed.Status != model.RunFailed || failed.Error != model.ServerRestartReason {
+		t.Fatal("ordinary restart recovery changed", failed, err)
+	}
+	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, nil); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := f.store.Run(ctx, restored.ID)
+	if err != nil || !cancelled.Cancelled() || !strings.Contains(cancelled.Reason, restoredRunCancelReason) {
+		t.Fatal(cancelled, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("restore marker not retired", err)
+	}
+	queued, err := f.store.ClaimNextRun(ctx)
+	if !errors.Is(err, store.ErrNotFound) || len(jobs.deleted) != 0 {
+		t.Fatal("restored run redispatched or deleted", queued, jobs.deleted, err)
 	}
 }

@@ -123,6 +123,10 @@ func TestPromotionRetryAdmissionLineageAndGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	retry.RetryMode = model.PromotionRetryAuto
+	if _, err := s.AppendPromotion(ctx, retry); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("automatic interrupted retry: %v", err)
+	}
+	retry.RetryMode = model.PromotionRetryManual
 	first, err := s.AppendPromotion(ctx, retry)
 	if err != nil {
 		t.Fatalf("retry of an interrupted promotion: %v", err)
@@ -136,14 +140,14 @@ func TestPromotionRetryAdmissionLineageAndGuards(t *testing.T) {
 	if _, err := s.FinishPromotion(ctx, first.ID, model.PromotionFailed, "", "upstream main moved"); err != nil {
 		t.Fatal(err)
 	}
-	retry.RetryOf = first.ID
+	retry.RetryOf, retry.RetryMode = first.ID, model.PromotionRetryAuto
 	second, err := s.AppendPromotion(ctx, retry)
 	if err != nil {
 		t.Fatal(err)
 	}
 	lineage, err := s.PromotionLineage(ctx, second.ID)
-	if err != nil || lineage.RetryOf != first.ID || lineage.Mode != model.PromotionRetryAuto || lineage.AutoAttempt != 2 {
-		t.Fatalf("second retry lineage = %#v, %v, want auto attempt 2 of %s", lineage, err, first.ID)
+	if err != nil || lineage.RetryOf != first.ID || lineage.Mode != model.PromotionRetryAuto || lineage.AutoAttempt != 1 {
+		t.Fatalf("second retry lineage = %#v, %v, want auto attempt 1 of %s", lineage, err, first.ID)
 	}
 	if original, err := s.PromotionLineage(ctx, pending.ID); err != nil || original.RetriedAs != first.ID || original.RetryOf != "" {
 		t.Fatalf("original lineage = %#v, %v", original, err)

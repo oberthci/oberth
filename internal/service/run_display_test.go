@@ -130,34 +130,6 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 	}
 }
 
-func TestRestartResetDisplaysQueuedUnderOriginalID(t *testing.T) {
-	fixture := newControlFixture(t)
-	ctx := context.Background()
-	original, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "restart-display", Repository: fixture.repo,
-		Branch: "feature/restart", SHA: strings.Repeat("c", 40), Actor: "agent@host"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "restart-other", Repository: fixture.repo, Branch: "feature/other", SHA: strings.Repeat("b", 40), Actor: "agent@host"}); err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := fixture.store.RequeueStrandedRun(ctx, original.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	value, err := fixture.api(t).Run(ctx, api.Actor{Identity: "agent@host"}, original.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	run := value.(RunDetailResponse).Run
-	if run.DisplayStatus != "queued" || run.Reason != store.RestartRequeueReason || run.SupersededBy != "" || replacement.ID != original.ID {
-		t.Fatalf("restart presentation = %+v", run)
-	}
-}
-
 func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := t.Context()
@@ -255,8 +227,6 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 	service := &API{}
 	for _, tc := range []struct{ reason, phase, want string }{
 		{"superseded by newer run", "interrupted", "superseded by aaaaaaaa"},
-		{"re-queued after restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
-		{"retried once after trusted preflight owner restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
 		{"cancelled by owner: restart later", "cancelled", "by owner: restart later"},
 		{"scheduler stopped", "interrupted", "server restart, retry needed"},
 		{"unrelated reason", "interrupted", "server restart, retry needed"},
@@ -290,15 +260,13 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 
 func TestScopedDisplayDoesNotLinkHiddenSuccessor(t *testing.T) {
 	service := &API{scope: &repoScope{}}
-	for _, reason := range []string{"superseded by newer run", "re-queued after restart", "retried once after trusted preflight owner restart"} {
+	for _, reason := range []string{"superseded by newer run", "unrelated reason"} {
 		run := model.Run{Status: model.RunInterrupted, Reason: reason, SupersededBy: strings.Repeat("b", 32)}
 		got := service.presentationRunWithSuccessor(t.Context(), run, nil)
 		if got.SupersededBy != "" || strings.Contains(got.DisplayReason, "bbbb") || got.DisplayStatus != "superseded" {
 			t.Fatalf("hidden successor leaked: %+v", got)
 		}
-		if reason == "retried once after trusted preflight owner restart" && got.DisplayReason != "server restart, re-queued" {
-			t.Fatalf("hidden trusted retry reason = %q", got.DisplayReason)
-		}
+
 	}
 }
 
@@ -339,7 +307,7 @@ func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {
 	}
 }
 
-func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
+func TestPromotionRestartDisplaysFailureWithoutCIIssue(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
 	enqueued, _, err := storetest.EnqueuePromotionRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb", SHA: strings.Repeat("b", 40), Actor: "agent", Trigger: "promotion", TestedSHA: strings.Repeat("b", 40), BaseSHA: strings.Repeat("a", 40)}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/restart", SourceSHA: strings.Repeat("b", 40), TargetRef: "main", PreviousSHA: strings.Repeat("a", 40), ResultSHA: strings.Repeat("b", 40), Actor: "agent"})
@@ -365,7 +333,7 @@ func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := presentationRun(run)
-	if shown.DisplayStatus != "cancelled" || shown.DisplayReason != "server restart, retry needed" || shown.SupersededBy != "" {
+	if shown.DisplayStatus != "failed" || shown.DisplayReason != model.ServerRestartReason || shown.SupersededBy != "" {
 		t.Fatalf("restart promotion %+v", shown)
 	}
 	if _, err = recovered.OpenCIIssue(ctx, f.repo.ID, "feature/restart"); !errors.Is(err, store.ErrNotFound) {

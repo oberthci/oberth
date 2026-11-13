@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestRunTimingMilestonesAdmissionEpisodesAndRefire(t *testing.T) {
+func TestRunTimingMilestonesAndAdmissionEpisodes(t *testing.T) {
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	ctx := context.Background()
@@ -70,20 +70,23 @@ func TestRunTimingMilestonesAdmissionEpisodesAndRefire(t *testing.T) {
 		}
 	}
 	now = now.Add(time.Second)
-	refired, err := s.RequeueStrandedRun(ctx, run.ID)
+	if _, err = s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: model.ServerRestartReason}); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := s.Run(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.RunTiming(ctx, run.ID)
-	if err != nil || got.Version != 1 || !got.QueuedAt.Equal(queued) || got.ClaimedAt == nil || !got.ClaimedAt.Equal(claimed) || got.CheckoutReadyAt == nil || !got.CheckoutReadyAt.Equal(checkout) || got.TerminalAt != nil || got.SourceReadyAt == nil {
+	if err != nil || got.Version != 1 || !got.QueuedAt.Equal(queued) || got.ClaimedAt == nil || !got.ClaimedAt.Equal(claimed) || got.CheckoutReadyAt == nil || !got.CheckoutReadyAt.Equal(checkout) || (got.TerminalAt == nil || !got.TerminalAt.Equal(now)) || got.SourceReadyAt == nil {
 		t.Fatalf("milestones=%+v err=%v", got, err)
 	}
 	if len(got.Admissions) != 2 || got.Admissions[0].RequestedAt == nil || !got.Admissions[0].RequestedAt.Equal(requested) || got.Admissions[0].GrantedAt == nil || !got.Admissions[0].GrantedAt.Equal(granted) || !got.Admissions[0].ClosedAt.Equal(parked) || !got.Admissions[1].RequestedAt.Equal(secondRequest) || got.Admissions[1].ClosedAt == nil {
 		t.Fatalf("episodes=%+v", got.Admissions)
 	}
-	fresh, err := s.RunTiming(ctx, refired.ID)
-	if err != nil || fresh.ClaimedAt == nil || !fresh.ClaimedAt.Equal(claimed) || len(fresh.Admissions) != 2 || fresh.TerminalAt != nil || refired.ID != run.ID || refired.AdmissionSequence != run.AdmissionSequence {
-		t.Fatalf("restart lost timing evidence: %+v %v", fresh, err)
+	fresh, err := s.RunTiming(ctx, finished.ID)
+	if err != nil || fresh.ClaimedAt == nil || !fresh.ClaimedAt.Equal(claimed) || len(fresh.Admissions) != 2 || (fresh.TerminalAt == nil || !fresh.TerminalAt.Equal(now)) || finished.ID != run.ID || finished.AdmissionSequence != run.AdmissionSequence {
+		t.Fatalf("terminalization lost timing evidence: %+v %v", fresh, err)
 	}
 	for _, query := range []string{`UPDATE run_timings SET claimed_at=1 WHERE run_id=?`, `UPDATE run_admission_timings SET requested_at=1 WHERE run_id=?`} {
 		if _, err = s.db.Exec(query, run.ID); err == nil {

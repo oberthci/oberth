@@ -113,7 +113,7 @@ func TestCancelTerminalRunIsAClearNoOpError(t *testing.T) {
 
 // A claimed run receives the supersede obligation with no successor, keeps the
 // Job name its owner published, and is never re-fired by owner restart
-// recovery: restart requeue selects only active runs.
+// recovery: owner recovery selects only active runs.
 func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *testing.T) {
 	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)

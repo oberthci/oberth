@@ -20,6 +20,7 @@ type pendingCreateJobs struct {
 	createHook func(context.Context, WorkflowRequest) error
 	settle     func(context.Context, string, string, time.Time) (bool, error)
 	adoptCalls atomic.Int32
+	adoptHook  func(context.Context, model.Run) (bool, error)
 }
 
 func (j *pendingCreateJobs) CreateWorkflow(ctx context.Context, req WorkflowRequest) error {
@@ -31,8 +32,11 @@ func (j *pendingCreateJobs) CreateWorkflow(ctx context.Context, req WorkflowRequ
 	}
 	return j.fakeJobs.CreateWorkflow(ctx, req)
 }
-func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (bool, error) {
+func (j *pendingCreateJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 	j.adoptCalls.Add(1)
+	if j.adoptHook != nil {
+		return j.adoptHook(ctx, run)
+	}
 	return false, nil
 }
 func (*pendingCreateJobs) WorkflowNamespace() string { return "test-argo" }
@@ -243,7 +247,10 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			}
 			// A blocking API call must not delay startup or dispatch of unrelated work.
 			apiEntered := make(chan struct{}, 1)
-			jobs.settle = func(ctx context.Context, _, _ string, _ time.Time) (bool, error) {
+			jobs.adoptHook = func(ctx context.Context, _ model.Run) (bool, error) {
+				if jobs.adoptCalls.Load() <= 2 {
+					return false, nil
+				}
 				select {
 				case apiEntered <- struct{}{}:
 				default:
@@ -251,6 +258,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				<-ctx.Done()
 				return false, ctx.Err()
 			}
+
 			startup := make(chan struct{})
 			f.scheduler.onStartupRecovered = func() { close(startup) }
 			done, _ := startCreateScheduler(t, f.scheduler)
@@ -267,13 +275,10 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			case <-time.After(testStartTimeout(time.Second)):
 				t.Fatal("pending worker never started")
 			}
-			wantAdopts := int32(0)
-			if !marked {
-				wantAdopts = 2
+			if jobs.adoptCalls.Load() < 3 {
+				t.Fatal("background recovery did not observe the Workflow")
 			}
-			if jobs.adoptCalls.Load() != wantAdopts {
-				t.Fatalf("unacknowledged recovery bypassed adoption: %d", jobs.adoptCalls.Load())
-			}
+
 			state := f.scheduler.submissionStateForTest()
 			if state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
 				t.Fatalf("restart did not restore exact pending contracts: %+v", state)

@@ -2,15 +2,15 @@
 
 An ordinary `oberth upgrade` can proceed with a busy queue. Adoption preserves
 eligible Argo Workflows under their existing run IDs; it does not create a second
-Workflow or repeat a publication. Running branch runs are adopted. Promotion,
-tag and release runs are adopted where the server supports it (#1172 slice 2);
-otherwise their Workflow is deleted and the run is recorded `interrupted`, as
-before. Retired execution declarations fail with a workflow capability migration
-message. Oberth stops the owned Workflow but does not read retired execution
-journals or clean external resources. Drain legacy work and clean those resources
-before upgrade. A claimed run with no parent Workflow follows ordinary recovery;
-its immutable source policy is checked before any new submission. Admission and
-audit checks still apply, and schema rollback requires a database restore.
+Workflow or repeat a publication. Branch, tag, release, and promotion Workflows
+use their existing adoption checks. Shutdown leaves running Workflows for the
+successor. A confirmed absent Workflow, including a claimed run never submitted,
+fails with `interrupted by server restart`; recovery does not resubmit it.
+Ambiguous creation stays under bounded observation until adoption or confirmed
+absence. Users can request an explicit retry or rerun with a new run ID.
+Retired execution declarations fail with a workflow capability migration
+message. Admission and audit checks still apply, and schema rollback requires
+a database restore.
 
 Live Argo output is retained as each pod writes it. In-process reconnects use
 an inclusive Kubernetes timestamp plus the ordered records at that timestamp,

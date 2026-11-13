@@ -91,14 +91,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 		t.Run(map[bool]string{false: "running", true: "finished-while-down"}[finishedWhileDown], func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			previous := fixture.enqueueAndClaim(t, "feature/adopt", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-			replacement, err := fixture.store.RequeueStrandedRun(context.Background(), previous.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			run, err := fixture.store.ClaimNextRun(context.Background())
-			if err != nil || run.ID != replacement.ID || run.AdmissionSequence != previous.AdmissionSequence || run.QueueSequence != previous.QueueSequence || run.ID != previous.ID {
-				t.Fatalf("re-fired fixture lost its admission order: previous=%#v run=%#v err=%v", previous, run, err)
-			}
+			run := previous
 			fixture.setWorkflowName(t, run.ID, "oberth-adopt")
 			if _, err := fixture.store.MarkRunSubmitted(context.Background(), run.ID); err != nil {
 				t.Fatal(err)
@@ -208,7 +201,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 	}
 }
 
-func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
+func TestAdoptionMissingWorkflowFailsButReadFailureDoesNot(t *testing.T) {
 	for _, readErr := range []error{nil, errors.New("API unavailable")} {
 		fixture := newRecoveryFixture(t)
 		run := fixture.enqueueAndClaim(t, "feature/missing", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -221,7 +214,7 @@ func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
 			t.Fatal(lookupErr)
 		}
 		if readErr == nil {
-			if err != nil || current.Status != model.RunQueued || current.SupersededBy != "" {
+			if err != nil || current.Status != model.RunFailed || current.Error != model.ServerRestartReason || current.SupersededBy != "" {
 				t.Fatalf("missing recovery: %#v, %v", current, err)
 			}
 		} else if err == nil || current.Status != model.RunRunning || current.SupersededBy != "" {
@@ -435,20 +428,17 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		// A legacy engine exposes no adoption capability. Release runs
 		// reset behind cleanup; promotion work uses its separate retry path.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
-		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("out-of-scope adoption") }); err != nil {
-			t.Fatal(err)
+		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("out-of-scope adoption") }); err == nil {
+			t.Fatal("unreadable Workflow was treated as absent")
 		}
 		current, err := fixture.store.Run(context.Background(), run.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantStatus, wantDeletes := model.RunInterrupted, 1
-		if release {
-			wantStatus, wantDeletes = model.RunQueued, 0
+		if current.Status != model.RunRunning || len(jobs.deleted) != 0 || len(jobs.adopted) != 0 {
+			t.Fatal("unknown Workflow was mutated", current, jobs.deleted)
 		}
-		if current.Status != wantStatus || current.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
-			t.Fatalf("legacy recovery changed: %#v adopted=%v deleted=%v", current, jobs.adopted, jobs.deleted)
-		}
+
 	}
 }
 

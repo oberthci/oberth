@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 )
 
@@ -25,7 +27,7 @@ func (jobs *waitingRestartJobs) TerminalResult(ctx context.Context, name string)
 	return jobs.recoveryJobs.TerminalResult(ctx, name)
 }
 
-func TestWaitingRunsExecuteAfterOwnerRestart(t *testing.T) {
+func TestClaimedWaitingRunsAreNeverResubmittedAfterRestart(t *testing.T) {
 	for _, kind := range []string{"branch", "tag", "release", "promotion"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newRecoveryFixture(t)
@@ -57,9 +59,8 @@ func TestWaitingRunsExecuteAfterOwnerRestart(t *testing.T) {
 			jobs := &waitingRestartJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal,
 				waitResult: JobResult{Status: model.RunFailed, Phase: "job", Error: "CI completed after restart",
 					Steps: []model.StepResult{stepResult(model.StepFailed)}}}}
-			scheduler := f.scheduler(t, jobs)
+			scheduler := f.scheduler(t, restartStateJobs{JobController: jobs})
 			scheduler.releaseJobs = jobs
-			scheduler.git = &restartCheckoutGit{}
 			source := filepath.Join(scheduler.workspaceRoot, run.ID, "src")
 			if err = os.MkdirAll(source, 0700); err != nil {
 				t.Fatal(err)
@@ -83,11 +84,11 @@ func TestWaitingRunsExecuteAfterOwnerRestart(t *testing.T) {
 			if jobs.terminalReads != 0 || len(jobs.deleted) != 0 {
 				t.Fatalf("unadmitted work was reconciled as a submitted Workflow: reads=%d deleted=%v", jobs.terminalReads, jobs.deleted)
 			}
-			if err = scheduler.ProcessNext(ctx); err != nil {
+			if err = scheduler.ProcessNext(ctx); !errors.Is(err, store.ErrNotFound) {
 				t.Fatal(err)
 			}
 			current, err := f.store.Run(ctx, run.ID)
-			if err != nil || current.Status != model.RunFailed || current.Error != "CI completed after restart" {
+			if err != nil || current.Status != model.RunFailed || current.Error != model.ServerRestartReason {
 				t.Fatalf("waiting run did not execute under its original ID: %+v %v", current, err)
 			}
 			retained, err := scheduler.logs.Tail(run.ID, 1024)

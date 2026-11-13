@@ -222,7 +222,7 @@ func (s *Store) EnqueuePromotionRun(ctx context.Context, runSpec model.RunSpec, 
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("begin promotion run enqueue: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
+	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}

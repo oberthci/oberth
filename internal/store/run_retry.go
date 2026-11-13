@@ -93,7 +93,7 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 		return model.EnqueueRunResult{}, fmt.Errorf("generate retry run ID: %w", err)
 	}
 	now := unixNano(s.now())
-	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
+	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("enqueue retry: %w", err)
 	}
