@@ -276,7 +276,7 @@ func (scheduler *Scheduler) AcceptEnqueue(context.Context, model.EnqueueRunResul
 }
 
 // AcceptCancellations executes the obligations an explicit run cancel
-// recorded: a waiting run's admission reservation is withdrawn at once and a
+// recorded: an in-flight create is cancelled and a
 // claimed run's Workflow is stopped (an absent one is fine). A failed Stop
 // stays pending for the cancellation pass, until Argo finishes.
 //
