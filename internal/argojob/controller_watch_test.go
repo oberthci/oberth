@@ -3,8 +3,10 @@ package argojob
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -13,8 +15,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -152,6 +156,134 @@ func (watchNodeBootRecorder) ObserveNodeBoot(context.Context, model.NodeBootObse
 }
 
 func TestWatchWait(t *testing.T) {
+
+	t.Run("failed_confirmations_retry_without_watch_events", func(t *testing.T) {
+		for _, missing := range []bool{false, true} {
+			t.Run(fmt.Sprint(missing), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					final := watchWaitWorkflow(wfv1.WorkflowSucceeded)
+					hub := newControlledWaitHub(final)
+					if missing {
+						hub = newControlledWaitHub(nil)
+					}
+					client := &countedWaitWorkflowClient{err: apierrors.NewServiceUnavailable("one failed read")}
+					c := (&Controller{workflows: client, config: Config{Namespace: final.Namespace, MaxRunLogBytes: 4096}}).WithWatchHub(hub)
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					result := startControlledWait(ctx, c, final)
+					synctest.Wait()
+					assertStillWaiting(t, result)
+					if client.reads() != 1 {
+						t.Fatal(client.reads())
+					}
+					var readErr error
+					if missing {
+						readErr = apierrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}, final.Name)
+					}
+					client.set(final, readErr)
+					time.Sleep(15 * time.Second)
+					synctest.Wait()
+					got := <-result
+					if client.reads() != 2 || hub.subscriptions() != 0 || (missing && got.err == nil) || (!missing && (got.err != nil || !got.completion.Succeeded)) {
+						t.Fatal(got, client.reads(), hub.subscriptions())
+					}
+				})
+			})
+		}
+	})
+	t.Run("outage_time_does_not_expire_identity_clocks", func(t *testing.T) {
+		for _, retried := range []bool{false, true} {
+			t.Run(fmt.Sprint(retried), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					c, wf, pod, requests := executorRetryFixture(t)
+					wf.Status.Phase = wfv1.WorkflowRunning
+					pod.Status.InitContainerStatuses[0].State.Running.StartedAt = metav1.NewTime(time.Now())
+					if retried {
+						pod.Annotations = map[string]string{executorIdentityRetryAnnotation: time.Now().Format(time.RFC3339Nano)}
+					}
+					hub := newControlledWaitHub(wf)
+					hub.setPods(pod)
+					final := wf.DeepCopy()
+					final.Status.Phase = wfv1.WorkflowSucceeded
+					client := &countedWaitWorkflowClient{workflow: final}
+					c.workflows = client
+					c.WithWatchHub(hub)
+					var unavailable atomic.Bool
+					unavailable.Store(true)
+					var reads atomic.Int64
+					c.kube.(*fake.Clientset).PrependReactor("get", "configmaps", func(ktesting.Action) (bool, runtime.Object, error) {
+						reads.Add(1)
+						if unavailable.Load() {
+							return true, nil, apierrors.NewServiceUnavailable("temporary trust read")
+						}
+						return false, nil, nil
+					})
+					c.seeder.exec = func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
+						return nil
+					}
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					result := startControlledWait(ctx, c, wf)
+					synctest.Wait()
+					if reads.Load() != 1 || *requests != 0 {
+						t.Fatal(reads.Load(), *requests)
+					}
+					hub.setHealthy(false)
+					time.Sleep(3 * time.Minute)
+					synctest.Wait()
+					assertStillWaiting(t, result)
+					if reads.Load() != 1 {
+						t.Fatal("outage performed identity reads", reads.Load())
+					}
+					hub.setHealthy(true)
+					synctest.Wait()
+					assertStillWaiting(t, result)
+					if reads.Load() != 2 {
+						t.Fatal("no first recovery attempt", reads.Load())
+					}
+					time.Sleep(time.Minute)
+					synctest.Wait()
+					assertStillWaiting(t, result)
+					unavailable.Store(false)
+					hub.setPods(pod)
+					synctest.Wait()
+					if *requests != 1 {
+						t.Fatal("recovery did not deliver identity", *requests)
+					}
+					hub.setWorkflow(final)
+					synctest.Wait()
+					if got := <-result; got.err != nil || !got.completion.Succeeded || hub.subscriptions() != 0 {
+						t.Fatal(got)
+					}
+				})
+			})
+		}
+	})
+	t.Run("completion_classifies_live_pod_not_stale_cache", func(t *testing.T) {
+		wf, _, pod, _ := diagnosticFixture()
+		stale := pod.DeepCopy()
+		stale.Status.ContainerStatuses = nil
+		hub := newControlledWaitHub(wf)
+		hub.setPods(stale)
+		hub.setHealthy(false)
+		kube := fake.NewClientset(pod)
+		client := &countedWaitWorkflowClient{workflow: wf}
+		c := (&Controller{workflows: client, kube: kube, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}}).WithWatchHub(hub)
+		completion, err := c.Wait(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
+		if err != nil || len(completion.Steps) != 1 || completion.Steps[0].Termination == nil || !completion.Steps[0].Termination.Available || completion.Steps[0].Termination.Container.Reason != "OOMKilled" {
+			t.Fatal(completion, err)
+		}
+		lists := 0
+		for _, action := range kube.Actions() {
+			if action.GetVerb() == "list" && action.GetResource().Resource == "pods" {
+				lists++
+			}
+		}
+		if lists != 1 || client.reads() != 1 {
+			t.Fatal("completion snapshot/settle count", lists, client.reads())
+		}
+	})
+
 	t.Run("idle_without_waiter_does_not_revalidate_capability", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			wf := watchWaitWorkflow(wfv1.WorkflowRunning)
@@ -380,11 +512,11 @@ func TestWatchWait(t *testing.T) {
 			time.Sleep(time.Minute)
 			synctest.Wait()
 			assertStillWaiting(t, result)
-			if client.reads() != 1 {
-				t.Fatal("completion polled between events", client.reads())
+			if client.reads() != 5 {
+				t.Fatal("owed completion was not retried on each idle tick", client.reads())
 			}
 			client.set(cached, nil)
-			hub.setWorkflow(cached)
+			time.Sleep(15 * time.Second)
 			synctest.Wait()
 			if got := <-result; got.err != nil || !got.completion.Succeeded {
 				t.Fatal(got)

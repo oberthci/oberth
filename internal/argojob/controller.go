@@ -430,6 +430,8 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	timed := map[string]bool{}
 	boundTiming := false
 	eventDriven := true
+	confirmPending := false
+	observationPaused := false
 	nodeBoots := map[string]*corev1.Node{}
 	for {
 		for {
@@ -437,15 +439,25 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				return Completion{}, ctx.Err()
 			}
 			workflow, found := controller.hub.Workflow(name)
+			healthy := controller.hub.Healthy()
+			if !healthy {
+				admissionWatch.identityReadFailingSince = time.Time{}
+				observationPaused = true
+			} else if observationPaused {
+				admissionWatch.resumeAfterOutage(time.Now())
+				observationPaused = false
+			}
 			// A terminal Workflow event can still be confirmed live when only the
-			// Pod informer is unavailable. Idle ticks never retry that live read.
-			if !controller.hub.Healthy() && (!found || !workflow.Status.Phase.Completed() || !eventDriven) {
+			// Pod informer is unavailable. Unhealthy idle ticks do no live reads.
+			if !healthy && (!found || !workflow.Status.Phase.Completed() || !eventDriven) {
 				break
 			}
+			confirm := eventDriven || confirmPending
+			confirmPending = false
 			if !found {
 				// A missing cache entry never proves deletion. Confirm on the initial
-				// observation or a native/recovery event, never on the idle timer.
-				if !eventDriven {
+				// observation/event, retrying only an owed confirmation on idle.
+				if !confirm {
 					break
 				}
 				readCtx, cancelRead := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
@@ -455,6 +467,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 					return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
 				}
 				if err != nil {
+					confirmPending = true
 					break
 				}
 				workflow = current
@@ -491,6 +504,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			if deliveryErr == nil {
 				deliveryErr = admissionWatch.observeIdentityReads(identityReadUnavailable, time.Now())
 			}
+			confirmPending = identityReadUnavailable
 			if err := deliveryErr; err != nil {
 				// Preserve observed execution evidence; a delivery error on a later
 				// Pod must not make already executed steps look like a pre-step failure.
@@ -500,7 +514,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				return completionFor(workflow), err
 			}
 			if workflow.Status.Phase.Completed() {
-				if !eventDriven {
+				if !confirm {
 					break
 				}
 				// One final read after the controller marks completion: the last
@@ -514,6 +528,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 					return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
 				}
 				if settleErr != nil {
+					confirmPending = true
 					break
 				}
 				if err := controller.verifyOwnership(settled, runID); err != nil {
@@ -523,6 +538,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 					return Completion{}, errors.New("argojob: Workflow identity changed at completion")
 				}
 				if !settled.Status.Phase.Completed() {
+					confirmPending = true
 					break
 				}
 				completeRead := len(settled.Status.Nodes) >= len(workflow.Status.Nodes)
@@ -540,7 +556,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				completion.Steps = reporter.order(completion.Steps)
 				preserveObservedExitCodes(&completion, workflow)
 				preserveRecordedExitCodes(&completion, events)
-				controller.collectWatchedStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
+				controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
 				if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 					budgetBreachErr = publishErr
 				}
