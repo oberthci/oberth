@@ -86,8 +86,9 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   while the server abandons an unreleased hold, makes the `/work/src` mount writable, makes the shared
   `/work/cache` mount read-only and moves every cache variable that pointed
   into it (`GOCACHE`, `GOMODCACHE`, `OBERTH_CACHE_DIR`) to
-  `/tmp/oberth-assist-cache`, and pins the server's architecture when the
-  server helper is mounted. Attempt 1 gets `<base>`: its deadline, mounts
+  `/tmp/oberth-assist-cache`. The mounted helper requires a compatible execution
+  environment; authors choose placement, without an injected architecture
+  selector. Attempt 1 gets `<base>`: its deadline, mounts
   and caches are exactly today's;
 - the template annotation `oberth.ci/assist-hold: <held deadline seconds>`,
   inherited by the Pods, and the mount of the server's own executable at
@@ -148,8 +149,9 @@ Everything else keeps today's behaviour.
 which every hold-eligible step's `main` container receives read-only at
 `/run/oberth/assist` from the run's source claim. The image does not matter:
 a stock `debian`, `alpine` or distroless image is patch-capable, with or
-without a shell and whatever its memory limit (only resource measurement
-keeps its 256Mi floor). The step's `patch_capable` (in `run.held` and
+without a shell. The mounted executable must be compatible with the authored
+execution environment. No measurement memory floor or architecture selector
+is injected. The step's `patch_capable` (in `run.held` and
 `run_hold_list`) is false only when its held Pod lacks that mount: a Pod
 created by an older server, or a run without a seeded source claim. Such a
 step is inspect-only: `run_hold_exec` works, `run_hold_patch` is refused;

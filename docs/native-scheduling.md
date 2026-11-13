@@ -118,7 +118,7 @@ retry (`internal/argojob/profile_retry.go`) wait without a deadline while the
 required immutable controller/profile proof is unverified. This can pause
 dispatch or a claimed run before Create. Operators see `controller_profile`
 state/reason/remedy and retry timing in status and the dashboard's existing
-controller-profile pause banner. Restore the exact Ready controller, profile
+"Controller verification required" banner with `dispatch_blocked`. Restore the exact Ready controller, profile
 ConfigMap, images and required read permissions named by that diagnostic.
 Existing execution observation and cleanup retain their authority. These waits
 protect policy and identity; neither examines CPU, memory or node capacity.
@@ -242,8 +242,8 @@ win name/path collisions; validated workspace opt-outs remain available.
   have no automounted API token; authorized credential leaves receive only
   their scoped token mounts. These are security/startup compatibility rules,
   **not placement policy**; missing identities or incompatible security can
-  cause native admission/startup failure. The separate authenticated execution
-  target's already documented placement remains an explicit exception.
+  cause native admission/startup failure. Authenticated execution targets retain
+  cluster, namespace and identity custody without a placement exception.
 - **Scratch and work volumes.** Oberth adds a bounded disk EmptyDir at `/tmp`
   (8 GiB size limit) to ordinary containers; the nonroot profile uses its own
   private `/tmp` EmptyDir and preparation mounts. If the author declares a
@@ -371,7 +371,7 @@ No new label was added for this release.
 | `oberth.ci/declared-secret-paths` | Workflow, when credentialed | Admitted secret-path record; no values |
 | `oberth.ci/sources` | Workflow with pinned sources | Canonical immutable pinned-source record |
 | `oberth.ci/fragments` | Workflow, when fragments used | Immutable fragment-resolution record |
-| `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator device/resource capability binding |
+| `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator API-kind/action capability binding |
 | `oberth.ci/helper-storage` | Workflow | Versioned server-helper footprint binding |
 | `oberth.ci/verified-controller-profile` | Workflow, nonroot profile | Opaque verified controller identity/proof |
 | `oberth.ci/execution-placement` | Workflow, approved target | Approved execution authority digest; no node placement policy |

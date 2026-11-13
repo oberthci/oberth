@@ -2,7 +2,9 @@
 
 `GET /metrics` on the server's HTTPS port exports Prometheus text: the
 readiness sample ([readiness under load](readyz-load-flap.md)), TLS
-certificate expiry, token use, controller identity verification and storage/backup state.\nThe controller-verification gauge is `oberth_controller_verification_blocked`;\nno resource-admission pressure or per-step usage sampler metrics are exported.
+certificate expiry, token use, controller identity verification and storage/backup state.
+The controller-verification gauge is `oberth_controller_verification_blocked`;
+no resource-admission pressure or per-step usage sampler metrics are exported.
 It answers a metrics-scoped uplink token or an unscoped admin token; any
 other token gets 403.
 

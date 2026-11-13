@@ -152,8 +152,10 @@ enforce the removed test contract; review and preserve the required test gate
 in the repository Workflow.
 
 `OBERTH_KVM` and `OBERTH_GUEST_TEST` are no longer injected. The five legacy MCP
-tools and `oberth kubevirt` are removed. Historical runs, step usage and errors
-remain readable without consulting the inert execution journals.
+tools and `oberth kubevirt` are removed. Historical run outcomes, logs, errors
+and termination diagnostics remain readable without consulting inert execution
+journals. Historical step usage figures are dropped; see
+[the history-loss note](releases/v0.22.0.md#step-usage-figures-removed).
 
 Drain old executions and clean up their external resources with the old owner
 before upgrading. If an old execution is encountered at restart, Oberth fails
@@ -164,7 +166,11 @@ removed VM `argo` values refuse the upgrade until they are dropped; see
 [removed chart values](../README.md#upgrading). Removed CLI serve flags must be
 removed from custom launch commands.
 
-No migration is added. Existing migration SQL remains byte-identical; retired
-tables are inert and reserved for removal by a later migration. Take a database
-backup before upgrade; rollback requires restoring that backup together with
-the previous server. See [backup and restore](backup-restore.md).
+The earlier technology-specific journal retirement left its inert tables in
+place. That historical statement does not describe all changes in this release:
+v0.22.0 includes forward migrations for target-placement removal, device-grant
+projection with exact in-flight recovery receipts, and measurement-history
+deletion. Shipped migration SQL remains unchanged. Take a database backup before
+upgrade; rollback requires restoring that backup together with the previous
+server. See [backup and restore](backup-restore.md) and the
+[exact live-upgrade boundaries](releases/v0.22.0.md#upgrade-and-operation).
