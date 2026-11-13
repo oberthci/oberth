@@ -37,7 +37,7 @@ func TestNodeStepResultsRetainsFanoutRetriesAndSkippedNodes(t *testing.T) {
 	}
 	for i, status := range []model.StepStatus{model.StepFailed, model.StepPassed, model.StepSkipped, model.StepSkipped} {
 		row := byID[fmt.Sprintf("node-%d", i)]
-		if row.Status != status || row.Step != "check" || row.DisplayName != "check" || row.Template != "shared-leaf" || row.Message != "native message\nwith details" || row.FinishedAt != nil || row.StartedAt == nil || !row.StartedAt.Equal(at.Time) {
+		if row.Status != status || row.Step != "check" || row.DisplayName != "check" || row.Template != "shared-leaf" || row.Message != "native messagewith details" || row.FinishedAt != nil || row.StartedAt == nil || !row.StartedAt.Equal(at.Time) {
 			t.Fatalf("native node changed: %+v", row)
 		}
 	}

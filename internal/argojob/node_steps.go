@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"reflect"
 	"sort"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -53,7 +54,7 @@ func NodeStepResults(workflow *wfv1.Workflow, pods []*corev1.Pod) []model.StepRe
 			LocalTemplate: node.TemplateRef == nil && scope == wfv1.ResourceScopeLocal && (owner == "" || owner == workflow.Name),
 			RunID:         runID, NodeID: id, DisplayName: node.DisplayName, Template: template,
 			NodeType: string(node.Type), BoundaryID: node.BoundaryID,
-			Phase: string(node.Phase), Message: node.Message, PodName: podNames[id],
+			Phase: string(node.Phase), Message: model.SanitizeNodeMessage(node.Message), PodName: podNames[id],
 			Stage: stage, Step: step, Status: model.StepStatus(stepStatus(node.Phase)), ExitCode: exit,
 			StartedAt: optionalTime(node.StartedAt), FinishedAt: optionalTime(node.FinishedAt),
 		})
@@ -90,7 +91,8 @@ func (controller *Controller) WithStepResultWriter(writer StepResultWriter) *Con
 
 // RecordNodeSteps consumes the same verified snapshot as the watch wait loop.
 // Missing observations never clear existing rows or change the run verdict.
-func (controller *Controller) RecordNodeSteps(ctx context.Context, workflow *wfv1.Workflow, pods []*corev1.Pod) error {
+// recorded belongs to one wait invocation; failed writes remain eligible to retry.
+func (controller *Controller) RecordNodeSteps(ctx context.Context, workflow *wfv1.Workflow, pods []*corev1.Pod, recorded map[string]model.StepResult) error {
 	if controller.stepResults == nil {
 		return nil
 	}
@@ -103,5 +105,22 @@ func (controller *Controller) RecordNodeSteps(ctx context.Context, workflow *wfv
 		return nil
 	}
 	runID, _, _ := WorkflowMeta(workflow)
-	return controller.stepResults.PutStepResults(ctx, runID, NodeStepResults(workflow, pods))
+	rows := NodeStepResults(workflow, pods)
+	changed := make([]model.StepResult, 0)
+	for _, row := range rows {
+		previous, exists := recorded[row.NodeID]
+		if !exists || !reflect.DeepEqual(previous, row) {
+			changed = append(changed, row)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	if err := controller.stepResults.PutStepResults(ctx, runID, changed); err != nil {
+		return err
+	}
+	for _, row := range changed {
+		recorded[row.NodeID] = row
+	}
+	return nil
 }

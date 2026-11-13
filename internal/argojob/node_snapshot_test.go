@@ -50,7 +50,7 @@ func TestRecordNodeStepsDoesNotClearRowsOnUnavailableNativeStatus(t *testing.T) 
 			writer := &snapshotStepWriter{}
 			controller := (&Controller{}).WithStepResultWriter(writer)
 			workflow, _ := nativeContainerFixture()
-			if err := controller.RecordNodeSteps(t.Context(), workflow, nil); err != nil {
+			if err := controller.RecordNodeSteps(t.Context(), workflow, nil, map[string]model.StepResult{}); err != nil {
 				t.Fatal(err)
 			}
 			workflow.Status.Nodes = nil
@@ -59,7 +59,7 @@ func TestRecordNodeStepsDoesNotClearRowsOnUnavailableNativeStatus(t *testing.T) 
 			} else {
 				workflow.Status.OffloadNodeStatusVersion = "native-version"
 			}
-			if err := controller.RecordNodeSteps(t.Context(), workflow, nil); err == nil {
+			if err := controller.RecordNodeSteps(t.Context(), workflow, nil, map[string]model.StepResult{}); err == nil {
 				t.Fatal("missing native status accepted as an empty snapshot")
 			}
 			if writer.writes != 1 {

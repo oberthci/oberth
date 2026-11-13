@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -360,12 +361,8 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	return nil
 }
 
-// Wait supervises a submitted Workflow to its terminal phase, writing step
-// progress markers and each step's pod log into destination as the run
-// proceeds.
-//
-// The server derives progress events from the Workflow node tree and writes
-// the retained marker protocol consumed by the scheduler, index and dashboard.
+// Wait supervises native Workflow watch observations, retaining node history
+// and plain container output as the run proceeds.
 func (controller *Controller) Wait(ctx context.Context, name, runID string, destination io.Writer) (Completion, error) {
 	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
 }
@@ -420,6 +417,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	confirmPending := false
 	observationPaused := false
 	nodeBoots := map[string]*corev1.Node{}
+	recordedNodes := map[string]model.StepResult{}
 	for {
 		for {
 			if ctx.Err() != nil {
@@ -459,8 +457,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 				workflow = current
 			}
-			pods := make([]corev1.Pod, 0)
-			for _, pod := range controller.hub.PodsOf(name) {
+			podSnapshot := controller.hub.PodsOf(name)
+			pods := make([]corev1.Pod, 0, len(podSnapshot))
+			for _, pod := range podSnapshot {
 				pods = append(pods, *pod)
 			}
 			if err := controller.verifyOwnership(workflow, runID); err != nil {
@@ -468,6 +467,11 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			}
 			if binding.UID != "" && !binding.matches(workflow) {
 				return Completion{}, errors.New("argojob: adopted Workflow identity changed")
+			}
+			// History failures remain retryable on the next wake. The scheduler
+			// persists final rows before FinishRun; observation never changes Argo's verdict.
+			if eventDriven {
+				_ = controller.RecordNodeSteps(ctx, workflow, podSnapshot, recordedNodes)
 			}
 			// Observe already-created Pods before identity delivery can block on a
 			// later Pod: early step output must not wait behind that setup RPC.
@@ -508,35 +512,15 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				// node transitions and the workflow phase are not written
 				// atomically, so a status read that races the final update can
 				// miss a step's terminal event.
-				settleCtx, cancelSettle := context.WithTimeout(ctx, 10*time.Second)
-				settled, settleErr := controller.workflows.Get(settleCtx, name, metav1.GetOptions{})
-				cancelSettle()
-				if apierrors.IsNotFound(settleErr) {
-					return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
-				}
+				settled, completeRead, settleErr := controller.confirmWatchedCompletion(ctx, workflow, runID, binding)
 				if settleErr != nil {
+					return Completion{}, settleErr
+				}
+				if settled == nil {
 					confirmPending = true
 					break
 				}
-				if err := controller.verifyOwnership(settled, runID); err != nil {
-					return Completion{}, err
-				}
-				if workflow.UID != "" && settled.UID != workflow.UID {
-					return Completion{}, errors.New("argojob: Workflow identity changed at completion")
-				}
-				if !settled.Status.Phase.Completed() {
-					confirmPending = true
-					break
-				}
-				completeRead := len(settled.Status.Nodes) >= len(workflow.Status.Nodes)
-				if !completeRead {
-					copy := settled.DeepCopy()
-					copy.Status.Nodes = workflow.DeepCopy().Status.Nodes
-					settled = copy
-				}
-				if binding.UID != "" && !binding.matches(settled) {
-					return Completion{}, errors.New("argojob: adopted Workflow identity changed at completion")
-				}
+				_ = controller.RecordNodeSteps(ctx, settled, podSnapshot, recordedNodes)
 				controller.retainWorkflowTiming(ctx, settled)
 				completion := completionFor(settled)
 				completion.ObservationComplete = completion.ObservationComplete && completeRead
@@ -567,23 +551,8 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 				return completion, nil
 			}
-			if controller.timings != nil && eventDriven {
-				if !boundTiming {
-					controller.retainWorkflowTiming(ctx, workflow)
-					boundTiming = true
-				}
-				observation := Completion{}
-				for _, step := range reporter.order(StepResults(workflow)) {
-					if terminal(step.Status) && !timed[step.NodeID] {
-						observation.Steps = append(observation.Steps, step)
-					}
-				}
-				if len(observation.Steps) > 0 {
-					controller.collectWatchedStepDiagnostics(ctx, workflow, &observation, time.Time{})
-					for _, step := range observation.Steps {
-						timed[step.NodeID] = true
-					}
-				}
+			if eventDriven {
+				controller.recordWatchedTimings(ctx, workflow, reporter, timed, &boundTiming)
 			}
 			if eventDriven {
 				if publishErr := controller.publishLogs(ctx, workflow, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
@@ -599,6 +568,61 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			eventDriven = true
 		case <-ticker.C:
 			eventDriven = false
+		}
+	}
+}
+
+// confirmWatchedCompletion uses a live read for the verdict and preserves the
+// watched node set when the final status write has not caught up yet.
+func (controller *Controller) confirmWatchedCompletion(ctx context.Context, observed *wfv1.Workflow, runID string, binding Adoption) (*wfv1.Workflow, bool, error) {
+	settleCtx, cancelSettle := context.WithTimeout(ctx, 10*time.Second)
+	settled, settleErr := controller.workflows.Get(settleCtx, observed.Name, metav1.GetOptions{})
+	cancelSettle()
+	if apierrors.IsNotFound(settleErr) {
+		return nil, false, fmt.Errorf("argojob: Workflow %s disappeared before completing", observed.Name)
+	}
+	if settleErr != nil {
+		return nil, false, nil
+	}
+	if err := controller.verifyOwnership(settled, runID); err != nil {
+		return nil, false, err
+	}
+	if observed.UID != "" && settled.UID != observed.UID {
+		return nil, false, errors.New("argojob: Workflow identity changed at completion")
+	}
+	if !settled.Status.Phase.Completed() {
+		return nil, false, nil
+	}
+	completeRead := len(settled.Status.Nodes) >= len(observed.Status.Nodes)
+	if !completeRead {
+		copy := settled.DeepCopy()
+		copy.Status.Nodes = observed.DeepCopy().Status.Nodes
+		settled = copy
+	}
+	if binding.UID != "" && !binding.matches(settled) {
+		return nil, false, errors.New("argojob: adopted Workflow identity changed at completion")
+	}
+	return settled, completeRead, nil
+}
+
+func (controller *Controller) recordWatchedTimings(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, timed map[string]bool, boundTiming *bool) {
+	if controller.timings == nil {
+		return
+	}
+	if !*boundTiming {
+		controller.retainWorkflowTiming(ctx, workflow)
+		*boundTiming = true
+	}
+	observation := Completion{}
+	for _, step := range reporter.order(StepResults(workflow)) {
+		if terminal(step.Status) && !timed[step.NodeID] {
+			observation.Steps = append(observation.Steps, step)
+		}
+	}
+	if len(observation.Steps) > 0 {
+		controller.collectWatchedStepDiagnostics(ctx, workflow, &observation, time.Time{})
+		for _, step := range observation.Steps {
+			timed[step.NodeID] = true
 		}
 	}
 }
