@@ -10,8 +10,17 @@ import (
 	"github.com/oberthci/oberth/internal/boundedio"
 )
 
-// SyncBranch force-publishes an exact branch SHA and verifies the remote ref.
-func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string) error {
+var ErrMirrorBranchAdvanced = errors.New("a newer commit was pushed to this branch")
+
+// MirrorBranchMatches checks the accepted mirror head without an upstream read.
+func (c *Cache) MirrorBranchMatches(ctx context.Context, input, branch, sha string) (bool, error) {
+	current, err := c.RefSHA(ctx, input, branch)
+	return err == nil && strings.EqualFold(current, sha), err
+}
+
+// SyncBranch publishes an exact accepted branch SHA and verifies the remote ref.
+// The head check and push share the Git lock, fencing a later accepted push.
+func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string, force bool) error {
 	if err := ValidateBranch(branch); err != nil {
 		return err
 	}
@@ -34,7 +43,19 @@ func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string) error
 		return err
 	}
 	ref := "refs/heads/" + branch
-	if err := c.run(ctx, commandSpec{dir: path, args: []string{"push", "--force", "upstream", sha + ":" + ref}}); err != nil {
+	head, err := c.capture(ctx, path, "rev-parse", "--verify", ref+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("read mirror branch %s before publication: %w", branch, err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(head), sha) {
+		return ErrMirrorBranchAdvanced
+	}
+	args := []string{"push"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, "upstream", sha+":"+ref)
+	if err := c.run(ctx, commandSpec{dir: path, args: args}); err != nil {
 		return fmt.Errorf("force-sync branch %s: %w", branch, err)
 	}
 	return c.verifyRemoteRef(ctx, path, "--heads", ref, sha)

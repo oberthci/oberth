@@ -269,8 +269,9 @@ type PushGit interface {
 }
 
 type PublicationGit interface {
+	MirrorBranchMatches(context.Context, string, string, string) (bool, error)
 	RemoteRef(context.Context, string, string) (string, bool, error)
-	SyncBranch(context.Context, string, string, string) error
+	SyncBranch(context.Context, string, string, string, bool) error
 	SyncTag(context.Context, string, string, string) error
 	PushPromotion(context.Context, string, string, string) error
 }

@@ -22,7 +22,7 @@ type parkPushGit struct {
 	policyErr error
 }
 
-func (g *parkPushGit) SyncBranch(_ context.Context, repo, branch, sha string) error {
+func (g *parkPushGit) SyncBranch(_ context.Context, repo, branch, sha string, force bool) error {
 	g.mirrored = append(g.mirrored, repo+":"+branch+":"+sha)
 	return g.mirrorErr
 }

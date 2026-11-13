@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/store"
@@ -86,6 +87,20 @@ func deliverPublication(
 	// predecessor check. The default branch is excluded: a direct push to the
 	// default branch must go through predecessor tracking and use a non-forced
 	// push so it cannot silently overwrite a just-delivered promotion (#432).
+	if publication.PromotionID == "" && publication.RefKind == model.RefBranch {
+		if deleted, err := mirrorBranchDeleted(ctx, git, repositoryInput, publication.Ref); err != nil {
+			return model.PublicationFinalization{}, err
+		} else if deleted {
+			return abandonDeletedBranchPublication(ctx, publications, publication)
+		}
+		matches, err := git.MirrorBranchMatches(ctx, repositoryInput, publication.Ref, publication.ResultSHA)
+		if err != nil {
+			return model.PublicationFinalization{}, err
+		}
+		if !matches {
+			return abandonChangedBranchPublication(ctx, publications, publication)
+		}
+	}
 	forceBranch := publication.PromotionID == "" && publication.RefKind == model.RefBranch && publication.Ref != repository.DefaultBranch
 	if forceBranch {
 		if deleted, err := mirrorBranchDeleted(ctx, git, repositoryInput, publication.Ref); err != nil {
@@ -147,6 +162,9 @@ func attemptPublicationMutation(
 	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	ctx = finalizeCtx
+	if errors.Is(mutationErr, gitcache.ErrMirrorBranchAdvanced) {
+		return abandonChangedBranchPublication(ctx, publications, publication)
+	}
 	if mutationErr == nil && publication.PromotionID == "" {
 		return finalizePublication(ctx, publications, publication.ID, model.PublicationDelivered, "")
 	}
@@ -203,13 +221,7 @@ func mutatePublication(ctx context.Context, git PublicationGit, repository strin
 	if publication.RefKind == model.RefTag {
 		return git.SyncTag(ctx, repository, publication.Ref, publication.ResultSHA)
 	}
-	// The default branch uses a non-forced push (PushPromotion semantics) so
-	// a direct push to main cannot silently overwrite a just-delivered
-	// promotion. Feature branches keep force-push behavior (#432).
-	if !forceBranch {
-		return git.PushPromotion(ctx, repository, publication.Ref, publication.ResultSHA)
-	}
-	return git.SyncBranch(ctx, repository, publication.Ref, publication.ResultSHA)
+	return git.SyncBranch(ctx, repository, publication.Ref, publication.ResultSHA, forceBranch)
 }
 
 func classifyRemotePublication(publication model.Publication, remoteSHA string, exists bool) remotePublicationState {
@@ -354,4 +366,18 @@ func abandonDeletedBranchPublication(ctx context.Context, publications Publicati
 		return abandoner.AbandonPublication(finalCtx, publication.ID, deletedBranchPublicationActor, reason)
 	}
 	return publications.FinalizePublication(finalCtx, publication.ID, model.PublicationFailed, reason)
+}
+
+func abandonChangedBranchPublication(ctx context.Context, publications PublicationStore, publication model.Publication) (model.PublicationFinalization, error) {
+	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	var owner any = publications
+	if wrapped, ok := publications.(schedulerDatabase); ok {
+		owner = wrapped.SchedulerStore
+	}
+	skipper, ok := owner.(deletedBranchPublicationSkipper)
+	if !ok {
+		return model.PublicationFinalization{}, errors.New("service: green publication abandonment unavailable")
+	}
+	return skipper.SkipDeletedBranchPublication(finalCtx, publication.ID, "oberth:branch-head", gitcache.ErrMirrorBranchAdvanced.Error())
 }

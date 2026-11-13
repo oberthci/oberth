@@ -53,7 +53,7 @@ func TestCorruptReceiveOutboxIsolatesRepositoryAndPreservesEvidence(t *testing.T
 	for name, action := range map[string]func() error{
 		"refresh":       func() error { _, err := cache.Ensure(t.Context(), "broken"); return err },
 		"fetch refresh": func() error { _, err := cache.EnsureForFetch(t.Context(), "broken"); return err },
-		"publish":       func() error { return cache.SyncBranch(t.Context(), "broken", "main", repository.initialSHA) },
+		"publish":       func() error { return cache.SyncBranch(t.Context(), "broken", "main", repository.initialSHA, true) },
 		"receive": func() error {
 			return cache.Receive(t.Context(), "broken", "tester", "", bytes.NewReader(nil), io.Discard, io.Discard, handler)
 		},

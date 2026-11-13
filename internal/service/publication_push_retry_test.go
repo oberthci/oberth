@@ -91,8 +91,10 @@ func (g *retryPublicationGit) push(ref, sha string) error {
 	}
 	return g.failure
 }
-func (g *retryPublicationGit) SyncBranch(_ context.Context, _, ref, sha string) error {
-	g.forced++
+func (g *retryPublicationGit) SyncBranch(_ context.Context, _, ref, sha string, force bool) error {
+	if force {
+		g.forced++
+	}
 	return g.push("refs/heads/"+ref, sha)
 }
 func (g *retryPublicationGit) SyncTag(_ context.Context, _, ref, sha string) error {

@@ -95,7 +95,10 @@ func (*controlGit) ReadDefaultBlob(context.Context, string, string, int) (string
 	return "", nil, false, nil
 }
 
-func (git *controlGit) SyncBranch(_ context.Context, repo, branch, sha string) error {
+func (git *controlGit) SyncBranch(ctx context.Context, repo, branch, sha string, force bool) error {
+	if !force {
+		return git.PushPromotion(ctx, repo, branch, sha)
+	}
 	if git.publishStarted != nil {
 		git.publishOnce.Do(func() {
 			close(git.publishStarted)
@@ -3928,5 +3931,9 @@ func (jobs *flakyDeleteJobs) SettleCreate(ctx context.Context, name, id string, 
 	if err := jobs.Stop(ctx, name, id); err != nil {
 		return false, err
 	}
+	return true, nil
+}
+
+func (*controlGit) MirrorBranchMatches(context.Context, string, string, string) (bool, error) {
 	return true, nil
 }
