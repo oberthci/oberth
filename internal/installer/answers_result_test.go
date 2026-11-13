@@ -305,7 +305,7 @@ func TestVerificationPublicEndpointsAndCAPin(t *testing.T) {
 		seen := 0
 		for _, check := range blocked.Checks {
 			switch check.Code {
-			case "deployment_ready", "https_tls", "ssh_reachable":
+			case "deployment_ready", "client_bootstrap_endpoint", "ssh_reachable":
 				seen++
 				if check.OK || check.Reason != reason {
 					t.Fatalf("lost readiness cause: %+v", check)

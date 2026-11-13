@@ -14,9 +14,15 @@ Verify uses Service discovery for empty fields, saved choices next, and explicit
 install without those flags preserves the saved Helm values.
 
 When `deployment_ready` fails, its JSON check includes a safe `reason` code.
-`https_tls` and `ssh_reachable` are blocked by that deployment failure and are
+`client_bootstrap_endpoint` and `ssh_reachable` are blocked by that deployment failure and are
 not probed. Their remedy is `blocked by: deployment not ready (<reason>)`.
 Restore readiness before diagnosing client connectivity.
+
+Install and verify use `client_bootstrap_endpoint` for HTTPS endpoint checks.
+Unreachable HTTPS and `ssh_reachable` failures share the complete routing and
+recovery remedy, including both selected client ports. Observed TLS/dial errors
+remain in the reason; verification does not start a port-forward or reissue a
+client certificate.
 
 `GET /readyz` returns `status` and `code`. Ready responses have code `ready`;
 not-ready codes are `no_upstream`, `database_error`, `ssh_identity`,
