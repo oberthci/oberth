@@ -338,14 +338,14 @@ func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...r
 }
 
 func (c *fakeBackupCluster) deps(output *bytes.Buffer) backupDeps {
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       output,
 		KubeClient:   c.client,
 		ContextName:  "test-context",
 		RunCommand:   c.run,
 		RunHelm:      c.helm,
 		PollInterval: time.Millisecond,
-	}
+	})
 	// The Helm upgrade a restore applies deploys only a verified chart.
 	if version := chartVersionFromRelease(c.chart, "oberth"); version != "" {
 		withSignedRelease(c.t, &deps, version, fakeChartImageRef)
@@ -428,6 +428,8 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 	}
 	joined := strings.Join(command, " ")
 	switch {
+	case joined == "oberth access list --json":
+		return []byte(`[{"repo":"codeberg/org/repo","step":"*","secret":"oberth/data/release/cosign-secret"}]`), nil
 	case joined == "oberth version --schema":
 		if c.schemaExecErr != nil {
 			return nil, c.schemaExecErr
@@ -443,15 +445,6 @@ func (c *fakeBackupCluster) run(_ context.Context, input []byte, name string, ar
 			return nil, errors.New(`kubectl: exit status 2: oberth: usage error: unknown command "backup"`)
 		}
 		return c.database, nil
-	case len(command) > 2 && command[2] == utilitySQLiteHashesScript:
-		var lines []string
-		for _, suffix := range []string{"", "-wal"} {
-			if body, ok := c.rawFiles[serverDatabasePath+suffix]; ok {
-				sum := sha256.Sum256(body)
-				lines = append(lines, hex.EncodeToString(sum[:])+"  "+serverDatabasePath+suffix)
-			}
-		}
-		return []byte(strings.Join(lines, "\n") + "\n"), nil
 	case len(command) == 4 && command[0] == "oberth" && command[1] == "admin" && command[2] == "read-file":
 		return c.rawFiles[command[3]], nil
 	case command[0] == "cat":
@@ -668,7 +661,7 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 	if manifest.Compatibility != sourceCompat {
 		t.Fatalf("compatibility = %+v, want the deployment's %+v", manifest.Compatibility, sourceCompat)
 	}
-	if manifest.Database.Snapshot != snapshotInPod || manifest.Database.Schema != store.LatestMigrationVersion() {
+	if manifest.Database.Snapshot != snapshotAPI || manifest.Database.Schema != store.LatestMigrationVersion() {
 		t.Fatalf("database summary = %+v", manifest.Database)
 	}
 	// identities/oberth/ssh-host is the install's own: never backed up.
@@ -708,26 +701,8 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 	if err := readBackupJSON(work, backupMemberSecretAccess, &grants); err != nil {
 		t.Fatal(err)
 	}
-	if !grants.Present || grants.Data[secretAccessConfigMapKey] != testGrants {
+	if !grants.Present || !strings.Contains(grants.Data[secretAccessConfigMapKey], "codeberg/org/repo") {
 		t.Fatalf("secret-access export = %+v", grants)
-	}
-}
-
-func TestBackupFallsBackToStableCopyOnOlderServers(t *testing.T) {
-	t.Parallel()
-	output, _, source := backupFixtureArchive(t, true)
-	assertUtilityHelperImage(t, source, "registry.internal/busybox@sha256:fixture")
-	work := t.TempDir()
-	manifest, err := openBackupArchive(context.Background(), output, fakeEnvelopeCipher{}, work, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manifest.Database.Snapshot != snapshotStableCopy {
-		t.Fatalf("snapshot = %q, want %q", manifest.Database.Snapshot, snapshotStableCopy)
-	}
-	protocol := store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}
-	if _, err := verifyDatabaseArchive(context.Background(), filepath.Join(work, filepath.FromSlash(backupMemberDatabase)), manifest.Database.Schema, protocol, 0); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -846,7 +821,7 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 
 	// The grants ConfigMap the server reconciles from is back.
 	cm, err := target.client.CoreV1().ConfigMaps(DefaultNamespace).Get(context.Background(), secretAccessConfigMapName, metav1.GetOptions{})
-	if err != nil || cm.Data[secretAccessConfigMapKey] != testGrants {
+	if err != nil || !strings.Contains(cm.Data[secretAccessConfigMapKey], "codeberg/org/repo") {
 		t.Fatalf("secret-access ConfigMap = %v, %v", cm, err)
 	}
 

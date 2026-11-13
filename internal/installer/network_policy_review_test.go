@@ -38,7 +38,7 @@ func TestProbeEvidenceRequiresEgressControlAndConvergence(t *testing.T) {
 					return ""
 				}
 			}
-			deps := Deps{KubeClient: kube, ContextName: "fixture", RunCommand: model.run}
+			deps := testAdminDeps(Deps{KubeClient: kube, ContextName: "fixture", RunCommand: model.run})
 			result := probeNetworkPolicy(t.Context(), Config{ArgoNamespace: "pipelines"}, deps, policyModelTiming())
 			want := "unverified"
 			if mode == "egress-only" || mode == "namespace-exclusion" {
@@ -141,7 +141,7 @@ func TestProbeEvidenceRejectsAndRecovers(t *testing.T) {
 					return ""
 				}
 			}
-			result := probeNetworkPolicy(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming())
+			result := probeNetworkPolicy(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.run}), policyModelTiming())
 			if result.Status != tc.want {
 				t.Fatalf("got %+v, want %s", result, tc.want)
 			}
@@ -173,7 +173,7 @@ func TestReview1548RejectingSourceWithoutEnforcement(t *testing.T) {
 				}
 				return ""
 			}}
-			result := probeNetworkPolicy(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming())
+			result := probeNetworkPolicy(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.run}), policyModelTiming())
 			if result.Status != "unverified" {
 				t.Fatal("unrelated per-source burst became enforcement", result)
 			}
@@ -185,7 +185,7 @@ func TestReview1548DuringSampleCanHappenOnlyAfter(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	var clients atomic.Int32
-	deps := Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 		_, _, script, _ := policyModelArgs(args)
 		switch script {
 		case policyOverlapScript:
@@ -197,7 +197,7 @@ func TestReview1548DuringSampleCanHappenOnlyAfter(t *testing.T) {
 			clients.Add(1)
 			return []byte("refused"), nil
 		}
-	}}
+	}})
 	pods := policyPairPods(t)
 	deps.KubeClient = pods.kube
 	state, err := policyProbePair(ctx, Config{}, deps, policyProbeTiming{interval: time.Millisecond}, pods.identities, "client-0", "control-0", "http://192.0.2.10:8080")
@@ -211,7 +211,7 @@ func TestPolicyOverlapRejectsEarlyCompletionAndControlFailure(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			var reads atomic.Int32
 			release := make(chan struct{})
-			deps := Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+			deps := testAdminDeps(Deps{RunCommand: func(ctx context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 				_, _, script, _ := policyModelArgs(args)
 				switch script {
 				case policyOverlapScript:
@@ -239,7 +239,7 @@ func TestPolicyOverlapRejectsEarlyCompletionAndControlFailure(t *testing.T) {
 					}
 					return []byte("refused"), nil
 				}
-			}}
+			}})
 			pods := policyPairPods(t)
 			deps.KubeClient = pods.kube
 			state, err := policyProbePair(t.Context(), Config{}, deps, policyProbeTiming{interval: time.Millisecond}, pods.identities, "client-0", "control-0", "http://192.0.2.10:8080")
@@ -274,7 +274,7 @@ func TestPolicyRecoveryConvergesAfterTransientSourceFailures(t *testing.T) {
 		}
 		return ""
 	}}
-	if err := waitPolicyTraffic(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming(), policyProbePods{namespace: namespace, names: names, uids: map[string]types.UID{"server": "server-uid", "client-0": "client-0-uid", "control-0": "control-0-uid"}}, "http://192.0.2.10/", ""); err != nil {
+	if err := waitPolicyTraffic(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.run}), policyModelTiming(), policyProbePods{namespace: namespace, names: names, uids: map[string]types.UID{"server": "server-uid", "client-0": "client-0-uid", "control-0": "control-0-uid"}}, "http://192.0.2.10/", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -295,7 +295,7 @@ func TestPolicyFreshUnselectedFailureBeforeAndAfter(t *testing.T) {
 				return ""
 			}}
 			pods := policyPairPods(t)
-			state, err := policyProbePair(t.Context(), Config{}, Deps{KubeClient: pods.kube, RunCommand: model.run}, policyModelTiming(), pods.identities, "client-0", "control-0", "http://192.0.2.10/")
+			state, err := policyProbePair(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: pods.kube, RunCommand: model.run}), policyModelTiming(), pods.identities, "client-0", "control-0", "http://192.0.2.10/")
 			if err == nil || state != "" || !strings.Contains(policyProbeFailure(err), "Fresh unselected connection "+tc.phase) || !strings.Contains(policyProbeFailure(err), "connection refused") {
 				t.Fatal(state, err)
 			}

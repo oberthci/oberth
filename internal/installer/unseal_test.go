@@ -193,12 +193,12 @@ func TestTPMUnsealRefusesUnsupportedHostsAndHasNoFallback(t *testing.T) {
 }
 
 func TestUnsealStatusDoesNotReadRecovery(t *testing.T) {
-	deps := Deps{KubeClient: fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet()), RunCommand: func(_ context.Context, input []byte, _ string, args ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{KubeClient: fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet()), RunCommand: func(_ context.Context, input []byte, _ string, args ...string) ([]byte, error) {
 		if len(input) > 0 || strings.Contains(strings.Join(args, " "), "sys/unseal") {
 			t.Fatal("status tried to unseal")
 		}
 		return []byte(`{"initialized":true,"sealed":true}`), errors.New("sealed status exit")
-	}}
+	}})
 	status, err := unsealWithDeps(t.Context(), UnsealConfig{OpenBaoNamespace: "openbao", StatusOnly: true, SecretsFile: "/missing/not-read"}, deps)
 	if err != nil || !status.Sealed {
 		t.Fatal("read-only status failed")
@@ -223,7 +223,7 @@ func TestTPMCredentialUnitUsesPrivateCLI(t *testing.T) {
 }
 
 func TestUnsealRefusesInsecureKubeconfigBeforeSecretRead(t *testing.T) {
-	_, err := ExecuteUnseal(t.Context(), UnsealConfig{SecretsFile: "/missing"}, InstallDeps{
+	_, err := ExecuteUnseal(t.Context(), UnsealConfig{SecretsFile: "/missing"}, testAdminInstallDeps(InstallDeps{
 		LookPath: func(string) (string, error) { return "/tool", nil },
 		LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 			return fake.NewClientset(), &rest.Config{TLSClientConfig: rest.TLSClientConfig{Insecure: true}}, "chosen", nil
@@ -232,7 +232,7 @@ func TestUnsealRefusesInsecureKubeconfigBeforeSecretRead(t *testing.T) {
 			t.Fatal("insecure cluster reached command execution")
 			return nil, nil
 		},
-	})
+	}))
 	if err == nil || !strings.Contains(err.Error(), "TLS verification") {
 		t.Fatal("insecure context accepted")
 	}

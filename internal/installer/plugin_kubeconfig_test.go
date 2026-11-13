@@ -55,7 +55,7 @@ func TestPluginPlanAndInstallKeepKubeconfigBytes(t *testing.T) {
 	kube := fake.NewClientset(preflightNode(), preflightStorage())
 	helmCalled := false
 	stop := errors.New("stop at Helm after the actual install preflight")
-	host := InstallDeps{Output: io.Discard, CredentialSink: func(string, string) {}, LookPath: func(name string) (string, error) { return name, nil }, KubeContexts: KubeconfigContexts,
+	host := testAdminInstallDeps(InstallDeps{Output: io.Discard, CredentialSink: func(string, string) {}, LookPath: func(name string) (string, error) { return name, nil }, KubeContexts: KubeconfigContexts,
 		LoadKubeConfig: func(name string) (kubernetes.Interface, *rest.Config, string, error) {
 			_, config, selected, err := LoadKubeConfigForContext(name, io.Discard)
 			if name != "kind-target" || selected != name {
@@ -73,7 +73,7 @@ func TestPluginPlanAndInstallKeepKubeconfigBytes(t *testing.T) {
 			helmCalled = true
 			return nil, stop
 		},
-	}
+	})
 	cfg := Config{ContextName: "kind-target", InstallSecretStoreDev: true, ChartPath: testLocalChart, ClientAccess: "none"}
 	plan := PlanInstall(t.Context(), cfg, host)
 	if !plan.OK || plan.Identity.Context != "kind-target" {

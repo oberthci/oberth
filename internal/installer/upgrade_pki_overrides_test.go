@@ -42,7 +42,7 @@ func TestUpgradePinsTLSOverridesOnlyForLivePKI(t *testing.T) {
 					}
 					applied := false
 					stop := errors.New("stop after Helm apply")
-					deps := Deps{Output: io.Discard, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+					deps := testAdminDeps(Deps{Output: io.Discard, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 						RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 							switch args[0] {
 							case "list":
@@ -77,7 +77,7 @@ func TestUpgradePinsTLSOverridesOnlyForLivePKI(t *testing.T) {
 							t.Fatal("override validation must not inspect or write PKI")
 							return nil, nil
 						},
-					}
+					})
 					_, err := RunUpgrade(t.Context(), cfg, deps)
 					if enabled {
 						var pinned *ErrPinnedKeyOverride

@@ -86,7 +86,7 @@ func newCertificateResumeHost(t *testing.T, onboard func(context.Context, []byte
 	kube := fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet(), preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
 	pki, runner := pkiLifecycleDeps(t, []string{"ci.example.com", "localhost", "node", "node.local"}, []string{"192.0.2.1", "127.0.0.1", "::1"})
 	h.runner = runner
-	h.deps = InstallDeps{Output: &h.output, LookPath: func(s string) (string, error) { return s, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
+	h.deps = testAdminInstallDeps(InstallDeps{Output: &h.output, LookPath: func(s string) (string, error) { return s, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
 		LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 			return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 		},
@@ -123,7 +123,7 @@ func newCertificateResumeHost(t *testing.T, onboard func(context.Context, []byte
 				h.applied = true
 			}
 			return nil, nil
-		}}
+		}})
 	return h
 }
 

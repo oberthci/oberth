@@ -34,7 +34,7 @@ func TestSetupProductionSecretStoreInteractiveTokenPrompt(t *testing.T) {
 		Data:       map[string]string{"ca.crt": "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"},
 	}
 	pod := runningOpenBaoPod()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &buf,
 		Input:        strings.NewReader(""),
 		KubeClient:   fake.NewClientset(ca, pod, runningOpenBaoStatefulSet()),
@@ -49,7 +49,7 @@ func TestSetupProductionSecretStoreInteractiveTokenPrompt(t *testing.T) {
 		ReadPassword: func() ([]byte, error) {
 			return []byte(injectedToken), nil
 		},
-	}
+	})
 	cfg := Config{InstallSecretStore: true}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestSetupProductionSecretStoreNonInteractiveTokenPromptNotShown(t *testing.
 		Data:       map[string]string{"ca.crt": "fake-ca"},
 	}
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &buf,
 		KubeClient:   fake.NewClientset(ca, pod, runningOpenBaoStatefulSet()),
 		RestConfig:   &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -110,7 +110,7 @@ func TestSetupProductionSecretStoreNonInteractiveTokenPromptNotShown(t *testing.
 		ContextName:  "test-ctx",
 		PollInterval: time.Millisecond,
 		// Non-interactive: no IsTerminal, no ReadPassword
-	}
+	})
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 

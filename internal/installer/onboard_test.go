@@ -761,7 +761,7 @@ func TestWorkKeyImportWaitsForAuditGate(t *testing.T) {
 	}
 	key := pem.EncodeToMemory(block)
 	calls := 0
-	deps := Deps{Output: io.Discard, PollInterval: time.Millisecond, RunCommand: func(_ context.Context, input []byte, _ string, _ ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{Output: io.Discard, PollInterval: time.Millisecond, RunCommand: func(_ context.Context, input []byte, _ string, _ ...string) ([]byte, error) {
 		calls++
 		if !bytes.Equal(input, key) {
 			t.Fatal("import payload changed")
@@ -770,7 +770,7 @@ func TestWorkKeyImportWaitsForAuditGate(t *testing.T) {
 			return []byte("oberth: daemon audit mutation gate rejected upstream.identity.import: audit integrity unavailable"), errors.New("exit status 1")
 		}
 		return nil, nil
-	}}
+	}})
 	if err := applyProvidedDeployKey(context.Background(), Config{ForgeURL: "github.com/company", Timeout: time.Second}, deps, key); err != nil {
 		t.Fatal(err)
 	}

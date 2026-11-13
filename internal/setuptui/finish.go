@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"golang.org/x/crypto/ssh"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 
-	tea "charm.land/bubbletea/v2"
-	"golang.org/x/crypto/ssh"
-
-	"github.com/oberthci/oberth/internal/containerimage"
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/mdnsdial"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // ---------- verification against the installed server (#002) ----------
@@ -44,12 +44,6 @@ func kubectlTarget(st *WizardState) []string {
 	return args
 }
 
-func podExec(st *WizardState, command ...string) []string {
-	command = containerimage.ServerCommand(command)
-	args := append(kubectlTarget(st), "exec", "-n", st.namespace(), "deploy/oberth", "-c", "oberth", "--")
-	return append(args, command...)
-}
-
 // kubectlLine renders a kubectl argv as a copyable command line.
 func kubectlLine(args []string) string {
 	parts := []string{"kubectl"}
@@ -60,26 +54,10 @@ func kubectlLine(args []string) string {
 	return strings.Join(parts, " ")
 }
 
-func upstreamAddArgs(st *WizardState) []string {
-	return podExec(st, "oberth", "upstream", "add", "--yes", "--no-wait", st.ForgeType,
-		"ssh://git@"+forgeUpstreamURL(st.ForgeType, st.ForgeOrg))
-}
-
-const upstreamPublicKeyPath = "/run/oberth-identities/upstream/id_ed25519.pub"
-
 // recoveryCommands are the exact commands that finish a pending forge
 // authorization by hand (#002, #012).
 func recoveryCommands(st *WizardState) []string {
-	var lines []string
-	if st.ForgeAuth != forgeAuthExisting {
-		lines = append(lines,
-			"1. Show the upstream public key:  "+kubectlLine(podExec(st, "/usr/local/bin/oberth", "admin", "read-file", upstreamPublicKeyPath)),
-			"2. Add it at "+forgeKeyDestination(st.ForgeType, st.ForgeOrg))
-	} else {
-		lines = append(lines, "1. Make sure the work key "+displayHome(st.Config.UpstreamPrivateKeyPath)+" is registered at "+forgeKeyDestination(st.ForgeType, st.ForgeOrg),
-			"2. (nothing to copy: the key you chose is already in OpenBao)")
-	}
-	return append(lines, "3. Register the upstream:  "+kubectlLine(upstreamAddArgs(st)))
+	return []string{"1. Read the public deploy key: oberth admin public-identity upstream-public-key", "2. Register the public key at " + forgeKeyDestination(st.ForgeType, st.ForgeOrg), "3. Register the upstream: oberth upstream add --yes --no-wait " + shellArg(st.ForgeType) + " " + shellArg("ssh://git@"+forgeUpstreamURL(st.ForgeType, st.ForgeOrg))}
 }
 
 type fileCheck struct {
@@ -216,20 +194,6 @@ type verifyDoneMsg struct {
 
 // upstreamListHasRows reads `oberth upstream list`: a table whose header
 // starts with NAME; any further non-empty line is a configured upstream.
-func upstreamListHasRows(out []byte) bool {
-	header := false
-	for _, line := range strings.Split(string(out), "\n") {
-		t := strings.TrimSpace(line)
-		switch {
-		case t == "":
-		case strings.HasPrefix(t, "NAME"):
-			header = true
-		case header:
-			return true
-		}
-	}
-	return false
-}
 
 func lastLine(out []byte, err error) string {
 	text := strings.TrimSpace(string(out))
@@ -252,32 +216,42 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 	defer cancel()
 	res := verifyResult{at: time.Now()}
 	list := func() error {
-		out, err := runKubectl(ctx, podExec(&st, "oberth", "upstream", "list", "--check")...)
-		if err != nil && strings.Contains(string(out), "flag provided but not defined") {
-			// A server older than --check: list without authenticating.
-			out, err = runKubectl(ctx, podExec(&st, "oberth", "upstream", "list")...)
+		var result struct {
+			Upstreams []struct {
+				Upstream model.Upstream `json:"upstream"`
+				Auth     string         `json:"auth"`
+			} `json:"upstreams"`
 		}
-		if err != nil {
-			return fmt.Errorf("list upstreams: %s", lastLine(out, err))
+		if err := runWizardAdmin(ctx, st, "upstream-list", map[string]bool{"check": true}, &result); err != nil {
+			return err
 		}
-		res.upstream = upstreamListHasRows(out)
-		res.upstreams = parseUpstreamCheck(out)
+		res.upstream = len(result.Upstreams) > 0
+		res.upstreams = nil
+		for _, row := range result.Upstreams {
+			res.upstreams = append(res.upstreams, upstreamCheck{name: row.Upstream.Name, url: row.Upstream.BaseURL, auth: row.Auth})
+		}
 		return nil
 	}
+
 	if err := list(); err != nil {
 		res.err = err.Error()
 	}
 	if !res.upstream && reRegister && st.ForgeOrg != "" && res.err == "" {
-		out, err := runKubectl(ctx, upstreamAddArgs(&st)...)
+		err := runWizardAdmin(ctx, st, "upstream-add", api.UpstreamAddRequest{Name: st.ForgeType, BaseURL: "ssh://git@" + forgeUpstreamURL(st.ForgeType, st.ForgeOrg), NoWait: true, ExpectedHostFingerprint: st.Config.ExpectedHostFingerprint}, nil)
 		if err != nil {
-			res.register = lastLine(out, err)
+			res.register = err.Error()
 		}
+
 		if err := list(); err != nil {
 			res.err = err.Error()
 		}
 	}
 	if st.ForgeAuth != forgeAuthExisting {
-		if out, err := runKubectl(ctx, podExec(&st, "/usr/local/bin/oberth", "admin", "read-file", upstreamPublicKeyPath)...); err == nil {
+		var identity struct {
+			Content string `json:"content"`
+		}
+		if err := runWizardAdmin(ctx, st, "public-identity", map[string]string{"name": "upstream-public-key"}, &identity); err == nil {
+			out := []byte(identity.Content)
 			if key, _, _, _, perr := ssh.ParseAuthorizedKey(out); perr == nil {
 				res.publicKey = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 				res.fingerprint = ssh.FingerprintSHA256(key)
@@ -701,10 +675,7 @@ func nextStepsUpstreams(st *WizardState, v *verifyResult) []installer.NextStepsU
 // serverCAFingerprintCommand prints the fingerprint clients should pin: the
 // server CA when the server issues short-lived leaves, else the self-signed
 // certificate.
-func serverCAFingerprintCommand(st *WizardState) string {
-	return kubectlLine(podExec(st, "/usr/local/bin/oberth", "admin", "read-file", "/run/oberth-identities/server/ca.crt", "/run/oberth-identities/server/tls.crt")) +
-		" | openssl x509 -fingerprint -sha256 -noout"
-}
+func serverCAFingerprintCommand(st *WizardState) string { return "oberth client pin" }
 
 func (f *finishScreen) frame(w *wizard) frameSpec {
 	inner := max(20, w.width-4)
@@ -871,4 +842,10 @@ func wizardClientEndpoint(st *WizardState, service *corev1.Service) installer.De
 	deps := installer.Deps{ClientHost: st.Config.ClientHost, ClientServiceType: st.Config.ServiceType, RestConfig: &rest.Config{Host: st.ClusterInfo.server}}
 
 	return installer.WithServiceEndpoint(service, st.namespace(), deps)
+}
+
+var runWizardAdmin = func(ctx context.Context, st WizardState, action string, args, into any) error {
+	cfg := st.Config
+	cfg.ContextName = st.contextForCommands()
+	return installer.AdminForTarget(ctx, cfg, action, args, into)
 }

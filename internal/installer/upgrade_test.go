@@ -80,7 +80,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 			t.Parallel()
 			var output bytes.Buffer
 			helmCalls := 0
-			deps := Deps{
+			deps := testAdminDeps(Deps{
 				Output: &output,
 				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 					t.Fatal("no-op/dry-run must not write audit records")
@@ -98,7 +98,7 @@ func TestRunUpgradeAlreadyUpToDate(t *testing.T) {
 				},
 				KubeClient: fake.NewClientset(),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-			}
+			})
 
 			result, err := RunUpgrade(context.Background(), UpgradeConfig{
 				BinaryVersion: "0.12.35", Namespace: "oberth", DryRun: dryRun,
@@ -243,7 +243,7 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 	}
 	var output bytes.Buffer
 	var calls [][]string
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -268,7 +268,7 @@ func TestRunUpgradeRetriesFailedSameVersionWithPinnedImage(t *testing.T) {
 		},
 		KubeClient: fake.NewClientset(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 	withSignedRelease(t, &deps, targetVersion, targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: targetVersion, Namespace: "oberth", Timeout: 10 * time.Second, NoBackup: true,
@@ -316,7 +316,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 	}
 	var output bytes.Buffer
 	var calls [][]string
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -341,7 +341,7 @@ func TestRunUpgradeReappliesValuesAtSameVersion(t *testing.T) {
 		},
 		KubeClient: fake.NewClientset(deployment),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 	valuesFile := filepath.Join(t.TempDir(), "watch.yaml")
 	if err := os.WriteFile(valuesFile, []byte("pushBannerURL: https://ci.example.invalid\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -504,7 +504,7 @@ func TestRunUpgradeRejectsUnparseableInstalledVersion(t *testing.T) {
 func TestRunUpgradeDryRun(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 			t.Fatal("no-op/dry-run must not write audit records")
@@ -528,7 +528,7 @@ func TestRunUpgradeDryRun(t *testing.T) {
 		},
 		KubeClient: fake.NewClientset(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withSignedRelease(t, &deps, "0.12.35", fakeChartImageRef)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -767,12 +767,12 @@ func TestDeploymentRolledOut(t *testing.T) {
 
 func TestVerifyRunningVersionParsesOutput(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
-	}
+	})
 	version, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
 	if err != nil {
 		t.Fatal(err)
@@ -784,12 +784,12 @@ func TestVerifyRunningVersionParsesOutput(t *testing.T) {
 
 func TestVerifyRunningVersionHandlesKubectlNoise(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("Defaulted container \"oberth\" out of: oberth, init\noberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
-	}
+	})
 	version, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
 	if err != nil {
 		t.Fatal(err)
@@ -801,12 +801,12 @@ func TestVerifyRunningVersionHandlesKubectlNoise(t *testing.T) {
 
 func TestVerifyRunningVersionRejectsMismatch(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth v0.12.20 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
-	}
+	})
 	_, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
 	if err == nil || !strings.Contains(err.Error(), "expected v0.12.35 but pod reports v0.12.20") {
 		t.Fatalf("mismatch error = %v", err)
@@ -815,12 +815,12 @@ func TestVerifyRunningVersionRejectsMismatch(t *testing.T) {
 
 func TestVerifyRunningVersionRejectsUnparseable(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			return []byte("oberth dev commit=unknown date=unknown\n"), nil
 		},
-	}
+	})
 	_, err := verifyRunningVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"}, "0.12.35")
 	if err == nil || !strings.Contains(err.Error(), "could not parse") {
 		t.Fatalf("unparseable error = %v", err)
@@ -921,7 +921,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 
 	verified, recorded := false, false
 	helmCallLog := make([]string, 0)
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -977,7 +977,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target str
 		KubeClient:  kubeClient,
 		RestConfig:  &rest.Config{Host: server.URL},
 		ContextName: "remote-fixture",
-	}
+	})
 
 	withSignedRelease(t, &deps, target, targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1266,7 +1266,7 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 	kubeClient := fake.NewClientset(deployment)
 
 	execAttempts := 0
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -1300,7 +1300,7 @@ func TestRunUpgradeRetriesTransientVerifyExecFailure(t *testing.T) {
 		},
 		KubeClient: kubeClient,
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1352,7 +1352,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 	kubeClient := fake.NewClientset(deployment)
 
 	execAttempts := 0
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -1386,7 +1386,7 @@ func TestRunUpgradeFailsWhenVersionUnverifiable(t *testing.T) {
 		},
 		KubeClient: kubeClient,
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1443,7 +1443,7 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 	kubeClient := fake.NewClientset(deployment)
 
 	execAttempts := 0
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:       &output,
 		PollInterval: time.Millisecond,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -1477,7 +1477,7 @@ func TestRunUpgradeFailsOnVersionMismatchFullFlow(t *testing.T) {
 		},
 		KubeClient: kubeClient,
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
@@ -1888,7 +1888,7 @@ func TestDryRunAndRealArgsAgree(t *testing.T) {
 
 func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 			// Verify the command calls version --schema, not just version.
@@ -1899,7 +1899,7 @@ func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 			}
 			return nil, fmt.Errorf("unexpected args: %v", args)
 		},
-	}
+	})
 	v, err := queryRunningSchemaVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"})
 	if err != nil {
 		t.Fatal(err)
@@ -1911,13 +1911,13 @@ func TestQueryRunningSchemaVersionParsesOutput(t *testing.T) {
 
 func TestQueryRunningSchemaVersionReturnsZeroForOldBinary(t *testing.T) {
 	t.Parallel()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: io.Discard,
 		RunCommand: func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 			// Old binary does not understand --schema, returns usage error.
 			return []byte("oberth: usage error: version accepts no arguments\n"), fmt.Errorf("exit status 2")
 		},
-	}
+	})
 	v, err := queryRunningSchemaVersion(context.Background(), deps, UpgradeConfig{Namespace: "oberth"})
 	if err != nil {
 		t.Fatal(err)
@@ -1930,7 +1930,7 @@ func TestQueryRunningSchemaVersionReturnsZeroForOldBinary(t *testing.T) {
 func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -1951,7 +1951,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		},
 		KubeClient: fake.NewClientset(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion:       "0.16.19",
@@ -1977,7 +1977,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -1998,7 +1998,7 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 		},
 		KubeClient: fake.NewClientset(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
-	}
+	})
 
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion:       "0.16.19",

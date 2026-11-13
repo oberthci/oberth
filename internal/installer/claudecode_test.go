@@ -40,10 +40,10 @@ type fakeClaude struct {
 }
 
 func (fake *fakeClaude) deps() Deps {
-	return Deps{
+	return testAdminDeps(Deps{
 		LookPath:   func(name string) (string, error) { return "/usr/local/bin/" + name, nil },
 		RunCommand: fake.run,
-	}
+	})
 }
 
 func (fake *fakeClaude) run(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {

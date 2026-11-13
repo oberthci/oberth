@@ -28,6 +28,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/clientcert"
 )
 
 // fakeChartImageRef is the digest-pinned image reference returned by fake
@@ -921,14 +924,14 @@ func secretStoreTestDeps(runner *fakeBaoRunner, output io.Writer, objects ...k8s
 		}
 	}
 
-	return Deps{
+	return testAdminDeps(Deps{
 		Output:       output,
 		KubeClient:   fake.NewClientset(append([]k8sruntime.Object{ca, runningOpenBaoStatefulSet()}, objects...)...),
 		RestConfig:   &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunCommand:   runner.run,
 		ContextName:  "test-ctx",
 		PollInterval: time.Millisecond,
-	}
+	})
 }
 
 // readyArgoControllerPod is the workflow controller Run verifies before it
@@ -2044,7 +2047,7 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 	clientRoot := t.TempDir()
 	client := fake.NewClientset(node, oberthPod, readyArgoControllerPod())
 	var buf bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:      &buf,
 		KubeClient:  client,
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -2077,7 +2080,7 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 		IsTerminal:   func() bool { return true },
 		Input:        strings.NewReader("this should never be read\n"),
 		PollInterval: time.Millisecond,
-	}
+	})
 	// SecretStoreUndecided is false (default), so the prompt must not fire
 	// even though no secret-store flag is set.
 	withSignedRelease(t, &deps, "0.17.16", fakeChartImageRef)
@@ -2111,7 +2114,7 @@ func TestRunPromptsWhenSecretStoreUndecided(t *testing.T) {
 	client := fake.NewClientset(node, oberthPod, readyArgoControllerPod())
 	var buf bytes.Buffer
 	// Cancelling must stop the install before any product write.
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:      &buf,
 		KubeClient:  client,
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -2131,7 +2134,7 @@ func TestRunPromptsWhenSecretStoreUndecided(t *testing.T) {
 		IsTerminal:   func() bool { return true },
 		Input:        strings.NewReader("2\n"),
 		PollInterval: time.Millisecond,
-	}
+	})
 	cfg := Config{Timeout: time.Second, SecretStoreUndecided: true}
 	if err := Run(context.Background(), cfg, deps); err == nil {
 		t.Fatal("cancelled install continued")
@@ -2479,13 +2482,60 @@ const fakeDeployKeyLine = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINKAaSupc8 oberth
 // testServerCAPEM stands in for the server CA the client files pin.
 const testServerCAPEM = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
 
-func (f *fakeOberthHost) run(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
+func (f *fakeOberthHost) run(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 	f.t.Helper()
 	if name != "kubectl" {
 		f.t.Fatal("unexpected host command in secret-store fixture")
 	}
 	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "admin create-first-admin") {
+		var request api.FirstAdminRequest
+		if json.Unmarshal(input, &request) != nil {
+			return nil, errors.New("invalid fixture enrollment")
+		}
+		command := []string{"exec", "-i", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "uplink", "add", "--admin"}
+		stdin := []byte(request.SSHPublicKey)
+		if request.CSR != "" {
+			command = append(command, "--csr", "-")
+			if request.Bearer {
+				command = append(command, "--bearer")
+			}
+			command = append(command, request.SSHPublicKey, request.Identity)
+			stdin = []byte(request.CSR)
+		} else {
+			command = append(command, "-", request.Identity)
+		}
+		raw, err := f.run(ctx, stdin, "kubectl", command...)
+		if err != nil {
+			return nil, err
+		}
+		files, e := clientcert.GenerateAuthority()
+		if e != nil {
+			return nil, e
+		}
+		authority, e := clientcert.Load(files["ca.crt"], files["ca.key"])
+		clear(files["ca.key"])
+		if e != nil {
+			return nil, e
+		}
+		installer, _, e := authority.Issue(request.Identity, []byte(request.InstallerCSR), time.Hour)
+		if e != nil {
+			return nil, e
+		}
+		result := api.FirstAdminResult{Token: extractUplinkToken(string(raw)), InstallerCertificate: string(installer), ServerCA: testServerCAPEM, ServerCertificate: testServerCAPEM}
+		if len(raw) == 0 && request.CSR == "" {
+			result.Token = "fixture-first-admin-token"
+		}
+		if strings.HasPrefix(string(raw), "-----BEGIN CERTIFICATE-----") {
+			result.Certificate = string(raw)
+		}
+		return json.Marshal(result)
+	}
 	switch {
+	case strings.HasSuffix(joined, "oberth version --schema"):
+		return []byte("1"), nil
+	case strings.HasSuffix(joined, "oberth version"):
+		return []byte("oberth v0.22.6"), nil
 	case strings.HasSuffix(joined, "oberth upstream list"):
 		f.listCalls++
 		out := "NAME   KIND   URL   KEY FINGERPRINT\n"
@@ -2545,6 +2595,9 @@ func finishInstallTest(ctx context.Context, cfg Config, deps Deps, buf *bytes.Bu
 	tw := newTableWriter(buf, false)
 	tw.WriteHeader()
 	tw.WriteFooter()
+	if f, ok := deps.Admin.(fixtureAdmin); ok && f.existing != nil {
+		cfg.existingRelease = f.existing()
+	}
 	var creds heldCredentials
 	return FinishInstall(ctx, cfg, deps, tw, &creds)
 }
@@ -2552,7 +2605,7 @@ func finishInstallTest(ctx context.Context, cfg Config, deps Deps, buf *bytes.Bu
 func onboardingDeps(t *testing.T, host *fakeOberthHost, buf *bytes.Buffer, input io.Reader, interactive bool) Deps {
 	t.Helper()
 	testHome := t.TempDir()
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		UserHomeDir: func() (string, error) { return testHome, nil },
 		// Client files go to this test's own directory, and no host binary
 		// (the developer's real claude) is ever found.
@@ -2566,6 +2619,10 @@ func onboardingDeps(t *testing.T, host *fakeOberthHost, buf *bytes.Buffer, input
 		RunCommand:       host.run,
 		IsTerminal:       func() bool { return interactive },
 		PollInterval:     time.Millisecond,
+	})
+	if f, ok := deps.Admin.(fixtureAdmin); ok {
+		f.existing = func() bool { return len(host.upstreamRows) > 0 }
+		deps.Admin = f
 	}
 	if interactive {
 		deps.RunInteractive = func(context.Context, string, ...string) error { return nil }
@@ -3011,7 +3068,7 @@ func TestApplyProvidedKeyUsesOnlyAuthenticatedExecStdin(t *testing.T) {
 	privatePEM := pem.EncodeToMemory(block)
 	client := fake.NewClientset()
 	called := false
-	deps := Deps{KubeClient: client, RunCommand: func(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{KubeClient: client, RunCommand: func(_ context.Context, input []byte, name string, args ...string) ([]byte, error) {
 		called = true
 		if name != "kubectl" || !strings.Contains(strings.Join(args, " "), "upstream provide-key github") {
 			t.Fatalf("wrong transport: %s %v", name, args)
@@ -3023,7 +3080,7 @@ func TestApplyProvidedKeyUsesOnlyAuthenticatedExecStdin(t *testing.T) {
 			t.Fatal("private key in command arguments")
 		}
 		return nil, nil
-	}}
+	}})
 	if err := applyProvidedDeployKey(context.Background(), Config{ForgeURL: "ssh://git@github.com/oberthci"}, deps, privatePEM); err != nil {
 		t.Fatal(err)
 	}
@@ -3762,7 +3819,7 @@ func TestExecuteRefusesWithoutHostTools(t *testing.T) {
 
 	for _, missingTool := range []string{"helm", "kubectl"} {
 		ranCommand := false
-		err := Execute(context.Background(), Config{}, InstallDeps{
+		err := Execute(context.Background(), Config{}, testAdminInstallDeps(InstallDeps{
 			Output: io.Discard,
 			GOOS:   "linux",
 			LookPath: func(name string) (string, error) {
@@ -3779,7 +3836,7 @@ func TestExecuteRefusesWithoutHostTools(t *testing.T) {
 				t.Fatal("cluster must not be contacted when a host tool is missing")
 				return nil, nil, "", nil
 			},
-		})
+		}))
 		if err == nil || !strings.Contains(err.Error(), missingTool+" not found in PATH") {
 			t.Fatalf("missing %s: got %v", missingTool, err)
 		}

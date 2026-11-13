@@ -38,7 +38,7 @@ func TestPolicyProbeNamespaceNeverInheritsInjectionOrAdmissionLabels(t *testing.
 		return false, nil, nil
 	})
 	model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "refused"}
-	result := probeNetworkPolicy(context.Background(), Config{ArgoNamespace: "pipelines"}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming())
+	result := probeNetworkPolicy(context.Background(), Config{ArgoNamespace: "pipelines"}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.run}), policyModelTiming())
 	if !created || result.Status != "enforced" || !strings.Contains(result.Evidence, "pipeline labels not copied") || !strings.Contains(result.Evidence, "namespace-label-specific exclusions") {
 		t.Fatal("scope or measurement missing", result)
 	}

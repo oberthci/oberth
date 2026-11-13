@@ -16,13 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/internal/kubeconfig"
-
-	"github.com/oberthci/oberth/internal/model"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	"github.com/oberthci/oberth/internal/kubeconfig"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // CheckResult is a stable public check. Diagnostics never include subprocess output.
@@ -160,7 +159,7 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 			return host.RunCommand(ctx, input, name, args...)
 		}
 	}
-	deps := Deps{KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy}
+	deps := Deps{Admin: host.Admin, KubeClient: kube, RestConfig: config, ContextName: selected, ClientHost: cfg.ClientHost, Output: io.Discard, RunCommand: run, ProbeNetworkPolicy: host.ProbeNetworkPolicy}
 	identity := publicClusterIdentity(cfg, config, selected)
 	if !checkClusterTrust(config, identity, &r) {
 		r.Cluster = &identity
@@ -225,12 +224,12 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		r.checkUpstreamPending(*r.Upstream)
 		r.check("upstream_public_key", r.Upstream.DeployPublicKey != "", "Read the public deploy key through the selected cluster administration connection.")
 	} else {
-		upstreamOutput, upstreamErr := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "upstream", "list", "--check")...)
-		healthy := upstreamErr == nil && verifiedUpstreams(upstreamOutput)
+		upstreamOutput, upstreamErr := upstreamCheckJSON(ctx, cfg, deps)
+		healthy := upstreamErr == nil && verifiedUpstreamAPI(upstreamOutput, false)
 		if r.Upstream != nil && !healthy {
 			r.Upstream.State = "pending"
 		}
-		if !healthy && r.Upstream != nil && upstreamErr == nil && upstreamsVerifiedOrPending(upstreamOutput, true) {
+		if !healthy && r.Upstream != nil && upstreamErr == nil && verifiedUpstreamAPI(upstreamOutput, true) {
 			r.checkUpstreamPending(*r.Upstream)
 			r.check("upstream_public_key", r.Upstream.DeployPublicKey != "", "Read the public deploy key through the selected cluster administration connection.")
 		} else {
@@ -286,9 +285,8 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 func deploymentReadinessReason(ctx context.Context, cfg Config, deps Deps) string {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	raw, err := deps.RunCommand(ctx, nil, "kubectl", kubectlOberthArgs(cfg, deps, false, "admin", "readiness")...)
 	var response model.ReadinessResponse
-	if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &response) != nil || !response.Valid() || response.Status == "ready" {
+	if CallAdmin(ctx, cfg, deps, "readiness", nil, &response) != nil || !response.Valid() || response.Status == "ready" {
 		return "unavailable"
 	}
 	return response.Code

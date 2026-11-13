@@ -61,7 +61,7 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 			}
 			kube := fake.NewClientset(preflightNode(), preflightStorage(), &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}}, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "oberth", Namespace: DefaultNamespace}, Spec: appsv1.DeploymentSpec{Replicas: &replicas}, Status: appsv1.DeploymentStatus{ReadyReplicas: readyReplicas}})
 			var output bytes.Buffer
-			host := InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			host := testAdminInstallDeps(InstallDeps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				if strings.Contains(" "+strings.Join(args, " ")+" ", " list ") {
 					return []byte(`[{"name":"oberth"}]`), nil
 				}
@@ -91,7 +91,7 @@ func TestInstallJSONPendingUpstreamCarriesAction(t *testing.T) {
 				}
 				t.Fatal("pending install probed forge authentication")
 				return nil, nil
-			}}
+			}})
 			cfg := Config{ForgeType: "github", ForgeOrg: "acme", ClientAccess: "none", ClientHost: "127.0.0.1", ClientHTTPSPort: port, ClientSSHPort: port, ContextName: "selected", KubeconfigPath: "/secure/kube config", UplinkIdentity: "admin@workstation", uplinkOnboarded: true, SSHPublicKeyPath: "-"}
 			if tc.additionalFailure {
 				cfg.AlsoUpstreams = []string{"ssh://git@codeberg.org/another-org"}

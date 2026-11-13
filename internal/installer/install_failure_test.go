@@ -33,7 +33,7 @@ func TestInstallUnreachableClientEndpoint(t *testing.T) {
 			kube := fake.NewClientset(preflightNode(), preflightStorage(), readyOberthPod(), readyArgoControllerPod())
 			var output bytes.Buffer
 			deployed := false
-			host := InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
+			host := testAdminInstallDeps(InstallDeps{Output: &output, LookPath: func(name string) (string, error) { return name, nil }, ProbeNetworkPolicy: enforcedPolicyFixture,
 				LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
 					return kube, &rest.Config{Host: "https://192.0.2.10:6443", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
 				},
@@ -59,7 +59,7 @@ func TestInstallUnreachableClientEndpoint(t *testing.T) {
 					}
 					return nil, nil
 				},
-			}
+			})
 			cfg := Config{ContextName: "chosen", ChartPath: testLocalChart, ImageRef: fakeChartImageRef, ClientHost: "localhost", ClientHTTPSPort: port, ClientAccess: "none", Timeout: time.Second}
 			if jsonOutput {
 				err = ExecuteJSON(t.Context(), cfg, host)

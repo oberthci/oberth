@@ -5,12 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"strings"
 
-	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/service"
 )
 
 func runAudit(ctx context.Context, arguments []string, output io.Writer) error {
@@ -27,83 +26,49 @@ func runAudit(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 }
 
-func runAuditHead(ctx context.Context, arguments []string, output io.Writer) error {
-	flags := flag.NewFlagSet("audit head", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	database := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
-	if err := flags.Parse(arguments); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			flags.SetOutput(output)
-			printFlagUsage(flags)
-			return nil
-		}
-		return usageError(err)
-	}
-	if flags.NArg() != 0 {
-		return fmt.Errorf("%w: audit head accepts flags only", errUsage)
-	}
-	if strings.TrimSpace(*database) == "" {
-		return fmt.Errorf("%w: database path is required", errUsage)
-	}
-	inspection, err := store.InspectCurrent(ctx, *database, configuredStoreOptions(ctx))
+func runAuditHead(ctx context.Context, args []string, output io.Writer) error {
+	flags, connection, parse := adminCLIFlags("audit head", args)
+	positional, help, err := parse()
 	if err != nil {
-		return fmt.Errorf("read audit head: %w", err)
+		return err
 	}
-	head, headErr := inspection.AuditHeadHint(ctx)
-	closeErr := inspection.Close()
-	if err := errors.Join(headErr, closeErr); err != nil {
-		return fmt.Errorf("read audit head: %w", err)
+	if help {
+		return commandFlagHelp(flags, "Usage: oberth audit head [flags]")
 	}
-	_, err = fmt.Fprintf(output, "%d:%s\n", head.ID, hex.EncodeToString(head.SHA256))
+	if len(positional) != 0 {
+		return fmt.Errorf("%w: audit head takes no arguments", errUsage)
+	}
+	raw, err := existingAdminTool(ctx, connection, "audit_list", map[string]any{"limit": 1})
+	if err != nil {
+		return err
+	}
+	var result service.AuditListResponse
+	if json.Unmarshal(raw, &result) == nil && result.HeadID == 0 && len(result.Entries) == 0 {
+		_, err = fmt.Fprintln(output, "0:"+strings.Repeat("0", 64))
+		return err
+	}
+	if json.Unmarshal(raw, &result) != nil || len(result.Entries) != 1 || result.Entries[0].ID != result.HeadID || !result.Entries[0].Verified {
+		return errors.New("invalid audit head response")
+	}
+	digest, err := hex.DecodeString(result.Entries[0].SHA256)
+	if err != nil || len(digest) != 32 {
+		return errors.New("invalid audit head digest")
+	}
+	_, err = fmt.Fprintf(output, "%d:%s\n", result.HeadID, result.Entries[0].SHA256)
 	return err
 }
-
-// runAuditRecord appends a lifecycle action (backup.completed,
-// restore.completed, upgrade.completed) reported by the workstation CLI after
-// an operation the server cannot observe itself (#1104). It runs in-pod on the
-// live daemon's database, after the daemon's audit mutation gate, and only the
-// store's fixed action list is accepted.
-func runAuditRecord(ctx context.Context, arguments []string, output io.Writer) error {
-	return runAuditRecordWithGate(ctx, arguments, output, requestLiveAdminMutationGate)
-}
-
-func runAuditRecordWithGate(ctx context.Context, arguments []string, output io.Writer, mutationGate func(context.Context, string, string) error) error {
-	flags := flag.NewFlagSet("audit record", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	database := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	details := flags.String("details", "{}", "JSON details to record")
-	if err := parseCommandFlags(flags, arguments); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			flags.SetOutput(output)
-			printFlagUsage(flags)
-			return nil
-		}
-		return usageError(err)
+func runAuditRecord(ctx context.Context, args []string, output io.Writer) error {
+	flags, connection, parse := adminCLIFlags("audit record", args)
+	details := flags.String("details", "{}", "public lifecycle audit details as a JSON object")
+	positional, help, err := parse()
+	if err != nil {
+		return err
 	}
-	if flags.NArg() != 1 {
+	if help {
+		return commandFlagHelp(flags, "Usage: oberth audit record <action> [--details JSON]")
+	}
+	if len(positional) != 1 || !json.Valid([]byte(*details)) {
 		return fmt.Errorf("%w: audit record <action> [--details JSON]", errUsage)
 	}
-	if !json.Valid([]byte(*details)) {
-		return fmt.Errorf("%w: --details must be JSON", errUsage)
-	}
-	if mutationGate == nil {
-		return errors.New("admin audit mutation gate is unavailable")
-	}
-	if err := mutationGate(ctx, "audit.database.open", *database); err != nil {
-		return err
-	}
-	handle, err := store.OpenAdminClient(ctx, *database, configuredStoreOptions(ctx))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = handle.Close() }()
-	if err := mutationGate(ctx, "audit.record", *database); err != nil {
-		return err
-	}
-	action, err := handle.RecordOperationAudit(ctx, administrativeActor, flags.Arg(0), *details)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(output, "recorded %s as audit entry %d\n", action.Action, action.ID)
-	return err
+	return callAdminCLI(ctx, connection, "audit-record", map[string]any{"action": positional[0], "details": json.RawMessage(*details)}, output)
 }

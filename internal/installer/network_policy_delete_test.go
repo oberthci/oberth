@@ -59,7 +59,7 @@ func TestPolicyProbeDeletesOnlyEachCreatedPolicyUID(t *testing.T) {
 				return true, nil, kube.Tracker().Delete(resource, namespace, policy.Name)
 			})
 			model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "reset"}
-			result := probeNetworkPolicy(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming())
+			result := probeNetworkPolicy(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.run}), policyModelTiming())
 			if replace {
 				if result.Status != "unverified" || attempts != 1 || len(deleted) != 0 || !strings.Contains(result.Remedy, "egress policy removal") {
 					t.Fatal("replacement deleted or measurement continued", result, attempts, deleted)
@@ -85,7 +85,7 @@ func TestPolicyProbeRequiresCreatedPolicyUID(t *testing.T) {
 		return true, nil, nil
 	})
 	model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "reset"}
-	result := probeNetworkPolicy(t.Context(), Config{}, Deps{KubeClient: kube, RunCommand: model.run}, policyModelTiming())
+	result := probeNetworkPolicy(t.Context(), Config{}, testAdminDeps(Deps{KubeClient: kube, RunCommand: model.run}), policyModelTiming())
 	if result.Status != "unverified" || !strings.Contains(result.Remedy, "NetworkPolicy has no verified UID") {
 		t.Fatal(result)
 	}
@@ -98,7 +98,7 @@ func TestPolicyProbeDoesNotAdoptReplacementPolicyUID(t *testing.T) {
 	model := &policyTrafficModel{kube: kube, mode: "egress-only", denial: "refused"}
 	var createdUID string
 	replaced, checked := false, false
-	deps := Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, command string, args ...string) ([]byte, error) {
+	deps := testAdminDeps(Deps{KubeClient: kube, RunCommand: func(ctx context.Context, input []byte, command string, args ...string) ([]byte, error) {
 		namespace, _, script, _ := policyModelArgs(args)
 		if script == policyTrafficScript && !replaced {
 			policies, err := kube.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{})
@@ -120,7 +120,7 @@ func TestPolicyProbeDoesNotAdoptReplacementPolicyUID(t *testing.T) {
 			}
 		}
 		return model.run(ctx, input, command, args...)
-	}}
+	}})
 	kube.PrependReactor("delete", "networkpolicies", func(action kt.Action) (bool, runtime.Object, error) {
 		checked = true
 		deletion := action.(kt.DeleteAction)

@@ -2,14 +2,7 @@ package installer
 
 // Database half of `oberth backup` / `oberth restore`.
 //
-// Backup: the running server binary takes its own verified snapshot in-pod
-// (`oberth backup database`, the store's WriteVerifiedBackup — the semantics
-// documented in docs/database-backup.md) and streams the closed archive out
-// over kubectl exec stdout. A server released before that subcommand existed
-// falls back to a stable copy: both SQLite files are streamed out and must
-// hash identically before and after the copy, and the same verified snapshot
-// is then taken locally with the online API. Only the compatibility copy
-// requires stable before/after hashes (with bounded retries).
+// Backup streams the server's verified archive through the authenticated admin API.
 //
 // Restore: the file is swapped on the server's PersistentVolumeClaim through a
 // short-lived pod that mounts the claim — never a host path — so it works on
@@ -29,10 +22,6 @@ import (
 	"strings"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -41,19 +30,12 @@ const (
 	serverDatabasePath = "/data/oberth.sqlite"
 	// serverContainerName is the chart's server container.
 	serverContainerName = "oberth"
-	// databaseSnapshotAttempts bounds retries when the live database changes
-	// while it is being snapshotted.
-	databaseSnapshotAttempts = 3
 
-	snapshotInPod      = "in-pod"
-	snapshotStableCopy = "stable-copy"
+	snapshotAPI = "admin-api"
 )
 
 // kubectlExecArgs builds a `kubectl exec` argv for one container.
 func kubectlExecArgs(contextName, namespace, pod, container string, stdin bool, command ...string) []string {
-	if container == serverContainerName {
-		command = containerimage.ServerCommand(command)
-	}
 	args := []string{"exec"}
 	if stdin {
 		args = append(args, "-i")
@@ -67,169 +49,33 @@ func kubectlExecArgs(contextName, namespace, pod, container string, stdin bool, 
 }
 
 // podSchemaVersion asks a pod's own oberth binary which schema it writes.
-func podSchemaVersion(ctx context.Context, run CommandRunner, contextName, namespace, pod, container string) (int, error) {
-	out, err := run(ctx, nil, "kubectl", kubectlExecArgs(contextName, namespace, pod, container, false, "oberth", "version", "--schema")...)
-	if err != nil {
-		return 0, fmt.Errorf("read server schema version: %w%s", err, commandOutputSuffix(out))
-	}
-	return parsePodSchema(out)
-}
-func parsePodSchema(out []byte) (int, error) {
-	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
-		return 0, errors.New("read server schema version: empty output")
-	}
-	version, err := strconv.Atoi(fields[len(fields)-1])
-	if err != nil || version < 1 {
-		return 0, fmt.Errorf("read server schema version: unexpected output %q", strings.TrimSpace(string(out)))
-	}
-	return version, nil
+func podSchemaVersion(ctx context.Context, deps Deps, namespace string) (int, error) {
+	_, schema, err := adminVersion(ctx, Config{Namespace: namespace}, deps)
+	return schema, err
 }
 
 // snapshotServerDatabase writes the store's verified database archive
 // (oberth.database-backup/v1) to destination and returns how it was taken.
-func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, pod string, schema int, protocol store.ProtocolConfig, workDir, destination string) (string, error) {
+func snapshotServerDatabase(ctx context.Context, deps backupDeps, namespace, destination string) (string, error) {
 	limit, err := store.BackupMaxBytes(deps.maxDatabaseBytes)
 	if err != nil {
 		return "", err
 	}
-	var lastErr error
-	// Preserve the working in-pod path on older servers for ordinary requests.
-	// The workstation still verifies the received archive against this limit.
-	useLimitFlag := limit != store.DefaultBackupMaxBytes
-	for attempt := 1; attempt <= databaseSnapshotAttempts; attempt++ {
-		args := kubectlExecArgs(deps.ContextName, namespace, pod, serverContainerName, false,
-			"oberth", "backup", "database", "--database", serverDatabasePath)
-		if useLimitFlag {
-			args = append(args, "--max-database-bytes", strconv.FormatInt(limit, 10))
-		}
-		_, err := streamBackupFile(ctx, deps, destination, limit+(64<<10), args)
-		if err != nil && ctx.Err() == nil && useLimitFlag &&
-			strings.Contains(err.Error(), "flag provided but not defined: -max-database-bytes") && limit >= 128<<20 {
-			// The old server's fixed 128 MiB cap is stricter. Retry its original
-			// invocation before paying for a utility Pod or requiring a stable
-			// transfer of the live main/WAL. Keep the local stream/verify bound.
-			useLimitFlag = false
-			args = args[:len(args)-2]
-			_, err = streamBackupFile(ctx, deps, destination, limit+(64<<10), args)
-		}
-		if err == nil {
-			return snapshotInPod, nil
-		}
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		// A restore's optional target preview uses this same path. Do not
-		// retry a space refusal, or bypass it as an old-server capability gap.
-		if strings.Contains(err.Error(), store.ErrBackupSpace.Error()) {
-			return "", err
-		}
-		// An older server with no backup command, an old cap refusal, or a
-		// requested bound smaller than its cap needs the stable-copy fallback.
-		if strings.Contains(err.Error(), `unknown command "backup"`) ||
-			strings.Contains(err.Error(), "flag provided but not defined: -max-database-bytes") ||
-			strings.Contains(err.Error(), "backup size refused") {
-			_, _ = fmt.Fprintln(deps.Output, "  The deployed server predates bounded online backup; taking a hash-checked stable copy and snapshotting it locally.")
-			return snapshotStableCopy, legacyStableCopyDatabase(ctx, deps, namespace, pod, schema, protocol, workDir, destination)
-		}
-		lastErr = err
-		if attempt < databaseSnapshotAttempts {
-			_, _ = fmt.Fprintf(deps.Output, "  Database snapshot attempt %d failed (%v); retrying.\n", attempt, err)
-			if err := sleepContext(ctx, pollInterval(deps.Deps)); err != nil {
-				return "", err
-			}
-		}
-	}
-	return "", fmt.Errorf("snapshot server database: %w", lastErr)
-}
-
-// stableCopyDatabase streams the main file and WAL out of the pod, accepting
-// the copy only when the in-pod hashes before and after it agree with each
-// other and with the bytes received, then builds the verified store archive
-// locally from that private copy.
-func stableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod, container string, schema int, protocol store.ProtocolConfig, workDir, destination string) error {
-	var lastErr error
-	for attempt := 1; attempt <= databaseSnapshotAttempts; attempt++ {
-		lastErr = stableCopyOnce(ctx, deps, namespace, pod, container, schema, protocol, workDir, destination)
-		if lastErr == nil {
-			return nil
-		}
-		if attempt < databaseSnapshotAttempts {
-			_, _ = fmt.Fprintf(deps.Output, "  Stable copy attempt %d failed (%v); retrying.\n", attempt, lastErr)
-			if err := sleepContext(ctx, pollInterval(deps.Deps)); err != nil {
-				return err
-			}
-		}
-	}
-	return fmt.Errorf("copy server database: %w", lastErr)
-}
-
-func podSQLiteHashes(ctx context.Context, deps backupDeps, namespace, pod, container string) (map[string]string, error) {
-	command := []string{"sh", "-c", utilitySQLiteHashesScript, "sh", serverDatabasePath, strconv.FormatInt(store.HardBackupMaxBytes, 10)}
-	out, err := deps.RunCommand(ctx, nil, "kubectl", kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)...)
+	remote, closeConnection, err := adminAPI(ctx, Config{Namespace: namespace}, deps.Deps)
 	if err != nil {
-		return nil, fmt.Errorf("hash server database: %w%s", err, commandOutputSuffix(out))
+		return "", err
 	}
-	hashes := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 && len(fields[0]) == 64 {
-			hashes[fields[1]] = fields[0]
-		}
-	}
-	if hashes[serverDatabasePath] == "" {
-		return nil, fmt.Errorf("server database %s not found in pod %s", serverDatabasePath, pod)
-	}
-	return hashes, nil
-}
-
-func stableCopyOnce(ctx context.Context, deps backupDeps, namespace, pod, container string, schema int, protocol store.ProtocolConfig, workDir, destination string) (resultErr error) {
-	before, err := podSQLiteHashes(ctx, deps, namespace, pod, container)
+	defer closeConnection()
+	file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- exclusive private backup staging destination selected by the operator.
 	if err != nil {
-		return err
+		return "", err
 	}
-	copyDir, err := os.MkdirTemp(workDir, "sqlite-copy-")
-	if err != nil {
-		return err
+	transferErr := remote.DownloadAdminBackup(ctx, limit, file)
+	if err := errors.Join(transferErr, file.Close()); err != nil {
+		_ = os.Remove(destination)
+		return "", err
 	}
-	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(copyDir)) }()
-	local := filepath.Join(copyDir, "oberth.sqlite")
-	for _, suffix := range []string{"", "-wal"} {
-		want, present := before[serverDatabasePath+suffix]
-		if !present {
-			continue
-		}
-		command := []string{"cat", serverDatabasePath + suffix}
-		args := kubectlExecArgs(deps.ContextName, namespace, pod, container, false, command...)
-		// Compatibility staging is bounded independently: a WAL may be
-		// larger than the logical database, but is never a backup member.
-		sum, err := streamBackupFile(ctx, deps, local+suffix, store.HardBackupMaxBytes, args)
-		if err != nil {
-			return fmt.Errorf("stream database%s: %w", suffix, err)
-		}
-		if sum != want {
-			return errors.New("server database changed while it was copied")
-		}
-	}
-	after, err := podSQLiteHashes(ctx, deps, namespace, pod, container)
-	if err != nil {
-		return err
-	}
-	if len(after) != len(before) {
-		return errors.New("server database changed while it was copied")
-	}
-	for path, sum := range before {
-		if after[path] != sum {
-			return errors.New("server database changed while it was copied")
-		}
-	}
-	out, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- fixed name inside the private working directory.
-	if err != nil {
-		return err
-	}
-	_, writeErr := store.WriteVerifiedBackup(ctx, local, schema, store.Options{Protocol: protocol, BackupMaxBytes: deps.maxDatabaseBytes}, out)
-	closeErr := out.Close()
-	return errors.Join(writeErr, closeErr)
+	return snapshotAPI, nil
 }
 
 // verifyDatabaseArchive validates a store database archive offline: SQLite
@@ -385,7 +231,7 @@ func extractDatabaseFiles(ctx context.Context, path, work string, maxBytes int64
 		if header.Name == "oberth.sqlite-wal" {
 			destination += "-wal"
 		}
-		file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- one of two exact names in fresh private directory.
+		file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600) // #nosec G304 -- exclusive private backup staging destination selected by the operator. // #nosec G304 -- one of two exact names in fresh private directory.
 		if err != nil {
 			return db, err
 		}
@@ -418,63 +264,16 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-const databaseCopyContainer = "database-copy"
-const utilitySQLiteHashesScript = `set -eu
-for f in "$1" "$1-wal"; do
-  if [ -f "$f" ]; then
-    size=$(stat -c '%s' "$f")
-    if [ "$size" -gt "$2" ]; then
-      printf 'backup size %s bytes exceeds limit %s bytes\n' "$size" "$2" >&2
-      exit 1
-    fi
-    sha256sum "$f"
-  fi
-done`
-
-// Pre-backup-subcommand images also predate native admin file commands. Mount
-// their PVC read-only in a pinned utility pod on the server's existing node;
-// never fall back to executing a shell inside an old/new server image.
-func legacyStableCopyDatabase(ctx context.Context, deps backupDeps, namespace, pod string, schema int, protocol store.ProtocolConfig, workDir, destination string) (result error) {
-	server, err := inspectServerDeployment(ctx, deps.Deps, namespace)
-	if err != nil {
-		return err
+// Utility schema output is read from an offline restore init container, not
+// by executing commands inside the running server.
+func parseUtilitySchema(out []byte) (int, error) {
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return 0, errors.New("empty utility schema output")
 	}
-	original, err := deps.KubeClient.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
-	if err != nil {
-		return err
+	version, err := strconv.Atoi(fields[len(fields)-1])
+	if err != nil || version < 1 {
+		return 0, errors.New("invalid utility schema output")
 	}
-	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
-	if deps.utilityImage != "" {
-		server.UtilityImage = deps.utilityImage
-	}
-	helper := restoreHelperPod("oberth-backup-copy-"+stamp, namespace, stamp, server)
-	helper.Labels = map[string]string{"oberth.ci/database-copy": stamp}
-	helper.Spec.InitContainers = nil
-	helper.Spec.NodeName = original.Spec.NodeName
-	helper.Spec.Containers[0].Name = databaseCopyContainer
-	for index := range helper.Spec.Containers[0].VolumeMounts {
-		helper.Spec.Containers[0].VolumeMounts[index].ReadOnly = true
-	}
-	for index := range helper.Spec.Volumes {
-		if claim := helper.Spec.Volumes[index].PersistentVolumeClaim; claim != nil {
-			claim.ReadOnly = true
-		}
-	}
-	pods := deps.KubeClient.CoreV1().Pods(namespace)
-	if _, err := pods.Create(ctx, helper, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("create legacy backup utility pod: %w", err)
-	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		grace := int64(0)
-		err := pods.Delete(cleanup, helper.Name, metav1.DeleteOptions{GracePeriodSeconds: &grace})
-		if err != nil && !apierrors.IsNotFound(err) {
-			result = errors.Join(result, err)
-		}
-	}()
-	if err := waitForPodRunning(ctx, deps.Deps, namespace, "oberth.ci/database-copy="+stamp, time.Minute); err != nil {
-		return err
-	}
-	return stableCopyDatabase(ctx, deps, namespace, helper.Name, databaseCopyContainer, schema, protocol, workDir, destination)
+	return version, nil
 }

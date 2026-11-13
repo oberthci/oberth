@@ -35,7 +35,7 @@ func TestHostPrepWarningsAreAdvisoryWithExactRemedies(t *testing.T) {
 func TestHostPrepKubeletConfigUsesSelectedNodeAndWarnsOnUnknown(t *testing.T) {
 	for _, good := range []bool{false, true} {
 		r := InstallResult{OK: true}
-		deps := Deps{ContextName: "selected", RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+		deps := testAdminDeps(Deps{ContextName: "selected", RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
 			if name != "kubectl" || !strings.Contains(strings.Join(args, " "), "--context selected get --raw /api/v1/nodes/worker/proxy/configz") {
 				t.Fatal(name, args)
 			}
@@ -43,7 +43,7 @@ func TestHostPrepKubeletConfigUsesSelectedNodeAndWarnsOnUnknown(t *testing.T) {
 				return []byte(`{"kubeletconfig":{"systemReserved":{"cpu":"500m","memory":"1Gi"},"evictionHard":{"memory.available":"500Mi"}}}`), nil
 			}
 			return []byte(`{}`), nil
-		}}
+		}})
 		inspectHostPrep(t.Context(), Config{}, deps, corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}}, &r)
 		if !r.OK || len(r.Checks) != 3 || r.Checks[2].OK != good {
 			t.Fatal(r)

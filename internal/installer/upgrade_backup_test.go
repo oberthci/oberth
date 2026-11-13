@@ -34,7 +34,7 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%s/no-backup=%t", tc.live, tc.noBackup), func(t *testing.T) {
 			var output bytes.Buffer
-			deps := Deps{Output: &output, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://cluster.example:6443"},
+			deps := testAdminDeps(Deps{Output: &output, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://cluster.example:6443"},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 					if out, ok := testUpgradeValuePreflight(args); ok {
 						return out, nil
@@ -45,7 +45,7 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 					return nil, fmt.Errorf("unexpected mutating helm call: %v", args)
 				},
 				RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte(tc.live), nil },
-			}
+			})
 			_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, Namespace: "chosen", Yes: true, DryRun: true, NoBackup: tc.noBackup}, deps)
 			if err != nil {
 				t.Fatal(err)
@@ -67,7 +67,7 @@ func TestUpgradeAnnouncesItsOwnBackup(t *testing.T) {
 // change and point at the supported rollback.
 func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 	t.Parallel()
-	deps := Deps{Output: &bytes.Buffer{}, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+	deps := testAdminDeps(Deps{Output: &bytes.Buffer{}, KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
 				return out, nil
@@ -78,7 +78,7 @@ func TestUpgradeRefusesNewerLiveSchema(t *testing.T) {
 			return nil, fmt.Errorf("unexpected helm call: %v", args)
 		},
 		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) { return []byte("18"), nil },
-	}
+	})
 	_, err := RunUpgrade(t.Context(), UpgradeConfig{BinaryVersion: "0.16.19", BinarySchemaVersion: 17, AllowDowngrade: true, DryRun: true}, deps)
 	if err == nil || !strings.Contains(err.Error(), "--rollback") {
 		t.Fatalf("newer live schema: %v", err)
@@ -116,7 +116,7 @@ func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgra
 	}
 	calls := &[]string{}
 	output := &bytes.Buffer{}
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if out, ok := testUpgradeValuePreflight(args); ok {
@@ -152,7 +152,7 @@ func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgra
 		KubeClient:  fake.NewClientset(deployment),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "fixture",
-	}
+	})
 	withSignedRelease(t, &deps, target, image)
 	return upgradeFixture{deps: deps, calls: calls, output: output}
 }

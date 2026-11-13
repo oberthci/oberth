@@ -246,7 +246,7 @@ func PrintSealStatus(w io.Writer, status SealStatus, jsonOutput bool) error {
 
 // Capture only stdout; child diagnostics never enter a transcript or error.
 func privateUnsealCommand(ctx context.Context, input []byte, name string, args ...string) (result []byte, resultErr error) {
-	args, environment, lease, cleanup, prepareErr := kubeconfig.Command(name, args, installerChildEnvironment())
+	args, environment, lease, cleanup, prepareErr := pinnedKubernetesCommand(name, args, installerChildEnvironment())
 	if prepareErr != nil {
 		return nil, prepareErr
 	}

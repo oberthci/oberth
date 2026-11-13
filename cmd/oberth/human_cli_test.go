@@ -44,14 +44,14 @@ func TestUsageErrorIsNotDoubled(t *testing.T) {
 // SQLite's "unable to open database file".
 func TestInPodCommandOffPodNamesWhereToRunIt(t *testing.T) {
 	missing := t.TempDir() + "/absent/oberth.sqlite"
-	for command, remote := range map[string]string{"uplink list": "oberth mcp call uplink_list", "schedules": "oberth schedules list", "fragments list": "no remote form"} {
+	for command, remote := range map[string]string{"schedules": "oberth schedules list", "fragments list": "no remote form"} {
 		arguments := append(strings.Fields(command), "--database", missing)
 		err := withInPodHint(arguments, runCLI(t.Context(), arguments, strings.NewReader(""), &bytes.Buffer{}))
 		var hint inPodCommandError
 		if !errors.As(err, &hint) {
 			t.Fatalf("%s: err = %v", command, err)
 		}
-		for _, want := range []string{"oberth " + command + " reads the server database", "kubectl exec -n <namespace> deploy/<release> -- oberth " + command, "kubectl exec -n oberth deploy/oberth -- oberth " + command, remote} {
+		for _, want := range []string{"oberth " + command + " could not open its local database", "authenticated server API", remote} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("%s: message omits %q:\n%v", command, want, err)
 			}

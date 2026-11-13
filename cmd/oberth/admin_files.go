@@ -10,43 +10,57 @@ import (
 	"syscall"
 )
 
-// These local, read-only commands replace file tools in the scratch server.
-// Kubernetes exec authorization, a public-path allowlist and the process UID govern access.
-func runAdmin(ctx context.Context, arguments []string, output io.Writer) error {
-	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
-		_, err := fmt.Fprintln(output, "Usage: oberth admin <read-file|readiness>\nRead allowed public identity files or cached readiness inside the Oberth pod.")
+// Administrative commands use the authenticated API after initial enrollment.
+func runAdmin(ctx context.Context, args []string, output io.Writer) error {
+	if len(args) == 0 {
+		return fmt.Errorf("%w: admin public-identity|readiness|version|idle|create-first-admin", errUsage)
+	}
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		_, err := fmt.Fprintln(output, "Usage: oberth admin <public-identity|readiness|version|idle|create-first-admin>\nNamed public identity reads and administration use authenticated APIs. Only install creates the first admin through one operator-authorized exec.")
 		return err
 	}
-
-	if len(arguments) == 0 {
-		return fmt.Errorf("%w: admin read-file <public-identity-path> [fallback-path]", errUsage)
+	if args[0] == "create-first-admin" {
+		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+			_, err := fmt.Fprintln(output, "Usage: oberth admin create-first-admin\nInstall-time enrollment JSON on stdin. Private keys stay on their client machines.")
+			return err
+		}
+		if len(args) != 1 {
+			return errors.New("create-first-admin accepts enrollment JSON on stdin only")
+		}
+		return runCreateFirstAdmin(ctx, os.Stdin, output)
 	}
-	switch arguments[0] {
-	case "readiness":
-		if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
-			_, err := fmt.Fprintln(output, "Usage: oberth admin readiness\nPrint cached readiness as JSON with a safe reason code. A not-ready state is a successful diagnostic read.")
-			return err
+	flags, connection, parse := adminCLIFlags("admin "+args[0], args[1:])
+	waitFor := flags.String("wait-for", "all", "idle observation: all or critical")
+	positional, help, err := parse()
+	if err != nil {
+		return err
+	}
+	if help {
+		return commandFlagHelp(flags, "Usage: oberth admin "+args[0]+" [flags]")
+	}
+	request := map[string]any{}
+	switch args[0] {
+	case "public-identity":
+		if len(positional) != 1 {
+			return fmt.Errorf("%w: admin public-identity <server-ca|server-certificate|upstream-public-key>", errUsage)
 		}
-		if len(arguments) != 1 {
-			return fmt.Errorf("%w: admin readiness accepts no arguments", errUsage)
+		request["name"] = positional[0]
+	case "idle":
+		if len(positional) != 0 {
+			return fmt.Errorf("%w: admin idle takes no arguments", errUsage)
 		}
-		return adminReadiness(ctx, defaultAdminSocket, output)
-	case "read-file":
-		if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
-			_, err := fmt.Fprintln(output, "Usage: oberth admin read-file <public-identity-path> [fallback-path]\nRead allowed public identity files inside the Oberth pod.")
-			return err
+		request["wait_for"] = *waitFor
+	case "readiness", "version":
+		if len(positional) != 0 {
+			return fmt.Errorf("%w: admin %s takes no arguments", errUsage, args[0])
 		}
-		if len(arguments) < 2 {
-			return fmt.Errorf("%w: admin read-file requires at least one absolute path", errUsage)
-		}
-		return adminReadPublicFiles(ctx, arguments[1:], output, adminPublicFiles)
 	default:
-		return fmt.Errorf("%w: unknown admin command %q", errUsage, arguments[0])
+		return fmt.Errorf("%w: unknown admin command %q", errUsage, args[0])
 	}
+	return callAdminCLI(ctx, connection, args[0], request, output)
 }
 
-// Only public identity material is exposed through read-file. Test fixtures pass
-// their own private roots to adminReadPublicFiles; the command always uses this list.
+// First-admin enrollment returns only these fixed public trust identities.
 var adminPublicFiles = map[string]bool{
 	"/etc/oberth/tls/tls.crt":                        true,
 	"/run/oberth-identities/server/ca.crt":           true,
@@ -58,7 +72,7 @@ func adminReadPublicFiles(ctx context.Context, paths []string, output io.Writer,
 	// Check every argument before touching the filesystem, including fallbacks.
 	for _, path := range paths {
 		if !allowed[path] {
-			return errors.New("admin read-file permits only public identity files")
+			return errors.New("first-admin trust reads permit only public identity files")
 		}
 	}
 	var last error

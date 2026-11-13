@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
+	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/app"
@@ -45,8 +46,6 @@ import (
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/pipeline"
-
-	"k8s.io/client-go/rest"
 )
 
 type stringList []string
@@ -1004,7 +1003,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	controlAPI, err := service.NewAPI(withAgentEvents(options, database, service.APIConfig{
-		Tags: pushes, BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
+		Administration: serverAdministration(options, database, git, anchors.AllowMutation),
+		Tags:           pushes, BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
 		ReleasePreflight:   argoJobs,
 		ClientCertificates: &service.ClientCertIssuer{Authority: clientAuthority, Store: database, ServerCAPin: servedCAPin(served)},
 		UplinkLifecycle:    database, DeclarationDismissal: database,
@@ -1214,7 +1214,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	defer func() { stopTokenWarnings(); <-adminExpiryDone }()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
-	adminServer := withAdminReadiness(withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), health.Ready)
+	adminServer := newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current)
 	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, adminServer, activateScheduler, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 

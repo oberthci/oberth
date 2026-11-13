@@ -48,7 +48,7 @@ func TestTLSBootstrapUsesTheGivenImageWithoutConsultingAnyChart(t *testing.T) {
 	t.Parallel()
 	pinned := "oberth-registry:5000/oberth@sha256:" + strings.Repeat("d", 64)
 
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		RunHelm: func(context.Context, []string) ([]byte, error) {
 			return nil, errors.New("helm must not be consulted when --image names the image")
 		},
@@ -56,7 +56,7 @@ func TestTLSBootstrapUsesTheGivenImageWithoutConsultingAnyChart(t *testing.T) {
 			t.Fatal("explicit image resolution invoked a cluster manager")
 			return nil, nil
 		},
-	}
+	})
 
 	image, err := resolveOberthTLSBootstrapImage(context.Background(), Config{ImageRef: pinned}, deps)
 	if err != nil {

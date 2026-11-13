@@ -42,7 +42,7 @@ func TestInstallAgeRecoveryUnsealRoundTrip(t *testing.T) {
 			var output bytes.Buffer
 			kube := fake.NewClientset(runningOpenBaoPod(), runningOpenBaoStatefulSet())
 			ca := newTestServerCA(t, []string{"api.example.test"})
-			deps := InstallDeps{
+			deps := testAdminInstallDeps(InstallDeps{
 				Output:   &output,
 				LookPath: func(name string) (string, error) { return name, nil },
 				LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
@@ -69,7 +69,7 @@ func TestInstallAgeRecoveryUnsealRoundTrip(t *testing.T) {
 					}
 					return json.Marshal(SealStatus{Initialized: true, Sealed: sealed})
 				},
-			}
+			})
 			status, callErr := ExecuteUnseal(t.Context(), UnsealConfig{ContextName: "chosen", SecretsFile: path, AgeIdentity: identity}, deps)
 			if (callErr != nil) != fail || writes != 1 || (!fail && status.Sealed) {
 				t.Fatal("unexpected encrypted-file unseal result")

@@ -18,13 +18,13 @@ func TestReleasedServerCertificateUsesSecretWithoutAdmin(t *testing.T) {
 	t.Parallel()
 	certificate, _ := testCertAndKey(t, []string{"oberth"})
 	calls := 0
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		KubeClient: fake.NewClientset(legacyDeployment(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"}, Data: map[string][]byte{"tls.crt": certificate}}),
 		RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 			calls++
 			return nil, errors.New(`unknown command "admin"`)
 		},
-	}
+	})
 	for _, ca := range []bool{false, true} {
 		got, err := readServerPublicCertificate(t.Context(), Config{}, deps, ca)
 		if err != nil || !bytes.Equal(got, certificate) || calls != 0 {
@@ -38,7 +38,7 @@ func TestOldRuntimeCertificateFallbackIsVersionGated(t *testing.T) {
 	for _, old := range []bool{false, true} {
 		t.Run(map[bool]string{false: "permission failure", true: "pre-scratch"}[old], func(t *testing.T) {
 			calls := 0
-			deps := Deps{
+			deps := testAdminDeps(Deps{
 				KubeClient: fake.NewClientset(currentDeployment(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"}, Data: map[string][]byte{"tls.crt": []byte("stale legacy certificate")}}),
 				RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 					if slices.Contains(args, "admin") {
@@ -56,7 +56,7 @@ func TestOldRuntimeCertificateFallbackIsVersionGated(t *testing.T) {
 					}
 					return nil, errors.New("file not found")
 				},
-			}
+			})
 			got, err := serverCACertificate(t.Context(), Config{}, deps)
 			if old {
 				if err != nil || string(got) != "runtime certificate" || calls != 2 {
@@ -79,7 +79,7 @@ func TestPreflightIdentityCrossCheckFailureRefuses(t *testing.T) {
 	}}
 	pr := &preflightRunner{t: t, baoRunner: runner, podCertFail: true}
 	var output bytes.Buffer
-	deps := Deps{KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()), RunCommand: pr.run, Output: &output}
+	deps := testAdminDeps(Deps{KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()), RunCommand: pr.run, Output: &output})
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot cross-check") || strings.Contains(output.String(), "cross-check skipped") {
@@ -93,7 +93,7 @@ func TestAbsentBaoCertificateStillChecksExistingRuntimeSANs(t *testing.T) {
 	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
 		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {out: "No value found", err: errors.New("exit 2")},
 	}}
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		Output:     &bytes.Buffer{},
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
@@ -105,7 +105,7 @@ func TestAbsentBaoCertificateStillChecksExistingRuntimeSANs(t *testing.T) {
 		RunHelm: func(context.Context, []string) ([]byte, error) {
 			return []byte(`{"argo":{"goProxy":{"enabled":true}}}`), nil
 		},
-	}
+	})
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
 	if err == nil || !strings.Contains(err.Error(), "--reissue-server-ca") {
@@ -120,7 +120,7 @@ func TestRuntimeCertificateStdoutCannotEnableLegacyFallback(t *testing.T) {
 		errors.New(`wrapped diagnostic: unknown command "admin"`),
 	} {
 		calls := 0
-		deps := Deps{
+		deps := testAdminDeps(Deps{
 			KubeClient: fake.NewClientset(currentDeployment()),
 			RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 				if slices.Contains(args, "cat") {
@@ -129,7 +129,7 @@ func TestRuntimeCertificateStdoutCannotEnableLegacyFallback(t *testing.T) {
 				}
 				return []byte(`untrusted stdout: unknown command "admin"`), failure
 			},
-		}
+		})
 		_, err := serverCACertificate(t.Context(), Config{}, deps)
 		if err == nil || calls != 0 {
 			t.Fatalf("stdout/error text enabled legacy fallback: %v calls=%d", err, calls)
@@ -142,7 +142,7 @@ func TestStoppedRuntimeIdentityNamesRecoveryStep(t *testing.T) {
 	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
 		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {out: "No value found", err: errors.New("exit 2")},
 	}}
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		Output:     &bytes.Buffer{},
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
@@ -155,7 +155,7 @@ func TestStoppedRuntimeIdentityNamesRecoveryStep(t *testing.T) {
 			t.Fatal("unverifiable identity reached Helm")
 			return nil, nil
 		},
-	}
+	})
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
 	if err == nil {

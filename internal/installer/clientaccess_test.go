@@ -26,7 +26,7 @@ func clientAccessDeps(t *testing.T, input string) (Deps, *bytes.Buffer, string) 
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 
 	var out bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output:     &out,
 		Input:      strings.NewReader(input),
 		IsTerminal: func() bool { return true },
@@ -45,7 +45,7 @@ func clientAccessDeps(t *testing.T, input string) (Deps, *bytes.Buffer, string) 
 			ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"},
 			Data:       map[string][]byte{"tls.crt": []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n")},
 		}),
-	}
+	})
 	return deps, &out, home
 }
 
@@ -354,12 +354,12 @@ func TestRefreshPinnedServerCARewritesStaleCA(t *testing.T) {
 	}
 	newCA := string(newTestServerCA(t, []string{"oberth"}))
 	var table bytes.Buffer
-	deps := Deps{
+	deps := testAdminDeps(Deps{
 		Output: &table,
 		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
 			return []byte(newCA), nil
 		},
-	}
+	})
 	refreshPinnedServerCA(context.Background(), Config{}, deps, newTableWriter(&table, false))
 	got, err := os.ReadFile(filepath.Join(root, "ca.crt"))
 	if err != nil || string(got) != newCA {

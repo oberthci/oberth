@@ -6,277 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
-
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes/fake"
-	k8stesting "k8s.io/client-go/testing"
 )
 
 // --- ConfigMap fallback path (run == nil) ---
 
-func TestProducePerRepoIdentitiesFromQualifiedGrants(t *testing.T) {
-	t.Parallel()
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data: map[string]string{
-			secretAccessConfigMapKey: `
-- repo: codeberg/oberthci/oberth
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/data/release/cosign-secret
-- repo: codeberg/oberthci/oberth
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/data/release/r2-token
-- repo: github/acme/terraform
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/upstream/acme/terraform/plan/gcp-sa
-`,
-		},
-	}
-	kube := fake.NewSimpleClientset(cm)
-
-	result, warnings, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("unexpected warnings: %v", warnings)
-	}
-
-	if len(result) != 2 {
-		t.Fatalf("expected 2 per-repo identities, got %d: %+v", len(result), result)
-	}
-
-	// Sort for deterministic assertion.
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Repo < result[j].Repo
-	})
-
-	// First: oberth (codeberg/oberthci)
-	if result[0].Upstream != "codeberg" || result[0].Org != "oberthci" || result[0].Repo != "oberth" {
-		t.Fatalf("unexpected identity[0]: %+v", result[0])
-	}
-	if len(result[0].Grants) != 0 {
-		t.Fatalf("expected 2 grants for oberth, got %d", len(result[0].Grants))
-	}
-
-	// Second: terraform (github/acme)
-	if result[1].Upstream != "github" || result[1].Org != "acme" || result[1].Repo != "terraform" {
-		t.Fatalf("unexpected identity[1]: %+v", result[1])
-	}
-}
-
-func TestProducePerRepoIdentitiesSkipsBareRepoNames(t *testing.T) {
-	t.Parallel()
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data: map[string]string{
-			secretAccessConfigMapKey: `
-- repo: oberth
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/data/release/cosign-secret
-- repo: codeberg/oberthci/oberth
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/data/release/r2-token
-`,
-		},
-	}
-	kube := fake.NewSimpleClientset(cm)
-
-	result, _, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Only the qualified entry should produce an identity.
-	if len(result) != 1 {
-		t.Fatalf("expected 1 identity (bare name skipped), got %d: %+v", len(result), result)
-	}
-	if result[0].Repo != "oberth" || result[0].Upstream != "codeberg" {
-		t.Fatalf("unexpected identity: %+v", result[0])
-	}
-}
-
-func TestProducePerRepoIdentitiesReturnsNilWhenConfigMapAbsent(t *testing.T) {
-	t.Parallel()
-	kube := fake.NewSimpleClientset()
-
-	result, warnings, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("unexpected warnings: %v", warnings)
-	}
-	if result != nil {
-		t.Fatalf("expected nil, got %+v", result)
-	}
-}
-
-func TestProducePerRepoIdentitiesReturnsNilOnEmptyData(t *testing.T) {
-	t.Parallel()
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data:       map[string]string{secretAccessConfigMapKey: ""},
-	}
-	kube := fake.NewSimpleClientset(cm)
-
-	result, _, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result != nil {
-		t.Fatalf("expected nil, got %+v", result)
-	}
-}
-
 // --- Exec path (access list parsing — tabwriter) ---
-
-func TestProduceFromAccessListParsesQualifiedOutput(t *testing.T) {
-	t.Parallel()
-	// Simulate the tabwriter-formatted output of `oberth access list`.
-	accessListOutput := strings.Join([]string{
-		"REPO                                        WORKFLOW   STEP   SECRET                                             APPROVED BY                            APPROVED AT        STATUS",
-		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/cosign-secret                  admin@localhost+configmap@rv=225951    2026-08-21 16:40   active",
-		"codeberg/acme/acme-example-service       .oberth/release.yaml   *      oberth/data/release/gar-sa-key                     admin@localhost+configmap@rv=225949    2026-08-21 16:40   active",
-		"codeberg/acme/terraform               .oberth/release.yaml   *      oberth/upstream/acme/terraform/credentials   configmap@rv=699072                    2026-08-23 22:23   active",
-		"github/oberthci/oberth                      .oberth/release.yaml   *      oberth/data/release/cosign-secret                  configmap@rv=18991                     2026-08-18 08:54   active",
-		"github/oberthci/oberth                      .oberth/release.yaml   *      oberth/data/release/r2-upload-token                admin@localhost+configmap@rv=18990     2026-08-18 08:54   active",
-	}, "\n")
-
-	// Mock the CommandRunner. First call (--json) fails to simulate an older
-	// deployed binary; second call (tabwriter) succeeds.
-	callCount := 0
-	mockRun := func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
-		callCount++
-		for _, a := range args {
-			if a == "--json" {
-				return nil, fmt.Errorf("flag provided but not defined: -json")
-			}
-		}
-		return []byte(accessListOutput), nil
-	}
-
-	result, _, err := ProducePerRepoIdentities(context.Background(), nil, mockRun, "", "oberth")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(result) != 3 {
-		t.Fatalf("expected 3 per-repo identities, got %d: %+v", len(result), result)
-	}
-
-	sort.Slice(result, func(i, j int) bool {
-		key := func(id PerRepoIdentity) string { return id.Upstream + "/" + id.Org + "/" + id.Repo }
-		return key(result[i]) < key(result[j])
-	})
-
-	// acme-example-service: 2 grants
-	if result[0].Upstream != "codeberg" || result[0].Org != "acme" || result[0].Repo != "acme-example-service" {
-		t.Fatalf("unexpected identity[0]: %+v", result[0])
-	}
-	if len(result[0].Grants) != 0 {
-		t.Fatalf("expected 2 grants for acme-example-service, got %d: %v", len(result[0].Grants), result[0].Grants)
-	}
-
-	// terraform: 1 upstream grant
-	if result[1].Upstream != "codeberg" || result[1].Org != "acme" || result[1].Repo != "terraform" {
-		t.Fatalf("unexpected identity[1]: %+v", result[1])
-	}
-	if len(result[1].Grants) != 0 {
-		t.Fatalf("unexpected grants for terraform: %v", result[1].Grants)
-	}
-
-	// oberth: 2 grants
-	if result[2].Upstream != "github" || result[2].Org != "oberthci" || result[2].Repo != "oberth" {
-		t.Fatalf("unexpected identity[2]: %+v", result[2])
-	}
-	if len(result[2].Grants) != 0 {
-		t.Fatalf("expected 2 grants for oberth, got %d", len(result[2].Grants))
-	}
-}
-
-func TestProduceFromAccessListFallsBackToConfigMapOnExecFailure(t *testing.T) {
-	t.Parallel()
-	// Exec fails — simulate a pod that is not running.
-	failRun := func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
-		return nil, context.DeadlineExceeded
-	}
-
-	// ConfigMap with a qualified entry should still be found via fallback.
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data: map[string]string{
-			secretAccessConfigMapKey: `
-- repo: codeberg/oberthci/oberth
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/data/release/cosign-secret
-`,
-		},
-	}
-	kube := fake.NewSimpleClientset(cm)
-
-	result, warnings, err := ProducePerRepoIdentities(context.Background(), kube, failRun, "", "oberth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 identity from CM fallback, got %d: %+v", len(result), result)
-	}
-	if result[0].Repo != "oberth" {
-		t.Fatalf("unexpected identity: %+v", result[0])
-	}
-	// The exec→CM fallback warning must be surfaced.
-	if len(warnings) == 0 {
-		t.Fatal("expected at least one warning about exec→CM fallback")
-	}
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "fell back to ConfigMap") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected 'fell back to ConfigMap' warning, got: %v", warnings)
-	}
-}
-
-func TestParseAccessListOutputSkipsBareRows(t *testing.T) {
-	t.Parallel()
-	output := strings.Join([]string{
-		"REPO          WORKFLOW   STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS",
-		"terraform     .oberth/release.yaml   *      oberth/data/release/cosign-secret   admin         2026-08-18 08:54   active",
-	}, "\n")
-
-	_, err := ParseAccessListOutput([]byte(output))
-	if err == nil || !strings.Contains(err.Error(), "format drift") {
-		t.Fatalf("expected format-drift error for all-bare rows, got: %v", err)
-	}
-}
-
-func TestParseAccessListOutputEmptyInput(t *testing.T) {
-	t.Parallel()
-	result, err := ParseAccessListOutput([]byte(""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 0 {
-		t.Fatalf("expected 0, got %d", len(result))
-	}
-}
 
 // --- JSON path tests ---
 
@@ -337,7 +73,7 @@ func TestProduceFromAccessListPrefersJSON(t *testing.T) {
 		return nil, fmt.Errorf("should not reach tabwriter path")
 	}
 
-	result, warnings, err := ProducePerRepoIdentities(context.Background(), nil, mockRun, "", "oberth")
+	result, warnings, err := testProducePerRepoIdentities(context.Background(), nil, mockRun, "", "oberth")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,165 +93,9 @@ func TestProduceFromAccessListPrefersJSON(t *testing.T) {
 
 // --- CM RBAC error surfacing (gap 4) ---
 
-func TestProduceFromConfigMapSurfacesRBACError(t *testing.T) {
-	t.Parallel()
-	kube := fake.NewSimpleClientset()
-	kube.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewForbidden(
-			schema.GroupResource{Group: "", Resource: "configmaps"}, secretAccessConfigMapName,
-			fmt.Errorf("RBAC: access denied"),
-		)
-	})
-
-	_, _, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
-	if err == nil {
-		t.Fatal("expected RBAC error to surface, got nil")
-	}
-	if !strings.Contains(err.Error(), "RBAC") && !strings.Contains(err.Error(), "Forbidden") {
-		t.Fatalf("error should mention RBAC/Forbidden, got: %v", err)
-	}
-}
-
-func TestProduceFromConfigMapIsNotFoundReturnsNilNil(t *testing.T) {
-	t.Parallel()
-	// A simple fake clientset with no ConfigMaps returns IsNotFound for Get.
-	kube := fake.NewSimpleClientset()
-
-	result, warnings, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
-	if err != nil {
-		t.Fatalf("IsNotFound should not surface as error, got: %v", err)
-	}
-	if len(warnings) != 0 {
-		t.Fatalf("unexpected warnings: %v", warnings)
-	}
-	if result != nil {
-		t.Fatalf("expected nil, got %+v", result)
-	}
-}
-
 // --- Exec garbage: valid exit, garbage data → error → CM fallback → warning ---
 
-func TestProduceExecGarbageTriggersConfigMapFallback(t *testing.T) {
-	t.Parallel()
-	// Both --json and tabwriter exec succeed but with garbage data. The JSON
-	// parse fails, tabwriter yields data lines but no qualified identities
-	// (triggers format-drift error), so the producer falls through to the
-	// ConfigMap.
-	mockRun := func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--json" {
-				return []byte("not valid json"), nil
-			}
-		}
-		// Tabwriter: valid exit, data lines, but no qualified repos.
-		return []byte("REPO   WORKFLOW   STEP   SECRET   APPROVED BY   APPROVED AT   STATUS\ngarbage   *   some/secret   admin   2026-08-18   active\n"), nil
-	}
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data: map[string]string{
-			secretAccessConfigMapKey: `
-- repo: codeberg/oberthci/oberth
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/data/release/cosign-secret
-`,
-		},
-	}
-	kube := fake.NewSimpleClientset(cm)
-
-	result, warnings, err := ProducePerRepoIdentities(context.Background(), kube, mockRun, "", "oberth")
-	if err != nil {
-		t.Fatalf("should have fallen back to CM, got error: %v", err)
-	}
-	if len(result) != 1 || result[0].Repo != "oberth" {
-		t.Fatalf("expected 1 identity from CM fallback, got %d: %+v", len(result), result)
-	}
-	// Must have a warning about the exec→CM fallback.
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "fell back to ConfigMap") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected 'fell back to ConfigMap' warning, got: %v", warnings)
-	}
-}
-
-func TestProduceExecTabwriterGarbageTriggersConfigMapFallback(t *testing.T) {
-	t.Parallel()
-	// --json exec fails (old binary), tabwriter exec succeeds but returns
-	// only bare (unqualified) repo names — triggers the format-drift error
-	// in parseAccessListOutput, which causes the exec path to fail and the
-	// producer to fall through to ConfigMap.
-	mockRun := func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
-		for _, a := range args {
-			if a == "--json" {
-				return nil, fmt.Errorf("flag provided but not defined: -json")
-			}
-		}
-		return []byte("REPO          WORKFLOW   STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS\ngarbage       *      some/secret                         admin         2026-08-18 08:54   active\n"), nil
-	}
-
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data: map[string]string{
-			secretAccessConfigMapKey: "- repo: codeberg/oberthci/oberth\n  workflow: .oberth/release.yaml\n  step: \"*\"\n  secret: oberth/data/release/cosign-secret\n",
-		},
-	}
-	kube := fake.NewSimpleClientset(cm)
-
-	result, warnings, err := ProducePerRepoIdentities(context.Background(), kube, mockRun, "", "oberth")
-	if err != nil {
-		t.Fatalf("should have fallen back to CM, got error: %v", err)
-	}
-	if len(result) != 1 || result[0].Repo != "oberth" {
-		t.Fatalf("expected 1 identity from CM fallback, got %d: %+v", len(result), result)
-	}
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "fell back to ConfigMap") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected fell-back-to-ConfigMap warning, got: %v", warnings)
-	}
-}
-
 // --- Parse-to-zero with non-empty input = error ---
-
-func TestParseAccessListOutputDataLinesNoQualifiedReturnsError(t *testing.T) {
-	t.Parallel()
-	// Multiple data lines, none qualified — should return format-drift error.
-	output := strings.Join([]string{
-		"REPO          WORKFLOW   STEP   SECRET                              APPROVED BY   APPROVED AT        STATUS",
-		"terraform     .oberth/release.yaml   *      oberth/data/release/cosign-secret   admin         2026-08-18 08:54   active",
-		"oberth        .oberth/release.yaml   *      oberth/data/release/r2-token        admin         2026-08-18 08:54   active",
-	}, "\n")
-	_, err := ParseAccessListOutput([]byte(output))
-	if err == nil {
-		t.Fatal("expected error for data lines with no qualified identities")
-	}
-	if !strings.Contains(err.Error(), "2 data lines") {
-		t.Fatalf("error should mention 2 data lines, got: %v", err)
-	}
-}
-
-func TestParseAccessListOutputHeaderOnlyIsEmpty(t *testing.T) {
-	t.Parallel()
-	output := "REPO   WORKFLOW   STEP   SECRET   APPROVED BY   APPROVED AT   STATUS\n"
-	result, err := ParseAccessListOutput([]byte(output))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 0 {
-		t.Fatalf("expected 0, got %d", len(result))
-	}
-}
 
 func TestParseAccessListJSONEntriesNoQualifiedReturnsError(t *testing.T) {
 	t.Parallel()
@@ -559,7 +139,7 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 		return []byte(accessListOutput), nil
 	}
 
-	identities, _, err := ProducePerRepoIdentities(context.Background(), nil, mockRun, "", "oberth")
+	identities, _, err := testProducePerRepoIdentities(context.Background(), nil, mockRun, "", "oberth")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,7 +212,7 @@ func TestProducePerStepIdentitiesExecFailureReturnsError(t *testing.T) {
 	failingRunner := func(_ context.Context, _ []byte, _ string, _ ...string) ([]byte, error) {
 		return nil, errors.New("connection refused")
 	}
-	_, err := ProducePerStepIdentities(context.Background(), failingRunner, "", "oberth")
+	_, err := testProducePerStepIdentities(context.Background(), failingRunner, "", "oberth")
 	if err == nil {
 		t.Fatal("expected an error when exec fails, got nil")
 	}
@@ -645,17 +225,6 @@ func TestProducePerStepIdentitiesExecFailureReturnsError(t *testing.T) {
 // when run is nil (no exec possible, e.g. fresh install), the function returns
 // nil, nil — this is safe because there are no grants to produce and no
 // orphans to remove.
-func TestProducePerStepIdentitiesNilRunnerReturnsNil(t *testing.T) {
-	t.Parallel()
-
-	identities, err := ProducePerStepIdentities(context.Background(), nil, "", "oberth")
-	if err != nil {
-		t.Fatalf("unexpected error for nil runner: %v", err)
-	}
-	if identities != nil {
-		t.Fatalf("expected nil identities for nil runner, got %v", identities)
-	}
-}
 
 // --- Issue #814: per-repo identities carry wildcard grants only ---
 
@@ -748,71 +317,6 @@ func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T
 
 // TestParseAccessListOutputExcludesNamedStepGrants covers the tabwriter
 // fallback path (older deployed binaries): the STEP column decides.
-func TestParseAccessListOutputExcludesNamedStepGrants(t *testing.T) {
-	t.Parallel()
-	output := strings.Join([]string{
-		"REPO                                      WORKFLOW   STEP                     SECRET                                 APPROVED BY   APPROVED AT        STATUS",
-		"codeberg/exampleorg/exampleorg-port       .oberth/release.yaml   *                        oberth/data/release/cosign-secret      admin         2026-08-21 16:40   active",
-		"codeberg/exampleorg/exampleorg-port       .oberth/release.yaml   release-publish-images   oberth/data/release/gar-image-key      fabian        2026-10-07 18:00   active",
-	}, "\n")
-	result, err := ParseAccessListOutput([]byte(output))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
-	}
-	if got, want := result[0].Grants, []string(nil); !reflect.DeepEqual(got, want) {
-		t.Fatalf("tabwriter per-repo grants: got %v want %v", got, want)
-	}
-}
 
 // TestProduceFromConfigMapExcludesNamedStepGrants covers the ConfigMap
 // fallback (no running pod): the step field decides there too.
-func TestProduceFromConfigMapExcludesNamedStepGrants(t *testing.T) {
-	t.Parallel()
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data: map[string]string{
-			secretAccessConfigMapKey: `
-- repo: codeberg/exampleorg/exampleorg-port
-  workflow: .oberth/release.yaml
-  step: "*"
-  secret: oberth/data/release/cosign-secret
-- repo: codeberg/exampleorg/exampleorg-port
-  workflow: .oberth/release.yaml
-  step: release-publish-images
-  secret: oberth/data/release/gar-image-key
-`,
-		},
-	}
-	kube := fake.NewSimpleClientset(cm)
-	result, _, err := ProducePerRepoIdentities(context.Background(), kube, nil, "", "oberth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 identity, got %d: %+v", len(result), result)
-	}
-	if got, want := result[0].Grants, []string(nil); !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfigMap per-repo grants: got %v want %v", got, want)
-	}
-}
-
-func TestSyncRefusesConfigMapFallbackDesiredSet(t *testing.T) {
-	kube := fake.NewSimpleClientset(&corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
-		Data:       map[string]string{secretAccessConfigMapKey: "- repo: bare\n  step: '*'\n  secret: oberth/data/key\n"},
-	})
-	failedExec := func(context.Context, []byte, string, ...string) ([]byte, error) {
-		return nil, errors.New("exec unavailable")
-	}
-	_, _, err := ProducePerRepoIdentitiesForSync(t.Context(), kube, failedExec, "", "oberth")
-	if err == nil {
-		t.Fatal("sync accepted a partial ConfigMap desired set for orphan removal")
-	}
-	_, _, err = ProducePerRepoIdentitiesForSync(t.Context(), kube, nil, "", "oberth")
-	if err == nil {
-		t.Fatal("sync accepted ConfigMap-only desired set")
-	}
-}
