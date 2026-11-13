@@ -473,7 +473,7 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 		if variable.ValueFrom.SecretKeyRef != nil || variable.ValueFrom.ConfigMapKeyRef != nil {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.env[%q] reads a Kubernetes Secret or ConfigMap and is not admitted", location, variable.Name))
 		}
-		if variable.ValueFrom.FieldRef != nil || variable.ValueFrom.ResourceFieldRef != nil {
+		if variable.ValueFrom.FieldRef != nil && variable.ValueFrom.FieldRef.FieldPath != "spec.serviceAccountName" {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.env[%q] reads pod/downward state and is not admitted", location, variable.Name))
 		}
 	}

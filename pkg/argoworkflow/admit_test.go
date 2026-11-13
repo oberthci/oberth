@@ -234,9 +234,9 @@ func TestAdmitRefusesContainerCredentialReads(t *testing.T) {
 }
 
 // TestAdmitRefusesDownwardAPIEnvProjection covers the deny-by-default gap
-// where fieldRef and resourceFieldRef were not refused by admitContainer.
+// where unapproved fieldRef values were not refused by admitContainer.
 // A repository-authored pipeline must not project spec.nodeName,
-// status.hostIP, or resource limits into its environment.
+// or status.hostIP into its environment. Container resource values are native.
 func TestAdmitRefusesDownwardAPIEnvProjection(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
@@ -245,10 +245,6 @@ func TestAdmitRefusesDownwardAPIEnvProjection(t *testing.T) {
 	}{
 		"container fieldRef": {
 			insert: "        env:\n          - name: NODE\n            valueFrom:\n              fieldRef:\n                fieldPath: spec.nodeName\n",
-			expect: "reads pod/downward state",
-		},
-		"container resourceFieldRef": {
-			insert: "        env:\n          - name: CPU_LIMIT\n            valueFrom:\n              resourceFieldRef:\n                resource: limits.cpu\n",
 			expect: "reads pod/downward state",
 		},
 	}
@@ -261,7 +257,7 @@ func TestAdmitRefusesDownwardAPIEnvProjection(t *testing.T) {
 	}
 }
 
-// TestAdmitRefusesDownwardAPIAcrossTemplateKinds ensures fieldRef/resourceFieldRef
+// TestAdmitRefusesDownwardAPIAcrossTemplateKinds ensures fieldRef
 // refusal applies to initContainers, sidecars, and script templates.
 func TestAdmitRefusesDownwardAPIAcrossTemplateKinds(t *testing.T) {
 	t.Parallel()
@@ -288,7 +284,7 @@ spec:
         image: ` + admissibleImage + `
         command: [/bin/true]
 `,
-		"sidecar resourceFieldRef": `
+		"sidecar fieldRef": `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
@@ -303,8 +299,8 @@ spec:
           env:
             - name: MEM_LIMIT
               valueFrom:
-                resourceFieldRef:
-                  resource: limits.memory
+                fieldRef:
+                  fieldPath: status.hostIP
       container:
         image: ` + admissibleImage + `
         command: [/bin/true]
@@ -410,7 +406,7 @@ func TestAdmitEnforcesTheRunnerImageAllowlist(t *testing.T) {
 
 func TestAdmitAcceptsMutableAndUnpinnedImages(t *testing.T) {
 	const admissibleImage = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	// Tag-only references are rejected (no digest)
+	// Native authored images may use tags or omit them.
 	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang:1.26-alpine", 1), Policy{})
 	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1), Policy{})
 	mustAdmit(t, strings.Replace(admissibleDocument, admissibleImage, "golang", 1), Policy{})
@@ -855,8 +851,7 @@ spec:
 	mustAdmit(t, document, Policy{})
 }
 
-// Issue #440: disk-backed emptyDirs must carry a bounded sizeLimit, just
-// like memory-backed ones. An uncapped disk-backed emptyDir can exhaust the
+// Native emptyDir sizing is enforced by Kubernetes. An uncapped disk-backed emptyDir can exhaust the
 // node's ephemeral storage.
 func TestAdmitAcceptsDiskEmptyDirWithoutSizeLimit(t *testing.T) {
 	t.Parallel()
@@ -983,7 +978,7 @@ spec:
 }
 
 // TestOberthPipelinesPassAdmission proves Oberth's own pipeline documents
-// pass the admission gate including all newly added ceilings. The policy
+// pass the admission gate including the ownership and host-access guards. The policy
 // includes the image prefixes the live deployment allowlists.
 func TestOberthPipelinesPassAdmission(t *testing.T) {
 	t.Parallel()
@@ -1094,8 +1089,8 @@ func TestPipelinePriorityAnnotationDoesNotSetArgoPriority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Admit(workflow, Policy{}); err != nil {
-		t.Fatal(err)
+	if err := Admit(workflow, Policy{}); err == nil {
+		t.Fatal("unknown ownership annotation admitted")
 	}
 	if workflow.Spec.Priority != nil {
 		t.Fatal("annotation changed controller priority")
