@@ -1,4 +1,4 @@
-# Pipeline execution permissions are held in one Role bound to the server.
+# Pipeline execution and shutdown permissions are bound to the server.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
