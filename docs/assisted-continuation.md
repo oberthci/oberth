@@ -157,6 +157,15 @@ created by an older server, or a run without a seeded source claim. Such a
 step is inspect-only: `run_hold_exec` works, `run_hold_patch` is refused;
 `run_rerun` with `assist: true` builds new Pods that carry the helper.
 
+Helper output from a held Pod is author-controlled data. Reserving the literal
+helper mount path does not prevent access through `/proc/self/root/...` or an
+image-provided symlink, or make the Pod's filesystem trustworthy. A helper read,
+digest or successful write acknowledgement supports diagnosis only; it does not
+prove that the requested tree was read or changed. The server records the
+assisted verdict before exec, patch or continue, independently of helper output.
+Assisted runs never count as commit evidence or publish a green upstream verdict;
+verification requires an ordinary run of the committed source.
+
 A hold is identified by the server-owned annotation, the pause variable on
 `main` and a retry node name (`...(N)`, N ≥ 1); admission refuses every
 `ARGO_*` environment name from repository YAML, template defaults and

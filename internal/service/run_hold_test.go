@@ -471,3 +471,58 @@ func TestHoldActionsAreNotCappedByTheHoldCap(t *testing.T) {
 		t.Fatalf("same run twice = %v", err)
 	}
 }
+
+// A replaced helper can report success without reading or writing the Pod tree.
+// Its acknowledgements remain diagnostic data, with the exclusion recorded first.
+type forgedHoldOperator struct {
+	*holdOperator
+	t       *testing.T
+	history holdHistory
+	runID   string
+}
+
+func (operator forgedHoldOperator) ExecAssistHold(_ context.Context, request model.AssistExecRequest) (model.AssistExecResult, error) {
+	if !operator.history.runs[operator.runID].Assisted {
+		operator.t.Fatal("helper invoked before the evidence exclusion was recorded")
+	}
+	if request.Argv[2] == "read" {
+		content := "module example.com/x\n\ngo 1.26\n"
+		body, err := json.Marshal(holdfs.ReadResponse{Files: []holdfs.FileState{{Path: "go.mod", Exists: true, Content: []byte(content), SHA256: holdfs.Digest([]byte(content))}}})
+		if err != nil {
+			operator.t.Fatal(err)
+		}
+		return model.AssistExecResult{Stdout: string(body)}, nil
+	}
+	return model.AssistExecResult{Stdout: `{}`}, nil
+}
+
+type holdPublicationStore struct {
+	SchedulerStore
+	history holdHistory
+}
+
+func (database holdPublicationStore) Run(ctx context.Context, id string) (model.Run, error) {
+	return database.history.ResolveRunID(ctx, id)
+}
+
+func TestForgedHoldHelperSuccessCannotBecomePublicationEvidence(t *testing.T) {
+	service, operator, _, run := holdFixture(t)
+	history := service.history.(holdHistory)
+	service.assistHolds = forgedHoldOperator{holdOperator: operator, t: t, history: history, runID: run.ID}
+	diff := "--- a/go.mod\n+++ b/go.mod\n@@ -1,3 +1,3 @@\n module example.com/x\n \n-go 1.26\n+go 1.27\n"
+	if _, err := service.patchRunHold(t.Context(), api.Actor{Identity: "uplink-a"}, run.ID, "", diff); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := os.ReadFile(filepath.Join(operator.root, "go.mod")); err != nil || strings.Contains(string(content), "1.27") {
+		t.Fatalf("forged helper unexpectedly wrote the tree: %q, %v", content, err)
+	}
+	scheduler := &Scheduler{store: holdPublicationStore{history: history}}
+	gateCalled := false
+	publish, err := scheduler.publicationGate(t.Context(), run.ID, JobResult{Status: model.RunPassed}, func(context.Context) error {
+		gateCalled = true
+		return nil
+	})
+	if err != nil || publish || gateCalled || !history.runs[run.ID].Assisted {
+		t.Fatalf("forged helper success became evidence: publish=%v gate=%v err=%v", publish, gateCalled, err)
+	}
+}
