@@ -64,6 +64,10 @@ type secretsFile struct {
 // link, a missing directory, or any place inside a git worktree, where one
 // `git add .` publishes them.
 func CheckSecretsFilePath(path string) (string, error) {
+	return checkSecretsFilePath(path, false)
+}
+
+func checkSecretsFilePath(path string, reuseEmpty bool) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", errors.New("--secrets-file needs a path")
 	}
@@ -71,8 +75,10 @@ func CheckSecretsFilePath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Lstat(abs); err == nil {
-		return "", fmt.Errorf("--secrets-file %s already exists; it is never overwritten: move it away or name a new file", abs)
+	if info, err := os.Lstat(abs); err == nil {
+		if !reuseEmpty || !emptyOwnedSecretsFile(info) {
+			return "", fmt.Errorf("--secrets-file %s already exists; it is never overwritten: move it away or name a new file", abs)
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("--secrets-file %s: %w", abs, err)
 	}
@@ -98,19 +104,47 @@ func CheckSecretsFilePath(path string) (string, error) {
 // file created since the check, O_NOFOLLOW a symbolic link planted there, and
 // the explicit chmod makes the mode 0600 whatever the umask.
 func createSecretsFile(path string) (*secretsFile, error) {
-	checked, err := CheckSecretsFilePath(path)
+	return openSecretsFile(path, false)
+}
+
+func emptyOwnedSecretsFile(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && info.Mode().IsRegular() && info.Size() == 0 && info.Mode().Perm()&0o077 == 0 && int64(stat.Uid) == int64(os.Geteuid()) && stat.Nlink == 1
+}
+
+// Install may reuse an empty owned file left by an interrupted reservation.
+// Other credential exports still require a new path. Neither mode truncates.
+func openSecretsFile(path string, reuseEmpty bool) (*secretsFile, error) {
+	checked, err := checkSecretsFilePath(path, reuseEmpty)
 	if err != nil {
 		return nil, err
 	}
-	// The operator names the file; CheckSecretsFilePath refused existing
-	// files, links and git worktrees.
+	// First reserve exclusively. Only install may open an existing empty file;
+	// validate that descriptor again after acquiring its exclusive lock.
 	file, err := os.OpenFile(checked, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600) //nolint:gosec // G304: operator-named path, checked above
+	created := err == nil
+	if reuseEmpty && errors.Is(err, os.ErrExist) {
+		file, err = os.OpenFile(checked, os.O_WRONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0) //nolint:gosec // G304: operator-selected path; locked descriptor checked below.
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create --secrets-file %s: %w", checked, err)
 	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		return nil, errors.New("--secrets-file is in use; choose a new output path")
+	}
+	if !created {
+		info, err := file.Stat()
+		if err != nil || !emptyOwnedSecretsFile(info) {
+			_ = file.Close()
+			return nil, errors.New("--secrets-file is no longer an empty owned file; choose a new output path")
+		}
+	}
 	if err := file.Chmod(0o600); err != nil {
 		_ = file.Close()
-		_ = os.Remove(checked)
+		if created {
+			_ = os.Remove(checked)
+		}
 		return nil, fmt.Errorf("restrict --secrets-file %s: %w", checked, err)
 	}
 	return &secretsFile{path: checked, file: file}, nil
