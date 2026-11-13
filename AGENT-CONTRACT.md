@@ -3329,3 +3329,12 @@ After re-approving, run `oberth secretstore sync` to prune old OpenBao roles and
 `access_allow`, `access_revoke`, and `access_dismiss` require `workflow`; lists,
 pending observations, policy digests and generated step identities include it.
 No approval-file default or alias is accepted.
+
+- Argo security defaults: install and upgrade read the live controller ConfigMap.
+  Existing security defaults are filled only with interactive approval of the
+  displayed review or `--argo-security-defaults`; only absent leaves are filled.
+  Compliant external controllers, including `--skip-argo-workflows`, pass without
+  a release rewrite. `controller.configMap.create=false`
+  passes when the live defaults comply; missing defaults require direct ConfigMap
+  edits, with the v0.22.5 migration named for old-profile releases. Pod-level Unconfined
+  seccomp is refused even when every container supplies a safe override.

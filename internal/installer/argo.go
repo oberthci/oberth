@@ -85,6 +85,16 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		return result, err
 	}
 	if cfg.SkipArgo {
+		if err := readArgoSecurityReview(ctx, &cfg, deps); err != nil {
+			return result, err
+		}
+		if len(cfg.argoSecurityArgs) > 0 {
+			plan := &upgradeArgoSecurity{namespace: ns, consent: cfg.ArgoSecurityDefaults}
+			if err := plan.reconcile(ctx, deps); err != nil {
+				return result, err
+			}
+			result.Upgraded = true
+		}
 		result.Skipped = true
 		return result, nil
 	}
@@ -105,6 +115,19 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	release, exists, err := findHelmRelease(ctx, deps, "argo-workflows", ns)
 	if err != nil {
 		return result, err
+	}
+	cfg.argoReviewRelease = &release
+	cfg.argoReleaseRead = true
+	if err := readArgoSecurityReview(ctx, &cfg, deps); err != nil {
+		return result, err
+	}
+	securityChanged := exists && len(cfg.argoSecurityArgs) > 0
+	if securityChanged {
+		plan := &upgradeArgoSecurity{namespace: ns, consent: cfg.ArgoSecurityDefaults}
+		if err := plan.reconcile(ctx, deps); err != nil {
+			return result, err
+		}
+		cfg.argoSecurityArgs = []string{}
 	}
 	cfg.argoExecutorResources, err = readArgoExecutorResources(ctx, deps, ns, exists)
 	if err != nil {
@@ -154,7 +177,8 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	}
 	switch action {
 	case actionSkip:
-		result.AlreadyInstalled = true
+		result.AlreadyInstalled = !securityChanged
+		result.Upgraded = securityChanged
 		return result, nil
 	case actionUpgrade:
 		result.Upgraded = true
@@ -171,6 +195,9 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	args := ArgoHelmArgs(cfg)
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
+	}
+	if err := checkLiveArgoSecurity(ctx, deps, ns); err != nil {
+		return result, argoSecurityUpgradeRemedy(ns, err)
 	}
 	return result, nil
 }
@@ -214,6 +241,11 @@ func ArgoHelmArgs(cfg Config) []string {
 	if canonicalChartVersion(chartVersion) == canonicalChartVersion(DefaultArgoChartVersion) {
 		args = append(args, "--set-string", "executor.image.tag="+strings.SplitN(argoworkflow.ExecutorImage, ":", 2)[1])
 	}
+	securityArgs := cfg.argoSecurityArgs
+	if securityArgs == nil {
+		securityArgs, _, _ = argoSecurityDefaults(nil)
+	}
+	args = append(args, securityArgs...)
 	args = append(args, argoLimitArgs(cfg)...)
 	return append(args, argoExecutorResourceArgs(cfg)...)
 }

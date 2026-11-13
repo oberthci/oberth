@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -21,7 +20,7 @@ func TestArgoPlanReviewUsesNativeValues(t *testing.T) {
 				cfg.ArgoParallelism, cfg.ArgoNamespaceParallelism = &global, &namespace
 			}
 			ca := newTestServerCA(t, []string{"api.example.test"})
-			kube := fake.NewClientset(preflightNode(), preflightStorage())
+			kube := argoSecurityTestClient(preflightNode(), preflightStorage())
 			reads, resourceReads := 0, 0
 			host := InstallDeps{Output: io.Discard, LookPath: func(name string) (string, error) { return name, nil },
 				LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
@@ -66,8 +65,8 @@ func TestArgoPlanReviewUsesNativeValues(t *testing.T) {
 			if plan.Review.ArgoParallelism != global || plan.Review.ArgoNamespaceParallelism != namespace {
 				t.Fatalf("review changed native values: %+v", plan.Review)
 			}
-			if existing && (reads != 1 || resourceReads != 1) {
-				t.Fatal("effective limits and raw operator resources must each be read once", reads, resourceReads)
+			if existing && (reads != 1 || resourceReads != 2) {
+				t.Fatal("effective limits read once; raw resources and security each read once", reads, resourceReads)
 			}
 		}
 	}
@@ -76,7 +75,7 @@ func TestArgoPlanReviewUsesNativeValues(t *testing.T) {
 func TestArgoUpgradePreservesOperatorLimits(t *testing.T) {
 	raw := []byte(`{"controller":{"parallelism":17,"namespaceParallelism":5}}`)
 	applied := false
-	deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+	deps := Deps{KubeClient: argoSecurityTestClient(), Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		switch args[0] {
 		case "list":
 			return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"deployed"}]`), nil

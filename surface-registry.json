@@ -108,6 +108,10 @@
       "doc_anchor": "docs/metrics.md#scraping-with-the-prometheus-operator",
       "test_ref": "charts/oberth/tests/servicemonitor_test.yaml scrapes /metrics over verified TLS with the admin token Secret"
     },
+    "flag:argo-security-defaults": {
+      "doc_anchor": "docs/security.md",
+      "test_ref": "internal/installer/argo_security_live_test.go TestArgoSecurityLiveConsentAndMigration"
+    },
     "flag:argo-parallelism": {
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -50,7 +49,7 @@ func pkiLifecycleDeps(t *testing.T, dns, ips []string) (Deps, *fakeBaoRunner) {
 	responses["read -format=json oberth-pki/roles/oberth-server"] = fakeBaoResponse{out: string(roleJSON)}
 	responses["read -format=json oberth-pki/issuer/default"] = fakeBaoResponse{out: string(issuerJSON)}
 	runner := &fakeBaoRunner{t: t, responses: responses}
-	deps := secretStoreTestDeps(runner, io.Discard, currentDeployment(), runningOpenBaoPod())
+	deps := secretStoreTestDeps(runner, io.Discard, append(argoSecurityLiveObjects(DefaultArgoNamespace, true), currentDeployment(), runningOpenBaoPod())...)
 	leaf := secretWithCertificate(t, append(base, "ci.example.com"), []string{"192.0.2.1"}).Data["tls.crt"]
 	deps.RunCommand = func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
 		if slices.Contains(args, "deploy/oberth") {
@@ -170,7 +169,7 @@ func TestServerPKIRemovalFailsClosedWhenServedCertificateIsUnreadable(t *testing
 }
 
 func TestReinstallPreservesRuntimeTLSNames(t *testing.T) {
-	deps := Deps{KubeClient: fake.NewClientset(currentDeployment()), RunHelm: func(context.Context, []string) ([]byte, error) {
+	deps := Deps{KubeClient: argoSecurityTestClient(currentDeployment()), RunHelm: func(context.Context, []string) ([]byte, error) {
 		return []byte(`{"tls":{"pki":{"enabled":true},"extraDNSNames":["ci.example.com"],"extraIPs":["192.0.2.1"]}}`), nil
 	}}
 	cfg := Config{Namespace: DefaultNamespace, TLSExtraDNSNames: []string{"new.example.com"}}
@@ -204,6 +203,10 @@ func TestUpgradeReconcilesPKIBeforeHelmAndDryRunNeverWrites(t *testing.T) {
 			rendered, applied := false, false
 			previews := 0
 			deps.RunHelm = func(_ context.Context, args []string) ([]byte, error) {
+				if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
+					return out, nil
+				}
+
 				switch args[0] {
 				case "list":
 					return []byte(`[{"name":"oberth","status":"deployed","chart":"oberth-0.17.80"}]`), nil

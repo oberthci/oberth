@@ -17,7 +17,7 @@ func argoTestDeps(t *testing.T, recorded *[][]string) Deps {
 	t.Helper()
 	return Deps{
 		Output:     io.Discard,
-		KubeClient: fake.NewClientset(),
+		KubeClient: fake.NewClientset(argoSecurityLiveObjects(DefaultArgoNamespace, true)...),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			*recorded = append(*recorded, slices.Clone(args))
@@ -145,8 +145,10 @@ func TestInstallArgoWorkflowsSkipStillBindsOberthToTheNamespace(t *testing.T) {
 	if !result.Skipped {
 		t.Fatal("expected the install to be skipped")
 	}
-	if len(recorded) != 0 {
-		t.Fatalf("skipping must not run helm: %v", recorded)
+	for _, args := range recorded {
+		if args[0] != "list" && args[0] != "get" {
+			t.Fatalf("skipping mutated Helm: %v", recorded)
+		}
 	}
 	args := argoOberthHelmValues(cfg, OpenBaoResult{})
 	if !slices.Contains(args, "argo.namespace="+DefaultArgoNamespace) {

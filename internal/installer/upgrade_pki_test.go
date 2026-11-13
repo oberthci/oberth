@@ -11,7 +11,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -31,9 +30,13 @@ func TestPlainPKIUpgradeNeedsNoBaoToken(t *testing.T) {
 			}
 			applied := false
 			deps := Deps{
-				Output: io.Discard, KubeClient: fake.NewClientset(deployment),
+				Output: io.Discard, KubeClient: argoSecurityTestClient(deployment),
 				RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+					if out, ok := testUpgradeArgoSecurityPreflight(args); ok {
+						return out, nil
+					}
+
 					switch args[0] {
 					case "list":
 						return []byte(`[{"name":"oberth","status":"deployed","chart":"oberth-0.17.80"}]`), nil

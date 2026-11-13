@@ -2042,7 +2042,7 @@ func TestRunSkipsPromptWhenSecretStoreFlagSet(t *testing.T) {
 		},
 	}
 	clientRoot := t.TempDir()
-	client := fake.NewClientset(node, oberthPod, readyArgoControllerPod())
+	client := argoSecurityTestClient(node, oberthPod, readyArgoControllerPod())
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:      &buf,
