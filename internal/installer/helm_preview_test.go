@@ -18,6 +18,9 @@ func TestPreviewHelmUpgradeRefusesOnSSAConflict(t *testing.T) {
 	deps := Deps{
 		Output: &bytes.Buffer{},
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+				return []byte(`{}`), nil
+			}
 			joined := strings.Join(args, " ")
 			helmCalls = append(helmCalls, joined)
 
@@ -301,7 +304,6 @@ func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
 	for _, want := range []string{
 		"secretstore.address=https://openbao.openbao.svc:8200 ",
 		"secretstore.caCert=" + liveCA,
-		"secretstore.transit.enabled=true",
 	} {
 		if !strings.Contains(preview, want) {
 			t.Fatalf("preview args missing %q:\n%s", want, preview)

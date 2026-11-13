@@ -119,8 +119,6 @@ type serveOptions struct {
 	secretStoreSAToken      string
 	secretStorePaths        stringList
 	secretStoreKVPath       string
-	secretStoreTransitMount string
-	secretStoreTransitKey   string
 	secretStoreInsecureHTTP bool
 
 	pipelineNetworkPolicyEnabled *bool
@@ -257,8 +255,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.secretStoreSAToken, "secretstore-sa-token", "", "optional ServiceAccount token path override for the OpenBao login")
 	flags.Var(&options.secretStorePaths, "secretstore-path", "allowlisted OpenBao KV path (repeatable)")
 	flags.StringVar(&options.secretStoreKVPath, "secretstore-kv-mount", secretstore.DefaultKVPath, "KV v2 mount backing the virtual oberth/upstream/ secret namespace")
-	flags.StringVar(&options.secretStoreTransitMount, "secretstore-transit-mount", "", "OpenBao transit mount for trusted Plan artifacts (enables trusted Plan/Apply with --secretstore-transit-key)")
-	flags.StringVar(&options.secretStoreTransitKey, "secretstore-transit-key", "", "OpenBao transit key for trusted Plan artifacts")
 	flags.BoolVar(&options.secretStoreInsecureHTTP, "secretstore-insecure-http", false, "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address")
 	flags.StringVar(&options.argoNamespace, "argo-namespace", "", "namespace for Argo Workflow pipelines (required)")
 	flags.Func("pipeline-network-policy-enabled", "configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement", func(value string) error {
@@ -495,7 +491,7 @@ func validateSecretStoreServeOptions(options serveOptions) error {
 	if options.secretStoreAddress == "" {
 		if options.secretStoreRole != "" || options.secretStoreCACert != "" || options.secretStoreSAToken != "" ||
 			len(options.secretStorePaths) != 0 || options.secretStoreInsecureHTTP || options.secretStoreAuthMount != secretstore.DefaultAuthMountPath ||
-			options.secretStoreKVPath != secretstore.DefaultKVPath || options.secretStoreTransitMount != "" || options.secretStoreTransitKey != "" {
+			options.secretStoreKVPath != secretstore.DefaultKVPath {
 			return errors.New("serve: secret store flags require --secretstore-address")
 		}
 		return nil
@@ -509,31 +505,7 @@ func validateSecretStoreServeOptions(options serveOptions) error {
 	if options.secretStoreSAToken != "" && (!filepath.IsAbs(options.secretStoreSAToken) || filepath.Clean(options.secretStoreSAToken) != options.secretStoreSAToken) {
 		return errors.New("serve: secret store ServiceAccount token must be a clean absolute path")
 	}
-	transitEnabled := options.secretStoreTransitMount != "" || options.secretStoreTransitKey != ""
-	if transitEnabled && (options.secretStoreTransitMount == "" || options.secretStoreTransitKey == "") {
-		return errors.New("serve: trusted Plan transit requires both --secretstore-transit-mount and --secretstore-transit-key")
-	}
-	if transitEnabled {
-		if options.secretStoreInsecureHTTP || !strings.HasPrefix(options.secretStoreAddress, "https://") {
-			return errors.New("serve: trusted Plan transit requires a verified HTTPS secret store and forbids the insecure HTTP development override")
-		}
-		if err := validateSecretStoreSingleSegment("transit mount", options.secretStoreTransitMount); err != nil {
-			return err
-		}
-		if err := validateSecretStoreSingleSegment("transit key", options.secretStoreTransitKey); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
-func validateSecretStoreSingleSegment(label, value string) error {
-	if strings.Contains(value, "/") {
-		return fmt.Errorf("serve: secret store %s must be one clean non-reserved path segment", label)
-	}
-	if err := pipeline.ValidateSecretStorePath(value); err != nil {
-		return fmt.Errorf("serve: secret store %s: %w", label, err)
-	}
 	return nil
 }
 

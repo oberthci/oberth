@@ -394,7 +394,7 @@ func TestOberthHelmArgs(t *testing.T) {
 	}{
 		"production": {
 			cfg:     Config{Namespace: "oberth", ChartVersion: "v0.10.54", InstallSecretStore: true},
-			openbao: OpenBaoResult{ServiceAddress: "https://openbao.openbao.svc:8200", CACertPEM: caPEM, TrustedTransitVerified: true},
+			openbao: OpenBaoResult{ServiceAddress: "https://openbao.openbao.svc:8200", CACertPEM: caPEM},
 			settings: []string{
 				// The installer defaults argo.vault.address to the installed
 				// store when no explicit --argo-vault-address was given, so
@@ -414,9 +414,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				"--set", "secretstore.role=oberth-ci",
 				"--set-string", "secretstore.caCert=" + caPEM,
 				"--set", "secretstore.insecureHTTPForDev=false",
-				"--set", "secretstore.transit.enabled=true",
-				"--set", "secretstore.transit.mount=oberth-transit",
-				"--set", "secretstore.transit.key=trusted-plan-artifacts",
 			},
 		},
 		"dev": {
@@ -433,7 +430,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				"--set", "secretstore.role=oberth-ci",
 				"--set-string", "secretstore.caCert=",
 				"--set", "secretstore.insecureHTTPForDev=true",
-				"--set", "secretstore.transit.enabled=false",
 			},
 		},
 	}
@@ -452,137 +448,6 @@ func TestOberthHelmArgs(t *testing.T) {
 			want = append(want, "--reuse-values")
 			assertSliceEqual(t, args, want)
 		})
-	}
-}
-
-func TestInstallOberthUpgradeFromLegacyValuesPinsManagedTransitIdentity(t *testing.T) {
-	t.Parallel()
-	var upgradeArgs []string
-	deps := Deps{
-		Output: io.Discard,
-		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			switch args[0] {
-			case "list":
-				// The stored values come from v0.10.92, which predates the
-				// transit.mount/key chart values; a same-version --upgrade
-				// reconcile reuses them, so Helm supplies neither.
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.93"}]`), nil
-			case "show":
-				return []byte(fakeChartValuesYAML), nil
-			case "upgrade":
-				upgradeArgs = slices.Clone(args)
-			}
-			return nil, nil
-		},
-	}
-	withSignedRelease(t, &deps, "0.10.93", fakeChartImageRef)
-	result, err := InstallOberth(context.Background(), Config{
-		Namespace:          "oberth",
-		ChartVersion:       "v0.10.93",
-		InstallSecretStore: true,
-		Upgrade:            true,
-	}, deps, OpenBaoResult{
-		ServiceAddress:         "https://openbao.openbao.svc:8200",
-		CACertPEM:              "public-ca",
-		TrustedTransitVerified: true,
-	}, RekorResult{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.Upgraded || result.AlreadyInstalled {
-		t.Fatalf("legacy release result = %+v, want upgrade", result)
-	}
-
-	want := map[string]bool{
-		"--reuse-values":                                 false,
-		"secretstore.transit.enabled=true":               false,
-		"secretstore.transit.mount=oberth-transit":       false,
-		"secretstore.transit.key=trusted-plan-artifacts": false,
-	}
-	for _, arg := range upgradeArgs {
-		if _, ok := want[arg]; ok {
-			want[arg] = true
-		}
-	}
-	for value, found := range want {
-		if !found {
-			t.Errorf("legacy --reuse-values upgrade does not override missing %q: %v", value, upgradeArgs)
-		}
-	}
-
-	rendered := renderOberthHelmArgsWithLegacyValues(t, upgradeArgs)
-	for _, want := range []string{
-		"--secretstore-transit-mount=oberth-transit",
-		"--secretstore-transit-key=trusted-plan-artifacts",
-	} {
-		if !strings.Contains(rendered, want) {
-			t.Errorf("legacy values upgrade did not render %q", want)
-		}
-	}
-}
-
-func renderOberthHelmArgsWithLegacyValues(t *testing.T, upgradeArgs []string) string {
-	t.Helper()
-	const transitDefaults = `  transit:
-    enabled: false
-    mount: oberth-transit
-    key: trusted-plan-artifacts
-`
-	chartPath := filepath.Join("..", "..", "charts", "oberth")
-	legacyChartPath := filepath.Join(t.TempDir(), "oberth")
-	if err := os.CopyFS(legacyChartPath, os.DirFS(chartPath)); err != nil {
-		t.Fatal(err)
-	}
-	valuesPath := filepath.Join(legacyChartPath, "values.yaml")
-	values, err := os.ReadFile(valuesPath) // #nosec G304 -- fixed test fixture path.
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(values), transitDefaults) != 1 {
-		t.Fatal("chart values no longer contain the expected managed Transit defaults")
-	}
-	legacyValues := strings.Replace(string(values), transitDefaults, "", 1)
-	if err := os.WriteFile(valuesPath, []byte(legacyValues), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	templateArgs := []string{"template", "oberth", legacyChartPath}
-	for index := 4; index < len(upgradeArgs); index++ {
-		switch upgradeArgs[index] {
-		case "--create-namespace", "--reuse-values":
-			continue
-		case "--version":
-			index++
-			continue
-		default:
-			templateArgs = append(templateArgs, upgradeArgs[index])
-		}
-	}
-	output, err := exec.Command("helm", templateArgs...).CombinedOutput() // #nosec G204 -- fixed binary and installer-owned arguments.
-	if err != nil {
-		t.Fatalf("render chart against legacy reused values: %v\n%s", err, output)
-	}
-	return string(output)
-}
-
-func TestOberthHelmArgsDoesNotEmitTransitIdentityWithoutPositiveVerification(t *testing.T) {
-	t.Parallel()
-	args := OberthHelmArgs(Config{InstallSecretStore: true}, OpenBaoResult{
-		ServiceAddress: "https://openbao.openbao.svc:8200",
-		CACertPEM:      "public-ca",
-	}, RekorResult{})
-
-	joined := strings.Join(args, "\n")
-	if !strings.Contains(joined, "secretstore.transit.enabled=false") {
-		t.Fatalf("unverified production Transit was not explicitly disabled: %v", args)
-	}
-	for _, forbidden := range []string{
-		"secretstore.transit.mount=",
-		"secretstore.transit.key=",
-	} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("unverified production Transit emitted managed identity %q: %v", forbidden, args)
-		}
 	}
 }
 
@@ -649,7 +514,7 @@ func TestOberthHelmArgsWithRekorAndSecretStore(t *testing.T) {
 				InstallSecretStore: true,
 				InstallRekor:       true,
 			},
-			openbao: OpenBaoResult{ServiceAddress: "https://openbao.openbao.svc:8200", CACertPEM: "public-ca", TrustedTransitVerified: true},
+			openbao: OpenBaoResult{ServiceAddress: "https://openbao.openbao.svc:8200", CACertPEM: "public-ca"},
 		},
 		"dev": {
 			cfg: Config{
@@ -674,10 +539,10 @@ func TestOberthHelmArgsWithRekorAndSecretStore(t *testing.T) {
 					t.Fatalf("combined service args missing %q: %v", want, args)
 				}
 			}
-			if name == "production" && (!strings.Contains(joined, "secretstore.transit.enabled=true") || strings.Contains(joined, "secretstore.insecureHTTPForDev=true")) {
+			if name == "production" && strings.Contains(joined, "secretstore.insecureHTTPForDev=true") {
 				t.Fatalf("production secret store args are not fail-closed: %v", args)
 			}
-			if name == "dev" && (!strings.Contains(joined, "secretstore.transit.enabled=false") || !strings.Contains(joined, "secretstore.insecureHTTPForDev=true")) {
+			if name == "dev" && !strings.Contains(joined, "secretstore.insecureHTTPForDev=true") {
 				t.Fatalf("development secret store args are not explicitly KV-only: %v", args)
 			}
 		})
@@ -687,7 +552,7 @@ func TestOberthHelmArgsWithRekorAndSecretStore(t *testing.T) {
 func TestOberthHelmArgsNoVersion(t *testing.T) {
 	t.Parallel()
 	cfg := Config{Namespace: "oberth", InstallSecretStore: true}
-	args := OberthHelmArgs(cfg, OpenBaoResult{ServiceAddress: "https://openbao.openbao.svc:8200", CACertPEM: "public-ca", TrustedTransitVerified: true}, RekorResult{})
+	args := OberthHelmArgs(cfg, OpenBaoResult{ServiceAddress: "https://openbao.openbao.svc:8200", CACertPEM: "public-ca"}, RekorResult{})
 	for _, arg := range args {
 		if arg == "--version" {
 			t.Fatal("--version should not be present when ChartVersion is empty")
@@ -854,15 +719,13 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 		"Initialize and unseal OpenBao",
 		"bao operator init -key-shares=1 -key-threshold=1",
 		"Configure secret store",
-		"Enable Transit mount: oberth-transit/ and create non-exportable key trusted-plan-artifacts",
-		"update only exact Transit encrypt/decrypt paths",
+		"server identity and PKI access under oberth",
 		"Install the local Rekor stack",
 		"bundled-rekor",
 		"auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"auditAnchor.rekorInsecureHTTP=true",
 		"auditAnchor.rekorPublicKey=<generated-log-public-key-pem>",
 		"secretstore.address=https://openbao.openbao.svc:8200",
-		"secretstore.transit.enabled=true",
 		"Install Oberth",
 		"No cluster changes were made",
 	} {
@@ -944,17 +807,12 @@ func TestDryRunPlainPlanOmitsOptionalPhases(t *testing.T) {
 // every write succeeds, for the given root token.
 func freshStoreResponses() map[string]fakeBaoResponse {
 	return map[string]fakeBaoResponse{
-		"auth list -format=json":                      {out: `{"token/":{"type":"token"}}`},
-		"auth enable -path=kubernetes kubernetes":     {out: "Success!"},
-		"read -format=json auth/kubernetes/config":    {out: "No value found at auth/kubernetes/config", err: errors.New("exit status 2")},
-		"write auth/kubernetes/config -":              {out: "Success!"},
-		"secrets list -format=json":                   {out: `{"cubbyhole/":{"type":"cubbyhole"}}`},
-		"secrets enable -path=oberth -version=2 kv":   {out: "Success!"},
-		"secrets enable -path=oberth-transit transit": {out: "Success!"},
-		"read -format=json oberth-transit/keys/trusted-plan-artifacts": {
-			out: "No value found at oberth-transit/keys/trusted-plan-artifacts", err: errors.New("exit status 2"),
-		},
-		"write oberth-transit/keys/trusted-plan-artifacts -":              {out: "Success!"},
+		"auth list -format=json":                                          {out: `{"token/":{"type":"token"}}`},
+		"auth enable -path=kubernetes kubernetes":                         {out: "Success!"},
+		"read -format=json auth/kubernetes/config":                        {out: "No value found at auth/kubernetes/config", err: errors.New("exit status 2")},
+		"write auth/kubernetes/config -":                                  {out: "Success!"},
+		"secrets list -format=json":                                       {out: `{"cubbyhole/":{"type":"cubbyhole"}}`},
+		"secrets enable -path=oberth -version=2 kv":                       {out: "Success!"},
 		"policy read oberth-ci":                                           {out: "No policy named: oberth-ci", err: errors.New("exit status 2")},
 		"policy write oberth-ci -":                                        {out: "Success!"},
 		"read -format=json auth/kubernetes/role/oberth-ci":                {out: "No value found at auth/kubernetes/role/oberth-ci", err: errors.New("exit status 2")},
@@ -1001,11 +859,7 @@ func configuredProductionStoreResponses(t *testing.T) map[string]fakeBaoResponse
 "oberth-pki/":{"type":"pki","options":{}}
 }`}
 	configuredServerPKIResponses(t, responses)
-	responses["read -format=json oberth-transit/keys/trusted-plan-artifacts"] = fakeBaoResponse{out: `{"data":{
-"type":"aes256-gcm96","derived":false,"exportable":false,"allow_plaintext_backup":false,
-"supports_encryption":true,"supports_decryption":true
-}}`}
-	responses["policy read oberth-ci"] = fakeBaoResponse{out: OberthProductionPolicy("oberth", "oberth-transit", "trusted-plan-artifacts") + serverPKIPolicy()}
+	responses["policy read oberth-ci"] = fakeBaoResponse{out: OberthPolicy("oberth") + serverPKIPolicy()}
 	responses["policy read oberth-argo-credentialed"] = fakeBaoResponse{out: OberthCredentialedPolicy("oberth", nil)}
 	responses["read -format=json auth/kubernetes/role/oberth-argo-credentialed"] = fakeBaoResponse{out: `{"request_id":"3","data":{` +
 		`"bound_service_account_names":["oberth-argo-credentialed"],` +
@@ -1186,87 +1040,6 @@ func TestConfigureSecretStoreFresh(t *testing.T) {
 		rolePayload["token_ttl"] != "10m" ||
 		rolePayload["token_max_ttl"] != "15m" {
 		t.Fatalf("role payload wrong: %v", rolePayload)
-	}
-}
-
-func TestConfigureSecretStoreProductionCreatesNarrowTransitKeyAndPolicy(t *testing.T) {
-	t.Parallel()
-	runner := &fakeBaoRunner{t: t, responses: freshStoreResponses()}
-	deps := secretStoreTestDeps(runner, io.Discard)
-	cfg := Config{InstallSecretStore: true}
-	if err := cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-
-	store := newOpenBaoExec(deps, DefaultOpenBaoNamespace, "openbao-0")
-	result, err := ConfigureSecretStore(context.Background(), cfg, deps, store, "root-token-x")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.TransitMountEnabled || !result.TransitKeyCreated || !result.PolicyWritten || !result.TrustedTransitVerified {
-		t.Fatalf("production Transit setup incomplete: %+v", result)
-	}
-	calls := runner.callsByCommand()
-	keyWrite, ok := calls["write oberth-transit/keys/trusted-plan-artifacts -"]
-	if !ok {
-		t.Fatal("managed Transit key was not created")
-	}
-	var keyPayload map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(keyWrite.stdin, "root-token-x\n")), &keyPayload); err != nil {
-		t.Fatal(err)
-	}
-	if keyPayload["type"] != "aes256-gcm96" || keyPayload["derived"] != false || keyPayload["exportable"] != false || keyPayload["allow_plaintext_backup"] != false {
-		t.Fatalf("unsafe Transit key payload: %v", keyPayload)
-	}
-	policy := strings.TrimPrefix(calls["policy write oberth-ci -"].stdin, "root-token-x\n")
-	for _, path := range []string{
-		`path "oberth-transit/encrypt/trusted-plan-artifacts"`,
-		`path "oberth-transit/decrypt/trusted-plan-artifacts"`,
-	} {
-		if !strings.Contains(policy, path) {
-			t.Fatalf("production policy missing exact Transit path %q:\n%s", path, policy)
-		}
-	}
-	if strings.Contains(policy, `path "oberth-transit/keys/`) || strings.Contains(policy, `path "oberth-transit/*`) {
-		t.Fatalf("production policy grants Transit key management or wildcard access:\n%s", policy)
-	}
-}
-
-func TestConfigureSecretStoreProductionRerunPositivelyVerifiesTransitWithoutMutation(t *testing.T) {
-	t.Parallel()
-	runner := &fakeBaoRunner{t: t, responses: configuredProductionStoreResponses(t)}
-	deps := secretStoreTestDeps(runner, io.Discard)
-	cfg := Config{InstallSecretStore: true}
-	if err := cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	result, err := ConfigureSecretStore(
-		context.Background(), cfg, deps,
-		newOpenBaoExec(deps, DefaultOpenBaoNamespace, "openbao-0"), "root-token-x",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !result.TrustedTransitVerified || !result.Skipped {
-		t.Fatalf("verified production rerun = %+v", result)
-	}
-}
-
-func TestConfigureSecretStoreProductionRefusesUnsafeExistingTransitKey(t *testing.T) {
-	t.Parallel()
-	responses := configuredProductionStoreResponses(t)
-	responses["read -format=json oberth-transit/keys/trusted-plan-artifacts"] = fakeBaoResponse{out: `{"data":{
-"type":"aes256-gcm96","derived":false,"exportable":true,"allow_plaintext_backup":false,
-"supports_encryption":true,"supports_decryption":true
-}}`}
-	runner := &fakeBaoRunner{t: t, responses: responses}
-	deps := secretStoreTestDeps(runner, io.Discard)
-	cfg := Config{InstallSecretStore: true}
-	_ = cfg.Validate()
-	store := newOpenBaoExec(deps, DefaultOpenBaoNamespace, "openbao-0")
-	_, err := ConfigureSecretStore(context.Background(), cfg, deps, store, "root-token-x")
-	if err == nil || !strings.Contains(err.Error(), "unsafe or incompatible") {
-		t.Fatalf("unsafe existing Transit key was not rejected: %v", err)
 	}
 }
 
@@ -1508,6 +1281,9 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 			deps := Deps{
 				Output: io.Discard,
 				RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+					if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+						return []byte(`{}`), nil
+					}
 					switch args[0] {
 					case "list":
 						return []byte(fmt.Sprintf(
@@ -1560,6 +1336,9 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+				return []byte(`{}`), nil
+			}
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.10.59"}]`), nil
@@ -1577,9 +1356,8 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 		ChartVersion:       "v0.10.58",
 		InstallSecretStore: true,
 	}, deps, OpenBaoResult{
-		ServiceAddress:         "https://openbao.openbao.svc:8200",
-		CACertPEM:              caPEM,
-		TrustedTransitVerified: true,
+		ServiceAddress: "https://openbao.openbao.svc:8200",
+		CACertPEM:      caPEM,
 	}, RekorResult{})
 	if err != nil {
 		t.Fatal(err)
@@ -1600,28 +1378,6 @@ func TestInstallOberthReconcilesVerifiedSecretStoreAtInstalledVersion(t *testing
 	}
 	if strings.Contains(joined, "oberth-0.10.58") || strings.Contains(joined, "secretstore.address=http://") {
 		t.Fatalf("secret store reconciliation downgraded chart or transport: %q", joined)
-	}
-}
-
-func TestInstallOberthRejectsUnverifiedProductionTransitBeforeAnyHelmCall(t *testing.T) {
-	t.Parallel()
-	helmCalls := 0
-	deps := Deps{
-		Output: io.Discard,
-		RunHelm: func(context.Context, []string) ([]byte, error) {
-			helmCalls++
-			return nil, nil
-		},
-	}
-	_, err := InstallOberth(context.Background(), Config{InstallSecretStore: true}, deps, OpenBaoResult{
-		ServiceAddress: "https://openbao.openbao.svc:8200",
-		CACertPEM:      "public-ca",
-	}, RekorResult{})
-	if err == nil || !strings.Contains(err.Error(), "not positively verified") {
-		t.Fatalf("unverified production install error = %v", err)
-	}
-	if helmCalls != 0 {
-		t.Fatalf("unverified production install made %d Helm calls, want 0", helmCalls)
 	}
 }
 
@@ -1664,6 +1420,9 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+				return []byte(`{}`), nil
+			}
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed"}]`), nil
@@ -2428,8 +2187,8 @@ func TestSetupProductionSecretStoreInitializesAndConfigures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !configured.TrustedTransitVerified {
-		t.Fatalf("fresh production setup lacks positive Transit proof: %+v", configured)
+	if len(configured.ServerCACertPEM) == 0 {
+		t.Fatalf("fresh production setup lacks server PKI proof: %+v", configured)
 	}
 
 	output := buf.String()
@@ -2568,7 +2327,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRunt
 		t.Fatalf("output missing already-initialized note:\n%s", output)
 	}
 	for _, want := range []string{
-		"Cannot enable trusted Plan Transit",
+		"Cannot verify the managed secret-store configuration",
 		"supply the root token without exposing it in shell history",
 		"--resume-secrets-file PATH --secrets-file NEW_PATH",
 		"oberth install --install-secretstore",
@@ -2605,7 +2364,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedUsesEnvToken(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !configured.TrustedTransitVerified || !configured.Skipped {
+	if !configured.Skipped {
 		t.Fatalf("production rerun lacks exact no-mutation proof: %+v", configured)
 	}
 	if !strings.Contains(buf.String(), "Using the root token to verify the secret-store configuration.") {
@@ -3821,6 +3580,9 @@ func TestInstallOberthPinsChartDefaultImageRef(t *testing.T) {
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+				return []byte(`{}`), nil
+			}
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.2"}]`), nil
@@ -3869,6 +3631,9 @@ func TestInstallOberthImageMustBeTheSignedRecords(t *testing.T) {
 		deps := Deps{
 			Output: io.Discard,
 			RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+					return []byte(`{}`), nil
+				}
 				switch args[0] {
 				case "list":
 					return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.16.2"}]`), nil

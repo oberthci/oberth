@@ -646,8 +646,8 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 // overlay, with the overlay in a values file inside the private working
 // directory (removed when the restore returns). Retain the installed chart
 // defaults deliberately; restore sets only database compatibility identities.
-// Newly introduced chart keys require template fallbacks, covered by the
-// v0.17.53 raw-values render and actual Helm restore tests.
+// Retired installer values are removed from a stored snapshot before reuse;
+// historical v0.22.3 and real Helm restore tests cover the applied values.
 func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, target restoreTarget, work string) ([]string, error) {
 	body, err := json.Marshal(target.Overlay)
 	if err != nil {
@@ -677,7 +677,8 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 	if _, err := deps.RunHelm(ctx, []string{"show", "chart", chart}); err != nil {
 		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
-	return append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile), nil
+	args = append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile)
+	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args)
 }
 
 // scaleServer scales through the scale subresource. A merge patch of the

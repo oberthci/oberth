@@ -660,7 +660,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	}
 	if full {
 		_, _ = fmt.Fprintln(w, "\nNot in the backup: server files (git caches, step logs; repositories are cloned again), Helm values (re-apply your own),\n"+
-			"and what every install makes for itself: its identities, Transit key and server CA.")
+			"and the installation's own identities, server CA and optional Rekor signing key.")
 	}
 	_, _ = fmt.Fprintf(w, "Look inside without a cluster: oberth restore --inspect %s\n", displayLocalPath(cfg.Output))
 	_, _ = fmt.Fprintf(w, "Restore it on a fresh install: oberth restore %s\n", displayLocalPath(cfg.Output))

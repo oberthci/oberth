@@ -115,17 +115,7 @@ is a name a public CA issues for in a deployment like this one. */ -}}
 {{- if and (not $secretstoreHTTPS) (not (and $secretstoreHTTP .Values.secretstore.insecureHTTPForDev)) -}}
 {{- fail "secretstore.address must use https unless the explicit HTTP development override is enabled" -}}
 {{- end -}}
-{{- if .Values.secretstore.transit.enabled -}}
-{{- if or (not $secretstoreHTTPS) .Values.secretstore.insecureHTTPForDev -}}
-{{- fail "secretstore.transit requires verified HTTPS and forbids insecureHTTPForDev" -}}
-{{- end -}}
-{{- if or (not (regexMatch "^[A-Za-z0-9._-]+$" .Values.secretstore.transit.mount)) (has .Values.secretstore.transit.mount (list "." ".." "auth" "sys" "identity" "cubbyhole")) -}}
-{{- fail "secretstore.transit.mount must be one clean path segment" -}}
-{{- end -}}
-{{- if or (not (regexMatch "^[A-Za-z0-9._-]+$" .Values.secretstore.transit.key)) (has .Values.secretstore.transit.key (list "." "..")) -}}
-{{- fail "secretstore.transit.key must be one clean path segment" -}}
-{{- end -}}
-{{- end -}}
+
 {{- end -}}
 {{- $monitor := (.Values.metrics | default dict).serviceMonitor | default dict -}}
 {{- if $monitor.enabled -}}

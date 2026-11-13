@@ -78,9 +78,10 @@ func deployedUpgradeRevision(ctx context.Context, namespace string, deps Deps) (
 }
 
 type preparedUpgradeValues struct {
-	pki           *upgradeServerPKI
-	revision      string
-	compatibility backupCompatibility
+	pki            *upgradeServerPKI
+	revision       string
+	compatibility  backupCompatibility
+	storedSnapshot map[string]any
 }
 
 func readUpgradeStoredValues(ctx context.Context, namespace, revision string, deps Deps) (map[string]any, error) {
@@ -121,6 +122,10 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
 	if err != nil {
 		return preparedUpgradeValues{}, err
+	}
+	var storedSnapshot map[string]any
+	if dropRetiredInstallerValues(values, deps.Output) {
+		storedSnapshot = values
 	}
 	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 		return preparedUpgradeValues{}, err
@@ -165,5 +170,42 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
 	}
-	return preparedUpgradeValues{pki: pki, revision: revision, compatibility: compat}, nil
+	return preparedUpgradeValues{pki: pki, revision: revision, compatibility: compat, storedSnapshot: storedSnapshot}, nil
+}
+
+// Keep the cleaned snapshot alive for both the server preview and actual apply.
+func (prepared preparedUpgradeValues) configureStoredSnapshot(cfg *UpgradeConfig) (func(), error) {
+	if prepared.storedSnapshot == nil {
+		return func() {}, nil
+	}
+	work, err := os.MkdirTemp("", "oberth-upgrade-stored-")
+	if err != nil {
+		return nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(work) }
+	cfg.storedValuesFile, err = writeStoredValuesSnapshot(work, prepared.storedSnapshot)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	return cleanup, nil
+}
+
+func prepareUpgradeDryRunValues(ctx context.Context, cfg *UpgradeConfig, deps Deps) error {
+	revision, err := deployedUpgradeRevision(ctx, cfg.Namespace, deps)
+	if err != nil {
+		return err
+	}
+	values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
+	if err != nil {
+		return err
+	}
+	if dropRetiredInstallerValues(values, deps.Output) {
+		cfg.storedValuesFile = "<cleaned-stored-values>"
+	}
+	if err := checkUpgradePKIKeyConflicts(*cfg, values); err != nil {
+		return err
+	}
+	_, err = prepareUpgradeServerPKI(ctx, cfg, deps, values)
+	return err
 }

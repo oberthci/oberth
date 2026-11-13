@@ -389,6 +389,7 @@ DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-
 const PostWorkflowCapabilityUIDDowngrade = historicalRestartTimingSchema + `
 DELETE FROM schema_migrations WHERE id='20261113181825-remove-restart-timings-370d05c58486149250a7139eb6afdca7';
 DELETE FROM schema_migrations WHERE id='20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153';
+DELETE FROM schema_migrations WHERE id='20261113134927-remove-trusted-plan-tables-9c79017beee9f599710138b306164845';
 DELETE FROM schema_migrations WHERE id='20261113073438-remove-unused-capability-recovery-842b529121af8cb6b818c84fa78a5024';
 DROP TABLE IF EXISTS workflow_capability_recoveries;
 CREATE TABLE workflow_capability_recoveries (

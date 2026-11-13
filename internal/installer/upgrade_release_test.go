@@ -223,6 +223,9 @@ func TestInstallReconcileOfANewerReleaseNeverDeploysThePreflightChart(t *testing
 	deps := Deps{
 		Output: io.Discard,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+				return []byte(`{}`), nil
+			}
 			switch args[0] {
 			case "list":
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-` + installed + `"}]`), nil

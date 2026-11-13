@@ -45,7 +45,7 @@ func TestUpgradeMergesNewChartDefaults(t *testing.T) {
 // a nonmutating kube client; HTTP supplies discovery metadata only.
 func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	requireHelmForUpgradeTest(t)
-	old, err := os.ReadFile("../../charts/oberth/values.yaml")
+	old, err := os.ReadFile("testdata/v0.22.3-values.yaml.golden")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,17 +55,20 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	}
 	values["removedOldDefault"] = "not user configuration"
 	values["compatibility"] = map[string]any{"schemaIdentity": testUpgradeCompatibility.SchemaIdentity, "auditDomain": testUpgradeCompatibility.AuditDomain, "witnessKeyInfo": testUpgradeCompatibility.WitnessKeyInfo}
-	config := map[string]any{"image": map[string]any{"ref": "example.invalid/old@sha256:" + strings.Repeat("2", 64)}, "argo": map[string]any{"goProxy": map[string]any{"enabled": false}}, "pushBannerURL": "", "retention": map[string]any{"keepNewestPerRef": 0}, "podAnnotations": map[string]any{"round17.example/stored": "kept"}}
-	values["pushBannerURL"] = ""
-	values["retention"].(map[string]any)["keepNewestPerRef"] = 0
-	values["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] = false
-	values["podAnnotations"] = map[string]any{"round17.example/stored": "kept"}
+	var config map[string]any
+	stored, err := os.ReadFile("testdata/v0.22.3-stored-config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(stored, &config); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	release := []any{map[string]any{
 		"name": "oberth", "namespace": "oberth", "version": 1,
 		"info": map[string]any{"status": "deployed"},
 		"chart": map[string]any{
-			"metadata": map[string]any{"apiVersion": "v2", "name": "oberth", "version": "0.22.2"},
+			"metadata": map[string]any{"apiVersion": "v2", "name": "oberth", "version": "0.22.3"},
 			"values":   values,
 		},
 		"config": config,
@@ -97,7 +100,13 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	if compat != testUpgradeCompatibility {
 		t.Fatalf("identities from installed chart defaults lost: %+v", compat)
 	}
-	args, flags := upgradeHelmArgs(cfg, chart, image, compat)
+	applyCfg := cfg
+	cleanup, err := prepared.configureStoredSnapshot(&applyCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	args, flags := upgradeHelmArgs(applyCfg, chart, image, compat)
 	args = append(args, flags...)
 	args = append(args, "--dry-run=client", "--output=json")
 	out, err := runHelm(t.Context(), args)
@@ -134,85 +143,23 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 			t.Errorf("render dropped installed identity %q", want)
 		}
 	}
+	if _, exists := upgraded.Config["secretstore"].(map[string]any)["transit"]; exists {
+		t.Fatal("retired installer values survived the actual upgrade")
+	}
+	if access, exists := upgraded.Config["sourceAccess"]; !exists || access != nil {
+		t.Fatal("explicit null sourceAccess changed")
+	}
 	proxy := upgraded.Config["argo"].(map[string]any)["goProxy"].(map[string]any)
 	if proxy["enabled"] != false || upgraded.Config["pushBannerURL"] != "" {
 		t.Fatalf("explicit false/empty configuration changed: %+v", upgraded.Config)
 	}
-	// Install re-runs and restore deliberately retain old chart defaults. Both
-	// paths must render every value introduced since v0.17.53 via fallbacks.
-	// Remove the synthetic old-only default for raw reuse: strict target schemas
-	// correctly reject it, which is why this mode needs an exact chart contract.
-	delete(values, "removedOldDefault")
-	encoded, err = json.Marshal(release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(history, encoded, 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, mode := range []string{"install", "restore"} {
-		t.Run(mode, func(t *testing.T) {
-			var args []string
-			if mode == "install" {
-				args = OberthHelmArgs(Config{Namespace: "oberth", ChartPath: chart, ImageRef: image}, OpenBaoResult{}, RekorResult{})
-			} else {
-				args, err = restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: chart}, backupDeps{Deps: deps}, restoreTarget{Overlay: map[string]any{"compatibility": values["compatibility"]}}, t.TempDir())
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			if !slices.Contains(args, "--reuse-values") {
-				t.Fatal("install/restore no longer preserve old chart defaults")
-			}
-			out, err := runHelm(t.Context(), append(args, "--dry-run=client", "--output=json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			var result struct {
-				Manifest string `json:"manifest"`
-			}
-			if err := json.Unmarshal(out, &result); err != nil {
-				t.Fatal(err)
-			}
-			for _, forbidden := range []string{"--git-backend", "OBERTH_GITCACHE_SHADOW"} {
-				if strings.Contains(result.Manifest, forbidden) {
-					t.Fatalf("legacy field reactivated %s", forbidden)
-				}
-			}
-			for _, want := range []string{containerimage.Utility, compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo} {
-				if !strings.Contains(result.Manifest, want) {
-					t.Errorf("%s raw-reuse render lacks %q", mode, want)
-				}
-			}
-		})
-	}
-	// A user-set removed key must be refused by the TARGET schema before upgrade.
-	// Exercise top-level and nested additionalProperties=false with real Helm.
-	for _, nested := range []string{"top", "retention"} {
-		parent := config
-		if nested == "retention" {
-			parent = config["retention"].(map[string]any)
-		}
-		parent["removedByTarget"] = true
-		encoded, err = json.Marshal(release)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(history, encoded, 0600); err != nil {
-			t.Fatal(err)
-		}
-		_, err = prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
-		var schemaErr *ErrSchemaValidation
-		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "removedByTarget") {
-			t.Fatalf("unknown stored key reached upgrade: %v", err)
-		}
-		delete(parent, "removedByTarget")
-	}
+	fixture := historicalHelmUpgrade{cfg: cfg, deps: deps, values: values, config: config, release: release, history: history, chart: chart, image: image}
+	fixture.checkOperatorOverrides(t, applyCfg, compat)
+	fixture.checkInstallRestore(t, compat)
+	fixture.checkUnknownStoredValues(t)
+
 }
 
-// requireRemovedValuesRefusal checks the stored removed values are refused
-// with their names and clearing flags, and returns those flags: the
-// refusal's own instruction is the way through.
 func requireHelmForUpgradeTest(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("helm"); err != nil {
@@ -294,3 +241,155 @@ func upgradeTestHelm(t *testing.T, dir, history string) func(context.Context, []
 }
 
 var testUpgradeCompatibility = backupCompatibility{SchemaIdentity: "legacy-schema-v1", AuditDomain: "legacy-audit-v1", WitnessKeyInfo: "legacy-witness-v1"}
+
+type historicalHelmUpgrade struct {
+	cfg                   UpgradeConfig
+	deps                  Deps
+	values, config        map[string]any
+	release               []any
+	history, chart, image string
+}
+
+func (f historicalHelmUpgrade) checkOperatorOverrides(t *testing.T, applyCfg UpgradeConfig, compat backupCompatibility) {
+	t.Helper()
+	chart, image, runHelm := f.chart, f.image, f.deps.RunHelm
+	t.Run("operator-override-precedence", func(t *testing.T) {
+		override := filepath.Join(t.TempDir(), "operator.yaml")
+		if err := os.WriteFile(override, []byte("retention:\n  keepNewestPerRef: 7\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		overridden := applyCfg
+		overridden.UserValues = []string{override}
+		overridden.UserSet = []string{"retention.keepNewestPerRef=9"}
+		a, f := upgradeHelmArgs(overridden, chart, image, compat)
+		raw, err := runHelm(t.Context(), append(append(a, f...), "--dry-run=client", "--output=json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Config map[string]any `json:"config"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Config["retention"].(map[string]any)["keepNewestPerRef"] != float64(9) {
+			t.Fatal("stored snapshot overrode operator values")
+		}
+	})
+	t.Run("new-retired-override-refused", func(t *testing.T) {
+		invalid := applyCfg
+		invalid.UserSet = []string{"secretstore.transit.enabled=false"}
+		a, f := upgradeHelmArgs(invalid, chart, image, compat)
+		if _, err := runHelm(t.Context(), append(append(a, f...), "--dry-run=client", "--output=json")); err == nil {
+			t.Fatal("new retired override was silently dropped")
+		}
+	})
+
+}
+
+func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCompatibility) {
+	t.Helper()
+	values, release, history := f.values, f.release, f.history
+	chart, image, deps := f.chart, f.image, f.deps
+	runHelm := deps.RunHelm
+	// Install re-runs and restore deliberately retain old chart defaults. Both
+	// paths must render historical v0.22.3 values after exact installer-key cleanup.
+	// Remove the synthetic old-only default for raw reuse: strict target schemas
+	// correctly reject it, which is why this mode needs an exact chart contract.
+	delete(values, "removedOldDefault")
+	encoded, err := json.Marshal(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(history, encoded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"install", "restore"} {
+		t.Run(mode, func(t *testing.T) {
+			var args []string
+			if mode == "install" {
+				args = OberthHelmArgs(Config{Namespace: "oberth", ChartPath: chart, ImageRef: image}, OpenBaoResult{}, RekorResult{})
+			} else {
+				args, err = restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: chart}, backupDeps{Deps: deps}, restoreTarget{Overlay: map[string]any{"compatibility": values["compatibility"]}}, t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "install" {
+				args, err = prepareRetiredInstallerReuse(t.Context(), deps, "oberth", t.TempDir(), args)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if slices.Contains(args, "--reuse-values") || !slices.Contains(args, "--reset-values") {
+				t.Fatal("retired defaults would be reintroduced by raw reuse", args)
+			}
+			out, err := runHelm(t.Context(), append(args, "--dry-run=client", "--output=json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result struct {
+				Manifest string         `json:"manifest"`
+				Config   map[string]any `json:"config"`
+			}
+			if err := json.Unmarshal(out, &result); err != nil {
+				t.Fatal(err)
+			}
+			if access, exists := result.Config["sourceAccess"]; !exists || access != nil {
+				t.Fatal("explicit null sourceAccess changed", mode)
+			}
+			if _, exists := result.Config["secretstore"].(map[string]any)["transit"]; exists {
+				t.Fatal("retired installer values survived", mode)
+			}
+			if result.Config["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] != false || result.Config["pushBannerURL"] != "" || result.Config["retention"].(map[string]any)["keepNewestPerRef"] != float64(0) {
+				t.Fatal("live operator values changed", mode)
+			}
+			for _, forbidden := range []string{"--git-backend", "OBERTH_GITCACHE_SHADOW"} {
+				if strings.Contains(result.Manifest, forbidden) {
+					t.Fatalf("legacy field reactivated %s", forbidden)
+				}
+			}
+			for _, want := range []string{containerimage.Utility, compat.SchemaIdentity, compat.AuditDomain, compat.WitnessKeyInfo} {
+				if !strings.Contains(result.Manifest, want) {
+					t.Errorf("%s raw-reuse render lacks %q", mode, want)
+				}
+			}
+		})
+	}
+
+}
+
+func (f historicalHelmUpgrade) checkUnknownStoredValues(t *testing.T) {
+	t.Helper()
+	config, release, history := f.config, f.release, f.history
+	cfg, deps, chart, image := f.cfg, f.deps, f.chart, f.image
+	// A user-set removed key must be refused by the TARGET schema before upgrade.
+	// Exercise top-level and nested additionalProperties=false with real Helm.
+	for _, nested := range []string{"top", "retention", "transit"} {
+		parent := config
+		if nested == "retention" {
+			parent = config["retention"].(map[string]any)
+		}
+		if nested == "transit" {
+			parent = config["secretstore"].(map[string]any)["transit"].(map[string]any)
+		}
+		parent["removedByTarget"] = true
+		encoded, err := json.Marshal(release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(history, encoded, 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = prepareUpgradeValues(t.Context(), cfg, deps, chart, image)
+		var schemaErr *ErrSchemaValidation
+		wantKey := "removedByTarget"
+		if nested == "transit" {
+			wantKey = "transit"
+		}
+		if !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), wantKey) {
+			t.Fatalf("unknown stored key reached upgrade: %v", err)
+		}
+		delete(parent, "removedByTarget")
+	}
+}

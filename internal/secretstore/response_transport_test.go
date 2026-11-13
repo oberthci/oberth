@@ -32,8 +32,6 @@ func TestBoundedSecretStoreTransportRejectsSuccessfulOversizedResponsesBeforeVau
 		path string
 	}{
 		{name: "login", path: "/v1/auth/kubernetes/login"},
-		{name: "transit encrypt", path: "/v1/oberth-transit/encrypt/trusted-plan-artifacts"},
-		{name: "transit decrypt", path: "/v1/oberth-transit/decrypt/trusted-plan-artifacts"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

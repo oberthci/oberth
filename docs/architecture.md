@@ -76,10 +76,6 @@ follow the durable promotion/publication retry rules. Parked sources always
 receive merged-tree CI. See [promotion trains](promotion-trains.md) and
 [park provenance](park-promotion.md).
 
-Trusted Plan/Apply is not an execution path. Its historical tables and Transit
-configuration still exist pending removal of their live evidence and installer
-readers; they do not provide a Plan/Apply product feature.
-
 ## Persistence, audit and service boundaries
 
 SQLite stores repository/run history, step results, grants, publications and

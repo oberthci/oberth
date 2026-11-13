@@ -490,13 +490,6 @@ secretstore:
   caCert: ""
   # DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address.
   insecureHTTPForDev: false
-  # Server-owned OpenBao Transit encryption for trusted promotion plan
-  # artifacts. The chart default is fail-closed; the production installer
-  # enables it only after exact mount/key/policy/role provisioning succeeds.
-  transit:
-    enabled: false
-    mount: oberth-transit
-    key: trusted-plan-artifacts
   # KV v2 mount that physically backs the virtual oberth/upstream/ secret
   # namespace. Release paths may be org- or repository-scoped. Trusted paths
   # are always repository- and phase-scoped as
