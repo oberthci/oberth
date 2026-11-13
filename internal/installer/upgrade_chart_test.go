@@ -343,6 +343,9 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCo
 			want["compatibility"] = values["compatibility"]
 			if mode == "install" {
 				want["image"].(map[string]any)["ref"] = image
+				argo := want["argo"].(map[string]any)
+				argo["namespace"] = DefaultArgoNamespace
+				argo["goProxy"].(map[string]any)["port"] = float64(8444)
 			}
 			if !reflect.DeepEqual(result.Config, want) {
 				t.Fatalf("stored user key set changed: got %#v, want %#v", result.Config, want)
