@@ -125,7 +125,7 @@ func buildArgoEngine(
 	if seeder == nil {
 		return nil, errors.New("configure Argo source seeding: the in-cluster Kubernetes client is required")
 	}
-	jobs, err := app.NewArgoJobs(controller.WithSourceSeeder(seeder), config, auditor, secretAccess, nil)
+	jobs, err := app.NewArgoJobs(controller.WithSourceSeeder(seeder), config, auditor, secretAccess)
 	if err != nil {
 		return nil, err
 	}

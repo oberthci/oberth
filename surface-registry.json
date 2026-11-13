@@ -732,10 +732,6 @@
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
-    "annotation:oberth.ci/fragments": {
-      "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
-      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
-    },
     "annotation:oberth.ci/workflow-capability": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"

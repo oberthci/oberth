@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-func TestArgoJobsRefusesExternalTemplateReferencesWithoutGitLoading(t *testing.T) {
+func TestArgoJobsRefusesExternalTemplateReferences(t *testing.T) {
 	for _, reference := range []string{"shared/pipeline@v1", "shared-template"} {
 		for _, site := range []string{"step", "dag", "hook", "workflow"} {
 			t.Run(reference+"/"+site, func(t *testing.T) {

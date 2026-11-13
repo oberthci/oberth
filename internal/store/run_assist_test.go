@@ -23,7 +23,7 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "fragment", UpstreamID: upstream.ID, DefaultBranch: "main"})
+	repository, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "repo", UpstreamID: upstream.ID, DefaultBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestSweepAbandonIsRecordedAndAudited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "fragment", UpstreamID: upstream.ID, DefaultBranch: "main"})
+	repository, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "repo", UpstreamID: upstream.ID, DefaultBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}

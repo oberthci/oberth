@@ -24,7 +24,7 @@ func (j *validationFailureJobs) ResolvePipelineSource(context.Context, WorkflowR
 	if j.receiptErr != nil {
 		return nil, j.receiptErr
 	}
-	resolved, err := argoworkflow.ResolveRunSource([]byte(j.source), nil, argoworkflow.RunSourceBinding{})
+	resolved, err := argoworkflow.ResolveRunSource([]byte(j.source), argoworkflow.RunSourceBinding{})
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ spec:
       command: [/bin/true]
 `
 	const rule = "argoworkflow: spec.hostNetwork is not admitted"
-	for _, stage := range []string{"receipt-admission", "receipt-decode", "receipt-fragment", "create", "receipt-io", "create-io"} {
+	for _, stage := range []string{"receipt-admission", "receipt-decode", "receipt-reference", "create", "receipt-io", "create-io"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newControlFixture(t)
 			jobs := &validationFailureJobs{fakeJobs: f.jobs, source: valid}
@@ -62,10 +62,13 @@ spec:
 				jobs.source = "apiVersion: argoproj.io/v1alpha1\nkind: Secret\n"
 				_, err := argoworkflow.Decode([]byte(jobs.source))
 				expected = err.Error()
-			case "receipt-fragment":
+			case "receipt-reference":
 				jobs.source = strings.Replace(valid, "  entrypoint:", "  workflowTemplateRef: {name: unsupported}\n  entrypoint:", 1)
-				_, failure := argoworkflow.ResolveRunSource([]byte(jobs.source), nil, argoworkflow.RunSourceBinding{})
-				expected = failure.Error()
+				workflow, failure := argoworkflow.Decode([]byte(jobs.source))
+				if failure != nil {
+					t.Fatal(failure)
+				}
+				expected = argoworkflow.Admit(workflow, argoworkflow.Policy{}).Error()
 			case "create":
 				jobs.createErr = fmt.Errorf("controller build: %w", &argoworkflow.AdmissionError{Cause: errors.New(rule)})
 			case "receipt-io":

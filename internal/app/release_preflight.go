@@ -28,15 +28,8 @@ func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.Work
 	jobs.mu.Lock()
 	identities, recorder := jobs.identities, jobs.declarations
 	jobs.mu.Unlock()
-	fragments, err := loadFragments(ctx, jobs.fragments, source, pipeline.TriggerRelease, request.Run.RefKind, "release")
-	if err != nil {
-		return service.ReleasePreflightResult{}, err
-	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
-		return service.ReleasePreflightResult{}, err
-	}
-	if _, err := argoworkflow.Resolve(workflow, fragments); err != nil {
 		return service.ReleasePreflightResult{}, err
 	}
 	grants := map[string]map[string]bool{}
@@ -50,7 +43,7 @@ func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.Work
 		}
 	}
 	submission := argojob.Request{Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
-		Source: source, PipelineFile: request.PipelineFile, Trigger: pipeline.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants, Fragments: fragments}
+		Source: source, PipelineFile: request.PipelineFile, Trigger: pipeline.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants}
 	submission.RepositoryID = request.Repository.ID
 	if identities != nil {
 		submission.Identities = identities.Snapshot()

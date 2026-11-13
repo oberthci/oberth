@@ -501,7 +501,7 @@ trust assumptions and complete invalidation rules.
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
 
-- Source receipts bind the exact reviewed source and fragments to submission.
+- Source receipts bind the exact reviewed source to submission.
   They carry no aggregate resource authorization or packing budget.
 
 - Native resources and placement are preserved as authored. Oberth has no
@@ -1878,8 +1878,7 @@ trust assumptions and complete invalidation rules.
   wildcard granting access to templates only within that workflow file. Enforcement is at admission:
   `admitSecretstoreExecPaths` checks each template's `--path` arguments
   against that workflow file's step grants before any Workflow is submitted. A path with only
-  named-step grants is refused when consumed by an inline, unnamed, or
-  fragment-renamed template (fail-closed: the name is not stable or
+  named-step grants is refused when consumed by an inline or unnamed template (fail-closed: the name is not stable or
   authoritative).
 - **Per-step Vault identities:** every (upstream repository, workflow file,
   named or wildcard step) with a grant gets a dedicated ServiceAccount,
@@ -3088,7 +3087,7 @@ restart adoption. Repository YAML cannot choose or widen it.
 GPUs and other extended resources use vanilla Kubernetes requests and limits,
 with no Oberth grant or amount bound. Operators enforce namespace ResourceQuota
 and admission policies, including limits on device-plugin resources. The source
-receipt pins exact source, fragments and run binding across submission.
+receipt pins exact source and run binding across submission.
 
 Retired execution tables are inert; existing migration SQL remains unchanged.
 The five legacy execution tools and technology-specific runtime are removed.

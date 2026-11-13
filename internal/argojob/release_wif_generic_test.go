@@ -245,3 +245,30 @@ func TestWIFStepIdentityIsBoundToExactRoute(t *testing.T) {
 		t.Fatal("route bindings alias caller")
 	}
 }
+
+func TestWIFIdentityUsesExactAuthoredTemplateName(t *testing.T) {
+	const name = "frag-authored"
+	config := genericWIFConfig()
+	want := ""
+	for repo, grant := range config.ReleaseWIF.Repositories {
+		grant.Templates[name] = grant.Templates["main"]
+		delete(grant.Templates, "main")
+		want = grant.StepServiceAccounts["main"]
+		grant.StepServiceAccounts[name] = want
+		delete(grant.StepServiceAccounts, "main")
+		grant.StepRoutes[name] = grant.StepRoutes["main"]
+		delete(grant.StepRoutes, "main")
+		config.ReleaseWIF.Repositories[repo] = grant
+	}
+	request := genericWIFRequest(t, func(wf *wfv1.Workflow) {
+		wf.Spec.Entrypoint = name
+		wf.Spec.Templates[0].Name = name
+	})
+	workflow, err := Build(config, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want == "" || workflow.Spec.Templates[0].ServiceAccountName != want {
+		t.Fatal("authored prefix changed the mapped WIF identity")
+	}
+}

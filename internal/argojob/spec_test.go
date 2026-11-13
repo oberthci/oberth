@@ -1651,55 +1651,37 @@ spec:
 	}
 }
 
-// TestPerStepGrantFailsClosedForFragmentTemplate proves that a path with only
-// named-step grants is refused when consumed by a fragment-renamed template
-// (frag-<hash>-<name>). Issue #623.
-func TestPerStepGrantFailsClosedForFragmentTemplate(t *testing.T) {
-	fragmentExecDoc := `
-apiVersion: argoproj.io/v1alpha1
+// Authored template names retain exact per-step grant matching regardless of prefix.
+func TestPerStepGrantUsesExactAuthoredTemplateName(t *testing.T) {
+	const path = "oberth/data/release/upload-token"
+	const name = "frag-a1b2c3d4-release-publish"
+	workflow, err := argoworkflow.Decode([]byte(`apiVersion: argoproj.io/v1alpha1
 kind: Workflow
-metadata:
-  annotations:
-    oberth.ci/secret-paths: oberth/data/release/r2-upload-token
-    example.com/tier: L
 spec:
-  entrypoint: main
-  activeDeadlineSeconds: 600
+  entrypoint: frag-a1b2c3d4-release-publish
   templates:
-    - name: main
-      dag:
-        tasks:
-          - name: publish
-            template: frag-a1b2c3d4-release-publish
-    - name: frag-a1b2c3d4-release-publish
-      container:
-        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        command: [/run/oberth/bin/oberth]
-        args:
-          - secretstore
-          - exec
-          - --dir=/run/oberth-secrets
-          - --path=oberth/data/release/r2-upload-token
-          - --
-          - publish.sh
-`
-	request := testRequest(pipeline.TriggerRelease, fragmentExecDoc)
-	request.ApprovedSecrets = map[string]bool{
-		"oberth/data/release/r2-upload-token": true,
+  - name: frag-a1b2c3d4-release-publish
+    container:
+      image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      command: [oberth, secretstore, exec, --path=oberth/data/release/upload-token, --, publish.sh]
+`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Named-step grant only — fragment template must be refused.
-	request.StepGrants = map[string]map[string]bool{
-		"oberth/data/release/r2-upload-token": {"release-publish": true},
+	if err := admitSecretstoreExecPaths(workflow, []string{path}, map[string]map[string]bool{path: {name: true}}); err != nil {
+		t.Fatal("exact authored-name grant refused", err)
 	}
-	_, err := Build(testConfig(), request)
-	if err == nil {
-		t.Fatal("expected fragment template to be refused with named-step-only grant")
+	if err := admitSecretstoreExecPaths(workflow, []string{path}, map[string]map[string]bool{path: {"release-publish": true}}); err == nil || !strings.Contains(err.Error(), "secret grant denied") {
+		t.Fatal("different template's grant authorized the step", err)
 	}
-	if !strings.Contains(err.Error(), "secret grant denied") {
-		t.Fatalf("expected 'secret grant denied' in error, got: %v", err)
+	request := Request{Repo: "consumer", UpstreamName: "forge", UpstreamOrg: "org", StepGrants: map[string]map[string]bool{path: {name: true}}}
+	config := testConfig()
+	config.PerStepIdentities = map[string]PerRepoIdentityConfig{"forge/org/consumer/" + name: {ServiceAccountName: "step-authored"}}
+	if err := applyPerStepIdentities(workflow, config, request); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "stable name") {
-		t.Fatalf("expected 'stable name' explanation in error, got: %v", err)
+	if workflow.Spec.Templates[0].ServiceAccountName != "step-authored" {
+		t.Fatal("authored prefix bypassed the named-step identity")
 	}
 }
 

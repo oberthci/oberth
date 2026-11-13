@@ -65,19 +65,6 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 		if err != nil {
 			return
 		}
-		refKind, runTrigger := model.RefBranch, "branch"
-		if trigger == pipeline.TriggerRelease {
-			refKind, runTrigger = model.RefTag, "release"
-		}
-		stage = "fragments"
-		fragments, err := loadFragments(ctx, jobs.fragments, source, trigger, refKind, runTrigger)
-		if err != nil {
-			return
-		}
-		stage = "resolve"
-		if _, err := argoworkflow.Resolve(wf, fragments); err != nil {
-			return
-		}
 		stage = "paths"
 		if _, err := argoworkflow.DeclaredSecretPaths(wf); err != nil {
 			return
