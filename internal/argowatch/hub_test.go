@@ -490,3 +490,28 @@ func TestWaitForSyncCancellation(t *testing.T) {
 		t.Fatalf("WaitForSync = %v", err)
 	}
 }
+
+func TestNamespacePodSnapshotFiltersForeignObjectsWithoutAPIReads(t *testing.T) {
+	kube := kubefake.NewClientset()
+	argo := fakeArgo()
+	h := newTestHub(t, kube, argo)
+	valid := podObject("valid", "wf")
+	foreign := podObject("foreign", "wf")
+	foreign.Namespace = "other"
+	spoofed := podObject("spoofed", "wf")
+	spoofed.OwnerReferences[0].UID = ""
+	missingTrigger := podObject("unlabelled", "wf")
+	delete(missingTrigger.Labels, "oberth.ci/trigger")
+	for _, pod := range []*corev1.Pod{valid, foreign, spoofed, missingTrigger} {
+		if err := h.pods.GetIndexer().Add(pod); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pods := h.Pods()
+	if len(pods) != 1 || pods[0] != valid {
+		t.Fatal(pods)
+	}
+	if len(kube.Actions()) != 0 || len(argo.Actions()) != 0 {
+		t.Fatal("snapshot performed API I/O")
+	}
+}

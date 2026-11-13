@@ -93,7 +93,17 @@ func (h *Hub) Run(ctx context.Context) {
 	h.runOnce.Do(func() {
 		h.argo.Start(ctx.Done())
 		h.kube.Start(ctx.Done())
-		<-ctx.Done()
+		ticker := time.NewTicker(resyncPeriod)
+		defer ticker.Stop()
+		running := true
+		for running {
+			select {
+			case <-ctx.Done():
+				running = false
+			case <-ticker.C:
+				h.logger.InfoContext(ctx, "argowatch: cached objects", "workflows", len(h.workflows.GetIndexer().ListKeys()), "pods", len(h.pods.GetIndexer().ListKeys()))
+			}
+		}
 		h.healthMu.Lock()
 		h.healthSinceLocked()
 		h.stopped = h.now()
@@ -138,6 +148,19 @@ func (h *Hub) PodsOf(workflowName string) []*corev1.Pod {
 	pods := make([]*corev1.Pod, 0, len(objects))
 	for _, obj := range objects {
 		if h.podWorkflowName(obj) == workflowName && workflowName != "" {
+			pods = append(pods, obj.(*corev1.Pod))
+		}
+	}
+	return pods
+}
+
+// Pods returns all shared, read-only step Pods for namespace-wide observation.
+// Consumers apply their own existing selectors; this never performs API I/O.
+func (h *Hub) Pods() []*corev1.Pod {
+	objects := h.pods.GetIndexer().List()
+	pods := make([]*corev1.Pod, 0, len(objects))
+	for _, obj := range objects {
+		if h.podWorkflowName(obj) != "" {
 			pods = append(pods, obj.(*corev1.Pod))
 		}
 	}

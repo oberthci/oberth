@@ -14,6 +14,7 @@
 //
 //	Workflow(name string) (*wfv1.Workflow, bool)
 //	PodsOf(workflowName string) []*corev1.Pod
+//	Pods() []*corev1.Pod
 //	Pod(name string) (*corev1.Pod, bool)
 //	Subscribe(workflowName string) (wake <-chan struct{}, cancel func())
 //	Healthy() bool
