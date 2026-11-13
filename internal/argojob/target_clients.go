@@ -63,7 +63,14 @@ func NewTargetClients(workflows WorkflowClient, kube kubernetes.Interface, journ
 		return nil, err
 	}
 	sum := sha256.Sum256(body)
-	return &TargetClients{workflows: workflows, kube: kube, journal: journal, config: config, digest: hex.EncodeToString(sum[:]), now: time.Now}, nil
+	digest := journal.Binding().CustodyDigest
+	if digest == "" {
+		digest = hex.EncodeToString(sum[:])
+	}
+	if !placementSHA(digest) {
+		return nil, errors.New("argojob: invalid retained target custody digest")
+	}
+	return &TargetClients{workflows: workflows, kube: kube, journal: journal, config: config, digest: digest, now: time.Now}, nil
 }
 
 func (c *TargetClients) WorkflowClient() WorkflowClient { return &targetWorkflows{clients: c} }

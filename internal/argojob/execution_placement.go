@@ -70,13 +70,6 @@ type placementDocument struct {
 	ClusterCreated         string              `json:"cluster_created"`
 	ClusterAnchorUID       string              `json:"cluster_anchor_uid"`
 	EndpointIdentity       string              `json:"endpoint_identity"`
-	NodeName               string              `json:"node_name"`
-	NodeUID                string              `json:"node_uid"`
-	ProviderID             string              `json:"provider_id"`
-	Zone                   string              `json:"zone"`
-	Pool                   string              `json:"pool"`
-	TaintKey               string              `json:"taint_key"`
-	TaintValue             string              `json:"taint_value"`
 	NativeIdentity         string              `json:"native_identity"`
 	DependencyIdentity     string              `json:"dependency_identity"`
 	ControllerPod          string              `json:"controller_pod"`
@@ -178,6 +171,15 @@ func decodeExecutionPlacement(body []byte) (*ExecutionPlacement, error) {
 	}
 	if err := checkPlacementJSON(json.NewDecoder(bytes.NewReader(body)), 0); err != nil {
 		return nil, err
+	}
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &rawFields); err != nil {
+		return nil, err
+	}
+	for _, field := range []string{"node_name", "node_uid", "provider_id", "zone", "pool", "taint_key", "taint_value"} {
+		if _, exists := rawFields[field]; exists {
+			return nil, fmt.Errorf("argojob: execution-target placement field %q was removed; put nodeSelector and tolerations in repository Workflow YAML and enforce node isolation with operator policy", field)
+		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
@@ -331,13 +333,8 @@ func (p *ExecutionPlacement) validate() error {
 	if d.AdmissionProfile != "kube1357-dts300" && d.AdmissionProfile != "kube1357-dts300-ptr-empty" {
 		return errors.New("argojob: unknown admission profile")
 	}
-	if len(k8svalidation.IsQualifiedName(d.TaintKey)) != 0 || len(k8svalidation.IsValidLabelValue(d.TaintValue)) != 0 || len(k8svalidation.IsDNS1123Subdomain(d.NodeName)) != 0 || len(k8svalidation.IsDNS1123Label(d.Namespace)) != 0 || len(k8svalidation.IsDNS1123Subdomain(d.ServiceAccount)) != 0 {
-		return errors.New("argojob: invalid placement names")
-	}
-	for _, v := range []string{d.Pool, d.Zone} {
-		if len(k8svalidation.IsValidLabelValue(v)) != 0 {
-			return errors.New("argojob: invalid placement selector")
-		}
+	if len(k8svalidation.IsDNS1123Label(d.Namespace)) != 0 || len(k8svalidation.IsDNS1123Subdomain(d.ServiceAccount)) != 0 {
+		return errors.New("argojob: invalid target namespace or service account")
 	}
 	if _, err := hex.DecodeString(d.SHA); err != nil {
 		return errors.New("argojob: invalid source SHA")
@@ -385,14 +382,6 @@ func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 	}
 	return nil
 }
-func (p *ExecutionPlacement) selectors() map[string]string {
-	d := p.document
-	return map[string]string{corev1.LabelOSStable: "linux", corev1.LabelArchStable: "amd64", "pool": d.Pool, corev1.LabelTopologyZone: d.Zone, corev1.LabelHostname: d.NodeName}
-}
-func (p *ExecutionPlacement) nativeTolerations() []corev1.Toleration {
-	return []corev1.Toleration{{Key: p.document.TaintKey, Operator: corev1.TolerationOpEqual, Value: p.document.TaintValue, Effect: corev1.TaintEffectNoSchedule}}
-}
-
 func applyExecutionPlacement(wf *wfv1.Workflow, config Config, request Request) error {
 	p := config.ExecutionPlacement
 	if p == nil {
@@ -401,23 +390,10 @@ func applyExecutionPlacement(wf *wfv1.Workflow, config Config, request Request) 
 	if err := p.selectRequest(config, request); err != nil {
 		return err
 	}
-	if len(wf.Spec.NodeSelector) != 0 || len(wf.Spec.Tolerations) != 0 || wf.Spec.Affinity != nil {
-		return errors.New("argojob: source workflow placement conflicts")
-	}
 	var result error
 	walkTemplates(wf, func(t *wfv1.Template) {
 		if result != nil {
 			return
-		}
-		if t.Affinity != nil || len(t.Tolerations) != 0 {
-			result = errors.New("argojob: source template placement conflicts")
-			return
-		}
-		for k, v := range t.NodeSelector {
-			if p.selectors()[k] != v {
-				result = errors.New("argojob: source selector conflicts")
-				return
-			}
 		}
 		if t.Container == nil && t.Script == nil {
 			if t.Resource != nil || t.Data != nil || t.ContainerSet != nil {
@@ -425,8 +401,6 @@ func applyExecutionPlacement(wf *wfv1.Workflow, config Config, request Request) 
 			}
 			return
 		}
-		t.NodeSelector = p.selectors()
-		t.Tolerations = p.nativeTolerations()
 		patch := map[string]any{}
 		if t.PodSpecPatch != "" {
 			if err := json.Unmarshal([]byte(t.PodSpecPatch), &patch); err != nil {
@@ -515,27 +489,6 @@ func (p *ExecutionPlacement) verifyEnvironment(ctx context.Context, client kuber
 	if string(anchor.UID) != d.ClusterAnchorUID || anchor.DeletionTimestamp != nil {
 		return errors.New("argojob: cluster anchor replaced")
 	}
-	node, err := client.CoreV1().Nodes().Get(ctx, d.NodeName, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	if string(node.UID) != d.NodeUID || node.Spec.ProviderID != d.ProviderID || node.Status.NodeInfo.KubeletVersion != d.NodeVersion || node.DeletionTimestamp != nil || node.Spec.Unschedulable {
-		return errors.New("argojob: node incarnation differs")
-	}
-	ready := false
-	for _, condition := range node.Status.Conditions {
-		if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
-			ready = true
-		}
-	}
-	if !ready {
-		return errors.New("argojob: approved node is not Ready")
-	}
-	for k, v := range p.selectors() {
-		if node.Labels[k] != v {
-			return errors.New("argojob: node selector differs")
-		}
-	}
 	proof, err := verifyNonrootController(ctx, client, config.Namespace, config.NonrootProfileConfigMap, Request{})
 	if err != nil {
 		return err
@@ -599,57 +552,53 @@ func equalPlacementTolerations(actual, expected []corev1.Toleration) bool {
 	}
 	return len(want) == 0
 }
-func (p *ExecutionPlacement) admittedTolerations(role string) ([]corev1.Toleration, error) {
-	expected := p.nativeTolerations()
+func (p *ExecutionPlacement) admittedSeedTolerations() []corev1.Toleration {
+	var expected []corev1.Toleration
 	add := func(key string, effect corev1.TaintEffect, seconds *int64) {
 		expected = append(expected, corev1.Toleration{Key: "node.kubernetes.io/" + key, Operator: corev1.TolerationOpExists, Effect: effect, TolerationSeconds: seconds})
 	}
-	switch role {
-	case "candidate", "harness", "seed", "control-deployment":
-		add("not-ready", corev1.TaintEffectNoExecute, ptr.To(int64(300)))
-		add("unreachable", corev1.TaintEffectNoExecute, ptr.To(int64(300)))
-		if p.document.AdmissionProfile == "kube1357-dts300-ptr-empty" {
-			add("memory-pressure", corev1.TaintEffectNoSchedule, nil)
-		}
-	case "daemonset", "hostnetwork-daemonset":
-		add("not-ready", corev1.TaintEffectNoExecute, nil)
-		add("unreachable", corev1.TaintEffectNoExecute, nil)
-		for _, key := range []string{"disk-pressure", "memory-pressure", "pid-pressure", "unschedulable"} {
-			add(key, corev1.TaintEffectNoSchedule, nil)
-		}
-		if role == "hostnetwork-daemonset" {
-			add("network-unavailable", corev1.TaintEffectNoSchedule, nil)
-		}
-	default:
-		return nil, errors.New("argojob: unsupported placement role")
+	add("not-ready", corev1.TaintEffectNoExecute, ptr.To(int64(300)))
+	add("unreachable", corev1.TaintEffectNoExecute, ptr.To(int64(300)))
+	if p.document.AdmissionProfile == "kube1357-dts300-ptr-empty" {
+		add("memory-pressure", corev1.TaintEffectNoSchedule, nil)
 	}
-	return expected, nil
+	return expected
 }
-func (p *ExecutionPlacement) verifyPodPlacement(pod *corev1.Pod, role string) error {
-	if err := p.validate(); err != nil {
-		return err
+
+// Verify identity without constraining Kubernetes placement. Retained Workflow
+// intents carry their original authority digest even after configuration removal.
+func (p *ExecutionPlacement) verifyWorkflowIdentity(ctx context.Context, config Config, wf *wfv1.Workflow) error {
+	expected := p.digest
+	if config.Custody != nil {
+		resources, err := config.Custody.Resources(ctx)
+		if err != nil {
+			return err
+		}
+		expected = ""
+		for _, r := range resources {
+			if r.Kind != "Workflow" || r.Namespace != wf.Namespace || r.Name != wf.Name || r.UID != string(wf.UID) {
+				continue
+			}
+			var original wfv1.Workflow
+			if json.Unmarshal(r.Object, &original) != nil {
+				return errors.New("argojob: invalid original Workflow identity")
+			}
+			expected = original.Annotations["oberth.ci/execution-placement"]
+		}
 	}
-	expected, err := p.admittedTolerations(role)
-	if err != nil {
-		return err
-	}
-	if pod.Namespace != p.document.Namespace || pod.UID == "" || pod.ResourceVersion == "" || pod.Spec.ServiceAccountName != p.document.ServiceAccount || pod.Spec.NodeName != p.document.NodeName || !reflect.DeepEqual(pod.Spec.NodeSelector, p.selectors()) || pod.Spec.Affinity != nil || !equalPlacementTolerations(pod.Spec.Tolerations, expected) {
-		return errors.New("argojob: admitted Pod placement differs from bound role/profile")
+	if !placementSHA(expected) || wf.Annotations["oberth.ci/execution-placement"] != expected {
+		return errors.New("argojob: Workflow execution authority differs")
 	}
 	return nil
 }
-
-func validatePlacementSource(wf *wfv1.Workflow) error {
-	if wf.Spec.PodSpecPatch != "" || len(wf.Spec.Tolerations) != 0 || wf.Spec.Affinity != nil {
-		return errors.New("argojob: source cannot supply placement authority")
+func (p *ExecutionPlacement) verifyPodIdentity(pod *corev1.Pod) error {
+	if err := p.validate(); err != nil {
+		return err
 	}
-	var result error
-	walkTemplates(wf, func(t *wfv1.Template) {
-		if t.PodSpecPatch != "" || t.Affinity != nil || len(t.Tolerations) != 0 {
-			result = errors.New("argojob: source cannot supply placement authority")
-		}
-	})
-	return result
+	if pod.Namespace != p.document.Namespace || pod.UID == "" || pod.ResourceVersion == "" || pod.Spec.ServiceAccountName != p.document.ServiceAccount {
+		return errors.New("argojob: Pod namespace or service identity differs from approved target")
+	}
+	return nil
 }
 
 type binaryIdentity struct {
@@ -719,20 +668,20 @@ func verifyPlacedSeed(expected, actual *corev1.Pod, p *ExecutionPlacement, sched
 	}
 	want := expected.DeepCopy()
 	got := actual.DeepCopy()
-	tolerations, err := p.admittedTolerations("seed")
-	if err != nil {
+	if err := p.validate(); err != nil {
 		return err
 	}
+	tolerations := p.admittedSeedTolerations()
 	if !equalPlacementTolerations(got.Spec.Tolerations, tolerations) {
 		return errors.New("argojob: seed admission tolerations differ")
 	}
 	want.Spec.Tolerations = nil
 	got.Spec.Tolerations = nil
 	if scheduled {
-		if err := p.verifyPodPlacement(actual, "seed"); err != nil {
-			return err
+		if got.Spec.NodeName == "" {
+			return errors.New("argojob: running seed has no scheduled node")
 		}
-		want.Spec.NodeName = p.document.NodeName
+		want.Spec.NodeName = got.Spec.NodeName
 	} else if got.Spec.NodeName != "" {
 		return errors.New("argojob: seed create was prescheduled")
 	}

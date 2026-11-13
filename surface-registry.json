@@ -782,7 +782,7 @@
     },
     "annotation:oberth.ci/execution-placement": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
-      "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
+      "test_ref": "internal/argojob/execution_target_native_placement_test.go TestExecutionTargetSubmitsExactlyAuthoredPlacement"
     },
     "annotation:oberth.ci/execution-target": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",

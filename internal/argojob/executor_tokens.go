@@ -206,13 +206,13 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 			}
 		}
 		if p := controller.config.ExecutionPlacement; p != nil {
-			if wf.Annotations["oberth.ci/execution-placement"] != p.digest {
-				return identityFailure("target_validation", errors.New("argojob: workflow placement identity differs"))
+			if err := p.verifyWorkflowIdentity(ctx, controller.config, wf); err != nil {
+				return identityFailure("target_validation", err)
 			}
 			if err := p.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
 				return identityFailure("target_validation", err)
 			}
-			if err := p.verifyPodPlacement(pod, "candidate"); err != nil {
+			if err := p.verifyPodIdentity(pod); err != nil {
 				return identityFailure("target_validation", err)
 			}
 		}

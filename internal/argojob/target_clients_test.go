@@ -305,3 +305,53 @@ func TestTargetUnknownWorkflowUIDCannotDisposeUnprovenDescendant(t *testing.T) {
 		}
 	}
 }
+
+func TestTargetConfigurationMigrationRetainsOriginalObjectIdentity(t *testing.T) {
+	j := newCustodyJournal(t, "migrated-workflow")
+	remote := &custodyWorkflows{}
+	kube := fake.NewClientset()
+	clients, err := NewTargetClients(remote, kube, j, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := custodyWorkflow(t, j)
+	original.Annotations["oberth.ci/execution-placement"] = strings.Repeat("a", 64)
+	created, err := clients.WorkflowClient().Create(t.Context(), original, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The migration retains this digest from immutable POST intents before
+	// removing retired fields from the executor snapshot.
+	j.b.CustodyDigest = clients.digest
+	j.b.Snapshot = json.RawMessage(`{"Config":{"ExecutionPlacement":{"namespace":"remote"}}}`)
+	migrated, err := NewTargetClients(remote, kube, j, testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := migrated.WorkflowClient().Get(t.Context(), original.Name, metav1.GetOptions{})
+	if err != nil || observed.UID != created.UID {
+		t.Fatal("original object not adopted", observed, err)
+	}
+	p := &ExecutionPlacement{digest: strings.Repeat("b", 64)}
+	config := testConfig()
+	config.Custody = j
+	if err := p.verifyWorkflowIdentity(t.Context(), config, observed); err != nil {
+		t.Fatal("retained authority lost", err)
+	}
+	forged := observed.DeepCopy()
+	forged.Annotations["oberth.ci/execution-placement"] = p.digest
+	if err := p.verifyWorkflowIdentity(t.Context(), config, forged); err == nil {
+		t.Fatal("current configuration replaced original authority")
+	}
+	remote.object.UID = "replacement"
+	if _, err := migrated.WorkflowClient().Get(t.Context(), original.Name, metav1.GetOptions{}); err == nil {
+		t.Fatal("migration accepted replacement UID")
+	}
+	remote.object = created.DeepCopy()
+	if err := migrated.WorkflowClient().Delete(t.Context(), original.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal("original fenced deletion failed", err)
+	}
+	if remote.posts != 1 || remote.deletes != 1 {
+		t.Fatal("migration repeated POST or deletion", remote.posts, remote.deletes)
+	}
+}

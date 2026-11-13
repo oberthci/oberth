@@ -59,11 +59,16 @@ run's namespace, using a key of the author's choice. Other ConfigMap references
 remain refused because Argo's failure text can expose their data. Oberth no
 longer creates or manages this ConfigMap; operators apply and maintain it.
 
-Two existing security exceptions remain explicit: an administrator-selected
-execution target must still prove its exact approved namespace/node/controller
-placement and rejects conflicting source placement; granted device resources
-still require a bounded aggregate device authorization proof. Neither is a
-CPU/memory capacity scheduler. Ordinary Workflows do not use either exception.
+An administrator-selected execution target still authenticates its approved
+cluster, namespace, controller and service identity, but adds no nodeSelector or
+tolerations and refuses no authored placement because of a target. Repository
+YAML carries nodeSelector, affinity and tolerations. A dedicated node is guarded
+by Kubernetes taints plus the admission or namespace policy the operator sets
+up; Oberth does not guarantee that a target's runs land only on a particular
+node. Ordinary repositories may author tolerations too, so taints alone do not
+establish exclusive access to a trusted node. See [execution targets](execution-targets.md).
+Granted device resources still require a bounded aggregate device authorization
+proof; this does not schedule CPU or memory.
 Server-owned executor/identity helpers have their own requests; these do not
 rewrite the author's container resources. Opted-in assisted holds retain their
 private scratch resources, retry/hold behavior and hold-lifetime deadlines.
@@ -142,7 +147,7 @@ requires changing the server image's contents and release delivery: include both
 authenticated executables, verify each delivered hash, select the matching
 binary inside the step, and cover both architectures and recovery. That is
 outside this bootstrap correction. The selector remains until that delivery
-replacement is implemented; execution-target placement is unchanged.
+replacement is implemented; execution targets add no placement policy.
 
 ## Source delivery and load
 
@@ -159,8 +164,8 @@ or tolerations. It mounts and binds a ReadWriteOnce PVC on whichever node
 schedules it. On a multi-node cluster that source volume ties the run's later
 Pods to the seed's node/storage topology; authored placement excluding that
 node stays Pending. This additional placement effect is part of the source
-delivery deviation, not a native placement guarantee. The separate authenticated
-execution target keeps its existing seed placement unchanged.
+delivery deviation, not a native placement guarantee. Authenticated execution
+targets also add no seed nodeSelector or tolerations.
 
 With N active runs and Argo parallelism P, all N prepare and submit; P bounds
 neither server copies nor PVCs nor the source-seed Pods. Up to N seed Pods and N
@@ -354,7 +359,7 @@ No new label was added for this release.
 | `oberth.ci/workflow-capability` | Workflow, when granted | Opaque operator device/resource capability binding |
 | `oberth.ci/helper-storage` | Workflow | Versioned server-helper footprint binding |
 | `oberth.ci/verified-controller-profile` | Workflow, nonroot profile | Opaque verified controller identity/proof |
-| `oberth.ci/execution-placement` | Workflow, approved target | Approved placement digest |
+| `oberth.ci/execution-placement` | Workflow, approved target | Approved execution authority digest; no node placement policy |
 | `oberth.ci/execution-target` | Custody-tracked target objects | Exact durable target binding digest |
 | `oberth.ci/release-wif-policy-sha256` | Workflow, WIF release | Public role/policy binding digest |
 | `oberth.ci/release-wif-adc` | WIF template/Pod | Public ADC identity descriptor; no token |

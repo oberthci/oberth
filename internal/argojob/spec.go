@@ -684,11 +684,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	if err := validatePinnedSourceDelivery(workflow, request); err != nil {
 		return nil, err
 	}
-	if config.ExecutionPlacement != nil {
-		if err := validatePlacementSource(workflow); err != nil {
-			return nil, err
-		}
-	}
 	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
 		return nil, &argoworkflow.AdmissionError{Cause: err}
 	} else if mirrorOnly && strings.TrimSpace(config.GoProxyURL) == "" {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,13 +75,6 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	d.AdmissionConfiguration = strings.Repeat("c", 64)
 	d.ClusterCreated = "2026-01-01T00:00:00Z"
 	d.Expires = time.Now().Add(time.Hour)
-	d.NodeName = "fixture-worker"
-	d.NodeUID = "node-uid"
-	d.ProviderID = "gce://example-project/example-zone/fixture-worker"
-	d.Zone = "example-zone"
-	d.Pool = "nested"
-	d.TaintKey = "oberth.ci/lane"
-	d.TaintValue = "nested"
 	d.NodeVersion = "v1.35.7-fixture"
 	d.ControlPlaneVersion = "v1.35.7-fixture"
 	d.EndpointIdentity = placementHash([]any{"https://api.example.org", "", []byte("fixture-ca")})
@@ -115,10 +109,9 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 		t.Fatal(err)
 	}
 	config.ExecutionPlacement = p
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: d.NodeName, UID: types.UID(d.NodeUID), Labels: p.selectors()}, Spec: corev1.NodeSpec{ProviderID: d.ProviderID}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{KubeletVersion: d.NodeVersion}, Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: d.ReplicaSet, Namespace: d.Namespace, UID: types.UID(d.ReplicaSetUID), OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: d.Deployment, UID: types.UID(d.DeploymentUID), Controller: ptr.To(true)}}}}
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: d.Deployment, Namespace: d.Namespace, UID: types.UID(d.DeploymentUID)}, Spec: appsv1.DeploymentSpec{Replicas: ptr.To(int32(1))}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}}
-	return config, request, []runtime.Object{pod, controllerCM, node, rs, deployment, cm, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: types.UID(d.ClusterAnchorUID)}}}
+	return config, request, []runtime.Object{pod, controllerCM, rs, deployment, cm, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: types.UID(d.ClusterAnchorUID)}}}
 }
 
 func TestExecutionPlacementSelectionRefusesBeforeSeed(t *testing.T) {
@@ -227,65 +220,27 @@ func TestExecutionPlacementConfigurationAndEnvironment(t *testing.T) {
 	}
 }
 
-func TestExecutionPlacementRolesAndCanonicalRefusals(t *testing.T) {
+func TestExecutionTargetSeedAdmissionDefaults(t *testing.T) {
 	config, _, _ := placementFixture(t)
 	p := config.ExecutionPlacement
 	for _, profile := range []string{"kube1357-dts300", "kube1357-dts300-ptr-empty"} {
 		p.document.AdmissionProfile = profile
-		p.digest = placementHash(p.document)
-		for _, role := range []string{"candidate", "harness", "seed", "control-deployment", "daemonset", "hostnetwork-daemonset"} {
-			t.Run(profile+"/"+role, func(t *testing.T) {
-				expected, err := p.admittedTolerations(role)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !equalPlacementTolerations(expected, expected) {
-					t.Fatal("positive")
-				}
-				reordered := append([]corev1.Toleration{}, expected...)
-				for i, j := 0, len(reordered)-1; i < j; i, j = i+1, j-1 {
-					reordered[i], reordered[j] = reordered[j], reordered[i]
-				}
-				if !equalPlacementTolerations(reordered, expected) {
-					t.Fatal("canonical order")
-				}
-				for i := range expected {
-					for _, change := range []func(*corev1.Toleration){func(t *corev1.Toleration) { t.Key = "" }, func(t *corev1.Toleration) {
-						t.Operator = corev1.TolerationOpEqual
-						if t.Value == "nested" {
-							t.Operator = corev1.TolerationOpExists
-						}
-					}, func(t *corev1.Toleration) { t.Effect = "" }, func(t *corev1.Toleration) { t.Value = "other" }, func(t *corev1.Toleration) { t.TolerationSeconds = ptr.To(int64(0)) }, func(t *corev1.Toleration) {
-						if t.TolerationSeconds == nil {
-							t.TolerationSeconds = ptr.To(int64(300))
-						} else {
-							t.TolerationSeconds = nil
-						}
-					}} {
-						mutated := append([]corev1.Toleration{}, expected...)
-						change(&mutated[i])
-						if equalPlacementTolerations(mutated, expected) {
-							t.Fatalf("accepted mutation %d", i)
-						}
-					}
-					if equalPlacementTolerations(append(append([]corev1.Toleration{}, expected...), expected[i]), expected) {
-						t.Fatal("duplicate")
-					}
-					if equalPlacementTolerations(append(append([]corev1.Toleration{}, expected[:i]...), expected[i+1:]...), expected) {
-						t.Fatal("removal")
-					}
-				}
-				for _, otherRole := range []string{"candidate", "daemonset", "hostnetwork-daemonset"} {
-					other, _ := p.admittedTolerations(otherRole)
-					if !reflect.DeepEqual(other, expected) && equalPlacementTolerations(other, expected) {
-						t.Fatal("role transfer")
-					}
-				}
-			})
+		expected := p.admittedSeedTolerations()
+		reordered := append([]corev1.Toleration{}, expected...)
+		slices.Reverse(reordered)
+		if !equalPlacementTolerations(reordered, expected) {
+			t.Fatal("default order changed identity")
 		}
-	}
-	if _, err := p.admittedTolerations("unknown"); err == nil {
-		t.Fatal("unknown role")
+		for i := range expected {
+			mutated := append([]corev1.Toleration{}, expected...)
+			mutated[i].TolerationSeconds = ptr.To(int64(0))
+			if equalPlacementTolerations(mutated, expected) {
+				t.Fatal("changed admission default accepted")
+			}
+		}
+		if equalPlacementTolerations(append(expected, corev1.Toleration{Operator: corev1.TolerationOpExists}), expected) {
+			t.Fatal("broad injected toleration accepted")
+		}
 	}
 }
 
@@ -300,7 +255,7 @@ func TestExecutionPlacementSeedCreateAndReadback(t *testing.T) {
 		if pod.Labels["oberth.ci/component"] == "source-seed" {
 			pod.UID = "seed-uid"
 			pod.ResourceVersion = "1"
-			pod.Spec.Tolerations, _ = config.ExecutionPlacement.admittedTolerations("seed")
+			pod.Spec.Tolerations = config.ExecutionPlacement.admittedSeedTolerations()
 			submitted = pod.DeepCopy()
 		}
 		return false, nil, nil
@@ -311,11 +266,11 @@ func TestExecutionPlacementSeedCreateAndReadback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submitted == nil || !reflect.DeepEqual(submitted.Spec.NodeSelector, config.ExecutionPlacement.selectors()) {
-		t.Fatal("direct seeder lost placement")
+	if submitted == nil || len(submitted.Spec.NodeSelector) != 0 {
+		t.Fatal("target injected seed placement")
 	}
 	readback := created.DeepCopy()
-	readback.Spec.NodeName = config.ExecutionPlacement.document.NodeName
+	readback.Spec.NodeName = "any-scheduled-node"
 	if err := verifyPlacedSeed(created, readback, config.ExecutionPlacement, true); err != nil {
 		t.Fatal(err)
 	}

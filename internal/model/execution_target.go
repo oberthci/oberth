@@ -9,6 +9,8 @@ import (
 // annotation or a result imported from an executor. Snapshot contains public
 // defaulted configuration and retained source/fragment bytes, not credentials.
 type ExecutionTargetBinding struct {
+	// CustodyDigest retains the original object-binding identity across a configuration migration.
+	CustodyDigest                                                                          string `json:"-"`
 	Trigger, ScheduleEntry                                                                 string
 	RefKind                                                                                string
 	RunID, Workflow, Target, Repository, Ref, SHA, TestedSHA                               string

@@ -364,7 +364,14 @@ DELETE FROM schema_migrations WHERE id='20261112194221-retire-startup-cleanup-re
 `
 
 // PostNativeHeadWaitDowngrade recreates retired state only in historical fixtures.
-const PostNativeHeadWaitDowngrade = `
+const PostNativeHeadWaitDowngrade = PostNativeTargetPlacementDowngrade + `
 CREATE TABLE IF NOT EXISTS admission_head_waits (repo_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,ref_kind TEXT NOT NULL CHECK(ref_kind IN ('branch','tag')),ref TEXT NOT NULL,sha TEXT NOT NULL,since INTEGER NOT NULL,PRIMARY KEY(repo_id,ref_kind,ref,sha));
 DELETE FROM schema_migrations WHERE id='20261112200858-remove-head-wait-state-5f391577728baf3aa3d319f69af46253';
+`
+
+// PostNativeTargetPlacementDowngrade reconstructs only disposable old-schema fixtures.
+const PostNativeTargetPlacementDowngrade = `
+DROP TRIGGER IF EXISTS execution_target_custody_digest_immutable;
+ALTER TABLE execution_target_bindings DROP COLUMN custody_digest;
+DELETE FROM schema_migrations WHERE id='20261113004204-remove-execution-target-placement-9b77efae7729ff92178a88a4344e38e4';
 `

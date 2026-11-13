@@ -189,7 +189,7 @@ func newTargetRouteFragmentsFixture(t *testing.T, withFragment bool) *targetRout
 		t.Fatal(err)
 	}
 	var selection map[string]any
-	if err := json.Unmarshal(configFields["ExecutionPlacement"], &selection); err != nil {
+	if err := decodeCurrentTargetFixture(configFields["ExecutionPlacement"], &selection); err != nil {
 		t.Fatal(err)
 	}
 	configFields["ExecutionPlacement"] = json.RawMessage(`null`)
@@ -316,7 +316,7 @@ func newTargetRouteFragmentsFixture(t *testing.T, withFragment bool) *targetRout
 		pod := object.(*corev1.Pod).DeepCopy()
 		if pod.Labels["oberth.ci/component"] == "source-seed" {
 			pod.Status.Phase = corev1.PodRunning
-			pod.Spec.NodeName = selection["node_name"].(string)
+			pod.Spec.NodeName = "operator-scheduled-node"
 		}
 		return true, pod, nil
 	})
@@ -688,3 +688,15 @@ var (
 	_ service.JobCreateSettler    = (*ArgoJobs)(nil)
 	_ service.PipelineDemandSizer = (*ArgoJobs)(nil)
 )
+
+// Keep historical synthetic controller captures unchanged; exercise the current
+// configuration schema after removing the retired placement-only fields.
+func decodeCurrentTargetFixture(body []byte, selection *map[string]any) error {
+	if err := json.Unmarshal(body, selection); err != nil {
+		return err
+	}
+	for _, retired := range []string{"node_name", "node_uid", "provider_id", "zone", "pool", "taint_key", "taint_value"} {
+		delete(*selection, retired)
+	}
+	return nil
+}

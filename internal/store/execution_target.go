@@ -61,12 +61,12 @@ func (s *Store) BindExecutionTarget(ctx context.Context, binding model.Execution
 }
 
 func (s *Store) ExecutionTarget(ctx context.Context, runID, workflow string) (model.ExecutionTargetBinding, bool, error) {
-	var body string
-	query, value := `SELECT binding_json FROM execution_target_bindings WHERE run_id=?`, runID
+	var body, custodyDigest string
+	query, value := `SELECT binding_json,custody_digest FROM execution_target_bindings WHERE run_id=?`, runID
 	if runID == "" {
-		query, value = `SELECT binding_json FROM execution_target_bindings WHERE workflow_name=?`, workflow
+		query, value = `SELECT binding_json,custody_digest FROM execution_target_bindings WHERE workflow_name=?`, workflow
 	}
-	err := s.db.QueryRowContext(ctx, query, value).Scan(&body)
+	err := s.db.QueryRowContext(ctx, query, value).Scan(&body, &custodyDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.ExecutionTargetBinding{}, false, nil
 	}
@@ -77,6 +77,7 @@ func (s *Store) ExecutionTarget(ctx context.Context, runID, workflow string) (mo
 	if json.Unmarshal([]byte(body), &binding) != nil || (workflow != "" && binding.Workflow != workflow) {
 		return binding, false, ErrInvalid
 	}
+	binding.CustodyDigest = custodyDigest
 	return binding, true, nil
 }
 
@@ -305,8 +306,8 @@ func (s *Store) auditTarget(ctx context.Context, tx *sql.Tx, runID, action strin
 
 // NextExecutionTargetCleanup rotates terminal work without a second allocator.
 func (s *Store) NextExecutionTargetCleanup(ctx context.Context, after string) (model.ExecutionTargetBinding, bool, error) {
-	var body string
-	err := s.db.QueryRowContext(ctx, `SELECT b.binding_json FROM execution_target_bindings b JOIN runs r ON r.id=b.run_id WHERE r.status IN ('passed','failed','interrupted') AND b.cleanup_receipt='' AND EXISTS(SELECT 1 FROM execution_target_resources x WHERE x.run_id=b.run_id) ORDER BY (b.run_id<=?),b.run_id LIMIT 1`, after).Scan(&body)
+	var body, custodyDigest string
+	err := s.db.QueryRowContext(ctx, `SELECT b.binding_json,b.custody_digest FROM execution_target_bindings b JOIN runs r ON r.id=b.run_id WHERE r.status IN ('passed','failed','interrupted') AND b.cleanup_receipt='' AND EXISTS(SELECT 1 FROM execution_target_resources x WHERE x.run_id=b.run_id) ORDER BY (b.run_id<=?),b.run_id LIMIT 1`, after).Scan(&body, &custodyDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.ExecutionTargetBinding{}, false, nil
 	}
@@ -317,6 +318,7 @@ func (s *Store) NextExecutionTargetCleanup(ctx context.Context, after string) (m
 	if json.Unmarshal([]byte(body), &b) != nil {
 		return b, false, ErrInvalid
 	}
+	b.CustodyDigest = custodyDigest
 	return b, true, nil
 }
 

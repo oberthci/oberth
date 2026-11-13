@@ -544,10 +544,6 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 			}},
 		},
 	}
-	if p := seeder.config.ExecutionPlacement; p != nil {
-		pod.Spec.NodeSelector = p.selectors()
-		pod.Spec.Tolerations = p.nativeTolerations()
-	}
 	expected := pod.DeepCopy()
 	created, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if seeder.config.ExecutionPlacement != nil {
