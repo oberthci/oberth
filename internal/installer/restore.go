@@ -646,8 +646,8 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 // overlay, with the overlay in a values file inside the private working
 // directory (removed when the restore returns). Retain the installed chart
 // defaults deliberately; restore sets only database compatibility identities.
-// Retired installer values are removed from a stored snapshot before reuse;
-// historical v0.22.3 and real Helm restore tests cover the applied values.
+// When the target chart no longer declares Transit, remove its retired leaves
+// from stored user values and explicitly retain installed compatibility identities.
 func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, target restoreTarget, work string) ([]string, error) {
 	body, err := json.Marshal(target.Overlay)
 	if err != nil {
@@ -678,6 +678,13 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
 	args = append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile)
+	retainsTransit, err := targetChartRetainsTransit(ctx, deps.Deps, chart)
+	if err != nil {
+		return nil, err
+	}
+	if retainsTransit {
+		return args, nil
+	}
 	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args)
 }
 

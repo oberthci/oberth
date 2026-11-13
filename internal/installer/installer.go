@@ -1787,9 +1787,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	// secretstore configuration survives a re-run without
 	// --install-secretstore. The --set flags above still override reused
 	// values. No-op on first install. This intentionally retains installed
-	// chart defaults, including compatibility identities. New chart keys must
-	// have template fallbacks. The historical v0.22.3 render and real Helm
-	// install/restore tests cover stored configuration and removed installer keys.
+	// chart defaults unless retired installer keys require a reset; that path
+	// reuses only stored user values and explicitly pins compatibility identities.
+	// Historical v0.22.3 and real Helm tests cover the applied configuration.
 	args = append(args, "--reuse-values")
 	return args
 }

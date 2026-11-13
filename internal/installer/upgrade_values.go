@@ -30,7 +30,11 @@ func requireUpgradeHelmVersion(ctx context.Context, deps Deps) error {
 // These deployment identities may live only in the INSTALLED chart's defaults.
 // Neither the new chart's defaults nor a caller override can supply them.
 func readUpgradeCompatibility(ctx context.Context, namespace, revision string, deps Deps) (backupCompatibility, error) {
-	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "--revision", revision, "--all", "-o", "json"})
+	args := []string{"get", "values", "oberth", "-n", namespace, "--all", "-o", "json"}
+	if revision != "" {
+		args = append(args, "--revision", revision)
+	}
+	raw, err := deps.RunHelm(ctx, args)
 	if err != nil {
 		return backupCompatibility{}, fmt.Errorf("cannot read installed compatibility identities with helm get values --all: %w", err)
 	}

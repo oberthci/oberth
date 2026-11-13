@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"sigs.k8s.io/yaml"
 )
 
 // Only these leaves were written by the installer for the removed Plan
@@ -61,30 +63,62 @@ func storedSnapshotHelmArgs(args []string, path string) []string {
 }
 
 func prepareRetiredInstallerReuse(ctx context.Context, deps Deps, namespace, work string, args []string) ([]string, error) {
-	values, err := readHelmValuesMap(ctx, deps, namespace)
-	if err != nil {
-		return nil, err
-	}
-	// The coalesced --all view omits explicit nulls. Overlay the raw stored
-	// user values so reset-values preserves those deletions as well.
+	// Reuse only USER values. Coalesced defaults would become permanent
+	// operator overrides after Helm stores this snapshot in release.Config.
 	raw, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "-o", "json"})
 	if err != nil {
 		return nil, fmt.Errorf("read stored Helm user values: %w", err)
 	}
 	defer clear(raw)
-	var user map[string]any
+	var values map[string]any
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.UseNumber()
-	if !json.Valid(raw) || decoder.Decode(&user) != nil {
+	if !json.Valid(raw) || decoder.Decode(&values) != nil {
 		return nil, fmt.Errorf("cannot decode stored Helm user values")
 	}
-	mergePlannedValues(values, user)
 	if !dropRetiredInstallerValues(values, deps.Output) {
-		return args, nil
+		// --reuse-values also loads old defaults, even when no Transit leaf
+		// was stored by the operator. Inspect them only to decide on reset;
+		// none of these coalesced values may enter the user snapshot.
+		installed, err := readHelmValuesMap(ctx, deps, namespace)
+		if err != nil {
+			return nil, err
+		}
+		if !dropRetiredInstallerValues(installed, deps.Output) {
+			return args, nil
+		}
+	}
+	// These identities may exist only in the installed chart defaults. Pin
+	// them explicitly without copying any other old defaults into user config.
+	compat, err := readUpgradeCompatibility(ctx, namespace, "", deps)
+	if err != nil {
+		return nil, err
 	}
 	path, err := writeStoredValuesSnapshot(work, values)
 	if err != nil {
 		return nil, err
 	}
-	return storedSnapshotHelmArgs(args, path), nil
+	args = storedSnapshotHelmArgs(args, path)
+	pins := []string{
+		"--set-string", "compatibility.schemaIdentity=" + compat.SchemaIdentity,
+		"--set-string", "compatibility.auditDomain=" + compat.AuditDomain,
+		"--set-string", "compatibility.witnessKeyInfo=" + compat.WitnessKeyInfo,
+	}
+	return append(append(args[:4:4], pins...), args[4:]...), nil
+}
+
+// Restore targets the installed chart, which can still own Transit flags.
+// Removing its values would reactivate that chart's disabled Transit default.
+func targetChartRetainsTransit(ctx context.Context, deps Deps, chart string) (bool, error) {
+	raw, err := deps.RunHelm(ctx, []string{"show", "values", chart})
+	if err != nil {
+		return false, fmt.Errorf("read restore chart defaults: %w", err)
+	}
+	var values map[string]any
+	if err := yaml.Unmarshal(raw, &values); err != nil {
+		return false, fmt.Errorf("decode restore chart defaults: %w", err)
+	}
+	store, _ := values["secretstore"].(map[string]any)
+	_, exists := store["transit"]
+	return exists, nil
 }

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -156,6 +157,8 @@ func TestUpgradeActualHelmPreservesValuesAndAddsDefaults(t *testing.T) {
 	fixture := historicalHelmUpgrade{cfg: cfg, deps: deps, values: values, config: config, release: release, history: history, chart: chart, image: image}
 	fixture.checkOperatorOverrides(t, applyCfg, compat)
 	fixture.checkInstallRestore(t, compat)
+	fixture.checkHistoricalRestore(t)
+	fixture.checkDefaultTransit(t, compat)
 	fixture.checkUnknownStoredValues(t)
 
 }
@@ -289,24 +292,15 @@ func (f historicalHelmUpgrade) checkOperatorOverrides(t *testing.T, applyCfg Upg
 
 func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCompatibility) {
 	t.Helper()
-	values, release, history := f.values, f.release, f.history
+	values := f.values
 	chart, image, deps := f.chart, f.image, f.deps
 	runHelm := deps.RunHelm
-	// Install re-runs and restore deliberately retain old chart defaults. Both
-	// paths must render historical v0.22.3 values after exact installer-key cleanup.
-	// Remove the synthetic old-only default for raw reuse: strict target schemas
-	// correctly reject it, which is why this mode needs an exact chart contract.
-	delete(values, "removedOldDefault")
-	encoded, err := json.Marshal(release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(history, encoded, 0600); err != nil {
-		t.Fatal(err)
-	}
+	// Old defaults, including the synthetic removed key, must never become
+	// stored user configuration during either path.
 	for _, mode := range []string{"install", "restore"} {
 		t.Run(mode, func(t *testing.T) {
 			var args []string
+			var err error
 			if mode == "install" {
 				args = OberthHelmArgs(Config{Namespace: "oberth", ChartPath: chart, ImageRef: image}, OpenBaoResult{}, RekorResult{})
 			} else {
@@ -335,6 +329,24 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCo
 			if err := json.Unmarshal(out, &result); err != nil {
 				t.Fatal(err)
 			}
+			// Assert the entire stored map, including nested keys. Chart defaults
+			// may influence the render but must not enter release.Config.
+			stored, err := json.Marshal(f.config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want map[string]any
+			if err := json.Unmarshal(stored, &want); err != nil {
+				t.Fatal(err)
+			}
+			dropRetiredInstallerValues(want, nil)
+			want["compatibility"] = values["compatibility"]
+			if mode == "install" {
+				want["image"].(map[string]any)["ref"] = image
+			}
+			if !reflect.DeepEqual(result.Config, want) {
+				t.Fatalf("stored user key set changed: got %#v, want %#v", result.Config, want)
+			}
 			if access, exists := result.Config["sourceAccess"]; !exists || access != nil {
 				t.Fatal("explicit null sourceAccess changed", mode)
 			}
@@ -357,6 +369,66 @@ func (f historicalHelmUpgrade) checkInstallRestore(t *testing.T, compat backupCo
 		})
 	}
 
+}
+
+func (f historicalHelmUpgrade) checkDefaultTransit(t *testing.T, compat backupCompatibility) {
+	t.Helper()
+	t.Run("transit-only-in-chart-defaults", func(t *testing.T) {
+		store := f.config["secretstore"].(map[string]any)
+		transit := store["transit"]
+		defer func() { store["transit"] = transit }()
+		delete(store, "transit")
+		body, err := json.Marshal(f.release)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f.history, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.checkInstallRestore(t, compat)
+	})
+}
+
+// A restore of the installed v0.22.3 chart must keep its active Transit
+// values. Cleaning them would silently select that chart's disabled default.
+func (f historicalHelmUpgrade) checkHistoricalRestore(t *testing.T) {
+	t.Helper()
+	t.Run("restore-v0.22.3", func(t *testing.T) {
+		chart := t.TempDir()
+		values, err := yaml.Marshal(f.values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range map[string][]byte{
+			"Chart.yaml":  []byte("apiVersion: v2\nname: oberth\nversion: 0.22.3\n"),
+			"values.yaml": values,
+		} {
+			if err := os.WriteFile(filepath.Join(chart, name), body, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		args, err := restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: chart}, backupDeps{Deps: f.deps}, restoreTarget{Overlay: map[string]any{"compatibility": f.values["compatibility"]}}, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(args, "--reuse-values") || slices.Contains(args, "--reset-values") {
+			t.Fatal("restore cleaned values still owned by the installed chart", args)
+		}
+		out, err := f.deps.RunHelm(t.Context(), append(args, "--dry-run=client", "--output=json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			Config map[string]any `json:"config"`
+		}
+		if err := json.Unmarshal(out, &result); err != nil {
+			t.Fatal(err)
+		}
+		transit := result.Config["secretstore"].(map[string]any)["transit"]
+		if !reflect.DeepEqual(transit, f.config["secretstore"].(map[string]any)["transit"]) {
+			t.Fatal("restore changed the installed chart's Transit configuration", transit)
+		}
+	})
 }
 
 func (f historicalHelmUpgrade) checkUnknownStoredValues(t *testing.T) {

@@ -288,7 +288,7 @@ func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.26"}]`), nil
 			case strings.HasPrefix(joined, "get values"):
 				return []byte(`{"secretstore":{"enabled":true,"address":"https://openbao.openbao.svc:8200","caCert":` +
-					strconv.Quote(liveCA) + `,"transit":{"enabled":true}}}`), nil
+					strconv.Quote(liveCA) + `,"transit":{"enabled":true}},"compatibility":{"schemaIdentity":"legacy-schema-v1","auditDomain":"legacy-audit-v1","witnessKeyInfo":"legacy-witness-v1"}}`), nil
 			case strings.Contains(joined, "--dry-run=server"):
 				preview = joined
 				return []byte(`{"config":{}}`), nil
