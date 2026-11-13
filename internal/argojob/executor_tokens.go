@@ -169,8 +169,11 @@ func executorTokenDirectory() string {
 // step's /proc/self/fd/N symlink would resolve to. A zero tick disables the
 // monitor (Wait starts it only when both ticks are nonzero), leaving no API
 // call between InitializeOutput and ReportOutputs. Self-reported step
-// progress (N/M) is therefore not shown. Env merges by name, so these values
-// replace anything the controller injected while Argo's other variables stay.
+// progress (N/M) is therefore not shown. Strategic merge replaces only the
+// first duplicate env entry; validateExecutorTokenTarget checks the live Pod
+// before delivery so controller configuration or Argo drift cannot win.
+// On every Argo bump, re-audit all go statements in workflow/executor/executor.go
+// for API calls during output collection and re-run the #1564 hostile tests.
 var executorEnvironment = [][2]string{
 	{"KUBECONFIG", executorKubeconfig},
 	{"ARGO_PROGRESS_PATCH_TICK_DURATION", "0"},
@@ -381,7 +384,24 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 			found = true
 		}
 		for _, mount := range container.VolumeMounts {
-			if mount.Name != executorTokenVolume || container.Name == executorTokenWaiter || container.Name == "init" || container.Name == "wait" {
+			if mount.Name != executorTokenVolume || container.Name == executorTokenWaiter {
+				continue
+			}
+			for _, expected := range executorEnvironment {
+				count := 0
+				for _, env := range container.Env {
+					if env.Name == expected[0] {
+						count++
+						if env.Value != expected[1] || env.ValueFrom != nil {
+							return fmt.Errorf("executor container %q has unsafe %s", container.Name, expected[0])
+						}
+					}
+				}
+				if count != 1 {
+					return fmt.Errorf("executor container %q must have exactly one %s", container.Name, expected[0])
+				}
+			}
+			if container.Name == "init" || container.Name == "wait" {
 				continue
 			}
 			if resourcePod && container.Name == "main" && container.Image == argoworkflow.ExecutorImage {
