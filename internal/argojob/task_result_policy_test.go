@@ -147,7 +147,7 @@ func TestWorkflowTaskResultPolicyScopesBoundIdentity(t *testing.T) {
 		},
 		"missing-label":   func(_ map[string]any, o *wfv1.WorkflowTaskResult) { o.Labels = nil },
 		"non-node-suffix": func(_ map[string]any, o *wfv1.WorkflowTaskResult) { o.Name = workflow.Name + "-other-node" },
-		"legacy-token":    func(r map[string]any, _ *wfv1.WorkflowTaskResult) { delete(r["userInfo"].(map[string]any), "extra") },
+		"unbound-token":   func(r map[string]any, _ *wfv1.WorkflowTaskResult) { delete(r["userInfo"].(map[string]any), "extra") },
 		"old-holder-name": func(r map[string]any, _ *wfv1.WorkflowTaskResult) {
 			r["userInfo"].(map[string]any)["extra"].(map[string]any)["authentication.kubernetes.io/pod-name"] = []string{"oberth-executor-oldhash"}
 		},
@@ -233,5 +233,27 @@ func TestExecutorIdentityHolderNameBinding(t *testing.T) {
 	}
 	if c.identityPodName(wf, "operator") != second {
 		t.Fatal("unstable holder name")
+	}
+}
+
+func TestWorkflowTaskResultPolicyRejectsAmbiguousHolderSegments(t *testing.T) {
+	policy := renderNativeAdmissionProbe(t, "argo-task-result-policy.yaml", "-argo-task-results")
+	controller := &Controller{config: Config{ExecutorServiceAccount: "executor"}}
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "executor.run", Namespace: "oberth-argo", UID: "11111111-1111-1111-1111-111111111111"}}
+	for _, account := range []string{"executor", "operator-capability", "per-step-account"} {
+		t.Run(account, func(t *testing.T) {
+			request := taskResultRequest(account, controller.identityPodName(workflow, account))
+			if !policy.accepts(t, request, taskResultObject(workflow, workflow.Name), nil) {
+				t.Fatal("dotted Workflow name refused")
+			}
+			forged := taskResultObject(workflow, "run")
+			forged.OwnerReferences[0].Name = "run"
+			forged.Labels["workflows.argoproj.io/workflow"] = "run"
+			role := strings.Split(controller.identityPodName(workflow, account), ".")[2]
+			forged.OwnerReferences[0].UID = ktypes.UID(string(workflow.UID) + "." + role)
+			if policy.accepts(t, request, forged, nil) {
+				t.Fatal("owner UID consumed the holder role and reassigned a dotted Workflow")
+			}
+		})
 	}
 }

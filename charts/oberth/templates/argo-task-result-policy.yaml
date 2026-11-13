@@ -31,7 +31,7 @@ spec:
   validations:
     - expression: "variables.podName != '' && has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-uid' in request.userInfo.extra && size(request.userInfo.extra['authentication.kubernetes.io/pod-uid']) == 1 && request.userInfo.extra['authentication.kubernetes.io/pod-uid'][0] != ''"
       message: "task results require a Pod-bound executor identity"
-    - expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 && object.metadata.ownerReferences[0].apiVersion == 'argoproj.io/v1alpha1' && object.metadata.ownerReferences[0].kind == 'Workflow' && variables.ownerUID != '' && variables.ownerName != ''"
+    - expression: "has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 && object.metadata.ownerReferences[0].apiVersion == 'argoproj.io/v1alpha1' && object.metadata.ownerReferences[0].kind == 'Workflow' && variables.ownerUID != '' && !variables.ownerUID.contains('.') && variables.ownerName != ''"
       message: "task results require exactly one Workflow owner"
     - expression: "variables.holderRole == 'executor' || variables.holderRole.matches('^[a-f0-9]{24}$')"
       message: "task result Workflow name and UID must match the authenticated bound identity Pod"
