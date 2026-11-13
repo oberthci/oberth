@@ -524,3 +524,8 @@ Private-copy refresh stress repeats the concurrent lifecycle/sweep cases 50
 times. After lease acquisition, disappearance is checked before marker age is
 judged; existing future, malformed and replaced objects remain preserved, and
 the separate pre-delete identity check remains required.
+
+Semaphore retirement checks the live retention marker before Helm removes a
+previously managed object. An operator replacement is left untouched and upgrade
+refuses unless it was explicitly marked keep; missing observation clients refuse
+too. The regression models the pinned Helm deletion path.

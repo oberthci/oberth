@@ -173,7 +173,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		result.TargetVersion = result.InstalledVersion
 		action = actionUpgrade
 	}
-	if err := orphanRetiredSyncLimits(ctx, cfg, deps, ns); err != nil {
+	if err := retireSyncLimitsBeforeHelm(ctx, cfg, deps, ns, retiredValues); err != nil {
 		return result, err
 	}
 	switch action {

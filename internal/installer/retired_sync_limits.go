@@ -15,6 +15,16 @@ import (
 
 const retiredSyncLimitsName = "oberth-sync-limits"
 
+func retireSyncLimitsBeforeHelm(ctx context.Context, cfg Config, deps Deps, ns string, tracked bool) error {
+	if err := orphanRetiredSyncLimits(ctx, cfg, deps, ns); err != nil {
+		return err
+	}
+	if !tracked {
+		return nil
+	}
+	return verifyRetiredSyncLimitsKept(ctx, deps, ns)
+}
+
 func isRetiredSyncLimitsObject(object any, namespace string) bool {
 	entry, ok := object.(map[string]any)
 	if !ok || entry["apiVersion"] != "v1" || entry["kind"] != "ConfigMap" {
@@ -104,5 +114,25 @@ func orphanRetiredSyncLimits(ctx context.Context, cfg Config, deps Deps, ns stri
 		return fmt.Errorf("orphan semaphore ConfigMap %s/%s before Helm upgrade: %w", ns, cm.Name, err)
 	}
 	_, _ = fmt.Fprintf(deps.Output, "Kept ConfigMap %s/%s and its semaphore data; it is now operator-owned.\n", ns, cm.Name)
+	return nil
+}
+
+// A prior Helm manifest can still track an operator replacement that this
+// installer must not modify. Helm refetches it and deletes it unless its live
+// keep annotation is set. Refuse rather than adopt or delete that replacement.
+func verifyRetiredSyncLimitsKept(ctx context.Context, deps Deps, ns string) error {
+	if deps.KubeClient == nil {
+		return fmt.Errorf("cannot safely retire semaphore ConfigMap %s/%s without a Kubernetes client", ns, retiredSyncLimitsName)
+	}
+	cm, err := deps.KubeClient.CoreV1().ConfigMaps(ns).Get(ctx, retiredSyncLimitsName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("verify retained semaphore ConfigMap before Helm upgrade: %w", err)
+	}
+	if cm.Annotations["helm.sh/resource-policy"] != "keep" {
+		return fmt.Errorf("refusing Helm upgrade: the prior release still tracks ConfigMap %s/%s, but its current object is not marked keep; left it untouched; explicitly retain or resolve its release tracking before retrying", ns, cm.Name)
+	}
 	return nil
 }
