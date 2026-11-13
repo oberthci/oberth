@@ -31,7 +31,10 @@ type ResourceKindCapability struct {
 	Actions    []string `json:"actions"`
 }
 
-var capabilityKindPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,62}$`)
+var (
+	capabilityKindPattern        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,62}$`)
+	resourceMetadataFieldPattern = regexp.MustCompile(`(?i)(annotations|labels)$`)
+)
 
 // CapabilityUsage includes defaults and inline templates, even unreachable
 // ones. An unsupported nesting depth must never hide authority from admission.
@@ -137,7 +140,7 @@ func admitCapabilityResource(location string, r *wfv1.ResourceTemplate, capabili
 	// Decode by exact keys. encoding/json's struct matching folds both ASCII
 	// and Unicode (for example Kind and nameſpace), unlike Kubernetes.
 	var object, metadata map[string]json.RawMessage
-	if json.Unmarshal(encoded, &object) != nil || rejectEnvelopeCaseVariants(object, "apiVersion", "kind", "metadata") != nil || json.Unmarshal(object["metadata"], &metadata) != nil || rejectEnvelopeCaseVariants(metadata, "namespace", "name", "generateName") != nil || resourceMetadataOverride(metadata) {
+	if json.Unmarshal(encoded, &object) != nil || rejectEnvelopeCaseVariants(object, "apiVersion", "kind", "metadata") != nil || json.Unmarshal(object["metadata"], &metadata) != nil || rejectEnvelopeCaseVariants(metadata, "namespace", "name", "generateName") != nil {
 		return refuse("invalid or case-variant resource envelope keys, Pod annotations or reserved labels")
 	}
 	var apiVersion, kind, namespace, name, generateName string
@@ -178,14 +181,16 @@ func resourcePriorityOverride(value any) bool {
 		value, pending = pending[len(pending)-1], pending[:len(pending)-1]
 		switch node := value.(type) {
 		case map[string]any:
+			// A controller can copy metadata from any parent field, including
+			// list entries. Inspect its shape at every depth, not its parent's
+			// spelling or the granted resource kind.
+			if resourceMetadataOverride(node, false) {
+				return true
+			}
 			for key, child := range node {
 				if strings.EqualFold(key, "metadata") || strings.EqualFold(key, "podMetadata") {
-					raw, err := json.Marshal(child)
-					if err != nil {
-						return true
-					}
-					var metadata map[string]json.RawMessage
-					if json.Unmarshal(raw, &metadata) != nil || resourceMetadataOverride(metadata) {
+					metadata, object := child.(map[string]any)
+					if child != nil && (!object || resourceMetadataOverride(metadata, true)) {
 						return true
 					}
 				}
@@ -203,19 +208,44 @@ func resourcePriorityOverride(value any) bool {
 
 // An opaque operator API may propagate its metadata onto a Pod. Apply the
 // same boundary to metadata envelopes rather than guessing each granted kind.
-func resourceMetadataOverride(metadata map[string]json.RawMessage) bool {
-	for name, raw := range metadata {
-		switch {
-		case strings.EqualFold(name, "annotations"):
-			var annotations map[string]string
-			if json.Unmarshal(raw, &annotations) != nil || len(annotations) != 0 {
+func resourceMetadataOverride(metadata map[string]any, envelope bool) bool {
+	for name, value := range metadata {
+		// APIs also expose direct podAnnotations/podLabels-style maps.
+		// This is independent of the resource kind and parent field name.
+		// Kubernetes label selectors read Pod labels; they do not write
+		// them. Native affinity may select even server-owned label keys.
+		if strings.EqualFold(name, "matchLabels") {
+			continue
+		}
+		field := resourceMetadataFieldPattern.FindString(name)
+		if field == "" {
+			continue
+		}
+		if value == nil {
+			continue
+		}
+		entries, ok := value.(map[string]any)
+		if !ok {
+			// Opaque APIs also use arrays/scalars called labels, for example
+			// metric labels. Only actual metadata envelopes require maps.
+			if envelope {
 				return true
 			}
-		case strings.EqualFold(name, "labels"):
-			var labels map[string]string
-			if json.Unmarshal(raw, &labels) != nil || len(admitPodMetadataKeys("resource metadata labels", labels)) != 0 {
+			continue
+		}
+		if strings.EqualFold(field, "annotations") && len(entries) != 0 {
+			return true
+		}
+		labels := make(map[string]string, len(entries))
+		for key, value := range entries {
+			text, ok := value.(string)
+			if !ok {
 				return true
 			}
+			labels[key] = text
+		}
+		if len(admitPodMetadataKeys("resource metadata labels", labels)) != 0 {
+			return true
 		}
 	}
 	return false

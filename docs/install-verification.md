@@ -51,6 +51,26 @@ unreadable receipts require the complete live measurement; public plan JSON is
 not accepted as proof. An install without a recent successful plan still has
 the full fresh-install NetworkPolicy gate.
 
+The plan receipt is a convenience cache that saves the time of a second live
+measurement. It is writable by the same local user running the installer,
+including an agent with that user's privileges; it is not a security boundary
+against that user. Private file permissions and binding checks prevent accidental
+reuse and cross-user access, but do not attest the receipt against its owner.
+Install still re-runs every other preflight against the current cluster.
+
 Plan receipts from the earlier measurement protocol are not reused after the
 probe-container and Pod/NetworkPolicy UID checks were added. A new measurement
 is required; fresh receipts retain the same five-minute, single-use window.
+
+Runtime identity certificates constrain their DNS names and each IP SAN.
+IPv4 constraints are exact /32 ranges; IPv6 constraints are exact /128 ranges.
+The runtime identity and explicit certificate-rotation paths already apply
+these constraints; existing CAs are not reissued or migrated by this follow-up.
+
+The installer's OpenBao-managed CA is a separate path: it has DNS constraints
+and no IP SANs. Its role restricts leaf IPs with `allowed_ip_sans_cidr`, which
+is distinct from CA-level IP constraints. The pinned OpenBao 2.6.1
+[CA generation implementation](https://github.com/openbao/openbao/blob/v2.6.1/builtin/logical/pki/cert_util.go#L731)
+only propagates permitted DNS constraints. Extending that backend or moving its
+non-exportable CA key outside OpenBao is declined here. See
+[single-host TLS](single-host-tls.md) for the existing CA and leaf distinction.
