@@ -132,7 +132,7 @@ func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
 	before, _ := json.Marshal(values)
 	deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 		if args[0] == "get" {
-			return before, nil
+			return bytes.Clone(before), nil
 		}
 		if args[0] != "show" {
 			t.Fatalf("old target must retain stored values: %v", args)
@@ -140,7 +140,7 @@ func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
 		if args[1] == "chart" {
 			return []byte("name: oberth\nversion: 0.22.4\n"), nil
 		}
-		return before, nil
+		return bytes.Clone(before), nil
 	}}
 	args, err := restoreHelmArgs(t.Context(), RestoreConfig{Namespace: "oberth", ChartPath: "old-chart"}, backupDeps{Deps: deps}, restoreTarget{Overlay: map[string]any{"compatibility": values["compatibility"]}}, t.TempDir())
 	if err != nil {
