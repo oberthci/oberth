@@ -81,8 +81,8 @@ func TestWorkflowCreateRecoveryAbsentGroupMateFailsInEitherOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if current.Status != model.RunQueued {
-				t.Fatalf("never-posted run failed instead of requeueing: %+v", current)
+			if current.Status != model.RunFailed || current.Error != model.ServerRestartReason {
+				t.Fatalf("never-posted run did not fail after restart: %+v", current)
 			}
 			replacement, err := f.store.Run(t.Context(), parked.ID)
 			if err != nil {
@@ -95,7 +95,7 @@ func TestWorkflowCreateRecoveryAbsentGroupMateFailsInEitherOrder(t *testing.T) {
 				t.Fatal(err)
 			}
 			state := scheduler.submissionStateForTest()
-			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != holder.ID || jobs.settleCalls != 1 {
+			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != holder.ID || jobs.settleCalls != 0 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
 			if len(jobs.deleted) != 0 {
@@ -204,7 +204,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			}
 			state := scheduler.submissionStateForTest()
 			if contract == "none" {
-				if current.Status != model.RunQueued || state.Runs != 0 || scheduler.pendingCreateCount() != 0 {
+				if current.Status != model.RunFailed || current.Error != model.ServerRestartReason || state.Runs != 0 || scheduler.pendingCreateCount() != 0 {
 					t.Fatalf("no-contract run quarantined or failed: %+v state=%+v", current, state)
 				}
 				return

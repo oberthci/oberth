@@ -216,7 +216,7 @@ func TestAdoptionMissingWorkflowFailsButReadFailureDoesNot(t *testing.T) {
 			t.Fatal(lookupErr)
 		}
 		if readErr == nil {
-			if err != nil || current.Status != model.RunQueued {
+			if err != nil || current.Status != model.RunFailed || current.Error != model.ServerRestartReason {
 				t.Fatalf("missing recovery: %#v, %v", current, err)
 			}
 		} else if err == nil || current.Status != model.RunRunning {

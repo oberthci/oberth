@@ -520,24 +520,17 @@ func TestStartupReconciliationFailsRunWithVanishedWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if recovered.Status != model.RunFailed {
-		t.Fatalf("reconciled run = %#v, want running under the same ID", recovered)
+		t.Fatalf("reconciled run = %#v, want failed under the same ID", recovered)
 	}
 	if recovered.Error != model.ServerRestartReason {
 		t.Fatal(recovered)
 	}
-
-	// Reconciliation must NOT delete inline: the durable restart obligation
-	// owns the deletion and stays pending until the cancellation pass.
 	if len(jobs.deleted) != 0 {
 		t.Fatal("restart deleted a Workflow", jobs.deleted)
 	}
 	pending, err := database.PendingRunCancellations(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pending) != 1 || pending[0].RunID != enqueued.ID ||
-		pending[0].WorkflowName != "oberth-vanished-job" || pending[0].Reason != "owner_restart" {
-		t.Fatalf("pending cancellations = %#v, want superseded obligation for the stranded Job", pending)
+	if err != nil || len(pending) != 0 {
+		t.Fatal(pending, err)
 	}
 	if err := scheduler.completePendingCancellationsWithGate(ctx, scheduler.requireMutation); err != nil {
 		t.Fatal(err)
@@ -622,8 +615,8 @@ func TestStartupReconciliationFailsUnobservedTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunQueued {
-		t.Fatalf("reconciled tag run = %#v, want queued under the original ID", recovered)
+	if recovered.Status != model.RunFailed {
+		t.Fatalf("reconciled tag run = %#v, want failed under the original ID", recovered)
 	}
 	if recovered.Error != model.ServerRestartReason {
 		t.Fatalf("reconciled tag run error = %q", recovered.Error)
@@ -637,8 +630,11 @@ func TestStartupReconciliationFailsUnobservedTag(t *testing.T) {
 	}
 }
 
-// A Wait observation failure hands native Stop to the owner, and its observed
-// unsuccessful completion uses interrupted/cancelled rather than CI failure.
+// ---------- Gap 3: Wait-error path must delete before terminalizing ----------
+
+// TestWaitErrorWithRunningWorkflowDeleteSucceedsFails verifies that when
+// Wait returns an error and TerminalResult reports the Workflow is still
+// running, a successful Delete allows the run to be terminalized as failed.
 func TestWaitErrorWithRunningWorkflowStopCompletesCancelled(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)

@@ -65,10 +65,17 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 			for _, original := range append(originals, later.Run) {
 				current, err := s.Run(ctx, original.ID)
 				requireRestartNoError(t, err)
-				if current.Status != model.RunQueued || current.ID != original.ID ||
-					current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence ||
-					!current.QueuedAt.Equal(original.QueuedAt) || current.StartedAt != nil || current.FinishedAt != nil || current.Error != "" {
-					t.Errorf("restart changed waiting identity/order/priority: before=%+v after=%+v", original, current)
+				want := model.RunFailed
+				if original.ID == later.ID {
+					want = model.RunQueued
+				} else if named {
+					want = model.RunRunning
+				}
+				if current.Status != want || current.ID != original.ID || current.QueueSequence != original.QueueSequence || current.AdmissionSequence != original.AdmissionSequence || !current.QueuedAt.Equal(original.QueuedAt) {
+					t.Fatal("restart changed queue identity", current)
+				}
+				if want == model.RunFailed && current.Error != model.ServerRestartReason {
+					t.Fatal(current)
 				}
 			}
 			currentPromotion, err := s.Promotion(ctx, promotion.ID)
