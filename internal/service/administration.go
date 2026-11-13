@@ -476,6 +476,9 @@ func (s *API) adminUplinkScope(ctx context.Context, actor api.Actor, raw json.Ra
 		return nil, refuse(ErrInvalidInput, "scope must be an array of at most 128 upstream names")
 	}
 	for _, name := range *args.Scope {
+		if name == model.MetricsScope {
+			continue
+		}
 		if err := validateAdminUpstreamName(name); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 		}
@@ -495,5 +498,5 @@ func (s *API) adminUplinkScope(ctx context.Context, actor api.Actor, raw json.Ra
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"identity": value.Identity, "fingerprint": value.Fingerprint, "scope": value.Scope}, nil
+	return map[string]any{"identity": value.Identity, "fingerprint": value.Fingerprint, "scope": append([]string{}, value.Scope...)}, nil
 }

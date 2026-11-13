@@ -41,9 +41,11 @@ func TestAdministrationClient(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("invalid arguments reached server: calls=%d", calls.Load())
 	}
+	t.Run("NoRedirectOrRetry", testAdministrationClientNeverRedirectsOrRetries)
+	t.Run("BackupBounds", testAdministrationBackupClientBounds)
 }
 
-func TestAdministrationClientNeverRedirectsOrRetries(t *testing.T) {
+func testAdministrationClientNeverRedirectsOrRetries(t *testing.T) {
 	var requests atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1); t.Error("admin body followed a redirect") }))
 	defer target.Close()
@@ -65,7 +67,7 @@ func TestAdministrationClientNeverRedirectsOrRetries(t *testing.T) {
 	}
 }
 
-func TestAdministrationBackupClientBounds(t *testing.T) {
+func testAdministrationBackupClientBounds(t *testing.T) {
 	var oversized atomic.Bool
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

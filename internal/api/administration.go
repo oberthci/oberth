@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 )
 
@@ -69,6 +70,11 @@ func (s *Server) handleAdministration(w http.ResponseWriter, r *http.Request, na
 	actor := actorFrom(r.Context())
 	if !actor.Admin || actor.Scoped() {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "administration requires an unscoped admin identity"})
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "administration requires application/json"})
 		return
 	}
 	if r.URL.RawQuery != "" {

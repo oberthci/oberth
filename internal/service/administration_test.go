@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,6 +94,13 @@ func newAdministrationFixture(t *testing.T) (*API, *administrationAudit, http.Ha
 	t.Helper()
 	fixture := newControlFixture(t)
 	control := fixture.api(t)
+	credential, err := fixture.store.CreateTokenCredential(t.Context(), model.TokenCredentialSpec{Name: "scope-fixture", Digest: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.RegisterUplink(t.Context(), "admin@host", model.UplinkSpec{Identity: "operator@host", Fingerprint: "SHA256:" + strings.Repeat("A", 43), TokenCredentialID: credential.ID}); err != nil {
+		t.Fatal(err)
+	}
 	upstream, err := fixture.store.RegisterUpstream(t.Context(), "admin@host", model.UpstreamSpec{Name: "south", Kind: "ssh", BaseURL: "ssh://source.invalid/team"})
 	if err != nil {
 		t.Fatal(err)
@@ -141,8 +150,13 @@ func newAdministrationFixture(t *testing.T) (*API, *administrationAudit, http.Ha
 	return control, audit, server.Handler()
 }
 
+var administrationRequestID atomic.Uint32
+
 func adminRequest(handler http.Handler, action, token, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/"+action, strings.NewReader(body))
+	// Isolate anonymous endpoint checks from the existing per-source failure budget.
+	req.RemoteAddr = fmt.Sprintf("192.0.2.%d:1234", administrationRequestID.Add(1)%250+1)
+	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -183,7 +197,30 @@ func testAdministrationRequiresAdmin(t *testing.T) {
 }
 
 func testAdministrationRejectsPaths(t *testing.T) {
-	_, _, handler := newAdministrationFixture(t)
+	control, _, handler := newAdministrationFixture(t)
+	externalCalls := 0
+	control.administration.EnsureUpstream = func(context.Context, api.UpstreamAddRequest) (api.UpstreamIdentity, error) {
+		externalCalls++
+		return api.UpstreamIdentity{}, nil
+	}
+	control.administration.ImportUpstreamKey = func(context.Context, api.UpstreamKeyRequest) (api.UpstreamIdentity, error) {
+		externalCalls++
+		return api.UpstreamIdentity{}, nil
+	}
+	control.administration.VerifyRepository = func(context.Context, string) (any, error) {
+		externalCalls++
+		return map[string]any{"verified": true}, nil
+	}
+	keyMaterial := ""
+	for _, test := range administrationCases(t) {
+		if test.action == "upstream-provide-key" {
+			var args api.UpstreamKeyRequest
+			if err := json.Unmarshal([]byte(test.body), &args); err != nil {
+				t.Fatal(err)
+			}
+			keyMaterial = args.PrivateKey
+		}
+	}
 	for _, path := range []string{"../private", "/new-repo", "/etc/private", "..\\private", "%2e%2e%2fprivate", "name/../../private"} {
 		fields := []struct{ action, field string }{
 			{"public-identity", "name"}, {"upstream-add", "name"}, {"upstream-remove", "name"},
@@ -196,7 +233,7 @@ func testAdministrationRejectsPaths(t *testing.T) {
 			case "public-identity", "upstream-remove":
 				args = map[string]any{"name": "server-ca"}
 			case "upstream-provide-key":
-				args = map[string]any{"name": "south", "private_key": "invalid"}
+				args = map[string]any{"name": "south", "private_key": keyMaterial}
 			case "repo-add":
 				args = map[string]any{"repo": "new-repo", "upstream": "south"}
 			case "repo-verify":
@@ -212,6 +249,9 @@ func testAdministrationRejectsPaths(t *testing.T) {
 				t.Errorf("%s %s=%q: got %d: %s", field.action, field.field, path, out.Code, out.Body)
 			}
 		}
+	}
+	if externalCalls != 0 {
+		t.Errorf("path-like inputs reached %d external operations", externalCalls)
 	}
 	for _, test := range administrationCases(t) {
 		out := adminRequest(handler, test.action, "admin", `{"path":"/etc/private"}`)
@@ -295,6 +335,7 @@ func testAdministrationAcceptsVerifiedAdminCertificate(t *testing.T) {
 	cert := &x509.Certificate{NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
 	cert.Subject.CommonName = "admin"
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/version", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}, VerifiedChains: [][]*x509.Certificate{{cert}}}
 	out := httptest.NewRecorder()
 	handler.ServeHTTP(out, req)
@@ -336,4 +377,41 @@ func TestAdministrationSecurity(t *testing.T) {
 	t.Run("AuditFailureClosesActions", testAdministrationAuditFailureClosesActions)
 	t.Run("AcceptsVerifiedAdminCertificate", testAdministrationAcceptsVerifiedAdminCertificate)
 	t.Run("PublicFileConfinement", testAdministrationPublicFileConfinement)
+	t.Run("UplinkScopeUpdates", testAdministrationUplinkScopeUpdates)
+	t.Run("RequiresJSONContentType", testAdministrationRequiresJSONContentType)
+}
+
+func testAdministrationUplinkScopeUpdates(t *testing.T) {
+	_, _, handler := newAdministrationFixture(t)
+	for _, scope := range [][]string{{"south"}, {"metrics"}, {}} {
+		body, err := json.Marshal(map[string]any{"identity": "operator@host", "scope": scope})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := adminRequest(handler, "uplink-scope", "admin", string(body))
+		var result struct {
+			Scope []string `json:"scope"`
+		}
+		if out.Code != http.StatusOK || json.Unmarshal(out.Body.Bytes(), &result) != nil || strings.Join(result.Scope, ",") != strings.Join(scope, ",") || result.Scope == nil {
+			t.Fatalf("scope %v: %d %s", scope, out.Code, out.Body)
+		}
+	}
+}
+
+func testAdministrationRequiresJSONContentType(t *testing.T) {
+	_, _, handler := newAdministrationFixture(t)
+	for _, test := range administrationCases(t) {
+		for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/"+test.action, strings.NewReader(test.body))
+			req.Header.Set("Authorization", "Bearer admin")
+			if contentType != "" {
+				req.Header.Set("Content-Type", contentType)
+			}
+			out := httptest.NewRecorder()
+			handler.ServeHTTP(out, req)
+			if out.Code != http.StatusUnsupportedMediaType {
+				t.Errorf("%s content type %q: %d %s", test.action, contentType, out.Code, out.Body)
+			}
+		}
+	}
 }
