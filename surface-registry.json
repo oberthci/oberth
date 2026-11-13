@@ -9,8 +9,8 @@
       "test_ref": "internal/installer/upstream_name_test.go TestInstallUpstreamHostNames"
     },
     "value:warning": {
-      "doc_anchor": "docs/host-preparation.md",
-      "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
+      "doc_anchor": "docs/install-verification.md",
+      "test_ref": "internal/installer/maintenance_policy_review_test.go TestExistingUpgradeDoesNotRequireFreshProbe"
     },
     "value:memory": {
       "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
@@ -23,18 +23,6 @@
     "value:resources": {
       "doc_anchor": "docs/platform-protection.md#dependencies-and-user-added-ingress",
       "test_ref": "internal/installer/platform_priority_test.go TestManagedDependenciesUseUpstreamPodDefaults"
-    },
-    "value:host_swap": {
-      "doc_anchor": "docs/host-preparation.md#swap-or-zram",
-      "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
-    },
-    "value:host_inotify": {
-      "doc_anchor": "docs/host-preparation.md#inotify",
-      "test_ref": "internal/installer/host_prep_test.go TestHostPrepWarningsAreAdvisoryWithExactRemedies"
-    },
-    "value:host_kubelet": {
-      "doc_anchor": "docs/host-preparation.md#kubelet",
-      "test_ref": "internal/installer/host_prep_test.go TestHostPrepKubeletConfigUsesSelectedNodeAndWarnsOnUnknown"
     },
     "value:cpu": {
       "doc_anchor": "docs/server-cpu.md#overrides-and-upgrades",
