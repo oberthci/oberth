@@ -290,7 +290,7 @@ func isInteractive(deps Deps) bool {
 
 func waitAndAnnounceReady(ctx context.Context, cfg Config, deps Deps) error {
 	_, _ = fmt.Fprintln(deps.Output, "Waiting for Oberth to become ready...")
-	if err := WaitForReady(ctx, cfg, deps); err != nil {
+	if err := waitForClientReady(ctx, cfg, deps); err != nil {
 		return err
 	}
 	color := isColor(deps)
@@ -558,7 +558,7 @@ func runOnboarding(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, 
 	}
 
 	_, _ = fmt.Fprintf(deps.Output, "\nWaiting for Oberth to become ready...\n")
-	if err := WaitForReady(ctx, cfg, deps); err != nil {
+	if err := waitForClientReady(ctx, cfg, deps); err != nil {
 		return err
 	}
 	if deps.StepProgressSink != nil {

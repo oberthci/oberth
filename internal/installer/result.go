@@ -36,21 +36,22 @@ type CheckResult struct {
 }
 
 type InstallReview struct {
-	NetworkPolicy   string   `json:"network_policy"`
-	ReissueServerCA bool     `json:"reissue_server_ca"`
-	Context         string   `json:"context"`
-	Namespace       string   `json:"namespace"`
-	ArgoNamespace   string   `json:"argo_namespace"`
-	ProductionStore bool     `json:"production_store"`
-	DevStore        bool     `json:"dev_store"`
-	ClientHost      string   `json:"client_host"`
-	AdminIdentity   string   `json:"admin_identity"`
-	DNSNames        []string `json:"tls_dns_names"`
-	IPs             []string `json:"tls_ips"`
+	ClientRequirements []string `json:"client_requirements,omitempty"`
+	NetworkPolicy      string   `json:"network_policy"`
+	ReissueServerCA    bool     `json:"reissue_server_ca"`
+	Context            string   `json:"context"`
+	Namespace          string   `json:"namespace"`
+	ArgoNamespace      string   `json:"argo_namespace"`
+	ProductionStore    bool     `json:"production_store"`
+	DevStore           bool     `json:"dev_store"`
+	ClientHost         string   `json:"client_host"`
+	AdminIdentity      string   `json:"admin_identity"`
+	DNSNames           []string `json:"tls_dns_names"`
+	IPs                []string `json:"tls_ips"`
 }
 
 func Review(cfg Config) InstallReview {
-	return InstallReview{NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
+	return InstallReview{ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {
@@ -93,6 +94,9 @@ func PrintReview(w io.Writer, cfg Config) { printReview(w, Review(cfg)) }
 func printReview(w io.Writer, review InstallReview) {
 	_, _ = fmt.Fprintf(w, "Review install: context %q, namespace %q, pipeline namespace %q\nSecret store: production=%t dev=%t; client address=%q; admin identity=%q\nTLS DNS names: %v; IP addresses: %v\n", review.Context, review.Namespace, review.ArgoNamespace, review.ProductionStore, review.DevStore, review.ClientHost, review.AdminIdentity, review.DNSNames, review.IPs)
 	_, _ = fmt.Fprintf(w, "Pipeline NetworkPolicy: %s (effective install choice)\n", review.NetworkPolicy)
+	for _, requirement := range review.ClientRequirements {
+		_, _ = fmt.Fprintln(w, requirement)
+	}
 	printPolicyWarning(w, review.NetworkPolicy)
 }
 
@@ -226,6 +230,11 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 		connection, dialErr := dialer.DialContext(ctx, "tcp", net.JoinHostPort(address, https))
 		r.check("https_tls", dialErr == nil, "Make the advertised HTTPS address reachable and ensure its name is on the server certificate.")
+		if dialErr != nil {
+			failure := clientEndpointFailure(cfg, deps, dialErr)
+			r.Checks[len(r.Checks)-1].Reason = failure.check.Reason
+			r.Checks[len(r.Checks)-1].Remedy = failure.check.Remedy
+		}
 		if connection != nil {
 			_ = connection.Close()
 		}
@@ -321,6 +330,11 @@ func executeJSON(ctx context.Context, cfg Config, deps InstallDeps, execute func
 	result.FirstUplink = identity
 	result.SecretsValues = values
 	result.check("install", installErr == nil || errors.Is(installErr, ErrUpstreamKeyPending), "Inspect the selected cluster; finish pending onboarding and rerun --verify --json.")
+	var failure *installStepError
+	if errors.As(installErr, &failure) {
+		result.Checks[len(result.Checks)-1] = failure.check
+		result.ServerURL = failure.endpoint
+	}
 	if cfg.SecretsFile != "" {
 		if raw, err := os.ReadFile(cfg.SecretsFile); err == nil { //nolint:gosec // G304: operator-selected credential sink; only its digest is public
 			sum := sha256.Sum256(raw)

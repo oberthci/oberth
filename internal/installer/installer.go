@@ -477,6 +477,9 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
+	// Host installs verify the advertised endpoint after server readiness.
+	checkClientReachability bool
+
 	ProbeNetworkPolicy func(context.Context, Config, Deps) NetworkPolicyProbeResult
 	baoToken           string
 	baoTokenCaptured   bool

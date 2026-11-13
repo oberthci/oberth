@@ -81,7 +81,10 @@ func installResultError(result InstallResult) error {
 			continue
 		}
 		if check.Code != "upstream_key_pending" {
-			return fmt.Errorf("install did not pass all checks; follow the reported remedies")
+			if check.Reason == "" {
+				return fmt.Errorf("%s: %s", check.Code, check.Remedy)
+			}
+			return fmt.Errorf("%s: %s; %s", check.Code, check.Reason, check.Remedy)
 		}
 		pending = true
 	}
