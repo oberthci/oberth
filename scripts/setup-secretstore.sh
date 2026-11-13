@@ -39,6 +39,8 @@ KV_PREFIX="oberth"
 NAMESPACE="oberth"
 SERVICE_ACCOUNT="oberth"
 KUBERNETES_HOST=""
+KUBE_CONTEXT=""
+KUBE_CONFIG=""
 ADDRESS=""
 CLI=""
 FORCE_AUTH_CONFIG="false"
@@ -58,7 +60,9 @@ Options:
   --service-account NAME   Oberth ServiceAccount name        (default: oberth)
   --kubernetes-host URL    API server URL the secret store uses for TokenReview
                            (default: in-cluster service URL when run in-cluster,
-                            otherwise the current kubeconfig server)
+                            otherwise the selected kubeconfig server)
+  --context NAME           recorded or explicitly selected Kubernetes context
+  --kubeconfig PATH        source kubeconfig for that context
   --address URL            secret store URL for this run
                            (default: BAO_ADDR / VAULT_ADDR from the environment)
   --cli bao|vault          force a specific CLI              (default: autodetect)
@@ -83,6 +87,8 @@ while [ $# -gt 0 ]; do
     --namespace) NAMESPACE="$2"; shift 2 ;;
     --service-account) SERVICE_ACCOUNT="$2"; shift 2 ;;
     --kubernetes-host) KUBERNETES_HOST="$2"; shift 2 ;;
+    --context) KUBE_CONTEXT="$2"; shift 2 ;;
+    --kubeconfig) KUBE_CONFIG="$2"; shift 2 ;;
     --address) ADDRESS="$2"; shift 2 ;;
     --cli) CLI="$2"; shift 2 ;;
     --force) FORCE="true"; shift ;;
@@ -252,7 +258,7 @@ unset AUDIT_ENABLED
 
 # --- cluster facts (read-only) ----------------------------------------------
 CLUSTER_CA=""
-if [ -n "${KUBERNETES_SERVICE_HOST:-}" ] && [ -r "$IN_CLUSTER_CA" ]; then
+if [ -z "$KUBE_CONTEXT$KUBE_CONFIG" ] && [ -n "${KUBERNETES_SERVICE_HOST:-}" ] && [ -r "$IN_CLUSTER_CA" ]; then
   # Running inside the cluster (e.g. next to an in-cluster OpenBao): the store
   # reaches the API server through the in-cluster service address, and the
   # pod's mounted ServiceAccount bundle already carries the cluster CA —
@@ -261,19 +267,49 @@ if [ -n "${KUBERNETES_SERVICE_HOST:-}" ] && [ -r "$IN_CLUSTER_CA" ]; then
   CLUSTER_CA="$(cat "$IN_CLUSTER_CA")"
 else
   command -v kubectl >/dev/null 2>&1 || fail "kubectl not found in PATH (read-only use; needed to derive the API server URL and CA)"
-  KUBE_CONTEXT="$(kubectl config current-context 2>/dev/null || true)"
-  [ -n "$KUBE_CONTEXT" ] && note "using kubeconfig context: $KUBE_CONTEXT"
-  if [ -z "$KUBERNETES_HOST" ]; then
-    KUBERNETES_HOST="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
-    [ -n "$KUBERNETES_HOST" ] || fail "could not derive the API server URL; pass --kubernetes-host"
-  fi
-  CLUSTER_CA="$(kubectl get configmap kube-root-ca.crt -n kube-public -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)"
-  if [ -z "$CLUSTER_CA" ]; then
-    CA_DATA="$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' 2>/dev/null || true)"
-    if [ -n "$CA_DATA" ]; then
-      CLUSTER_CA="$(printf '%s' "$CA_DATA" | base64 -d 2>/dev/null || printf '%s' "$CA_DATA" | base64 -D 2>/dev/null || true)"
-    fi
-  fi
+  CLUSTER_FACTS="$(python3 - "$KUBE_CONTEXT" "$KUBE_CONFIG" <<'PYTHON'
+import base64, hashlib, json, os, pathlib, stat, subprocess, sys
+context, config = sys.argv[1:]
+record_path = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", str(pathlib.Path.home()/".config"))) / "oberth/kubernetes.json"
+record = None
+try:
+    if record_path.exists():
+        info = record_path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > 65536:
+            raise ValueError("unsafe recorded Kubernetes target")
+        record = json.loads(record_path.read_text())
+        context = context or record["context"]
+        config = config or record.get("kubeconfig", "")
+    if not context:
+        raise ValueError("select --context or use the recorded install target")
+    command = ["kubectl", "--context", context]
+    if config:
+        command += ["--kubeconfig", config]
+    command += ["config", "view", "--minify", "--flatten", "--raw", "-o", "json"]
+    selected = json.loads(subprocess.check_output(command, stderr=subprocess.PIPE))
+    cluster = selected["clusters"][0]["cluster"]
+    server = cluster["server"]
+    ca = base64.b64decode(cluster.get("certificate-authority-data", ""), validate=True)
+    if record and context == record["context"]:
+        if (server != record.get("api_server") or hashlib.sha256(ca).hexdigest() != record.get("ca_sha256")
+                or cluster.get("tls-server-name", "") != record.get("tls_server_name", "")
+                or cluster.get("insecure-skip-tls-verify", False) != record.get("insecure_tls", False)):
+            raise ValueError("recorded Kubernetes cluster identity changed (API server or CA)")
+    if not ca:
+        raise ValueError("selected Kubernetes context must provide a CA bundle for TokenReview")
+    print(context)
+    print(server)
+    print(base64.b64encode(ca).decode())
+except (ValueError, KeyError, IndexError, OSError, subprocess.CalledProcessError):
+    sys.exit("cannot verify selected Kubernetes cluster; check --context, API server and CA against the install record")
+PYTHON
+)" || fail "could not verify Kubernetes cluster identity"
+  mapfile -t CLUSTER_FACT_ARRAY <<< "$CLUSTER_FACTS"
+  KUBE_CONTEXT="${CLUSTER_FACT_ARRAY[0]}"
+  [ -n "$KUBERNETES_HOST" ] || KUBERNETES_HOST="${CLUSTER_FACT_ARRAY[1]}"
+  CLUSTER_CA="$(printf '%s' "${CLUSTER_FACT_ARRAY[2]}" | base64 -d)"
+  note "using kubeconfig context: $KUBE_CONTEXT"
+
 fi
 [ -n "$CLUSTER_CA" ] || fail "could not read the cluster CA (in-cluster bundle, kube-root-ca.crt, or kubeconfig); is kubectl pointed at the right cluster?"
 
@@ -485,9 +521,9 @@ Next steps:
    repository fails the run before its Job starts — and are delivered only
    into the release Job's memory.
 
-4. Prove the whole trust chain end to end from inside the Oberth pod
-   (ServiceAccount login, TokenReview, read policy, TLS — no credentials
-   needed beyond the pod's own identity):
+4. Prove the whole trust chain end to end through the authenticated admin API
+   (ServiceAccount login, TokenReview, read policy, TLS), using your saved
+   unscoped admin identity:
 
-     oberth mcp call secretstore_verify '{}'  oberth/upstream/<org>/<repo>/github-token
+     oberth mcp call secretstore_verify '{"paths":["oberth/upstream/<org>/<repo>/github-token"]}'
 SUMMARY
