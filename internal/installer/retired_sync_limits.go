@@ -8,6 +8,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -65,9 +66,10 @@ func removeSyncLimitsValues(ctx context.Context, deps Deps, ns string, exists bo
 	return []string{"--set-json", "extraObjects=" + string(encoded)}, true, nil
 }
 
-// Explicit deletion also removes the old Helm keep annotation's effect. Only
-// a Helm-owned Oberth/Argo object is removed; an operator's replacement is kept.
-func deleteRetiredSyncLimits(ctx context.Context, cfg Config, deps Deps, ns string) error {
+// Helm reads the live keep annotation before deleting resources removed from a
+// release. Detach ownership before upgrading; later manifests omit this object.
+// Patch metadata alone so concurrent operator changes to semaphore data survive.
+func orphanRetiredSyncLimits(ctx context.Context, cfg Config, deps Deps, ns string) error {
 	if deps.KubeClient == nil {
 		return nil
 	}
@@ -87,13 +89,20 @@ func deleteRetiredSyncLimits(ctx context.Context, cfg Config, deps Deps, ns stri
 	if (owner != "argo-workflows" || ownerNS != ns) && (owner != "oberth" || ownerNS != oberthNS) {
 		return nil
 	}
-	err = cms.Delete(ctx, cm.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &cm.UID, ResourceVersion: &cm.ResourceVersion}})
-	if apierrors.IsNotFound(err) {
-		return nil
+	if cm.DeletionTimestamp != nil {
+		return fmt.Errorf("cannot orphan deleting semaphore ConfigMap %s/%s", ns, cm.Name)
 	}
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{
+		"uid": cm.UID, "resourceVersion": cm.ResourceVersion,
+		"annotations": map[string]any{"meta.helm.sh/release-name": nil, "meta.helm.sh/release-namespace": nil, "helm.sh/resource-policy": "keep"},
+		"labels":      map[string]any{"app.kubernetes.io/managed-by": nil},
+	}})
 	if err != nil {
-		return fmt.Errorf("remove retired semaphore ConfigMap %s/%s: %w", ns, cm.Name, err)
+		return err
 	}
-	_, _ = fmt.Fprintf(deps.Output, "Removed managed ConfigMap %s/%s; create operator-owned semaphore limits before resuming semaphore users.\n", ns, cm.Name)
+	if _, err = cms.Patch(ctx, cm.Name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("orphan semaphore ConfigMap %s/%s before Helm upgrade: %w", ns, cm.Name, err)
+	}
+	_, _ = fmt.Fprintf(deps.Output, "Kept ConfigMap %s/%s and its semaphore data; it is now operator-owned.\n", ns, cm.Name)
 	return nil
 }

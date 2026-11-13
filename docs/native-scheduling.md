@@ -57,7 +57,9 @@ reference restrictions.
 A repository semaphore may read only the `oberth-sync-limits` ConfigMap in the
 run's namespace, using a key of the author's choice. Other ConfigMap references
 remain refused because Argo's failure text can expose their data. Oberth no
-longer creates or manages this ConfigMap; operators apply and maintain it.
+longer creates or manages this ConfigMap. Upgrade preserves an existing object
+and its data with Helm ownership removed; new installs create none. Operators
+apply and maintain semaphore limits themselves.
 
 An administrator-selected execution target still authenticates its approved
 cluster, namespace, controller and service identity, but adds no nodeSelector or

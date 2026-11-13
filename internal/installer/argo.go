@@ -173,10 +173,13 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		result.TargetVersion = result.InstalledVersion
 		action = actionUpgrade
 	}
+	if err := orphanRetiredSyncLimits(ctx, cfg, deps, ns); err != nil {
+		return result, err
+	}
 	switch action {
 	case actionSkip:
 		result.AlreadyInstalled = true
-		return result, deleteRetiredSyncLimits(ctx, cfg, deps, ns)
+		return result, nil
 	case actionUpgrade:
 		result.Upgraded = true
 		if result.InstalledVersion != "" && result.InstalledVersion != result.TargetVersion {
@@ -199,7 +202,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}
-	return result, deleteRetiredSyncLimits(ctx, cfg, deps, ns)
+	return result, nil
 }
 
 // installArgoPinningProfile installs Argo and records the nonroot profile it
