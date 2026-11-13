@@ -88,7 +88,7 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 // namespace rule. Assist identity/hold markers are server-written, not opt-ins.
 func supportedWorkflowAnnotation(key string) bool {
 	switch key {
-	case SecretPathsAnnotation, SourcesAnnotation, GoProxyAnnotation, NonrootTemplatesAnnotation:
+	case SecretPathsAnnotation, SourcesAnnotation, NonrootTemplatesAnnotation:
 		return true
 	default:
 		return false
