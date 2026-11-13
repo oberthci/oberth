@@ -135,13 +135,15 @@ check leaves fresh-machine acceptance incomplete for that candidate.
    requires reconciliation through `events_since`/`run_get`. See
    [agent events](agent-events.md).
 
-   Require a `run.held` event for this push. Read `run_get` and `run_hold_list`;
-   verify the exact pushed SHA, run ID, held step and `patch_capable: true`
-   before editing. Through `run_hold_patch`, apply a unified diff changing only
-   `expect.txt` from `broken` to `fixed`, then call `run_continue` for that run
-   and step before its hold deadline. Wait for completion and read `run_get`.
-   Require `status: passed`, `assisted: true`, the same SHA and a
-   `display_reason` containing `not evidence`. Record the event ID, run ID,
+   Require a `run.held` event for this push. Read `run_get` to verify the
+   exact pushed SHA and run ID, then `run_hold_list` to verify the held step
+   and `patch_capable: true` before editing. Through `run_hold_patch`, apply a
+   unified diff changing only `expect.txt` from `broken` to `fixed`, then call
+   `run_continue` for that run and step before its hold deadline. Wait for
+   completion and read `run_get` for `status: passed`, the same SHA and run ID,
+   and a `display_reason` containing `not evidence`. Read `assisted: true` from
+   `run_hold_list` or the full `run_get` view (`summary: false`); the default
+   `run_get` summary does not include it. Record the event ID, run ID,
    SHA, step, patch digest and result. The assisted pass must not count as
    green evidence for its SHA, become a promotion source or publish upstream.
    A premature `run.finished`, missing hold or ordinary green classification
