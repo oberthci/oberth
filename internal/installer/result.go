@@ -196,6 +196,11 @@ func verifyInstall(ctx context.Context, cfg Config, host InstallDeps, maintenanc
 		r.Checks[len(r.Checks)-1].Reason = "unverified"
 		return r
 	}
+	if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
+		// Verification still describes the installed release. Obsolete values
+		// require an upgrade before the next write, not a failed read check.
+		r.Checks = append(r.Checks, CheckResult{Code: "installed_values", OK: true, Warning: true, Remedy: err.Error()})
+	}
 
 	if err := readArgoReviewValues(ctx, &cfg, installPolicyDeps(host, cfg, selected)); err != nil {
 		r.check("argo_values", false, argoValuesRemedy)
