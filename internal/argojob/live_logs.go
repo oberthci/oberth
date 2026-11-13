@@ -112,7 +112,10 @@ func newStepLogFollowers(ctx context.Context, reader PodLogFollower, output io.W
 }
 
 func (logs *stepLogFollowers) observe(workflow *wfv1.Workflow) {
-	observed := logs.steps(logs.ctx, workflow)
+	logs.observeSteps(workflow, logs.steps(logs.ctx, workflow))
+}
+
+func (logs *stepLogFollowers) observeSteps(workflow *wfv1.Workflow, observed []StepResult) {
 	// A journaled earlier attempt proves this logical step uses durable cursors.
 	// A later attempt without a cursor has never been retained and must start
 	// at its beginning, even if it started before controller adoption.
@@ -196,10 +199,36 @@ func (logs *stepLogFollowers) drain(workflow *wfv1.Workflow) {
 			<-worker.done
 		}
 		before := len(logs.workers)
-		logs.observe(workflow)
+		observed := logs.steps(logs.ctx, workflow)
+		logs.observeSteps(workflow, observed)
 		if len(logs.workers) == before {
+			logs.reportUnbound(workflow, observed)
 			return
 		}
+	}
+}
+
+// An unbound terminal Pod must leave an explicit delivery observation, even
+// when discovery never managed to start a follower. It is never "complete".
+func (logs *stepLogFollowers) reportUnbound(workflow *wfv1.Workflow, steps []StepResult) {
+	for _, step := range steps {
+		if step.PodName != "" || workflow.Status.Nodes[step.NodeID].Type != wfv1.NodeTypePod {
+			continue
+		}
+		retained := false
+		for _, worker := range logs.workers {
+			if worker.step.NodeID == step.NodeID {
+				retained = true
+				break
+			}
+		}
+		if retained {
+			continue
+		}
+		worker := &stepLogFollower{owner: logs, step: step}
+		message := "Pod identity could not be observed"
+		worker.status("unavailable", message)
+		writeLine(logs.output, step, "oberth: step log unavailable: "+message)
 	}
 }
 

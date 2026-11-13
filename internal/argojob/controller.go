@@ -592,17 +592,29 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 	}
 	steps = append(steps, finalStepResults(observed)...)
 	for _, step := range steps {
-		if !reporter.observe(destination, step) {
+		if reporter.observe(destination, step) {
+			// A terminal event makes this log eligible; only a read finishes
+			// replay. Missing discovery must remain eligible on later polls.
+			reporter.replayed[step.NodeID] = false
+		}
+		replayed, eligible := reporter.replayed[step.NodeID]
+		if live != nil || !eligible || replayed || !terminal(step.Status) || workflow.Status.Nodes[step.NodeID].Type != wfv1.NodeTypePod {
 			continue
 		}
-		if live == nil && terminal(step.Status) && step.PodName != "" {
-			if err := controller.replayStepLog(ctx, workflow, step, destination); err != nil {
-				return err
+		if step.PodName == "" {
+			if workflow.Status.Phase.Completed() {
+				writeLine(destination, step, "oberth: step log unavailable: Pod identity could not be observed")
 			}
+			continue
 		}
+		read, err := controller.replayStepLog(ctx, workflow, step, destination)
+		if err != nil {
+			return err
+		}
+		reporter.replayed[step.NodeID] = read
 	}
 	if live != nil {
-		live.observe(workflow)
+		live.observeSteps(workflow, observed)
 	}
 	return nil
 }
@@ -617,16 +629,16 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 // It returns an error only when the aggregate run log budget is breached: the
 // per-step truncation is handled in-band (banner + continue), but an aggregate
 // breach must propagate to Wait so the run goes red with step attribution.
-func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.Workflow, step StepResult, destination io.Writer) error {
+func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.Workflow, step StepResult, destination io.Writer) (bool, error) {
 	if controller.logs == nil {
-		return nil
+		return false, nil
 	}
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
 	stream, err := controller.logs(readCtx, workflow.Namespace, step.PodName, mainContainerName)
 	if err != nil {
 		writeLine(destination, step, fmt.Sprintf("oberth: step log unavailable: %v", err))
-		return nil
+		return false, nil
 	}
 	defer func() { _ = stream.Close() }()
 	if step.Attempt != "" {
@@ -637,11 +649,11 @@ func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.
 			// Best-effort banner -- the budget is exhausted so this write
 			// will likely fail, but writeLine silently drops write errors.
 			writeLine(destination, step, "oberth: run log truncated: aggregate budget exceeded")
-			return fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Stage, step.Step)
+			return true, fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Stage, step.Step)
 		}
 		writeLine(destination, step, fmt.Sprintf("oberth: step log truncated: %v", err))
 	}
-	return nil
+	return true, nil
 }
 
 // TerminalState reports a Workflow's terminal result without requiring any
@@ -751,6 +763,7 @@ type progressReporter struct {
 	reported      map[string]runprogress.Status
 	node          map[string]string
 	done          map[string]bool
+	replayed      map[string]bool
 	ordinals      map[string]int
 	ordinalOwners map[int]string
 	failed        error
@@ -762,6 +775,7 @@ func newProgressReporter(destination io.Writer) *progressReporter {
 		reported:      map[string]runprogress.Status{},
 		node:          map[string]string{},
 		done:          map[string]bool{},
+		replayed:      map[string]bool{},
 		ordinals:      map[string]int{},
 		ordinalOwners: map[int]string{},
 	}
