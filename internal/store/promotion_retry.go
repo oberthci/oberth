@@ -45,10 +45,6 @@ func validatePromotionRetrySpec(spec model.PromotionSpec) error {
 // promotion of the same tuple is pending or delivered. The checks and the
 // insert share one transaction, so two concurrent retries cannot both pass.
 func checkPromotionRetryTx(ctx context.Context, tx *sql.Tx, spec model.PromotionSpec) (promotionRetryAdmission, error) {
-	return checkPromotionRetryAdmissionTx(ctx, tx, spec, false)
-}
-
-func checkPromotionRetryAdmissionTx(ctx context.Context, tx *sql.Tx, spec model.PromotionSpec, trustedPreflight bool) (promotionRetryAdmission, error) {
 	original, err := promotionTx(ctx, tx, spec.RetryOf)
 	if err != nil {
 		return promotionRetryAdmission{}, err
@@ -63,14 +59,8 @@ func checkPromotionRetryAdmissionTx(ctx context.Context, tx *sql.Tx, spec model.
 		if spec.GrantID != original.GrantID || spec.Actor != original.Actor || !sameTrainGrants(original.Train, spec.Train) {
 			return promotionRetryAdmission{}, fmt.Errorf("%w: automatic promotion retry must retain its original actor and grant", ErrInvalidState)
 		}
-		if original.Status == model.PromotionInterrupted && !trustedPreflight {
-			eligible, err := interruptedPromotionRetryEligible(ctx, tx, original)
-			if err != nil {
-				return promotionRetryAdmission{}, err
-			}
-			if !eligible {
-				return promotionRetryAdmission{}, fmt.Errorf("%w: promotion interruption is not an infrastructure-only retry", ErrInvalidState)
-			}
+		if original.Status == model.PromotionInterrupted {
+			return promotionRetryAdmission{}, fmt.Errorf("%w: interrupted promotions require a user-requested retry", ErrInvalidState)
 		}
 	}
 	var blockerID, blockerStatus string

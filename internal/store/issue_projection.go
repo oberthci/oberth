@@ -73,7 +73,7 @@ func scanCIIssueWork(row rowScanner) (ciIssueWork, error) {
 }
 
 func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, failureTail string, now int64) error {
-	if run.Status == model.RunInterrupted {
+	if run.Status == model.RunInterrupted || (run.Status == model.RunFailed && run.Phase == "infrastructure" && run.Error == model.ServerRestartReason && run.FailedStep == "") {
 		return nil
 	}
 	// An assisted green run tested a tree that is not in Git: it neither

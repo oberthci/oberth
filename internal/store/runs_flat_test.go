@@ -155,21 +155,23 @@ func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
 	}
 }
 
-func TestStrandedRequeueRecordsCauseAndDoesNotFileIssue(t *testing.T) {
+func TestStrandedRestartFailureDoesNotFileCIIssue(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	old := projectionRun(t, s, repo.ID, "main", projectionSourceSHA)
-	copy, err := s.RequeueStrandedRun(t.Context(), old.ID)
-	if err != nil {
+	if _, err := s.db.Exec(`UPDATE runs SET job_name='' WHERE id=?`, old.ID); err != nil {
 		t.Fatal(err)
 	}
-	old, err = s.Run(t.Context(), old.ID)
-	if err != nil || old.Reason != "re-queued after restart" || old.SupersededBy != "" || old.ID != copy.ID || old.Status != model.RunQueued {
-		t.Fatalf("restart %+v, %v", old, err)
+	if err := s.RecoverOwnerState(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-	if _, err = s.OpenCIIssue(t.Context(), repo.ID, "main"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("restart issue: %v", err)
+	failed, err := s.Run(t.Context(), old.ID)
+	if err != nil || failed.Status != model.RunFailed || failed.Error != model.ServerRestartReason {
+		t.Fatal(failed, err)
+	}
+	if _, err := s.OpenCIIssue(t.Context(), repo.ID, "main"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("restart opened CI-red issue", err)
 	}
 }
 

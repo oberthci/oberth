@@ -18,17 +18,12 @@ import (
 // beside the restored database: the IDs of runs the backup recorded as
 // running, and for a rollback restore also those queued or waiting. A
 // running run whose Workflow is found here is adopted; otherwise startup
-// recovery marks it interrupted instead of requeueing it. Queued, waiting
+// recovery records a failed run without resubmitting it. Queued, waiting
 // and mid-submission restored runs are cancelled (interrupted, with
 // restoredRunCancelReason), because they may already have run on the
 // version the rollback undid. A restore never re-executes a pipeline (or
 // re-burns a release) on its own.
 const RestoredRunsFile = ".oberth-restored-runs.json"
-
-// errRestoredRun keeps a restored run out of the stranded-run requeue.
-var errRestoredRun = fmt.Errorf("%w: run was running when the restored backup was taken", store.ErrRequeueIneligible)
-
-const restoredRunInterruption = "run was running when the restored backup was taken; restored without re-executing it"
 
 // loadRestoredRuns reads the marker; a missing file is an empty set. An
 // unreadable or malformed marker is refused rather than ignored, because

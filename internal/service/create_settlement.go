@@ -32,6 +32,8 @@ type pendingCreate struct {
 	grant       *submissionOwner
 	persisted   bool
 	confirmed   bool
+	restarting  bool
+	adopted     bool
 	next, since time.Time
 	attempts    int
 }
@@ -238,10 +240,12 @@ func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {
 	if done {
 		delete(scheduler.createPending, pending.runID)
 		scheduler.createMu.Unlock()
-		scheduler.submissions.mu.Lock()
-		pending.grant.retained = false
-		scheduler.submissions.releaseLocked(pending.grant)
-		scheduler.submissions.mu.Unlock()
+		if !pending.adopted {
+			scheduler.submissions.mu.Lock()
+			pending.grant.retained = false
+			scheduler.submissions.releaseLocked(pending.grant)
+			scheduler.submissions.mu.Unlock()
+		}
 		scheduler.signalQueue()
 		return
 	}
@@ -296,6 +300,9 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			observed = &copy
 			break
 		}
+	}
+	if pending.restarting && run.Status == model.RunRunning {
+		return scheduler.observeRestartCreate(ctx, pending, run, observed)
 	}
 	if observed != nil {
 		// A re-arm supersedes any previous final observation.

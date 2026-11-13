@@ -11,9 +11,8 @@ const TimingVersion = 1
 const MaxTimingTasks = 2048
 const MaxStepTimingBytes = 16 << 10
 
-// A durable run ID survives unexecuted owner restarts. First-observed
-// milestones and admission episodes remain; Workflow/step evidence describes
-// the current restart attempt, with older bindings retained in the store.
+// RunTiming retains first-observed milestones, admission episodes, and the
+// Workflow and step evidence bound to this run. Explicit retries have new IDs.
 type RunTiming struct {
 	Version             int               `json:"version"`
 	RunID               string            `json:"run_id"`

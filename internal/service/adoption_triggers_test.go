@@ -454,7 +454,7 @@ func TestAdoptedTriggerPublicationRecoversPushBeforeLedgerFinalization(t *testin
 	}
 }
 
-func TestMissingWorkflowResetsTagsAndInterruptsPromotions(t *testing.T) {
+func TestMissingWorkflowFailsTagsAndPromotions(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		t.Run(kind, func(t *testing.T) {
 			fixture, run, promotion := slice2RecoveryRun(t, kind)
@@ -465,11 +465,7 @@ func TestMissingWorkflowResetsTagsAndInterruptsPromotions(t *testing.T) {
 				t.Fatal(err)
 			}
 			final, err := fixture.store.Run(context.Background(), run.ID)
-			wantStatus, wantDeleted := model.RunQueued, 0
-			if kind == "promotion" {
-				wantStatus, wantDeleted = model.RunInterrupted, 1
-			}
-			if err != nil || final.Status != wantStatus || final.SupersededBy != "" || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != wantDeleted || jobs.created != 0 || jobs.releaseCreated != 0 {
+			if err != nil || final.Status != model.RunFailed || final.Error != model.ServerRestartReason || final.SupersededBy != "" || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != 0 || jobs.created != 0 || jobs.releaseCreated != 0 {
 				t.Fatalf("missing fallback: %+v %v", final, err)
 			}
 			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
@@ -477,7 +473,7 @@ func TestMissingWorkflowResetsTagsAndInterruptsPromotions(t *testing.T) {
 			}
 			if promotion.ID != "" {
 				p, err := fixture.store.Promotion(context.Background(), promotion.ID)
-				if err != nil || p.Status != model.PromotionInterrupted {
+				if err != nil || p.Status != model.PromotionFailed {
 					t.Fatalf("promotion=%+v %v", p, err)
 				}
 			}

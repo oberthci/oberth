@@ -35,11 +35,14 @@ func TestRunSourcesAreImmutableExactAndSurviveRestart(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE runs SET source_bindings='[]' WHERE id=?`, run.ID); err == nil {
 		t.Fatal("SQL bypassed immutable receipt")
 	}
-	// Requeue the same durable ID using the production restart path.
+	// A failed unsubmitted run retains its immutable source receipt.
 	if _, err := s.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	reset, err := s.RequeueStrandedRun(t.Context(), run.ID)
+	if err := s.RecoverOwnerState(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	reset, err := s.Run(t.Context(), run.ID)
 	if err != nil || reset.ID != run.ID || !reflect.DeepEqual(reset.SourceBindings, sources) {
 		t.Fatalf("restart lost sources: %+v %v", reset, err)
 	}

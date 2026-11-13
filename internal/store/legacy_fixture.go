@@ -24,7 +24,7 @@ func (s *Store) EnqueueRun(ctx context.Context, spec model.RunSpec) (model.Enque
 		return model.EnqueueRunResult{}, fmt.Errorf("begin enqueue run: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
+	result, err := s.enqueueRunTx(ctx, tx, spec, id, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, err
 	}

@@ -2815,8 +2815,8 @@ func TestRestartRecoveryWithPromotionRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted {
-		t.Fatalf("recovered promotion run status = %q, want interrupted", recovered.Status)
+	if recovered.Status != model.RunFailed {
+		t.Fatalf("recovered promotion run status = %q, want failed", recovered.Status)
 	}
 
 	// The promotion should also be interrupted.
@@ -2824,8 +2824,8 @@ func TestRestartRecoveryWithPromotionRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prom.Status != model.PromotionInterrupted {
-		t.Fatalf("recovered promotion status = %q, want interrupted", prom.Status)
+	if prom.Status != model.PromotionFailed {
+		t.Fatalf("recovered promotion status = %q, want failed", prom.Status)
 	}
 }
 

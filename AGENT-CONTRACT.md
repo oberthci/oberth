@@ -1270,9 +1270,9 @@ Original object UID and intent continue to fence recovery and cleanup. See
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
   | queued publication retry | `running` | publication attempt/backoff message; from publication state |
   | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
-  | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `superseded` | `server restart, re-queued as <run12>` |
+  | Workflow confirmed absent after a server restart, including work never submitted | `failed` | `interrupted by server restart` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
-  | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
+  | observed Workflow interrupted by server restart, requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
   Raw status fields retain their values, but existing `display_status` values
   can change from `cancelled` to `superseded` when a successor is known.

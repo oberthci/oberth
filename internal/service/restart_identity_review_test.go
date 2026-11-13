@@ -2,9 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,52 +30,5 @@ func TestStartupAdoptsNonReleaseTagWorkflow(t *testing.T) {
 	current, err := fixture.store.Run(t.Context(), run.ID)
 	if err != nil || current.Status != model.RunRunning || current.SupersededBy != "" {
 		t.Fatalf("adoption changed durable identity: %+v %v", current, err)
-	}
-}
-
-type restartCheckoutGit struct{ controlGit }
-
-func (git *restartCheckoutGit) Checkout(ctx context.Context, input, sha, destination string) error {
-	if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
-		return errors.New("old workspace still exists")
-	}
-	return git.controlGit.Checkout(ctx, input, sha, destination)
-}
-func TestSameIDRestartRecreatesCheckoutAndAppendsLog(t *testing.T) {
-	fixture := newRecoveryFixture(t)
-	run := fixture.enqueueAndClaim(t, "feature/restart-files", strings.Repeat("b", 40))
-	jobs := &recoveryJobs{waitResult: JobResult{Status: model.RunFailed, Phase: "job", Error: "fixture completed", Steps: []model.StepResult{stepResult(model.StepFailed)}}}
-	scheduler := fixture.scheduler(t, jobs)
-	scheduler.git = &restartCheckoutGit{}
-	source := filepath.Join(scheduler.workspaceRoot, run.ID, "src")
-	if err := os.MkdirAll(source, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "old-file"), []byte("old"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	file, err := scheduler.logs.Create(run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = file.WriteString("before restart\n"); err != nil {
-		t.Fatal(err)
-	}
-	if err = file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = fixture.store.RequeueStrandedRun(t.Context(), run.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err = scheduler.ProcessNext(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	current, err := fixture.store.Run(t.Context(), run.ID)
-	if err != nil || current.Status != model.RunFailed || current.Error != "fixture completed" {
-		t.Fatalf("restart failed during preparation: %+v %v", current, err)
-	}
-	log, err := scheduler.logs.Tail(run.ID, 1024)
-	if err != nil || !strings.Contains(string(log), "before restart") {
-		t.Fatalf("old log lost: %q %v", log, err)
 	}
 }

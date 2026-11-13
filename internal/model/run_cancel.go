@@ -16,7 +16,7 @@ func (run Run) Cancelled() bool {
 }
 
 // Preempted reports whether someone other than the run's owner terminalized
-// it while it was active: a newer push or restart requeue superseded it, or an
+// it while it was active: a newer push superseded it, or an
 // actor cancelled it. The owner of such a run settles its cancellation
 // obligation and never records a result over it.
 func (run Run) Preempted() bool {

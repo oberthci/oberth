@@ -32,7 +32,7 @@ func TestRetiredUnsubmittedExecutionFailsOnRestart(t *testing.T) {
 		}
 	}
 	got, err := s.Run(t.Context(), run.ID)
-	if err != nil || got.Status != model.RunFailed || got.FinishedAt == nil || !strings.Contains(got.Error, "workflow capability grant") {
+	if err != nil || got.Status != model.RunFailed || got.FinishedAt == nil || got.Error != model.ServerRestartReason {
 		t.Fatalf("%+v %v", got, err)
 	}
 	if _, err := s.ListRecentRuns(t.Context(), model.RunListFilter{RepoID: repo.ID}); err != nil {

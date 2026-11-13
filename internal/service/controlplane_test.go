@@ -1979,7 +1979,7 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	fixture.store = reopened
 	t.Cleanup(func() { _ = reopened.Close() })
 	recoveryScheduler, err := NewScheduler(SchedulerConfig{
-		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
+		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: restartStateJobs{JobController: fixture.jobs}, ReleaseJobs: fixture.jobs,
 		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: filepath.Join(fixture.root, "work")})
 	if err != nil {
 		t.Fatal(err)
@@ -1990,7 +1990,7 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	if err := recoveryScheduler.completePendingCancellations(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.jobs.deleted) != 2 || fixture.jobs.deleted[1] != restartJob {
+	if len(fixture.jobs.deleted) != 1 {
 		t.Fatalf("restart deletions = %#v", fixture.jobs.deleted)
 	}
 }
@@ -2176,13 +2176,18 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
 	recovery, err := NewScheduler(SchedulerConfig{
-		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
+		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: restartStateJobs{JobController: jobs, found: true}, ReleaseJobs: jobs,
 		Auditor: reopened, Signals: fixture.signals,
 		WorkspaceRoot: filepath.Join(fixture.root, "post-create-delete-failure")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recovery.reconcileStrandedRunsWithGate(ctx, recovery.requireMutation, nil); err != nil {
+	if err := recovery.reconcileStrandedRunsWithGate(ctx, recovery.requireMutation, func(r model.Run) error {
+		if r.ID != running.ID {
+			t.Fatal(r)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := recovery.completePendingCancellations(ctx); err != nil {
@@ -2192,7 +2197,7 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	attempted := append([]string(nil), jobs.attempted...)
 	deleted := append([]string(nil), jobs.deleted...)
 	jobs.mu.Unlock()
-	if len(attempted) != 2 || attempted[0] != workflowName || attempted[1] != workflowName || len(deleted) != 1 || deleted[0] != workflowName {
+	if len(attempted) != 1 || attempted[0] != workflowName || len(deleted) != 0 {
 		t.Fatalf("exact Job recovery attempts = %#v, successful = %#v", attempted, deleted)
 	}
 }
@@ -2255,9 +2260,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("scheduler did not join its canceled worker")
 	}
-	// Shutdown must NOT delete the Job inline any more: the requeue records
-	// a durable obligation the successor's cancellation pass executes
-	// (issue #270).
+	// Shutdown leaves the Workflow for the next owner to adopt.
 	select {
 	case deleted := <-jobs.deleted:
 		t.Fatalf("shutdown deleted Job %q inline, want deletion owned by the durable obligation", deleted)
@@ -2267,16 +2270,15 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.Status != model.RunQueued || finished.SupersededBy != "" || finished.ID != enqueued.ID || finished.Ref != running.Ref || finished.SHA != running.SHA || finished.QueueSequence != running.QueueSequence || finished.Reason != store.RestartRequeueReason {
-		t.Fatalf("shutdown run = %#v, want the original run reset to queued", finished)
+	if finished.Status != model.RunRunning || finished.SupersededBy != "" || finished.ID != enqueued.ID || finished.Ref != running.Ref || finished.SHA != running.SHA || finished.QueueSequence != running.QueueSequence {
+		t.Fatalf("shutdown run = %#v, want the original running run", finished)
 	}
 	pending, err := fixture.store.PendingRunCancellations(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].WorkflowName != workflowName ||
-		pending[0].SupersededBy != "" {
-		t.Fatalf("pending obligations = %#v, want the canceled Job %q owned by the requeue", pending, workflowName)
+	if len(pending) != 0 {
+		t.Fatalf("pending obligations = %#v, want no restart deletion for Job %q", pending, workflowName)
 	}
 }
 

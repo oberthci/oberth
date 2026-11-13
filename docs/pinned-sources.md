@@ -17,7 +17,7 @@ The equivalent server argument is
 `--source-allowlist='{"forge/acme/consumer":["forge/acme/producer"]}'`.
 Policy changes take effect when the server loads its configuration. Existing
 running workflows retain their exact mounted sources; revocation prevents new
-source preparation, including a restart requeue that needs a new workflow.
+source preparation, including a user-requested retry that creates a new workflow.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1

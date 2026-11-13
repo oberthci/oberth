@@ -154,14 +154,6 @@ func (s *deadlineFaultStore) RunningRunsWithJobs(a0 context.Context) ([]model.Ru
 	return s.Store.RunningRunsWithJobs(a0)
 }
 
-func (s *deadlineFaultStore) RequeueStrandedRun(a0 context.Context, a1 string) (model.Run, error) {
-	if err := s.fault("RequeueStrandedRun"); err != nil {
-		var zero model.Run
-		return zero, err
-	}
-	return s.Store.RequeueStrandedRun(a0, a1)
-}
-
 func (s *deadlineFaultStore) BeginPublication(a0 context.Context, a1 model.PublicationSpec) (model.Publication, error) {
 	if err := s.fault("BeginPublication"); err != nil {
 		var zero model.Publication

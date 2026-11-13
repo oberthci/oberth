@@ -380,7 +380,7 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	successor, err := NewScheduler(SchedulerConfig{
-		Store: fixture.store, Git: &controlGit{}, Logs: logs, Jobs: fixture.engine, ReleaseJobs: fixture.engine,
+		Store: fixture.store, Git: &controlGit{}, Logs: logs, Jobs: restartStateJobs{JobController: fixture.engine}, ReleaseJobs: fixture.engine,
 		Auditor: fixture.store, Signals: fixture.scheduler.signals, WorkspaceRoot: filepath.Join(t.TempDir(), "work")})
 	if err != nil {
 		t.Fatal(err)
@@ -399,11 +399,10 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 	}
 	t.Cleanup(shutdown)
 
-	// The stranded run executes under the original ID.
-	created := fixture.awaitCreated(t, 1)
-	requeued := fixture.run(t, stranded.ID)
-	if requeued.Status != model.RunRunning || requeued.SupersededBy != "" || !created[stranded.ID] {
-		t.Fatalf("stranded run after restart = %#v, created %v", requeued, created)
+	fixture.awaitTerminal(t, stranded.ID)
+	recoveredRun := fixture.run(t, stranded.ID)
+	if recoveredRun.Status != model.RunFailed || recoveredRun.Error != model.ServerRestartReason {
+		t.Fatal(recoveredRun)
 	}
 	fixture.awaitNoPendingCancellations(t)
 	fixture.assertNothingCreated(t)
@@ -422,7 +421,5 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 		t.Fatal("the successor never deleted the cancelled run's Workflow")
 	}
 	fixture.assertNoCIIssue(t, fixture.exampleService, "feature-cancel")
-	fixture.engine.finish(t, requeued.ID)
-	fixture.awaitTerminal(t, requeued.ID)
 	shutdown()
 }
