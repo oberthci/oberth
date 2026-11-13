@@ -923,6 +923,22 @@
     "flag:runner-image-prefixes": {
       "doc_anchor": "docs/cli-reference.md#oberth-validate",
       "test_ref": "pkg/argoworkflow/admit_test.go TestAdmitEnforcesTheRunnerImageAllowlist"
+    },
+    "param:containers": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/api/live_log_stream_test.go TestContainerLogHTTPPassesPlainBytes"
+    },
+    "param:node_id": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/api/live_log_stream_test.go TestContainerLogHTTPPassesPlainBytes"
+    },
+    "param:container": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/api/live_log_stream_test.go TestContainerLogHTTPPassesPlainBytes"
+    },
+    "param:raw": {
+      "doc_anchor": "docs/container-logs.md",
+      "test_ref": "internal/service/container_logs_test.go TestContainerLogServiceHistoricMarkersArePlain"
     }
   }
 }

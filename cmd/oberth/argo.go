@@ -25,6 +25,7 @@ import (
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -40,6 +41,7 @@ func buildArgoEngine(
 	kube kubernetes.Interface,
 	auditor service.Auditor,
 	secretAccess app.SecretAccessLoader,
+	containerLogs runlog.ContainerLogStore,
 	artifactStore app.ArtifactStore,
 	artifactLimit int64,
 	perRepoIdentities map[string]argojob.PerRepoIdentityConfig,
@@ -104,7 +106,7 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
-	controller.WithWatchHub(hub)
+	controller.WithWatchHub(hub).WithContainerLogStore(containerLogs)
 	if recorder, ok := auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}
@@ -120,6 +122,7 @@ func buildArgoEngine(
 		return nil, err
 	}
 	jobs.SetWatchHub(hub)
+	jobs.SetContainerLogSource(controller)
 	if artifactStore != nil {
 		jobs.SetArtifacts(seeder, artifactStore, artifactLimit)
 	}

@@ -54,6 +54,7 @@ const DefaultWindowLines = 200
 const DefaultWindowDescription = "last 200 lines by default; pass tail, limit or pattern for more"
 
 type Filter struct {
+	Raw     bool // Display historical run bytes without interpreting markers.
 	Pattern string
 	Context int
 	Offset  int
@@ -122,13 +123,9 @@ func Open(directory string) (*Store, error) {
 }
 
 func (store *Store) Create(runID string) (*os.File, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, err
-	}
 	// logPath validates the run ID and proves the resulting path remains under
 	// the configured log directory.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o640) //nolint:gosec
+	file, err := store.openRunLog(runID, os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_RDWR)
 	if err != nil {
 		return nil, fmt.Errorf("create run log: %w", err)
 	}
@@ -138,15 +135,11 @@ func (store *Store) Create(runID string) (*os.File, error) {
 // Resume opens an existing run log for append and restores its progress journal.
 // A run can have a Workflow even if the owner stopped before its first log write.
 func (store *Store) Resume(runID string) (*os.File, []runprogress.Event, int64, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, nil, 0, err
-	}
 	events, err := store.StepProgress(runID)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, nil, 0, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o640) //nolint:gosec
+	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_RDWR)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("resume run log: %w", err)
 	}
@@ -250,17 +243,6 @@ func (store *Store) ReadActiveFiltered(runID, stage, step string, filter Filter)
 }
 
 // LiveLogSize stats the append-only log without opening or reading its bytes.
-func (store *Store) LiveLogSize(runID string) (int64, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return 0, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0, err
-	}
-	return info.Size(), nil
-}
 
 // ReadFrom returns up to maximum bytes of the run's append-only log starting
 // at offset, plus the next poll offset and the current log size. It serves the
@@ -273,72 +255,10 @@ func (store *Store) LiveLogSize(runID string) (int64, error) {
 // complete line so a multi-byte character split at the read boundary can never
 // be mangled by JSON re-encoding; a chunk without any newline is returned
 // as-is to guarantee forward progress.
-func (store *Store) ReadFrom(runID string, offset, maximum int64) ([]byte, int64, int64, error) {
-	if maximum <= 0 {
-		return nil, 0, 0, errors.New("live log read requires a positive byte bound")
-	}
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	// logPath validated the owner ID and confined this path to the log root.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	size := info.Size()
-	start := offset
-	if start < 0 {
-		start = max(int64(0), size-maximum)
-		start, err = recordStart(file, start)
-		if err != nil {
-			return nil, 0, 0, err
-		}
-	}
-	if start > size {
-		start = size
-	}
-	if start == size {
-		return []byte{}, size, size, nil
-	}
-	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return nil, 0, 0, err
-	}
-	chunk, err := io.ReadAll(io.LimitReader(file, maximum))
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	if start+int64(len(chunk)) < size {
-		if newline := bytes.LastIndexByte(chunk, '\n'); newline >= 0 {
-			chunk = chunk[:newline+1]
-		}
-	}
-	return chunk, start + int64(len(chunk)), size, nil
-}
 
 // recordStart scans backward with fixed memory. A log record can exceed the
 // poll response size, so one look-behind chunk is not necessarily sufficient.
 // Only initial tail reads align; explicit continuation cursors stay exact.
-func recordStart(file *os.File, offset int64) (int64, error) {
-	var block [64 << 10]byte
-	for offset > 0 {
-		start := max(int64(0), offset-int64(len(block)))
-		n, err := file.ReadAt(block[:offset-start], start)
-		if err != nil {
-			return 0, err
-		}
-		if newline := bytes.LastIndexByte(block[:n], '\n'); newline >= 0 {
-			return start + int64(newline) + 1, nil
-		}
-		offset = start
-	}
-	return 0, nil
-}
 
 func (store *Store) Tail(runID string, maximum int64) ([]byte, error) {
 	if maximum <= 0 {
@@ -819,7 +739,7 @@ func (store *Store) loadIndexContext(ctx context.Context, runID string) (Index, 
 	}
 	defer func() { _ = file.Close() }()
 	var index Index
-	decoder := json.NewDecoder(contextReader{ctx, io.LimitReader(file, 8<<20)})
+	decoder := json.NewDecoder(contextReader{ctx, file})
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&index); err != nil {
 		return Index{}, fmt.Errorf("decode log index: %w", err)

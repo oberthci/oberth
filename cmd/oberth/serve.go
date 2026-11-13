@@ -210,7 +210,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.DurationVar(&options.logRetention, "log-retention", 0, "maximum age of terminal run logs (0 disables age retention)")
 	flags.DurationVar(&options.artifactRetention, "artifact-retention", 0, "maximum age of terminal run artifacts (0 disables age retention)")
-	flags.Int64Var(&options.runLogLimitBytes, "run-log-limit-bytes", runlog.DefaultRunLimitBytes, "maximum retained log bytes per run")
+	flags.Int64Var(&options.runLogLimitBytes, "run-log-limit-bytes", runlog.DefaultRunLimitBytes, "maximum retained log bytes per container")
 	flags.Int64Var(&options.logsBudgetBytes, "logs-budget-bytes", 0, "total retained log budget (0 disables size retention)")
 	flags.DurationVar(&options.retentionInterval, "retention-sweep-interval", 10*time.Minute, "interval between protected evidence retention sweeps")
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
@@ -752,7 +752,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("per-step identities: %d (repo, step) pairs with named grants", len(perStepIdentities))
 	}
 	identityStore := argojob.NewIdentityStoreWithSteps(perRepoIdentities, buildPerRepoCIIdentities(perRepoIdentities), perStepIdentities)
-	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database,
+	argoJobs, err := buildArgoEngine(options, restConfig, kube, database, database, logs,
 		artifactStoreAdapter{store: artifactStore, scanPatterns: artifacts.DefaultScanPatterns},
 		options.artifactsLimitBytes, perRepoIdentities, identityStore)
 	if err != nil {
@@ -974,6 +974,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		UplinkLifecycle:    database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
 		SchedulingObserver: argoJobs,
+		ContainerLogs:      argoJobs,
 		Runs:               database, History: database, Repositories: database, Issues: database,
 		IssueStaleAfter: options.issueStaleAfter, IssueActiveStaleAfter: options.issueActiveStaleAfter,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,

@@ -64,9 +64,10 @@ type DeclarationRecorder interface {
 // contracts the Argo Workflow engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
-	watchHub       *argowatch.Hub
-	pinnedSources  *PinnedSourceLoader
-	sourceRecorder PinnedSourceRecorder
+	containerLogSource containerLogController
+	watchHub           *argowatch.Hub
+	pinnedSources      *PinnedSourceLoader
+	sourceRecorder     PinnedSourceRecorder
 
 	beforeCreate func(context.Context, service.WorkflowRequest, argojob.Request) error
 

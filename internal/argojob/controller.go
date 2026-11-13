@@ -36,18 +36,11 @@ type WorkflowClient interface {
 	Delete(ctx context.Context, name string, options metav1.DeleteOptions) error
 }
 
-// PodLogReader fetches one pod's logs. Separated from the Kubernetes client so
-// tests can supply canned output.
-type PodLogReader func(ctx context.Context, namespace, pod, container string) (io.ReadCloser, error)
-
 const (
 	pollInterval        = 500 * time.Millisecond
 	deletionGracePeriod = int64(10)
 	// mainContainerName is the container Argo runs the template's command in.
 	mainContainerName = "main"
-	// maxStepLogBytes bounds one step's replayed log so a runaway step cannot
-	// exhaust the run log budget on its own.
-	maxStepLogBytes = 32 << 20
 	// workflowReadGrace bounds how long Wait keeps polling through failed
 	// Workflow reads (API server restart, connection reset) before it gives
 	// up on observing the run.
@@ -61,27 +54,22 @@ var serverStartedAt = time.Now().UTC()
 // ErrNotTerminal reports that a Workflow has not reached a terminal phase.
 var ErrNotTerminal = errors.New("argojob: Workflow has not reached a terminal state")
 
-// errRunLogBudget is returned by the run budget writer when the aggregate
-// per-run byte ceiling is exceeded.
-var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
-
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
-	capabilities func(context.Context, int64) (*argoworkflow.Capability, error)
-	restartedAt  time.Time
-	timings      TimingRecorder
-	nodeBoots    NodeBootRecorder
-	hub          ObservationHub
-	workflows    WorkflowClient
-	kube         kubernetes.Interface
-	logs         PodLogReader
-	followLogs   PodLogFollower
-	logIdentity  podLogIdentityReader
-	logPod       func(context.Context, string, string) (*corev1.Pod, error)
-	seeder       *SourceSeeder
-	config       Config
-	interval     time.Duration
-	readGrace    time.Duration
+	containerLogs      runlog.ContainerLogStore
+	containerLogSource PodLogStream
+	containerLogPod    func(context.Context, string, string) (*corev1.Pod, error)
+	capabilities       func(context.Context, int64) (*argoworkflow.Capability, error)
+	restartedAt        time.Time
+	timings            TimingRecorder
+	nodeBoots          NodeBootRecorder
+	hub                ObservationHub
+	workflows          WorkflowClient
+	kube               kubernetes.Interface
+	seeder             *SourceSeeder
+	config             Config
+	interval           time.Duration
+	readGrace          time.Duration
 	// assistSeen remembers the holds the sweep already logged.
 	assistSeen struct {
 		sync.Mutex
@@ -104,16 +92,13 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 	}
 	controller := &Controller{restartedAt: serverStartedAt, workflows: workflows, kube: client, config: config, interval: pollInterval, readGrace: workflowReadGrace}
 	if client != nil {
-		controller.logPod = func(ctx context.Context, namespace, pod string) (*corev1.Pod, error) {
+		controller.containerLogPod = func(ctx context.Context, namespace, pod string) (*corev1.Pod, error) {
 			return client.CoreV1().Pods(namespace).Get(ctx, pod, metav1.GetOptions{})
 		}
-		controller.followLogs = func(ctx context.Context, namespace, pod string, options corev1.PodLogOptions) (io.ReadCloser, error) {
+		controller.containerLogSource = func(ctx context.Context, namespace, pod string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 			return client.CoreV1().Pods(namespace).GetLogs(pod, &options).Stream(ctx)
 		}
-		controller.logs = func(ctx context.Context, namespace, pod, container string) (io.ReadCloser, error) {
-			return client.CoreV1().Pods(namespace).
-				GetLogs(pod, &corev1.PodLogOptions{Container: container}).Stream(ctx)
-		}
+
 	}
 	return controller, nil
 }
@@ -128,14 +113,6 @@ func (controller *Controller) WithSourceSeeder(seeder *SourceSeeder) *Controller
 		seeder.hub = controller.hub
 		seeder.workflows = controller.workflows
 	}
-	return controller
-}
-
-// WithPodLogReader replaces the log source. Used by tests and by callers that
-// stream logs through an already-authenticated path.
-func (controller *Controller) WithPodLogReader(reader PodLogReader) *Controller {
-	controller.logs = reader
-	controller.followLogs = nil
 	return controller
 }
 
@@ -364,9 +341,8 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	return nil
 }
 
-// Wait supervises a submitted Workflow to its terminal phase, writing step
-// progress markers and each step's pod log into destination as the run
-// proceeds.
+// Wait observes a submitted Workflow to its terminal phase. Container log
+// copies are retained separately from the observation output.
 //
 // The server derives progress events from the Workflow node tree and writes
 // the retained marker protocol consumed by the scheduler, index and dashboard.
@@ -374,7 +350,7 @@ func (controller *Controller) Wait(ctx context.Context, name, runID string, dest
 	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
 }
 
-// WaitResumed restores progress and the aggregate budget for an adopted Workflow.
+// WaitResumed restores recorded progress for an adopted Workflow.
 func (controller *Controller) WaitResumed(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
 	if binding.UID == "" {
 		binding.RestartedAt = time.Time{}
@@ -386,16 +362,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	if retained < 0 {
 		return Completion{}, errors.New("argojob: invalid retained log size")
 	}
-	budget := &runBudgetWriter{destination: destination, remaining: controller.config.MaxRunLogBytes - retained}
-	var live *stepLogFollowers
-	if controller.followLogs != nil {
-		live = newStepLogFollowers(ctx, controller.followLogs, budget, events)
-		live.steps = controller.observedStepAttempts
-		live.identity = controller.logIdentity
-		live.pod = controller.logPod
-		defer live.close()
-	}
-	reporter := newProgressReporter(budget)
+	reporter := newProgressReporter(destination)
 	for _, event := range events {
 		if err := event.Validate(); err != nil {
 			return Completion{}, err
@@ -406,7 +373,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	}
 	ticker := time.NewTicker(controller.interval)
 	defer ticker.Stop()
-	var budgetBreachErr error
 	delivered := map[types.UID]bool{}
 	var admissionWatch executorIdentityProgress
 	var readFailingSince time.Time
@@ -445,9 +411,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		}
 		// Observe already-created Pods before identity delivery can block on a
 		// later Pod: early step output must not wait behind that setup RPC.
-		if live != nil {
-			live.observe(workflow)
-		}
 		if !workflow.Status.Phase.Completed() {
 			controller.observeRunningNodeBoots(ctx, workflow)
 		}
@@ -486,23 +449,11 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			preserveObservedExitCodes(&completion, workflow)
 			preserveRecordedExitCodes(&completion, events)
 			controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
-			if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
-				budgetBreachErr = publishErr
-			}
-			if live != nil {
-				live.drain(settled)
-				live.applyDiagnostics(&completion)
-				if err := live.failure(); err != nil && budgetBreachErr == nil {
-					budgetBreachErr = err
-				}
-			}
+			controller.captureObservedContainerLogs(ctx, settled, runID)
 			completion.classifyRestartCut()
-			reporter.finish(budget)
+			reporter.finish(destination)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
 				return completion, fmt.Errorf("retire executor identity: %w", err)
-			}
-			if budgetBreachErr != nil {
-				return completion, budgetBreachErr
 			}
 			if progressErr := reporter.failure(); progressErr != nil {
 				return completion, fmt.Errorf("argojob: run progress markers degraded: %w", progressErr)
@@ -527,9 +478,10 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				}
 			}
 		}
-		if publishErr := controller.publishLogs(ctx, workflow, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
-			budgetBreachErr = publishErr
+		for _, step := range controller.observedStepAttempts(ctx, workflow) {
+			reporter.observe(destination, step)
 		}
+		controller.captureObservedContainerLogs(ctx, workflow, runID)
 
 		select {
 		case <-ctx.Done():
@@ -567,90 +519,6 @@ func (controller *Controller) verifyOwnership(workflow *wfv1.Workflow, runID str
 	return nil
 }
 
-func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
-	if workflow == nil {
-		return nil
-	}
-	// Superseded retry attempts first: they ran before the attempt that
-	// replaced them, and their failure and log are the evidence of why the
-	// step was retried. They are reported once and never decide a verdict.
-	// An attempt still non-terminal when superseded has nothing to report.
-	observed := controller.observedStepAttempts(ctx, workflow)
-	steps := make([]StepResult, 0, len(observed))
-	for _, step := range observed {
-		if step.Superseded && terminal(step.Status) {
-			steps = append(steps, step)
-		}
-	}
-	steps = append(steps, finalStepResults(observed)...)
-	for _, step := range steps {
-		if reporter.observe(destination, step) {
-			// A terminal event makes this log eligible; only a read finishes
-			// replay. Missing discovery must remain eligible on later polls.
-			reporter.replayed[step.NodeID] = false
-		}
-		replayed, eligible := reporter.replayed[step.NodeID]
-		if live != nil || !eligible || replayed || !terminal(step.Status) || workflow.Status.Nodes[step.NodeID].Type != wfv1.NodeTypePod {
-			continue
-		}
-		if step.PodName == "" {
-			if workflow.Status.Phase.Completed() {
-				writeLine(destination, step, "oberth: step log unavailable: Pod identity could not be observed")
-			}
-			continue
-		}
-		read, err := controller.replayStepLog(ctx, workflow, step, destination)
-		if err != nil {
-			return err
-		}
-		reporter.replayed[step.NodeID] = read
-	}
-	if live != nil {
-		live.observeSteps(workflow, observed)
-	}
-	return nil
-}
-
-// replayStepLog copies one finished step's pod log into the run log, prefixed
-// so the existing runlog index attributes every line to its burn and step.
-//
-// Steps are copied whole on completion rather than streamed concurrently:
-// Argo runs each step in its own pod, and interleaving several live streams
-// into one append-only log would produce output no reader could attribute.
-//
-// It returns an error only when the aggregate run log budget is breached: the
-// per-step truncation is handled in-band (banner + continue), but an aggregate
-// breach must propagate to Wait so the run goes red with step attribution.
-func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.Workflow, step StepResult, destination io.Writer) (bool, error) {
-	if controller.logs == nil {
-		return false, nil
-	}
-	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
-	defer cancel()
-	stream, err := controller.logs(readCtx, workflow.Namespace, step.PodName, mainContainerName)
-	if err != nil {
-		writeLine(destination, step, fmt.Sprintf("oberth: step log unavailable: %v", err))
-		return false, nil
-	}
-	defer func() { _ = stream.Close() }()
-	if step.Attempt != "" {
-		writeLine(destination, step, "oberth: Argo retry attempt "+step.Attempt)
-	}
-	if err := copyPrefixed(destination, step, io.LimitReader(stream, maxStepLogBytes)); err != nil {
-		if errors.Is(err, errRunLogBudget) {
-			// Best-effort banner -- the budget is exhausted so this write
-			// will likely fail, but writeLine silently drops write errors.
-			writeLine(destination, step, "oberth: run log truncated: aggregate budget exceeded")
-			return true, fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Stage, step.Step)
-		}
-		writeLine(destination, step, fmt.Sprintf("oberth: step log truncated: %v", err))
-	}
-	return true, nil
-}
-
-// TerminalState reports a Workflow's terminal result without requiring any
-// in-process state, so a server that restarted mid-run can still record the
-// real outcome instead of fabricating an interruption.
 func (controller *Controller) TerminalState(ctx context.Context, name string) (*Completion, error) {
 	return controller.terminalState(ctx, name, "", Adoption{}, nil)
 }
@@ -948,115 +816,6 @@ func (reporter *progressReporter) failure() error {
 	return reporter.failed
 }
 
-// runBudgetWriter wraps a destination writer with an aggregate byte ceiling.
-// When the ceiling is exceeded, subsequent writes fail with errRunLogBudget.
-// This is the Argo engine's counterpart of service.runLogWriter: both enforce
-// the same 64 MiB default, but this one lives inside the controller so it can
-// propagate the breach as a step-attributed error through Wait.
-type runBudgetWriter struct {
-	mu          sync.Mutex
-	destination io.Writer
-	remaining   int64
-	failure     error
-}
-
-func (writer *runBudgetWriter) Write(body []byte) (int, error) {
-	writer.mu.Lock()
-	defer writer.mu.Unlock()
-	if writer.failure != nil {
-		return 0, writer.failure
-	}
-	if writer.remaining <= 0 {
-		return 0, errRunLogBudget
-	}
-	allowed := len(body)
-	limited := int64(allowed) > writer.remaining
-	if limited {
-		allowed = int(writer.remaining)
-	}
-	written, err := writer.destination.Write(body[:allowed])
-	writer.remaining -= int64(written)
-	if err != nil {
-		return written, err
-	}
-	if written != allowed {
-		return written, io.ErrShortWrite
-	}
-	if limited {
-		return written, errRunLogBudget
-	}
-	return written, nil
-}
-
-// copyPrefixed writes body into destination with a [burn/step] prefix on every
-// line, which is the marker internal/runlog indexes on. It returns an error on
-// the first destination write failure or when the transformed output exceeds
-// the per-step budget, and stops reading immediately in either case.
-func copyPrefixed(destination io.Writer, step StepResult, body io.Reader) error {
-	prefix := []byte("[" + step.Stage + "/" + step.Step + "] ")
-	buffered := make([]byte, 0, 8192)
-	chunk := make([]byte, 4096)
-	var written int64
-	flush := func(line []byte) error {
-		assembled := make([]byte, 0, len(prefix)+len(line)+1)
-		assembled = append(assembled, prefix...)
-		assembled = append(assembled, line...)
-		assembled = append(assembled, '\n')
-		written += int64(len(assembled))
-		if written > maxStepLogBytes {
-			return fmt.Errorf("step log exceeds the %d byte budget", maxStepLogBytes)
-		}
-		_, err := destination.Write(assembled)
-		return err
-	}
-	for {
-		read, err := body.Read(chunk)
-		if read > 0 {
-			buffered = append(buffered, chunk[:read]...)
-			if int64(len(buffered)) > maxStepLogBytes {
-				buffered = buffered[:maxStepLogBytes]
-			}
-			for {
-				index := indexByte(buffered, '\n')
-				if index < 0 {
-					break
-				}
-				if flushErr := flush(trimCarriageReturn(buffered[:index])); flushErr != nil {
-					return flushErr
-				}
-				buffered = buffered[index+1:]
-			}
-		}
-		if err != nil {
-			break
-		}
-	}
-	if len(buffered) != 0 {
-		return flush(trimCarriageReturn(buffered))
-	}
-	return nil
-}
-
-func writeLine(destination io.Writer, step StepResult, text string) {
-	_, _ = destination.Write([]byte("[" + step.Stage + "/" + step.Step + "] " + text + "\n"))
-}
-
-func indexByte(body []byte, target byte) int {
-	for index, value := range body {
-		if value == target {
-			return index
-		}
-	}
-	return -1
-}
-
-func trimCarriageReturn(line []byte) []byte {
-	if len(line) != 0 && line[len(line)-1] == '\r' {
-		return line[:len(line)-1]
-	}
-	return line
-}
-
 // specIdentity digests the exact object Oberth intends to submit, so an
 // already-existing Workflow can be proven to be the same submission.
 //
@@ -1156,49 +915,3 @@ func requestNeedsSecretStore(request Request) bool {
 }
 
 var errEmptyExitCode = errors.New("argojob: node reported no usable exit code")
-
-func (writer *runBudgetWriter) PodLogCursors() map[string]runlog.PodLogCursor {
-	writer.mu.Lock()
-	defer writer.mu.Unlock()
-	if sink, ok := writer.destination.(runlog.PodLogSink); ok {
-		return sink.PodLogCursors()
-	}
-	return nil
-}
-func (writer *runBudgetWriter) CommitPodLog(cursor runlog.PodLogCursor, body []byte) (result error) {
-	writer.mu.Lock()
-	defer writer.mu.Unlock()
-	if writer.failure != nil {
-		return writer.failure
-	}
-	defer func() {
-		if result != nil {
-			writer.failure = result
-		}
-	}()
-	if int64(len(body)) > writer.remaining {
-		return errRunLogBudget
-	}
-	if sink, ok := writer.destination.(runlog.PodLogSink); ok {
-		if err := sink.CommitPodLog(cursor, body); err != nil {
-			return err
-		}
-		writer.remaining -= int64(len(body))
-		return nil
-	}
-	n, err := writer.destination.Write(body)
-	writer.remaining -= int64(n)
-	if err == nil && n != len(body) {
-		err = io.ErrShortWrite
-	}
-	return err
-}
-
-func (writer *runBudgetWriter) PodLogContinuityLost() bool {
-	writer.mu.Lock()
-	defer writer.mu.Unlock()
-	if state, ok := writer.destination.(interface{ PodLogContinuityLost() bool }); ok {
-		return state.PodLogContinuityLost()
-	}
-	return false
-}

@@ -49,10 +49,10 @@ overrides remain refused. See [secret delivery](argo-secret-delivery.md).
 
 ## Observation, logs and recovery
 
-Argo Workflow and Pod observations drive run and step results. Step progress
-markers and the retained run log keep step status and named log slices
-available after Kubernetes collects the Workflow. A Pod-log continuity journal
-supports resumed following and final log collection. Display rows come from
+Argo Workflow and Pod observations drive run and step results. Native container logs stream from Kubernetes only while requested by a client.
+Completed containers are read once into retained log spans, with an explicit
+reason when the Pod is missing, a read is cut, or the size limit is reached.
+There is no follower pool, cursor journal, reconnect loop or final drain. Display rows come from
 `StepResult`; retained Workflow/step timing and termination diagnostics remain
 available through full MCP run details. Admission timing episodes are absent.
 The dashboard uses the compact

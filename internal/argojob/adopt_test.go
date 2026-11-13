@@ -12,6 +12,7 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -110,11 +111,11 @@ func TestAdoptedWaitRidesOutTransientReadFailures(t *testing.T) {
 	}
 }
 
-func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
+func TestAdoptedWaitRestoresProgressWithoutReadingPodLogs(t *testing.T) {
 	wf, request := adoptionWorkflow()
 	calls := map[string]int{}
 	controller := &Controller{kube: fixtureKube(wf), workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, interval: time.Millisecond,
-		logs: func(_ context.Context, _, pod, _ string) (io.ReadCloser, error) {
+		containerLogSource: func(_ context.Context, _, pod string, _ corev1.PodLogOptions) (io.ReadCloser, error) {
 			calls[pod]++
 			return io.NopCloser(strings.NewReader("new log line\n")), nil
 		}}
@@ -131,19 +132,15 @@ func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 	if err != nil || !completion.Succeeded || len(completion.Steps) != 2 {
 		t.Fatalf("resumed completion = %#v, %v", completion, err)
 	}
-	if calls[steps[0].PodName] != 0 || calls[steps[1].PodName] != 1 || strings.Contains(output.String(), "compile") || strings.Count(output.String(), "new log line") != 1 {
+	if calls[steps[0].PodName] != 0 || calls[steps[1].PodName] != 0 || strings.Contains(output.String(), "compile") || strings.Contains(output.String(), "new log line") {
 		t.Fatalf("duplicate replay: calls=%v output=%s", calls, output.String())
 	}
 	output.Reset()
 	_, err = controller.WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0]), event(steps[1])}, 200, binding)
-	if err != nil || output.Len() != 0 || calls[steps[1].PodName] != 1 {
+	if err != nil || output.Len() != 0 || calls[steps[1].PodName] != 0 {
 		t.Fatalf("second resume replayed completed steps: %v %s %v", err, output.String(), calls)
 	}
-	output.Reset()
-	completion, err = controller.WaitResumed(context.Background(), wf.Name, request.RunID, &output, nil, 4090, binding)
-	if err == nil || output.Len() > 6 || completion.Name == "" {
-		t.Fatalf("retained budget not enforced: output=%d completion=%#v err=%v", output.Len(), completion, err)
-	}
+
 }
 
 func TestAdoptedWaitRefusesReplacedWorkflow(t *testing.T) {

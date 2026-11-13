@@ -3,12 +3,9 @@ package api
 import (
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 
 	"testing"
-
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 func TestDashboardBehaviorRequiresNode(t *testing.T) {
@@ -31,19 +28,12 @@ func TestDashboardLiveLogBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal("dashboard behavior checks require Node on PATH: install Node or use hack/with-test-node.sh on Linux/x86_64")
 	}
-	for _, script := range []string{"test-live-logs.mjs", "test-step-timers-reconnect.mjs", "test-dashboard-runs.mjs", "test-dashboard-issues.mjs", "test-resource-messages.mjs", "test-dashboard-token-expiry.mjs", "test-dashboard-preflight-deadline.mjs", "test-dashboard-polling.mjs", "test-status-probes.mjs"} {
+	for _, script := range []string{"test-live-logs.mjs", "test-container-logs.mjs", "test-step-timers-reconnect.mjs", "test-dashboard-runs.mjs", "test-dashboard-issues.mjs", "test-resource-messages.mjs", "test-dashboard-token-expiry.mjs", "test-dashboard-preflight-deadline.mjs", "test-dashboard-polling.mjs", "test-status-probes.mjs"} {
 		t.Run(script, func(t *testing.T) {
 			command := exec.Command(node, "../../hack/"+script)
 			if output, err := command.CombinedOutput(); err != nil {
 				t.Fatalf("dashboard behavior: %v\n%s", err, output)
 			}
 		})
-	}
-}
-
-func TestDashboardDeliveryWirePrefix(t *testing.T) {
-	source := string(staticAssets["app.js"].body)
-	if !strings.Contains(source, "const deliveryPrefix = "+strconv.Quote(runprogress.LogDeliveryPrefix)+";") {
-		t.Fatal("dashboard and retained log delivery prefixes differ")
 	}
 }

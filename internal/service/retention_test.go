@@ -160,7 +160,7 @@ func TestRunPurgeAuditsRemovalAndPreservesHistory(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	if _, err := f.api.RunLogLive(ctx, actor, run.ID, 0); !errors.Is(err, ErrEvidencePurged) {
+	if err := f.api.CheckContainerLogAccess(ctx, actor, run.ID); !errors.Is(err, ErrEvidencePurged) {
 		t.Fatalf("live purged log=%v", err)
 	}
 	if _, err := f.retention.Database.VerifyAuditChain(ctx); err != nil {

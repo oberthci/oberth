@@ -453,8 +453,8 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 	}
 
 	// The dashboard's live log reads by run ID outside CallTool.
-	_, hiddenErr := fixture.service.RunLogLive(context.Background(), scopedActor, hiddenRun.ID, 0)
-	_, missingErr := fixture.service.RunLogLive(context.Background(), scopedActor, missingRunID, 0)
+	hiddenErr := fixture.service.CheckContainerLogAccess(context.Background(), scopedActor, hiddenRun.ID)
+	missingErr := fixture.service.CheckContainerLogAccess(context.Background(), scopedActor, missingRunID)
 	if hiddenErr == nil || fmt.Sprint(hiddenErr) != fmt.Sprint(missingErr) {
 		t.Errorf("livelog: hidden %v, missing %v", hiddenErr, missingErr)
 	}

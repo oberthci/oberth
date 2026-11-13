@@ -804,17 +804,6 @@ func splitLines(body string) []string {
 
 // TestCopyPrefixedAttributesEveryLine proves the run log index can attribute
 // each line of a step's Pod log to its burn and step.
-func TestCopyPrefixedAttributesEveryLine(t *testing.T) {
-	destination := &recordingWriter{}
-	if err := copyPrefixed(destination, StepResult{Stage: "setup", Step: "prepare"},
-		stringReader("first\r\nsecond\nthird without newline")); err != nil {
-		t.Fatalf("copyPrefixed: %v", err)
-	}
-	want := "[setup/prepare] first\n[setup/prepare] second\n[setup/prepare] third without newline\n"
-	if destination.String() != want {
-		t.Fatalf("got:\n%q\nwant:\n%q", destination.String(), want)
-	}
-}
 
 func stringReader(body string) *stringBodyReader { return &stringBodyReader{body: []byte(body)} }
 

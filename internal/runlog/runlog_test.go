@@ -168,71 +168,6 @@ func TestBuildIndexOnReconciledRunProducesReadableIndex(t *testing.T) {
 	}
 }
 
-func TestReadFromServesGrowingLogWithTailAndCursor(t *testing.T) {
-	store, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Absent log (queued run): callers see os.ErrNotExist and decide.
-	if _, _, _, err := store.ReadFrom("r-live", -1, 64); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing log error = %v", err)
-	}
-	file, err := store.Create("r-live")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = file.Close() }()
-	write := func(text string) {
-		t.Helper()
-		if _, err := file.WriteString(text); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("[setup/go] one\n[setup/go] two\n")
-	chunk, next, size, err := store.ReadFrom("r-live", -1, 1<<20)
-	if err != nil || string(chunk) != "[setup/go] one\n[setup/go] two\n" || next != size || size != 30 {
-		t.Fatalf("tail read = %q next=%d size=%d err=%v", chunk, next, size, err)
-	}
-	// Nothing new: empty chunk, cursor unchanged.
-	chunk, next2, _, err := store.ReadFrom("r-live", next, 1<<20)
-	if err != nil || len(chunk) != 0 || next2 != next {
-		t.Fatalf("idle read = %q next=%d err=%v", chunk, next2, err)
-	}
-	// The file grew: only the appended bytes come back.
-	write("[lint/vet] three\n")
-	chunk, next3, _, err := store.ReadFrom("r-live", next2, 1<<20)
-	if err != nil || string(chunk) != "[lint/vet] three\n" || next3 != next2+17 {
-		t.Fatalf("grow read = %q next=%d err=%v", chunk, next3, err)
-	}
-	// A bounded mid-stream read is trimmed to the last complete line.
-	chunk, next4, _, err := store.ReadFrom("r-live", 0, 20)
-	if err != nil || string(chunk) != "[setup/go] one\n" || next4 != 15 {
-		t.Fatalf("trimmed read = %q next=%d err=%v", chunk, next4, err)
-	}
-	// A bound smaller than the first line still makes progress untrimmed.
-	chunk, next5, _, err := store.ReadFrom("r-live", 0, 4)
-	if err != nil || string(chunk) != "[set" || next5 != 4 {
-		t.Fatalf("progress read = %q next=%d err=%v", chunk, next5, err)
-	}
-	// Tail mode with a small bound starts near the end, not at zero.
-	chunk, _, size, err = store.ReadFrom("r-live", -1, 10)
-	if err != nil || size != 47 || len(chunk) == 0 || len(chunk) > 10 {
-		t.Fatalf("bounded tail = %q size=%d err=%v", chunk, size, err)
-	}
-	// An offset beyond the file clamps cleanly.
-	chunk, next6, _, err := store.ReadFrom("r-live", 9000, 64)
-	if err != nil || len(chunk) != 0 || next6 != 47 {
-		t.Fatalf("clamped read = %q next=%d err=%v", chunk, next6, err)
-	}
-	// Bounds and identifiers stay validated.
-	if _, _, _, err := store.ReadFrom("r-live", 0, 0); err == nil {
-		t.Fatal("zero byte bound was accepted")
-	}
-	if _, _, _, err := store.ReadFrom("../escape", 0, 64); err == nil {
-		t.Fatal("path traversal was accepted")
-	}
-}
-
 func TestStepProgressJournalReducesTransitionsInPlanOrder(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {
@@ -381,36 +316,5 @@ func TestResumeRetainsBytesAndProgress(t *testing.T) {
 	}
 	if _, _, _, err := logs.Resume("../escape"); err == nil {
 		t.Fatal("resume escaped log root")
-	}
-}
-
-func TestLiveLogSizeTracksAppendAndMissing(t *testing.T) {
-	store, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.LiveLogSize("missing"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal(err)
-	}
-	file, err := store.Create("stat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	for _, body := range []string{"", "one\n", "two\n"} {
-		if _, err := file.WriteString(body); err != nil {
-			t.Fatal(err)
-		}
-		info, err := file.Stat()
-		if err != nil {
-			t.Fatal(err)
-		}
-		size, err := store.LiveLogSize("stat")
-		if err != nil || size != info.Size() {
-			t.Fatalf("size=%d info=%v error=%v", size, info, err)
-		}
-	}
-	if _, err := store.LiveLogSize("../escape"); err == nil {
-		t.Fatal("invalid ID accepted")
 	}
 }

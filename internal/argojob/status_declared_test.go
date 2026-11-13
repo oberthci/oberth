@@ -81,10 +81,7 @@ func TestDeclaredRetryRowsResolveThroughWait(t *testing.T) {
 				}
 				defer func() { _ = file.Close() }()
 				controller := &Controller{kube: fixtureKube(wf), workflows: &staticWorkflowClient{workflow: wf},
-					config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond,
-					logs: func(_ context.Context, _, pod, _ string) (io.ReadCloser, error) {
-						return io.NopCloser(strings.NewReader("output of " + pod + "\n")), nil
-					}}
+					config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 1 << 20}, interval: time.Millisecond}
 				completion, err := controller.WaitResumed(context.Background(), wf.Name, "run-retry",
 					io.MultiWriter(file, journalMarkers{logs, "run-retry"}), events, retained, Adoption{})
 				if err != nil || completion.Succeeded != (test.want == runprogress.StepPassed) {
@@ -117,10 +114,6 @@ func TestDeclaredRetryRowsResolveThroughWait(t *testing.T) {
 				}
 				if _, err := logs.BuildIndex("run-retry"); err != nil {
 					t.Fatal(err)
-				}
-				body, err := logs.Read("run-retry", "address", "check")
-				if err != nil || !strings.Contains(string(body), "output of "+fixturePodName(wf, last)) {
-					t.Fatalf("declared log range lacks latest attempt: %s: %v", body, err)
 				}
 				if file, _, _, err := logs.Resume("run-retry"); err != nil {
 					t.Fatalf("second adoption: %v", err)

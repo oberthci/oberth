@@ -9,64 +9,174 @@ import (
 	"os"
 )
 
-// ContainerLog identifies a single retained copy. Bytes stay in the run's
-// ordinary .log file; only attribution and missing/incomplete reasons live
-// in its existing .index.json. There are no in-band control records.
+// ContainerLog binds one retained copy to a native Pod and container. Its
+// bytes occupy an immutable span in the ordinary run log, without markers.
 type ContainerLog struct {
 	NodeID        string `json:"node_id"`
 	PodUID        string `json:"pod_uid"`
 	PodName       string `json:"pod_name"`
+	Namespace     string `json:"namespace,omitempty"`
 	ContainerName string `json:"container_name"`
 	Start         int64  `json:"start"`
 	End           int64  `json:"end"`
 	Reason        string `json:"reason,omitempty"`
+	Pending       bool   `json:"pending,omitempty"`
+	Captured      bool   `json:"captured,omitempty"`
 	Body          []byte `json:"-"`
 }
 
 type ContainerLogStore interface {
-	ContainerLogStored(runID, podUID, container string) (bool, error)
-	StoreContainerLog(runID string, entry ContainerLog, limit int64) error
+	ContainerLogs(context.Context, string) ([]ContainerLog, error)
+	TrackContainerLogs(string, []ContainerLog) error
+	ReserveContainerLog(string, ContainerLog) (bool, error)
+	StoreContainerLog(string, ContainerLog, int64) error
 }
 
-func (store *Store) ContainerLogStored(runID, podUID, container string) (bool, error) {
+func (store *Store) openRunLog(runID string, flags int) (*os.File, error) {
+	if !safeID(runID) {
+		return nil, errors.New("invalid run ID")
+	}
+	root, err := os.OpenRoot(store.directory)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	file, err := root.OpenFile(runID+".log", flags, 0o640)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, errors.New("run log must be a regular file")
+	}
+	return file, nil
+}
+
+// AppendRunLog serializes ordinary run output with complete container spans.
+func (store *Store) AppendRunLog(runID string, body []byte) (int, error) {
 	store.containerMu.Lock()
 	defer store.containerMu.Unlock()
-	index, err := store.loadIndexContext(context.Background(), runID)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
+	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-	for _, entry := range index.Containers {
-		if entry.PodUID == podUID && entry.ContainerName == container {
-			return true, nil
+	defer func() { _ = file.Close() }()
+	return file.Write(body)
+}
+
+func containerLogPosition(index Index, entry ContainerLog) int {
+	for i, saved := range index.Containers {
+		if saved.PodUID == entry.PodUID && saved.ContainerName == entry.ContainerName && (entry.PodUID != "" || saved.NodeID == entry.NodeID) {
+			return i
 		}
 	}
-	return false, nil
+	return -1
 }
 
-func (store *Store) StoreContainerLog(runID string, entry ContainerLog, limit int64) error {
-	if entry.NodeID == "" || entry.PodUID == "" || entry.ContainerName == "" || limit <= 0 {
-		return errors.New("invalid retained container log identity or limit")
-	}
+// TrackContainerLogs retains native bindings while Pods still exist, so a later
+// deletion can be explained without guessing a Pod name or fetching logs early.
+func (store *Store) TrackContainerLogs(runID string, entries []ContainerLog) error {
 	store.containerMu.Lock()
 	defer store.containerMu.Unlock()
-	path, err := store.logPath(runID)
-	if err != nil {
-		return err
-	}
 	index, err := store.loadIndexContext(context.Background(), runID)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, previous := range index.Containers {
-		if previous.PodUID == entry.PodUID && previous.ContainerName == entry.ContainerName {
-			return nil
+	changed := false
+	for _, entry := range entries {
+		if entry.NodeID == "" || entry.PodUID == "" || entry.PodName == "" || entry.ContainerName == "" {
+			return errors.New("invalid native container binding")
 		}
+		if containerLogPosition(index, entry) >= 0 {
+			continue
+		}
+		entry.Start, entry.End, entry.Body, entry.Pending, entry.Captured = index.Size, index.Size, nil, false, false
+		index.Containers = append(index.Containers, entry)
+		changed = true
 	}
-	// The run ID has been validated and confined to the log root.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640) //nolint:gosec
+	if !changed {
+		return nil
+	}
+	index.RunID, index.Format = runID, "containers"
+	return store.writeIndex(runID, index)
+}
+
+// ReserveContainerLog records the once-only read before network I/O. An owner
+// interrupted during capture leaves an explicit incomplete receipt, not cursors
+// or a replay stream. Existing copies and interrupted reads are not reopened.
+func (store *Store) ReserveContainerLog(runID string, entry ContainerLog) (bool, error) {
+	if entry.NodeID == "" || entry.PodUID == "" || entry.ContainerName == "" {
+		return false, errors.New("invalid container log identity")
+	}
+	store.containerMu.Lock()
+	defer store.containerMu.Unlock()
+	index, err := store.loadIndexContext(context.Background(), runID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	position := containerLogPosition(index, entry)
+	if position >= 0 && (index.Containers[position].Captured || index.Containers[position].Pending) {
+		return false, nil
+	}
+	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
+	if err != nil {
+		return false, err
+	}
+	info, statErr := file.Stat()
+	_ = file.Close()
+	if statErr != nil {
+		return false, statErr
+	}
+	entry.Start, entry.End, entry.Body = info.Size(), info.Size(), nil
+	entry.Pending = true
+	entry.Reason = "oberth: log incomplete: container copy was interrupted"
+	index.RunID, index.Format, index.Size = runID, "containers", info.Size()
+	if position >= 0 {
+		index.Containers[position] = entry
+	} else {
+		index.Containers = append(index.Containers, entry)
+	}
+	return true, store.writeIndex(runID, index)
+}
+
+func retainedContainerBody(entry *ContainerLog, limit int64) []byte {
+	body := bytes.Clone(entry.Body)
+	if int64(len(body)) > limit {
+		entry.Reason = "oberth: log incomplete: container log limit reached"
+	}
+	if entry.Reason == "" {
+		return body[:min(int64(len(body)), limit)]
+	}
+	reason := []byte(entry.Reason + "\n")
+	if int64(len(reason)) > limit {
+		return nil
+	}
+	body = body[:min(int64(len(body)), limit-int64(len(reason)))]
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		if int64(len(body)+len(reason)+1) > limit {
+			body = body[:len(body)-1]
+		}
+		body = append(body, '\n')
+	}
+	return append(body, reason...)
+}
+
+func (store *Store) StoreContainerLog(runID string, entry ContainerLog, limit int64) error {
+	if entry.NodeID == "" || limit <= 0 || (entry.Reason == "" && (entry.PodUID == "" || entry.ContainerName == "")) {
+		return errors.New("invalid retained container log identity or limit")
+	}
+	store.containerMu.Lock()
+	defer store.containerMu.Unlock()
+	index, err := store.loadIndexContext(context.Background(), runID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	position := containerLogPosition(index, entry)
+	if position >= 0 && index.Containers[position].Captured {
+		return nil
+	}
+	file, err := store.openRunLog(runID, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
 	if err != nil {
 		return err
 	}
@@ -75,33 +185,7 @@ func (store *Store) StoreContainerLog(runID string, entry ContainerLog, limit in
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() {
-		return errors.New("retained run log must be a regular file")
-	}
-	remaining := max(int64(0), limit-info.Size())
-	body := bytes.Clone(entry.Body)
-	if int64(len(body)) > remaining {
-		entry.Reason = "oberth: log incomplete: retained run log limit reached"
-	}
-	if entry.Reason != "" {
-		reason := []byte(entry.Reason + "\n")
-		if int64(len(reason)) <= remaining {
-			body = body[:min(int64(len(body)), remaining-int64(len(reason)))]
-			if len(body) > 0 && body[len(body)-1] != '\n' {
-				// Reserve the separator without exceeding the existing budget.
-				if int64(len(body)+len(reason)+1) > remaining {
-					body = body[:len(body)-1]
-				}
-				body = append(body, '\n')
-			}
-			body = append(body, reason...)
-		} else {
-			// Keep the full reason in the index even when no file bytes remain.
-			body = nil
-		}
-	} else if int64(len(body)) > remaining {
-		body = body[:remaining]
-	}
+	body := retainedContainerBody(&entry, limit)
 	n, err := file.Write(body)
 	if err != nil {
 		return err
@@ -109,29 +193,40 @@ func (store *Store) StoreContainerLog(runID string, entry ContainerLog, limit in
 	if n != len(body) {
 		return io.ErrShortWrite
 	}
-	end, err := file.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
-	}
 	if err := file.Sync(); err != nil {
 		return err
 	}
-	entry.Start, entry.End, entry.Body = end-int64(n), end, nil
-	index.RunID, index.Format, index.Size = runID, "containers", end
-	index.Containers = append(index.Containers, entry)
+	entry.Start, entry.End, entry.Body, entry.Pending, entry.Captured = info.Size(), info.Size()+int64(n), nil, false, true
+	index.RunID, index.Format, index.Size = runID, "containers", entry.End
+	if position >= 0 {
+		index.Containers[position] = entry
+	} else {
+		index.Containers = append(index.Containers, entry)
+	}
 	return store.writeIndex(runID, index)
 }
 
-func (store *Store) ReadContainerLog(ctx context.Context, runID, nodeID, container string, filter Filter) ([]byte, Meta, ContainerLog, error) {
+func (store *Store) ContainerLogs(ctx context.Context, runID string) ([]ContainerLog, error) {
 	store.containerMu.Lock()
+	defer store.containerMu.Unlock()
 	index, err := store.loadIndexContext(ctx, runID)
-	store.containerMu.Unlock()
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return index.Containers, err
+}
+
+func (store *Store) ReadContainerLog(ctx context.Context, runID, nodeID, container string, filter Filter) ([]byte, Meta, ContainerLog, error) {
+	entries, err := store.ContainerLogs(ctx, runID)
 	if err != nil {
 		return nil, Meta{}, ContainerLog{}, err
 	}
-	for _, entry := range index.Containers {
+	for _, entry := range entries {
 		if entry.NodeID != nodeID || entry.ContainerName != container {
 			continue
+		}
+		if !entry.Captured && !entry.Pending {
+			return nil, Meta{}, entry, os.ErrNotExist
 		}
 		if entry.Start < 0 || entry.End < entry.Start {
 			return nil, Meta{}, entry, errors.New("invalid container log range")
@@ -144,11 +239,7 @@ func (store *Store) ReadContainerLog(ctx context.Context, runID, nodeID, contain
 			value, meta, err := FilterBytes(body, filter.WithContext(ctx))
 			return value, meta, entry, err
 		}
-		path, err := store.logPath(runID)
-		if err != nil {
-			return nil, Meta{}, entry, err
-		}
-		file, err := os.Open(path) //nolint:gosec // Validated run ID confines this to the log root.
+		file, err := store.openRunLog(runID, os.O_RDONLY)
 		if err != nil {
 			return nil, Meta{}, entry, err
 		}
@@ -166,13 +257,9 @@ func (store *Store) ReadContainerLog(ctx context.Context, runID, nodeID, contain
 	return nil, Meta{}, ContainerLog{}, fmt.Errorf("container log %s/%s: %w", nodeID, container, os.ErrNotExist)
 }
 
-// ReadRunLog keeps historical marker-bearing files readable as plain text.
+// ReadRunLog displays historical marker-bearing files as ordinary text.
 func (store *Store) ReadRunLog(ctx context.Context, runID string, filter Filter) ([]byte, Meta, error) {
-	path, err := store.logPath(runID)
-	if err != nil {
-		return nil, Meta{}, err
-	}
-	file, err := os.Open(path) //nolint:gosec // Validated run ID confines this to the log root.
+	file, err := store.openRunLog(runID, os.O_RDONLY)
 	if err != nil {
 		return nil, Meta{}, err
 	}
@@ -183,3 +270,42 @@ func (store *Store) ReadRunLog(ctx context.Context, runID string, filter Filter)
 	}
 	return filterRanges(file, []Range{{Start: 0, End: info.Size()}}, info.Size(), filter.WithContext(ctx))
 }
+
+func (store *Store) OpenStoredContainerLog(ctx context.Context, runID, node, container string) (io.ReadCloser, error) {
+	entries, err := store.ContainerLogs(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.NodeID != node || entry.ContainerName != container {
+			continue
+		}
+		if !entry.Captured && !entry.Pending {
+			return nil, os.ErrNotExist
+		}
+		if entry.Start == entry.End {
+			if entry.Reason != "" {
+				return io.NopCloser(bytes.NewBufferString(entry.Reason + "\n")), nil
+			}
+			return io.NopCloser(bytes.NewReader(nil)), nil
+		}
+		file, err := store.openRunLog(runID, os.O_RDONLY)
+		if err != nil {
+			return nil, err
+		}
+		info, err := file.Stat()
+		if err != nil || entry.Start < 0 || entry.End < entry.Start || entry.End > info.Size() {
+			_ = file.Close()
+			return nil, errors.New("stored container log range is unavailable")
+		}
+		return &storedContainerLog{Reader: io.NewSectionReader(file, entry.Start, entry.End-entry.Start), file: file}, nil
+	}
+	return nil, os.ErrNotExist
+}
+
+type storedContainerLog struct {
+	io.Reader
+	file *os.File
+}
+
+func (stream *storedContainerLog) Close() error { return stream.file.Close() }

@@ -427,11 +427,7 @@ func joinStatuses(statuses []runprogress.Status) string {
 // even when the retry was already running by the time it was first seen; the
 // final attempt is reported after it and ends the step passed.
 func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
-	replayed := map[string]int{}
-	controller := &Controller{logs: func(_ context.Context, _, pod, _ string) (io.ReadCloser, error) {
-		replayed[pod]++
-		return io.NopCloser(strings.NewReader("output of " + pod + "\n")), nil
-	}}
+	controller := &Controller{}
 	final := dagRetryWorkflow(wfv1.WorkflowSucceeded,
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeFailed},
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeSucceeded})
@@ -452,17 +448,6 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 	}
 	if got := joinStatuses(progressStatuses(output.String(), "address/get")); got != "running,passed,running,passed" {
 		t.Fatalf("address/get progress = %s, want both attempts", got)
-	}
-	for _, id := range []string{"address-0-check", "address-1-check", "address-0-get", "address-1-get"} {
-		pod := fixturePodName(final, final.Status.Nodes[id])
-		if replayed[pod] != 1 {
-			t.Errorf("log of %s replayed %d times, want once", id, replayed[pod])
-		}
-	}
-	for _, banner := range []string{"[address/check] oberth: Argo retry attempt address(0)", "[address/check] oberth: Argo retry attempt address(1)"} {
-		if !strings.Contains(output.String(), banner) {
-			t.Errorf("run log lacks %q:\n%s", banner, output.String())
-		}
 	}
 	if strings.Contains(output.String(), "address(0)/") || strings.Contains(output.String(), "[address(") {
 		t.Errorf("a retry suffix leaked into a step key:\n%s", output.String())
@@ -485,15 +470,7 @@ func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
 			t.Fatalf("resumed %s progress = %s, want only the final attempt", key, got)
 		}
 	}
-	for _, id := range []string{"address-0-check", "address-1-check", "address-0-get", "address-1-get"} {
-		want := 1
-		if strings.Contains(id, "address-1-") {
-			want = 2
-		}
-		if got := replayed[fixturePodName(final, final.Status.Nodes[id])]; got != want {
-			t.Errorf("resumed log of %s replayed %d times, want %d total", id, got, want)
-		}
-	}
+
 }
 
 // TestWaitResumedRetriedDAGIsGreen runs an adopted Workflow (#1172) whose

@@ -40,8 +40,6 @@ type fakeBackend struct {
 	logStep         string
 	logCalls        int
 	logFilter       runlog.Filter
-	liveOffset      int64
-	liveCalls       int
 	artifactName    string
 	artifactFilter  runlog.Filter
 	artifactBody    string
@@ -137,11 +135,6 @@ func (backend *fakeBackend) RunLogFiltered(_ context.Context, _ Actor, id, stage
 	backend.logFilter = filter
 	backend.logCalls++
 	return map[string]any{"run_id": id, "burn": stage, "step": step, "output": "[test/unit] ok\n"}, nil
-}
-func (backend *fakeBackend) RunLogLive(_ context.Context, _ Actor, id string, offset int64) (any, error) {
-	backend.runID, backend.liveOffset = id, offset
-	backend.liveCalls++
-	return LiveLogResponse{RunID: id, Status: "running", Chunk: "line\n", Offset: offset + 5, Size: offset + 5}, nil
 }
 func (backend *fakeBackend) Repositories(context.Context, Actor) (any, error) {
 	return map[string]any{"repositories": []any{}}, nil
@@ -538,44 +531,6 @@ func TestLogFilterValidationNamesFieldAndType(t *testing.T) {
 	}
 }
 
-func TestLiveLogViewRequiresAuthAndBoundsOffset(t *testing.T) {
-	server, backend := testServer(t)
-	unauthenticated := httptest.NewRecorder()
-	server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/runs/run-1/livelog", nil))
-	if unauthenticated.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated live log = %d", unauthenticated.Code)
-	}
-	// The default offset is -1 (start tailing).
-	request := httptest.NewRequest(http.MethodGet, "/api/runs/run-1/livelog", nil)
-	request.Header.Set("Authorization", "Bearer valid-token")
-	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || backend.runID != "run-1" || backend.liveOffset != -1 {
-		t.Fatalf("live log = %d, forwarded id %q offset %d", response.Code, backend.runID, backend.liveOffset)
-	}
-	// An explicit cursor is forwarded exactly.
-	cursor := httptest.NewRequest(http.MethodGet, "/api/runs/run-1/livelog?offset=8192", nil)
-	cursor.Header.Set("Authorization", "Bearer valid-token")
-	cursorResponse := httptest.NewRecorder()
-	server.Handler().ServeHTTP(cursorResponse, cursor)
-	if cursorResponse.Code != http.StatusOK || backend.liveOffset != 8192 {
-		t.Fatalf("live log cursor = %d, forwarded offset %d", cursorResponse.Code, backend.liveOffset)
-	}
-	backend.liveCalls = 0
-	for _, query := range []string{"offset=-2", "offset=abc", "offset=1.5", "offset=9223372036854775808"} {
-		malformed := httptest.NewRequest(http.MethodGet, "/api/runs/run-1/livelog?"+query, nil)
-		malformed.Header.Set("Authorization", "Bearer valid-token")
-		rejected := httptest.NewRecorder()
-		server.Handler().ServeHTTP(rejected, malformed)
-		if rejected.Code != http.StatusBadRequest {
-			t.Fatalf("live log query %q = %d, want 400", query, rejected.Code)
-		}
-	}
-	if backend.liveCalls != 0 {
-		t.Fatalf("malformed live offsets reached the backend %d times", backend.liveCalls)
-	}
-}
-
 func TestReadinessFailsClosed(t *testing.T) {
 	for _, code := range []string{"no_upstream", "database_error", "ssh_identity", "not-a-public-code"} {
 		server, backend := testServer(t)
@@ -707,7 +662,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_rerun":           {"assist", "force", "id", "reason"},
 		"run_cancel":          {"force", "id", "reason"},
 		"run_purge":           {"id", "reason", "what"},
-		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "step", "tail"},
+		"run_logs":            {"burn", "byte_offset", "container", "containers", "context", "id", "limit", "node_id", "offset", "pattern", "raw", "step", "tail"},
 		"wait":                {"id", "repo", "sha", "timeout_s", "trigger"},
 		"sync":                {"branch", "repo", "sha"},
 		"promote":             {"branch", "prune_source", "repo", "sha", "skip_conflicting", "sources", "tag_after"},
@@ -1237,3 +1192,16 @@ func TestRunsPageLimitCountsOnlyDatedRows(t *testing.T) {
 		}
 	}
 }
+
+func (backend *fakeBackend) RunContainerLogs(_ context.Context, _ Actor, id string) (any, error) {
+	backend.runID = id
+	return map[string]any{"run_id": id, "containers": []any{}}, nil
+}
+func (backend *fakeBackend) RunContainerLogFiltered(_ context.Context, _ Actor, id, node, container string, filter runlog.Filter) (any, error) {
+	backend.runID = id
+	return map[string]any{"output": ""}, nil
+}
+func (backend *fakeBackend) OpenRunContainerLog(context.Context, Actor, string, string, string, bool) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+func (backend *fakeBackend) CheckContainerLogAccess(context.Context, Actor, string) error { return nil }

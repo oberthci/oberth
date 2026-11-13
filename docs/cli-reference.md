@@ -1666,7 +1666,7 @@ Flags:
   -retention-sweep-interval duration
         interval between protected evidence retention sweeps (default 10m0s)
   -run-log-limit-bytes int
-        maximum retained log bytes per run (default 67108864)
+        maximum retained log bytes per container (default 67108864)
   -runner-image-prefixes string
         comma-separated allowlist of permitted runner image prefixes
   -schedule-max-entries int

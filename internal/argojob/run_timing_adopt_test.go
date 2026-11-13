@@ -145,15 +145,12 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	runningSecond.FinishedAt = metav1.Time{}
 	runningSecond.Outputs = nil
 	running.Status.Nodes[second.ID] = runningSecond
-	logs := func(context.Context, string, string, string) (io.ReadCloser, error) {
-		return io.NopCloser(strings.NewReader("log line\n")), nil
-	}
 	config := Config{Namespace: terminal.Namespace, MaxRunLogBytes: 1 << 20}
 
 	recorder := &failingTimingRecorder{Store: db}
 	ownerCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	owner := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running}, exhausted: stop}, kube: fake.NewClientset(firstPod.DeepCopy()), logs: logs, config: config, interval: time.Millisecond, timings: recorder}
+	owner := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running}, exhausted: stop}, kube: fake.NewClientset(firstPod.DeepCopy()), config: config, interval: time.Millisecond, timings: recorder}
 	if _, err = owner.Wait(ownerCtx, terminal.Name, run.ID, io.Discard); err == nil {
 		t.Fatal("pre-restart owner observed a terminal Workflow")
 	}
@@ -185,7 +182,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 			events = append(events, runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 		}
 	}
-	resumed := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running, terminal}}, kube: fake.NewClientset(secondPod.DeepCopy()), logs: logs, config: config, interval: time.Millisecond, timings: recorder}
+	resumed := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running, terminal}}, kube: fake.NewClientset(secondPod.DeepCopy()), config: config, interval: time.Millisecond, timings: recorder}
 	completion, err := resumed.WaitResumed(ctx, terminal.Name, run.ID, io.Discard, events, 100, binding)
 	if err != nil || !completion.Succeeded || len(completion.Steps) != 2 {
 		t.Fatalf("resumed completion = %+v, %v", completion, err)

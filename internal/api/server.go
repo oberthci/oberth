@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -119,6 +118,10 @@ type GrantFilter struct {
 }
 
 type ViewService interface {
+	RunContainerLogs(context.Context, Actor, string) (any, error)
+	RunContainerLogFiltered(context.Context, Actor, string, string, string, runlog.Filter) (any, error)
+	OpenRunContainerLog(context.Context, Actor, string, string, string, bool) (io.ReadCloser, error)
+	CheckContainerLogAccess(context.Context, Actor, string) error
 	RunArtifacts(context.Context, Actor, string) (any, error)
 	RunArtifact(context.Context, Actor, string, string, runlog.Filter) (any, error)
 	Runs(context.Context, Actor, RunFilter) (any, error)
@@ -126,7 +129,6 @@ type ViewService interface {
 	Run(context.Context, Actor, string) (any, error)
 	RunLog(context.Context, Actor, string, string, string) (any, error)
 	RunLogFiltered(context.Context, Actor, string, string, string, runlog.Filter) (any, error)
-	RunLogLive(context.Context, Actor, string, int64) (any, error)
 	Repositories(context.Context, Actor) (any, error)
 	Issues(context.Context, Actor, IssueFilter) (any, error)
 	Grants(context.Context, Actor, GrantFilter) (any, error)
@@ -304,8 +306,9 @@ func (server *Server) routes() {
 	server.mux.Handle("GET /api/runs/counts", server.requireAuth(http.HandlerFunc(server.handleRunCounts)))
 	server.mux.Handle("GET /api/runs/{run}", server.requireAuth(http.HandlerFunc(server.handleRunDetail)))
 	server.mux.Handle("GET /api/runs/{run}/logs", server.requireAuth(http.HandlerFunc(server.handleRunLog)))
-	server.mux.Handle("GET /api/runs/{run}/livelog/stream", server.requireAuth(http.HandlerFunc(server.handleRunLogLiveStream)))
-	server.mux.Handle("GET /api/runs/{run}/livelog", server.requireAuth(http.HandlerFunc(server.handleRunLogLive)))
+	server.mux.Handle("GET /api/runs/{run}/containers", server.requireAuth(http.HandlerFunc(server.handleRunContainerLogs)))
+	server.mux.Handle("GET /api/runs/{run}/containerlog", server.requireAuth(http.HandlerFunc(server.handleRunContainerLog)))
+	server.mux.Handle("GET /api/runs/{run}/containerlog/stream", server.requireAuth(http.HandlerFunc(server.handleRunContainerLogStream)))
 	server.mux.Handle("GET /api/runs/{run}/artifacts", server.requireAuth(http.HandlerFunc(server.handleRunArtifacts)))
 	server.mux.Handle("GET /api/runs/{run}/artifacts/{name...}", server.requireAuth(http.HandlerFunc(server.handleRunArtifactDownload)))
 	server.mux.Handle("GET /api/repos", server.requireAuth(http.HandlerFunc(server.handleRepos)))
@@ -503,6 +506,13 @@ func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if raw := query.Get("raw"); raw != "" {
+		filter.Raw, err = strconv.ParseBool(raw)
+		if err != nil {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "raw must be true or false"})
+			return
+		}
+	}
 	value, err := server.views.RunLogFiltered(request.Context(), actorFrom(request.Context()), id, stage, step, filter)
 	server.writeView(writer, value, err)
 }
@@ -546,154 +556,7 @@ func logFilterFrom(query url.Values) (runlog.Filter, error) {
 	return filter, nil
 }
 
-// handleRunLogLive serves the polled live view of a running Job's redacted
-// log stream. The offset query parameter is the caller's next-poll cursor; -1
-// (the default) asks the store to start tailing near the current end.
-func (server *Server) handleRunLogLive(writer http.ResponseWriter, request *http.Request) {
-	id, offset, ok := liveLogCursor(writer, request)
-	if !ok {
-		return
-	}
-	value, err := server.views.RunLogLive(request.Context(), actorFrom(request.Context()), id, offset)
-	server.writeView(writer, value, err)
-}
-
-func liveLogCursor(writer http.ResponseWriter, request *http.Request) (string, int64, bool) {
-	id := request.PathValue("run")
-	if !validRunSelector(id) {
-		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid run ID"})
-		return "", 0, false
-	}
-	offset := int64(-1)
-	if raw := request.URL.Query().Get("offset"); raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || value < -1 {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid log offset"})
-			return "", 0, false
-		}
-		offset = value
-	}
-	return id, offset, true
-}
-
-// LiveLogResponse is a bounded slice of the redacted run log. Done is true
-// only after a terminal run's final bytes have been read.
-type LiveLogResponse struct {
-	RunID         string `json:"run_id"`
-	Status        string `json:"status"`
-	DisplayStatus string `json:"display_status,omitempty"`
-	DisplayReason string `json:"display_reason"`
-	Chunk         string `json:"chunk"`
-	Offset        int64  `json:"offset"`
-	Size          int64  `json:"size"`
-	Done          bool   `json:"done"`
-}
-
 const liveLogAuthInterval = 30 * time.Second
-
-func (server *Server) handleRunLogLiveStream(writer http.ResponseWriter, request *http.Request) {
-	id, offset, ok := liveLogCursor(writer, request)
-	if !ok {
-		return
-	}
-	// Use the full authorized view initially, on log changes and roughly once
-	// a second so terminal state and evidence/scope changes remain visible.
-	read := func() (LiveLogResponse, error) {
-		value, err := server.views.RunLogLive(request.Context(), actorFrom(request.Context()), id, offset)
-		if err != nil {
-			return LiveLogResponse{}, err
-		}
-		chunk, ok := value.(LiveLogResponse)
-		if !ok {
-			return LiveLogResponse{}, errors.New("invalid live log response")
-		}
-		return chunk, nil
-	}
-	chunk, err := read()
-	lastRead := time.Now()
-	lastAuth := lastRead
-	if err != nil {
-		server.writeView(writer, nil, err)
-		return
-	}
-	if !supportsMCPFlush(writer) {
-		writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": "streaming unavailable"})
-		return
-	}
-	writer.Header().Set("Content-Type", "text/event-stream")
-	writer.Header().Set("Cache-Control", "no-store")
-	writer.Header().Set("X-Accel-Buffering", "no")
-	controller := http.NewResponseController(writer)
-	write := func(frame string) error {
-		// Refresh the server-wide write deadline for each frame, bounding a
-		// slow reader without imposing a hard lifetime on healthy streams.
-		if err := controller.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return err
-		}
-		if _, err := io.WriteString(writer, frame); err != nil {
-			return err
-		}
-		return controller.Flush()
-	}
-	defer func() { _ = controller.SetWriteDeadline(time.Time{}) }()
-	if err := write(": ping\n\n"); err != nil {
-		return
-	}
-	tick := time.NewTicker(150 * time.Millisecond)
-	defer tick.Stop()
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-	for {
-		if request.Context().Err() != nil {
-			return
-		}
-		offset = chunk.Offset
-		if chunk.Chunk != "" || chunk.Done {
-			body, err := json.Marshal(chunk)
-			if err != nil || write("event: chunk\ndata: "+string(body)+"\n\n") != nil {
-				return
-			}
-		}
-		if chunk.Done {
-			return
-		}
-		select {
-		case <-request.Context().Done():
-			return
-		case <-heartbeat.C:
-			if err := write(": ping\n\n"); err != nil {
-				return
-			}
-		case <-tick.C:
-		}
-		if time.Since(lastAuth) >= liveLogAuthInterval {
-			authCtx, cancel := context.WithTimeout(request.Context(), 5*time.Second)
-			fresh, authErr := server.authenticateRequest(authCtx, request)
-			cancel()
-			original := actorFrom(request.Context())
-			if authErr != nil || strings.TrimSpace(fresh.Identity) == "" || fresh.Identity != original.Identity || fresh.Fingerprint != original.Fingerprint || fresh.Admin != original.Admin || !slices.Equal(fresh.Scope, original.Scope) {
-				_ = write("event: auth_error\ndata: {\"error\":\"stream authorization changed or expired; reconnect with current credentials\"}\n\n")
-				return
-			}
-			lastAuth = time.Now()
-		}
-		if source, ok := server.views.(interface{ LiveLogSize(string) (int64, error) }); ok && time.Since(lastRead) < time.Second {
-			// The first view resolved any prefix and authorized this canonical ID.
-			// Stat failures fall through to the normal view's error handling.
-			if size, err := source.LiveLogSize(chunk.RunID); err == nil && size == offset {
-				chunk.Chunk = ""
-				continue
-			}
-		}
-		chunk, err = read()
-		lastRead = time.Now()
-		if err != nil {
-			// Closing makes clients resume through the authenticated poll
-			// endpoint, which can report the normal structured view error.
-			return
-		}
-	}
-}
 
 // validRunSelector bounds dashboard path and query selectors before they reach
 // storage: non-empty, trimmed, single-line, and shorter than any legitimate

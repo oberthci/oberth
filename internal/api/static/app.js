@@ -8,7 +8,6 @@
 const app = document.getElementById("app");
 const listPollMs = 4000;
 const slowPollMs = 10000;
-const livePollMs = 2000;
 const state = {
   repos: [], runs: [], repoRuns: [], activeRuns: [], activeRunsRepo: null, activeRunsComplete: false, status: null,
   runCounts: null, runCursor: 0, runCursorHistory: [],
@@ -930,27 +929,7 @@ function splitLogText(raw) {
    string the runner writes (copyPrefixed) and that runlog indexes on; it
    stays in the stored data and the API response — this strips it only for
    the human-facing single-step terminal view. */
-function stripStepPrefix(lines, burn, step) {
-  const prefix = "[" + burn + "/" + step + "] ";
-  return lines.map(line => line.startsWith(prefix) ? line.slice(prefix.length) : line);
-}
 const maxRenderedLogLines = 5000;
-const LOG_STEP_MARK = /^\[([^\]/]+)\/([^\]]+)\] /;
-/* Attribution belongs to newline-delimited retained records. CR progress
-   updates within one record all belong to that record's step, even when the
-   command text happens to contain another bracketed step name. */
-function splitAttributedLogText(raw) {
-  const records = String(raw || "").split("\n");
-  if (records[records.length - 1] === "") records.pop();
-  return records.flatMap(record => {
-    const prefix = LOG_STEP_MARK.exec(record)?.[0] || "";
-    const body = record.slice(prefix.length).replace(/\r$/, "");
-    return splitLogText(body + "\n").map(line => prefix + line);
-  });
-}
-/* renderLogLines numbers lines by their position in the log, so a number
-   still matches oberth log and the API. With groupSteps (the combined live
-   view) the repeated [burn/step] prefix becomes one header row per step. */
 function renderLogLines(lines, opts = {}) {
   const total = lines.length;
   const truncated = total > maxRenderedLogLines;
@@ -973,18 +952,6 @@ function renderLogLines(lines, opts = {}) {
       flushNoise();
       out += `<div class="log-line"${recordAttr}><span class="log-no">${base + i + 1}</span><span class="log-txt"><button type="button" class="run-successor" data-run-id="${esc(line.successor)}">${esc(line.text)}</button></span></div>`;
       continue;
-    }
-    if (opts.groupSteps) {
-      const mark = LOG_STEP_MARK.exec(line);
-      if (mark) {
-        const key = mark[1] + " / " + mark[2];
-        if (key !== current) {
-          flushNoise();
-          current = key;
-          out += `<div class="log-line log-hdr"><span class="log-no"></span><span class="log-txt">── ${esc(key)} ──</span></div>`;
-        }
-        line = line.slice(mark[0].length);
-      }
     }
     if (isExecutorNoise(line)) {
       noise.push(`<div class="log-line exec"${recordAttr}><span class="log-no">${base + i + 1}</span><span class="log-txt">${esc(line)}</span></div>`);
@@ -1041,274 +1008,76 @@ function summaryLines(detail) {
   lines.push("", "select a step for its retained log");
   return lines;
 }
-async function stepLogContent(runID, step, active) {
-  if (step.status === "pending") return renderLogLines([`step: ${stepKey(step)} · pending`, "", "step is declared by the pipeline and has not been reached yet"]);
-  if (statusKind(step.status) === "pending") return renderLogLines([`step: ${stepKey(step)} · queued`, "", "step is waiting for its turn"]);
-  const cacheKey = `${runID}|${step.burn}|${step.step}|${step.finished_at || ""}`;
-  if (!active && state.logCache.has(cacheKey)) return state.logCache.get(cacheKey);
-  let html;
-  try {
-    const payload = await api(`/api/runs/${enc(runID)}/logs?burn=${enc(step.burn)}&step=${enc(step.step)}`);
-    const lines = stripStepPrefix(splitAttributedLogText(payload.output), step.burn, step.step);
-    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.status)}${step.exit_code ? ` · exit ${step.exit_code}` : ""}`, ""].concat(lines.length ? lines : ["no retained step output"]));
-  } catch (err) {
-    html = renderLogLines([`step: ${stepKey(step)} · ${statusLabel(step.status)}`, "", `step log unavailable: ${err.message || err}`]);
-  }
-  if (state.logCache.size > 32) state.logCache.clear();
-  if (!active) state.logCache.set(cacheKey, html);
-  return html;
-}
-/* Polling health and pod delivery health are separate observations. Empty
-   successful reads are healthy polling; they say nothing about command work. */
-const deliveryPrefix = "::oberth-log:: ";
-function selectedLiveLines(lines, burn, step) {
-  const prefix = "[" + burn + "/" + step + "] ";
-  return lines.filter(line => line.startsWith(prefix)).map(line => line.slice(prefix.length));
-}
-function ingestLiveChunk(live, chunk, now, done = false) {
-  // Keep the head of an oversized record, including its attribution, and
-  // discard its continuation until the real newline. A suffix is not a new
-  // record and must never be allowed to supply a different step prefix.
-  if (live.pendingTruncated) {
-    const newline = chunk.indexOf("\n");
-    if (newline < 0 && !done) return [];
-    chunk = newline < 0 ? "" : chunk.slice(newline);
-  }
-  const output = [];
-  const records = (live.pending + chunk).split("\n");
-  live.pending = records.pop();
-  if (records.length) live.pendingTruncated = false;
-  if (live.pending.length > 400000) {
-    live.pending = live.pending.slice(0, 300000) + " … [truncated]";
-    live.pendingTruncated = true;
-  }
-  // Once the server confirms EOF, a final line needs no trailing newline.
-  if (done && live.pending) { records.push(live.pending); live.pending = ""; live.pendingTruncated = false; }
-  for (const record of records) {
-    const line = record.length > 400000 ? record.slice(0, 300000) + " … [truncated]" : record;
-    if (line.startsWith(deliveryPrefix)) {
-      try {
-        const delivery = JSON.parse(line.slice(deliveryPrefix.length));
-        live.delivery.set(delivery.burn + "/" + delivery.step + "/" + (delivery.node || ""), delivery);
-      } catch { /* malformed metadata never becomes command output */ }
-      continue;
-    }
-    const mark = LOG_STEP_MARK.exec(line);
-    if (mark) live.lastOutput.set(mark[1] + "/" + mark[2], now);
-    live.lastAnyOutput = now;
-    live.text += line + "\n";
-    output.push(line);
-  }
-  if (live.text.length > 400000) {
-    const cut = live.text.indexOf("\n", live.text.length - 300000);
-    live.text = cut < 0 ? "" : live.text.slice(cut + 1);
-  }
-  return output;
-}
-function liveDeliverySummary(live, burn, step, now = Date.now()) {
-  const key = burn && step ? burn + "/" + step : "";
-  const last = key ? live.lastOutput.get(key) : live.lastAnyOutput;
-  const age = Math.max(0, (now - (last || live.startedAt)) / 1000);
-  const poll = live.error ? `reconnecting: ${live.error} · last successful poll ${live.lastPoll ? fmtDur((now - live.lastPoll) / 1000) + " ago" : "not yet"}` : live.connected && !live.fallback ? "stream connected" : live.lastPoll ? "polling connected" : "connecting";
-  const deliveries = [...live.delivery.values()].filter(d => !key || (d.burn === burn && d.step === step));
-  const deliveryStale = d => !d.at || ((now - Date.parse(d.at)) > 10000 && !["complete", "gapped", "truncated", "unavailable"].includes(d.state));
-  const unhealthy = deliveries.filter(d => deliveryStale(d) || d.gap || ["reconnecting", "unavailable", "gap", "gapped", "truncated"].includes(d.state));
-  const delivery = unhealthy.length ? unhealthy.map(d => `${d.burn}/${d.step}: ${deliveryStale(d) ? "delivery unconfirmed · last observed " : ""}${d.gap ? "continuity gap · " : ""}${d.state}${d.message ? " — " + d.message : ""}`).join("; ") : deliveries.length ? `pod delivery: ${[...new Set(deliveries.map(d => d.state))].join(", ")}` : "pod delivery not yet observed";
-  return `${poll} · ${last ? "last output received " + fmtDur(age) + " ago" : "no output observed for " + fmtDur(age)}${age >= 30 ? " · quiet period" : ""} · ${delivery}`;
-}
-/* EventSource framing over fetch preserves the dashboard's bearer header.
-   Native EventSource cannot attach Authorization; tokens never go in URLs. */
-class LiveLogEventSource {
-  constructor(url, onChunk, onError, onOpen) {
-    this.controller = new AbortController();
-    this.closed = false;
-    this.read(url, onChunk, onError, onOpen);
-  }
-  close() { this.closed = true; this.controller.abort(); }
-  async read(url, onChunk, onError, onOpen) {
-    let reader;
-    try {
-      const response = await fetch(url, {cache: "no-store", headers: {...authHeaders(), Accept: "text/event-stream"}, signal: this.controller.signal});
-      if (!response.ok || !response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body) throw new Error("live stream unavailable");
-      if (this.closed) return;
-      onOpen();
-      reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let pending = "", event = "", data = [];
-      while (!this.closed) {
-        const {value, done} = await reader.read();
-        if (done) throw new Error("live stream ended");
-        pending += decoder.decode(value, {stream: true});
-        let newline;
-        while ((newline = pending.indexOf("\n")) >= 0 && !this.closed) {
-          const line = pending.slice(0, newline).replace(/\r$/, "");
-          pending = pending.slice(newline + 1);
-          if (!line) {
-            if (event === "auth_error") {
-              const detail = data.length ? JSON.parse(data.join("\n")) : {};
-              throw new Error(detail.error || "stream authentication required");
-            }
-            if (event === "chunk" && data.length) onChunk(JSON.parse(data.join("\n")));
-            event = ""; data = [];
-          } else if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
-        }
-      }
-    } catch (err) {
-      if (!this.closed) onError(err);
-    } finally {
-      if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-    }
-  }
-}
-function stopLiveTransport(live) {
-  live.source?.close(); live.source = null;
-  clearInterval(live.pollTimer); live.pollTimer = null;
-  clearTimeout(live.retryTimer); live.retryTimer = null;
-  live.pollController?.abort();
-  live.connected = false;
-}
 function closeLiveLog() {
-  const live = state.live;
-  if (!live) return;
-  live.closed = true;
-  stopLiveTransport(live);
-  if (live.frame != null) cancelAnimationFrame(live.frame);
+  state.live?.controller.abort();
   state.live = null;
 }
-function liveViewLines(lines, view) {
-  return view.burn && view.step ? selectedLiveLines(lines, view.burn, view.step) : lines;
-}
-function receiveLiveChunk(live, payload) {
-  if (state.live !== live || live.closed) return;
-  const now = Date.now();
-  const records = ingestLiveChunk(live, payload.chunk || "", now, payload.done === true);
-  if (typeof payload.offset === "number") live.offset = payload.offset;
-  live.lastPoll = now; live.error = "";
-  if (!live.fallback) live.retries = 0;
-  live.done = payload.done === true;
-  if (live.view) {
-    live.view.pending = live.view.pending.concat(liveViewLines(splitAttributedLogText(records.length ? records.join("\n") + "\n" : ""), live.view));
-    // Bound queued work even when animation frames are paused in a hidden tab.
-    const excess = live.view.pending.length - maxRenderedLogLines;
-    if (excess > 0) {
-      live.view.pending.splice(0, excess);
-      live.view.carry.count += excess;
-      live.view.carry.current = "";
-    }
-  }
-  if (live.done) stopLiveTransport(live);
-  scheduleLiveFrame(live);
-}
-function pollLiveLog(live) {
-  if (live.busy || live.done || live.closed || state.live !== live || live.source) return live.pollPromise;
-  live.busy = true;
-  const controller = live.pollController = new AbortController();
-  // A stalled fallback request must not prevent a later streaming attempt.
-  const timeout = setTimeout(() => controller.abort(), 10000);
-  live.pollPromise = (async () => {
-    try {
-      const payload = await api(`/api/runs/${enc(live.runID)}/livelog?offset=${live.offset}`, {detached: true, controller});
-      if (!controller.signal.aborted) receiveLiveChunk(live, payload);
-    } catch (err) {
-      if (state.live === live && !live.closed && !live.done) {
-        live.error = controller.signal.aborted ? "live poll timed out" : String(err.message || err);
-        scheduleLiveFrame(live);
-      }
-    } finally {
-      clearTimeout(timeout);
-      live.pollController = null;
-      live.busy = false;
-    }
-  })();
-  return live.pollPromise;
-}
-function canStreamLiveLog() { return typeof ReadableStream !== "undefined" && typeof TextDecoder !== "undefined"; }
-function startLiveStream(live) {
-  if (state.live !== live || live.closed || live.done) return;
-  live.fallback = false;
-  live.source = new LiveLogEventSource(`/api/runs/${enc(live.runID)}/livelog/stream?offset=${live.offset}`,
-    payload => receiveLiveChunk(live, payload), err => fallbackLiveLog(live, err),
-    () => { if (state.live === live && !live.closed) { live.connected = true; live.error = ""; scheduleLiveFrame(live); } });
-}
-function fallbackLiveLog(live, err) {
-  if (state.live !== live || live.closed || live.done) return;
-  stopLiveTransport(live);
-  live.fallback = true;
-  live.error = String(err?.message || "");
-  live.pollTimer = setInterval(() => { pollLiveLog(live); }, livePollMs);
-  if (canStreamLiveLog()) {
-    const delay = Math.min(30000, 1000 * 2 ** Math.min(live.retries || 0, 5));
-    live.retries = (live.retries || 0) + 1;
-    live.retryTimer = setTimeout(async () => {
-      live.retryTimer = null;
-      clearInterval(live.pollTimer); live.pollTimer = null;
-      // The poll owns the cursor until it settles. Never overlap transports
-      // or reconnect from a cursor captured before that response arrives.
-      await live.pollPromise;
-      startLiveStream(live);
-    }, delay);
-  }
-  scheduleLiveFrame(live);
-  return pollLiveLog(live);
-}
-function scheduleLiveFrame(live) {
-  if (live.frame != null || !live.view?.body || live.closed) return;
-  live.frame = requestAnimationFrame(() => {
-    live.frame = null;
-    if (state.live === live && !live.closed) appendLiveLines(live);
-  });
-}
-function appendLiveLines(live) {
-  const view = live.view, body = view?.body;
-  if (!body?.isConnected) return;
-  const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
-  const previousTop = body.scrollTop;
-  const lines = view.pending.splice(0);
-  if (lines.length) {
-    body.querySelector(".log-waiting")?.remove();
-    body.insertAdjacentHTML("beforeend", renderLogLines(lines, {groupSteps: !view.burn, carry: view.carry}));
-    // Remove old rows in place. Header/fold rows preceding the first retained
-    // record are kept only when they still describe that record.
-    const records = body.querySelectorAll("[data-log-record]");
-    if (records.length > maxRenderedLogLines) {
-      const first = records[records.length - maxRenderedLogLines];
-      let keep = first;
-      while (keep.previousElementSibling?.matches(".log-hdr, .log-fold")) keep = keep.previousElementSibling;
-      const oldHeight = body.scrollHeight;
-      // If the cap cuts through a step, retain its header for attribution.
-      if (!keep.matches(".log-hdr")) {
-        let header = keep.previousElementSibling;
-        while (header && !header.matches(".log-hdr")) header = header.previousElementSibling;
-        if (header) { body.insertBefore(header, keep); keep = header; }
-      }
-      while (body.firstElementChild !== keep) body.firstElementChild.remove();
-      if (!stick) body.scrollTop = Math.max(0, previousTop - (oldHeight - body.scrollHeight));
-    }
+function containerKey(entry) { return JSON.stringify([entry.node_id, entry.container]); }
+function paintContainerLog(live) {
+  if (state.live !== live) return;
+  const body = document.getElementById("termBody");
+  if (body) {
+    const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+    body.innerHTML = renderLogLines(splitLogText(live.text));
     if (stick) body.scrollTop = body.scrollHeight;
   }
-  const delivery = document.getElementById("liveDelivery");
-  if (delivery) delivery.textContent = liveDeliverySummary(live, view.burn, view.step);
-  const indicator = document.querySelector(".term-live");
-  if (indicator) indicator.textContent = live.error ? "RECONNECTING" : live.done ? "COMPLETE" : live.fallback ? "POLLING" : "LIVE";
+  const indicator = document.querySelector?.(".term-live");
+  if (indicator) indicator.textContent = live.error ? "STREAM ENDED" : live.done ? "COMPLETE" : "LIVE";
 }
-async function liveLogContent(run, activeBurn, activeStep) {
-  if (!state.live || state.live.runID !== run.id) {
+async function readContainerStream(live, entry) {
+  let reader;
+  try {
+    const url = `/api/runs/${enc(live.runID)}/containerlog/stream?node_id=${enc(entry.node_id)}&container=${enc(entry.container)}`;
+    const response = await fetch(url, {cache: "no-store", headers: authHeaders(), signal: live.controller.signal});
+    if (!response.ok || !response.body) throw new Error(`container log unavailable (${response.status})`);
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    while (!live.controller.signal.aborted) {
+      const {value, done} = await reader.read();
+      live.text += decoder.decode(value, {stream: !done});
+      // Bound the dashboard display independently of the retained copy.
+      if (live.text.length > 1048576) live.text = live.text.slice(-1048576);
+      live.done = done;
+      paintContainerLog(live);
+      if (done) break;
+    }
+  } catch (err) {
+    if (!live.controller.signal.aborted) { live.error = String(err.message || err); paintContainerLog(live); }
+  } finally {
+    if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  }
+}
+async function containerLogContent(run, node) {
+  let entries;
+  try { entries = (await api(`/api/runs/${enc(run.id)}/containers`)).containers || []; }
+  catch (err) { closeLiveLog(); return {html: renderLogLines([`container logs unavailable: ${err.message || err}`]), options: "", live: false}; }
+  const matching = node ? entries.filter(entry => entry.node_id === node) : entries;
+  const candidates = matching.length ? matching : entries;
+  const entry = candidates.find(item => containerKey(item) === state.containerKey) || candidates[0];
+  const options = candidates.map(item => `<option value="${esc(containerKey(item))}"${entry === item ? " selected" : ""}>${esc(item.node_id)} / ${esc(item.container || "missing Pod")}${item.stored ? " · retained" : ""}</option>`).join("");
+  if (!entry) {
     closeLiveLog();
-    const live = state.live = {runID: run.id, routePath: location.pathname, offset: -1, text: "", pending: "", pendingTruncated: false, busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false, frame: null};
-    if (canStreamLiveLog()) startLiveStream(live);
-    else await fallbackLiveLog(live);
-    if (state.live !== live) return "";
+    if (!["running", "waiting"].includes(run.status)) {
+      try { const payload = await api(`/api/runs/${enc(run.id)}/logs?raw=true`); return {html: renderLogLines(splitLogText(payload.output)), options, live: false}; }
+      catch (err) { return {html: renderLogLines([`retained run log unavailable: ${err.message || err}`]), options, live: false}; }
+    }
+    return {html: renderLogLines(["No container logs observed yet."]), options, live: false};
   }
-  const live = state.live;
-  const key = JSON.stringify([activeBurn || "", activeStep || ""]);
-  if (live.view?.key === key && live.view.body?.isConnected) {
-    scheduleLiveFrame(live);
-    return "";
+  state.containerKey = containerKey(entry);
+  const key = `${run.id}|${state.containerKey}|${entry.stored}`;
+  if (!entry.stored && ["running", "waiting"].includes(run.status) && entry.container) {
+    if (state.live?.key !== key) {
+      closeLiveLog();
+      const live = state.live = {key, runID: run.id, routePath: location.pathname, controller: new AbortController(), text: "", done: false, error: ""};
+      readContainerStream(live, entry);
+    }
+    return {html: renderLogLines(splitLogText(state.live.text)), options, live: true};
   }
-  const view = live.view = {key, burn: activeBurn, step: activeStep, carry: {count: 0, current: ""}, pending: []};
-  const lines = liveViewLines(splitAttributedLogText(live.text), view);
-  return renderLogLines(lines, {groupSteps: !activeBurn, carry: view.carry}) || '<div class="log-waiting">waiting for step output…</div>';
+  closeLiveLog();
+  try {
+    const payload = await api(`/api/runs/${enc(run.id)}/containerlog?node_id=${enc(entry.node_id)}&container=${enc(entry.container)}`);
+    return {html: renderLogLines(splitLogText(payload.output || payload.note || "No retained container output.")), options, live: false};
+  } catch (err) { return {html: renderLogLines([entry.reason || `container log unavailable: ${err.message || err}`]), options, live: false}; }
 }
 async function renderRunDetail(runID, seq, background) {
   if (!background) setChrome("runs", "/ run");
@@ -1341,12 +1110,10 @@ async function renderRunDetailView(detail, seq) {
   const phaseLabel = statusLabel(status).toUpperCase();
   const seconds = runDuration(run);
   const stepCount = steps.length;
-  // A running run streams live output in the terminal: on the summary view and
-  // on any still-running step. Completed steps keep their retained slice.
-  const executing = run.status === "running";
-  const live = (executing && (!selected || ["running", "queued"].includes(selected.status))) || state.step === "__summary__";
-  const terminal = live ? await liveLogContent(run, selected?.burn, selected?.step) : selected ? await stepLogContent(run.id, selected, executing) : renderLogLines(summaryLines(detail));
-  if (!currentRoute(seq) || (live && !state.live)) return;
+  const containerView = await containerLogContent(run, selected?.node_id);
+  const live = containerView.live;
+  const terminal = containerView.html;
+  if (!currentRoute(seq)) return;
   // Preserve the reader's place across the poll re-render: stick to the
   // bottom while they are at the bottom, hold their position when they have
   // scrolled up to read.
@@ -1389,8 +1156,8 @@ async function renderRunDetailView(detail, seq) {
         ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || `<div class="empty">${run.phase === "preflight" ? "Retired execution preflight; see the run result for upgrade details." : "No step results recorded yet."}</div>`}
       </div>
       <div class="logp">
-        <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
-        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "RECONNECTING" : state.live?.done ? "COMPLETE" : state.live?.fallback ? "POLLING" : "LIVE"}</span>` : ""}</div>${live ? `<div id="liveDelivery" class="log-delivery" role="status">${esc(liveDeliverySummary(state.live, selected?.burn, selected?.step))}</div>` : ""}<div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
+        <div class="log-h" id="logHead"><label>Container <select id="containerLogSelect">${containerView.options}</select></label>${selected ? `${statusIcon(selected.status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.status) === "pass" ? "pass" : statusKind(selected.status) === "fail" ? "fail" : statusKind(selected.status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>
+        <div class="terminal"><div class="term-bar"><span class="lamp red"></span><span class="lamp yellow"></span><span class="lamp green"></span><span class="term-title">${esc(repository)} / ${esc(run.ref)} — ${live ? "live output" : selected ? esc(stepKey(selected)) : "summary"}</span>${live ? `<span class="term-live">${state.live?.error ? "STREAM ENDED" : state.live?.done ? "COMPLETE" : "LIVE"}</span>` : ""}</div><div id="termBody" class="term-body${state.showExec ? " show-exec" : ""}">${terminal}</div></div>
       </div>
     </div>
   </section>`;
@@ -1401,7 +1168,7 @@ async function renderRunDetailView(detail, seq) {
     for (const selector of [".rh", "#runBanners", "#stepList", "#logHead", ".term-bar"]) {
       existing.querySelector(selector).innerHTML = template.content.querySelector(selector).innerHTML;
     }
-    const preserve = live && state.live?.view?.body === previousTerm;
+    const preserve = live && previousTerm?.dataset.containerKey === state.live?.key;
     if (!preserve) existing.querySelector(".terminal").replaceWith(template.content.querySelector(".terminal"));
   } else {
     replaceApp(detailHTML);
@@ -1410,10 +1177,12 @@ async function renderRunDetailView(detail, seq) {
   }
   updateRunHistory(run);
   const termBody = document.getElementById("termBody");
-  if (live && state.live?.view) {
-    state.live.view.body = termBody;
-    scheduleLiveFrame(state.live);
-  } else if (state.live?.view) state.live.view = null;
+  if (live && termBody) { termBody.dataset.containerKey = state.live.key; paintContainerLog(state.live); }
+  document.getElementById("containerLogSelect")?.addEventListener("change", event => {
+    state.containerKey = event.target.value;
+    closeLiveLog();
+    renderRunDetail(run.id, state.routeSeq, true);
+  });
   if (termBody && (live || selected)) termBody.scrollTop = stick ? termBody.scrollHeight : previousScroll;
   const stepList = document.getElementById("stepList");
   if (stepList) stepList.scrollTop = previousStepScroll;
