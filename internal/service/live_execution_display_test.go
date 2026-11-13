@@ -167,3 +167,45 @@ func TestSeedPendingReasonPrecedesArgoStateOnAllReadSurfaces(t *testing.T) {
 		})
 	}
 }
+
+func TestArgoSlotReasonMatchesOnEveryRunRead(t *testing.T) {
+	for _, scoped := range []bool{false, true} {
+		t.Run(fmt.Sprint(scoped), func(t *testing.T) {
+			f := newControlFixture(t)
+			run := submittedDisplayRun(t, f, "slot-wait")
+			s := f.api(t)
+			s.schedulingObserver = schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
+				return &model.ExecutionObservation{State: "observed", Phase: "Pending", Message: model.ParallelismWaitMessage}, nil
+			})
+			actor := api.Actor{Identity: "owner"}
+			if scoped {
+				actor.Scope = []string{"codeberg"}
+			}
+			const want = "waiting for an Argo workflow slot (controller parallelism)"
+			listed, err := s.Runs(t.Context(), actor, api.RunFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := listed.([]model.Run)
+			if len(rows) != 1 || rows[0].DisplayReason != want {
+				t.Fatalf("list: %+v", rows)
+			}
+			detail, err := s.Run(t.Context(), actor, run.ID)
+			if err != nil || detail.(RunDetailResponse).Run.DisplayReason != want {
+				t.Fatal("detail", detail, err)
+			}
+			scopedAPI, err := s.forActor(t.Context(), actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := scopedAPI.status(t.Context(), f.repo.Name, run.SHA, "")
+			if err != nil || status.Run.DisplayReason != want {
+				t.Fatal("status", status, err)
+			}
+			kept, err := f.store.Run(t.Context(), run.ID)
+			if err != nil || kept.Status != model.RunRunning {
+				t.Fatal("display changed durable status", kept, err)
+			}
+		})
+	}
+}
