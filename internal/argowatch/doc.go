@@ -18,6 +18,7 @@
 //	Pod(name string) (*corev1.Pod, bool)
 //	Subscribe(workflowName string) (wake <-chan struct{}, cancel func())
 //	Healthy() bool
+//	Synced() bool
 //	UnhealthySince() (time.Time, bool)
 //	WaitForSync(ctx context.Context) error
 //
@@ -36,6 +37,7 @@
 //
 // Healthy is false before both caches sync, after shutdown, or if a resource's
 // list/watch attempts have been failing for more than five seconds.
+// Synced distinguishes incomplete initial lists from later observation outages.
 // UnhealthySince returns the beginning of the current failure episode
 // (startup, first failed attempt, or shutdown), with true only while unhealthy.
 // A successful attempt clears that resource's failure episode. Overlapping

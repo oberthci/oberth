@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,8 +10,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 // Scripted observation fixtures use the same cache interface as production,
@@ -18,11 +21,12 @@ import (
 type testObservationHub struct {
 	controller *Controller
 	unhealthy  bool
+	unsynced   bool
 	since      time.Time
 }
 
 func (h *testObservationHub) Healthy() bool {
-	if h.unhealthy {
+	if h.unhealthy || h.unsynced {
 		return false
 	}
 	if client, ok := h.controller.workflows.(*schedulingWorkflowClient); ok {
@@ -30,6 +34,7 @@ func (h *testObservationHub) Healthy() bool {
 	}
 	return true
 }
+func (h *testObservationHub) Synced() bool                      { return !h.unsynced }
 func (h *testObservationHub) UnhealthySince() (time.Time, bool) { return h.since, !h.Healthy() }
 func (h *testObservationHub) Workflow(name string) (*wfv1.Workflow, bool) {
 	var wf *wfv1.Workflow
@@ -115,7 +120,7 @@ func TestWatchObservationsNeverReadAPI(t *testing.T) {
 	wf.Spec.Suspend = new(bool)
 	*wf.Spec.Suspend = true
 	observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
-	if err != nil || observation.State != "unavailable" || observation.Message != "status unknown: cluster API unreachable since 12:34" || observation.Reason != "" || len(observation.Pods) != 0 {
+	if err != nil || observation.State != "unavailable" || observation.Message != "status unknown: cluster API unreachable since 12:34 UTC" || observation.Reason != "" || len(observation.Pods) != 0 {
 		t.Fatal(observation, err)
 	}
 	if _, err := controller.EnforceAssistHolds(t.Context(), nil, nil, time.Now()); err == nil {
@@ -214,5 +219,90 @@ func TestAssistSweepObservesHealthyHeldPodWithoutAPIReads(t *testing.T) {
 	}
 	if len(kube.Actions()) != 0 {
 		t.Fatal("healthy assist observation performed API I/O", kube.Actions())
+	}
+}
+
+func TestAssistSweepSparesChangedVictimAndContinues(t *testing.T) {
+	for _, kind := range []string{"released", "deleted", "delete_not_found", "delete_conflict", "get_unavailable"} {
+		t.Run(kind, func(t *testing.T) {
+			stale := heldPodFixture("wf-stale-1", "wf", "stale", time.Hour, false)
+			due := heldPodFixture("wf-due-1", "wf", "due", time.Hour, false)
+			kube := fake.NewClientset(stale, due)
+			controller := assistSweepController(t, kube)
+			controller.WithWatchHub(&fixedObservationHub{testObservationHub: controller.hub.(*testObservationHub), pods: []*corev1.Pod{stale.DeepCopy(), due.DeepCopy()}})
+			switch kind {
+			case "released":
+				live := stale.DeepCopy()
+				live.Status.Phase = corev1.PodSucceeded
+				if _, err := kube.CoreV1().Pods(testNamespace).Update(t.Context(), live, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			case "deleted":
+				if err := kube.CoreV1().Pods(testNamespace).Delete(t.Context(), stale.Name, metav1.DeleteOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			case "delete_not_found", "delete_conflict":
+				kube.PrependReactor("delete", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+					if action.(ktesting.DeleteAction).GetName() != stale.Name {
+						return false, nil, nil
+					}
+					resource := schema.GroupResource{Resource: "pods"}
+					if kind == "delete_not_found" {
+						return true, nil, apierrors.NewNotFound(resource, stale.Name)
+					}
+					return true, nil, apierrors.NewConflict(resource, stale.Name, errors.New("UID changed"))
+				})
+			case "get_unavailable":
+				kube.PrependReactor("get", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewServiceUnavailable("API unavailable")
+				})
+			}
+			abandoned, err := controller.EnforceAssistHolds(t.Context(), nil, nil, time.Now())
+			if kind == "get_unavailable" {
+				if err == nil || len(abandoned) != 0 {
+					t.Fatal(abandoned, err)
+				}
+				return
+			}
+			if err != nil || len(abandoned) != 1 || abandoned[0].Pod != due.Name {
+				t.Fatal("stale victim stopped the sweep", abandoned, err)
+			}
+			if _, err := kube.CoreV1().Pods(testNamespace).Get(t.Context(), due.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+				t.Fatal("other due victim was not handled", err)
+			}
+		})
+	}
+}
+
+func TestWatchStartupDoesNotClaimAPIOutage(t *testing.T) {
+	controller := withTestObservationCache(t, &Controller{workflows: &schedulingWorkflowClient{}, config: Config{Namespace: "pipeline"}})
+	hub := controller.hub.(*testObservationHub)
+	hub.unsynced = true
+	hub.unhealthy = true
+	hub.since = time.Date(2026, 11, 13, 12, 34, 0, 0, time.UTC)
+	observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	if err != nil || observation.State != "unavailable" || strings.Contains(observation.Message, "unreachable") {
+		t.Fatal(observation, err)
+	}
+	hub.unsynced = false
+	observation, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+	if err != nil || observation.Message != "status unknown: cluster API unreachable since 12:34 UTC" {
+		t.Fatal(observation, err)
+	}
+}
+
+func TestAssistSweepMissingCapVictimNoLongerCountsTowardCap(t *testing.T) {
+	stale := heldPodFixture("wf-stale-1", "wf", "stale", time.Minute, false)
+	kept := heldPodFixture("wf-kept-1", "wf", "kept", 2*time.Minute, false)
+	kube := fake.NewClientset(kept)
+	controller := assistSweepController(t, kube)
+	controller.config.Assist.MaxConcurrentHolds = 1
+	controller.WithWatchHub(&fixedObservationHub{testObservationHub: controller.hub.(*testObservationHub), pods: []*corev1.Pod{stale, kept}})
+	abandoned, err := controller.EnforceAssistHolds(t.Context(), nil, nil, time.Now())
+	if err != nil || len(abandoned) != 0 {
+		t.Fatal("missing hold caused an extra cap victim", abandoned, err)
+	}
+	if _, err := kube.CoreV1().Pods(testNamespace).Get(t.Context(), kept.Name, metav1.GetOptions{}); err != nil {
+		t.Fatal("live hold was deleted", err)
 	}
 }

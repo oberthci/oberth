@@ -19,7 +19,12 @@ import (
 
 const maxSchedulingItems = 16
 
-// ObserveScheduling reads the shared Workflow and Pod caches without API I/O.
+// Seed diagnostics remain live until source delivery removes them. They must
+// never inherit the cluster client timeout on a synchronous run-list read.
+const seedObservationTimeout = 100 * time.Millisecond
+
+// ObserveScheduling reads shared Workflow and step-Pod caches. A missing
+// Workflow may use the bounded, exact source-seed diagnostic read.
 // AI-CONTRACT: arbitrary Kubernetes/Argo status text is untrusted: output only
 // fixed summaries, never raw messages (which may contain secrets or commands).
 func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID, sha string) (*model.ExecutionObservation, error) {
@@ -31,7 +36,13 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		// Source seed Pods have a separate, short-lived observation path (S1 row
 		// 10); they are deliberately outside the step-Pod informer selector.
 		if controller.seeder != nil {
-			observation, err := controller.seeder.observeScheduling(ctx, name, runID, sha)
+			seedCtx, cancel := context.WithTimeout(ctx, seedObservationTimeout)
+			observation, err := controller.seeder.observeScheduling(seedCtx, name, runID, sha)
+			timedOut := errors.Is(seedCtx.Err(), context.DeadlineExceeded)
+			cancel()
+			if timedOut {
+				return controller.observationUnavailable(), nil
+			}
 			if err != nil || observation != nil {
 				return observation, err
 			}

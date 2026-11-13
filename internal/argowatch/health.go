@@ -54,7 +54,7 @@ func (h *Hub) UnhealthySince() (time.Time, bool) {
 
 func (h *Hub) healthSinceLocked() time.Time {
 	var since time.Time
-	if !h.workflows.HasSynced() || !h.pods.HasSynced() {
+	if !h.Synced() {
 		since = h.created
 	}
 	if !h.stopped.IsZero() && (since.IsZero() || h.stopped.Before(since)) {

@@ -113,6 +113,10 @@ func (h *Hub) Run(ctx context.Context) {
 	})
 }
 
+// Synced reports whether both initial informer lists have completed. It stays
+// true through later watch outages, separating startup from lost observation.
+func (h *Hub) Synced() bool { return h.workflows.HasSynced() && h.pods.HasSynced() }
+
 // WaitForSync waits for both informer caches, bounded only by ctx.
 func (h *Hub) WaitForSync(ctx context.Context) error {
 	if !cache.WaitForCacheSync(ctx.Done(), h.workflows.HasSynced, h.pods.HasSynced) {

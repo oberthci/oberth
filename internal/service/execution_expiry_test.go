@@ -13,7 +13,7 @@ func TestRunListWithdrawsSuspensionImmediatelyWhenWatchUnhealthy(t *testing.T) {
 	run := submittedDisplayRun(t, f, "watch-outage")
 	s := f.api(t)
 	healthy := true
-	const unavailable = "status unknown: cluster API unreachable since 12:34"
+	const unavailable = "status unknown: cluster API unreachable since 12:34 UTC"
 	s.schedulingObserver = schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
 		if !healthy {
 			return &model.ExecutionObservation{State: "unavailable", Message: unavailable}, nil

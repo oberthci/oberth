@@ -515,3 +515,21 @@ func TestNamespacePodSnapshotFiltersForeignObjectsWithoutAPIReads(t *testing.T) 
 		t.Fatal("snapshot performed API I/O")
 	}
 }
+
+func TestSyncedSeparatesInitialListsFromLaterWatchHealth(t *testing.T) {
+	h := newTestHub(t, kubefake.NewClientset(), fakeArgo())
+	if h.Synced() {
+		t.Fatal("new hub claimed initial sync")
+	}
+	runHub(t, h)
+	syncHub(t, h)
+	if !h.Synced() {
+		t.Fatal("initial lists not recorded")
+	}
+	h.healthMu.Lock()
+	h.attempts[workflowKind].failureSince = time.Now().Add(-time.Minute)
+	h.healthMu.Unlock()
+	if !h.Synced() || h.Healthy() {
+		t.Fatal("later outage confused initial sync")
+	}
+}

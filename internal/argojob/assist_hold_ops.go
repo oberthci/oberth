@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/holdfs"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kexec "k8s.io/client-go/util/exec"
@@ -272,11 +273,11 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		}
 	}
 	var abandoned []model.AssistAbandon
-	released := map[string]bool{} // released between snapshot and recheck
+	inactive := map[string]bool{} // released, missing or replaced after the snapshot
 	abandon := func(sweep assistSweepHold, reason string) (bool, error) {
 		if recheck != nil {
 			fresh, err := recheck(ctx, sweep.runID, sweep.hold.Pod)
-			released[sweep.hold.Pod] = err == nil && fresh.Released
+			inactive[sweep.hold.Pod] = err == nil && fresh.Released
 			if err != nil || !assistVictimDue(reason, fresh, assist.HoldTTL, sweep.hold, now) {
 				return false, nil
 			}
@@ -287,14 +288,26 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 			return false, errWatchUnavailable
 		}
 		pod, current, err := controller.heldPod(ctx, sweep.hold.Pod)
+		if apierrors.IsNotFound(err) || errors.Is(err, ErrNotHeld) {
+			inactive[sweep.hold.Pod] = true
+			return false, nil
+		}
 		if err != nil {
 			return false, err
 		}
-		if pod.UID != sweep.uid || !controller.observedPodOwned(pod) || !assistVictimDue(reason, activity[sweep.hold.Pod], assist.HoldTTL, current, now) {
+		if pod.UID != sweep.uid || !controller.observedPodOwned(pod) {
+			inactive[sweep.hold.Pod] = true
+			return false, nil
+		}
+		if !assistVictimDue(reason, activity[sweep.hold.Pod], assist.HoldTTL, current, now) {
 			return false, nil
 		}
 		uid := pod.UID
 		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, sweep.hold.Pod, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}); err != nil {
+			if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
+				inactive[sweep.hold.Pod] = true
+				return false, nil
+			}
 			return false, fmt.Errorf("abandon hold %s: %w", sweep.hold.Pod, err)
 		}
 		abandoned = append(abandoned, model.AssistAbandon{RunID: sweep.runID, Pod: sweep.hold.Pod, Step: sweep.hold.Step, Reason: reason,
@@ -323,8 +336,8 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 			if err != nil {
 				return abandoned, err
 			}
-			if done || released[hold.Pod] {
-				continue // a hold released meanwhile is running work: not counted
+			if done || inactive[hold.Pod] {
+				continue // no longer an active hold: do not count it toward the cap
 			}
 		}
 		holds = append(holds, sweep)
@@ -346,7 +359,7 @@ func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity m
 		if err != nil {
 			return abandoned, err
 		}
-		if done {
+		if done || inactive[sweep.hold.Pod] {
 			excess--
 		}
 	}

@@ -19,6 +19,7 @@ type ObservationHub interface {
 	PodsOf(string) []*corev1.Pod
 	Pods() []*corev1.Pod
 	Healthy() bool
+	Synced() bool
 	UnhealthySince() (time.Time, bool)
 }
 
@@ -36,9 +37,9 @@ func (controller *Controller) WithWatchHub(hub ObservationHub) *Controller {
 
 func (controller *Controller) observationUnavailable() *model.ExecutionObservation {
 	message := "Execution observation is unavailable."
-	if controller.hub != nil {
+	if controller.hub != nil && controller.hub.Synced() {
 		if since, ok := controller.hub.UnhealthySince(); ok {
-			message = fmt.Sprintf("status unknown: cluster API unreachable since %s", since.UTC().Format("15:04"))
+			message = fmt.Sprintf("status unknown: cluster API unreachable since %s", since.UTC().Format("15:04 UTC"))
 		}
 	}
 	return &model.ExecutionObservation{State: "unavailable", Message: message}

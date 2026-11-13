@@ -3,7 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,7 +19,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 
@@ -98,5 +104,100 @@ func TestWatchHubRunListAndSweepsMakeNoAPIReads(t *testing.T) {
 	}
 	if len(kube.Actions()) != beforeKube || len(argo.Actions()) != beforeArgo {
 		t.Fatal("run list or agent sweep performed API reads", kube.Actions()[beforeKube:], argo.Actions()[beforeArgo:])
+	}
+}
+
+// Seed Pods deliberately remain outside the step-Pod cache. An unresponsive
+// exact GET must have a short local deadline even on an otherwise healthy hub.
+func TestRunListBlockedSeedReadsReturnPromptly(t *testing.T) {
+	f := newControlFixture(t)
+	for i := range 3 {
+		submittedDisplayRun(t, f, fmt.Sprintf("blocked-seed-%d", i))
+	}
+	var gets atomic.Int32
+	seedAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/pods/") {
+			t.Errorf("unexpected seed operation %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(500)
+			return
+		}
+		gets.Add(1)
+		<-r.Context().Done()
+	}))
+	defer seedAPI.Close()
+	kube, err := kubernetes.NewForConfig(&rest.Config{Host: seedAPI.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := argojob.Config{Namespace: "pipeline", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "credentialed", CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor"}
+	argo := argofake.NewSimpleClientset()
+	controller, err := argojob.NewController(argo.ArgoprojV1alpha1().Workflows(config.Namespace), kube, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeder := argojob.NewSourceSeeder(kube, func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
+		return fmt.Errorf("unexpected seed exec")
+	}, config)
+	controller.WithWatchHub(emptyHealthyWatchHub{}).WithSourceSeeder(seeder)
+	s := f.api(t)
+	s.schedulingObserver = watchSchedulingObserver{controller}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	value, err := s.Runs(ctx, api.Actor{Identity: "owner"}, api.RunFilter{})
+	elapsed := time.Since(start)
+	if err != nil || elapsed > 750*time.Millisecond {
+		t.Fatal("blocked seed GET held the list", elapsed, err)
+	}
+	rows := value.([]model.Run)
+	if len(rows) != 3 || gets.Load() != 3 {
+		t.Fatal("seed fallback not exercised", len(rows), gets.Load())
+	}
+	for _, run := range rows {
+		if run.Scheduling == nil || run.Scheduling.Execution == nil || run.Scheduling.Execution.State != "unavailable" || run.DisplayReason != "awaiting Argo state" {
+			t.Fatal(run)
+		}
+	}
+	if len(argo.Actions()) != 0 {
+		t.Fatal("Workflow cache miss polled Argo", argo.Actions())
+	}
+}
+
+type emptyHealthyWatchHub struct{}
+
+func (emptyHealthyWatchHub) Workflow(string) (*wfv1.Workflow, bool) { return nil, false }
+func (emptyHealthyWatchHub) PodsOf(string) []*corev1.Pod            { return nil }
+func (emptyHealthyWatchHub) Pods() []*corev1.Pod                    { return nil }
+func (emptyHealthyWatchHub) Healthy() bool                          { return true }
+func (emptyHealthyWatchHub) Synced() bool                           { return true }
+func (emptyHealthyWatchHub) UnhealthySince() (time.Time, bool)      { return time.Time{}, false }
+
+func TestRunListBeforeInitialSyncAwaitsArgoWithoutOutageClaim(t *testing.T) {
+	f := newControlFixture(t)
+	submittedDisplayRun(t, f, "initial-watch-sync")
+	kube := kubefake.NewClientset()
+	argo := argofake.NewSimpleClientset()
+	hub, err := argowatch.New(kube, argo, "pipeline", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := argojob.Config{Namespace: "pipeline", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "credentialed", CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor"}
+	controller, err := argojob.NewController(argo.ArgoprojV1alpha1().Workflows(config.Namespace), kube, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.WithWatchHub(hub)
+	s := f.api(t)
+	s.schedulingObserver = watchSchedulingObserver{controller}
+	value, err := s.Runs(t.Context(), api.Actor{Identity: "owner"}, api.RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := value.([]model.Run)
+	if len(rows) != 1 || rows[0].DisplayReason != "awaiting Argo state" || strings.Contains(rows[0].Scheduling.Execution.Message, "unreachable") {
+		t.Fatal(rows)
+	}
+	if hub.Synced() || len(kube.Actions()) != 0 || len(argo.Actions()) != 0 {
+		t.Fatal("startup observation used live API")
 	}
 }
