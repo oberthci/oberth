@@ -124,8 +124,7 @@ the server daemon uses workload identity; operator-only secretstore sync reads B
 
 2. Inspect it, then run it on the machine where your bao/vault CLI is already
    authenticated. It enables Kubernetes auth, writes a minimal read-only
-   KV policy plus exact Transit encrypt/decrypt grants, creates one
-   non-exportable trusted-plan key, binds a role to the Oberth ServiceAccount,
+   KV policy, binds a role to the Oberth ServiceAccount,
    and prints the exact helm values for step 3.
 
 3. helm upgrade --install with the printed secretstore.* values.
@@ -1093,15 +1092,18 @@ func planDigestFromIdentities(identities []installer.PerRepoIdentity, stepIdenti
 	for _, sid := range stepIdentities {
 		qualified := sid.Upstream + "/" + sid.Org + "/" + sid.Repo
 		stepsByRepo[qualified] = append(stepsByRepo[qualified], planStepForDigest{
-			step:   sid.Step,
-			paths:  sid.GrantPaths,
-			policy: installer.PerStepName(sid.Upstream, sid.Org, sid.Repo, sid.Step),
+			workflow: sid.Workflow,
+			step:     sid.Step,
+			paths:    sid.GrantPaths,
+			policy:   installer.PerStepName(sid.Upstream, sid.Org, sid.Repo, sid.Workflow, sid.Step),
 		})
 	}
 	// Sort steps within each repo for deterministic output.
 	for repo := range stepsByRepo {
 		entries := stepsByRepo[repo]
-		sort.Slice(entries, func(i, j int) bool { return entries[i].step < entries[j].step })
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].workflow+"\x00"+entries[i].step < entries[j].workflow+"\x00"+entries[j].step
+		})
 		stepsByRepo[repo] = entries
 	}
 
@@ -1132,20 +1134,20 @@ type planRepoForDigest struct {
 
 // planStepForDigest mirrors the per-step entry in the plan digest.
 type planStepForDigest struct {
-	step   string
-	paths  []string
-	policy string
+	workflow string
+	step     string
+	paths    []string
+	policy   string
 }
 
 // computePlanDigestLocal computes the same sha256 digest as
 // service.ComputePlanDigest. The algorithm is frozen: changing it breaks
 // current/stale detection for all prior syncs.
 //
-// v2: includes per-step entries (issue #623). Repos without steps produce
-// the same bytes as the v1 format because the step loop doesn't write anything.
+// v3 includes exact workflow-file scope and deliberately invalidates prior sync receipts.
 func computePlanDigestLocal(repos []planRepoForDigest) string {
 	h := sha256.New()
-	h.Write([]byte("oberth-secretstore-plan-v1\x00"))
+	h.Write([]byte("oberth-secretstore-plan-v3\x00"))
 	for _, repo := range repos {
 		h.Write([]byte(repo.Repo))
 		h.Write([]byte{0})
@@ -1156,9 +1158,11 @@ func computePlanDigestLocal(repos []planRepoForDigest) string {
 			h.Write([]byte{0})
 		}
 		// Per-step entries (issue #623). Repos without steps produce no
-		// additional bytes, preserving backward compatibility.
+		// additional bytes.
 		for _, step := range repo.Steps {
 			h.Write([]byte("step:"))
+			h.Write([]byte(step.workflow))
+			h.Write([]byte{0})
 			h.Write([]byte(step.step))
 			h.Write([]byte{0})
 			h.Write([]byte(step.policy))

@@ -262,7 +262,7 @@ func TestRunGetSummary(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Repo != qualified || got.Ref != run.Ref || got.SHA != run.SHA || got.QueuePosition != 0 {
+		if got.Repo != qualified || got.Ref != run.Ref || got.SHA != run.SHA {
 			t.Fatalf("summary identity or unknown admission context: %#v", got)
 		}
 		// retry_hint (class, cause, action) is the thirteenth field of a red run.

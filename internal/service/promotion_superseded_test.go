@@ -44,9 +44,6 @@ func TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion(t *testing.T) {
 	if err = f.store.RecoverOwnerState(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if eligible, err := f.store.InterruptedPromotionRetryEligible(t.Context(), id); err != nil || !eligible {
-		t.Fatal("interruption not initially retryable", eligible, err)
-	}
 	deliveredID := promoteForRetry(t, control, actor)
 	if err = scheduler.ProcessNext(t.Context()); err != nil {
 		t.Fatal(err)
@@ -59,15 +56,6 @@ func TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion(t *testing.T) {
 	previous := log.Writer()
 	log.SetOutput(&output)
 	defer log.SetOutput(previous)
-	for range 2 {
-		if err = scheduler.recoverInterruptedPromotions(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-		control.waitBackground()
-	}
-	if eligible, err := f.store.InterruptedPromotionRetryEligible(t.Context(), id); err != nil || eligible {
-		t.Fatal("delivered tuple still startup eligible", eligible, err)
-	}
 	if lineage, err := f.store.PromotionLineage(t.Context(), id); err != nil || lineage.RetriedAs != "" {
 		t.Fatal("created unnecessary retry", lineage, err)
 	}
@@ -80,7 +68,7 @@ func TestStartupSkipsPromotionAlreadyDeliveredByAnotherPromotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control.retryAutomaticPromotion(t.Context(), original, "owner restart")
+	control.retryAutomaticPromotion(t.Context(), original, "target moved")
 	if strings.Contains(output.String(), "automatic retry of promotion "+id) {
 		t.Fatal("delivered promotion logged retry failure", output.String())
 	}

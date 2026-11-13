@@ -345,7 +345,7 @@ func (engine *groupEngine) declareCPU(ref string, milli int64) {
 	engine.numericCPU[ref] = milli
 }
 
-func (engine *groupEngine) PipelineDemandReceipt(_ context.Context, req WorkflowRequest) (*argoworkflow.DemandReceipt, error) {
+func (engine *groupEngine) ResolvePipelineSource(_ context.Context, req WorkflowRequest) (*argoworkflow.SourceReceipt, error) {
 	engine.mu.Lock()
 	cpu := engine.numericCPU[req.Run.Ref]
 	engine.mu.Unlock()

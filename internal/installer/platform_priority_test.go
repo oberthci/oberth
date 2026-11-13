@@ -15,8 +15,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
-
-	"github.com/oberthci/oberth/internal/podpriority"
 )
 
 func TestPriorityBootstrapIsOwnedIdempotentAndMatchesChart(t *testing.T) {
@@ -30,7 +28,7 @@ func TestPriorityBootstrapIsOwnedIdempotentAndMatchesChart(t *testing.T) {
 		t.Fatal(err)
 	}
 	classes, err := kube.SchedulingV1().PriorityClasses().List(t.Context(), metav1.ListOptions{})
-	if err != nil || len(classes.Items) != 2 {
+	if err != nil || len(classes.Items) != 1 {
 		t.Fatalf("classes: %+v %v", classes, err)
 	}
 	for _, action := range kube.Actions() {
@@ -60,9 +58,8 @@ func TestPriorityBootstrapIsOwnedIdempotentAndMatchesChart(t *testing.T) {
 		}
 	}
 	high, _ := kube.SchedulingV1().PriorityClasses().Get(t.Context(), controlPlanePriority(cfg), metav1.GetOptions{})
-	low, _ := kube.SchedulingV1().PriorityClasses().Get(t.Context(), podpriority.PipelineClass(cfg.ArgoNamespace), metav1.GetOptions{})
-	if high.Value <= low.Value || *high.PreemptionPolicy != corev1.PreemptLowerPriority || *low.PreemptionPolicy != corev1.PreemptNever {
-		t.Fatal("control plane cannot preempt non-preempting pipelines")
+	if high.Value != controlPlanePriorityValue || *high.PreemptionPolicy != corev1.PreemptLowerPriority {
+		t.Fatal("control plane lost its priority")
 	}
 }
 

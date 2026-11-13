@@ -386,7 +386,20 @@ DELETE FROM schema_migrations WHERE id='20261113010858-remove-extended-resource-
 `
 
 // PostWorkflowCapabilityUIDDowngrade reconstructs an empty UID-less table only in disposable historical fixtures.
-const PostWorkflowCapabilityUIDDowngrade = PostWorkflowStopDowngrade + `
+// postRunGrantClassificationDowngrade reconstructs the old column only in
+// disposable historical fixtures before replaying forward migrations.
+const postRunGrantClassificationDowngrade = `
+ALTER TABLE runs ADD COLUMN credentialed INTEGER NOT NULL DEFAULT 0 CHECK (credentialed IN (0, 1));
+DELETE FROM schema_migrations WHERE id='20261113193452-remove-run-credentialed-14b11551632068123f2deef9e27ca7dc';
+DELETE FROM schema_migrations WHERE id='20261113193519-scope-secret-approvals-to-workflow-4e48838f64a9b32ddba9d914280daa25';
+`
+
+const PostWorkflowCapabilityUIDDowngrade = PostWorkflowStopDowngrade + historicalRestartTimingSchema + postRunGrantClassificationDowngrade + `
+DELETE FROM schema_migrations WHERE id='20261113181825-remove-restart-timings-370d05c58486149250a7139eb6afdca7';
+DELETE FROM schema_migrations WHERE id='20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153';
+DELETE FROM schema_migrations WHERE id='20261113190600-remove-admission-timing-18a8ff23a732be469158310b6aab30a5';
+DELETE FROM schema_migrations WHERE id='20261113190559-remove-trusted-plan-tables-4f79e6850c236b51af74321a36c610dc';
+
 DELETE FROM schema_migrations WHERE id='20261113073438-remove-unused-capability-recovery-842b529121af8cb6b818c84fa78a5024';
 DROP TABLE IF EXISTS workflow_capability_recoveries;
 CREATE TABLE workflow_capability_recoveries (
@@ -536,4 +549,33 @@ CREATE INDEX runs_fifo_idx ON runs(status, queue_sequence);
 CREATE INDEX runs_ref_idx ON runs(repo_id, ref, queue_sequence DESC);
 CREATE INDEX runs_sha_idx ON runs(repo_id, sha, queue_sequence DESC);
 
+`
+
+// Historical schema reconstruction for disposable migration fixtures only.
+const historicalRestartTimingSchema = `
+CREATE TABLE IF NOT EXISTS restart_workflow_timings (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ epoch INTEGER NOT NULL CHECK(epoch > 0),
+ workflow_created_at INTEGER NOT NULL,
+ workflow_json TEXT NOT NULL CHECK(length(workflow_json) <= 262144),
+ PRIMARY KEY(run_id,epoch)
+);
+CREATE TABLE IF NOT EXISTS restart_step_timings (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ epoch INTEGER NOT NULL CHECK(epoch > 0),
+ node_id TEXT NOT NULL,
+ workflow_uid TEXT NOT NULL,
+ pod_uid TEXT NOT NULL,
+ available INTEGER NOT NULL CHECK(available IN (0,1)),
+ ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+ timing_json TEXT NOT NULL CHECK(length(timing_json) <= 16384),
+ PRIMARY KEY(run_id,epoch,node_id)
+);
+CREATE TRIGGER IF NOT EXISTS restart_workflow_timing_immutable BEFORE UPDATE ON restart_workflow_timings
+BEGIN SELECT RAISE(ABORT,'restart Workflow timing is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS restart_step_timing_immutable BEFORE UPDATE ON restart_step_timings
+WHEN NEW.run_id != OLD.run_id OR NEW.epoch != OLD.epoch OR NEW.node_id != OLD.node_id OR NEW.workflow_uid != OLD.workflow_uid
+ OR (OLD.pod_uid != '' AND NEW.pod_uid != OLD.pod_uid)
+ OR (OLD.available = 1 AND NEW.timing_json != OLD.timing_json)
+BEGIN SELECT RAISE(ABORT,'restart step timing attempt is immutable'); END;
 `

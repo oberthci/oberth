@@ -43,7 +43,8 @@ time. The CLI build and one adverse fixture reuse the same race build flags/cach
 
 It also builds the source CLI and runs real `install --plan --json --answers`
 against a loopback TLS API with two context names. A CLI context overrides the
-answers context; an unknown or ambiguous selection fails. The fixture asserts
+answers context; an unknown or ambiguous selection fails. Explicit native Argo
+parallelism and namespaceParallelism answers must reach the plan Review. The fixture asserts
 that no API mutation occurs. Narrow Helm stubs model an existing release with
 stored policy enabled, and then no release. The TLS fixture accepts reads only;
 both maintenance and fresh plans succeed with an unverified warning explaining

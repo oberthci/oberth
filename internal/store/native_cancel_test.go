@@ -102,3 +102,38 @@ func TestCancelledSucceededPromotionAcceptsAlreadyTerminalPromotion(t *testing.T
 		t.Fatalf("cancelled promotion resurrected: %+v %v", kept, err)
 	}
 }
+
+func TestCancelUpgradeEscalatesReleaseObservationCleanup(t *testing.T) {
+	s := newMigrationIDTestStore(t)
+	cut := -1
+	for i, m := range migrations {
+		if strings.Contains(m.id, "native-cancel-escalation") {
+			cut = i
+			break
+		}
+	}
+	if cut < 0 {
+		t.Fatal("missing escalation migration")
+	}
+	if err := s.migrateWithMigrations(t.Context(), nil, migrations[:cut]); err != nil {
+		t.Fatal(err)
+	}
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), model.RunSpec{RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", SHA: strings.Repeat("a", 40), Actor: "operator", Trigger: "tag", Release: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`UPDATE runs SET status='running',phase='cancelled',job_name='workflow' WHERE id=?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at) VALUES(?,'workflow','owner_restart',1)`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.migrateWithMigrations(t.Context(), nil, migrations); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.PendingRunCancellations(t.Context())
+	if err != nil || len(pending) != 1 || !pending[0].Terminate {
+		t.Fatalf("release cancellation retained exit grants: %+v %v", pending, err)
+	}
+}

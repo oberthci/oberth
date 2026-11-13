@@ -21,7 +21,7 @@ Website: [oberth.ci](https://oberth.ci)
 - **CI** — each push submits the repository's Argo Workflow YAML
   (`.oberth/build.yaml` for branches, `.oberth/release.yaml` for tags); each
   template runs in its own container with its own exit code and named log
-  slice. A priority-then-FIFO queue; how many Workflows run at once is the
+  slice. Runs are claimed in acceptance order; how many Workflows run at once is the
   Argo controller's parallelism ([where limits live](docs/where-limits-live.md));
   a newer push leaves earlier runs active under Argo parallelism.
 - **Issues** — a red run files exactly one issue per repository and branch;
@@ -255,23 +255,9 @@ identities. Stored user values and requested overrides are checked against the
 target chart's schema before the Oberth or Argo controller upgrade begins;
 unknown keys are reported and refused rather than silently removed.
 
-Older Helm 4 installations whose Argo Role rules are owned by a legacy kubectl
-manager can use the [explicit Role ownership migration](docs/argo-role-migration.md)
-before an upgrade. It preserves permissions and unrelated ownership. PVC update
-and list remain required for source-claim adoption and cleanup.
-
-Chart values that no longer exist are refused, never ignored or stripped:
-`gitBackend`, `gitcache`, `maxConcurrentJobs`, `argoSync`, `trustedTests`, `vm`,
-`argo.vmLauncherServiceAccount`, `argo.containerDiskPrefixes`,
-`argo.kubevirtCeiling` and `admission.` `exclusiveClasses`, `sizeWeights`,
-`maxHeadWait`, `declaredResources`, `legacyResources` and `runtimeCapacity`.
-When the stored release values, a `--values` file or a `--set` still sets one,
-`oberth upgrade` names each key with its source and stops before any write.
-Delete the keys from your values files and re-run the upgrade with
-`--set <key>=null` for each named key, for example
-`oberth upgrade --set trustedTests=null --set vm=null`. Helm's
-`--reset-then-reuse-values` merge drops a stored key that an override sets to
-null, so the key is gone from the stored values from then on.
+The server's pipeline permissions live in one base Argo Role. A prior field
+manager owning its rules can cause an SSA conflict on upgrade; resolve that
+ownership first. See [Argo Role ownership](docs/argo-role-migration.md).
 
 When a target chart removes a configured key, export the installed values,
 remove or migrate the unsupported keys in an explicit values file, and reconcile
@@ -282,12 +268,19 @@ the newer chart's keys; reusing newer values directly will be rejected. Database
 migrations remain forward-only: an older binary may require restoring its
 matching database backup before it can run.
 
-Re-running `oberth install` and restoring a backup intentionally retain
-`--reuse-values`: these paths preserve installed chart defaults, while restore
-sets only the database identities it needs. Every newly introduced value must
-therefore have a template fallback. The v0.17.53 raw-values render (without
-the removed values) and actual Helm install/restore tests cover the
-`utilityImage` fallback.
+Upgrade, install re-runs and restore remove only the retired installer-written
+`secretstore.transit.enabled`, `secretstore.transit.mount` and
+`secretstore.transit.key` leaves from stored Helm snapshots and print one note.
+They preserve live feature settings, including operator-set false, empty and
+zero values. Explicit unsupported values in a new values file or override still
+fail schema validation.
+
+Re-running `oberth install` and restoring a backup preserve installed live
+chart defaults. When retired installer keys are present, the CLI passes a
+cleaned snapshot with `--reset-values` so Helm cannot reintroduce them from the
+old chart. Other reuses retain their normal merge behavior. The historical
+v0.22.3 values render and actual Helm upgrade/install/restore tests cover this
+path and the utility image configuration.
 
 ## How it works
 
@@ -306,9 +299,10 @@ the removed values) and actual Helm install/restore tests cover the
    authorizes a parked SHA, merges locally, proves the merged tree for parked
    sources or a divergent target, and pushes without force.
 5. **Release** — a tag reachable from the default branch runs the release
-   Workflow. The presence of declared secret-store paths in the
-   `oberth.ci/secret-paths` annotation selects the credentialed
-   ServiceAccount and its projected token. Release steps wrap their command
+   Workflow. Each secret-consuming step needs declared paths in
+   `oberth.ci/secret-paths` and explicit step grants in its repository/upstream.
+   Only the granted main container receives its store settings and token.
+   Release steps wrap their command
    with `oberth secretstore exec`, which fetches the approved secrets into
    private files on verified tmpfs and redacts child output. Only
    after every burn is terminal green does Oberth sync the exact admitted
@@ -467,10 +461,10 @@ tools (a call to one is still refused by the server); available operations are:
 | `uplink_list` | List public uplink identities and usage. Unscoped admin only. No tokens are returned. |
 | `uplink_revoke` | Revoke an uplink SSH key and bearer immediately. Unscoped admin only; audited; the last active unscoped admin cannot be revoked. |
 | `uplink_rotate` | Finish rotation to an already registered active replacement key with identical identity, admin status and scope, atomically revoking the selected old credential. Unscoped admin only. Issue the replacement through uplink add first; no key material crosses MCP. |
-| `access_dismiss` | Dismiss one stale pending declaration. Unscoped admin only. Copy its exact repository key from access_list; legacy or orphaned keys are supported. Scoped uplinks are refused. Audited; later admission can observe it again. |
-| `access_list` | List secret access grants for a repository. |
-| `access_allow` | Grant a step access to a secret path. Requires admin uplink. |
-| `access_revoke` | Revoke a step's access to a secret path. Requires admin uplink. |
+| `access_dismiss` | Dismiss one stale pending declaration. Unscoped admin only. Copy its exact repository and workflow file from access_list; orphaned repository keys are supported. Scoped uplinks are refused. Audited; later admission can observe it again. |
+| `access_list` | List secret access grants, including their exact workflow file, for a repository. |
+| `access_allow` | Grant a step in an exact workflow file access to a secret path. Requires admin uplink. |
+| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path. Requires admin uplink. |
 | `workflow_capability_grant` | Grant operator-owned Kubernetes API access to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here. |
 | `workflow_capability_revoke` | Revoke a repository's operator capability. New submissions and restart adoption refuse the revoked authority. Running Kubernetes workloads remain operator-owned. Administrator only; audited. |
 | `workflow_capability_get` | Read the repository's current or revoked operator capability within the caller's upstream scope. |
@@ -550,21 +544,19 @@ unauthenticated.
 
 - Workflow Pods use server-enforced identities, dropped capabilities,
   read-only root filesystems, seccomp `RuntimeDefault`, bounded resources and
-  deadlines. Credentialed main containers and the executor receive separate,
+  deadlines. Granted main containers and the executor receive separate,
   scoped projected tokens; ordinary build containers receive no store token.
   [Non-root test leaves](docs/nonroot-test-leaves.md) have a separately enforced
   UID and controller contract.
-- **Declared paths and the trigger together are the security boundary.**
-  Pipelines without declared secret-store paths bind to the pipeline
-  ServiceAccount and receive no secrets on either trigger. Release pipelines
-  with approved paths bind to the credentialed ServiceAccount — the only
-  identity whose OpenBao role carries release-secret grants; branch (CI)
-  pipelines with approved paths bind to the separate ci-secrets
-  ServiceAccount, whose role reaches the upstream subtree only, so release
-  credentials are unreachable from a branch push at the Vault layer. Branch
-  pipelines may only declare upstream-scoped paths; system-namespace paths
-  require a release trigger and an administrator allowlist entry. All fetched
-  secret-store values are delivered to memory only.
+- **Secret access is granted per step.** The reviewed consumer command,
+  declared paths and current step grants determine store delivery. Workflows
+  without granted consumers use the tokenless pipeline identity on either
+  trigger. Granted release steps use the release-login identity; granted CI
+  steps use the separate ci-secrets identity with upstream-only policy. Store
+  address, CA, helper binary and login token go only to the granted main
+  container. Helpers and other steps receive none of those settings. Branch
+  steps cannot consume system-namespace paths. All fetched store values are
+  delivered to memory only. See [secret delivery](docs/argo-secret-delivery.md).
 - Secret-store values never appear in etcd, Kubernetes objects, node disk, or
   logs; per-run store tokens are read-only, short-lived, and revoked after
   every fetch. Every fetch is an actor-attributed entry in the audit chain.

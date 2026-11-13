@@ -197,7 +197,7 @@ func SetupProductionSecretStore(ctx context.Context, cfg Config, deps Deps, open
 			rootToken = strings.TrimSpace(string(tokenBytes))
 		}
 		if rootToken == "" {
-			_, _ = fmt.Fprintln(deps.Output, "Cannot enable trusted Plan Transit: a re-run has no root token available to positively verify the managed mount, key, policy, and role.")
+			_, _ = fmt.Fprintln(deps.Output, "Cannot verify the server PKI configuration: a re-run has no root token available.")
 			_, _ = fmt.Fprintln(deps.Output, "To verify or repair the configuration, supply the root token without exposing it in shell history:")
 			_, _ = fmt.Fprintln(deps.Output, "")
 			_, _ = fmt.Fprintln(deps.Output, "    read -rs BAO_TOKEN && export BAO_TOKEN")
@@ -205,7 +205,7 @@ func SetupProductionSecretStore(ctx context.Context, cfg Config, deps Deps, open
 			_, _ = fmt.Fprintln(deps.Output, "")
 			_, _ = fmt.Fprintln(deps.Output, "Keep every install flag unchanged, especially --namespace, --openbao-namespace, --chart-version and --openbao-chart-version.")
 			_, _ = fmt.Fprintln(deps.Output, "Or run scripts/setup-secretstore.sh from an already-authenticated bao CLI session.")
-			return SecretStoreResult{}, fmt.Errorf("%s is required to verify production Transit provisioning before Oberth can be enabled", baoTokenEnvVar)
+			return SecretStoreResult{}, fmt.Errorf("%s is required to verify production server PKI provisioning before Oberth can be enabled", baoTokenEnvVar)
 		}
 		_, _ = fmt.Fprintf(deps.Output, "Using the root token to verify the secret-store configuration.\n")
 	}
@@ -218,9 +218,7 @@ func SetupProductionSecretStore(ctx context.Context, cfg Config, deps Deps, open
 	if err != nil {
 		return SecretStoreResult{}, fmt.Errorf("configure secret store: %w", err)
 	}
-	if !configured.TrustedTransitVerified {
-		return SecretStoreResult{}, errors.New("production secret-store setup completed without verified Transit provisioning")
-	}
+
 	return configured, nil
 }
 
@@ -245,8 +243,8 @@ func printProductionCredentials(w io.Writer, initResult baoInitResult, color boo
 	_, _ = fmt.Fprintln(w)
 }
 
-// OberthCredentialedPolicy returns the HCL policy for credentialed pipeline
-// templates. It grants read access to registered upstream subtrees only; the
+// OberthCredentialedPolicy returns the HCL policy for the store login identity
+// used by granted steps. It grants read access to registered upstream subtrees only; the
 // approval table in Oberth's database is the fine-grained admission gate,
 // and any non-upstream paths (e.g. release secrets) require explicit
 // approval-table entries that are synced to the policy via

@@ -33,16 +33,16 @@ const PerStepPrefix = "oberth-step-"
 // identity. The name is shared across the ServiceAccount, the Vault policy,
 // and the Vault role, because they are a single identity.
 //
-// The hash input is the full canonical quad (upstream/org/repo/step) so two
+// The hash input is the full canonical tuple (upstream, org, repo, workflow file, step) so two
 // steps in different repos that sanitise to the same readable portion get
 // different names.
-func PerStepName(upstream, org, repo, step string) string {
-	canonical := upstream + "/" + org + "/" + repo + "/" + step
+func PerStepName(upstream, org, repo, workflow, step string) string {
+	canonical := strings.Join([]string{upstream, org, repo, workflow, step}, "\x00")
 	digest := sha256.Sum256([]byte(canonical))
 	hashSuffix := hex.EncodeToString(digest[:])[:12]
 
 	var safe strings.Builder
-	for _, c := range strings.ToLower(upstream + "-" + org + "-" + repo + "-" + step) {
+	for _, c := range strings.ToLower(upstream + "-" + org + "-" + repo + "-" + workflow + "-" + step) {
 		switch {
 		case c >= 'a' && c <= 'z',
 			c >= '0' && c <= '9',
@@ -69,12 +69,12 @@ func PerStepName(upstream, org, repo, step string) string {
 // string ("upstream/org/repo") and a step name. It splits the qualified repo
 // and delegates to PerStepName. Returns empty string if the repo is not in
 // the expected 3-segment format.
-func PerStepNameFromQualified(qualifiedRepo, step string) string {
+func PerStepNameFromQualified(qualifiedRepo, workflow, step string) string {
 	parts := strings.SplitN(qualifiedRepo, "/", 3)
 	if len(parts) != 3 {
 		return ""
 	}
-	return PerStepName(parts[0], parts[1], parts[2], step)
+	return PerStepName(parts[0], parts[1], parts[2], workflow, step)
 }
 
 // HasPerStepPrefix reports whether name begins with the per-step prefix.

@@ -336,7 +336,7 @@ func TestRestartTerminalizesPromotionWhoseRunningCIHasNoPublicationIntent(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recoveredRun.Status != model.RunInterrupted || recoveredPromotion.Status != model.PromotionInterrupted ||
+	if recoveredRun.Status != model.RunFailed || recoveredPromotion.Status != model.PromotionFailed ||
 		recoveredPromotion.RunID != enqueued.ID {
 		t.Fatalf("restart recovery = run %#v, promotion %#v", recoveredRun, recoveredPromotion)
 	}

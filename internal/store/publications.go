@@ -115,8 +115,8 @@ RETURNING `+publicationColumns,
 	}
 	if spec.RunID != "" {
 		result, updateErr := tx.ExecContext(ctx, `
-UPDATE runs SET phase = 'publishing', updated_at = ?
-WHERE id = ? AND status = 'running'`, now, spec.RunID)
+UPDATE runs SET phase = 'publishing', error = CASE WHEN ? THEN ? ELSE error END, updated_at = ?
+WHERE id = ? AND status = 'running'`, spec.ArtifactCollectionDeadline, model.ArtifactCollectionDeadlineReason, now, spec.RunID)
 		if updateErr != nil {
 			return model.Publication{}, fmt.Errorf("mark run publishing: %w", updateErr)
 		}
@@ -318,6 +318,10 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 		}
 		if runPassed {
 			runStatus, phase, runError = model.RunPassed, "passed", ""
+		}
+		runError, err = publicationRunMessage(ctx, tx, publication.RunID, runError)
+		if err != nil {
+			return model.PublicationFinalization{}, err
 		}
 		finalization.Run, err = scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
@@ -571,9 +575,13 @@ func (s *Store) RetryFailedPublication(ctx context.Context, runID, promotionID, 
 
 	// Verify and transition the owning run back to the publishing state.
 	if failed.RunID != "" {
+		message, err := publicationRunMessage(ctx, tx, failed.RunID, "")
+		if err != nil {
+			return model.Publication{}, err
+		}
 		result, updateErr := tx.ExecContext(ctx, `
-UPDATE runs SET status = 'running', phase = 'publishing', error = '', finished_at = NULL, updated_at = ?
-WHERE id = ? AND status = 'failed' AND (phase = 'publishing' OR (phase = 'infrastructure' AND error LIKE ?))`, now, failed.RunID, pushretry.Failure("")+"%")
+UPDATE runs SET status = 'running', phase = 'publishing', error = ?, finished_at = NULL, updated_at = ?
+WHERE id = ? AND status = 'failed' AND (phase = 'publishing' OR (phase = 'infrastructure' AND error LIKE ?))`, message, now, failed.RunID, pushretry.Failure("")+"%")
 		if updateErr != nil {
 			return model.Publication{}, fmt.Errorf("reactivate publishing-failed run: %w", updateErr)
 		}
@@ -724,4 +732,16 @@ func publicationFailedReason(publication model.Publication, failure string) stri
 		return reason + "; retry with promote_retry"
 	}
 	return reason + "; retry with run_rerun, which re-publishes without re-running steps"
+}
+
+// Publication transport messages may change without erasing missing output evidence.
+func publicationRunMessage(ctx context.Context, tx *sql.Tx, runID, message string) (string, error) {
+	var previous string
+	if err := tx.QueryRowContext(ctx, `SELECT error FROM runs WHERE id=?`, runID).Scan(&previous); err != nil {
+		return "", fmt.Errorf("read publication run evidence: %w", err)
+	}
+	if _, present := model.SplitArtifactCollectionDeadline(previous); present {
+		return model.WithArtifactCollectionDeadline(message), nil
+	}
+	return message, nil
 }

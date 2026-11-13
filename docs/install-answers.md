@@ -16,6 +16,8 @@ config:
   InstallSecretStore: true
   Namespace: oberth
   ArgoNamespace: oberth-argo
+  ArgoParallelism: 4
+  ArgoNamespaceParallelism: 0
   ClientHost: localhost
   ClientAccess: none
   ForgeType: github
@@ -30,7 +32,13 @@ The version 1 `config` object uses the exported field names of
 writes the complete object; all fields are optional and use the same defaults
 as the engine. Unknown or duplicate keys, including nested keys, are refused.
 Strings are strings, booleans are booleans, lists contain strings, optional
-parallelism values are integers, and `ArgoSyncLimits` maps names to integers.
+parallelism values are integers. `ArgoParallelism` sets Argo's native
+`controller.parallelism`; `ArgoNamespaceParallelism` sets
+`controller.namespaceParallelism`. New releases default to 4 and 0 respectively
+without CPU or node calculations. Omit either field to preserve that setting on
+an existing Argo release. An explicit 0 means unlimited. Both fields appear in
+Review and can be edited there in setup, or overridden with
+`--argo-parallelism` and `--argo-namespace-parallelism`.
 `Timeout` is an integer number of nanoseconds. `Release` has `Dir`, `Origin`, and
 `ChartRepository` strings. Every wizard answer maps to this object. Use file
 paths for imported key material and Helm values; never put a credential into

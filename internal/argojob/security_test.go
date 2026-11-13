@@ -37,7 +37,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
       initContainers:
-        - name: init
+        - name: prepare
           image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           command: [/bin/true]
       sidecars:
@@ -282,9 +282,9 @@ spec:
 // spent a version number and half an hour to discover a value was missing.
 func TestBuildRefusesAReleaseThatCanNeverVerifyTheStore(t *testing.T) {
 	t.Parallel()
-	// The vault CA check only fires for credentialed runs (those with declared
-	// paths). Use a document with a declared path so the release is credentialed.
-	withPaths := strings.Replace(admissibleSecurityDocument, "spec:\n",
+	// The CA check applies to granted store consumers. This main step
+	// declares its path and has an explicit wildcard fixture grant.
+	withPaths := strings.Replace(strings.Replace(admissibleSecurityDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1), "spec:\n",
 		"metadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\nspec:\n", 1)
 	credentialedRelease := func() Request {
 		request := releaseRequestWithAnchor(withPaths)

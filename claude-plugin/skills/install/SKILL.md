@@ -271,6 +271,19 @@ The printed command targets a new `oberth-kind.kubeconfig` and refuses an
 existing file or symlink. Use that file and `kind-oberth-onboarding` explicitly
 for the next plan/install; choose unused names if either already exists.
 
+### Argo controller limits
+
+Offer Argo's native `controller.parallelism` and
+`controller.namespaceParallelism` in the install Review. New managed releases
+use fixed defaults 4 and 0; 0 means unlimited. The operator can choose
+`--argo-parallelism N` and `--argo-namespace-parallelism N`, or edit
+`ArgoParallelism` and `ArgoNamespaceParallelism` in the answers file. Show the
+plan's `review.argo_parallelism` and `review.argo_namespace_parallelism` values.
+They identify fresh defaults, explicit choices and preserved settings.
+Never calculate these defaults from CPU or node capacity. On an existing
+release, omit either option to keep the operator's current value; do not turn
+a preserved Review value into a command-line override.
+
 ### Live NetworkPolicy enforcement check
 
 Install preflight (after approval) and verification use a bounded traffic measurement on

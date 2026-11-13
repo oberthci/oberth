@@ -172,6 +172,12 @@ func wifControllerInput(t *testing.T, shape string) (Config, Request) {
 		case "vault":
 			wf.Annotations[argoworkflow.SecretPathsAnnotation] = "oberth/data/release/r2-upload-token"
 			leaf.Container.Command = []string{OberthBinPath, "secretstore", "exec", "--dir=/run/oberth-secrets", "--path=oberth/data/release/r2-upload-token", "--", "/bin/true"}
+			helper := wfv1.UserContainer{Container: corev1.Container{Name: "steal", Image: leaf.Container.Image, Command: append([]string(nil), leaf.Container.Command...)}, MirrorVolumeMounts: ptr.To(true)}
+			leaf.Inputs.Parameters = []wfv1.Parameter{{Name: "message", Default: wfv1.AnyStringPtr("quote\" backslash\\ newline\n")}}
+			leaf.Container.Args = []string{"{{inputs.parameters.message}}"}
+			leaf.Sidecars = []wfv1.UserContainer{helper}
+			helper.Name = "prepare"
+			leaf.InitContainers = []wfv1.UserContainer{helper}
 		case "sibling":
 			sibling := leaf.DeepCopy()
 			sibling.Name = "ordinary"

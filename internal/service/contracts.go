@@ -98,17 +98,12 @@ type RunQueueStore interface {
 	SetRunPolicyWaiting(context.Context, string, bool) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
 	SetRunWorkflowName(context.Context, string, string) (model.Run, error)
-	SetRunCredentialed(context.Context, string) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
 	CompleteRunCancellation(context.Context, string, string) error
 	CompleteObservedRunCancellation(context.Context, model.RunCancellation) error
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
 	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)
 	RunningRunsWithJobs(context.Context) ([]model.Run, error)
-	// RequeueStrandedRun resets one unexecuted stranded run under the same ID;
-	// the durable cancellation ledger fences any old Workflow before another claim.
-	// store.ErrRequeueIneligible signals the caller must terminalize instead.
-	RequeueStrandedRun(context.Context, string) (model.Run, error)
 }
 
 type ReceiveRecorder interface {
@@ -208,8 +203,8 @@ type AuditActionReader interface {
 // store directly.
 type SecretAccessStore interface {
 	SecretAccessList(ctx context.Context, repo string, includeRevoked bool) ([]store.SecretAccessGrant, error)
-	Grant(ctx context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error)
-	Revoke(ctx context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error)
+	Grant(ctx context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error)
+	Revoke(ctx context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error)
 	// QualifiedRepoName resolves a repository ID to its canonical
 	// "upstream/org/repo" form. Used by access grant/revoke handlers to
 	// store grants with identity-safe keys (#245 BLOCKER B).
@@ -358,12 +353,12 @@ type LogStore interface {
 }
 
 type WorkflowRequest struct {
-	DemandReceipt *argoworkflow.DemandReceipt
+	SourceReceipt *argoworkflow.SourceReceipt
 	WorkflowName  string `json:"WorkflowName"`
 	Run           model.Run
 	Repository    model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
-	// resolved by the scheduler for all credentialed runs. Used to
+	// resolved by the scheduler for each submission. Used to
 	// construct canonical per-repo identity keys.
 	UpstreamName string
 	// UpstreamOrg is the registered org of the repository's upstream
@@ -375,10 +370,6 @@ type WorkflowRequest struct {
 	// PipelineFile identifies the document under read-only release preflight.
 	PipelineFile string
 	SourceDir    string
-	// Exclusive is the sorted exclusive-class set admission granted (#1499),
-	// read from the fragment-resolved graph. Build refuses a Workflow whose
-	// resolved classes differ.
-	Exclusive []string
 }
 
 type JobResult struct {
@@ -424,8 +415,8 @@ type JobController interface {
 }
 
 // ErrAdoptionRefused marks an existing Workflow that startup must not adopt
-// (binding mismatch, invalid size declaration, conflicting group). Startup
-// stops until the operator deletes that Workflow; recovery then re-queues it.
+// (binding mismatch, conflicting ownership). Recovery fails that run and
+// leaves the original Workflow for operator inspection.
 var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 
 // JobAdopter restores observation of an existing Workflow without submitting it.
@@ -460,15 +451,6 @@ type ReleaseJobController interface {
 // steps appear as execution reaches them.
 type PipelinePlanner interface {
 	PlannedSteps(context.Context, WorkflowRequest) ([]runprogress.PlannedStep, error)
-}
-
-// PipelineCredentialDetector reports whether the checked-out pipeline declares
-// secret-store paths. It reads the reviewed document
-// without evaluating it. An engine that does not implement this interface is
-// assumed to have no credentialed CI pipelines; release runs are always
-// credentialed regardless.
-type PipelineCredentialDetector interface {
-	PipelineCredentialed(context.Context, WorkflowRequest) (bool, error)
 }
 
 type Health interface {

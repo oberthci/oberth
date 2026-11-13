@@ -162,7 +162,7 @@ func TestPromoteRetryReusesExactTransientPushCandidate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pub, err := s.beginRunPublication(t.Context(), f.repo, pending, promotion)
+			pub, err := s.beginRunPublication(t.Context(), f.repo, pending, promotion, JobResult{})
 			if err != nil {
 				t.Fatal(err)
 			}

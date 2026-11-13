@@ -88,7 +88,7 @@ func TestIsolationMatchesActualControllerObservation(t *testing.T) {
 			var before, submitted corev1.Pod
 			fixture(shape+"-before-patch.json", &before)
 			fixture(shape+"-submitted.json", &submitted)
-			assertHistoricalPipelinePriority(t, &submitted)
+			assertHistoricalWorkflowPriority(t, &submitted)
 			if before.Spec.NodeSelector["pool"] != "ci" || submitted.Spec.NodeSelector["pool"] != "ci" {
 				t.Fatal("Argo workflowDefaults nodeSelector was replaced")
 			}

@@ -281,9 +281,8 @@ func writeValidateRepo(t *testing.T, files map[string]string) string {
 	return root
 }
 
-// Removed size annotations fail validation with what replaced them, as
-// server admission does.
-func TestValidateRefusesRemovedSizeAnnotations(t *testing.T) {
+// Retired Workflow annotation names have no resource-admission effect.
+func TestValidateIgnoresRetiredSizeAnnotations(t *testing.T) {
 	t.Parallel()
 	for _, annotation := range []string{"oberth.ci/size: S", "oberth.ci/size-by-trigger: branch=M"} {
 		document := strings.Replace(buildYAMLDemo, "kind: Workflow\n", "kind: Workflow\nmetadata:\n  annotations:\n    "+annotation+"\n", 1)
@@ -292,7 +291,7 @@ func TestValidateRefusesRemovedSizeAnnotations(t *testing.T) {
 		}
 		var output bytes.Buffer
 		err := runValidate(context.Background(), []string{writeValidateRepo(t, map[string]string{"build.yaml": document})}, &output)
-		if err == nil || !strings.Contains(output.String(), "is removed") || !strings.Contains(output.String(), "resources block") {
+		if err != nil {
 			t.Fatalf("%s: %v\n%s", annotation, err, output.String())
 		}
 	}

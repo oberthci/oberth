@@ -55,12 +55,9 @@ func TestSetupProductionSecretStoreInteractiveTokenPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configured, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !configured.TrustedTransitVerified {
-		t.Fatalf("interactive token prompt did not lead to verified Transit: %+v", configured)
 	}
 
 	output := buf.String()

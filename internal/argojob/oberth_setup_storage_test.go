@@ -14,7 +14,7 @@ func TestOberthGoToolSetupScratchUsesPrivateWorkClaim(t *testing.T) {
 		t.Run(cacheRoot, func(t *testing.T) {
 			config := oberthConfig()
 			config.CICacheRoot = cacheRoot
-			workflow, err := Build(config, Request{
+			workflow, err := buildOberthPipeline(config, Request{
 				RunID: "setup-storage", Name: "setup-storage", Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 				Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml"), ApprovedSecrets: map[string]bool{},
 			})

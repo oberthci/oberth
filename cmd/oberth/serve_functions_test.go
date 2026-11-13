@@ -313,8 +313,6 @@ func TestParseServeOptionsValidatesSecretStoreFlagsWithoutAddress(t *testing.T) 
 		{"--secretstore-sa-token", "/var/run/token"},
 		{"--secretstore-path", "oberth/data/test"},
 		{"--secretstore-insecure-http"},
-		{"--secretstore-transit-mount", "transit"},
-		{"--secretstore-transit-key", "plan-key"},
 	} {
 		arguments := append(append([]string(nil), argoBase...), extra...)
 		if _, err := parseServeOptions(arguments, io.Discard); err == nil {
@@ -331,20 +329,6 @@ func TestParseServeOptionsValidatesSecretStoreAddressRequiresRole(t *testing.T) 
 	}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "requires --secretstore-role") {
 		t.Fatalf("missing role error = %v", err)
-	}
-}
-
-func TestParseServeOptionsValidatesTransitRequiresBoth(t *testing.T) {
-	t.Parallel()
-	_, err := parseServeOptions([]string{
-		"--argo-namespace", "argo-pipelines",
-		"--secretstore-address", "https://bao:8200",
-		"--secretstore-role", "oberth",
-		"--secretstore-transit-mount", "transit",
-		// missing --secretstore-transit-key
-	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "transit requires both") {
-		t.Fatalf("transit without key error = %v", err)
 	}
 }
 
@@ -739,21 +723,6 @@ func TestParseServeOptionsRejectsNonCleanAuditPaths(t *testing.T) {
 				t.Fatalf("%s: error = %v", test.name, err)
 			}
 		})
-	}
-}
-
-func TestParseServeOptionsRejectsSecretStoreTransitInsecure(t *testing.T) {
-	t.Parallel()
-	_, err := parseServeOptions([]string{
-		"--argo-namespace", "argo",
-		"--secretstore-address", "https://bao:8200",
-		"--secretstore-role", "oberth",
-		"--secretstore-transit-mount", "transit",
-		"--secretstore-transit-key", "plan-key",
-		"--secretstore-insecure-http",
-	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "verified HTTPS") {
-		t.Fatalf("transit insecure error = %v", err)
 	}
 }
 

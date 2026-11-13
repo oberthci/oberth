@@ -382,19 +382,13 @@ trust assumptions and complete invalidation rules.
   the warning or `OBERTH_REQUIRE_SWAPLESS` refusal. A device name alone never
   establishes memory-only storage; the existing absent `/proc/swaps`
   portability behavior is unchanged.
-- Trusted-plan artifacts use the same short-lived Kubernetes-auth client and
-  exactly one non-exportable OpenBao Transit key. The role has `update` only
-  on the exact managed encrypt and decrypt endpoints; it has no key-management,
-  export, backup, rotate, list, or wildcard Transit capability. Transit hard
-  rejects the development HTTP override before login or network I/O.
 - Installer-managed production OpenBao starts with verified TLS from its first
   listener: a credential-free bootstrap Pod writes the CA and server keys
   directly to the retained OpenBao PVC before Helm creates the StatefulSet.
   Private keys never enter Helm values, a Kubernetes Secret, etcd, or pod
   logs. Only the public CA certificate is copied into Oberth's ConfigMap trust
   mount. Existing HTTP installs stage the same bundle on their current PVC,
-  publish the TLS config, then roll the chart's OnDelete pod before Transit is
-  enabled.
+  publish the TLS config, then roll the chart's OnDelete pod.
 
 ### Authenticated execution targets
 
@@ -499,7 +493,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
   schedule triggers share that identity. Retry, rerun,
-  replacement, stranded-run requeue and Workflow adoption retain it. Legacy
+  replacement and Workflow adoption retain it. Historical
   rows stay empty; no current file is used to guess their entry. Non-schedule
   runs cannot carry a nonempty entry. `oberth-schedule` is a reserved,
   server-owned Workflow parameter: any repository declaration in
@@ -533,20 +527,15 @@ Original object UID and intent continue to fence recovery and cleanup. See
   evaluates); this server replaces that value. `valueFrom`, `default`,
   `enum`, a duplicate, or an out-of-vocabulary value is refused. A document
   that never mentions the parameter is submitted byte-identical to before.
-  The removed `oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit`
-  annotations are refused at admission; a run that must not
-  overlap another declares a native Argo mutex or semaphore. The
+  A run that must not overlap another declares a native Argo mutex or
+  semaphore. Retired Workflow annotations are inert metadata. The
   `concurrency_groups` tool, `oberth admission groups` and
   `system_status.admission.groups` are gone; the `runs.concurrency_group`,
   `runs.concurrency_limit` historical columns remain unread; the orphaned declaration table is dropped. Concurrency-group membership no longer
   restricts cancellation.
 - Workflow resources, placement, parallelism, synchronization, priority, deadlines and retries are authored in repository YAML. Oberth configures only Argo global parallelism; it does not inject release locks or priority, manage semaphore ConfigMaps, or apply CPU/pressure/disk/hold/startup gates. Requests and deadlines are optional.
 - Assisted lifecycle settings (`assist.*`), cron entry settings (`schedules.*`), and security execution-target/profile configuration remain operator-owned. Assisted holds retain their explicit deadline extension and keep their Argo slot and locks.
-- Semaphore limits are operator-owned in `oberth-sync-limits` in the pipeline namespace. The fixed name and same-namespace restriction protect ConfigMap data from disclosure through Argo errors. The installer removes the retired managed object on upgrade; operators recreate required keys. Named mutexes and native Argo priority pass unchanged; no release mutex is reserved or injected.
-- Server-owned helper operations (secret-store delivery, trusted plan
-  capture/acknowledge/deliver/load) are exec'd through the same
-  `go -C /work/src/.oberth run .` invocation with explicit flags; the SDK's
-  `Main` dispatches them before any pipeline evaluation.
+- Semaphore limits are operator-owned in `oberth-sync-limits` in the pipeline namespace. The fixed name and same-namespace restriction protect ConfigMap data from disclosure through Argo errors. The installer leaves existing semaphore objects and their ownership to operators. Named mutexes and native Argo priority pass unchanged; no release mutex is reserved or injected.
 - Pipeline steps receive `OBERTH_REPO`, `OBERTH_REF`, `OBERTH_SHA`,
   `OBERTH_TRIGGER`, and `OBERTH_STEP` (the Argo template name), plus the
   documented Go cache variables. `OBERTH_STEP` is set on every template for
@@ -616,50 +605,6 @@ Original object UID and intent continue to fence recovery and cleanup. See
   `$OBERTH_SECRETSTORE_DIR/<name>/<key>` (`/run/secrets/secretstore`, tmpfs);
   the runner refuses to start burns until the delivery manifest verifies and
   fails closed on timeout. Branch burns receive zero secret-store secrets.
-- A repository may declare its per-trigger Job resource tier with one literal
-  `var JobSizes = map[string]string{"ci": "M", "release": "L"}` — keys are the
-  trigger names (`ci`, `release`, `plan`, `apply`), values the public tiers
-  (`S`, `M`, `L`, `XL`). Like the secret declarations, it is statically
-  parsed, never evaluated; computed keys or values are rejected. An absent
-  declaration or trigger key selects `M`. Per-step `WithSize` remains runtime
-  step metadata inside the Job (usage summaries, per-step telemetry) and does
-  not set the Job's resources.
-- A repository that declares trusted infrastructure work must provide one
-  `Plan` burn and one `Apply` burn with the same literal `.Backend("...")`, plus
-  a nonempty literal `var PlanLockFiles = []string{"..."}`. The server scopes
-  the backend identity to the registered repository, digests bounded regular
-  lock files without following symlinks, and admits Plan only through an
-  explicit actor-attributed `plan` call for one exact already-green SHA and the
-  target's exact current base.
-- Trusted credentials are phase-explicit literal maps:
-  `PlanSecretStoreSecrets` may contain only
-  `oberth/upstream/<org>/<repo>/plan/<name>` paths, while
-  `ApplySecretStoreSecrets` may contain only the corresponding `/apply/`
-  paths. Legacy, org-wide, system-allowlist, raw KV, and cross-phase paths fail
-  before store login, fetch, or Job creation. Plan paths are operator-owned
-  read-only capabilities and Apply paths are operator-owned mutation
-  capabilities; Oberth enforces namespace separation, not the external
-  credential's privileges. A present empty value remains a valid zero-byte
-  delivered file and is never installed as an empty masking pattern.
-- Plan and Apply expose the same `ctx.Plan.Path` interface
-  (`/run/oberth-plan/terraform.plan`) but share no writable volume or host
-  cache: their Go module/build caches use separate `plan` and `apply` trust
-  tiers. Plan writes at most 16 MiB at the fixed path;
-  server-owned `save-plan` verifies and encrypts it through OpenBao Transit
-  before persistence on the Oberth `/data` PVC. Apply uses server-owned
-  `load-plan` and `verify-plan` in an init container, then mounts the admitted
-  tmpfs file read-only into repository steps. `WithSecretEnv(env, delivery,
-  key)` is valid only in its statically declared Plan or Apply phase and
-  resolves an already-admitted phase secret immediately before exec.
-- A ready plan binds repository/upstream, source and result SHA, target and
-  exact base, green/Plan run, backend, Periapsis/config/tool/lock identities,
-  artifact digest/size, actor, creation/expiry, and single consumption. An
-  Apply-capable promotion must name that exact `plan_id`, remains
-  fast-forward-only, publishes Git first, and then durably enqueues one Apply.
-  Promotion publication evidence stays distinct from Apply status: Apply may
-  fail after publication and never implies rollback. Authorization expiry is
-  checked before attachment; an attached/applying plan is a committed
-  obligation and is not replayable or replaced by a fresh plan.
 - Oberth's own repository Release DAG may publish and verify immutable release
   artifacts, but it receives no upstream-forge mutation credential and performs
   no forge release or ref mutation. Oberth alone publishes the exact admitted
@@ -1263,9 +1208,9 @@ Original object UID and intent continue to fence recovery and cleanup. See
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
   | queued publication retry | `running` | publication attempt/backoff message; from publication state |
   | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
-  | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `superseded` | `server restart, re-queued as <run12>` |
+  | Workflow confirmed absent after a server restart, including work never submitted | `failed` | `interrupted by server restart` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
-  | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
+  | observed Workflow interrupted by server restart, requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
   Raw status fields retain their values, but existing `display_status` values
   can change from `cancelled` to `superseded` when a successor is known.
@@ -1347,10 +1292,8 @@ Original object UID and intent continue to fence recovery and cleanup. See
   FIFO CI run for the exact accepted commit. A newer push to the same repository
   and branch marks the older run `interrupted`, records which newer run
   superseded it, and creates a durable cancellation obligation for any in-flight
-  Kubernetes Job. Settling that obligation also withdraws the superseded run's
-  admission reservation when it was still preparing or waiting, without a
-  restart; a granted reservation is released only by its owner, once the
-  Workflow is terminal or its deletion was accepted.
+  Workflow. The scheduler cancels an in-flight create and retries deletion
+  until the Workflow is absent. Submission tracking reserves no capacity.
 - A branch deletion atomically cancels that ref's unfinished non-promotion runs
   with phase `cancelled` and reason `ref deleted`, recording the same durable
   cleanup obligations. Deferred receives retain a cancelled reason and cannot
@@ -1443,7 +1386,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   exponential backoff (250ms to 5s), until recovery or owner shutdown. They do
   not return a fatal scheduler completion, replay a Workflow create/Wait/Git
   push, or change an already observed run result. Lost commit acknowledgements
-  resolve the exact claim/requeue/publication identity before retrying.
+  resolve the exact claim/publication identity before retrying.
   Intentional retry backoff is excluded from local dispatch liveness; a DB
   call that ignores its deadline remains detectable as a local wedge. Warnings carry
   `operation`, `retry_pending`, `retries_total` and `retry_in`; unscoped
@@ -1512,18 +1455,15 @@ Original object UID and intent continue to fence recovery and cleanup. See
   Workflow is deleted and only that run fails with phase `infrastructure`;
   the scheduler keeps running. If that deletion also fails, the run stays
   owned for the next restart, exactly as for a submitted run.
-  A missing branch Workflow, or a claimed branch run without a Job, retains
-  the requeue-with-supersede fallback (#270): the old run links to a queued
-  copy of the same commit and any deletion obligation completes before the
-  replacement is claimed. The copy starts uncredentialed and re-earns delivery
-  through normal admission. A replacement inherits the stranded run's
-  `admission_sequence`, retaining its FIFO place while receiving a fresh
-  `queue_sequence` for identity and unchanged history paging (#1092).
+  A confirmed-absent Workflow, or a claimed run without a Workflow name,
+  fails with `interrupted by server restart`. This applies to branch, tag,
+  release, and promotion runs. Recovery never automatically requeues or
+  re-fires them. Existing Workflows are adopted; ambiguous creation remains
+  under bounded observation until adoption or confirmed absence. API read
+  errors do not establish absence. An explicit retry or rerun creates a new
+  run ID with its own queue and admission sequences.
   Argo tag pipelines require the durable release flag; a historical tag Job
-  without that capability keeps its conservative fallback and never gains
-  release/WIF authority from its ref name. A missing promotion/tag/release
-  Workflow, or one that never acquired a Job name, is interrupted without
-  automatic re-fire.
+  without that capability never gains release/WIF authority from its ref name.
   Publication ownership is durable and takes precedence over Workflow
   observation: recovery never submits or adopts that run again.
   A passing adopted promotion uses its immutable target/base/result through
@@ -1538,11 +1478,6 @@ Original object UID and intent continue to fence recovery and cleanup. See
   run/publication/promotion owners permit terminal cleanup. Explicit cancellation and newer-push
   supersession still delete the exact owned Workflow, and terminal runs are
   never adopted or automatically re-fired.
-  Upgrade note: the first upgrade to a release with adoption is still
-  disruptive, because the old process acts on its own SIGTERM: it re-queues
-  its running branch runs, and a process without promotion/tag/release
-  adoption deletes those Workflows and records them as interrupted
-  ("scheduler stopped"). Adoption applies from the next restart onward.
 - Green branch runs force-sync that same branch to the upstream forge. Red
   default-branch and scheduled branch runs create or update one open CI issue
   per repository and branch with the new SHA, a bounded (16 KiB) failure excerpt,
@@ -1652,16 +1587,16 @@ Original object UID and intent continue to fence recovery and cleanup. See
   TTL. A document's own `serviceAccountName` is never honoured — Vault validates
   identity, not intent, so a branch push that could name the release identity
   would defeat the tier gate before OpenBao ever saw it.
-- The presence of declared secret-store paths selects the identity, not the
-  trigger type. A pipeline that declares no secret paths — whether CI or
-  release — binds to the pipeline ServiceAccount and runs with no
-  ServiceAccount token, so an in-Pod store login cannot even be attempted.
-  A pipeline that declares approved paths binds to the credentialed
-  ServiceAccount, which is the identity the OpenBao Kubernetes-auth role is
-  bound to by exact `(namespace, ServiceAccount)` pair. The CI system-path
-  prohibition (branch pipelines may not declare system-namespace paths) and
-  the approval-table grant check are enforced as defense in depth,
-  independently of the identity switch.
+- Current per-step grants select secret identity and delivery. A recognized
+  main store consumer must declare every path and hold the corresponding
+  grant for its stable template name or wildcard in the repository/upstream.
+  Admission and Build share `argojob.GrantedSecretSteps`; only that main
+  Container/Script receives store address/role/CA, helper binary, login token
+  and secret-root mounts. Other containers and steps receive no settings;
+  Argo wait loses the generated store mirrors. Run records carry no durable
+  credential classification. Retry/rerun reload current grants, and granted
+  consumers require healthy access reconciliation. Step-level credential
+  evidence remains part of replay safety.
 - Admission refuses everything that would reach the node or the cluster around
   the envelope: `podSpecPatch`, `hostNetwork`, `hostAliases`, `hostPath`,
   `nodeSelector`, `affinity`, `hostPort`/`hostIP`, `workflowTemplateRef`,
@@ -1908,7 +1843,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   format: when an authenticated caller triggers UpdateConfigMap, the
   reconciler stamps `<actor>+configmap@rv=N` in `approved_by`/`revoked_by`;
   watcher-driven reconciles keep plain `configmap@rv=N`. Grant is
-  duplicate-tolerant via `INSERT ... ON CONFLICT(repo, step, secret) WHERE
+  duplicate-tolerant via `INSERT ... ON CONFLICT(repo, workflow, step, secret) WHERE
   revoked_at IS NULL DO NOTHING`; a concurrent race returns the existing
   active row without error. Grant step values are `*` (wildcard: all
   templates) or a DNS-1123 label (specific Argo template name, e.g.
@@ -1924,58 +1859,32 @@ Original object UID and intent continue to fence recovery and cleanup. See
   KV `data/` segment, slash cleanup, or short-path expansion is inferred.
   For example, `oberth/data/release/cosign-secret` and
   `release/cosign-secret` are different paths. Revocation selects the exact
-  canonical repository, step and secret tuple; `step="*"` selects only that
+  canonical upstream repository, exact workflow file, step and secret tuple; `step="*"` selects only that
   wildcard grant, not its named-step neighbors. A missing tuple is refused
   without mutation. Repository-name canonicalization is unchanged.
 - Grant revocation is immediately effective for Oberth admission (the sqlite
   approval table is updated atomically with ConfigMap reconciliation), but the
   Vault credentialed policy retains the exact-path read entry until a policy
   re-sync. Per-step grants (issue #623) scope a secret path to a named Argo
-  template: `access_allow repo=X step=release-publish-images
+  template: `access_allow repo=X workflow=.oberth/release.yaml step=release-publish-images
   secret=oberth/data/release/gar-image-key` restricts the path to templates
-  named `release-publish-images`; `step="*"` is the backward-compatible
-  wildcard granting access to all templates. Enforcement is at admission:
+  named `release-publish-images`; `step="*"` is the explicit
+  wildcard granting access to templates only within that workflow file. Enforcement is at admission:
   `admitSecretstoreExecPaths` checks each template's `--path` arguments
-  against the step grants before any Workflow is submitted. A path with only
+  against that workflow file's step grants before any Workflow is submitted. A path with only
   named-step grants is refused when consumed by an inline, unnamed, or
   fragment-renamed template (fail-closed: the name is not stable or
   authoritative).
-- **Per-step Vault identities (issue #623):** for each (repo, step) with at
-  least one named-step grant, the installer/sync renders a dedicated
-  ServiceAccount `oberth-step-<readable>-<hash12>` in the pipeline namespace,
-  a Kubernetes-auth role bound to exactly that SA + namespace + the existing
-  audience/TTL conventions, and a policy with exactly the step's approved
-  paths (read) plus `auth/token/revoke-self` plus the upstream org/repo
-  wildcard. Wildcard (`*`) grants keep the per-repo identity (backward
-  compatible). Steps without any grant keep the grant-free pipeline identity.
-  At workflow admission, `applyPerStepIdentities` overrides
-  `template.ServiceAccountName` and `OBERTH_VAULT_ROLE` on templates
-  consuming named-step-granted paths, after `ForceIdentity` set the per-repo
-  SA as the workflow default. The per-step SA's projected token is the only
-  token that template's Pod can use for Vault login, so a template can only
-  read the paths its per-step policy grants. **The two path sets (issue
-  #814):** the per-repo policy carries exactly the repo's wildcard (`*`)
-  grants — never a named-step path — because the per-repo SA is the default
-  for every template without a named grant; the per-step policy carries the
-  step's named grants plus the inherited wildcards. A repo whose grants are
-  all named still gets its per-repo identity, with a zero-grant policy. Every
-  producer applies the same rule (`installer.appendPerRepoGrant` for the
-  `access list --json`, tabwriter, and ConfigMap paths;
-  `service.computeSecretStorePlan` for the `secretstore_plan` tool) so the
-  plan digest and the sync receipt agree. Consequence: revoking a wildcard
-  grant narrows the per-repo policy on the next sync even while a named-step
-  grant for the same path remains, and `secretstore_verify` with the
-  per-repo identity must be denied on a named-step-only path. `secretstore
-  plan` and `secretstore sync` render these per-step roles/policies/SAs
-  alongside per-repo identities. The chart renders per-step SAs from the
-  `argo.perStepIdentities` values list.
-  **Fail-closed admission (finding 2):** when per-step identities are
-  configured (the map is non-empty) and a template has a named grant but its
-  per-step identity is missing from the server's identity store or has an
-  empty SA, admission is DENIED with the message: `secret grant denied: step
-  "<s>" has a named grant for path "<p>" but its per-step identity is not
-  materialized -- run \`oberth secretstore sync\``. This closes the residual
-  where a template would run under the per-repo union identity.
+- **Per-step Vault identities:** every (upstream repository, workflow file,
+  named or wildcard step) with a grant gets a dedicated ServiceAccount,
+  Kubernetes-auth role, and `oberth-step-<readable>-<hash12>` policy. Names
+  hash the complete tuple. Named steps inherit wildcard paths only from the
+  same file. Repository identities carry no explicit secret approvals.
+  `applyPerStepIdentities` assigns the admitted main's scoped account and
+  role. Sidecars, init containers, helpers and ungranted steps receive none
+  of its store settings or login token. Plan and sync digests include the
+  exact workflow file. The chart creates the scoped accounts from
+  `argo.perStepIdentities`.
   **Prune safety (finding 1):** `ProducePerStepIdentities` returns a hard
   error when the `kubectl exec ... access list --json` call fails — it never
   returns `nil, nil` on exec failure. `secretstore sync` aborts before any
@@ -1987,14 +1896,10 @@ Original object UID and intent continue to fence recovery and cleanup. See
   args are only set when the per-repo producer AND the per-step producer
   both succeeded (prune-safety: an empty list from a producer failure never
   reaches the chart or the sync).
-  **Fail-closed admission (finding 2):** `applyPerStepIdentities` does NOT
-  have a `len(config.PerStepIdentities) == 0` early return. Whenever a
-  template consumes a path with a named grant and the snapshot has no entry
-  (or an empty SA), admission is DENIED with the message: `secret grant
-  denied: step "<s>" has a named grant for path "<p>" but its per-step
-  identity is not materialized -- run \`oberth secretstore sync\` then
-  \`oberth install --install-secretstore --upgrade\``. This closes the
-  residual where a template would run under the per-repo union identity.
+  **Fail-closed admission:** every granted release main requires its exact
+  workflow-file and step identity, including wildcard consumers. A missing
+  or empty account is refused with the workflow and step plus the store sync
+  and identity installation commands. An empty identity map supplies no authority.
   At controller.Create, each per-step SA assigned to a template is verified
   to exist in the pipeline namespace using the same mechanism as the
   workflow-level `verifyServiceAccount`; a missing per-step SA produces the
@@ -2012,7 +1917,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   expire by TTL (<=30m `token_max_ttl`). This handles revoked grants: the
   per-step identity stays in OpenBao until the next sync removes it.
   **Pending declarations (finding 4):** `access_list --pending` returns
-  (repo, step, path) declarations observed at Workflow admission that have
+  (repo, workflow file, step, path) declarations observed at Workflow admission that have
   no matching active grant. Declarations are recorded at admission time
   by `ArgoJobs.recordDeclarations` via the `DeclarationRecorder` interface
   (wired to `store.Store.RecordGrantDeclarations` in serve.go)
@@ -2084,9 +1989,9 @@ Original object UID and intent continue to fence recovery and cleanup. See
   and extractable via `oberth secretstore setup --print-script`; the script is
   idempotent, refuses drifted roles/policies without `--force` and
   cross-cluster auth configs without `--force-auth-config`, and never touches
-  a token or secret value). Over verified HTTPS it also creates or validates
-  the managed non-exportable Transit key; `--disable-transit` is an explicit
-  KV-only development mode and is required for HTTP. `oberth secretstore verify` runs in the pod with
+  a token or secret value). The script configures Kubernetes authentication
+  and KV read policies. It does not provision Transit. Existing trusted-plan
+  mounts and keys remain operator-owned. `oberth secretstore verify` runs in the pod with
   only the pod's ServiceAccount identity, reads the live serve process's
   `--secretstore-*` flags from `/proc/1/cmdline`, exercises the production
   fetch path end to end (login, TokenReview, read policy, TLS), reports key
@@ -2466,9 +2371,9 @@ merged below stored release configuration, then user values and pinned arguments
 apply. Explicit false, zero and empty configured values are not replaced merely
 because they are empty. Direct `--reuse-values` upgrades also need template
 fallbacks for newly introduced keys: `utilityImage` falls back to the shared
-utility pin. Native Git is the only backend. `hack/test-chart-upgrade.sh` renders the
-new chart against the unmodified v0.17.53 values shape, both with and without
-new defaults. It runs from branch and release chart gates before publication.
+utility pin. Native Git is the only backend. The historical v0.22.3 chart gate proves the
+old Transit defaults are refused raw and render after exact installer-key
+cleanup plus omission of the empty retired profile defaults. Real Helm upgrade, install and restore tests retain live settings.
 
 Helm >= 3.14 is checked before a real upgrade. The three compatibility identity
 values are read from the installed release with `helm get values --all`,
@@ -2479,15 +2384,26 @@ with stored user values (not the old defaults), the same pins and requested
 overrides, so target schema errors and unknown keys refuse before either the
 Argo controller or Oberth mutation. Temporary stored-value files are private
 and removed on all exits; rendered manifests are not printed by this preflight.
-Unknown user keys are reported, not automatically pruned. Manual reconciliation
+Only the retired installer-written secretstore.transit.enabled, .mount and
+.key leaves are removed from stored snapshots, with one output note. The actual
+preview and apply use the cleaned snapshot with --reset-values; live settings
+and operator override precedence remain intact. Unknown user keys are reported,
+not automatically pruned. Manual reconciliation
 and downgrades require `--reset-values` with a cleaned explicit values file
 matching the target schema and preserving existing compatibility identities;
 forward-only database migration constraints still apply.
 
 Install re-runs and restore deliberately retain `--reuse-values`, preserving
 old chart defaults. Restore overrides only its database compatibility values.
-Every newly added chart key must have a template fallback, exercised by the
-historical raw-values gate and actual Helm install/restore upgrade tests.
+When retired installer keys are present in stored values or installed defaults,
+install and restore to a chart without Transit instead apply a cleaned snapshot
+of stored USER values with --reset-values. Installed compatibility identities
+are preserved inside the initial stored-user snapshot, below operator files and
+the restore overlay; restored archive identities win. Other chart defaults never
+become operator settings.
+Restore to a chart that still declares secretstore.transit retains its values.
+The v0.22.3 fixture and real Helm tests assert the exact stored user key set and
+cover both target-chart paths.
 
 ## Retired execution compatibility
 
@@ -2541,7 +2457,7 @@ and v2 backup-and-replace semantics are unchanged. See
 | v5 | v0.11.0 | secret_access table for grant tracking | Database restore |
 | v6 | v0.12.0 | uplinks: add admin flag | Database restore |
 | v7 | v0.13.0 | upstreams: add key_name for per-upstream deploy keys | Database restore |
-| v8 | v0.13.5 | runs: add credentialed flag | Database restore |
+| v8 | v0.13.5 | Historical run credential flag, dropped by the v0.22.5 forward migration | Database restore |
 | v9 | v0.13.10 | schedule_fires table for scheduled entry deduplication | Database restore |
 | v10 | v0.13.25 | Ledger-only no-op (org-qualified identity phase 1); body is immutable and must not be rewritten | Database restore |
 | v11 | v0.13.26 | Canonical persistence rebuild: compound UNIQUE(upstream_id, name) on repositories, schedule-fire qualification (raw connection-level migration) | Database restore |
@@ -3027,20 +2943,19 @@ Missing timestamps are unknown; they never mean a zero duration. Legacy rows
 have `unavailable=not-recorded`; no timestamp is backfilled from `StartedAt`.
 Timing detail is retained for the newest 2000 terminal runs (and every run the
 evidence retention protects); the retention sweep removes the Workflow and step
-records of older runs, keeps their milestones and admission episodes, and their
+records of older runs, keeps their ordinary run milestones, and their
 timing reads `unavailable=pruned`. `system_status.storage.database_bytes` reports
 the live database size the backup ceiling is measured against.
 
-A run ID identifies one execution attempt. An owner resume keeps it; a restart
-re-fire has a new run ID even when it inherits admission_sequence. Known facts
-are write-once. Admission parking closes an episode; another request/grant opens
-a new numbered episode, preserving previous waits and grants. Queue time is
-`queued_at` to `claimed_at`, not queued to the historically overloaded StartedAt.
-Checkout completion, admission request and grant, source seed start and readiness,
-Workflow creation, and durable terminalization have separate timestamps. Source
-seeding is once per Workflow, not once per step. Admission grants are recorded
-at the start of Workflow submission with MarkRunSubmissionStarted; these
-retained historical timing fields do not represent a resource gate.
+Owner resume retains the durable run ID and verified Workflow binding. Stranded
+runs fail after restart without resubmission; explicit retries have new IDs.
+Known milestones remain write-once. Restart timing epochs are removed while
+retaining current Workflow and step evidence. Queue time is `queued_at` to
+`claimed_at`, not queued to the historically overloaded StartedAt. Checkout
+completion, source seed start and readiness, Workflow creation, and durable
+terminalization have separate timestamps. Source seeding is once per Workflow,
+not once per step. Admission episodes, requested/granted/closed fields, and their
+table and triggers are removed by a forward migration; there is no alias.
 
 Before TTL, the server retains the admitted expanded task/template identities,
 simple dependency names, Workflow UID and spec identity. No commands, arguments,
@@ -3078,7 +2993,7 @@ An adopted branch Workflow (#1172) is observed under its original run ID and
 Workflow UID, so resumed observation re-collects the same node/Pod attempts:
 identical observations are idempotent, unknowns may still be upgraded, and a
 different attempt for a retained node is refused. No milestone is re-recorded
-by adoption; an admission episode left open by the previous owner stays open.
+by adoption. Admission wait history is not recorded.
 
 Migration v30 stacks after #1102's repository-archive migration v29. Shipped
 migration bodies and existing ledger rows remain unchanged; older backups
@@ -3394,5 +3309,14 @@ install after approval; maintenance preserves its stored policy choice. Plans
 provide no enforcement evidence. Fresh install apply and explicit verification
 retain their enforcement gates.
 
-Recovery supports only the current helper-storage policy and server command
-format. Removed formats are refused before reseeding or adopting a Workflow.
+Recovery requires the current helper-storage policy before reseeding or
+adopting a Workflow. Admitted commands are preserved without interpreting
+server command wrappers.
+
+The v0.22.5 workflow-scoped approval migration clears all existing secret
+approvals with no backfill. Unscoped ConfigMap entries are rejected with an
+error. After a committed reset, install and upgrade output says: all secret approvals are cleared; re-approve.
+After re-approving, run `oberth secretstore sync` to prune old OpenBao roles and policies.
+`access_allow`, `access_revoke`, and `access_dismiss` require `workflow`; lists,
+pending observations, policy digests and generated step identities include it.
+No approval-file default or alias is accepted.

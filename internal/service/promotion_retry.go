@@ -271,34 +271,3 @@ func (service *API) promotionRetriedAs(ctx context.Context, promotion model.Prom
 	}
 	return lineage.RetriedAs, nil
 }
-
-// RecoverInterruptedPromotions runs after Workflow cleanup and publication
-// recovery, so a durable outbox always takes precedence over a fresh attempt.
-func (service *API) RecoverInterruptedPromotions(ctx context.Context) error {
-	eligibility, ok := service.promotions.(interface {
-		InterruptedPromotionRetryEligible(context.Context, string) (bool, error)
-	})
-	if !ok {
-		return nil
-	}
-	var before int64
-	for {
-		page, err := service.promotions.ListPromotions(ctx, model.PromotionListFilter{Status: model.PromotionInterrupted, Before: before, Limit: 100})
-		if err != nil {
-			return err
-		}
-		for _, promotion := range page.Promotions {
-			eligible, err := eligibility.InterruptedPromotionRetryEligible(ctx, promotion.ID)
-			if err != nil {
-				return err
-			}
-			if eligible {
-				service.retryAutomaticPromotion(ctx, promotion, "owner restart")
-			}
-		}
-		if page.NextBefore == 0 {
-			return nil
-		}
-		before = page.NextBefore
-	}
-}

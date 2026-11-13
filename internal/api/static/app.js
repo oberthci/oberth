@@ -522,10 +522,8 @@ function isTerminalRun(run) { return ["passed", "failed", "interrupted"].include
    submission positions. The table presents its queue in reverse order and
    keeps queued work above running and terminal rows. */
 function orderRuns(runs) {
-  const queued = runs.filter(run => runListGroup(run) === 0);
-  const positioned = queued.length > 0 && queued.every(run => run.queue_position > 0 || run.scheduling?.queue_position > 0);
   const activeIndex = new Map(state.activeRuns.map((run, index) => [run.id, index + 1]));
-  const position = run => positioned ? run.queue_position || run.scheduling?.queue_position : activeIndex.get(run.id) || 0;
+  const position = run => activeIndex.get(run.id) || 0;
 
   const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
   return runs.map((run, index) => ({ run, index })).sort((a, b) => {
@@ -1012,8 +1010,7 @@ function summaryLines(detail) {
      point of seeding it — "12 of 16" is a different fact from "12 passed". */
   const unreached = steps.filter(step => step.status === "pending").length;
   const reached = steps.length - unreached;
-  if (run.release) lines.push("[release] reachable-tag release run — release burns executed with release credentials");
-  else if (run.credentialed) lines.push("[credentialed] CI run with approved secret-store access — secrets are scoped per-repo, audit-attributed; in-step redaction via oberth-secret-materialize");
+  if (run.release) lines.push("[release] reachable-tag release workflow");
   const status = displayRunStatus(run), kind = statusKind(status);
   if (kind === "pass") lines.push(`[pass] ${passed} step${passed === 1 ? "" : "s"} passed across ${burns} burn${burns === 1 ? "" : "s"}`);
   else if (kind === "fail") lines.push(`[fail] failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${run.failed_step || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
@@ -1022,7 +1019,6 @@ function summaryLines(detail) {
     const scheduling = detail.scheduling || {};
     lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
     if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
-    if (scheduling.queue_position) lines.push(`submission position ${scheduling.queue_position}`);
   }
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);
@@ -1646,7 +1642,7 @@ async function renderStatus(seq) {
     <div class="vcs-panel">
       <div class="vcs-head">Secret store (OpenBao)</div>
       <div class="vcs-entry"><span class="vcs-led ${store.transport === "insecure-http" ? "err" : "ok"}"></span><span class="vcs-host">address</span><span class="meta">${esc(store.transport)}</span><span class="mono-detail">${esc(store.address)}</span><span class="mono-detail">auth ${esc(store.auth_mount)} · role ${esc(store.role)}</span></div>
-      <div class="vcs-entry"><span class="vcs-led ${store.probe === "ready" ? "ok" : store.probe ? "err" : "na"}"></span><span class="vcs-host">verify</span><span class="meta">${store.probe === "ready" ? "login OK" : store.probe === "sealed" ? "SEALED" : store.probe ? "login failed" : "no probe"}</span><span class="mono-detail">${store.probe === "sealed" ? "sealed \u2014 unseal required; credentialed releases fail until unsealed" : store.probe && store.probe !== "ready" ? esc(store.probe) : "SA token \u2192 K8s-auth login \u2192 TokenReview \u2192 logout"}</span><span class="mono-detail">proves reachability, TLS/CA, unsealed, auth mount, role binding</span></div>
+      <div class="vcs-entry"><span class="vcs-led ${store.probe === "ready" ? "ok" : store.probe ? "err" : "na"}"></span><span class="vcs-host">verify</span><span class="meta">${store.probe === "ready" ? "login OK" : store.probe === "sealed" ? "SEALED" : store.probe ? "login failed" : "no probe"}</span><span class="mono-detail">${store.probe === "sealed" ? "sealed \u2014 unseal required; granted secret-consuming steps fail until unsealed; ordinary steps are unaffected" : store.probe && store.probe !== "ready" ? esc(store.probe) : "SA token \u2192 K8s-auth login \u2192 TokenReview \u2192 logout"}</span><span class="mono-detail">proves reachability, TLS/CA, unsealed, auth mount, role binding</span></div>
     </div>` : ""}
   </section>`);
   setAuto(slowPollMs);

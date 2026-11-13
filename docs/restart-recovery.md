@@ -1,41 +1,37 @@
 # Run and promotion recovery
 
-Runs awaiting Workflow submission survive an owner restart under the same run ID,
-queue and admission sequences, and queued time. This applies
-to branch, tag, release, and promotion runs. Recovery releases the abandoned
-worker's claim so the new scheduler can submit the original run; a promotion
-keeps its pending record and original CI run. A deterministic Workflow name
-recorded before admission does not mean a Workflow was submitted. These runs
-need no Workflow Stop. Recovery still excludes durable execution and
-publication evidence from this path. An eligible waiting run is retained even
-when a newer active sibling exists in the same ref and schedule lane.
+Oberth adopts an existing Workflow after an owner restart using its original run,
+specification, identity, and credential bindings. Branch, tag, release, and
+promotion Workflows keep their original run ID. Shutdown leaves running
+Workflows alone for the successor to adopt.
 
-An owner restart adopts a live branch or tag Workflow only after the engine
-verifies its existing run, specification, identity, and credential bindings.
-Release tags use the same adoption checks.
+A run whose Workflow is confirmed absent, including a claimed run that never
+submitted a Workflow, fails with `interrupted by server restart`. Recovery does
+not resubmit it. Users can request an explicit retry or rerun through the
+existing authorization checks; that creates a new run ID with its own queue
+and admission sequences. It does not inherit the failed run's admission order.
+Unclaimed queued runs keep their existing queue order. Runs listed in a restored backup's marker are
+cancelled with `restored from a backup; not dispatched again` instead.
 
-If no resumable Workflow remains and a run has neither step results nor a
-publication, recovery queues the original run ID with its original queue and
-admission sequences. Its prior Workflow must finish after an ownership-checked Argo Stop through
-the durable cancellation ledger before the run can be claimed again. Oberth
-leaves the Workflow for Argo's TTL cleanup. The new attempt
-recreates only that run's scratch directory and appends to its existing log.
-First-observed timing milestones and admission episodes remain; subsequent
-Workflow and step timing records are stored separately from prior attempts.
+An ambiguous Workflow creation remains under bounded observation. An initial
+absence or an API error does not prove the Workflow was never created. Recovery
+adopts a Workflow that appears, and concludes absence only after the existing
+observation boundary and a successful absence read. It does not delete a live
+Workflow to retry creation.
+
+First-observed timing milestones, admission episodes, and bound Workflow and
+step evidence remain durable. The forward timing migration retains the current
+attempt's evidence in the ordinary timing tables and drops the retired restart
+attempt tables. Historical audit records remain immutable.
 
 A pending publication is recovered from its durable intent. A tag publication
 is keyed by repository, tag, and result SHA: replay reuses the original intent,
-and another run cannot create a second intent for that tuple. Existing historical
+and another run cannot create a second intent for that tuple. Existing
 publication records are retained during upgrade.
 
-Infrastructure-only promotion interruptions retry automatically after Workflow
-cleanup and publication recovery. The original actor must still have current
-scope and authority, and a granted promotion must use its original, still-valid
-grant. Revocation, expiry, failed CI steps, manual cancellation, and already
-published work prevent automatic retry. At most two successive automatic
-promotion retries are admitted by the service.
+Interrupted promotions are not automatically resubmitted on restart. Explicit
+user retries retain their authorization checks. The separate moved-target
+publication retry policy remains unchanged.
 
-Schema versions 44 and 45 add restart timing records and tag publication guards.
-They preserve existing run IDs, logs, audit records, timing and publication
-history. Use the normal forward upgrade process; do not downgrade a database
-that has applied these migrations.
+Use the normal forward upgrade process; do not downgrade a database that has
+applied these migrations.

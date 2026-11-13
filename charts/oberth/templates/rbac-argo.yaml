@@ -1,10 +1,4 @@
-# The Argo execution engine runs pipelines in their OWN namespace, separate
-# from the server's, so the Vault Kubernetes-auth roles bind identities that do
-# not sit beside server-tier ones. That means a second, namespaced Role: the
-# server creates and supervises Workflows there, and reads the step Pods' logs.
-#
-# Native shutdown removes workflows/delete from the former permission fixture.
-# Workflow shutdown uses the patch-only companion Role; Pod/PVC cleanup remains.
+# Pipeline execution permissions are held in one Role bound to the server.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -19,32 +13,40 @@ rules:
   # A Pod may only mount PersistentVolumeClaims in its own namespace, so the
   # checkout on the server's volume cannot be handed to a pipeline that runs
   # here. The server instead creates a claim per run and fills it through a
-  # short-lived Pod over the exec stream. Pipeline secrets instead use
+  # short-lived Pod over the exec stream. Pipeline secrets use
   # projected identity tokens and secretstore exec.
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["create", "get", "list", "update", "delete"]
+  # Pod patch persists executor-identity retry across observer/server restarts
+  # and binds surviving source seeds to their Workflow UID.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
-  # secretstore verify --release-tier requests a short-lived token for the
-  # release ServiceAccount to prove the OpenBao trust chain end to end before
-  # a real release tag fires. The token never leaves the server process.
-  # Keep this established Role's rules unchanged when per-repo identities are
-  # added: older installs have a separate field manager on the rules list.
-  # The per-repo token allowlist lives in its own Role below.
+  # TokenRequests name only installer-provisioned execution identities.
   - apiGroups: [""]
     resources: ["serviceaccounts/token"]
     resourceNames:
       - {{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" | quote }}
+      - {{ .Values.argo.executorServiceAccount | quote }}
+      {{- range .Values.argo.perRepoIdentities }}
+      - {{ . | quote }}
+      {{- end }}
+      {{- range .Values.argo.perRepoCIIdentities }}
+      - {{ . | quote }}
+      {{- end }}
     verbs: ["create"]
-  # argojob verifies that a credentialed run's per-repo ServiceAccount exists
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["kube-root-ca.crt"]
+    verbs: ["get"]
+  # argojob verifies that a granted step's per-repo ServiceAccount exists
   # before creating the Job (fail-closed materialization guard, issues
   # #433/#459: a grant added before the installer resync would otherwise
   # produce a Job that binds a non-existent identity). Read-only get; no
@@ -55,6 +57,22 @@ rules:
   - apiGroups: [""]
     resources: ["serviceaccounts"]
     verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-argo
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

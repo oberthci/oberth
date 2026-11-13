@@ -29,8 +29,6 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
-
-	"github.com/oberthci/oberth/internal/podpriority"
 )
 
 // seedTestConfig is a pipeline namespace distinct from the server's, which is
@@ -46,7 +44,7 @@ func TestSourceSeedPodHasCheckoutExecutionHeadroom(t *testing.T) {
 	seeder := NewSourceSeeder(client, func(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error {
 		return nil
 	}, seedTestConfig())
-	if err := seeder.createSeedPod(t.Context(), "source-seed", "source-claim"); err != nil {
+	if _, err := seeder.createSeedPodBound(t.Context(), "source-seed", "source-claim"); err != nil {
 		t.Fatal(err)
 	}
 	pod, err := client.CoreV1().Pods(seeder.config.Namespace).Get(t.Context(), "source-seed", metav1.GetOptions{})
@@ -238,7 +236,7 @@ func TestSeedPodHoldsNoServiceAccountToken(t *testing.T) {
 	if created.Spec.AutomountServiceAccountToken == nil || *created.Spec.AutomountServiceAccountToken {
 		t.Fatal("the seed pod mounts a ServiceAccount token")
 	}
-	if created.Spec.PriorityClassName != podpriority.PipelineClass(created.Namespace) || created.Spec.Priority != nil {
+	if created.Spec.PriorityClassName != "" || created.Spec.Priority != nil {
 		t.Fatal("the CI seed pod received a priority override")
 	}
 	container := created.Spec.Containers[0]
@@ -456,8 +454,8 @@ func recordingExec(calls *[]seedExecCall) ExecStreamer {
 	}
 }
 
-// A credentialed run's claim carries the trust anchor beside the checkout. This
-// is the delivery mechanism itself: without it a credentialed step reaches an
+// A claim serving granted secret steps carries the trust anchor beside the checkout.
+// This is the delivery mechanism itself: without it a granted step reaches an
 // HTTPS OpenBao with nothing to verify it against, and the login fails before
 // any credential exists.
 func TestSeedDeliversTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {

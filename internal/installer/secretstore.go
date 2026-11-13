@@ -246,13 +246,6 @@ func (b openBaoExec) enableKVv2(ctx context.Context, token string) error {
 	return nil
 }
 
-func (b openBaoExec) enableTransit(ctx context.Context, token string) error {
-	if out, err := b.authenticated(ctx, token, nil, "secrets", "enable", "-path="+defaultTransitMount, "transit"); err != nil {
-		return fmt.Errorf("enable Transit mount: %w%s", err, commandOutputSuffix(out))
-	}
-	return nil
-}
-
 // policyRead returns the stored policy text and whether it exists.
 func (b openBaoExec) policyRead(ctx context.Context, token, name string) (string, bool, error) {
 	out, err := b.authenticated(ctx, token, nil, "policy", "read", name)
@@ -490,7 +483,7 @@ func setupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			clear(tokenBytes)
 		}
 		if rootToken == "" {
-			_, _ = fmt.Fprintln(interactiveDeps.Output, "Cannot enable trusted Plan Transit: a re-run has no root token available to positively verify the managed mount, key, policy, and role.")
+			_, _ = fmt.Fprintln(interactiveDeps.Output, "Cannot verify the managed secret-store configuration without a root token.")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "To verify or repair the configuration, supply the root token without exposing it in shell history:")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "")
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "    oberth install --install-secretstore --resume-secrets-file PATH --secrets-file NEW_PATH [same install flags]")
@@ -510,9 +503,7 @@ func setupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 	if err != nil {
 		return SecretStoreResult{}, fmt.Errorf("configure secret store: %w", err)
 	}
-	if !configured.TrustedTransitVerified {
-		return SecretStoreResult{}, errors.New("production secret-store setup completed without verified Transit provisioning")
-	}
+
 	return configured, nil
 }
 
@@ -631,39 +622,6 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	result.Items = append(result.Items, configItem{Name: "kv v2 mount", Status: "✓"})
 
 	if cfg.InstallSecretStore {
-		transitKey := defaultTransitMount + "/"
-		if mount, exists := mounts[transitKey]; exists {
-			if mount.Type != "transit" {
-				return result, fmt.Errorf("mount %s already exists with type %q, not transit", defaultTransitMount, mount.Type)
-			}
-		} else {
-			if err := store.enableTransit(ctx, rootToken); err != nil {
-				return result, err
-			}
-			result.TransitMountEnabled = true
-		}
-		result.Items = append(result.Items, configItem{Name: "transit mount", Status: "✓"})
-
-		keyPath := defaultTransitMount + "/keys/" + defaultTransitKey
-		existingKey, err := store.readData(ctx, rootToken, keyPath)
-		if err != nil {
-			return result, err
-		}
-		if existingKey == nil {
-			if err := store.writeJSON(ctx, rootToken, keyPath, map[string]any{
-				"type":                   "aes256-gcm96",
-				"derived":                false,
-				"exportable":             false,
-				"allow_plaintext_backup": false,
-			}); err != nil {
-				return result, err
-			}
-			result.TransitKeyCreated = true
-		} else if err := validateManagedTransitKey(existingKey); err != nil {
-			return result, err
-		}
-		result.Items = append(result.Items, configItem{Name: "transit key", Status: "✓"})
-
 		caPEM, replaced, err := ensureServerPKI(ctx, cfg, store, rootToken, mounts)
 		if err != nil {
 			return result, fmt.Errorf("server PKI: %w", err)
@@ -674,7 +632,7 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 
 	wantPolicy := OberthPolicy(defaultKVPrefix, ns)
 	if cfg.InstallSecretStore {
-		wantPolicy = OberthProductionPolicy(defaultKVPrefix, defaultTransitMount, defaultTransitKey, ns) + serverPKIPolicy()
+		wantPolicy = OberthPolicy(defaultKVPrefix, ns) + serverPKIPolicy()
 	}
 	havePolicy, policyExists, err := store.policyRead(ctx, rootToken, defaultPolicy)
 	if err != nil {
@@ -726,24 +684,8 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 		}
 	}
 
-	credentialedGrantPaths, err := credentialedPolicyPaths(defaultKVPrefix, cfg.CredentialedSecretPaths)
-	if err != nil {
-		return result, err
-	}
-
-	// When per-repo identities exist, strip the shared policies to zero
-	// stanzas: no upstream org access, no approval-table grants. Admission
-	// never selects the shared identities once per-repo identities exist
-	// (fail-closed in identityForWithRepo), so the remaining policy breadth
-	// is dormant standing privilege. Issue #456. This also aligns the install
-	// path with the sync path — both now produce the same zero-stanza shape.
-	sharedOrgs := upstreamOrgs
-	sharedGrants := credentialedGrantPaths
-	if len(cfg.PerRepoIdentities) > 0 {
-		sharedOrgs = nil
-		sharedGrants = nil
-	}
-	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, sharedOrgs, sharedGrants)
+	// Shared credentialed identities never carry approvals or upstream access.
+	wantCredentialedPolicy := OberthCredentialedPolicyWithGrants(defaultKVPrefix, nil, nil)
 	haveCredentialedPolicy, credentialedPolicyExists, err := store.policyRead(ctx, rootToken, defaultCredentialedPolicy)
 	if err != nil {
 		return result, err
@@ -789,6 +731,10 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 	// unlike the credentialed policy there is nothing approval-driven to sync
 	// — drift from the managed shape is always rewritten back.
 
+	sharedOrgs := upstreamOrgs
+	if len(cfg.PerRepoIdentities) > 0 {
+		sharedOrgs = nil
+	}
 	wantCISecretsPolicy := OberthCISecretsPolicy(defaultKVPrefix, sharedOrgs)
 	haveCISecretsPolicy, ciSecretsPolicyExists, err := store.policyRead(ctx, rootToken, defaultCISecretsPolicy)
 	if err != nil {
@@ -842,25 +788,10 @@ func ConfigureSecretStore(ctx context.Context, cfg Config, deps Deps, store open
 			return result, fmt.Errorf("configure Rekor OpenBao identity: %w", err)
 		}
 	}
-	result.TrustedTransitVerified = cfg.InstallSecretStore
 
-	result.Skipped = !result.AuthMountConfigured && !result.TransitMountEnabled && !result.TransitKeyCreated &&
+	result.Skipped = !result.AuthMountConfigured &&
 		!result.PolicyWritten && !result.RoleCreated && !writeConfig
 	return result, nil
-}
-
-func validateManagedTransitKey(key map[string]any) error {
-	keyType, typeOK := key["type"].(string)
-	derived, derivedOK := key["derived"].(bool)
-	exportable, exportableOK := key["exportable"].(bool)
-	plaintextBackup, backupOK := key["allow_plaintext_backup"].(bool)
-	supportsEncryption, encryptOK := key["supports_encryption"].(bool)
-	supportsDecryption, decryptOK := key["supports_decryption"].(bool)
-	if !typeOK || keyType != "aes256-gcm96" || !derivedOK || derived || !exportableOK || exportable ||
-		!backupOK || plaintextBackup || !encryptOK || !supportsEncryption || !decryptOK || !supportsDecryption {
-		return fmt.Errorf("transit key %s exists with an unsafe or incompatible configuration; refusing to overwrite it", defaultTransitKey)
-	}
-	return nil
 }
 
 func managedRoleMatches(role map[string]any, namespace string) bool {
@@ -982,7 +913,7 @@ func credentialedPolicyPaths(kvPrefix string, paths []string) ([]string, error) 
 // --upgrade` to sync.
 func OberthCredentialedPolicyWithGrants(kvPrefix string, upstreamOrgs []string, approvedPaths []string) string {
 	var builder strings.Builder
-	builder.WriteString("# Credentialed pipeline templates: read-only, per-upstream subtrees. The\n")
+	builder.WriteString("# Granted secret-consuming templates: read-only, per-upstream subtrees. The\n")
 	builder.WriteString("# approval table in the Oberth database is the fine-grained gate; this policy\n")
 	builder.WriteString("# is the coarse Vault-level boundary. Managed by oberth install.\n")
 	writeUpstreamOrgRules(&builder, kvPrefix, upstreamOrgs)
@@ -1016,7 +947,7 @@ func OberthCredentialedPolicyWithGrants(kvPrefix string, upstreamOrgs []string, 
 // granted — fail closed.
 func OberthCISecretsPolicy(kvPrefix string, upstreamOrgs []string) string {
 	var builder strings.Builder
-	builder.WriteString("# CI-trigger credentialed pipelines: read-only, per-upstream subtrees. This\n")
+	builder.WriteString("# CI-trigger granted steps: read-only, per-upstream subtrees. This\n")
 	builder.WriteString("# policy never carries approval-table grants; release secrets are reachable\n")
 	builder.WriteString("# only through the release-tier credentialed role. Managed by oberth install.\n")
 	writeUpstreamOrgRules(&builder, kvPrefix, upstreamOrgs)
@@ -1109,25 +1040,6 @@ func writeUpstreamOrgRules(builder *strings.Builder, kvPrefix string, upstreamOr
 }`, kvPrefix, org)
 		first = false
 	}
-}
-
-// OberthProductionPolicy adds exactly the two Transit data operations needed
-// for trusted-plan envelopes. It grants no key-management, export, rotate,
-// backup, configuration, list, or wildcard Transit capability.
-func OberthProductionPolicy(kvPrefix, transitMount, transitKey string, namespace ...string) string {
-	return fmt.Sprintf(`# Trusted-plan envelope encryption/decryption through one non-exportable key.
-path "%s/encrypt/%s" {
-  capabilities = ["update"]
-}
-
-path "%s/decrypt/%s" {
-  capabilities = ["update"]
-}
-
-# Allow the client to revoke its own short-lived login token.
-path "auth/token/revoke-self" {
-  capabilities = ["update"]
-}`, transitMount, transitKey, transitMount, transitKey) + serverIdentityPolicy(kvPrefix, namespace...)
 }
 
 func getClusterCA(ctx context.Context, deps Deps) (string, error) {

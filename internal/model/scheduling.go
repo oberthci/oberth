@@ -6,16 +6,13 @@ import (
 )
 
 // RunScheduling is an ephemeral read-only observation, never execution evidence.
-// QueuePosition is accepted order among durable queued runs, not an ETA or
-// claim order: publication gates may let later runs start first.
 type RunScheduling struct {
 	// Requests is this run's peak pod requests, independent of admission budgets.
-	ObservedAt    time.Time             `json:"observed_at"`
-	AgeSeconds    int64                 `json:"age_seconds"`
-	State         string                `json:"state"`
-	Message       string                `json:"message"`
-	QueuePosition int64                 `json:"queue_position,omitempty"`
-	Execution     *ExecutionObservation `json:"execution,omitempty"`
+	ObservedAt time.Time             `json:"observed_at"`
+	AgeSeconds int64                 `json:"age_seconds"`
+	State      string                `json:"state"`
+	Message    string                `json:"message"`
+	Execution  *ExecutionObservation `json:"execution,omitempty"`
 }
 
 // ExecutionDeadlineMessage is a fixed presentation label, never raw controller text.
@@ -83,6 +80,7 @@ type SchedulingReason struct {
 
 // IsExecutionDeadlineReason recognizes fixed controller vocabulary, not exit signals.
 func IsExecutionDeadlineReason(message string) bool {
+	message, _ = SplitArtifactCollectionDeadline(message)
 	message = strings.TrimSpace(message)
 	// The watchdog may join a Cancel error on subsequent lines, and adopted
 	// Workflow observation adds this fixed wrapper. Ordinary operation timeouts

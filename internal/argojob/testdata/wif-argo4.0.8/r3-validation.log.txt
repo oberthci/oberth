@@ -1,0 +1,6 @@
+=== RUN   TestR3VaultPods
+    zz_r3_validation_test.go:16: PASS vault-sa-false-submitted.json
+    zz_r3_validation_test.go:16: PASS vault-sa-true-submitted.json
+--- PASS: TestR3VaultPods (0.00s)
+PASS
+ok  	oberth-pod-validation	0.008s

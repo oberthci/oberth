@@ -156,7 +156,6 @@ type Run struct {
 	QueueSequence int64
 	// AdmissionSequence retains restart FIFO order; QueueSequence is the cursor.
 	AdmissionSequence int64 `json:"-"`
-	QueuePosition     int64 `json:"QueuePosition,omitempty"`
 	// Display fields are read-side projections; durable Status is unchanged.
 	DisplayStatus string         `json:"display_status,omitempty"`
 	DisplayReason string         `json:"display_reason"`
@@ -167,7 +166,6 @@ type Run struct {
 	SHA           string
 	Actor         string
 	Release       bool
-	Credentialed  bool
 	Trigger       string
 	ScheduleEntry string `json:",omitempty"`
 	Phase         string
@@ -197,7 +195,6 @@ type RunSpec struct {
 	SHA           string
 	Actor         string
 	Release       bool
-	Credentialed  bool
 	Trigger       string
 	ScheduleEntry string
 	TestedSHA     string
@@ -567,6 +564,10 @@ type PublicationSpec struct {
 	PreviousKnown bool
 	ResultSHA     string
 	Actor         string
+
+	// ArtifactCollectionDeadline carries the fixed evidence note into the
+	// durable publication transaction. It does not affect the Git mutation.
+	ArtifactCollectionDeadline bool
 }
 
 // PublicationFinalization is returned from the one transaction that closes a

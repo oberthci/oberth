@@ -83,7 +83,7 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: ref already has an active run", ErrInvalidState)
 	}
 	spec, err := validateRunSpec(model.RunSpec{RepoID: previous.RepoID, RefKind: previous.RefKind,
-		Ref: previous.Ref, SHA: previous.SHA, Actor: request.Actor, Release: previous.Release, Credentialed: previous.Release && previous.Credentialed, Trigger: previous.Trigger, ScheduleEntry: previous.ScheduleEntry,
+		Ref: previous.Ref, SHA: previous.SHA, Actor: request.Actor, Release: previous.Release, Trigger: previous.Trigger, ScheduleEntry: previous.ScheduleEntry,
 		TestedSHA: previous.TestedSHA, BaseSHA: previous.BaseSHA})
 	if err != nil {
 		return model.EnqueueRunResult{}, err
@@ -93,7 +93,7 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 		return model.EnqueueRunResult{}, fmt.Errorf("generate retry run ID: %w", err)
 	}
 	now := unixNano(s.now())
-	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
+	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("enqueue retry: %w", err)
 	}

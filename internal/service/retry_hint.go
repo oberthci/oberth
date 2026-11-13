@@ -19,6 +19,7 @@ import (
 // there is nothing to retry: the run passed, is still running without a
 // publication retry, or was cancelled.
 func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHint {
+	run.Error, _ = model.SplitArtifactCollectionDeadline(run.Error)
 	if publication != nil && publication.Status == model.PublicationPending && publication.Attempts > 0 {
 		hint := &model.RetryHint{Class: model.RetryInfrastructure, Cause: "git_transport", Action: "none: Oberth retries the publication automatically",
 			Detail:      "upstream publication is retrying after a transient transport failure",
@@ -56,23 +57,16 @@ func runRetryHint(run model.Run, publication *model.Publication) *model.RetryHin
 		return infrastructure("git_transport", "run_rerun (retries only the publication)", "every step passed; only the upstream publication failed")
 	}
 	if reason := evictionDisplayReason(run); reason != "" {
-		if strings.Contains(reason, "storage limit") {
-			return code("resource_limit", "raise the step's ephemeral-storage limit in git", reason)
-		}
 		return infrastructure("eviction", "run_retry", reason)
 	}
-	// A step's own eviction names the step, so evictionDisplayReason (the
-	// step-less infrastructure line) does not see it; without this the
-	// generic step branch below advised fixing the code.
+	// Only a positively identified authored-container budget failure warrants
+	// changing the step's limit. A named step can also have a Pod/helper eviction.
 	switch {
 	case strings.Contains(message, "exceeded its declared ephemeral-storage budget"):
 		return code("resource_limit", "raise the step's ephemeral-storage limit in git", boundedText(message, 200))
 	case run.FailedStep != "" && (message == "Evicted" || strings.HasPrefix(message, "Evicted: ")):
 		// The same kubelet message classification as the step-less line.
 		reason := evictionDisplayReason(model.Run{Phase: "infrastructure", Error: message})
-		if strings.Contains(reason, "storage limit") {
-			return code("resource_limit", "raise the step's ephemeral-storage limit in git", reason)
-		}
 		return infrastructure("eviction", "run_retry", reason)
 	}
 	switch {

@@ -423,17 +423,17 @@ one with a non-admin token is still answered with the server's refusal.
 | `workflow_capability_revoke` | Revoke the repository's operator capability; blocks new authorization |
 | `workflow_capability_get` | Read the repository's current operator capability |
 | `access_list` | List secret access grants for a repository |
-| `access_allow` | Grant a step access to a secret path (admin-only) |
-| `access_revoke` | Revoke a step's access to a secret path (admin-only) |
+| `access_allow` | Grant a step in an exact workflow file access to a secret path (admin-only) |
+| `access_revoke` | Revoke a step's access in an exact workflow file to a secret path (admin-only) |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
 `access_list` or the pipeline declaration, including the mount and KV API prefix
 when present. For example, `oberth/data/release/cosign-secret` is a different
 identity from `release/cosign-secret`; the server does not expand or normalize
-one into the other. Copy the listed `repo`, `step`, and `secret` tuple when
+one into the other. Both tools require `workflow`, the exact clean repository-relative file, such as `.oberth/release.yaml`; no default or wildcard file is accepted. Copy the listed `repo`, `workflow`, `step`, and `secret` tuple when
 revoking a grant. The grant ID is returned as evidence, not accepted as a revoke
 selector. `step: "*"` selects the wildcard grant itself; it does not revoke
-named-step grants. A missing exact tuple is refused without changing grants.
+named-step grants or approvals in another workflow file. `access_dismiss` also requires `workflow`. A missing exact tuple is refused without changing grants.
 Revocation removes admission approval immediately; complete the documented
 `oberth secretstore sync` procedure to remove the corresponding Bao policy read.
 
@@ -684,9 +684,6 @@ when an observer is unavailable.
 - `observed_at` and `age_seconds` describe when the snapshot was read. `wait`
   retains that timestamp and updates its age before returning. Controller
   state may itself lag; this is diagnostic context, not execution evidence.
-- `queue_position` is global accepted order across unclaimed and claimed but
-  unadmitted runs, computed before repository/ref filters. Publication
-  gates can let later runs execute first; it is not an ETA.
 - `execution` reports observed Workflow phase, up to 16 node phase/message
   summaries and 16 Pod phase/reason summaries. It can identify unscheduled Pods,
   insufficient CPU/memory, unbound claims, image pull waits, startup, and known
@@ -706,9 +703,9 @@ required.
 Run rows in `run_list` and `/api/runs` carry `Repo` (repository name),
 `Ref`, `SHA` and `QueuePosition` when available.
 Full run detail carries the same context in `Run`; compact `run_get` uses
-`repo`, `ref`, `sha` and `queue_position`. Serving admission counts runs and
-reports no size or CPU/memory reservation. Kubernetes places Pods using their
-requests. Scoped uplinks omit global queue positions. See
+`repo`, `ref`, and `sha`. Argo controls execution parallelism; run records
+report no size or CPU/memory reservation. Kubernetes places Pods using their
+requests. See
 [admission and native synchronization](native-synchronization.md).
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
@@ -922,8 +919,8 @@ It returns `id`, `repo` (repository name), `ref`, `sha`, `size`,
 `burn`, `name`, `status`, `started_at`, and `finished_at`; unknown times are null
 and an empty step list is `[]`. Burn names distinguish steps with the same name in different burns. This read omits
 retained timing, the full repository record, diagnostics, and telemetry. It
-does not load the retained timing record. Omit `summary` or pass false for
-the existing full `Run`/`Steps`/`Repository` response. Authorization and upstream scope are
+does not load the retained timing record. Pass `"summary":false` for
+the full `Run`/`Steps`/`Repository` response with retained Workflow/step timing. Authorization and upstream scope are
 the same for compact and full reads.
 
 ### Server-side wait correlation

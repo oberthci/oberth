@@ -504,6 +504,10 @@ func (c *fakeBackupCluster) helm(_ context.Context, args []string) ([]byte, erro
 		return json.Marshal(c.values)
 	case args[0] == "repo":
 		return nil, nil
+	case args[0] == "show" && args[1] == "values":
+		// These restore fixtures target an installed chart that still owns
+		// Transit settings, so the new CLI must retain its reuse behavior.
+		return []byte("secretstore:\n  transit:\n    enabled: false\n"), nil
 	case args[0] == "show" && args[1] == "chart":
 		c.helmShowChart = args
 		if c.missingChart {

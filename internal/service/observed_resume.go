@@ -13,24 +13,24 @@ import (
 func (scheduler *Scheduler) resumeObservedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *submissionOwner, stoppedByOberth bool) error {
 	defer reservation.cancel()
 	if err := require(ctx); err != nil {
-		reservation.retain()
+
 		return err
 	}
 	repository, err := scheduler.database().Repository(ctx, run.RepoID)
 	if err != nil {
-		reservation.retain()
+
 		return err
 	}
 
 	current, err := scheduler.database().Run(ctx, run.ID)
 	if err != nil {
-		reservation.retain()
+
 		return err
 	}
 	if current.Cancelled() {
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			reservation.retain()
-			scheduler.deferCreateCleanup(ctx, current, run.WorkflowName, reservation, err)
+
+			scheduler.deferCreateCleanup(ctx, current, run.WorkflowName, err)
 			return nil
 		}
 	}
@@ -41,15 +41,15 @@ func (scheduler *Scheduler) resumeObservedRun(ctx context.Context, run model.Run
 		retained = 0
 	}
 	if err != nil {
-		reservation.retain()
+
 		return err
 	}
 	// A previous owner can stop between Workflow creation and this transition.
-	if run.Phase == "waiting" {
+	if run.Phase == "waiting" || isPendingCreate(run) {
 		run, err = scheduler.database().MarkRunSubmitted(ctx, run.ID)
 		if err != nil {
 			_ = file.Close()
-			reservation.retain()
+
 			return err
 		}
 	}

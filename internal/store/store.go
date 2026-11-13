@@ -26,7 +26,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const (
@@ -66,7 +65,10 @@ type Options struct {
 }
 
 type Store struct {
-	protocol ProtocolConfig
+	// Supplied from the restore marker before owner recovery; immutable snapshots.
+	restoredRuns      map[string]bool // protected by mu
+	startupMigrations []string        // immutable; committed upgrades applied by this open
+	protocol          ProtocolConfig
 
 	authDB          *sql.DB       // reserved SSH/bearer read-only WAL readers; no cached authorization
 	sshAuthSlots    chan struct{} // per-Store admission; initialized before serving
@@ -831,6 +833,7 @@ func (s *Store) migrateWithMigrations(ctx context.Context, expectedLegacyHead *m
 			return err
 		}
 	}
+	var committed []string
 	for _, item := range items {
 		if applied[item.ID()] || item.version > targetVersion {
 			continue
@@ -896,12 +899,16 @@ func (s *Store) migrateWithMigrations(ctx context.Context, expectedLegacyHead *m
 			return fmt.Errorf("apply migration %s: %w", item.ID(), err)
 		}
 		applied[item.ID()] = true
+		committed = append(committed, item.ID())
 	}
 	if err := s.verifySchemaIdentity(ctx, tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit schema migrations: %w", err)
+	}
+	if databaseVersion > 0 {
+		s.startupMigrations = append(s.startupMigrations, committed...)
 	}
 	return nil
 }
@@ -964,7 +971,24 @@ func (s *Store) RecoverOwnerState(ctx context.Context) error {
 	return s.recoverInterruptedRuns(ctx)
 }
 
+// PreserveRestoredRuns hands backup-owned rows to the restore cancellation path.
+// The scheduler configures this from its existing marker before owner recovery.
+func (s *Store) PreserveRestoredRuns(ids map[string]bool) {
+	preserved := make(map[string]bool, len(ids))
+	for id, present := range ids {
+		if present {
+			preserved[id] = true
+		}
+	}
+	s.mu.Lock()
+	s.restoredRuns = preserved
+	s.mu.Unlock()
+}
+
 func (s *Store) recoverInterruptedRuns(ctx context.Context) error {
+	s.mu.Lock()
+	restored := s.restoredRuns
+	s.mu.Unlock()
 	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -998,83 +1022,21 @@ ORDER BY queue_sequence`)
 		return fmt.Errorf("list active recovery runs: %w", err)
 	}
 	for _, active := range activeRuns {
-		if active.Phase == "preflight" && active.WorkflowName == "" {
-			recovered, err := scanRun(tx.QueryRowContext(ctx, `UPDATE runs SET status='failed', phase='infrastructure', reason=?, error=?, finished_at=?, updated_at=? WHERE id=? RETURNING `+runColumns,
-				argoworkflow.ErrWorkflowCapabilityRequired.Error(), argoworkflow.ErrWorkflowCapabilityRequired.Error(), now, now, active.ID))
-			if err != nil {
-				return fmt.Errorf("fail retired execution %s: %w", active.ID, err)
-			}
-			if recovered.Trigger == "promotion" {
-				promotion, err := promotionByRunTx(ctx, tx, recovered.ID)
-				if err != nil {
-					return err
-				}
-				_, err = finishPromotionTx(ctx, tx, promotion, model.PromotionFailed, recovered.ID, recovered.Error, now)
-				if err != nil {
-					return err
-				}
-			} else if err := s.projectRunIssue(ctx, tx, recovered, "", now); err != nil {
-				return err
-			}
+		if active.WorkflowName != "" || restored[active.ID] {
+			// Named Workflows need engine observation. Marker-listed backup
+			// runs belong to restore cancellation, including unnamed claims.
 			continue
 		}
 		if active.Cancelled() && active.WorkflowName == "" {
 			if _, err := s.finishRunTx(ctx, tx, active.ID, model.RunResult{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Error: strings.Replace(active.Reason, "cancelling by ", "cancelled by ", 1)}, model.PhaseCancelled, now); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE run_cancellations SET completed_at=? WHERE run_id=? AND job_name=''`, now, active.ID); err != nil {
-				return err
-			}
 			continue
 		}
-		if restored, err := s.recoverWaitingRunTx(ctx, tx, active, now); err != nil {
-			return fmt.Errorf("restore waiting run %s: %w", active.ID, err)
-		} else if restored {
-			continue
-		}
-		if active.WorkflowName != "" {
-			// Runs with a known Job name stay in "running" status so the
-			// scheduler's startup reconciliation can query K8s for their
-			// terminal state before deciding whether to interrupt.
-			continue
-		}
-		if _, requeueErr := s.requeueStrandedRunTx(ctx, tx, active, now); requeueErr == nil {
-			// This owner has not submitted a Workflow. Startup proves the
-			// old background task is gone, so an empty-name cleanup obligation is done.
-			if _, err := tx.ExecContext(ctx, `
-UPDATE run_cancellations
-SET completed_at = ?
-WHERE run_id = ? AND job_name = '' AND completed_at IS NULL`, now, active.ID); err != nil {
-				return fmt.Errorf("complete requeued run cancellation: %w", err)
-			}
-			continue
-		} else if !errors.Is(requeueErr, ErrRequeueIneligible) {
-			return fmt.Errorf("requeue recovered run %s: %w", active.ID, requeueErr)
-		}
-		recovered, updateErr := scanRun(tx.QueryRowContext(ctx, `
-UPDATE runs
-SET status = 'interrupted', phase = 'interrupted', reason = 'oberth restarted',
-    error = CASE WHEN error = '' THEN 'oberth restarted' ELSE error END,
-    finished_at = ?, updated_at = ?
-WHERE id = ? AND status = 'running'
-RETURNING `+runColumns, now, now, active.ID))
-		if updateErr != nil {
-			return fmt.Errorf("recover active run %s: %w", active.ID, updateErr)
-		}
-		if recovered.Trigger == "promotion" {
-			promotion, promotionErr := promotionByRunTx(ctx, tx, recovered.ID)
-			if promotionErr != nil {
-				return fmt.Errorf("load interrupted promotion for run %s: %w", recovered.ID, promotionErr)
-			}
-			_, promotionErr = finishPromotionTx(
-				ctx, tx, promotion, model.PromotionInterrupted, recovered.ID,
-				"oberth restarted during promotion CI", now,
-			)
-			if promotionErr != nil {
-				return promotionErr
-			}
-		} else if err := s.projectRunIssue(ctx, tx, recovered, "", now); err != nil {
-			return err
+		if _, err := s.finishRunTx(ctx, tx, active.ID, model.RunResult{
+			Status: model.RunFailed, Phase: "infrastructure", Error: model.ServerRestartReason,
+		}, "infrastructure", now); err != nil {
+			return fmt.Errorf("fail unsubmitted run %s after restart: %w", active.ID, err)
 		}
 	}
 
@@ -1654,7 +1616,7 @@ func (s *Store) EnqueueAdmittedPromotionRun(ctx context.Context, runSpec model.R
 		!baseMatches {
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("%w: admitted promotion run does not match promotion", ErrInvalidState)
 	}
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
+	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}

@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -9,70 +8,35 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestRefiredFlatQueueUsesGlobalAdmissionPositions(t *testing.T) {
-	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+func TestFailedRestartLeavesFlatClaimOrders(t *testing.T) {
+	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
-	ctx := context.Background()
-	other, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "other", UpstreamID: repo.UpstreamID, DefaultBranch: "main"})
+	ctx := t.Context()
+	a, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/a", strings.Repeat("a", 40)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueue := func(repoID int64, ref, sha string) model.Run {
-		t.Helper()
-		result, err := s.EnqueueRun(ctx, testRunSpec(repoID, ref, strings.Repeat(sha, 40)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return result.Run
-	}
-	a := enqueue(repo.ID, "feature/a", "a")
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	b := enqueue(other.ID, "feature/b", "b")
-	copy, err := s.RequeueStrandedRun(ctx, a.ID)
+	b, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/b", strings.Repeat("b", 40)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if copy.ID != a.ID || copy.Status != model.RunQueued || copy.QueueSequence != a.QueueSequence || copy.AdmissionSequence != a.AdmissionSequence {
-		t.Fatalf("restart must preserve durable identity and both FIFO sequences: original=%+v reset=%+v", a, copy)
-	}
-	c := enqueue(repo.ID, "feature/c", "c")
-	// Restart recovery resets the original run in place. It stays first in
-	// claim order and must not leave a duplicate interrupted row in the list.
-	rows, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-	if err != nil || len(rows) != 3 || rows[0].ID != a.ID || rows[1].ID != b.ID || rows[2].ID != c.ID || rows[0].Status != model.RunQueued || rows[0].QueueSequence != a.QueueSequence || rows[0].AdmissionSequence != a.AdmissionSequence {
-		t.Fatalf("flat FIFO order = %v, %v", runIDs(rows), err)
-	}
-	for i := 0; i < 3; i++ {
-		if rows[i].QueuePosition != int64(i+1) {
-			t.Fatalf("queue position %d = %d", i, rows[i].QueuePosition)
-		}
-	}
-	claimed, err := s.ClaimNextRun(ctx)
-	if err != nil || claimed.ID != copy.ID {
-		t.Fatalf("re-fired claim = %#v, %v", claimed, err)
-	}
-	assertFilteredPosition := func(want int64) {
-		t.Helper()
-		rows, err := s.ListRecentRuns(ctx, model.RunListFilter{RepoID: other.ID})
-		if err != nil || len(rows) != 1 || rows[0].ID != b.ID || rows[0].QueuePosition != want {
-			t.Fatalf("filtered global queue position = %#v, %v; want %d", rows, err, want)
-		}
-		active, err := s.ListActiveRuns(ctx, model.RunListFilter{RepoID: other.ID})
-		if err != nil || len(active) != 1 || active[0].ID != b.ID || active[0].QueuePosition != want {
-			t.Fatalf("active global queue position = %#v, %v; want %d", active, err, want)
-		}
-		position, err := s.QueuedRunPosition(ctx, b.ID)
-		if err != nil || position != want {
-			t.Fatalf("single-run queue position = %d, %v; want %d", position, err, want)
-		}
-	}
-	assertFilteredPosition(2)
-	if _, err := s.MarkRunSubmissionStarted(ctx, copy.ID); err != nil {
+	if err := s.RecoverOwnerState(ctx); err != nil {
 		t.Fatal(err)
 	}
-	assertFilteredPosition(1)
-
+	rows, err := s.ListRecentRuns(ctx, model.RunListFilter{})
+	if err != nil || len(rows) != 2 {
+		t.Fatal(rows, err)
+	}
+	for _, r := range rows {
+		if r.ID == a.ID && (r.Status != model.RunFailed) {
+			t.Fatal(r)
+		}
+		if r.ID == b.ID && (r.Status != model.RunQueued) {
+			t.Fatal(r)
+		}
+	}
 }

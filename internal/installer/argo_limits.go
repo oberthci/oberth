@@ -7,17 +7,20 @@ import (
 	"fmt"
 )
 
-const maxArgoParallelism = 100000
+const (
+	DefaultArgoParallelism          = 4
+	DefaultArgoNamespaceParallelism = 0
+)
 
 // validateArgoLimits checks the limit flags before anything is installed.
 func validateArgoLimits(cfg Config) error {
-	for name, value := range map[string]*int{"--argo-parallelism": cfg.ArgoParallelism} {
-		if value != nil && (*value < 0 || *value > maxArgoParallelism) {
-			return fmt.Errorf("%s must be 0 (no limit) to %d", name, maxArgoParallelism)
+	for name, value := range map[string]*int{"--argo-parallelism": cfg.ArgoParallelism, "--argo-namespace-parallelism": cfg.ArgoNamespaceParallelism} {
+		if value != nil && *value < 0 {
+			return fmt.Errorf("%s must be a non-negative integer (0 means no limit)", name)
 		}
 	}
-	if cfg.ArgoParallelism != nil && cfg.SkipArgo {
-		return errors.New("--argo-parallelism configure the managed argo-workflows release; set them on your own controller when --skip-argo-workflows is used")
+	if argoLimitsRequested(cfg) && cfg.SkipArgo {
+		return errors.New("--argo-parallelism and --argo-namespace-parallelism configure the managed argo-workflows release; set them on your own controller when --skip-argo-workflows is used")
 	}
 	return nil
 }
@@ -25,7 +28,7 @@ func validateArgoLimits(cfg Config) error {
 // argoLimitsRequested reports whether this run changes any Argo limit, which
 // forces a helm upgrade of an otherwise current argo-workflows release.
 func argoLimitsRequested(cfg Config) bool {
-	return cfg.ArgoParallelism != nil
+	return cfg.ArgoParallelism != nil || cfg.ArgoNamespaceParallelism != nil
 }
 
 // argoLimitArgs renders the requested native controller cap.
@@ -34,13 +37,16 @@ func argoLimitArgs(cfg Config) []string {
 	if cfg.ArgoParallelism != nil {
 		args = append(args, "--set", fmt.Sprintf("controller.parallelism=%d", *cfg.ArgoParallelism))
 	}
+	if cfg.ArgoNamespaceParallelism != nil {
+		args = append(args, "--set", fmt.Sprintf("controller.namespaceParallelism=%d", *cfg.ArgoNamespaceParallelism))
+	}
 	return args
 }
 
-// noticeArgoExternalConfigMap explains why a native cap cannot change a
-// controller whose ConfigMap is supplied outside the chart.
-func noticeArgoExternalConfigMap(ctx context.Context, cfg Config, deps Deps, namespace string, exists bool) error {
-	if !exists || !argoLimitsRequested(cfg) {
+// noticeArgoExternalConfigMap explains why native controller settings cannot
+// change a ConfigMap supplied outside the chart.
+func noticeArgoExternalConfigMap(ctx context.Context, deps Deps, namespace string, exists bool) error {
+	if !exists {
 		return nil
 	}
 	raw, err := deps.RunHelm(ctx, []string{"get", "values", "argo-workflows", "-n", namespace, "-o", "json"})
@@ -58,7 +64,7 @@ func noticeArgoExternalConfigMap(ctx context.Context, cfg Config, deps Deps, nam
 		return fmt.Errorf("decode Argo controller ConfigMap setting: %w", err)
 	}
 	if create, ok := stored.Controller.ConfigMap.Create.(bool); ok && !create {
-		_, _ = fmt.Fprintln(deps.Output, "Argo controller.configMap.create=false: --argo-parallelism does not change the external ConfigMap; migrate the old profile settings as described in docs/releases/v0.22.4.md.")
+		_, _ = fmt.Fprintln(deps.Output, "Argo controller.configMap.create=false: controller.parallelism and executor.resources values do not change the external ConfigMap; migrate the old profile settings as described in docs/releases/v0.22.5.md.")
 	}
 	return nil
 }

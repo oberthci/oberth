@@ -8,14 +8,14 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testing.T) {
+func TestRestartMigrationRetiresLegacyDeletionButKeepsCancel(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		t.Run(kind, func(t *testing.T) {
 			now := time.Now().UTC()
 			s := testStore(t, &now)
 			ctx := context.Background()
 			repo := createRepo(t, s)
-			spec := model.RunSpec{RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TestedSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host", Trigger: kind, Release: true, Credentialed: true}
+			spec := model.RunSpec{RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", TestedSHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: "agent@host", Trigger: kind, Release: true}
 			var enqueued model.EnqueueRunResult
 			var err error
 			if kind == "promotion" {
@@ -44,13 +44,14 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 			if _, err = s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at) VALUES(?,?,'owner_restart',?)`, run.ID, "workflow", unixNano(now)); err != nil {
 				t.Fatal(err)
 			}
+			applyStopRestartMigration(t, s)
 			for range 2 {
 				if err = s.RecoverOwnerState(ctx); err != nil {
 					t.Fatal(err)
 				}
 			}
 			current, err := s.Run(ctx, run.ID)
-			if err != nil || current.Status != model.RunRunning || current.ID != run.ID || current.AdmissionSequence != run.AdmissionSequence || current.QueueSequence != run.QueueSequence || current.Credentialed != run.Credentialed {
+			if err != nil || current.Status != model.RunRunning || current.ID != run.ID || current.AdmissionSequence != run.AdmissionSequence || current.QueueSequence != run.QueueSequence {
 				t.Fatalf("recovery changed attempt: %+v %v", current, err)
 			}
 			if pending, err := s.PendingRunCancellations(ctx); err != nil || len(pending) != 0 {

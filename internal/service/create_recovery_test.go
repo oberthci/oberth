@@ -44,7 +44,7 @@ func recoveryWaitingRun(t *testing.T, f *recoveryFixture, ref, name, _ string) m
 	return run
 }
 
-func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T) {
+func TestWorkflowCreateRecoveryAbsentGroupMateFailsInEitherOrder(t *testing.T) {
 	for _, parkedFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("parkedFirst=%t", parkedFirst), func(t *testing.T) {
 			f := newRecoveryFixture(t)
@@ -88,7 +88,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if replacement.Status != model.RunQueued || replacement.SHA != parked.SHA || replacement.Ref != parked.Ref {
+			if replacement.Status != model.RunFailed || replacement.SHA != parked.SHA || replacement.Ref != parked.Ref {
 				t.Fatalf("restart lost queued source: %+v", replacement)
 			}
 			if err := scheduler.completePendingCancellations(t.Context()); err != nil {
@@ -98,7 +98,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != holder.ID || jobs.settleCalls != 1 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
-			if len(jobs.deleted) != 1 || jobs.deleted[0] != parked.WorkflowName {
+			if len(jobs.deleted) != 0 {
 				t.Fatalf("real sibling was deleted: %v", jobs.deleted)
 			}
 		})
@@ -214,7 +214,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			}
 			scheduler.settleOneCreate(t.Context())
 			current, err = f.store.Run(t.Context(), run.ID)
-			if err != nil || !isPendingCreate(current) || jobs.settleCalls != 1 {
+			if err != nil || !isPendingCreate(current) || jobs.settleCalls != 0 {
 				t.Fatalf("absent possible POST lost background cleanup: %+v %v", current, err)
 			}
 		})

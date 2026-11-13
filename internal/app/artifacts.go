@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -48,6 +49,9 @@ func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID 
 	}
 	if collectErr != nil {
 		archive = nil
+	}
+	if errors.Is(collectErr, context.DeadlineExceeded) {
+		return model.ArtifactCollectionDeadlineReason
 	}
 	if collectErr != nil && len(archive) == 0 {
 		return fmt.Sprintf("collect: %v", collectErr)

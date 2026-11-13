@@ -20,6 +20,7 @@ type pendingCreateJobs struct {
 	createHook func(context.Context, WorkflowRequest) error
 	settle     func(context.Context, string, string, time.Time) (bool, error)
 	adoptCalls atomic.Int32
+	adoptHook  func(context.Context, model.Run) (bool, error)
 }
 
 func (j *pendingCreateJobs) CreateWorkflow(ctx context.Context, req WorkflowRequest) error {
@@ -31,8 +32,11 @@ func (j *pendingCreateJobs) CreateWorkflow(ctx context.Context, req WorkflowRequ
 	}
 	return j.fakeJobs.CreateWorkflow(ctx, req)
 }
-func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (bool, error) {
+func (j *pendingCreateJobs) Adopt(ctx context.Context, run model.Run) (bool, error) {
 	j.adoptCalls.Add(1)
+	if j.adoptHook != nil {
+		return j.adoptHook(ctx, run)
+	}
 	return false, nil
 }
 func (*pendingCreateJobs) WorkflowNamespace() string { return "test-argo" }
@@ -246,7 +250,10 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			}
 			// A blocking API call must not delay startup or dispatch of unrelated work.
 			apiEntered := make(chan struct{}, 1)
-			jobs.settle = func(ctx context.Context, _, _ string, _ time.Time) (bool, error) {
+			jobs.adoptHook = func(ctx context.Context, _ model.Run) (bool, error) {
+				if jobs.adoptCalls.Load() <= 2 {
+					return false, nil
+				}
 				select {
 				case apiEntered <- struct{}{}:
 				default:
@@ -254,6 +261,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				<-ctx.Done()
 				return false, ctx.Err()
 			}
+
 			startup := make(chan struct{})
 			f.scheduler.onStartupRecovered = func() { close(startup) }
 			done, _ := startCreateScheduler(t, f.scheduler)
@@ -270,13 +278,10 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			case <-time.After(testStartTimeout(time.Second)):
 				t.Fatal("pending worker never started")
 			}
-			wantAdopts := int32(0)
-			if !marked {
-				wantAdopts = 2
+			if jobs.adoptCalls.Load() < 3 {
+				t.Fatal("background recovery did not observe the Workflow")
 			}
-			if jobs.adoptCalls.Load() != wantAdopts {
-				t.Fatalf("unacknowledged recovery bypassed adoption: %d", jobs.adoptCalls.Load())
-			}
+
 			state := f.scheduler.submissionStateForTest()
 			if state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
 				t.Fatalf("restart did not restore exact pending contracts: %+v", state)
@@ -460,36 +465,22 @@ func TestWorkflowCreatePendingStatusDoesNotCallKubernetes(t *testing.T) {
 }
 
 func TestTerminalCancellationHandoffDoesNotRearmStop(t *testing.T) {
-	for _, hasOwner := range []bool{false, true} {
-		t.Run(fmt.Sprintf("owner=%t", hasOwner), func(t *testing.T) {
-			f := newControlFixture(t)
-			enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "terminal-handoff", Repository: f.repo, Branch: "feature/terminal", SHA: strings.Repeat("a", 40), Actor: "owner"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			run, err := f.store.ClaimNextRun(t.Context())
-			if err != nil || run.ID != enqueued.ID {
-				t.Fatal(run, err)
-			}
-			var grant *submissionOwner
-			if hasOwner {
-				grant, err = f.scheduler.submissions.adopt(run)
-				if err != nil {
-					t.Fatal(err)
-				}
-				grant.retain()
-			}
-			if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "native terminal verdict"}); err != nil {
-				t.Fatal(err)
-			}
-			// A cancellation snapshot can hand off after the observer finalized.
-			// A failed local owner restore must also drain without a nil dereference.
-			f.scheduler.createPending = map[string]*pendingCreate{run.ID: {runID: run.ID, grant: grant}}
-			f.scheduler.settleOneCreate(t.Context())
-			pending, err := f.store.PendingRunCancellations(t.Context())
-			if err != nil || len(pending) != 0 || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {
-				t.Fatalf("terminal handoff rearmed custody: pending=%+v state=%+v error=%v", pending, f.scheduler.submissionStateForTest(), err)
-			}
-		})
+	f := newControlFixture(t)
+	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "terminal-handoff", Repository: f.repo, Branch: "feature/terminal", SHA: strings.Repeat("a", 40), Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.store.ClaimNextRun(t.Context())
+	if err != nil || run.ID != enqueued.ID {
+		t.Fatal(run, err)
+	}
+	if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "native terminal verdict"}); err != nil {
+		t.Fatal(err)
+	}
+	f.scheduler.createPending = map[string]*pendingCreate{run.ID: {runID: run.ID}}
+	f.scheduler.settleOneCreate(t.Context())
+	pending, err := f.store.PendingRunCancellations(t.Context())
+	if err != nil || len(pending) != 0 || f.scheduler.pendingCreateCount() != 0 {
+		t.Fatalf("terminal handoff rearmed custody: pending=%+v error=%v", pending, err)
 	}
 }

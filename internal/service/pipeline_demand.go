@@ -6,20 +6,20 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// PipelineDemandSizer binds resource admission and submission to one resolution.
-type PipelineDemandSizer interface {
-	PipelineDemandReceipt(context.Context, WorkflowRequest) (*argoworkflow.DemandReceipt, error)
+// PipelineSourceResolver pins the source and fragment resolution used for submission.
+type PipelineSourceResolver interface {
+	ResolvePipelineSource(context.Context, WorkflowRequest) (*argoworkflow.SourceReceipt, error)
 }
 
-func (scheduler *Scheduler) pipelineDemandReceipt(ctx context.Context, request WorkflowRequest) (*argoworkflow.DemandReceipt, error) {
+func (scheduler *Scheduler) resolvePipelineSource(ctx context.Context, request WorkflowRequest) (*argoworkflow.SourceReceipt, error) {
 	engine := any(scheduler.jobs)
 	if request.Run.Release {
-		if _, ok := scheduler.releaseJobs.(PipelineDemandSizer); ok {
+		if _, ok := scheduler.releaseJobs.(PipelineSourceResolver); ok {
 			engine = scheduler.releaseJobs
 		}
 	}
-	if sizer, ok := engine.(PipelineDemandSizer); ok {
-		return sizer.PipelineDemandReceipt(ctx, request)
+	if sizer, ok := engine.(PipelineSourceResolver); ok {
+		return sizer.ResolvePipelineSource(ctx, request)
 	}
 	return nil, nil
 }

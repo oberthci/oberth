@@ -239,8 +239,8 @@ func TestWorkspaceStartupRecoveryPreservesPendingPublication(t *testing.T) {
 	if err := restarted.recoverOwnedWorkspaces(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// The reset run owns its scratch until execution recreates it.
-	assertWorkspaceExists(t, interruptedPath)
+	// Failed stranded work releases scratch; publication ownership is preserved.
+	assertWorkspaceMissing(t, interruptedPath)
 	assertWorkspaceExists(t, publicationPath)
 	assertWorkspaceExists(t, promotionPath)
 

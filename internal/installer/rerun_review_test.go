@@ -147,6 +147,9 @@ func TestValuesPreviewListsAllChangesWithoutValues(t *testing.T) {
 func TestSameVersionExplicitInstallValuesAreApplied(t *testing.T) {
 	writes := 0
 	deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+			return []byte(`{}`), nil
+		}
 		switch args[0] {
 		case "list":
 			return []byte(`[{"name":"oberth","chart":"oberth-0.17.62","status":"deployed"}]`), nil

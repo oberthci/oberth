@@ -711,7 +711,7 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if len(cancellations) != 0 {
 		t.Fatalf("restart cancellations = %#v, want none for the resumable branch Workflow", cancellations)
 	}
-	// A claimed ordinary branch run without a job_name is requeued by store
+	// A claimed ordinary branch run without a job_name is failed by store
 	// recovery: its ID and queue ordering remain stable, and the no-Job
 	// cancellation obligation terminalizes
 	// inside the recovery transaction because owner startup proves the
@@ -736,29 +736,29 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if noJobRecovered.Status != model.RunQueued || noJobRecovered.FinishedAt != nil {
+	if noJobRecovered.Status != model.RunFailed || noJobRecovered.FinishedAt == nil {
 		t.Fatalf("no-job recovered run = %#v, want queued under the same ID", noJobRecovered)
 	}
-	requeued, err := s.Run(ctx, noJobRun.ID)
+	recoveredRun, err := s.Run(ctx, noJobRun.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requeued.Status != model.RunQueued || requeued.Ref != noJobRun.Ref || requeued.SHA != noJobRun.SHA ||
-		requeued.Trigger != noJobRun.Trigger || requeued.Actor != noJobRun.Actor {
-		t.Fatalf("requeued run = %#v, want queued copy of %#v", requeued, noJobRun)
+	if recoveredRun.Status != model.RunFailed || recoveredRun.Ref != noJobRun.Ref || recoveredRun.SHA != noJobRun.SHA ||
+		recoveredRun.Trigger != noJobRun.Trigger || recoveredRun.Actor != noJobRun.Actor {
+		t.Fatalf("recoveredRun run = %#v, want failed original %#v", recoveredRun, noJobRun)
 	}
-	// Neither the resumable Workflow nor the requeued no-Job run needs deletion.
+	// Neither the resumable Workflow nor the failed no-Job run needs deletion.
 	cancellations, err = s.PendingRunCancellations(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cancellations) != 0 {
-		t.Fatalf("pending cancellations after requeue = %#v, want none", cancellations)
+		t.Fatalf("pending cancellations after restart = %#v, want none", cancellations)
 	}
 }
 
-// Unexecuted tag work resumes under the original durable ID.
-func TestRestartRecoveryRequeuesTagRun(t *testing.T) {
+// Claimed tag work with no Workflow fails under the original durable ID.
+func TestRestartRecoveryFailsUnsubmittedTagRun(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 7, 6, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.db")
@@ -790,83 +790,8 @@ func TestRestartRecoveryRequeuesTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunQueued || recovered.Reason != RestartRequeueReason {
-		t.Fatalf("recovered tag run = %#v, want queued under the same ID", recovered)
-	}
-}
-
-// TestRequeueStrandedRunReplacesOwnerRestartObligation covers the scheduler
-// reconciliation path of issue #270 at the store level: a stranded run whose
-// owner_restart cancellation already exists (run_id is the primary key) gets
-// its obligation upserted to retain the old Workflow while the same run queues,
-// re-armed for the cancellation pass.
-func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
-	ctx := context.Background()
-	now := time.Date(2026, 9, 7, 6, 30, 0, 0, time.UTC)
-	path := filepath.Join(t.TempDir(), "oberth.db")
-	s, err := Open(ctx, path, Options{Now: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := createRepo(t, s)
-	run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/stranded", "abcabcabcabcabcabcabcabcabcabcabcabcabca"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.SetRunWorkflowName(ctx, run.ID, "job-stranded"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.MarkRunSubmissionStarted(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	// A credentialed (ci-secrets tier) branch run is requeue-eligible; the
-	// copy re-earns credentials through fresh scheduler admission.
-	if err := s.SetRunCredentialed(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(time.Minute)
-	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-
-	// A prior binary may already have left this obligation behind.
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO run_cancellations(run_id, job_name, reason, created_at) VALUES(?, ?, 'owner_restart', ?)`, run.ID, "job-stranded", unixNano(now)); err != nil {
-		t.Fatal(err)
-	}
-	requeued, err := s.RequeueStrandedRun(ctx, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	old, err := s.Run(ctx, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if old.Status != model.RunQueued || old.ID != requeued.ID {
-		t.Fatalf("stranded run after requeue = %#v, want queued under original ID %s", old, requeued.ID)
-	}
-	if requeued.Status != model.RunQueued || requeued.Ref != run.Ref || requeued.SHA != run.SHA || requeued.Credentialed {
-		t.Fatalf("requeued run = %#v, want uncredentialed queued copy", requeued)
-	}
-	pending, err := s.PendingRunCancellations(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName != "job-stranded" ||
-		pending[0].Reason != "owner_restart" {
-		t.Fatalf("pending obligations = %#v, want upserted owner-restart obligation for job-stranded", pending)
-	}
-
-	// A second requeue attempt is refused: the run is no longer running.
-	if _, err := s.RequeueStrandedRun(ctx, run.ID); !errors.Is(err, ErrRequeueIneligible) {
-		t.Fatalf("second requeue error = %v, want ErrRequeueIneligible", err)
+	if recovered.Status != model.RunFailed || recovered.Error != model.ServerRestartReason {
+		t.Fatalf("recovered tag run = %#v, want failed under the same ID", recovered)
 	}
 }
 
@@ -1894,6 +1819,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,reason,created_at) VALUES(?,?,'owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {
 		t.Fatal(err)
 	}
+	applyStopRestartMigration(t, s)
 	if err := s.RecoverOwnerState(context.Background()); err != nil {
 		t.Fatal(err)
 	}

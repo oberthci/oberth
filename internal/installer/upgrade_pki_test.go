@@ -60,6 +60,9 @@ func TestPlainPKIUpgradeNeedsNoBaoToken(t *testing.T) {
 				},
 				RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
 					if !dryRun && applied && name == "kubectl" {
+						if slices.Contains(args, "logs") && slices.Contains(args, "--since-time") && slices.Contains(args, "--tail=1000") {
+							return nil, nil // bounded migration evidence, no PKI inspection
+						}
 						if slices.Contains(args, "version") {
 							return []byte("oberth v0.17.81\n"), nil
 						}

@@ -31,12 +31,13 @@ var grantSecretPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 // wildcard retains its existing meaning of all steps.
 var grantStepPattern = regexp.MustCompile(`^(\*|[A-Za-z0-9._/-]+)$`)
 
-// SecretAccessGrant records an approval for a (repo, step, secret) triple. If
-// a revoked grant already exists for the same triple, a new active row is
+// SecretAccessGrant records an approval for a (repo, workflow, step, secret) tuple. If
+// a revoked grant already exists for the same tuple, a new active row is
 // inserted. If an active grant already exists, it is returned unchanged.
 type SecretAccessGrant struct {
 	ID         int64
 	Repo       string
+	Workflow   string
 	Step       string
 	Secret     string
 	ApprovedBy string
@@ -53,16 +54,16 @@ func (s *Store) SecretAccessList(ctx context.Context, repo string, includeRevoke
 	var args []any
 	if includeRevoked {
 		if strings.TrimSpace(repo) == "" {
-			query = `SELECT id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access ORDER BY repo, step, secret, id`
+			query = `SELECT id, repo, workflow, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access ORDER BY repo, workflow, step, secret, id`
 		} else {
-			query = `SELECT id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access WHERE repo = ? ORDER BY step, secret, id`
+			query = `SELECT id, repo, workflow, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access WHERE repo = ? ORDER BY workflow, step, secret, id`
 			args = append(args, repo)
 		}
 	} else {
 		if strings.TrimSpace(repo) == "" {
-			query = `SELECT id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access WHERE revoked_at IS NULL ORDER BY repo, step, secret, id`
+			query = `SELECT id, repo, workflow, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access WHERE revoked_at IS NULL ORDER BY repo, workflow, step, secret, id`
 		} else {
-			query = `SELECT id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access WHERE repo = ? AND revoked_at IS NULL ORDER BY step, secret, id`
+			query = `SELECT id, repo, workflow, step, secret, approved_by, approved_at, revoked_by, revoked_at FROM secret_access WHERE repo = ? AND revoked_at IS NULL ORDER BY workflow, step, secret, id`
 			args = append(args, repo)
 		}
 	}
@@ -85,7 +86,7 @@ func (s *Store) SecretAccessList(ctx context.Context, repo string, includeRevoke
 	return grants, nil
 }
 
-// Grant records an approval for a (repo, step, secret) triple. If an active
+// Grant records an approval for a (repo, workflow, step, secret) tuple. If an active
 // grant already exists it is returned without modification. The actor is the
 // identity of the administrator granting access. The mutation and its audit
 // action are committed in a single transaction; a failed audit append rolls
@@ -93,9 +94,9 @@ func (s *Store) SecretAccessList(ctx context.Context, repo string, includeRevoke
 // revoked_at IS NULL DO NOTHING targets the partial unique index so a
 // concurrent CLI+reconciler race cannot surface a spurious constraint error
 // for a grant that is already durably in effect.
-func (s *Store) Grant(ctx context.Context, repo, step, secret, actor string) (SecretAccessGrant, error) {
-	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" || strings.TrimSpace(actor) == "" {
-		return SecretAccessGrant{}, fmt.Errorf("%w: repo, step, secret, and actor are required", ErrInvalid)
+func (s *Store) Grant(ctx context.Context, repo, workflow, step, secret, actor string) (SecretAccessGrant, error) {
+	if strings.TrimSpace(workflow) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" || strings.TrimSpace(actor) == "" {
+		return SecretAccessGrant{}, fmt.Errorf("%w: repo, workflow, step, secret, and actor are required", ErrInvalid)
 	}
 	if !grantRepoPattern.MatchString(repo) {
 		return SecretAccessGrant{}, fmt.Errorf("%w: repo %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, repo)
@@ -106,6 +107,9 @@ func (s *Store) Grant(ctx context.Context, repo, step, secret, actor string) (Se
 	if !grantSecretPattern.MatchString(secret) {
 		return SecretAccessGrant{}, fmt.Errorf("%w: secret %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, secret)
 	}
+	if err := model.ValidateWorkflowFile(workflow); err != nil {
+		return SecretAccessGrant{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
 	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -113,10 +117,10 @@ func (s *Store) Grant(ctx context.Context, repo, step, secret, actor string) (Se
 	}
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `
-INSERT INTO secret_access(repo, step, secret, approved_by, approved_at)
-VALUES(?, ?, ?, ?, ?)
-ON CONFLICT(repo, step, secret) WHERE revoked_at IS NULL DO NOTHING`,
-		repo, step, secret, actor, now)
+INSERT INTO secret_access(repo, workflow, step, secret, approved_by, approved_at)
+VALUES(?, ?, ?, ?, ?, ?)
+ON CONFLICT(repo, workflow, step, secret) WHERE revoked_at IS NULL DO NOTHING`,
+		repo, workflow, step, secret, actor, now)
 	if err != nil {
 		return SecretAccessGrant{}, fmt.Errorf("grant secret access: %w", err)
 	}
@@ -127,9 +131,9 @@ ON CONFLICT(repo, step, secret) WHERE revoked_at IS NULL DO NOTHING`,
 	if affected == 0 {
 		// Active grant already exists — return it without a new audit action.
 		existing, scanErr := scanSecretAccess(tx.QueryRowContext(ctx, `
-SELECT id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_at
-FROM secret_access WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS NULL`,
-			repo, step, secret))
+SELECT id, repo, workflow, step, secret, approved_by, approved_at, revoked_by, revoked_at
+FROM secret_access WHERE repo = ? AND workflow = ? AND step = ? AND secret = ? AND revoked_at IS NULL`,
+			repo, workflow, step, secret))
 		if scanErr != nil {
 			return SecretAccessGrant{}, fmt.Errorf("read existing grant: %w", scanErr)
 		}
@@ -139,7 +143,7 @@ FROM secret_access WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS 
 	if err != nil {
 		return SecretAccessGrant{}, fmt.Errorf("read grant id: %w", err)
 	}
-	details, err := json.Marshal(map[string]string{"repo": repo, "step": step, "secret": secret})
+	details, err := json.Marshal(map[string]string{"repo": repo, "workflow": workflow, "step": step, "secret": secret})
 	if err != nil {
 		return SecretAccessGrant{}, fmt.Errorf("encode grant audit: %w", err)
 	}
@@ -153,18 +157,21 @@ FROM secret_access WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS 
 		return SecretAccessGrant{}, fmt.Errorf("commit grant: %w", err)
 	}
 	return SecretAccessGrant{
-		ID: id, Repo: repo, Step: step, Secret: secret,
+		ID: id, Repo: repo, Workflow: workflow, Step: step, Secret: secret,
 		ApprovedBy: actor, ApprovedAt: fromUnixNano(now),
 	}, nil
 }
 
-// Revoke marks the active grant for (repo, step, secret) as revoked. Returns
+// Revoke marks the active grant for (repo, workflow, step, secret) as revoked. Returns
 // ErrNotFound if no active grant exists. The mutation and its audit action are
 // committed in a single transaction; a failed audit append rolls back the
 // revocation.
-func (s *Store) Revoke(ctx context.Context, repo, step, secret, actor string) (SecretAccessGrant, error) {
-	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" || strings.TrimSpace(actor) == "" {
-		return SecretAccessGrant{}, fmt.Errorf("%w: repo, step, secret, and actor are required", ErrInvalid)
+func (s *Store) Revoke(ctx context.Context, repo, workflow, step, secret, actor string) (SecretAccessGrant, error) {
+	if strings.TrimSpace(workflow) == "" || strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" || strings.TrimSpace(actor) == "" {
+		return SecretAccessGrant{}, fmt.Errorf("%w: repo, workflow, step, secret, and actor are required", ErrInvalid)
+	}
+	if err := model.ValidateWorkflowFile(workflow); err != nil {
+		return SecretAccessGrant{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -174,16 +181,16 @@ func (s *Store) Revoke(ctx context.Context, repo, step, secret, actor string) (S
 	defer func() { _ = tx.Rollback() }()
 	grant, err := scanSecretAccess(tx.QueryRowContext(ctx, `
 UPDATE secret_access SET revoked_by = ?, revoked_at = ?
-WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS NULL
-RETURNING id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_at`,
-		actor, now, repo, step, secret))
+WHERE repo = ? AND workflow = ? AND step = ? AND secret = ? AND revoked_at IS NULL
+RETURNING id, repo, workflow, step, secret, approved_by, approved_at, revoked_by, revoked_at`,
+		actor, now, repo, workflow, step, secret))
 	if errors.Is(err, sql.ErrNoRows) {
-		return SecretAccessGrant{}, fmt.Errorf("%w: no active grant for %s/%s/%s", ErrNotFound, repo, step, secret)
+		return SecretAccessGrant{}, fmt.Errorf("%w: no active grant for %s workflow %s step %s secret %s", ErrNotFound, repo, workflow, step, secret)
 	}
 	if err != nil {
 		return SecretAccessGrant{}, fmt.Errorf("revoke secret access: %w", err)
 	}
-	details, err := json.Marshal(map[string]string{"repo": repo, "step": step, "secret": secret})
+	details, err := json.Marshal(map[string]string{"repo": repo, "workflow": workflow, "step": step, "secret": secret})
 	if err != nil {
 		return SecretAccessGrant{}, fmt.Errorf("encode revocation audit: %w", err)
 	}
@@ -203,7 +210,10 @@ RETURNING id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_
 // (step, secret). The repository is identified by its durable ID so that
 // same-name repos under different upstreams cannot alias each other's
 // grants (#245 BLOCKER B).
-func (s *Store) ActiveSecretGrants(ctx context.Context, repoID int64) (map[string]map[string]bool, error) {
+func (s *Store) ActiveSecretGrants(ctx context.Context, repoID int64, workflow string) (map[string]map[string]bool, error) {
+	if err := model.ValidateWorkflowFile(workflow); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
 	qualifiedName, err := s.QualifiedRepoName(ctx, repoID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve qualified repo name for grants: %w", err)
@@ -219,7 +229,7 @@ func (s *Store) ActiveSecretGrants(ctx context.Context, repoID int64) (map[strin
 	// against the registered identity.
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT step, secret FROM secret_access
-WHERE repo = ? AND revoked_at IS NULL`, qualifiedName)
+WHERE repo = ? AND workflow = ? AND revoked_at IS NULL`, qualifiedName, workflow)
 	if err != nil {
 		return nil, fmt.Errorf("list active secret grants: %w", err)
 	}
@@ -241,7 +251,7 @@ WHERE repo = ? AND revoked_at IS NULL`, qualifiedName)
 	return grants, nil
 }
 
-// RecordGrantDeclarations upserts (repo, step, path) declarations observed
+// RecordGrantDeclarations upserts (repo, workflow file, step, path) declarations observed
 // at Workflow admission. This captures what a repository's pipeline actually
 // declares so `access_list --pending` can show declared-but-not-granted paths
 // without reading the git cache at query time. Issue #623, finding 4.
@@ -256,16 +266,19 @@ func (s *Store) RecordGrantDeclarations(ctx context.Context, repo, sha string, d
 	}
 	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO grant_declarations (repo, step, path, last_seen_sha, last_seen_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (repo, step, path)
+INSERT INTO grant_declarations (repo, workflow, step, path, last_seen_sha, last_seen_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT (repo, workflow, step, path)
 DO UPDATE SET last_seen_sha = excluded.last_seen_sha, last_seen_at = excluded.last_seen_at`)
 	if err != nil {
 		return fmt.Errorf("prepare grant declarations: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
 	for _, d := range declarations {
-		if _, err := stmt.ExecContext(ctx, repo, d.Step, d.Path, sha, now); err != nil {
+		if err := model.ValidateWorkflowFile(d.Workflow); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalid, err)
+		}
+		if _, err := stmt.ExecContext(ctx, repo, d.Workflow, d.Step, d.Path, sha, now); err != nil {
 			return fmt.Errorf("upsert grant declaration (%s, %s, %s): %w", repo, d.Step, d.Path, err)
 		}
 	}
@@ -274,13 +287,15 @@ DO UPDATE SET last_seen_sha = excluded.last_seen_sha, last_seen_at = excluded.la
 
 // GrantDeclaration is a single (step, path) observation from Workflow admission.
 type GrantDeclaration struct {
-	Step string
-	Path string
+	Workflow string
+	Step     string
+	Path     string
 }
 
 // PendingGrantDeclaration is a declared-but-not-granted entry.
 type PendingGrantDeclaration struct {
 	Repo        string    `json:"repo"`
+	Workflow    string    `json:"workflow"`
 	Step        string    `json:"step"`
 	Path        string    `json:"path"`
 	LastSeenSHA string    `json:"last_seen_sha"`
@@ -288,15 +303,16 @@ type PendingGrantDeclaration struct {
 }
 
 // PendingGrantDeclarations returns declarations that have no matching active
-// grant. A wildcard grant (step="*") for the same (repo, path) covers any
-// step's declaration. Issue #623, finding 4.
+// grant. A wildcard grant (step="*") for the same (repo, workflow file, path) covers any
+// step's declaration within that file. Issue #623, finding 4.
 func (s *Store) PendingGrantDeclarations(ctx context.Context, repo string) ([]PendingGrantDeclaration, error) {
 	query := `
-SELECT d.repo, d.step, d.path, d.last_seen_sha, d.last_seen_at
+SELECT d.repo, d.workflow, d.step, d.path, d.last_seen_sha, d.last_seen_at
 FROM grant_declarations d
 WHERE NOT EXISTS (
     SELECT 1 FROM secret_access sa
     WHERE sa.repo = d.repo
+      AND sa.workflow = d.workflow
       AND sa.secret = d.path
       AND sa.revoked_at IS NULL
       AND (sa.step = d.step OR sa.step = '*')
@@ -306,7 +322,7 @@ WHERE NOT EXISTS (
 		query += " AND d.repo = ?"
 		args = append(args, repo)
 	}
-	query += " ORDER BY d.repo, d.step, d.path"
+	query += " ORDER BY d.repo, d.workflow, d.step, d.path"
 
 	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
@@ -318,7 +334,7 @@ WHERE NOT EXISTS (
 	for rows.Next() {
 		var p PendingGrantDeclaration
 		var lastSeenAt int64
-		if err := rows.Scan(&p.Repo, &p.Step, &p.Path, &p.LastSeenSHA, &lastSeenAt); err != nil {
+		if err := rows.Scan(&p.Repo, &p.Workflow, &p.Step, &p.Path, &p.LastSeenSHA, &lastSeenAt); err != nil {
 			return nil, fmt.Errorf("scan pending grant declaration: %w", err)
 		}
 		p.LastSeenAt = fromUnixNano(lastSeenAt)
@@ -331,7 +347,7 @@ func scanSecretAccess(row rowScanner) (SecretAccessGrant, error) {
 	var grant SecretAccessGrant
 	var approvedAt int64
 	var revokedAt sql.NullInt64
-	if err := scanRowNotFound(row, "SecretAccess", &grant.ID, &grant.Repo, &grant.Step, &grant.Secret,
+	if err := scanRowNotFound(row, "SecretAccess", &grant.ID, &grant.Repo, &grant.Workflow, &grant.Step, &grant.Secret,
 		&grant.ApprovedBy, &approvedAt, &grant.RevokedBy, &revokedAt); err != nil {
 		return SecretAccessGrant{}, err
 	}
@@ -360,30 +376,33 @@ func (s *Store) ReplaceGrantDeclarations(ctx context.Context, repo, sha string, 
 	}
 	now := unixNano(s.now())
 	for _, d := range declarations {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO grant_declarations(repo,step,path,last_seen_sha,last_seen_at) VALUES(?,?,?,?,?) ON CONFLICT(repo,step,path) DO NOTHING`, repo, d.Step, d.Path, sha, now); err != nil {
+		if err := model.ValidateWorkflowFile(d.Workflow); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalid, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO grant_declarations(repo,workflow,step,path,last_seen_sha,last_seen_at) VALUES(?,?,?,?,?,?) ON CONFLICT(repo,workflow,step,path) DO NOTHING`, repo, d.Workflow, d.Step, d.Path, sha, now); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func (s *Store) DismissGrantDeclaration(ctx context.Context, actor, repo, step, path string) error {
-	if strings.TrimSpace(actor) == "" || repo == "" || step == "" || path == "" {
-		return fmt.Errorf("%w: actor, repo, step and secret required", ErrInvalid)
+func (s *Store) DismissGrantDeclaration(ctx context.Context, actor, repo, workflow, step, path string) error {
+	if strings.TrimSpace(actor) == "" || repo == "" || workflow == "" || step == "" || path == "" {
+		return fmt.Errorf("%w: actor, repo, workflow, step and secret required", ErrInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `DELETE FROM grant_declarations WHERE repo=? AND step=? AND path=?`, repo, step, path)
+	result, err := tx.ExecContext(ctx, `DELETE FROM grant_declarations WHERE repo=? AND workflow=? AND step=? AND path=?`, repo, workflow, step, path)
 	if err != nil {
 		return err
 	}
 	if err := requireChanged("grant declaration", result); err != nil {
 		return err
 	}
-	details, _ := json.Marshal(map[string]string{"repo": repo, "step": step, "secret": path})
+	details, _ := json.Marshal(map[string]string{"repo": repo, "workflow": workflow, "step": step, "secret": path})
 	if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "secret_access.dismiss", ResourceType: "repository", ResourceID: repo, Details: string(details)}, unixNano(s.now())); err != nil {
 		return err
 	}

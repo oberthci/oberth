@@ -73,7 +73,7 @@ func (*deferredReplayCancel) AcceptCancellations(context.Context, []model.RunCan
 }
 func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 	h := newRerunHarness(t)
-	source, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
+	source, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Trigger: "tag"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestTagReplayReviewHistoryLimitAndUnknownResolverFailClosed(t *testing.T) {
 				h.service.refs = struct{ RefResolver }{h.refs}
 			} else {
 				for range 64 {
-					queued, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
+					queued, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Trigger: "tag"})
 					if err != nil {
 						t.Fatal(err)
 					}

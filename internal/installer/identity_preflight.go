@@ -61,9 +61,6 @@ type liveHelmValuesSubset struct {
 	Secretstore struct {
 		Address string `json:"address"`
 		CACert  string `json:"caCert"`
-		Transit struct {
-			Enabled bool `json:"enabled"`
-		} `json:"transit"`
 	} `json:"secretstore"`
 }
 

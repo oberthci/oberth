@@ -36,7 +36,7 @@ func TestRetryRunKeepsSourceAndAuditsActor(t *testing.T) {
 			}
 			if retried.ID == source.ID || retried.RepoID != repo.ID || retried.Ref != source.Ref ||
 				retried.SHA != sha || retried.TestedSHA != sha || retried.Actor != "reviewer@host" ||
-				retried.Status != model.RunQueued || retried.Trigger != "branch" || retried.Credentialed {
+				retried.Status != model.RunQueued || retried.Trigger != "branch" {
 				t.Fatalf("retry changed run identity or admission: %#v", retried.Run)
 			}
 			audit, err := s.LatestAuditActionByType(ctx, "run.retry", "run")
@@ -139,7 +139,7 @@ func TestTagReplayEvidenceAndPublicationGuardAreTransactional(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := t.Context()
-	source, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "tag", Release: true, Credentialed: true})
+	source, err := s.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefTag, Ref: "v1", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "tag", Release: true})
 	if err != nil {
 		t.Fatal(err)
 	}

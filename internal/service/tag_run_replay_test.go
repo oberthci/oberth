@@ -36,7 +36,7 @@ func TestTagRunRerunBeforeCredentialedStepsNeedsNoForce(t *testing.T) {
 		t.Fatalf("safe tag needs force/warning: %+v", response)
 	}
 	queued := harness.run(t, response.RunID)
-	if !queued.Release || !queued.Credentialed || queued.SHA != failed.SHA || queued.TestedSHA != failed.TestedSHA || queued.RefKind != model.RefTag {
+	if !queued.Release || queued.SHA != failed.SHA || queued.TestedSHA != failed.TestedSHA || queued.RefKind != model.RefTag {
 		t.Fatalf("lost admission: %+v", queued)
 	}
 	action, err := harness.fixture.store.LatestAuditActionByType(t.Context(), "run.rerun", "run")
@@ -125,7 +125,7 @@ func TestTagRunRetryInfrastructureKeepsReleaseAdmission(t *testing.T) {
 				t.Fatalf("tag retry audit basis: %+v %v", audit, err)
 			}
 			retried := value.(model.Run)
-			if !retried.Release || !retried.Credentialed || retried.SHA != failed.SHA || retried.TestedSHA != failed.TestedSHA || retried.Trigger != failed.Trigger || retried.Ref != failed.Ref || retried.Actor != rerunAdmin.Identity {
+			if !retried.Release || retried.SHA != failed.SHA || retried.TestedSHA != failed.TestedSHA || retried.Trigger != failed.Trigger || retried.Ref != failed.Ref || retried.Actor != rerunAdmin.Identity {
 				t.Fatalf("retry changed tag admission: %+v", retried)
 			}
 			if _, err := harness.call(rerunAdmin, "run_retry", map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrInvalidState) {
@@ -176,7 +176,7 @@ func TestTagRunRerunUnknownEvidenceStillNeedsForce(t *testing.T) {
 
 func TestTagRunRetryBeforeWorkflowIntentNeedsNoPlan(t *testing.T) {
 	harness := newRerunHarness(t)
-	queued, err := storetest.EnqueueRun(harness.fixture.store, context.Background(), model.RunSpec{RepoID: harness.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Release: true, Credentialed: true, Trigger: "tag", Actor: "pusher"})
+	queued, err := storetest.EnqueueRun(harness.fixture.store, context.Background(), model.RunSpec{RepoID: harness.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Release: true, Trigger: "tag", Actor: "pusher"})
 	if err != nil {
 		t.Fatal(err)
 	}

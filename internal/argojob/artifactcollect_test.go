@@ -7,16 +7,19 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestCollectStreamsTheArtifactsDirectoryOut(t *testing.T) {
 	t.Parallel()
-	client := fake.NewClientset()
+	client := collectorTestClient()
 	runningSeedPods(client)
 
 	var command []string
@@ -47,7 +50,7 @@ func TestCollectStreamsTheArtifactsDirectoryOut(t *testing.T) {
 
 func TestCollectPodHoldsNoServiceAccountToken(t *testing.T) {
 	t.Parallel()
-	client := fake.NewClientset()
+	client := collectorTestClient()
 	runningSeedPods(client)
 	seeder := NewSourceSeeder(client, func(_ context.Context, _, _, _ string, _ []string,
 		_ io.Reader, stdout, _ io.Writer,
@@ -72,7 +75,7 @@ func TestCollectPodHoldsNoServiceAccountToken(t *testing.T) {
 
 func TestCollectDeletesItsPodEvenWhenTheExecFails(t *testing.T) {
 	t.Parallel()
-	client := fake.NewClientset()
+	client := collectorTestClient()
 	runningSeedPods(client)
 	seeder := NewSourceSeeder(client, func(_ context.Context, _, _, _ string, _ []string,
 		_ io.Reader, _, _ io.Writer,
@@ -96,7 +99,7 @@ func TestCollectDeletesItsPodEvenWhenTheExecFails(t *testing.T) {
 
 func TestCollectReturnsNothingForAnEmptyDirectory(t *testing.T) {
 	t.Parallel()
-	client := fake.NewClientset()
+	client := collectorTestClient()
 	runningSeedPods(client)
 	seeder := NewSourceSeeder(client, func(_ context.Context, _, _, _ string, _ []string,
 		_ io.Reader, _, _ io.Writer,
@@ -115,7 +118,7 @@ func TestCollectReturnsNothingForAnEmptyDirectory(t *testing.T) {
 
 func TestCollectRefusesAnOversizeStream(t *testing.T) {
 	t.Parallel()
-	client := fake.NewClientset()
+	client := collectorTestClient()
 	runningSeedPods(client)
 	config := seedTestConfig()
 	config.ArtifactsLimitBytes = 16
@@ -133,7 +136,7 @@ func TestCollectRefusesAnOversizeStream(t *testing.T) {
 
 func TestCollectMountsTheRunClaim(t *testing.T) {
 	t.Parallel()
-	client := fake.NewClientset()
+	client := collectorTestClient()
 	runningSeedPods(client)
 	seeder := NewSourceSeeder(client, func(_ context.Context, _, _, _ string, _ []string,
 		_ io.Reader, stdout, _ io.Writer,
@@ -172,4 +175,19 @@ func createdPods(t *testing.T, client *fake.Clientset) []*corev1.Pod {
 		}
 	}
 	return pods
+}
+
+func collectorTestClient() *fake.Clientset {
+	client := fake.NewClientset(&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name: sourceClaimName("oberth-run-abc"), Namespace: seedTestConfig().Namespace, UID: "claim-uid",
+		CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)), Labels: map[string]string{"oberth.ci/component": "source", "oberth.ci/workflow": "oberth-run-abc"},
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: "oberth-run-abc", UID: "workflow-uid"}},
+	}})
+	client.PrependReactor("create", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		pod := a.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+		pod.UID = types.UID(pod.Name + "-uid")
+		pod.ResourceVersion = "1"
+		return false, nil, nil
+	})
+	return client
 }

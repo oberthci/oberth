@@ -103,15 +103,15 @@ func (s *Store) VerifyAuditAnchorReference(ctx context.Context, anchor model.Aud
 
 // SecretAccessCheck reports whether an active (non-revoked) grant exists for
 // the given (repo, step, secret) triple.
-func (s *Store) SecretAccessCheck(ctx context.Context, repo, step, secret string) (bool, error) {
+func (s *Store) SecretAccessCheck(ctx context.Context, repo, workflow, step, secret string) (bool, error) {
 	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
 		return false, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalid)
 	}
 	var count int
 	if err := s.reader().QueryRowContext(ctx, `
 SELECT count(*) FROM secret_access
-WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS NULL`,
-		repo, step, secret).Scan(&count); err != nil {
+WHERE repo = ? AND workflow = ? AND step = ? AND secret = ? AND revoked_at IS NULL`,
+		repo, workflow, step, secret).Scan(&count); err != nil {
 		return false, fmt.Errorf("check secret access: %w", err)
 	}
 	return count > 0, nil
@@ -222,7 +222,7 @@ func (s *Store) EnqueuePromotionRun(ctx context.Context, runSpec model.RunSpec, 
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("begin promotion run enqueue: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
+	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now)
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}

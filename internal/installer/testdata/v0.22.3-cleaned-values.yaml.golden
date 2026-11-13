@@ -1,0 +1,188 @@
+archivedRepositories: []
+image:
+  ref: europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:093c6f6ed22f5e4bbb34994e545a7180b1d091a7935110ed0129f6bd6a798686
+  pullPolicy: IfNotPresent
+utilityImage: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+compatibility:
+  schemaIdentity: oberth-schema-v1
+  auditDomain: oberth-audit-v1
+  witnessKeyInfo: oberth-audit-witness-v1
+runnerImagePrefixes:
+- 'golang:'
+- 'debian:'
+- 'aquasec/trivy:'
+uplinkTokens:
+  defaultTTL: 2160h
+  maxTTL: 8760h
+statusProbes:
+  upstreamIntervalSeconds: 60
+  clusterIntervalSeconds: 60
+  secretStoreIntervalSeconds: 60
+  upstreamFailureThreshold: 3
+replicaCount: 1
+assist:
+  enabled: false
+  holdTTL: 20m
+  maxConcurrentHolds: 2
+  execTimeout: 1m
+  execOutputBytes: 65536
+  patchMaxBytes: 1048576
+  patchMaxFiles: 64
+  scratchBytes: 8589934592
+agentEvents:
+  retention: 10000
+  syncRetention: 20000
+  interval: 10s
+  lockWaitThreshold: 60s
+  maxStreamsPerToken: 4
+  maxBacklog: 500
+  heartbeat: 20s
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 60s
+    additionalLabels: {}
+    bearerTokenSecretName: ''
+    bearerTokenSecretKey: token
+    caConfigMapName: ''
+    caConfigMapKey: ca.crt
+    serverName: ''
+kubernetesClient:
+  qps: 50
+  burst: 100
+terminationGracePeriodSeconds: 75
+retention:
+  interval: 10m
+  keepNewestPerRef: 1
+  logs:
+    limitBytes: 67108864
+    maxAge: 0s
+    budgetBytes: 2147483648
+  artifacts:
+    maxAge: 0s
+    limitBytes: 268435456
+    budgetBytes: 4294967296
+promotion:
+  grantMaxLifetime: 24h
+branches:
+  reserved:
+  - main
+  - master
+schedules:
+  minInterval: 15m
+  maxEntries: 8
+pushBannerURL: ''
+auditAnchor:
+  tsaURL: ''
+  tsaInsecureHTTP: false
+  rekorURL: ''
+  rekorInsecureHTTP: false
+  interval: 10m
+  maxAge: 30m
+  gateTimeout: 2m
+  verifyTimeout: 45s
+  rootsSecret: ''
+  rekorCA: ''
+  rekorPublicKey: ''
+  tsaCA: ''
+  acceptWitnessChainReset: ''
+  acceptWitnessGenesis: ''
+clientEndpoint:
+  host: ''
+  sshPort: ''
+  httpsPort: ''
+service:
+  type: LoadBalancer
+  sshPort: 2222
+  httpsPort: 443
+  sshNodePort: 30022
+  httpsNodePort: 30443
+persistence:
+  existingClaim: ''
+  storageClassName: ''
+  size: 10Gi
+tls:
+  existingSecret: ''
+  extraDNSNames: []
+  extraIPs: []
+  pki:
+    enabled: false
+    mount: oberth-pki
+    role: oberth-server
+    ttl: 720h
+ssh:
+  hostKey:
+    existingSecret: ''
+upstream:
+  name: github
+  baseURL: ssh://git@github.com/your-org
+  keyFile: id_ed25519
+  knownHostsKey: known_hosts
+argo:
+  executorScratchSizeLimit: 1Gi
+  releaseWIF: {}
+  releaseTagRoutes: {}
+  executionPlacementConfigMap: ''
+  executionTargetConfigMap: ''
+  executionTargetCredentialsSecret: ''
+  controllerProfile: ''
+  controllerProfileConfigMap: ''
+  namespace: oberth-argo
+  podPolicy:
+    enabled: true
+  pipelineServiceAccount: oberth-argo-pipeline
+  credentialedServiceAccount: oberth-argo-credentialed
+  ciSecrets:
+    serviceAccount: oberth-argo-ci-secrets
+    vaultRole: oberth-argo-ci-secrets
+  executorServiceAccount: oberth-argo-executor
+  perRepoIdentities: []
+  perRepoCIIdentities: []
+  perStepIdentities: []
+  workflowTTL: 3600
+  sourceStorageClass: ''
+  vault:
+    address: ''
+    credentialedRole: ''
+    caCert: ''
+  goProxy:
+    enabled: false
+    allowNonDefaultBranchPseudoVersions: false
+    port: 8444
+    modulePrefix: ''
+    repositoryPrefix: ''
+    upstream: ''
+    organization: ''
+secretstore:
+  enabled: true
+  address: https://openbao.openbao.svc:8200
+  k8sAuthMount: kubernetes
+  role: oberth-ci
+  caCert: ''
+  insecureHTTPForDev: false
+  kvMount: oberth
+  allowedPaths: []
+  createAuthDelegatorBinding: true
+  external: null
+cache:
+  ciRoot: /var/cache/oberth/ci
+  releaseRoot: /var/cache/oberth/release
+resources:
+  requests:
+    cpu: 500m
+    memory: 256Mi
+    ephemeral-storage: 256Mi
+  limits:
+    memory: 1Gi
+    ephemeral-storage: 2Gi
+networkPolicy:
+  enabled: true
+  dnsNamespace: kube-system
+  dnsAnyDestination: false
+  pipelineIngress:
+    enabled: true
+  inNamespacePorts: []
+  inNamespaceAllPorts: false
+podAnnotations: {}
+podLabels: {}
+sourceAccess: {}

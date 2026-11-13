@@ -59,7 +59,7 @@ func TestBuildPreservesTokenOptOut(t *testing.T) {
 			if tmpl.AutomountServiceAccountToken == nil || *tmpl.AutomountServiceAccountToken {
 				t.Fatal("test-only leaf regained service-account token")
 			}
-			if tmpl.ServiceAccountName != testCredentialedAcct {
+			if tmpl.ServiceAccountName != testPipelineAcct {
 				t.Fatal("forced identity changed")
 			}
 			for _, env := range tmpl.Container.Env {
@@ -423,6 +423,16 @@ func TestArtifactReservedAliasCannotRestoreSourceWrite(t *testing.T) {
 		}
 		wf.Spec.Templates[0].Container.VolumeMounts = []corev1.VolumeMount{{Name: ArtifactsVolumeName, MountPath: "/source-write-alias", SubPath: "src"}}
 		b, e := json.Marshal(wf)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, err := Build(testConfig(), seededRequest(t, string(b))); err == nil || !strings.Contains(err.Error(), "reserved server-owned oberth- prefix") {
+			t.Fatalf("reserved artifact alias was not refused: %v", err)
+		}
+		// The valid, alias-free control still checks the existing artifact
+		// mount and environment behavior for each workspace mode.
+		wf.Spec.Templates[0].Container.VolumeMounts = nil
+		b, e = json.Marshal(wf)
 		if e != nil {
 			t.Fatal(e)
 		}

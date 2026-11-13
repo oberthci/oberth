@@ -102,8 +102,6 @@ const evidenceProtectionSQL = `
  OR EXISTS(SELECT 1 FROM promotions p WHERE p.run_id=r.id
    OR (p.repo_id=r.repo_id AND p.status='pending' AND (p.source_sha=r.sha OR p.source_sha=r.tested_sha OR p.result_sha=r.tested_sha)))
  OR EXISTS(SELECT 1 FROM publications p WHERE p.run_id=r.id AND p.status='pending')
- OR EXISTS(SELECT 1 FROM trusted_plans p WHERE p.green_run_id=r.id OR p.plan_run_id=r.id)
- OR EXISTS(SELECT 1 FROM trusted_applies a WHERE a.run_id=r.id)
  OR EXISTS(SELECT 1 FROM issues i WHERE i.repo_id=r.repo_id AND i.branch=r.ref AND i.state='open')
  OR EXISTS(SELECT 1 FROM promotion_grants g WHERE g.repo_id=r.repo_id AND (g.source_sha=r.sha OR g.source_sha=r.tested_sha)
    AND g.revoked_at IS NULL AND g.consumed_at IS NULL AND g.expires_at>?)

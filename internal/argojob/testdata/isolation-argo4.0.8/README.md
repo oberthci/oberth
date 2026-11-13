@@ -141,3 +141,25 @@ against every submitted Pod before copying outputs and updating checksums.
 The capture ran with Go 1.26.10 on linux/arm64.
 
 The 2026-11-13 #1564 recapture follows the executor identity change: the waiter commits on the kubeconfig marker instead of the in-cluster default token path, and Argo's init/wait (and resource/data main) containers get KUBECONFIG through the server patch. Inputs come from the retained exporter `../isolation-argo4.0.8/kubeconfig-export_test.go.txt` (current Build plus the documented historical scheduling and measurement reconstruction against each set's own frozen input). The authenticated Argo v4.0.8 module (sums equal provenance) ran its real operate(ctx) with fake clients and the retained isolation, nonroot and WIF capture helpers; instrumented workflowpod.go SHA-256 e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4; nonroot ran first to fix executor verbosity. Every captured Pod equals the previous capture except timestamps, the waiter command, the KUBECONFIG variable on init and wait, ARGO_PROGRESS_PATCH_TICK_DURATION and ARGO_PROGRESS_FILE_TICK_DURATION on init and wait replaced by 0 (the controller injected 1m0s and 3s), and the podSpecPatch/identity text that carries them. All 26 submitted Pods passed the retained Kubernetes v1.35.7 validator (validation-kubeconfig.log.txt). Go 1.26.9 on linux/amd64; inputs keep their recorded arm64 architecture. No Pod was edited by hand; no live cluster or credential was used for this capture.
+
+The 2026-11-13 step-scoped secret delivery recapture removes store settings from containers without
+step grants and removes CA/helper mirrors from the Argo wait executor. The
+pinned Argo v4.0.8 controller ran its real operate(ctx) using the retained fake
+clients and capture-only hooks, with Go 1.26.10 linux/amd64. All 26 submitted
+Pods passed the retained Kubernetes v1.35.7 validator. No Pod JSON was edited
+by hand and no live API or credentials were used. The vault case includes
+hostile main-command helpers and native parameter values containing quotes,
+backslashes and a newline. The original address-map capture is superseded by the later secret-store workflow recapture.
+The address is a literal public setting on the granted main; Argo may serialize
+it with the role name and CA path into helper template metadata. Physical
+store mounts and env remain confined to the granted main. These historical security
+fixtures retain their own helper policy and reconstructed scheduling and
+measurement inputs; they do not assert current scheduling policy. Isolation
+architecture selectors were translated to amd64 before exporting. WIF keeps
+its recorded historical selectors.
+
+The exact step-scoped secret delivery exporter is `../isolation-argo4.0.8/secret-step-export_test.go.txt`.
+Overlay it at `internal/argojob/zz_priority_export_test.go`, use the `/proof`
+scratch directories described above, then run the retained capture helpers
+and validator. The raw controller and validator receipts are retained as
+`secret-step-controller.log.txt` and `secret-step-validation.log.txt`.

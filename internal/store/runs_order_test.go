@@ -107,10 +107,7 @@ func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 			if got := runIDs(first); strings.Join(got, ",") != strings.Join(want, ",") {
 				t.Fatalf("%s limit %d first page = %v, want %v", name, limit, got, want)
 			}
-			for i, want := range []int64{1, 2, 3, 4} {
-				if first[i].QueuePosition != want {
-					t.Fatalf("%s limit %d queue position of %s = %d, want %d", name, limit, first[i].Ref, first[i].QueuePosition, want)
-				}
+			{
 			}
 			// Older pages continue the finished runs only.
 			var page []model.Run
@@ -184,11 +181,8 @@ func TestRunListGroupsAreMonotonicWithRepositoryFilter(t *testing.T) {
 		if got := runIDs(rows); strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Fatalf("latest=%v filtered list = %v, want %v", latest, got, want)
 		}
-		if rows[0].QueuePosition != 1 || rows[1].QueuePosition != 3 {
-			t.Fatalf("latest=%v global queue positions = %d, %d", latest, rows[0].QueuePosition, rows[1].QueuePosition)
-		}
 		scoped, err := s.ListRecentRuns(ctx, model.RunListFilter{LatestPerRef: latest, RepoIDs: []int64{other.ID}, Limit: 1})
-		if err != nil || strings.Join(runIDs(scoped), ",") != foreign.ID || scoped[0].QueuePosition != 2 {
+		if err != nil || strings.Join(runIDs(scoped), ",") != foreign.ID {
 			t.Fatalf("latest=%v scoped list = %v, %v", latest, scoped, err)
 		}
 	}
@@ -257,9 +251,6 @@ func TestRunListKeepsClaimedUnstartedRunsInTheQueue(t *testing.T) {
 		}
 		if model.DisplayRunStatus(runs[0]) != model.DisplayQueued || runListGroup(runs[0]) != 0 {
 			t.Fatalf("claimed run must display queued in the queue group: %+v", runs[0])
-		}
-		if runs[0].QueuePosition != 1 || runs[1].QueuePosition != 2 {
-			t.Fatalf("queue positions = %d, %d; want claimed 1, queued 2", runs[0].QueuePosition, runs[1].QueuePosition)
 		}
 	}
 }

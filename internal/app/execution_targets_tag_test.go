@@ -21,10 +21,10 @@ func TestExecutionTargetBranchDoesNotCaptureSameNamedTag(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.WorkflowName = request.Run.WorkflowName
-	if size, err := f.local.PipelineDemandReceipt(ctx, request); err != nil {
+	if size, err := f.local.ResolvePipelineSource(ctx, request); err != nil {
 		t.Fatal("local release control", size, err)
 	}
-	if size, err := f.jobs.PipelineDemandReceipt(ctx, request); err != nil {
+	if size, err := f.jobs.ResolvePipelineSource(ctx, request); err != nil {
 		t.Fatal("branch target captured tag release", size, err)
 	}
 	binding, found, err := f.db.ExecutionTarget(ctx, request.Run.ID, request.WorkflowName)
@@ -35,17 +35,17 @@ func TestExecutionTargetBranchDoesNotCaptureSameNamedTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if size, err := restarted.PipelineDemandReceipt(ctx, request); err != nil {
+	if size, err := restarted.ResolvePipelineSource(ctx, request); err != nil {
 		t.Fatal("tag restart changed route", size, err)
 	}
 	// Canonical remote custody is checked before initial branch selection. A
 	// changed request cannot escape that binding by presenting itself as a tag.
-	if _, err := f.jobs.PipelineDemandReceipt(ctx, f.request); err != nil {
+	if _, err := f.jobs.ResolvePipelineSource(ctx, f.request); err != nil {
 		t.Fatal(err)
 	}
 	changed := f.request
 	changed.Run.RefKind, changed.Run.Trigger, changed.Run.Release = model.RefTag, "tag", true
-	if _, err := f.jobs.PipelineDemandReceipt(ctx, changed); err == nil {
+	if _, err := f.jobs.ResolvePipelineSource(ctx, changed); err == nil {
 		t.Fatal("changed remote binding fell back locally")
 	}
 	remote, found, err := f.db.ExecutionTarget(ctx, changed.Run.ID, changed.WorkflowName)

@@ -873,15 +873,13 @@ func TestResolveChartImageRefEmpty(t *testing.T) {
 func TestRunUpgradeFullFlow(t *testing.T) {
 	t.Parallel()
 	for _, auditFails := range []bool{false, true} {
-		for _, storedRemoved := range []bool{false, true} {
-			t.Run(fmt.Sprintf("audit-fails=%t/stored-removed=%t", auditFails, storedRemoved), func(t *testing.T) {
-				testRunUpgradeFullFlow(t, auditFails, storedRemoved, "0.12.34", "0.12.35")
-			})
-		}
+		t.Run(fmt.Sprintf("audit-fails=%t", auditFails), func(t *testing.T) {
+			testRunUpgradeFullFlow(t, auditFails, "0.12.34", "0.12.35")
+		})
 	}
 }
 
-func testRunUpgradeFullFlow(t *testing.T, auditFails, storedRemoved bool, installed, target string) {
+func testRunUpgradeFullFlow(t *testing.T, auditFails bool, installed, target string) {
 	t.Parallel()
 	var output bytes.Buffer
 	details := map[string]string{"from": installed, "to": target}
@@ -926,9 +924,6 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails, storedRemoved bool, instal
 	deps := Deps{
 		Output: &output,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-			if storedRemoved && args[0] == "get" && !slices.Contains(args, "--all") {
-				return []byte(`{"trustedTests":{"runtime":"old"},"vm":null,"argoSync":{"semaphores":{"kvm":1}}}`), nil
-			}
 			if out, ok := testUpgradeValuePreflight(args); ok {
 				if args[0] == "get" && args[1] == "values" && slices.Contains(args, "--all") {
 					var values map[string]any
@@ -992,16 +987,6 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails, storedRemoved bool, instal
 		Timeout:       10 * time.Second,
 		NoBackup:      true,
 	}, deps)
-	if storedRemoved {
-		// A null stored value is already absent; the others are named with
-		// the exact flags that drop them.
-		want := "chart schema validation failed: chart values that no longer exist are set: argoSync (stored release values), trustedTests (stored release values); no upgrade applied. " +
-			"Delete them from any --values file and re-run the upgrade with --set argoSync=null --set trustedTests=null (Helm drops a null value from the stored release values)"
-		if err == nil || err.Error() != want || slices.Contains(helmCallLog, "upgrade") || recorded {
-			t.Fatalf("stored removed values: err=%v helm=%v recorded=%t", err, helmCallLog, recorded)
-		}
-		return
-	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1978,6 +1963,9 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := output.String()
+	if strings.Contains(text, "all secret approvals are cleared; re-approve.") {
+		t.Fatal("dry run falsely reports approvals cleared", text)
+	}
 	if !strings.Contains(text, "Schema migration v17 will run") {
 		t.Fatalf("expected schema migration announcement, got: %q", text)
 	}
@@ -2030,7 +2018,7 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 func TestUpgradeRefusesRemovedValueOverrides(t *testing.T) {
 	for _, key := range []string{"trustedTests.recipes=[]", "trustedTests.runtime=old", "vm.kvm.enabled=true", "argo.kubevirtCeiling.maxVMs=4", "argo.vmLauncherServiceAccount=old"} {
 		var schemaErr *ErrSchemaValidation
-		if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{key}); !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "no longer exist") {
+		if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{key}); !errors.As(err, &schemaErr) || !strings.Contains(err.Error(), "does not exist in the chart values") {
 			t.Fatalf("%s: %v", key, err)
 		}
 	}

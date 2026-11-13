@@ -103,7 +103,7 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 	}
 	spec, err := validateRunSpec(model.RunSpec{Assist: request.Assist, Reason: reason,
 		RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: request.Actor,
-		Release: source.Release, Credentialed: source.Release && source.Credentialed, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry,
+		Release: source.Release, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry,
 		TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA,
 	})
 	if err != nil {
@@ -114,7 +114,7 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 		return model.RunRerunResult{}, fmt.Errorf("generate rerun run ID: %w", err)
 	}
 	now := unixNano(s.now())
-	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
+	enqueued, err := s.enqueueRunTx(ctx, tx, spec, id, now)
 	if err != nil {
 		return model.RunRerunResult{}, fmt.Errorf("enqueue rerun: %w", err)
 	}

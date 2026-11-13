@@ -93,12 +93,15 @@ ALTER TABLE repositories_live RENAME TO repositories;
 DELETE FROM schedule_fires;
 INSERT INTO schedule_fires(repo, entry, fired_at, outcome) VALUES('terraform', 'nightly', 1000, 'fired');
 DELETE FROM secret_access;
+DROP INDEX secret_access_active;
+ALTER TABLE secret_access DROP COLUMN workflow;
+CREATE UNIQUE INDEX secret_access_active ON secret_access(repo,step,secret) WHERE revoked_at IS NULL;
 INSERT INTO secret_access(repo, step, secret, approved_by, approved_at) VALUES('terraform', '*', 'oberth/data/release/cosign-secret', 'admin@test', 1000);
 DROP TABLE vm_suite_resources;
 DROP TABLE vm_suite_executions;
 DROP TABLE vm_capacity_slots;
 DROP TABLE vm_executions;
-DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings;
+DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER IF EXISTS run_timing_grant; DROP TRIGGER IF EXISTS run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE IF EXISTS run_admission_timings; DROP TABLE run_timings;
 DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN concurrency_group;
 DROP TABLE IF EXISTS grant_declarations;
@@ -191,13 +194,10 @@ PRAGMA foreign_keys = ON;`); err != nil {
 		t.Fatalf("schedule_fires key = %q, want codeberg/acme/terraform", scheduleRepo)
 	}
 
-	// The grant key must be qualified by the v12 data migration.
-	var grantRepo string
-	if err := s2.db.QueryRowContext(ctx, `SELECT repo FROM secret_access`).Scan(&grantRepo); err != nil {
-		t.Fatal(err)
-	}
-	if grantRepo != "codeberg/acme/terraform" {
-		t.Fatalf("secret_access key = %q, want codeberg/acme/terraform", grantRepo)
+	// The workflow-scope migration clears approvals instead of backfilling them.
+	var grantCount int
+	if err := s2.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM secret_access`).Scan(&grantCount); err != nil || grantCount != 0 {
+		t.Fatalf("pre-scope approvals survived: %d, %v", grantCount, err)
 	}
 
 	// v16 (#658) lands on the live lineage as well: the retired column

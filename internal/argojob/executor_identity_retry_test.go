@@ -39,8 +39,14 @@ func executorRetryFixture(t *testing.T) (*Controller, *wfv1.Workflow, *corev1.Po
 	wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "identity-retry", Namespace: config.Namespace, UID: "workflow-uid", Annotations: map[string]string{runIDAnnotation: "identity-run", identityAnnotation: "spec-digest"}}, Spec: wfv1.WorkflowSpec{ActiveDeadlineSeconds: ptr.To(int64(300))}}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "identity-step", Namespace: wf.Namespace, UID: "step-uid", Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, OwnerReferences: []metav1.OwnerReference{{UID: wf.UID, Kind: "Workflow", Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{
 		Volumes:        []corev1.Volume{{Name: executorTokenVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory}}}},
-		InitContainers: []corev1.Container{{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}},
-		Containers:     []corev1.Container{{Name: "main"}},
+		InitContainers: []corev1.Container{executorWaiterContainer(config.SourceSeedImage, executorWaiterResources(false))},
+		// Some tests turn main into a resource executor. Model the environment
+		// the server patch supplies before the live Pod reaches token delivery.
+		Containers: []corev1.Container{{Name: "main", Env: []corev1.EnvVar{
+			{Name: "KUBECONFIG", Value: executorKubeconfig},
+			{Name: "ARGO_PROGRESS_PATCH_TICK_DURATION", Value: "0"},
+			{Name: "ARGO_PROGRESS_FILE_TICK_DURATION", Value: "0"},
+		}}},
 	}, Status: corev1.PodStatus{InitContainerStatuses: []corev1.ContainerStatus{{Name: executorTokenWaiter, State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
 	kube := fake.NewClientset(pod, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: wf.Namespace}, Data: map[string]string{"ca.crt": "public-ca"}})
 	kube.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {

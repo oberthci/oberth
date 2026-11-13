@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -170,50 +169,6 @@ func TestSecretStoreCmdlineMatchesServeParsing(t *testing.T) {
 	}
 	if !reflect.DeepEqual(discovered, want) {
 		t.Fatalf("discovered = %+v, want the serve-parsed configuration %+v", discovered, want)
-	}
-}
-
-func TestTrustedPlanTransitServeFlagsAreNestedAndFailClosed(t *testing.T) {
-	base := []string{
-		"--argo-namespace=argo-pipelines",
-		"--runner-image-prefixes=golang:",
-		"--secretstore-address=https://store.example:8200",
-		"--secretstore-role=oberth-ci",
-	}
-	valid := append(slices.Clone(base),
-		"--secretstore-transit-mount=oberth-transit",
-		"--secretstore-transit-key=trusted-plan-artifacts",
-	)
-	options, err := parseServeOptions(valid, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options.secretStoreTransitMount != "oberth-transit" || options.secretStoreTransitKey != "trusted-plan-artifacts" {
-		t.Fatalf("transit options = %+v", options)
-	}
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "missing key", args: append(slices.Clone(base), "--secretstore-transit-mount=oberth-transit"), want: "requires both"},
-		{name: "missing mount", args: append(slices.Clone(base), "--secretstore-transit-key=trusted-plan-artifacts"), want: "requires both"},
-		{name: "HTTP development mode", args: []string{
-			"--argo-namespace=argo-pipelines",
-			"--runner-image-prefixes=golang:",
-			"--secretstore-address=http://127.0.0.1:8200", "--secretstore-insecure-http", "--secretstore-role=dev",
-			"--secretstore-transit-mount=oberth-transit", "--secretstore-transit-key=trusted-plan-artifacts",
-		}, want: "verified HTTPS"},
-		{name: "reserved mount", args: append(slices.Clone(base), "--secretstore-transit-mount=sys", "--secretstore-transit-key=trusted-plan-artifacts"), want: "reserved"},
-		{name: "dot key", args: append(slices.Clone(base), "--secretstore-transit-mount=oberth-transit", "--secretstore-transit-key=.."), want: "clean non-empty"},
-		{name: "nested mount", args: append(slices.Clone(base), "--secretstore-transit-mount=transit/plans", "--secretstore-transit-key=trusted-plan-artifacts"), want: "one clean"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if _, err := parseServeOptions(test.args, io.Discard); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("error = %v, want %q", err, test.want)
-			}
-		})
 	}
 }
 
@@ -1049,9 +1004,9 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 
 	// Construct the same grant table that both sides would see.
 	grants := []store.SecretAccessGrant{
-		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
-		{Repo: "codeberg/oberthci/oberth", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
-		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 	}
 
 	// Server side: computeSecretStorePlan + ComputePlanDigest.
@@ -1064,13 +1019,14 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 	// hand. Per-repo identities carry wildcard grants only; the named grant
 	// lives on the per-step identity (issue #814).
 	type accessListRow struct {
-		Repo   string `json:"repo"`
-		Step   string `json:"step"`
-		Secret string `json:"secret"`
+		Workflow string `json:"workflow"`
+		Repo     string `json:"repo"`
+		Step     string `json:"step"`
+		Secret   string `json:"secret"`
 	}
 	rows := make([]accessListRow, 0, len(grants))
 	for _, g := range grants {
-		rows = append(rows, accessListRow{Repo: g.Repo, Step: g.Step, Secret: g.Secret})
+		rows = append(rows, accessListRow{Workflow: g.Workflow, Repo: g.Repo, Step: g.Step, Secret: g.Secret})
 	}
 	accessList, err := json.Marshal(rows)
 	if err != nil {
@@ -1081,7 +1037,7 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	cliStepIdentities := installer.DerivePerStepIdentities(cliRepoIdentities, rawGrants)
-	if len(cliRepoIdentities) != 2 || len(cliStepIdentities) != 1 {
+	if len(cliRepoIdentities) != 2 || len(cliStepIdentities) != 3 {
 		t.Fatalf("expected 2 per-repo and 1 per-step identity, got %d and %d", len(cliRepoIdentities), len(cliStepIdentities))
 	}
 	for _, id := range cliRepoIdentities {
@@ -1105,22 +1061,19 @@ func TestPlanDigestCLIEqualsServerWildcardOnly(t *testing.T) {
 	t.Parallel()
 
 	grants := []store.SecretAccessGrant{
-		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Workflow: ".oberth/release.yaml", Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 	}
 
 	serverPlan := serverPlanForGrants(t, grants)
 	serverDigest := service.ComputePlanDigest(serverPlan.Repos)
 
-	cliRepoIdentities := []installer.PerRepoIdentity{
-		{
-			Upstream: "codeberg",
-			Org:      "oberthci",
-			Repo:     "oberth",
-			Grants:   []string{"oberth/data/release/cosign-secret"},
-		},
+	rows, _ := json.Marshal([]map[string]string{{"repo": grants[0].Repo, "workflow": grants[0].Workflow, "step": grants[0].Step, "secret": grants[0].Secret}})
+	cliRepoIdentities, rawGrants, err := installer.ParseAccessListJSONWithSteps(rows)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// No per-step identities for wildcard-only grants.
-	cliDigest := planDigestFromIdentities(cliRepoIdentities, nil)
+	cliSteps := installer.DerivePerStepIdentities(cliRepoIdentities, rawGrants)
+	cliDigest := planDigestFromIdentities(cliRepoIdentities, cliSteps)
 
 	if cliDigest != serverDigest {
 		t.Fatalf("CLI digest %q != server digest %q (wildcard-only)", cliDigest, serverDigest)

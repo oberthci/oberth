@@ -62,8 +62,8 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 	params = append(params, beforeID, MaxActiveRuns, beforeID, beforeTime, beforeTime, beforeID, pageLimit(filter.Limit))
 	// Group using a narrow covering index: only sequences/counts are scanned,
 	// never historical errors/logs. Fetch the wide rows after selecting heads.
-	// Queue positions use the same global priority order as the flat list.
-	rows, err := tx.QueryContext(ctx, latestRefQuery(restriction, submissionOrderSQL(), statusSQL), params...) //nolint:gosec // Fixed query with placeholder-only scope restrictions.
+	// Queued heads keep the same acceptance order as the flat list.
+	rows, err := tx.QueryContext(ctx, latestRefQuery(restriction, statusSQL), params...) //nolint:gosec // Fixed query with placeholder-only scope restrictions.
 	if err != nil {
 		return nil, fmt.Errorf("list latest refs: %w", err)
 	}
@@ -71,12 +71,11 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 	result := []model.Run{}
 	for rows.Next() {
 		var earlier int
-		var position int64
-		run, err := scanReadRun(rows, &earlier, &position)
+		run, err := scanReadRun(rows, &earlier)
 		if err != nil {
 			return nil, err
 		}
-		run.EarlierAttempts, run.QueuePosition = earlier, position
+		run.EarlierAttempts = earlier
 		result = append(result, run)
 	}
 	if err := rows.Err(); err != nil {
@@ -94,9 +93,8 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 // latestRefQuery ranks every head into a list group (0 queued, 1 running,
 // 2 terminal) before paging, so an older page can never resurrect an older
 // attempt of a ref whose head appeared earlier, and never carries active work.
-// The ranking reads the covering index only; the wide rows, with their
-// priority subqueries and queue positions, are fetched for the selected page.
-func latestRefQuery(restriction, priorityOrder string, statusSQL ...string) string {
+// The ranking reads the covering index only; wide rows are fetched for the selected page.
+func latestRefQuery(restriction string, statusSQL ...string) string {
 	heads := "heads"
 	filtered := ""
 	if len(statusSQL) > 0 && statusSQL[0] != "" {
@@ -114,12 +112,8 @@ func latestRefQuery(restriction, priorityOrder string, statusSQL ...string) stri
  SELECT * FROM (SELECT * FROM ` + heads + ` WHERE list_group<2 AND ?='' ORDER BY head_sequence DESC LIMIT ?)
  UNION ALL
  SELECT * FROM (SELECT * FROM ` + heads + ` WHERE list_group=2 AND (?='' OR end_time<? OR (end_time=? AND head_id<?)) ORDER BY end_time DESC, head_id DESC LIMIT ?)
-), queue AS MATERIALIZED (
- SELECT id AS queued_run_id, ROW_NUMBER() OVER(ORDER BY ` + priorityOrder + `) AS queue_position
- FROM runs WHERE ` + queuedRunSQL + `
 )
- SELECT ` + runReadColumns + `,page.earlier_attempts,COALESCE(queue.queue_position,0)
+ SELECT ` + runReadColumns + `,page.earlier_attempts
  FROM page JOIN runs ON runs.queue_sequence=page.head_sequence
- LEFT JOIN queue ON queue.queued_run_id=runs.id
- ORDER BY page.list_group, COALESCE(queue.queue_position,0) ASC, CASE page.list_group WHEN 1 THEN page.head_started_at ELSE page.end_time END DESC, page.head_id DESC`
+ ORDER BY page.list_group, CASE WHEN page.list_group=0 THEN runs.admission_sequence END ASC, CASE WHEN page.list_group=0 THEN runs.queue_sequence END ASC, CASE page.list_group WHEN 1 THEN page.head_started_at ELSE page.end_time END DESC, page.head_id DESC`
 }

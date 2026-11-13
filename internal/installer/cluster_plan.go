@@ -190,9 +190,18 @@ func inspectInstallPreflight(ctx context.Context, cfg *Config, deps Deps, host I
 		r.check("installed_values", false, "Read the existing Helm release values before choosing policy configuration.")
 		return
 	}
+	if err := readArgoReviewValues(ctx, cfg, installPolicyDeps(host, *cfg, selected)); err != nil {
+		r.check("argo_values", false, argoValuesRemedy)
+		return
+	}
+	if err := resolveArgoExecutorResources(ctx, cfg, installPolicyDeps(host, *cfg, selected)); err != nil {
+		r.check("argo_executor_resources", false, "Read the stored argo-workflows values so operator executor.resources can be preserved.")
+		return
+	}
 	if cfg.existingRelease {
 		cfg.NetworkPolicy = "auto"
 	}
+
 	inspectCluster(ctx, cfg, deps, identity, r, cfg.existingRelease, measure)
 }
 

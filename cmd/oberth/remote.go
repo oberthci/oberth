@@ -156,7 +156,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
 	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")
 	all := flags.Bool("all", false, "follow pages to the oldest run")
-	active := flags.Bool("active", false, "only queued and running runs, in scheduling order, with queue position and wait reason")
+	active := flags.Bool("active", false, "only queued and running runs, in scheduling order, with wait reason")
 	asJSON := flags.Bool("json", false, `emit {"runs":[...],"next_before":N}; --active emits {"runs":[...]}`)
 	transport := registerTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
@@ -316,14 +316,11 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 		_, err := fmt.Fprintln(output, "no active runs")
 		return err
 	}
-	if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-30s %s\n", "#", "RUN", "STATUS", "ELAPSED", "REF", "REASON"); err != nil {
+	if _, err := fmt.Fprintf(output, "%-34s %-9s %-8s %-30s %s\n", "RUN", "STATUS", "ELAPSED", "REF", "REASON"); err != nil {
 		return err
 	}
 	for _, run := range runs {
-		position, elapsed, reason := "-", "-", ""
-		if displayRunStatus(run.remoteRun) == "queued" && run.Scheduling != nil && run.Scheduling.QueuePosition > 0 {
-			position = strconv.FormatInt(run.Scheduling.QueuePosition, 10)
-		}
+		elapsed, reason := "-", ""
 		if run.StartedAt != nil {
 			elapsed = now.Sub(*run.StartedAt).Truncate(time.Second).String()
 		}
@@ -334,8 +331,8 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 			row.Scheduling = run.Scheduling
 		}
 		reason = displayRunReason(row)
-		if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-30s %s\n",
-			position, run.ID, displayRunStatus(run.remoteRun), elapsed, run.Ref, reason); err != nil {
+		if _, err := fmt.Fprintf(output, "%-34s %-9s %-8s %-30s %s\n",
+			run.ID, displayRunStatus(run.remoteRun), elapsed, run.Ref, reason); err != nil {
 			return err
 		}
 	}

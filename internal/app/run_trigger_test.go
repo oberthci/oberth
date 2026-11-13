@@ -39,7 +39,7 @@ func TestRunKindReadsOnlyTheDurableRun(t *testing.T) {
 		}
 	}
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	if _, err := jobs.PipelineDemandReceipt(context.Background(), service.WorkflowRequest{
+	if _, err := jobs.ResolvePipelineSource(context.Background(), service.WorkflowRequest{
 		Run: model.Run{Trigger: "apply"}, Repository: model.Repository{Name: "infra"}, SourceDir: writeBuild(t, perTriggerBuild),
 	}); err == nil {
 		t.Fatal("source receipt inspected an apply run")

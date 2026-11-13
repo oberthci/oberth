@@ -17,6 +17,9 @@ func resolveInstallRerunValues(ctx context.Context, cfg *Config, deps Deps, clus
 	if err := readInstallValues(ctx, cfg, deps); err != nil {
 		return err
 	}
+	if err := resolveArgoExecutorResources(ctx, cfg, deps); err != nil {
+		return err
+	}
 	if cfg.NetworkPolicy == "auto" {
 		if !cfg.existingRelease {
 			if cluster.NodesUnavailable && cluster.Engine == "unknown" {
@@ -185,9 +188,6 @@ func readInstallValues(ctx context.Context, cfg *Config, deps Deps) error {
 		if exists {
 			cfg.liveInstallValues, err = readHelmValuesMap(ctx, deps, ns)
 			if err != nil {
-				return err
-			}
-			if err := refuseRemovedReleaseValues(cfg.liveInstallValues, "oberth install"); err != nil {
 				return err
 			}
 		}

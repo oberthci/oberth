@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -117,19 +114,25 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	if err != nil {
 		return result, err
 	}
+	cfg.argoExecutorResources, err = readArgoExecutorResources(ctx, deps, ns, exists)
+	if err != nil {
+		return result, err
+	}
+	printArgoExecutorResources(deps.Output, argoExecutorResourcesForReview(cfg))
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "argo-workflows")
 	result.TargetVersion = cfg.ArgoChartVersion
 	if result.TargetVersion == "" {
 		result.TargetVersion = DefaultArgoChartVersion
 	}
 
-	if !exists && cfg.ArgoParallelism == nil {
-		// A fresh controller gets a run ceiling sized to the cluster instead of
-		// none: on a single node a push storm otherwise starts every run at
-		// once. An explicit --argo-parallelism (0 is no limit) always wins.
-		if parallelism, ok := defaultArgoParallelism(ctx, deps); ok {
+	if !exists {
+		if cfg.ArgoParallelism == nil {
+			parallelism := DefaultArgoParallelism
 			cfg.ArgoParallelism = &parallelism
-			_, _ = fmt.Fprintf(deps.Output, "Argo parallelism defaults to %d (half the cluster's allocatable CPUs, at least 2); change it with --argo-parallelism.\n", parallelism)
+		}
+		if cfg.ArgoNamespaceParallelism == nil {
+			parallelism := DefaultArgoNamespaceParallelism
+			cfg.ArgoNamespaceParallelism = &parallelism
 		}
 	}
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
@@ -143,31 +146,19 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		if err != nil {
 			return result, err
 		}
-	} else {
-		_, _ = fmt.Fprintf(deps.Output, "Argo chart %s: executor image left unchanged; resource-template token delivery requires %s.\n", displayVersion(effectiveVersion), argoworkflow.ExecutorImage)
-	}
-	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "argo-workflows", ns, "controller", controlPlanePriority(cfg), exists)
-	if err != nil {
+	} else if err := noticeArgoExecutorImage(ctx, deps, ns, effectiveVersion, exists); err != nil {
 		return result, err
 	}
-	defer cleanupDependency()
-	retiredArgs, retiredValues, err := removeSyncLimitsValues(ctx, deps, ns, exists)
-	if err != nil {
+	if err := noticeArgoExternalConfigMap(ctx, deps, ns, exists); err != nil {
 		return result, err
 	}
-	if err := noticeArgoExternalConfigMap(ctx, cfg, deps, ns, exists); err != nil {
-		return result, err
-	}
-	if (argoLimitsRequested(cfg) || retiredValues || dependencyChanged || imageMissing) && action == actionSkip {
+	if (argoLimitsRequested(cfg) || imageMissing || cfg.argoExecutorResources == nil) && action == actionSkip {
 		if canonicalChartVersion(result.InstalledVersion) == "" {
 			return result, errors.New("cannot reconcile existing Argo values without a known installed chart version")
 		}
 		cfg.ArgoChartVersion = result.InstalledVersion
 		result.TargetVersion = result.InstalledVersion
 		action = actionUpgrade
-	}
-	if err := retireSyncLimitsBeforeHelm(ctx, cfg, deps, ns, retiredValues); err != nil {
-		return result, err
 	}
 	switch action {
 	case actionSkip:
@@ -185,7 +176,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		_, _ = fmt.Fprintln(deps.Output, "Installing Argo Workflows...")
 	}
 
-	args := append(withDependencyValues(ArgoHelmArgs(cfg), dependencyFile), retiredArgs...)
+	args := ArgoHelmArgs(cfg)
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}
@@ -233,7 +224,8 @@ func ArgoHelmArgs(cfg Config) []string {
 	if canonicalChartVersion(chartVersion) == canonicalChartVersion(DefaultArgoChartVersion) {
 		args = append(args, "--set-string", "executor.image.tag="+strings.SplitN(argoworkflow.ExecutorImage, ":", 2)[1])
 	}
-	return append(args, argoLimitArgs(cfg)...)
+	args = append(args, argoLimitArgs(cfg)...)
+	return append(args, argoExecutorResourceArgs(cfg)...)
 }
 
 // VerifyArgoController checks that a controller is actually watching the
@@ -269,9 +261,9 @@ func VerifyArgoController(ctx context.Context, cfg Config, deps Deps) error {
 // When the installer manages a secret store and no explicit --argo-vault-address
 // was given, the effective address defaults to the installed store's service
 // address. This ensures that the first push after a default
-// `oberth install --install-secretstore` produces credentialed release steps
+// `oberth install --install-secretstore` produces granted secret-consuming steps
 // that can reach the installed store — without this, argo.vault.address stays
-// empty and credentialed release steps cannot reach the installed store.
+// empty and granted secret-consuming steps cannot reach the installed store.
 func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	ns := cfg.ArgoNamespace
 	if ns == "" {
@@ -284,7 +276,7 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	// store the installer just provisioned. The HTTPS guard mirrors the
 	// validator's own rejection of plaintext vault addresses: release-tier
 	// credentials traverse the network, and dev-mode HTTP stores are not
-	// wired here because they cannot serve credentialed releases. The
+	// wired here because they cannot serve granted secret-consuming steps. The
 	// CA-pinning condition below then fires automatically because address
 	// equals ServiceAddress.
 	if address == "" && cfg.wantsSecretStore() {
@@ -345,26 +337,4 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 		"--set", "argo.goProxy.port=8444",
 	)
 	return values
-}
-
-// defaultArgoParallelism is half the cluster's allocatable CPUs, at least 2,
-// or false when no node can be read (the controller then keeps no limit).
-func defaultArgoParallelism(ctx context.Context, deps Deps) (int, bool) {
-	if deps.KubeClient == nil {
-		return 0, false
-	}
-	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil || len(nodes.Items) == 0 {
-		return 0, false
-	}
-	var millis int64
-	for _, node := range nodes.Items {
-		if cpu, ok := node.Status.Allocatable[corev1.ResourceCPU]; ok {
-			millis += cpu.MilliValue()
-		}
-	}
-	if millis <= 0 {
-		return 0, false
-	}
-	return int(min(max(millis/2000, 2), maxArgoParallelism)), true
 }

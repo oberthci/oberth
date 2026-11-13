@@ -20,7 +20,7 @@ type validationFailureJobs struct {
 	creates               int
 }
 
-func (j *validationFailureJobs) PipelineDemandReceipt(context.Context, WorkflowRequest) (*argoworkflow.DemandReceipt, error) {
+func (j *validationFailureJobs) ResolvePipelineSource(context.Context, WorkflowRequest) (*argoworkflow.SourceReceipt, error) {
 	if j.receiptErr != nil {
 		return nil, j.receiptErr
 	}
@@ -145,6 +145,8 @@ spec:
 			default:
 				request.Source = []byte(strings.Replace(source, "spec:", "metadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\nspec:", 1))
 				request.ApprovedSecrets["oberth/upstream/acme/oberth/test-secret"] = true
+				request.StepGrants = map[string]map[string]bool{"oberth/upstream/acme/oberth/test-secret": {"*": true}}
+				request.Source = []byte(strings.Replace(string(request.Source), "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/test-secret, --, /bin/true]", 1))
 				if kind == "vault-address" {
 					config.VaultAddress = ""
 					config.VaultCredentialedRole = ""

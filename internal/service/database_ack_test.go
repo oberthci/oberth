@@ -37,10 +37,6 @@ func (s *lostDatabaseAck) ClaimNextRun(ctx context.Context) (model.Run, error) {
 	v, e := s.Store.ClaimNextRun(ctx)
 	return v, s.lost("ClaimNextRun", e)
 }
-func (s *lostDatabaseAck) RequeueStrandedRun(ctx context.Context, id string) (model.Run, error) {
-	v, e := s.Store.RequeueStrandedRun(ctx, id)
-	return v, s.lost("RequeueStrandedRun", e)
-}
 func (s *lostDatabaseAck) BeginPublication(ctx context.Context, spec model.PublicationSpec) (model.Publication, error) {
 	v, e := s.Store.BeginPublication(ctx, spec)
 	return v, s.lost("BeginPublication", e)
@@ -90,7 +86,7 @@ func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 }
 
 func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
-	for _, operation := range []string{"RequeueStrandedRun", "BeginPublication", "FinalizePublication", "MarkRunSubmissionStarted", "MarkRunSubmitted"} {
+	for _, operation := range []string{"BeginPublication", "FinalizePublication", "MarkRunSubmissionStarted", "MarkRunSubmitted"} {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			fixture := newRecoveryFixture(t)
@@ -112,16 +108,6 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 				current, err := database.MarkRunSubmitted(ctx, run.ID)
 				if err != nil || current.Phase != "running" {
 					t.Fatal(current, err)
-				}
-			case "RequeueStrandedRun":
-				fixture.setWorkflowName(t, run.ID, "known-job")
-				successor, err := database.RequeueStrandedRun(ctx, run.ID)
-				if err != nil || successor.ID != run.ID || successor.Status != model.RunQueued {
-					t.Fatal(successor, err)
-				}
-				old, err := fixture.store.Run(t.Context(), run.ID)
-				if err != nil || old.Status != model.RunQueued {
-					t.Fatal(old, err)
 				}
 			case "BeginPublication":
 				publication, err := database.BeginPublication(ctx, spec)

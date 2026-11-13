@@ -23,6 +23,9 @@ func TestAdvertisedEndpointChangeReconcilesInstalledRelease(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			writes := 0
 			deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				if len(args) > 1 && args[0] == "get" && args[1] == "values" {
+					return []byte(`{}`), nil
+				}
 				if args[0] == "list" {
 					return []byte(`[{"name":"oberth","chart":"oberth-0.17.62","status":"deployed"}]`), nil
 				}

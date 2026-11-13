@@ -1040,9 +1040,7 @@ ALTER TABLE issues ADD COLUMN scope_upstream_id INTEGER;`,
     revoked_at INTEGER,
     CHECK ((revoked_at IS NULL AND revoked_by = '') OR (revoked_at IS NOT NULL AND revoked_by != ''))
 );`},
-	// Admission head-wait origins (#1085): when a run first waited at the
-	// head of the admission queue, keyed by its commit so a run requeued
-	// under a new ID after a restart keeps its bounded-backfill clock.
+	// Historical admission head-wait origins (#1085); immutable SQL.
 	{version: 27, sql: `CREATE TABLE IF NOT EXISTS admission_head_waits (
     repo_id INTEGER NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
     ref_kind TEXT NOT NULL CHECK (ref_kind IN ('branch', 'tag')),
@@ -1076,7 +1074,34 @@ CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequen
 	{version: tokenExpiryMigrationVersion, sql: tokenExpirySchema},
 	{version: issueRevisionMigrationVersion, sql: issueRevisionSchema},
 	{version: publicationAbandonMigrationVersion, sql: publicationAbandonSchema},
-	{version: restartTimingMigrationVersion, sql: restartTimingSchema},
+	// Frozen v44 SQL; the forward removal migration retires these tables.
+	{version: 44, sql: `
+CREATE TABLE IF NOT EXISTS restart_workflow_timings (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ epoch INTEGER NOT NULL CHECK(epoch > 0),
+ workflow_created_at INTEGER NOT NULL,
+ workflow_json TEXT NOT NULL CHECK(length(workflow_json) <= 262144),
+ PRIMARY KEY(run_id,epoch)
+);
+CREATE TABLE IF NOT EXISTS restart_step_timings (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ epoch INTEGER NOT NULL CHECK(epoch > 0),
+ node_id TEXT NOT NULL,
+ workflow_uid TEXT NOT NULL,
+ pod_uid TEXT NOT NULL,
+ available INTEGER NOT NULL CHECK(available IN (0,1)),
+ ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+ timing_json TEXT NOT NULL CHECK(length(timing_json) <= 16384),
+ PRIMARY KEY(run_id,epoch,node_id)
+);
+CREATE TRIGGER IF NOT EXISTS restart_workflow_timing_immutable BEFORE UPDATE ON restart_workflow_timings
+BEGIN SELECT RAISE(ABORT,'restart Workflow timing is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS restart_step_timing_immutable BEFORE UPDATE ON restart_step_timings
+WHEN NEW.run_id != OLD.run_id OR NEW.epoch != OLD.epoch OR NEW.node_id != OLD.node_id OR NEW.workflow_uid != OLD.workflow_uid
+ OR (OLD.pod_uid != '' AND NEW.pod_uid != OLD.pod_uid)
+ OR (OLD.available = 1 AND NEW.timing_json != OLD.timing_json)
+BEGIN SELECT RAISE(ABORT,'restart step timing attempt is immutable'); END;
+`},
 	{version: tagPublicationMigrationVersion, sql: tagPublicationSchema},
 	{version: pilotRetirementMigrationVersion, sql: pilotRetirementSchema},
 	{version: workflowCapabilityMigrationVersion, sql: workflowCapabilitySchema},

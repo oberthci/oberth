@@ -88,7 +88,7 @@ func TestGoProxyEnvironmentPreventsAmbientBypass(t *testing.T) {
 				config := testConfig()
 				config.GoProxyURL = "https://mirror.example.invalid:8444"
 				config.GoProxyModulePrefix = "go.example.test"
-				injectRunEnvironment(workflow, config, testRequest(trigger, ""), false)
+				injectRunEnvironment(workflow, config, testRequest(trigger, ""), nil)
 				for _, c := range []*corev1.Container{ordinary, inline, &script.Container} {
 					want := map[string]string{
 						"GOPROXY":   config.GoProxyURL + ",https://proxy.golang.org|direct",

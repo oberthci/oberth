@@ -26,6 +26,7 @@ import (
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 // buildArgoEngine wires the Argo execution engine from serve flags.
@@ -278,7 +279,7 @@ func validateArgoServeOptions(options serveOptions) error {
 //
 // It is a plain file read rather than an x509.CertPool because the bytes
 // themselves travel: the server does not use this anchor, it delivers it, and
-// what it delivers has to be the PEM an secretstore exec in another Pod can parse.
+// what it delivers has to be the PEM that oberth secretstore exec in another Pod can parse.
 // argojob.Config.Validate is what decides the bytes are a usable anchor.
 func readArgoVaultCACert(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
@@ -339,7 +340,7 @@ func (adapter artifactStoreAdapter) Extract(runID string, stream io.Reader, limi
 type perRepoStore interface {
 	ListRepositories(context.Context) ([]model.Repository, error)
 	ListUpstreams(context.Context) ([]model.Upstream, error)
-	ActiveSecretGrants(ctx context.Context, repoID int64) (map[string]map[string]bool, error)
+	SecretAccessList(context.Context, string, bool) ([]store.SecretAccessGrant, error)
 }
 
 // buildPerRepoIdentities reads the repo registry and approval table, and
@@ -376,7 +377,7 @@ func buildPerRepoIdentities(ctx context.Context, db perRepoStore) (map[string]ar
 			continue
 		}
 
-		grants, err := db.ActiveSecretGrants(ctx, repo.ID)
+		grants, err := db.SecretAccessList(ctx, upstream.Name+"/"+org+"/"+repo.Name, false)
 		if err != nil {
 			return nil, fmt.Errorf("load grants for %s: %w", repo.Name, err)
 		}
@@ -418,11 +419,9 @@ func buildPerRepoCIIdentities(releaseIdentities map[string]argojob.PerRepoIdenti
 	return result
 }
 
-// buildPerStepIdentities reads the repo registry and approval table, and
-// builds the per-step identity map that scopes each named-step grant to its
-// own Vault policy at the ServiceAccount level. Only (repo, step) combinations
-// with named-step grants (step != "*") get a per-step identity; wildcard grants
-// keep the per-repo identity (backward compatible). Issue #623, finding 1.
+// buildPerStepIdentities reads all explicit workflow-scoped grants and derives
+// the corresponding named or wildcard step identities. Admission subsequently
+// looks up only the exact selected workflow file.
 func buildPerStepIdentities(ctx context.Context, db perRepoStore) (map[string]argojob.PerRepoIdentityConfig, error) {
 	repos, err := db.ListRepositories(ctx)
 	if err != nil {
@@ -449,19 +448,17 @@ func buildPerStepIdentities(ctx context.Context, db perRepoStore) (map[string]ar
 			continue
 		}
 
-		grants, err := db.ActiveSecretGrants(ctx, repo.ID)
+		grants, err := db.SecretAccessList(ctx, upstream.Name+"/"+org+"/"+repo.Name, false)
 		if err != nil {
 			return nil, fmt.Errorf("load grants for %s: %w", repo.Name, err)
 		}
 
 		// grants is map[step]map[secret]bool. Scan for named steps.
-		for step := range grants {
-			if step == "*" {
-				continue
-			}
+		for _, grant := range grants {
+			step := grant.Step
 			// Named-step grant: create a per-step identity.
-			key := upstream.Name + "/" + org + "/" + repo.Name + "/" + step
-			saName := installer.PerStepName(upstream.Name, org, repo.Name, step)
+			key := upstream.Name + "/" + org + "/" + repo.Name + "/" + grant.Workflow + "/" + step
+			saName := installer.PerStepName(upstream.Name, org, repo.Name, grant.Workflow, step)
 			result[key] = argojob.PerRepoIdentityConfig{
 				ServiceAccountName: saName,
 			}

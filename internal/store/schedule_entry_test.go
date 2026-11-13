@@ -66,7 +66,10 @@ func TestScheduleEntriesAreIndependentAndSurviveRetryRecovery(t *testing.T) {
 	if _, err = s.SetRunWorkflowName(ctx, weekly.ID, "lost-schedule-workflow"); err != nil {
 		t.Fatal(err)
 	}
-	recovered, err := s.RequeueStrandedRun(ctx, weekly.ID)
+	if err := s.RecoverOwnerState(ctx); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := s.Run(ctx, weekly.ID)
 	if err != nil || recovered.ScheduleEntry != "weekly" {
 		t.Fatalf("restart recovery: %+v %v", recovered, err)
 	}

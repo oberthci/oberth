@@ -647,7 +647,7 @@ ALTER TABLE upstreams DROP COLUMN key_name;
 DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DROP TABLE IF EXISTS run_priority_requests; DROP TABLE IF EXISTS priority_grants; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable;
 ALTER TABLE runs DROP COLUMN schedule_entry;
 DELETE FROM schema_migrations WHERE version=31;
-DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx;
+DROP TRIGGER run_timing_claim; DROP TRIGGER IF EXISTS run_timing_grant; DROP TRIGGER IF EXISTS run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE IF EXISTS run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx;
 ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;
@@ -857,7 +857,7 @@ CREATE UNIQUE INDEX uplinks_token_credential_idx ON uplinks(token_credential_id)
 DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable;
 ALTER TABLE runs DROP COLUMN schedule_entry;
 DELETE FROM schema_migrations WHERE version=31;
-DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx;
+DROP TRIGGER run_timing_claim; DROP TRIGGER IF EXISTS run_timing_grant; DROP TRIGGER IF EXISTS run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE IF EXISTS run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx;
 ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;

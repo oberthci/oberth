@@ -3,58 +3,45 @@ release:
   name: oberth
   namespace: server-system
 templates:
-  - templates/rbac-argo-ci-tokens.yaml
+  - templates/rbac-argo.yaml
 set:
   image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  argo.namespace: pipeline-system
 tests:
-  - it: grants no authority without configured CI identities
-    asserts:
-      - hasDocuments:
-          count: 0
-  - it: accepts legacy null CI identities without granting authority
-    set:
-      argo.perRepoCIIdentities: null
-    asserts:
-      - hasDocuments:
-          count: 0
-  - it: keeps release identities out of CI token authority
-    set:
-      argo.perRepoIdentities:
-        - release-one
-      argo.perRepoCIIdentities: []
-    asserts:
-      - hasDocuments:
-          count: 0
-  - it: permits only token creation for the exact CI identities in the pipeline namespace
-    set:
-      argo.namespace: pipeline-system
-      argo.perRepoIdentities:
-        - release-one
-      argo.perRepoCIIdentities:
-        - ci-one
-        - ci-two
+  - it: grants only the base identities without configured CI identities
     documentIndex: 0
     asserts:
-      - hasDocuments:
-          count: 2
-      - isKind:
-          of: Role
+      - equal:
+          path: rules[5].resourceNames
+          value: [oberth-argo-credentialed, oberth-argo-executor]
+  - it: accepts null CI identities without adding token authority
+    set:
+      argo.perRepoCIIdentities: null
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: rules[5].resourceNames
+          value: [oberth-argo-credentialed, oberth-argo-executor]
+  - it: combines exact execution and CI identity allowlists in the base role
+    set:
+      argo.perRepoIdentities: [release-one]
+      argo.perRepoCIIdentities: [ci-one, ci-two]
+    documentIndex: 0
+    asserts:
       - equal:
           path: metadata.namespace
           value: pipeline-system
-      - equal:
+      - contains:
           path: rules
-          value:
-            - apiGroups: [""]
-              resources: ["serviceaccounts/token"]
-              resourceNames: ["ci-one", "ci-two"]
-              verbs: ["create"]
-  - it: binds CI-only verification authority to the server across namespaces
+          content:
+            apiGroups: [""]
+            resources: [serviceaccounts/token]
+            resourceNames: [oberth-argo-credentialed, oberth-argo-executor, release-one, ci-one, ci-two]
+            verbs: [create]
+  - it: binds the base role to the server across namespaces
     set:
-      argo.namespace: pipeline-system
       argo.perRepoIdentities: null
-      argo.perRepoCIIdentities:
-        - ci-one
+      argo.perRepoCIIdentities: [ci-one]
     documentIndex: 1
     asserts:
       - isKind:
@@ -73,4 +60,4 @@ tests:
           value:
             apiGroup: rbac.authorization.k8s.io
             kind: Role
-            name: oberth-argo-ci-tokens
+            name: oberth-argo

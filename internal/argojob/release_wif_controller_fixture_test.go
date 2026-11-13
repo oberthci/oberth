@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,19 +77,41 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 			if len(input.Annotations[identityAnnotation]) != 64 {
 				t.Fatal("captured workflow lost its server identity")
 			}
-			if err := validateHelperStorage(&input); err == nil {
-				t.Fatal("historical helper policy accepted for recovery")
+			if shape != "vault" {
+				if err := validateHelperStorage(&input); err == nil {
+					t.Fatal("historical helper policy accepted for recovery")
+				}
+			} else if err := validateHelperStorage(&input); err != nil {
+				t.Fatal("current vault capture lost its helper policy", err)
 			}
 			current, err := Build(c, r)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if shape == "vault" {
+				capturedJSON, _ := json.Marshal(input)
+				currentJSON, _ := json.Marshal(current)
+				if string(capturedJSON) != string(currentJSON) {
+					t.Fatal("vault capture input differs from current Build")
+				}
+				for _, name := range []string{"vault-workflow.json", "vault-sa-false-before-patch.json", "vault-sa-false-submitted.json", "vault-sa-true-before-patch.json", "vault-sa-true-submitted.json"} {
+					if strings.Contains(string(read(t, name)), "oberth-store-") {
+						t.Fatalf("%s retains a removed settings-map reference", name)
+					}
+				}
 			}
 			for _, automount := range []bool{false, true} {
 				name := shape + "-sa-" + strconv.FormatBool(automount)
 				var before, submitted corev1.Pod
 				decode(t, name+"-before-patch.json", &before)
 				decode(t, name+"-submitted.json", &submitted)
-				assertHistoricalPipelinePriority(t, &submitted)
+				if shape == "vault" {
+					if submitted.Spec.PriorityClassName != "" || submitted.Spec.Priority != nil || submitted.Spec.PreemptionPolicy != nil {
+						t.Fatal("current vault capture acquired unauthored scheduling fields")
+					}
+				} else {
+					assertHistoricalWorkflowPriority(t, &submitted)
+				}
 				assertWIFPodIsolation(t, shape, submitted.Spec)
 				if shape == "wif-only-step" && submitted.Spec.ServiceAccountName != "release-step-main" {
 					t.Fatal("Argo lost pinned step identity")
@@ -130,8 +153,30 @@ func assertWIFPodIsolation(t *testing.T, shape string, spec corev1.PodSpec) {
 	if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
 		t.Fatal("ambient API token enabled")
 	}
+	var mainArgs []string
+	for _, c := range spec.Containers {
+		if c.Name == "main" {
+			mainArgs = c.Args
+		}
+	}
 	main, executor := false, false
 	for _, c := range append(spec.Containers, spec.InitContainers...) {
+		if c.Name != "main" {
+			assertNoStoreSettings(t, c)
+			if shape == "vault" {
+				for _, e := range c.Env {
+					if e.Name == "ARGO_TEMPLATE" {
+						var view wfv1.Template
+						if err := json.Unmarshal([]byte(e.Value), &view); err != nil {
+							t.Fatal(err)
+						}
+						if view.Container == nil || !reflect.DeepEqual(view.Container.Args, mainArgs) {
+							t.Fatalf("executor metadata changed native parameter substitution: %v vs %v", view.Container, mainArgs)
+						}
+					}
+				}
+			}
+		}
 		found := map[string]bool{}
 		paths := map[string]bool{}
 		for _, m := range c.VolumeMounts {

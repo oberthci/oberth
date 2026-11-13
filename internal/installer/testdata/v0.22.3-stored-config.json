@@ -1,0 +1,30 @@
+{
+  "image": {
+    "ref": "example.invalid/old@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "argo": {
+    "goProxy": {
+      "enabled": false
+    }
+  },
+  "secretstore": {
+    "enabled": true,
+    "address": "https://openbao.openbao.svc:8200",
+    "role": "oberth-ci",
+    "caCert": "fixture-public-ca",
+    "insecureHTTPForDev": false,
+    "transit": {
+      "enabled": true,
+      "mount": "oberth-transit",
+      "key": "trusted-plan-artifacts"
+    }
+  },
+  "pushBannerURL": "",
+  "retention": {
+    "keepNewestPerRef": 0
+  },
+  "podAnnotations": {
+    "round17.example/stored": "kept"
+  },
+  "sourceAccess": null
+}

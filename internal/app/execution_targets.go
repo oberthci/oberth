@@ -162,7 +162,7 @@ func (r *executionTargets) forRequest(ctx context.Context, request service.Workf
 		}
 		return r.local, nil
 	}
-	if request.Run.RefKind != model.RefBranch || request.Run.Release || request.Run.Credentialed || request.Run.Trigger != "branch" {
+	if request.Run.RefKind != model.RefBranch || request.Run.Release || request.Run.Trigger != "branch" {
 		return nil, errors.New("app: remote execution requires an ordinary branch run")
 	}
 	authority, err := workflowpolicy.ResolveBranchAuthority(ctx, r.owner.resourceBlobs, repo, sha)
@@ -185,13 +185,31 @@ func (r *executionTargets) forRequest(ctx context.Context, request service.Workf
 	if err != nil {
 		return nil, err
 	}
-	credentialed, err := workflowCredentialed(resolved.Workflow())
+	_, grants, err := r.local.stepSecretAccess(ctx, request.Repository, resolved.Workflow(), file)
 	if err != nil {
 		return nil, err
 	}
-	if credentialed {
-		return nil, errors.New("app: remote execution cannot acquire credentialed authority")
+	paths, err := argoworkflow.DeclaredSecretPaths(resolved.Workflow())
+	if err != nil {
+		return nil, err
 	}
+	steps, err := argojob.GrantedSecretSteps(resolved.Workflow(), paths, grants)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := argoworkflow.PlannedSteps(resolved.Workflow())
+	if err != nil {
+		return nil, err
+	}
+	for _, step := range plan {
+		if step.Credentialed {
+			return nil, errors.New("app: remote execution cannot acquire step credentials")
+		}
+	}
+	if len(steps) > 0 {
+		return nil, errors.New("app: remote execution cannot acquire step secrets")
+	}
+
 	submission := argojob.Request{BranchAuthority: authority, RunID: request.Run.ID, RepositoryID: request.Repository.ID, Name: request.WorkflowName, Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg, Ref: request.Run.Ref, SHA: sha, PipelineFile: file, Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch, Source: source, Fragments: fragments}
 	if err := selected.Config.ExecutionPlacement.ValidateRequest(selected.Config, submission); err != nil {
 		return nil, err
@@ -225,7 +243,7 @@ func matchTargetRun(b model.ExecutionTargetBinding, run model.Run, name string) 
 	if sha == "" {
 		sha = run.SHA
 	}
-	if b.RunID != run.ID || b.Workflow != name || b.RepositoryID != run.RepoID || b.Ref != run.Ref || b.SHA != run.SHA || b.TestedSHA != sha || b.RefKind != string(run.RefKind) || b.Trigger != run.Trigger || b.ScheduleEntry != run.ScheduleEntry || (b.Target != "local" && (run.Trigger != "branch" || run.ScheduleEntry != "" || run.Release || run.Credentialed)) {
+	if b.RunID != run.ID || b.Workflow != name || b.RepositoryID != run.RepoID || b.Ref != run.Ref || b.SHA != run.SHA || b.TestedSHA != sha || b.RefKind != string(run.RefKind) || b.Trigger != run.Trigger || b.ScheduleEntry != run.ScheduleEntry || (b.Target != "local" && (run.Trigger != "branch" || run.ScheduleEntry != "" || run.Release)) {
 		return errors.New("app: canonical run differs from execution target binding")
 	}
 	return nil
@@ -326,8 +344,8 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 			return err
 		}
 		capsule := map[string]any{"workflow": workflow, "capability": submission.Capability, "identities": submission.Identities, "source_digest": b.SourceDigest, "graph_digest": b.GraphDigest, "fragment_lock_digest": b.FragmentLockDigest, "policy_digest": b.PolicyDigest}
-		if submission.DemandReceipt != nil {
-			capsule["demand_receipt"] = submission.DemandReceipt.Summary()
+		if submission.SourceReceipt != nil {
+			capsule["source_receipt"] = submission.SourceReceipt.Summary()
 		}
 		body, err := json.Marshal(capsule)
 		if err != nil {

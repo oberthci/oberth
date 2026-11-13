@@ -35,7 +35,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/oberthci/oberth/internal/podpriority"
 	"github.com/oberthci/oberth/internal/releaseverify"
 )
 
@@ -83,8 +82,6 @@ const (
 	defaultRole           = "oberth-ci"
 	defaultPolicy         = "oberth-ci"
 	defaultKVPrefix       = "oberth"
-	defaultTransitMount   = "oberth-transit"
-	defaultTransitKey     = "trusted-plan-artifacts"
 	defaultServiceAccount = "oberth"
 
 	// Credentialed tier: release templates with approved secrets.
@@ -143,26 +140,26 @@ type Config struct {
 	// ArgoNamespace. It does not make pipelines execute any other way: Argo is
 	// the execution engine, so the install still binds Oberth to that
 	// namespace and still verifies a controller is really there.
-	SkipArgo            bool
-	OpenBaoNamespace    string
-	Namespace           string
-	RekorNamespace      string
-	ArgoNamespace       string
-	ChartVersion        string
-	OpenBaoChartVersion string
-	RekorChartVersion   string
-	ArgoChartVersion    string
-	// ArgoParallelism sets native controller.parallelism; nil preserves its value.
+	SkipArgo              bool
+	OpenBaoNamespace      string
+	Namespace             string
+	RekorNamespace        string
+	ArgoNamespace         string
+	ChartVersion          string
+	OpenBaoChartVersion   string
+	RekorChartVersion     string
+	ArgoChartVersion      string
+	argoExecutorResources *ArgoExecutorResourcesReview
+	// ArgoParallelism and ArgoNamespaceParallelism set native controller limits;
+	// nil preserves the stored value.
 	ArgoParallelism           *int
+	ArgoNamespaceParallelism  *int
+	argoReleaseRead           bool
+	argoValuesRead            bool
+	existingArgoRelease       bool
+	liveArgoValues            map[string]any
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
-	// CredentialedSecretPaths are exact secret paths for the shared
-	// credentialed Vault policy, populated from the --credentialed-secret-path
-	// flag. When per-repo identities exist (len(PerRepoIdentities) > 0),
-	// these are not included in the shared policy, which is stripped to zero
-	// stanzas (issue #456); the grants are carried by per-repo policies
-	// instead.
-	CredentialedSecretPaths []string
 	// PerRepoIdentities describes per-repo Vault identities to create.
 	// Each entry results in a ServiceAccount (via the chart), a Vault
 	// policy, and a Vault role (via ConfigurePerRepoIdentities). The
@@ -569,26 +566,18 @@ type OpenBaoResult struct {
 	// CACertPEM is the public installer-managed CA used to verify the
 	// production OpenBao listener. It is empty in explicit dev mode.
 	CACertPEM string
-	// TrustedTransitVerified is set only after the production setup has
-	// positively provisioned or verified the exact managed Transit mount, key,
-	// policy, and Kubernetes role. It gates runtime enablement.
-	TrustedTransitVerified bool
 	// PKIEnabled retains live PKI enablement during a nonmutating Helm preview.
 	PKIEnabled bool
-	// ServerCACertPEM is the server PKI CA; non-empty enables tls.pki so the
-	// server issues its own short-lived leaf. Clients pin this certificate.
+	// ServerCACertPEM is the server PKI CA pinned by clients.
 	ServerCACertPEM string
 }
 
 // SecretStoreResult describes the outcome of secretstore configuration.
 type SecretStoreResult struct {
-	RekorPublicKey         string
-	AuthMountConfigured    bool
-	TransitMountEnabled    bool
-	TransitKeyCreated      bool
-	PolicyWritten          bool
-	RoleCreated            bool
-	TrustedTransitVerified bool
+	RekorPublicKey      string
+	AuthMountConfigured bool
+	PolicyWritten       bool
+	RoleCreated         bool
 	// ServerCACertPEM is the installer-managed server CA (production only);
 	// non-empty means the server PKI role is provisioned.
 	ServerCACertPEM string
@@ -1051,7 +1040,6 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 			if err != nil {
 				return fmt.Errorf("set up production secret store: %w", err)
 			}
-			openbao.TrustedTransitVerified = configured.TrustedTransitVerified
 			openbao.ServerCACertPEM = configured.ServerCACertPEM
 			if configured.ServerCAReplaced {
 				_, _ = fmt.Fprintln(w, "Server CA issued: clients that pinned the previous server certificate or CA must refresh it (oberth install rewrites ~/.config/oberth/ca.crt).")
@@ -1118,6 +1106,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		tw.WriteRow("Execution engine", "argo-workflows "+displayVersion(argo.TargetVersion), "✓ deployed")
 	}
 
+	mutationStarted := time.Now()
 	quietOberthDeps := deps
 	quietOberthDeps.Output = io.Discard
 	oberthResult, err := InstallOberth(ctx, cfg, quietOberthDeps, openbao, rekor)
@@ -1140,11 +1129,19 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// as onboarding steps complete.
 	tw.WriteFooter()
 
-	// A fresh deployment is deliberately NotReady until its first upstream is
-	// registered (vault-pre-init pattern), so completion goes through the
-	// onboarding-aware finish instead of a blind readiness wait. Onboarding
-	// results are appended to the table via AppendRow.
-	return FinishInstall(ctx, cfg, deps, tw, &creds)
+	return finishInstallWithMigrationNotice(ctx, cfg, deps, tw, &creds, oberthResult, mutationStarted)
+}
+
+// A fresh deployment stays NotReady until upstream registration. Complete
+// onboarding before reporting a migration observed during this installation.
+func finishInstallWithMigrationNotice(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, creds *heldCredentials, result OberthResult, since time.Time) error {
+	if err := FinishInstall(ctx, cfg, deps, tw, creds); err != nil {
+		return err
+	}
+	if !result.AlreadyInstalled {
+		printSecretApprovalReset(ctx, deps, result.Namespace, since)
+	}
+	return nil
 }
 
 // --- Phase 1: Cluster detection ---
@@ -1248,13 +1245,8 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		result.CACertPEM = caPEM
 	}
 
-	dependencyFile, dependencyChanged, cleanupDependency, err := dependencySchedulingValues(ctx, deps, "openbao", ns, "server", controlPlanePriority(cfg), exists)
-	if err != nil {
-		return result, err
-	}
-	defer cleanupDependency()
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
-	if action == actionSkip && (requiresTLSMigration || dependencyChanged) {
+	if action == actionSkip && (requiresTLSMigration) {
 		// Listener TLS is a values-only reconciliation. Pin that reconciliation
 		// to the installed chart so an older installer cannot downgrade a newer
 		// OpenBao release while hardening its transport.
@@ -1284,7 +1276,7 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		_, _ = fmt.Fprintln(deps.Output, "Installing OpenBao...")
 	}
 
-	if _, err := deps.RunHelm(ctx, withDependencyValues(OpenBaoHelmArgs(cfg), dependencyFile)); err != nil {
+	if _, err := deps.RunHelm(ctx, OpenBaoHelmArgs(cfg)); err != nil {
 		return result, fmt.Errorf("helm install OpenBao: %w", err)
 	}
 	if requiresTLSMigration {
@@ -1558,9 +1550,7 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		if strings.TrimSpace(openbao.CACertPEM) == "" {
 			return result, errors.New("installer-managed production OpenBao requires a public CA certificate before installing Oberth")
 		}
-		if !openbao.TrustedTransitVerified {
-			return result, errors.New("installer-managed production OpenBao Transit provisioning was not positively verified; refusing to invoke Oberth Helm")
-		}
+
 	}
 
 	release, exists, err := findHelmRelease(ctx, deps, "oberth", ns)
@@ -1641,7 +1631,19 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		}
 	}
 
-	if _, err := deps.RunHelm(ctx, OberthHelmArgs(cfg, openbao, rekor)); err != nil {
+	args := OberthHelmArgs(cfg, openbao, rekor)
+	if exists {
+		work, err := os.MkdirTemp("", "oberth-install-stored-")
+		if err != nil {
+			return result, err
+		}
+		defer func() { _ = os.RemoveAll(work) }()
+		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args)
+		if err != nil {
+			return result, err
+		}
+	}
+	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return result, fmt.Errorf("helm install Oberth: %w", err)
 	}
 
@@ -1761,27 +1763,13 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 			args = append(args,
 				"--set-string", "secretstore.caCert=",
 				"--set", "secretstore.insecureHTTPForDev=true",
-				"--set", "secretstore.transit.enabled=false",
 			)
 		} else {
-			transitEnabled := "false"
-			if openbao.TrustedTransitVerified {
-				transitEnabled = "true"
-			}
 			args = append(args,
 				"--set-string", "secretstore.caCert="+openbao.CACertPEM,
 				"--set", "secretstore.insecureHTTPForDev=false",
-				"--set", "secretstore.transit.enabled="+transitEnabled,
 			)
-			if openbao.TrustedTransitVerified {
-				// --reuse-values discards defaults newly added by a newer chart.
-				// Pin the exact identity that was positively verified so upgrades
-				// from pre-Transit releases cannot enable an incomplete config.
-				args = append(args,
-					"--set", "secretstore.transit.mount="+defaultTransitMount,
-					"--set", "secretstore.transit.key="+defaultTransitKey,
-				)
-			}
+
 		}
 	}
 	if cfg.InstallRekor {
@@ -1807,9 +1795,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	// secretstore configuration survives a re-run without
 	// --install-secretstore. The --set flags above still override reused
 	// values. No-op on first install. This intentionally retains installed
-	// chart defaults, including compatibility identities. New chart keys must
-	// have template fallbacks; test-chart-upgrade.sh and the real Helm install
-	// rerun test cover every key added since v0.17.53 (utilityImage).
+	// chart defaults unless retired installer keys require a reset; that path
+	// reuses only stored user values and explicitly pins compatibility identities.
+	// Historical v0.22.3 and real Helm tests cover the applied configuration.
 	args = append(args, "--reuse-values")
 	return args
 }
@@ -2188,6 +2176,7 @@ Next steps:
 }
 
 func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
+	printArgoExecutorResources(w, argoExecutorResourcesForReview(cfg))
 	_, _ = fmt.Fprintf(w, "\nDry-run plan (no cluster changes will be made):\n\n")
 	step := 1
 
@@ -2201,11 +2190,7 @@ func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
 			displayVersion(cfg.ChartVersion), releaseSourceText(cfg.Release))
 	}
 
-	pipelineNamespace := cfg.ArgoNamespace
-	if pipelineNamespace == "" {
-		pipelineNamespace = DefaultArgoNamespace
-	}
-	_, _ = fmt.Fprintf(w, "\n     Establish Helm-owned classes for the Oberth server and helper Pods %s (value %d, PreemptLowerPriority) and %s (value %d, Never).\n\n", controlPlanePriority(cfg), podpriority.ControlPlaneValue, podpriority.PipelineClass(pipelineNamespace), podpriority.PipelineValue)
+	_, _ = fmt.Fprintf(w, "\n     Establish the Helm-owned class for the Oberth server %s (value %d, PreemptLowerPriority).\n\n", controlPlanePriority(cfg), controlPlanePriorityValue)
 	openbaoAddr := ""
 	var rekor RekorResult
 	if cfg.wantsSecretStore() {
@@ -2249,10 +2234,9 @@ func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
 		_, _ = fmt.Fprintln(w, "     Write auth config: kubernetes_host=https://kubernetes.default.svc")
 		_, _ = fmt.Fprintf(w, "     Enable KV v2 mount: %s/\n", defaultKVPrefix)
 		if cfg.InstallSecretStore {
-			_, _ = fmt.Fprintf(w, "     Enable Transit mount: %s/ and create non-exportable key %s\n", defaultTransitMount, defaultTransitKey)
-			_, _ = fmt.Fprintf(w, "     Write policy: %s (read %s/data/*; update only exact Transit encrypt/decrypt paths)\n", defaultPolicy, defaultKVPrefix)
+			_, _ = fmt.Fprintf(w, "     Write policy: %s (server identity and PKI access under %s)\n", defaultPolicy, defaultKVPrefix)
 		} else {
-			_, _ = fmt.Fprintf(w, "     Write policy: %s (read-only on %s/data/*; Transit disabled)\n", defaultPolicy, defaultKVPrefix)
+			_, _ = fmt.Fprintf(w, "     Write policy: %s (server identity access under %s)\n", defaultPolicy, defaultKVPrefix)
 		}
 		oberthNS := cfg.Namespace
 		if oberthNS == "" {
@@ -2318,7 +2302,6 @@ func printDryRunPlan(cfg Config, w io.Writer, cluster ClusterInfo) error {
 		openbao.CACertPEM = "<installer-managed-public-ca-pem>"
 		// The dry-run orders this Helm step after the exact provisioning step
 		// above; show the value that is emitted only if that step succeeds.
-		openbao.TrustedTransitVerified = true
 	}
 	oberthArgs := OberthHelmArgs(cfg, openbao, rekor)
 	_, _ = fmt.Fprintf(w, "     helm %s\n\n", strings.Join(oberthArgs, " "))

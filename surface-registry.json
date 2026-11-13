@@ -1,5 +1,9 @@
 {
   "entries": {
+    "flag:active": {
+      "doc_anchor": "docs/remote-cli.md",
+      "test_ref": "cmd/oberth/remote_test.go TestRunsActivePreservesOrderAndReasons"
+    },
     "flag:upstream-name": {
       "doc_anchor": "docs/install-answers.md#upstream-name",
       "test_ref": "internal/installer/upstream_name_test.go TestInstallUpstreamHostNames"
@@ -116,14 +120,6 @@
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
     },
-    "annotation:oberth.ci/concurrency-group": {
-      "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/concurrency-limit": {
-      "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
     "value:releases": {
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",
       "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
@@ -131,18 +127,6 @@
     "value:serialize": {
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",
       "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
-    },
-    "annotation:oberth.ci/size": {
-      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/size-by-trigger": {
-      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/exclusive": {
-      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
-      "test_ref": "internal/argojob/fragment_test.go TestBuildRefusesRemovedExclusiveAnnotationInFragments"
     },
     "annotation:oberth.ci/trigger": {
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
@@ -844,38 +828,6 @@
       "doc_anchor": "docs/native-scheduling.md#labels-and-annotations",
       "test_ref": "internal/argojob/native_placement_test.go TestNativeMetadataDescribesOnlyExistingLabels"
     },
-    "annotation:oberth.ci/cpu-requests": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/request-defaults": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/declared-pod-demand": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/resource-admission-fallback": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-deadline-seconds": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-start-allowance-seconds": {
-      "doc_anchor": "docs/releases/v0.22.0.md#removed-controls",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-usage-memory-policy": {
-      "doc_anchor": "docs/releases/v0.22.0.md#step-usage-figures-removed",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
-    "annotation:oberth.ci/step-usage-memory-warning": {
-      "doc_anchor": "docs/releases/v0.22.0.md#step-usage-figures-removed",
-      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitRefusesRemovedAnnotations"
-    },
     "flag:status-upstream-probe-interval": {
       "doc_anchor": "docs/api-latency.md#status-and-run-list-latency",
       "test_ref": "cmd/oberth/status_probes_test.go TestStatusProbeFlagsAndChart"
@@ -925,7 +877,7 @@
       "test_ref": "internal/installer/client_cert_test.go TestFirstAdminCSRDoesNotMintBearer"
     },
     "flag:endpoint-address": {
-      "doc_anchor": "docs/plugin-install.md#naming-an-ip-or-load-balancer-endpoint",
+      "doc_anchor": "docs/plugin-install.md#choosing-an-ip-or-naming-an-endpoint",
       "test_ref": "internal/installer/plugin_onboarding_test.go TestPluginDNSRemedyWaitsForNameAndReprobes"
     },
     "flag:wait-load-balancer": {
@@ -959,6 +911,26 @@
     "value:network_policy": {
       "doc_anchor": "docs/plugin-install.md#live-networkpolicy-enforcement-check",
       "test_ref": "internal/installer/network_policy_values_test.go TestStoredDisabledPolicySurvivesPreflightAndUpgrade"
+    },
+    "flag:argo-namespace-parallelism": {
+      "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
+      "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
+    },
+    "flag:argo-vault-ca-cert": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier"
+    },
+    "flag:argo-vault-ci-secrets-role": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildRefusesCICredentialedWithoutCISecretsRole"
+    },
+    "flag:argo-vault-address": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildInjectsRunIdentityAndVaultCoordinates"
+    },
+    "flag:argo-vault-credentialed-role": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildInjectsRunIdentityAndVaultCoordinates"
     }
   }
 }

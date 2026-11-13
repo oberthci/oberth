@@ -429,7 +429,7 @@ func applyExecutionPlacement(wf *wfv1.Workflow, config Config, request Request) 
 		for _, key := range []string{"containers", "initContainers"} {
 			items, _ := patch[key].([]any)
 			for _, item := range items {
-				if m, ok := item.(map[string]any); ok && (m["name"] == "wait" || m["name"] == "init" || m["name"] == executorTokenWaiter) {
+				if m, ok := item.(map[string]any); ok && m["name"] == executorTokenWaiter {
 					m["resources"] = helperResources(wf, t)
 				}
 			}
@@ -621,7 +621,7 @@ func (p *ExecutionPlacement) VerifyTarget(config *rest.Config) error {
 }
 
 func verifyPlacedSeed(expected, actual *corev1.Pod, p *ExecutionPlacement) error {
-	if actual == nil || actual.UID == "" || actual.ResourceVersion == "" || actual.Name != expected.Name || actual.Namespace != expected.Namespace || len(actual.OwnerReferences) != 0 || actual.DeletionTimestamp != nil || !reflect.DeepEqual(actual.Labels, expected.Labels) || len(actual.Annotations) != 0 {
+	if actual == nil || actual.UID == "" || actual.ResourceVersion == "" || actual.Name != expected.Name || actual.Namespace != expected.Namespace || !reflect.DeepEqual(actual.OwnerReferences, expected.OwnerReferences) || actual.DeletionTimestamp != nil || !reflect.DeepEqual(actual.Labels, expected.Labels) || len(actual.Annotations) != 0 {
 		return errors.New("argojob: seed API identity differs")
 	}
 	want := expected.DeepCopy()

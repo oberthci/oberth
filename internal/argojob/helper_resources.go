@@ -10,18 +10,6 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// CPU/memory remain provisional. The pinned Argo v4.0.8 executor occupies
-// 160825009 bytes in the shared disk emptyDir before workload scratch/logs.
-// Reserve helper-owned storage in the Pod sum; init limits alone do not raise
-// the steady-state Pod allowance. Headroom is provisional, not a measured peak.
-// The limit is added only where the step declares its own (see helperResources).
-func executorControlResources() corev1.ResourceRequirements {
-	return corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("256Mi")},
-		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("512Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("512Mi")},
-	}
-}
-
 const helperStorageAnnotation = "oberth.ci/helper-storage"
 
 // The sole supported helper policy; older submissions must be drained before upgrade.
@@ -34,10 +22,18 @@ func validateHelperStorage(wf *wfv1.Workflow) error {
 	return nil
 }
 
-// Helpers reserve storage and add a limit only when the step declares one.
+// The Oberth token waiter reserves storage and adds a limit only when the step
+// declares one. Argo-generated executors use native controller resources.
 func helperResources(workflow *wfv1.Workflow, t *wfv1.Template) corev1.ResourceRequirements {
-	resources := executorControlResources()
-	if !stepDeclaresStorageLimit(workflow, t) {
+	return executorWaiterResources(stepDeclaresStorageLimit(workflow, t))
+}
+
+func executorWaiterResources(storageLimited bool) corev1.ResourceRequirements {
+	resources := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("256Mi")},
+		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("512Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("512Mi")},
+	}
+	if !storageLimited {
 		delete(resources.Limits, corev1.ResourceEphemeralStorage)
 	}
 	return resources

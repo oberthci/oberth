@@ -52,7 +52,7 @@ func (scheduler *Scheduler) finishObservedRun(finalizeCtx context.Context, run m
 	if publish, gateErr := scheduler.publicationGate(finalizeCtx, run.ID, jobResult, require); gateErr != nil {
 		return gateErr
 	} else if publish {
-		publication, beginErr := scheduler.beginRunPublication(finalizeCtx, repository, run, promotion)
+		publication, beginErr := scheduler.beginRunPublication(finalizeCtx, repository, run, promotion, jobResult)
 		if beginErr != nil {
 			jobResult.Status = model.RunFailed
 			jobResult.Phase = "publishing"

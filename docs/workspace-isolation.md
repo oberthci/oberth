@@ -33,7 +33,7 @@ private scratch space. Set the following fields on the test's Pod template:
 ```
 
 `automountServiceAccountToken: false` prevents the pipeline token from being
-mounted even in a credentialed workflow. Oberth retains the forced
+mounted even in a workflow with secret-consuming steps. Oberth retains the forced
 ServiceAccount name, omits injected Vault environment, CA and server-binary
 mounts, and does not inject the credential-chain token or secret tmpfs mount.
 Recognized `oberth secretstore exec` commands that contradict

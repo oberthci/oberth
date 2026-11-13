@@ -48,6 +48,10 @@ func testConfig() Config {
 		VaultCredentialedRole:      testVaultCredentialedRole,
 		VaultCISecretsRole:         testVaultCISecretsRole,
 		VaultCACertPEM:             testVaultAnchorPEM,
+		PerStepIdentities: map[string]PerRepoIdentityConfig{
+			"oberth/.oberth/release.yaml/*":             {ServiceAccountName: testCredentialedAcct},
+			"github/acme/oberth/.oberth/release.yaml/*": {ServiceAccountName: testCredentialedAcct},
+		},
 	}
 }
 
@@ -76,12 +80,20 @@ spec:
 `
 
 func testRequest(trigger pipeline.Trigger, source string) Request {
+	file, _ := argoworkflow.TriggerFile(trigger)
+	grants := map[string]map[string]bool{}
+	if w, err := argoworkflow.Decode([]byte(source)); err == nil {
+		paths, _ := argoworkflow.DeclaredSecretPaths(w)
+		for _, p := range paths {
+			grants[p] = map[string]bool{"*": true}
+		}
+	}
 	return Request{
 		RunID: "run-abc123", RepositoryID: 1, Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "acme",
 		Ref: "refs/heads/main", SHA: testSHA,
-		Trigger: trigger, Source: []byte(source),
-		ApprovedSecrets: map[string]bool{},
+		Trigger: trigger, PipelineFile: file, Source: []byte(source),
+		ApprovedSecrets: map[string]bool{}, StepGrants: grants,
 	}
 }
 
@@ -119,7 +131,7 @@ func TestBuildRefusesUnknownTriggers(t *testing.T) {
 }
 
 func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
@@ -128,6 +140,7 @@ func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 	environment := environmentOf(t, release, "main")
+	assertStoreAddress(t, *release.Spec.Templates[0].Container, testVaultAddress)
 	for name, expected := range map[string]string{
 		"OBERTH_REPO":       "oberth",
 		"OBERTH_REF":        "refs/heads/main",
@@ -315,6 +328,7 @@ func TestBuildIsDeterministic(t *testing.T) {
 func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths = strings.Replace(withPaths, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1)
 	// Release with an approved system-namespace path: admitted.
 	approvedRelease := testRequest(pipeline.TriggerRelease, withPaths)
 	approvedRelease.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
@@ -330,6 +344,7 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 	// CI pipelines CAN declare upstream-scoped paths.
 	withUpstream := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withUpstream = strings.Replace(withUpstream, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/test-secret, --, /bin/true]", 1)
 	ciUpstream := testRequest(pipeline.TriggerCI, withUpstream)
 	ciUpstream.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	if _, err := Build(testConfig(), ciUpstream); err != nil {
@@ -350,7 +365,7 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 // switch keys on trigger AND paths, so a branch push cannot present the
 // identity the release role binds.
 func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/test-secret, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 
 	request := testRequest(pipeline.TriggerCI, withPaths)
@@ -366,8 +381,8 @@ func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 	if credentialed.Spec.ServiceAccountName == testCredentialedAcct {
 		t.Fatal("a CI pipeline received the release-tier credentialed ServiceAccount")
 	}
-	if credentialed.Spec.AutomountServiceAccountToken == nil || !*credentialed.Spec.AutomountServiceAccountToken {
-		t.Fatal("credentialed CI does not automount a ServiceAccount token")
+	if credentialed.Spec.AutomountServiceAccountToken == nil || *credentialed.Spec.AutomountServiceAccountToken {
+		t.Fatal("credentialed CI automounts a ServiceAccount token")
 	}
 	// The projected token volume must be present for the credential chain to
 	// authenticate — as the ci-secrets identity, which is the pod's own.
@@ -381,9 +396,7 @@ func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 		t.Fatal("credentialed CI is missing the projected token volume")
 	}
 	environment := environmentOf(t, credentialed, "main")
-	if environment["VAULT_ADDR"] != testVaultAddress {
-		t.Fatalf("credentialed CI VAULT_ADDR = %q, want %q", environment["VAULT_ADDR"], testVaultAddress)
-	}
+	assertStoreAddress(t, *credentialed.Spec.Templates[0].Container, testVaultAddress)
 	if environment["OBERTH_VAULT_ROLE"] != testVaultCISecretsRole {
 		t.Fatalf("credentialed CI OBERTH_VAULT_ROLE = %q, want %q", environment["OBERTH_VAULT_ROLE"], testVaultCISecretsRole)
 	}
@@ -413,7 +426,7 @@ func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 // configured the CI-secrets Vault role is refused at admission — it must not
 // fall back to the release-tier role.
 func TestBuildRefusesCICredentialedWithoutCISecretsRole(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/test-secret, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
@@ -421,13 +434,13 @@ func TestBuildRefusesCICredentialedWithoutCISecretsRole(t *testing.T) {
 	config.VaultCISecretsRole = ""
 	_, err := Build(config, request)
 	if err == nil {
-		t.Fatal("expected a CI credentialed pipeline without a CI-secrets role to be refused")
+		t.Fatal("expected a CI secret consumer without a CI-secrets role to be refused")
 	}
 	if !strings.Contains(err.Error(), "never runs under the release-tier credentialed role") {
 		t.Fatalf("refusal does not explain the tier boundary: %v", err)
 	}
 	// The release trigger is unaffected by the missing CI role.
-	release := releaseRequestWithAnchor(strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	release := releaseRequestWithAnchor(strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1))
 	release.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	if _, err := Build(config, release); err != nil {
@@ -450,7 +463,7 @@ func TestPipelineAndCredentialedServiceAccountsMustDiffer(t *testing.T) {
 // with declared secret paths receives the credentialed SA and the
 // credentialed Vault role.
 func TestReleaseWithSecretsGetsCredentialedIdentity(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
@@ -490,11 +503,11 @@ func TestConfigRefusesASharedIdentity(t *testing.T) {
 	}
 }
 
-// TestBuildRejectsCredentialedRunWithMissingVaultCoordinates proves that a
-// credentialed pipeline (one with declared secret paths) is refused at
+// TestBuildRejectsGrantedStepWithMissingVaultCoordinates proves that a
+// granted secret-consuming step is refused at
 // admission when VaultAddress or VaultCredentialedRole is empty. Issue #27,
 // finding 11.
-func TestBuildRejectsCredentialedRunWithMissingVaultCoordinates(t *testing.T) {
+func TestBuildRejectsGrantedStepWithMissingVaultCoordinates(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
@@ -506,7 +519,7 @@ func TestBuildRejectsCredentialedRunWithMissingVaultCoordinates(t *testing.T) {
 	noAddr.VaultCredentialedRole = ""
 	noAddr.VaultCACertPEM = ""
 	if _, err := Build(noAddr, request); err == nil {
-		t.Fatal("expected a credentialed run without Vault address to be refused")
+		t.Fatal("expected a granted step without Vault address to be refused")
 	}
 
 	// Address present, role missing.
@@ -667,7 +680,7 @@ func containerEnv(container *corev1.Container) map[string]string {
 // The release step needs the trust anchor before it can log in, so the
 // server delivers the anchor as a mounted file.
 func TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := releaseRequestWithAnchor(withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
@@ -700,15 +713,12 @@ func TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {
 	if anchor.Name != SourceVolumeName || anchor.SubPath != vaultCASubPath || !anchor.ReadOnly {
 		t.Fatalf("anchor mount = %+v", *anchor)
 	}
-	// The login token is scoped to credentialed templates (those whose command
-	// is secretstore exec). This template's command is /bin/true, so it must not
-	// carry the token even though the projected volume exists at the workflow
-	// level (verified below). Per-template scoping is tested in
-	// TestBuildMountsReleaseTokenOnlyInCredentialedTemplates.
+	var hasToken bool
 	for _, mount := range container.VolumeMounts {
-		if mount.Name == ReleaseTokenVolumeName || mount.MountPath == ReleaseTokenMountPath {
-			t.Fatalf("a non-credentialed release template carries the login token: %+v", mount)
-		}
+		hasToken = hasToken || mount.Name == ReleaseTokenVolumeName
+	}
+	if !hasToken {
+		t.Fatal("granted store consumer lost its login token")
 	}
 	var projected *corev1.Volume
 	for index := range workflow.Spec.Volumes {
@@ -728,9 +738,7 @@ func TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {
 	if environment["VAULT_CACERT"] != VaultCACertPath {
 		t.Fatalf("VAULT_CACERT = %q, want %q", environment["VAULT_CACERT"], VaultCACertPath)
 	}
-	if environment["VAULT_ADDR"] != testVaultAddress {
-		t.Fatalf("VAULT_ADDR = %q", environment["VAULT_ADDR"])
-	}
+	assertStoreAddress(t, *container, testVaultAddress)
 	// The path travels, never the bytes: the anchor is public, but a server
 	// that inlines file content into a Workflow object is a server that will
 	// eventually inline something else.
@@ -856,6 +864,7 @@ func TestValidateRefusesAVaultCABundleThatIsNotAnAnchor(t *testing.T) {
 func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	withPaths = strings.Replace(withPaths, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/test-secret, --, /bin/true]", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	// ApprovedSecrets is set but empty — no grants.
 	request.ApprovedSecrets = map[string]bool{}
@@ -869,7 +878,7 @@ func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 // TestBuildAdmitsApprovedSecretPath proves that a pipeline declaring a path
 // present in the approval table is admitted.
 func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/oberth/test-secret, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
@@ -895,6 +904,7 @@ func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
 func TestBuildRejectsCISystemPathWithApprovalTable(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths = strings.Replace(withPaths, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
@@ -910,7 +920,7 @@ func TestBuildRejectsCISystemPathWithApprovalTable(t *testing.T) {
 // declaring a system-namespace path is admitted when the approval table
 // has a grant for it.
 func TestBuildAdmitsApprovedReleaseSystemPath(t *testing.T) {
-	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
+	withPaths := strings.Replace(strings.Replace(greedyDocument, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1), "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{
@@ -931,6 +941,7 @@ func TestBuildAdmitsApprovedReleaseSystemPath(t *testing.T) {
 func TestBuildRejectsUnapprovedReleaseSystemPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
+	withPaths = strings.Replace(withPaths, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/data/release/r2-upload-token, --, /bin/true]", 1)
 	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		// No grant for this path.
@@ -950,6 +961,7 @@ func TestBuildRejectsCrossRepoUpstreamPathWithApprovalTable(t *testing.T) {
 	// Oberth trying to declare a path in terraform's namespace.
 	withPaths := strings.Replace(greedyDocument, "    example.com/tier: L\n",
 		"    example.com/tier: L\n    oberth.ci/secret-paths: oberth/upstream/acme/terraform/stolen-secret\n", 1)
+	withPaths = strings.Replace(withPaths, "command: [/bin/true]", "command: [oberth, secretstore, exec, --path=oberth/upstream/acme/terraform/stolen-secret, --, /bin/true]", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/upstream/acme/terraform/stolen-secret": true,
@@ -1505,8 +1517,8 @@ spec:
 func TestPerStepGrantExactMatchPasses(t *testing.T) {
 	config := testConfig()
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/release-publish-r2":     {ServiceAccountName: "oberth-step-test-r2"},
-		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
+		"oberth/.oberth/release.yaml/release-publish-r2":     {ServiceAccountName: "oberth-step-test-r2"},
+		"oberth/.oberth/release.yaml/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
 	}
 	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
@@ -1776,19 +1788,18 @@ func TestOberthStepEnvironmentInjected(t *testing.T) {
 	}
 }
 
-// TestPerStepGrantNilStepGrantsBackwardCompatible proves that a nil StepGrants
-// map (pre-existing callers that only populate ApprovedSecrets) still passes
-// admission — backward compatibility with the wildcard-only era. Issue #623.
-func TestPerStepGrantNilStepGrantsBackwardCompatible(t *testing.T) {
+// TestPerStepGrantNilStepGrantsDenied proves that a nil StepGrants
+// map confers no step authority even when repository approval exists.
+func TestPerStepGrantNilStepGrantsDenied(t *testing.T) {
 	request := testRequest(pipeline.TriggerRelease, oberthExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/cosign-secret":   true,
 	}
-	// StepGrants is nil — all paths should pass.
+	// Repository approval alone must not authorize a step.
 	request.StepGrants = nil
-	if _, err := Build(testConfig(), request); err != nil {
-		t.Fatalf("nil StepGrants rejected (backward compatibility broken): %v", err)
+	if _, err := Build(testConfig(), request); err == nil {
+		t.Fatal("nil StepGrants granted access")
 	}
 }
 
@@ -1824,7 +1835,7 @@ spec:
 `
 	config := testConfig()
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/publish": {ServiceAccountName: "oberth-step-release-publish"},
+		"oberth/.oberth/release.yaml/publish": {ServiceAccountName: "oberth-step-release-publish"},
 	}
 	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{upstreamPath: true}
@@ -1859,7 +1870,8 @@ func TestPerStepIdentityAssignedToTemplate(t *testing.T) {
 		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
 	}
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
+		"oberth/.oberth/release.yaml/*":                      {ServiceAccountName: "oberth-argo-test-repo"},
+		"oberth/.oberth/release.yaml/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
 	}
 
 	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
@@ -1909,16 +1921,15 @@ func TestPerStepIdentityAssignedToTemplate(t *testing.T) {
 	}
 }
 
-// TestPerStepIdentityWildcardKeepsPerRepo proves that templates consuming only
-// wildcard-granted paths keep the per-repo identity even when per-step
-// identities exist for other templates. Issue #623.
-func TestPerStepIdentityWildcardKeepsPerRepo(t *testing.T) {
+// Wildcard consumers require the selected workflow file's scoped identity.
+func TestPerStepIdentityWildcardUsesWorkflowScopedIdentity(t *testing.T) {
 	config := testConfig()
 	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{
 		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
 	}
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
+		"oberth/.oberth/release.yaml/*":                      {ServiceAccountName: "file-wildcard"},
+		"oberth/.oberth/release.yaml/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
 	}
 
 	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
@@ -1941,9 +1952,9 @@ func TestPerStepIdentityWildcardKeepsPerRepo(t *testing.T) {
 		if tmpl.Container == nil {
 			continue
 		}
-		// No template should have the per-step SA when all grants are wildcard.
-		if tmpl.ServiceAccountName == "oberth-step-test-images" {
-			t.Fatalf("template %q has per-step SA but all grants are wildcard", tmpl.Name)
+		// Each consumer uses the file-scoped wildcard identity.
+		if tmpl.ServiceAccountName != "file-wildcard" {
+			t.Fatalf("template %q identity = %q", tmpl.Name, tmpl.ServiceAccountName)
 		}
 	}
 }
@@ -1975,29 +1986,14 @@ func TestPerStepIdentityNilMapDeniesNamedGrants(t *testing.T) {
 	}
 }
 
-// TestPerStepIdentityNilMapWildcardOnlyPasses proves that a nil
-// PerStepIdentities map with only wildcard grants succeeds — there are no
-// per-step identities to materialize.
-func TestPerStepIdentityNilMapWildcardOnlyPasses(t *testing.T) {
+// A wildcard grant still requires the workflow-scoped physical identity.
+func TestPerStepIdentityNilMapWildcardOnlyDenied(t *testing.T) {
 	config := testConfig()
 	config.PerStepIdentities = nil
-
 	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
-	request.ApprovedSecrets = map[string]bool{
-		"oberth/data/release/r2-upload-token": true,
-		"oberth/data/release/gar-image-key":   true,
-	}
-	request.StepGrants = map[string]map[string]bool{
-		"oberth/data/release/r2-upload-token": {"*": true},
-		"oberth/data/release/gar-image-key":   {"*": true},
-	}
-
-	workflow, err := Build(config, request)
-	if err != nil {
-		t.Fatalf("wildcard-only grants with nil PerStepIdentities should pass: %v", err)
-	}
-	if workflow == nil {
-		t.Fatal("expected non-nil workflow")
+	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true, "oberth/data/release/gar-image-key": true}
+	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "per-step identity is not materialized") {
+		t.Fatalf("wildcard identity missing: %v", err)
 	}
 }
 
@@ -2012,7 +2008,7 @@ func TestPerStepIdentityMissingDeniesAdmission(t *testing.T) {
 	}
 	// Per-step identities exist for SOME step, but not release-publish-images.
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/release-publish-r2": {ServiceAccountName: "oberth-step-test-r2"},
+		"oberth/.oberth/release.yaml/release-publish-r2": {ServiceAccountName: "oberth-step-test-r2"},
 	}
 
 	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
@@ -2054,7 +2050,7 @@ func TestPerStepIdentityEmptySADeniesAdmission(t *testing.T) {
 	}
 	// Per-step entry exists but SA is empty.
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"oberth/release-publish-images": {ServiceAccountName: ""},
+		"oberth/.oberth/release.yaml/release-publish-images": {ServiceAccountName: ""},
 	}
 
 	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)

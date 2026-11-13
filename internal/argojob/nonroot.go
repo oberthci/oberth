@@ -101,30 +101,7 @@ func nonrootPodPatch(tmpl *wfv1.Template, config Config) ([]byte, error) {
 	if err := pipeline.ValidateRunnerImage(seedImage); err != nil {
 		return nil, fmt.Errorf("argojob: invalid nonroot preparation image: %w", err)
 	}
-	prepareMounts := []corev1.VolumeMount{
-		{Name: nonrootTmpVolume, MountPath: "/prepare/tmp"},
-		{Name: "var-run-argo", MountPath: "/prepare/argo"},
-		{Name: "tmp-dir-argo", MountPath: "/prepare/executor"},
-	}
-	// The first init owns the root:root0755 executor parent. A replay may see
-	// its own partially prepared directory, but must never follow a symlink
-	// or adopt another owner's entry. The parent is not writable by main.
-	command := "if [ ! -e /prepare/executor/0 ]; then mkdir /prepare/executor/0; fi; " +
-		"test -d /prepare/executor/0 && test ! -L /prepare/executor/0 && test -O /prepare/executor/0 && " +
-		"chmod 1777 /prepare/tmp /prepare/argo /prepare/executor/0"
-	if tmpl.Script != nil {
-		prepareMounts = append(prepareMounts, corev1.VolumeMount{Name: "argo-staging", MountPath: "/prepare/staging"})
-		command += " /prepare/staging"
-	}
-	prepare := corev1.Container{
-		Name: nonrootPrepareName, Image: seedImage,
-		Command:         []string{"/bin/sh", "-ec", command},
-		SecurityContext: nonrootContainerSecurity(0), VolumeMounts: prepareMounts,
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi")},
-			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("64Mi")},
-		},
-	}
+	prepare := nonrootPrepareContainer(tmpl.Script != nil, seedImage)
 	main := tmpl.Container
 	if tmpl.Script != nil {
 		main = &tmpl.Script.Container
@@ -189,4 +166,32 @@ func (config Config) executorScratchLimit() *resource.Quantity {
 		return ptr.To(resource.MustParse("1Gi"))
 	}
 	return ptr.To(resource.MustParse(config.ExecutorScratchSizeLimit))
+}
+
+func nonrootPrepareContainer(script bool, seedImage string) corev1.Container {
+	prepareMounts := []corev1.VolumeMount{
+		{Name: nonrootTmpVolume, MountPath: "/prepare/tmp"},
+		{Name: "var-run-argo", MountPath: "/prepare/argo"},
+		{Name: "tmp-dir-argo", MountPath: "/prepare/executor"},
+	}
+	// The first init owns the root:root0755 executor parent. A replay may see
+	// its own partially prepared directory, but must never follow a symlink
+	// or adopt another owner's entry. The parent is not writable by main.
+	command := "if [ ! -e /prepare/executor/0 ]; then mkdir /prepare/executor/0; fi; " +
+		"test -d /prepare/executor/0 && test ! -L /prepare/executor/0 && test -O /prepare/executor/0 && " +
+		"chmod 1777 /prepare/tmp /prepare/argo /prepare/executor/0"
+	if script {
+		prepareMounts = append(prepareMounts, corev1.VolumeMount{Name: "argo-staging", MountPath: "/prepare/staging"})
+		command += " /prepare/staging"
+	}
+	prepare := corev1.Container{
+		Name: nonrootPrepareName, Image: seedImage,
+		Command:         []string{"/bin/sh", "-ec", command},
+		SecurityContext: nonrootContainerSecurity(0), VolumeMounts: prepareMounts,
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi")},
+			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("64Mi")},
+		},
+	}
+	return prepare
 }

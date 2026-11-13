@@ -1,0 +1,1176 @@
+{
+  "metadata": {
+    "resourceVersion": "756"
+  },
+  "items": [
+    {
+      "metadata": {
+        "name": "oberth-live-token-ordinary",
+        "namespace": "default",
+        "uid": "7c89b55f-5833-464a-ae57-5c0026796d57",
+        "resourceVersion": "754",
+        "generation": 1,
+        "creationTimestamp": "2026-11-13T20:33:24Z",
+        "labels": {
+          "oberth.ci/run": "oberth-live-token-ordinary",
+          "oberth.ci/tier": "ci",
+          "oberth.ci/trigger": "ci",
+          "workflows.argoproj.io/completed": "true",
+          "workflows.argoproj.io/workflow": "oberth-live-token-ordinary"
+        },
+        "annotations": {
+          "kubectl.kubernetes.io/default-container": "main",
+          "workflows.argoproj.io/node-id": "oberth-live-token-ordinary",
+          "workflows.argoproj.io/node-name": "oberth-live-token-ordinary"
+        },
+        "ownerReferences": [
+          {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "name": "oberth-live-token-ordinary",
+            "uid": "14c634bc-afb0-4f8c-a093-c360fca97fd0",
+            "controller": true,
+            "blockOwnerDeletion": true
+          }
+        ],
+        "managedFields": [
+          {
+            "manager": "kubelet",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-13T20:33:42Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:status": {
+                "f:conditions": {
+                  "k:{\"type\":\"ContainersReady\"}": {
+                    ".": {},
+                    "f:lastProbeTime": {},
+                    "f:lastTransitionTime": {},
+                    "f:reason": {},
+                    "f:status": {},
+                    "f:type": {}
+                  },
+                  "k:{\"type\":\"Initialized\"}": {
+                    ".": {},
+                    "f:lastProbeTime": {},
+                    "f:lastTransitionTime": {},
+                    "f:reason": {},
+                    "f:status": {},
+                    "f:type": {}
+                  },
+                  "k:{\"type\":\"PodReadyToStartContainers\"}": {
+                    ".": {},
+                    "f:lastProbeTime": {},
+                    "f:lastTransitionTime": {},
+                    "f:status": {},
+                    "f:type": {}
+                  },
+                  "k:{\"type\":\"Ready\"}": {
+                    ".": {},
+                    "f:lastProbeTime": {},
+                    "f:lastTransitionTime": {},
+                    "f:reason": {},
+                    "f:status": {},
+                    "f:type": {}
+                  }
+                },
+                "f:containerStatuses": {},
+                "f:hostIP": {},
+                "f:hostIPs": {},
+                "f:initContainerStatuses": {},
+                "f:phase": {},
+                "f:podIP": {},
+                "f:podIPs": {
+                  ".": {},
+                  "k:{\"ip\":\"10.244.0.8\"}": {
+                    ".": {},
+                    "f:ip": {}
+                  }
+                },
+                "f:startTime": {}
+              }
+            },
+            "subresource": "status"
+          },
+          {
+            "manager": "workflow-controller",
+            "operation": "Update",
+            "apiVersion": "v1",
+            "time": "2026-11-13T20:33:45Z",
+            "fieldsType": "FieldsV1",
+            "fieldsV1": {
+              "f:metadata": {
+                "f:annotations": {
+                  ".": {},
+                  "f:kubectl.kubernetes.io/default-container": {},
+                  "f:workflows.argoproj.io/node-id": {},
+                  "f:workflows.argoproj.io/node-name": {}
+                },
+                "f:labels": {
+                  ".": {},
+                  "f:oberth.ci/run": {},
+                  "f:oberth.ci/tier": {},
+                  "f:oberth.ci/trigger": {},
+                  "f:workflows.argoproj.io/completed": {},
+                  "f:workflows.argoproj.io/workflow": {}
+                },
+                "f:ownerReferences": {
+                  ".": {},
+                  "k:{\"uid\":\"14c634bc-afb0-4f8c-a093-c360fca97fd0\"}": {}
+                }
+              },
+              "f:spec": {
+                "f:activeDeadlineSeconds": {},
+                "f:automountServiceAccountToken": {},
+                "f:containers": {
+                  "k:{\"name\":\"main\"}": {
+                    ".": {},
+                    "f:args": {},
+                    "f:command": {},
+                    "f:env": {
+                      ".": {},
+                      "k:{\"name\":\"ARGO_CONTAINER_NAME\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_DEADLINE\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_INCLUDE_SCRIPT_OUTPUT\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_NODE_ID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_FILE\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_FILE_TICK_DURATION\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_PATCH_TICK_DURATION\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"OBERTH_REF\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"OBERTH_REPO\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"OBERTH_RUN_ID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"OBERTH_SHA\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"OBERTH_STEP\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"OBERTH_TRIGGER\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      }
+                    },
+                    "f:image": {},
+                    "f:imagePullPolicy": {},
+                    "f:name": {},
+                    "f:resources": {},
+                    "f:securityContext": {
+                      ".": {},
+                      "f:allowPrivilegeEscalation": {},
+                      "f:capabilities": {
+                        ".": {},
+                        "f:drop": {}
+                      },
+                      "f:readOnlyRootFilesystem": {}
+                    },
+                    "f:terminationMessagePath": {},
+                    "f:terminationMessagePolicy": {},
+                    "f:volumeMounts": {
+                      ".": {},
+                      "k:{\"mountPath\":\"/tmp\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {}
+                      },
+                      "k:{\"mountPath\":\"/var/run/argo\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {}
+                      }
+                    },
+                    "f:workingDir": {}
+                  },
+                  "k:{\"name\":\"wait\"}": {
+                    ".": {},
+                    "f:command": {},
+                    "f:env": {
+                      ".": {},
+                      "k:{\"name\":\"ARGO_ARTIFACT_PLUGIN_NAMES\"}": {
+                        ".": {},
+                        "f:name": {}
+                      },
+                      "k:{\"name\":\"ARGO_CONTAINER_NAME\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_DEADLINE\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_INCLUDE_SCRIPT_OUTPUT\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_NODE_ID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_POD_NAME\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:valueFrom": {
+                          ".": {},
+                          "f:fieldRef": {}
+                        }
+                      },
+                      "k:{\"name\":\"ARGO_POD_UID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:valueFrom": {
+                          ".": {},
+                          "f:fieldRef": {}
+                        }
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_FILE\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_FILE_TICK_DURATION\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_PATCH_TICK_DURATION\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_WORKFLOW_NAME\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_WORKFLOW_UID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"KUBECONFIG\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      }
+                    },
+                    "f:image": {},
+                    "f:imagePullPolicy": {},
+                    "f:name": {},
+                    "f:resources": {},
+                    "f:terminationMessagePath": {},
+                    "f:terminationMessagePolicy": {},
+                    "f:volumeMounts": {
+                      ".": {},
+                      "k:{\"mountPath\":\"/mainctrfs/tmp\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {}
+                      },
+                      "k:{\"mountPath\":\"/tmp\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {},
+                        "f:subPath": {}
+                      },
+                      "k:{\"mountPath\":\"/var/run/argo\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {}
+                      },
+                      "k:{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {},
+                        "f:readOnly": {}
+                      }
+                    }
+                  }
+                },
+                "f:dnsPolicy": {},
+                "f:enableServiceLinks": {},
+                "f:initContainers": {
+                  ".": {},
+                  "k:{\"name\":\"init\"}": {
+                    ".": {},
+                    "f:command": {},
+                    "f:env": {
+                      ".": {},
+                      "k:{\"name\":\"ARGO_CONTAINER_NAME\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_DEADLINE\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_INCLUDE_SCRIPT_OUTPUT\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_NODE_ID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_POD_NAME\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:valueFrom": {
+                          ".": {},
+                          "f:fieldRef": {}
+                        }
+                      },
+                      "k:{\"name\":\"ARGO_POD_UID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:valueFrom": {
+                          ".": {},
+                          "f:fieldRef": {}
+                        }
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_FILE\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_FILE_TICK_DURATION\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_PROGRESS_PATCH_TICK_DURATION\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_TEMPLATE\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_WORKFLOW_NAME\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"ARGO_WORKFLOW_UID\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      },
+                      "k:{\"name\":\"KUBECONFIG\"}": {
+                        ".": {},
+                        "f:name": {},
+                        "f:value": {}
+                      }
+                    },
+                    "f:image": {},
+                    "f:imagePullPolicy": {},
+                    "f:name": {},
+                    "f:resources": {},
+                    "f:terminationMessagePath": {},
+                    "f:terminationMessagePolicy": {},
+                    "f:volumeMounts": {
+                      ".": {},
+                      "k:{\"mountPath\":\"/var/run/argo\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {}
+                      },
+                      "k:{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {},
+                        "f:readOnly": {}
+                      }
+                    }
+                  },
+                  "k:{\"name\":\"oberth-executor-token\"}": {
+                    ".": {},
+                    "f:command": {},
+                    "f:image": {},
+                    "f:imagePullPolicy": {},
+                    "f:name": {},
+                    "f:resources": {
+                      ".": {},
+                      "f:limits": {
+                        ".": {},
+                        "f:cpu": {},
+                        "f:memory": {}
+                      },
+                      "f:requests": {
+                        ".": {},
+                        "f:cpu": {},
+                        "f:ephemeral-storage": {},
+                        "f:memory": {}
+                      }
+                    },
+                    "f:securityContext": {
+                      ".": {},
+                      "f:allowPrivilegeEscalation": {},
+                      "f:capabilities": {
+                        ".": {},
+                        "f:drop": {}
+                      },
+                      "f:readOnlyRootFilesystem": {},
+                      "f:runAsGroup": {},
+                      "f:runAsNonRoot": {},
+                      "f:runAsUser": {},
+                      "f:seccompProfile": {
+                        ".": {},
+                        "f:type": {}
+                      }
+                    },
+                    "f:terminationMessagePath": {},
+                    "f:terminationMessagePolicy": {},
+                    "f:volumeMounts": {
+                      ".": {},
+                      "k:{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\"}": {
+                        ".": {},
+                        "f:mountPath": {},
+                        "f:name": {}
+                      }
+                    }
+                  }
+                },
+                "f:restartPolicy": {},
+                "f:schedulerName": {},
+                "f:securityContext": {
+                  ".": {},
+                  "f:runAsGroup": {},
+                  "f:runAsNonRoot": {},
+                  "f:runAsUser": {},
+                  "f:seccompProfile": {
+                    ".": {},
+                    "f:type": {}
+                  }
+                },
+                "f:serviceAccount": {},
+                "f:serviceAccountName": {},
+                "f:terminationGracePeriodSeconds": {},
+                "f:volumes": {
+                  ".": {},
+                  "k:{\"name\":\"exec-sa-token\"}": {
+                    ".": {},
+                    "f:emptyDir": {
+                      ".": {},
+                      "f:medium": {},
+                      "f:sizeLimit": {}
+                    },
+                    "f:name": {}
+                  },
+                  "k:{\"name\":\"oberth-tmp\"}": {
+                    ".": {},
+                    "f:emptyDir": {
+                      ".": {},
+                      "f:sizeLimit": {}
+                    },
+                    "f:name": {}
+                  },
+                  "k:{\"name\":\"tmp-dir-argo\"}": {
+                    ".": {},
+                    "f:emptyDir": {},
+                    "f:name": {}
+                  },
+                  "k:{\"name\":\"var-run-argo\"}": {
+                    ".": {},
+                    "f:emptyDir": {},
+                    "f:name": {}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "spec": {
+        "volumes": [
+          {
+            "name": "var-run-argo",
+            "emptyDir": {}
+          },
+          {
+            "name": "tmp-dir-argo",
+            "emptyDir": {}
+          },
+          {
+            "name": "exec-sa-token",
+            "emptyDir": {
+              "medium": "Memory",
+              "sizeLimit": "1Mi"
+            }
+          },
+          {
+            "name": "oberth-tmp",
+            "emptyDir": {
+              "sizeLimit": "8Gi"
+            }
+          }
+        ],
+        "initContainers": [
+          {
+            "name": "oberth-executor-token",
+            "image": "busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74",
+            "command": [
+              "sh",
+              "-c",
+              "trap 'printf \"%s\\n\" \"executor token wait terminated\" \u003e\u00262; exit 143' TERM\ntrap 'printf \"%s\\n\" \"executor token wait interrupted\" \u003e\u00262; exit 130' INT\nprintf '%s\\n' 'waiting for executor token from Oberth' \u003e\u00262\nwaited_seconds=0\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/kubeconfig; do\n  if ! sleep 1; then\n    printf '%s\\n' 'executor token wait failed' \u003e\u00262\n    exit 1\n  fi\n  waited_seconds=$((waited_seconds + 1))\n  if [ \"$((waited_seconds % 30))\" -eq 0 ]; then\n    printf 'still waiting for executor token from Oberth after %ss\\n' \"$waited_seconds\" \u003e\u00262\n  fi\ndone\nprintf '%s\\n' 'executor token ready' \u003e\u00262"
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "500m",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "50m",
+                "ephemeral-storage": "256Mi",
+                "memory": "64Mi"
+              }
+            },
+            "volumeMounts": [
+              {
+                "name": "exec-sa-token",
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+              }
+            ],
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "imagePullPolicy": "IfNotPresent",
+            "securityContext": {
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "runAsUser": 0,
+              "runAsGroup": 0,
+              "runAsNonRoot": false,
+              "readOnlyRootFilesystem": true,
+              "allowPrivilegeEscalation": false,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            }
+          },
+          {
+            "name": "init",
+            "image": "quay.io/argoproj/argoexec:v4.0.8@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87",
+            "command": [
+              "argoexec",
+              "init",
+              "--loglevel",
+              "info",
+              "--log-format",
+              "text",
+              "--gloglevel",
+              "0"
+            ],
+            "env": [
+              {
+                "name": "KUBECONFIG",
+                "value": "/var/run/secrets/kubernetes.io/serviceaccount/kubeconfig"
+              },
+              {
+                "name": "ARGO_POD_NAME",
+                "valueFrom": {
+                  "fieldRef": {
+                    "apiVersion": "v1",
+                    "fieldPath": "metadata.name"
+                  }
+                }
+              },
+              {
+                "name": "ARGO_POD_UID",
+                "valueFrom": {
+                  "fieldRef": {
+                    "apiVersion": "v1",
+                    "fieldPath": "metadata.uid"
+                  }
+                }
+              },
+              {
+                "name": "ARGO_WORKFLOW_NAME",
+                "value": "oberth-live-token-ordinary"
+              },
+              {
+                "name": "ARGO_WORKFLOW_UID",
+                "value": "14c634bc-afb0-4f8c-a093-c360fca97fd0"
+              },
+              {
+                "name": "ARGO_CONTAINER_NAME",
+                "value": "init"
+              },
+              {
+                "name": "ARGO_TEMPLATE",
+                "value": "{\"name\":\"main\",\"inputs\":{},\"outputs\":{},\"metadata\":{\"labels\":{\"oberth.ci/run\":\"oberth-live-token-ordinary\",\"oberth.ci/tier\":\"ci\",\"oberth.ci/trigger\":\"ci\"}},\"container\":{\"name\":\"\",\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"command\":[\"sh\",\"-c\"],\"args\":[\"echo ordinary-identity-proof\"],\"workingDir\":\"/tmp\",\"env\":[{\"name\":\"OBERTH_REPO\",\"value\":\"oberth\"},{\"name\":\"OBERTH_REF\",\"value\":\"refs/heads/argo-live\"},{\"name\":\"OBERTH_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_TRIGGER\",\"value\":\"ci\"},{\"name\":\"OBERTH_RUN_ID\",\"value\":\"oberth-live-token-ordinary\"},{\"name\":\"OBERTH_STEP\",\"value\":\"main\"}],\"resources\":{},\"volumeMounts\":[{\"name\":\"oberth-tmp\",\"mountPath\":\"/tmp\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false}},\"serviceAccountName\":\"oberth-argo-pipeline\",\"automountServiceAccountToken\":false,\"podSpecPatch\":\"{\\\"$setElementOrder/initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\"},{\\\"name\\\":\\\"init\\\"}],\\\"containers\\\":[{\\\"env\\\":[{\\\"name\\\":\\\"KUBECONFIG\\\",\\\"value\\\":\\\"/var/run/secrets/kubernetes.io/serviceaccount/kubeconfig\\\"},{\\\"name\\\":\\\"ARGO_PROGRESS_PATCH_TICK_DURATION\\\",\\\"value\\\":\\\"0\\\"},{\\\"name\\\":\\\"ARGO_PROGRESS_FILE_TICK_DURATION\\\",\\\"value\\\":\\\"0\\\"}],\\\"name\\\":\\\"wait\\\"}],\\\"initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\",\\\"image\\\":\\\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\\\",\\\"command\\\":[\\\"sh\\\",\\\"-c\\\",\\\"trap 'printf \\\\\\\"%s\\\\\\\\n\\\\\\\" \\\\\\\"executor token wait terminated\\\\\\\" \\\\u003e\\\\u00262; exit 143' TERM\\\\ntrap 'printf \\\\\\\"%s\\\\\\\\n\\\\\\\" \\\\\\\"executor token wait interrupted\\\\\\\" \\\\u003e\\\\u00262; exit 130' INT\\\\nprintf '%s\\\\\\\\n' 'waiting for executor token from Oberth' \\\\u003e\\\\u00262\\\\nwaited_seconds=0\\\\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/kubeconfig; do\\\\n  if ! sleep 1; then\\\\n    printf '%s\\\\\\\\n' 'executor token wait failed' \\\\u003e\\\\u00262\\\\n    exit 1\\\\n  fi\\\\n  waited_seconds=$((waited_seconds + 1))\\\\n  if [ \\\\\\\"$((waited_seconds % 30))\\\\\\\" -eq 0 ]; then\\\\n    printf 'still waiting for executor token from Oberth after %ss\\\\\\\\n' \\\\\\\"$waited_seconds\\\\\\\" \\\\u003e\\\\u00262\\\\n  fi\\\\ndone\\\\nprintf '%s\\\\\\\\n' 'executor token ready' \\\\u003e\\\\u00262\\\"],\\\"resources\\\":{\\\"limits\\\":{\\\"cpu\\\":\\\"500m\\\",\\\"memory\\\":\\\"512Mi\\\"},\\\"requests\\\":{\\\"cpu\\\":\\\"50m\\\",\\\"ephemeral-storage\\\":\\\"256Mi\\\",\\\"memory\\\":\\\"64Mi\\\"}},\\\"volumeMounts\\\":[{\\\"name\\\":\\\"exec-sa-token\\\",\\\"mountPath\\\":\\\"/var/run/secrets/kubernetes.io/serviceaccount\\\"}],\\\"securityContext\\\":{\\\"capabilities\\\":{\\\"drop\\\":[\\\"ALL\\\"]},\\\"runAsUser\\\":0,\\\"runAsGroup\\\":0,\\\"runAsNonRoot\\\":false,\\\"readOnlyRootFilesystem\\\":true,\\\"allowPrivilegeEscalation\\\":false,\\\"seccompProfile\\\":{\\\"type\\\":\\\"RuntimeDefault\\\"}}},{\\\"env\\\":[{\\\"name\\\":\\\"KUBECONFIG\\\",\\\"value\\\":\\\"/var/run/secrets/kubernetes.io/serviceaccount/kubeconfig\\\"},{\\\"name\\\":\\\"ARGO_PROGRESS_PATCH_TICK_DURATION\\\",\\\"value\\\":\\\"0\\\"},{\\\"name\\\":\\\"ARGO_PROGRESS_FILE_TICK_DURATION\\\",\\\"value\\\":\\\"0\\\"}],\\\"name\\\":\\\"init\\\"}],\\\"volumes\\\":[{\\\"emptyDir\\\":{\\\"medium\\\":\\\"Memory\\\",\\\"sizeLimit\\\":\\\"1Mi\\\"},\\\"name\\\":\\\"exec-sa-token\\\",\\\"secret\\\":null}]}\"}"
+              },
+              {
+                "name": "ARGO_NODE_ID",
+                "value": "oberth-live-token-ordinary"
+              },
+              {
+                "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+                "value": "false"
+              },
+              {
+                "name": "ARGO_DEADLINE",
+                "value": "2026-11-13T20:38:24Z"
+              },
+              {
+                "name": "ARGO_PROGRESS_FILE",
+                "value": "/var/run/argo/progress"
+              },
+              {
+                "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+                "value": "0"
+              },
+              {
+                "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+                "value": "0"
+              }
+            ],
+            "resources": {},
+            "volumeMounts": [
+              {
+                "name": "exec-sa-token",
+                "readOnly": true,
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+              },
+              {
+                "name": "var-run-argo",
+                "mountPath": "/var/run/argo"
+              }
+            ],
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "imagePullPolicy": "IfNotPresent"
+          }
+        ],
+        "containers": [
+          {
+            "name": "wait",
+            "image": "quay.io/argoproj/argoexec:v4.0.8@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87",
+            "command": [
+              "argoexec",
+              "wait",
+              "--loglevel",
+              "info",
+              "--log-format",
+              "text",
+              "--gloglevel",
+              "0"
+            ],
+            "env": [
+              {
+                "name": "KUBECONFIG",
+                "value": "/var/run/secrets/kubernetes.io/serviceaccount/kubeconfig"
+              },
+              {
+                "name": "ARGO_POD_NAME",
+                "valueFrom": {
+                  "fieldRef": {
+                    "apiVersion": "v1",
+                    "fieldPath": "metadata.name"
+                  }
+                }
+              },
+              {
+                "name": "ARGO_POD_UID",
+                "valueFrom": {
+                  "fieldRef": {
+                    "apiVersion": "v1",
+                    "fieldPath": "metadata.uid"
+                  }
+                }
+              },
+              {
+                "name": "ARGO_WORKFLOW_NAME",
+                "value": "oberth-live-token-ordinary"
+              },
+              {
+                "name": "ARGO_WORKFLOW_UID",
+                "value": "14c634bc-afb0-4f8c-a093-c360fca97fd0"
+              },
+              {
+                "name": "ARGO_ARTIFACT_PLUGIN_NAMES"
+              },
+              {
+                "name": "ARGO_CONTAINER_NAME",
+                "value": "wait"
+              },
+              {
+                "name": "ARGO_NODE_ID",
+                "value": "oberth-live-token-ordinary"
+              },
+              {
+                "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+                "value": "false"
+              },
+              {
+                "name": "ARGO_DEADLINE",
+                "value": "2026-11-13T20:38:24Z"
+              },
+              {
+                "name": "ARGO_PROGRESS_FILE",
+                "value": "/var/run/argo/progress"
+              },
+              {
+                "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+                "value": "0"
+              },
+              {
+                "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+                "value": "0"
+              }
+            ],
+            "resources": {},
+            "volumeMounts": [
+              {
+                "name": "exec-sa-token",
+                "readOnly": true,
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+              },
+              {
+                "name": "oberth-tmp",
+                "mountPath": "/mainctrfs/tmp"
+              },
+              {
+                "name": "tmp-dir-argo",
+                "mountPath": "/tmp",
+                "subPath": "0"
+              },
+              {
+                "name": "var-run-argo",
+                "mountPath": "/var/run/argo"
+              }
+            ],
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "imagePullPolicy": "IfNotPresent"
+          },
+          {
+            "name": "main",
+            "image": "busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74",
+            "command": [
+              "/var/run/argo/argoexec",
+              "emissary",
+              "--loglevel",
+              "info",
+              "--log-format",
+              "text",
+              "--gloglevel",
+              "0",
+              "--",
+              "sh",
+              "-c"
+            ],
+            "args": [
+              "echo ordinary-identity-proof"
+            ],
+            "workingDir": "/tmp",
+            "env": [
+              {
+                "name": "OBERTH_REPO",
+                "value": "oberth"
+              },
+              {
+                "name": "OBERTH_REF",
+                "value": "refs/heads/argo-live"
+              },
+              {
+                "name": "OBERTH_SHA",
+                "value": "0123456789abcdef0123456789abcdef01234567"
+              },
+              {
+                "name": "OBERTH_TRIGGER",
+                "value": "ci"
+              },
+              {
+                "name": "OBERTH_RUN_ID",
+                "value": "oberth-live-token-ordinary"
+              },
+              {
+                "name": "OBERTH_STEP",
+                "value": "main"
+              },
+              {
+                "name": "ARGO_CONTAINER_NAME",
+                "value": "main"
+              },
+              {
+                "name": "ARGO_NODE_ID",
+                "value": "oberth-live-token-ordinary"
+              },
+              {
+                "name": "ARGO_INCLUDE_SCRIPT_OUTPUT",
+                "value": "false"
+              },
+              {
+                "name": "ARGO_DEADLINE",
+                "value": "2026-11-13T20:38:24Z"
+              },
+              {
+                "name": "ARGO_PROGRESS_FILE",
+                "value": "/var/run/argo/progress"
+              },
+              {
+                "name": "ARGO_PROGRESS_PATCH_TICK_DURATION",
+                "value": "1m0s"
+              },
+              {
+                "name": "ARGO_PROGRESS_FILE_TICK_DURATION",
+                "value": "3s"
+              }
+            ],
+            "resources": {},
+            "volumeMounts": [
+              {
+                "name": "oberth-tmp",
+                "mountPath": "/tmp"
+              },
+              {
+                "name": "var-run-argo",
+                "mountPath": "/var/run/argo"
+              }
+            ],
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "imagePullPolicy": "IfNotPresent",
+            "securityContext": {
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": true,
+              "allowPrivilegeEscalation": false
+            }
+          }
+        ],
+        "restartPolicy": "Never",
+        "terminationGracePeriodSeconds": 30,
+        "activeDeadlineSeconds": 299,
+        "dnsPolicy": "ClusterFirst",
+        "serviceAccountName": "oberth-argo-pipeline",
+        "serviceAccount": "oberth-argo-pipeline",
+        "automountServiceAccountToken": false,
+        "nodeName": "oberth-t1-1565-r4-control-plane",
+        "securityContext": {
+          "runAsUser": 0,
+          "runAsGroup": 0,
+          "runAsNonRoot": false,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "schedulerName": "default-scheduler",
+        "tolerations": [
+          {
+            "key": "node.kubernetes.io/not-ready",
+            "operator": "Exists",
+            "effect": "NoExecute",
+            "tolerationSeconds": 300
+          },
+          {
+            "key": "node.kubernetes.io/unreachable",
+            "operator": "Exists",
+            "effect": "NoExecute",
+            "tolerationSeconds": 300
+          }
+        ],
+        "priority": 0,
+        "enableServiceLinks": true,
+        "preemptionPolicy": "PreemptLowerPriority"
+      },
+      "status": {
+        "phase": "Succeeded",
+        "conditions": [
+          {
+            "type": "PodReadyToStartContainers",
+            "status": "False",
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-11-13T20:33:42Z"
+          },
+          {
+            "type": "Initialized",
+            "status": "True",
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-11-13T20:33:38Z",
+            "reason": "PodCompleted"
+          },
+          {
+            "type": "Ready",
+            "status": "False",
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-11-13T20:33:40Z",
+            "reason": "PodCompleted"
+          },
+          {
+            "type": "ContainersReady",
+            "status": "False",
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-11-13T20:33:40Z",
+            "reason": "PodCompleted"
+          },
+          {
+            "type": "PodScheduled",
+            "status": "True",
+            "lastProbeTime": null,
+            "lastTransitionTime": "2026-11-13T20:33:24Z"
+          }
+        ],
+        "hostIP": "172.20.0.2",
+        "hostIPs": [
+          {
+            "ip": "172.20.0.2"
+          }
+        ],
+        "podIP": "10.244.0.8",
+        "podIPs": [
+          {
+            "ip": "10.244.0.8"
+          }
+        ],
+        "startTime": "2026-11-13T20:33:24Z",
+        "initContainerStatuses": [
+          {
+            "name": "oberth-executor-token",
+            "state": {
+              "terminated": {
+                "exitCode": 0,
+                "reason": "Completed",
+                "startedAt": "2026-11-13T20:33:27Z",
+                "finishedAt": "2026-11-13T20:33:30Z",
+                "containerID": "containerd://4814869e8aff59d3f1ae7a9b21bb297aa28ed354ed09e78327a725cad2ca3dcf"
+              }
+            },
+            "lastState": {},
+            "ready": true,
+            "restartCount": 0,
+            "image": "sha256:0ed463b26daee791b094dc3fff25edb3e79f153d37d274e5c2936923c38dac2b",
+            "imageID": "docker.io/library/busybox@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74",
+            "containerID": "containerd://4814869e8aff59d3f1ae7a9b21bb297aa28ed354ed09e78327a725cad2ca3dcf",
+            "started": false,
+            "allocatedResources": {
+              "cpu": "50m",
+              "ephemeral-storage": "256Mi",
+              "memory": "64Mi"
+            },
+            "resources": {
+              "limits": {
+                "cpu": "500m",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "50m",
+                "ephemeral-storage": "256Mi",
+                "memory": "64Mi"
+              }
+            },
+            "volumeMounts": [
+              {
+                "name": "exec-sa-token",
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount"
+              }
+            ],
+            "user": {
+              "linux": {
+                "uid": 0,
+                "gid": 0,
+                "supplementalGroups": [
+                  0,
+                  10
+                ]
+              }
+            }
+          },
+          {
+            "name": "init",
+            "state": {
+              "terminated": {
+                "exitCode": 0,
+                "reason": "Completed",
+                "startedAt": "2026-11-13T20:33:37Z",
+                "finishedAt": "2026-11-13T20:33:37Z",
+                "containerID": "containerd://7cd76c98e43e95ded6fdea5a0a62e00255c6139c4494658b017ccb5e77a72ced"
+              }
+            },
+            "lastState": {},
+            "ready": true,
+            "restartCount": 0,
+            "image": "sha256:0a5bc02352753037c276bd2ebf5abee8423d5e4ff1467af3be287acbb0a67aec",
+            "imageID": "quay.io/argoproj/argoexec@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87",
+            "containerID": "containerd://7cd76c98e43e95ded6fdea5a0a62e00255c6139c4494658b017ccb5e77a72ced",
+            "started": false,
+            "resources": {},
+            "volumeMounts": [
+              {
+                "name": "exec-sa-token",
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "readOnly": true,
+                "recursiveReadOnly": "Disabled"
+              },
+              {
+                "name": "var-run-argo",
+                "mountPath": "/var/run/argo"
+              }
+            ],
+            "user": {
+              "linux": {
+                "uid": 0,
+                "gid": 0,
+                "supplementalGroups": [
+                  0
+                ]
+              }
+            }
+          }
+        ],
+        "containerStatuses": [
+          {
+            "name": "main",
+            "state": {
+              "terminated": {
+                "exitCode": 0,
+                "reason": "Completed",
+                "startedAt": "2026-11-13T20:33:39Z",
+                "finishedAt": "2026-11-13T20:33:40Z",
+                "containerID": "containerd://d66f84bd706453c60463de0326f8cebaba75076df7934b7380531290453aeab9"
+              }
+            },
+            "lastState": {},
+            "ready": false,
+            "restartCount": 0,
+            "image": "sha256:0ed463b26daee791b094dc3fff25edb3e79f153d37d274e5c2936923c38dac2b",
+            "imageID": "docker.io/library/busybox@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74",
+            "containerID": "containerd://d66f84bd706453c60463de0326f8cebaba75076df7934b7380531290453aeab9",
+            "started": false,
+            "resources": {},
+            "volumeMounts": [
+              {
+                "name": "oberth-tmp",
+                "mountPath": "/tmp"
+              },
+              {
+                "name": "var-run-argo",
+                "mountPath": "/var/run/argo"
+              }
+            ],
+            "user": {
+              "linux": {
+                "uid": 0,
+                "gid": 0,
+                "supplementalGroups": [
+                  0,
+                  10
+                ]
+              }
+            }
+          },
+          {
+            "name": "wait",
+            "state": {
+              "terminated": {
+                "exitCode": 0,
+                "reason": "Completed",
+                "startedAt": "2026-11-13T20:33:38Z",
+                "finishedAt": "2026-11-13T20:33:40Z",
+                "containerID": "containerd://b637ed702e560957388041bb1d6d222688d948f40d045366a2cbd9de1272b0ee"
+              }
+            },
+            "lastState": {},
+            "ready": false,
+            "restartCount": 0,
+            "image": "sha256:0a5bc02352753037c276bd2ebf5abee8423d5e4ff1467af3be287acbb0a67aec",
+            "imageID": "quay.io/argoproj/argoexec@sha256:86a965d7eea176959351156e24f3a2fa8d8e342e477ef425009af95a12e3fe87",
+            "containerID": "containerd://b637ed702e560957388041bb1d6d222688d948f40d045366a2cbd9de1272b0ee",
+            "started": false,
+            "resources": {},
+            "volumeMounts": [
+              {
+                "name": "exec-sa-token",
+                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                "readOnly": true,
+                "recursiveReadOnly": "Disabled"
+              },
+              {
+                "name": "oberth-tmp",
+                "mountPath": "/mainctrfs/tmp"
+              },
+              {
+                "name": "tmp-dir-argo",
+                "mountPath": "/tmp"
+              },
+              {
+                "name": "var-run-argo",
+                "mountPath": "/var/run/argo"
+              }
+            ],
+            "user": {
+              "linux": {
+                "uid": 0,
+                "gid": 0,
+                "supplementalGroups": [
+                  0
+                ]
+              }
+            }
+          }
+        ],
+        "qosClass": "Burstable"
+      }
+    }
+  ]
+}

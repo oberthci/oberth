@@ -197,7 +197,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 		{"build.yaml", "refs/heads/main", pipeline.TriggerCI},
 		{"release.yaml", "refs/tags/v0.1.0", pipeline.TriggerRelease},
 	} {
-		wf, err := Build(oberthConfig(), Request{
+		wf, err := buildOberthPipeline(oberthConfig(), Request{
 			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 			Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 			Ref: entry.ref, SHA: testSHA, Trigger: entry.trigger,
@@ -216,7 +216,7 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 	}
 	kube := fake.NewClientset()
 	seeder := &SourceSeeder{client: kube, config: testConfig()}
-	if err := seeder.createSeedPod(t.Context(), "seed", "claim"); err != nil {
+	if _, err := seeder.createSeedPodBound(t.Context(), "seed", "claim"); err != nil {
 		t.Fatal(err)
 	}
 	pod, err := kube.CoreV1().Pods(testNamespace).Get(t.Context(), "seed", metav1.GetOptions{})

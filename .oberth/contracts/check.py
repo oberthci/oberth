@@ -269,6 +269,8 @@ def scan(root, names, registry, deprecations):
                     add("rule7-hygiene")
             if name.endswith((".go", ".py")):
                 for kind, pattern in (("env", ENV), ("annotation", ANNOTATION), ("flag", FLAG)):
+                    if kind == "annotation" and name.endswith("_test.go"):
+                        continue  # Test literals include immutable historical fixtures, not public surfaces.
                     for match in pattern.finditer(line):
                         key = kind + ":" + match[1]
                         if kind == "annotation" and "label:" + match[1] in entries:

@@ -359,8 +359,7 @@ SELECT COUNT(*) FROM promotions WHERE repo_id = ? AND status = 'pending'`,
 	}
 
 	// Attempt deletion. FK constraints from runs, promotions, receive_events,
-	// publications, issues, ci_issue_work, ci_issue_projections, trusted_plans,
-	// and trusted_applies will fail the deletion if any immutable history exists.
+	// publications, issues, ci_issue_work and ci_issue_projections will fail the deletion if any immutable history exists.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repoID); err != nil {
 		if strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
 			return RemovedRepository{}, fmt.Errorf("%w: repository %s has immutable CI history; removal is not supported once runs exist", ErrInvalidState, name)

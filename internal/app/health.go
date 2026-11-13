@@ -75,10 +75,7 @@ type Health struct {
 	// using the unauthenticated seal-status endpoint. Called only when the
 	// login probe fails, to distinguish a sealed store from other failures.
 	SecretStoreSealed func(context.Context) (bool, error)
-	// AdmissionBlocker optionally reports the run blocking the admission
-	// queue head (#1021).
-	// Admission optionally reports the whole admission gate (#1099).
-	DatabaseRetries func() uint64
+	DatabaseRetries   func() uint64
 	// SchemaVersion is the database schema version the running binary last
 	// applied, reported on the status view and the version command so the
 	// upgrade path can detect pending forward-only migrations.
@@ -164,12 +161,6 @@ type HealthStatus struct {
 	// AdminTokens is when the installation's admin tokens expire, with a
 	// warning inside two weeks of the earliest. Unscoped status only.
 	AdminTokens *model.AdminTokenExpiry `json:"admin_tokens,omitempty"`
-	// AdmissionBlocker names the run at the head of the admission queue that
-	// every later run waits behind, e.g. an XL run waiting for a full drain
-	// (#1021). Unscoped status only.
-	// Admission is the admission gate as data (#1099): every reservation,
-	// including retained ones, and every concurrency group in use. A scoped
-	// view keeps only its repositories' entries and omits the shared budget.
 }
 
 // Ready gates the readiness probe. Like a vault before initialization, a
@@ -538,7 +529,7 @@ func (o *SecretStoreObserver) Observe(result string) {
 	}
 	switch current {
 	case "sealed":
-		o.Log("WARNING: secret store SEALED at %s \u2014 credentialed releases and access grants will fail until unsealed (branch CI unaffected)", o.Address)
+		o.Log("WARNING: secret store SEALED at %s \u2014 granted secret-consuming steps and access grants will fail until unsealed; ordinary steps are unaffected", o.Address)
 	case "failing":
 		o.Log("WARNING: secret store probe failing at %s: %s", o.Address, result)
 	case "ready":

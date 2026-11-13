@@ -17,151 +17,13 @@ type rowScanner interface {
 }
 
 const runColumns = `
-queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
+queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, queued_at, started_at, finished_at, created_at, updated_at,
 schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
 var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
-
-// ErrRequeueIneligible marks work whose execution/publication evidence or
-// newer work prevents an automatic restart reset.
-var ErrRequeueIneligible = errors.New("store: stranded run is not eligible for restart requeue")
-
-// RestartRequeueReason is server-owned and identifies an in-place restart.
-const RestartRequeueReason = "re-queued after restart"
-
-// RequeueStrandedRun retains the existing scheduler interface.
-func (s *Store) RequeueStrandedRun(ctx context.Context, runID string) (model.Run, error) {
-	return s.ResetStrandedRunToQueued(ctx, runID)
-}
-
-// ResetStrandedRunToQueued preserves the run ID and both ordering sequences.
-// It records any prior Workflow cleanup obligation atomically with the reset.
-func (s *Store) ResetStrandedRunToQueued(ctx context.Context, runID string) (model.Run, error) {
-	if strings.TrimSpace(runID) == "" {
-		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Run{}, fmt.Errorf("begin stranded run requeue: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, runID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return model.Run{}, fmt.Errorf("%w: run", ErrNotFound)
-	}
-	if err != nil {
-		return model.Run{}, fmt.Errorf("load stranded run: %w", err)
-	}
-	if run.Status != model.RunRunning || run.Cancelled() {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	var pendingPublications int
-	if err := tx.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, run.ID).Scan(&pendingPublications); err != nil {
-		return model.Run{}, fmt.Errorf("check stranded run publications: %w", err)
-	}
-	if pendingPublications > 0 {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	requeued, err := s.requeueStrandedRunTx(ctx, tx, run, now)
-	if err != nil {
-		return model.Run{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return requeued, fmt.Errorf("commit stranded run requeue: %w", err)
-	}
-	return requeued, nil
-}
-
-// requeueStrandedRunTx is shared by scheduler reconciliation and owner startup.
-func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
-	if run.Status != model.RunRunning || run.Trigger == "promotion" || (run.RefKind != model.RefBranch && run.RefKind != model.RefTag) {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	if err := requireRepositoryActive(ctx, tx, run.RepoID); err != nil {
-		if errors.Is(err, ErrRepositoryArchived) {
-			return model.Run{}, ErrRequeueIneligible
-		}
-		return model.Run{}, err
-	}
-	var safe bool
-	if err := tx.QueryRowContext(ctx, `SELECT
- NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)`, run.ID, run.ID).Scan(&safe); err != nil {
-		return model.Run{}, err
-	}
-	if !safe {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	// Evidence/publication exclusions above apply to every run.
-	var activeSiblings int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs
- WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND id!=?
- AND status IN ('queued','running')`, run.RepoID, run.RefKind, run.Ref, run.ScheduleEntry, run.ID).Scan(&activeSiblings); err != nil {
-		return model.Run{}, fmt.Errorf("check active restart siblings: %w", err)
-	}
-	if activeSiblings > 0 {
-		return model.Run{}, ErrRequeueIneligible
-	}
-	if run.RefKind == model.RefTag {
-		if err := requireUnpublishedTagTx(ctx, tx, run); err != nil {
-			if errors.Is(err, ErrInvalidState) {
-				return model.Run{}, ErrRequeueIneligible
-			}
-			return model.Run{}, err
-		}
-	}
-	if run.WorkflowName != "" {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO run_cancellations(run_id,job_name,reason,created_at,completed_at)
-  VALUES(?,?,'owner_restart',?,NULL)
-  ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name,reason='owner_restart',created_at=excluded.created_at,completed_at=NULL`, run.ID, run.WorkflowName, now); err != nil {
-			return model.Run{}, err
-		}
-	}
-	return s.resetRunAfterRestartTx(ctx, tx, run, now)
-}
-
-// A claim is persisted as running before Workflow submission. Owner startup
-// proves the claiming worker is gone. Restore that claim for every trigger,
-// including promotion, without creating a new run or interrupting its promotion.
-// The deterministic Workflow name is recorded before admission, so its presence
-// alone does not imply submission or authorize a Kubernetes deletion.
-func (s *Store) recoverWaitingRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (bool, error) {
-	if run.Status != model.RunRunning || run.Phase != "waiting" || run.StartedAt != nil {
-		return false, nil
-	}
-	var safe bool
-	if err := tx.QueryRowContext(ctx, `SELECT
- NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)`, run.ID, run.ID).Scan(&safe); err != nil {
-		return false, err
-	}
-	if !safe {
-		return false, nil
-	}
-	_, err := s.resetRunAfterRestartTx(ctx, tx, run, now)
-	return err == nil, err
-}
-
-func (s *Store) resetRunAfterRestartTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
-	// Preserve prior timing evidence while closing the abandoned admission episode.
-	if _, err := tx.ExecContext(ctx, `UPDATE run_admission_timings SET closed_at=? WHERE run_id=? AND closed_at IS NULL`, now, run.ID); err != nil {
-		return model.Run{}, err
-	}
-	reason := RestartRequeueReason
-	reset, err := scanRun(tx.QueryRowContext(ctx, `UPDATE runs SET status='queued',phase='queued',job_name='',credentialed=0,started_at=NULL,finished_at=NULL,error='',failed_burn='',failed_step='',reason=?,updated_at=? WHERE id=? AND status='running' RETURNING `+runColumns, reason, now, run.ID))
-	if err != nil {
-		return model.Run{}, err
-	}
-	if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: "oberth", Action: "run.restart", ResourceType: "run", ResourceID: run.ID, Details: `{"reason":"owner restart","same_id":true}`}, now); err != nil {
-		return model.Run{}, err
-	}
-	return reset, nil
-}
 
 func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 	if spec.RepoID <= 0 || !spec.RefKind.Valid() || strings.TrimSpace(spec.Ref) == "" ||
@@ -181,28 +43,25 @@ func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
 	return spec, nil
 }
 
-func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now, inheritedAdmissionSequence int64) (model.EnqueueRunResult, error) {
+func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, id string, now int64) (model.EnqueueRunResult, error) {
 	if err := requireRepositoryActive(ctx, tx, spec.RepoID); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
 
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO runs(
-    id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger, phase,
+    id, repo_id, ref_kind, ref, sha, actor, release, trigger, phase,
     tested_sha, base_sha, schedule_entry, status, reason, assist_requested, queued_at, created_at, updated_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
 RETURNING `+runColumns,
 		id, spec.RepoID, spec.RefKind, spec.Ref, spec.SHA, spec.Actor, spec.Release,
-		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, spec.Reason, spec.Assist, now, now, now)
+		spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, spec.Reason, spec.Assist, now, now, now)
 	value, err := scanRun(row)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
 	}
 	admissionSequence := value.QueueSequence
-	if inheritedAdmissionSequence > 0 {
-		admissionSequence = inheritedAdmissionSequence
-	}
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission_sequence = ? WHERE id = ?`, admissionSequence, id); err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("set run admission sequence: %w", err)
 	}
@@ -281,8 +140,8 @@ func (s *Store) MarkRunSubmitted(ctx context.Context, id string) (model.Run, err
 	}
 	now := unixNano(s.now())
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
-UPDATE runs SET phase = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
-WHERE id = ? AND status = 'running' AND phase = 'waiting' AND job_name != ''
+UPDATE runs SET error=CASE WHEN phase='infrastructure-pending' THEN '' ELSE error END, phase = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
+WHERE id = ? AND status = 'running' AND phase IN ('waiting','infrastructure-pending') AND job_name != ''
 RETURNING `+runColumns, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		current, lookupErr := s.Run(ctx, id)
@@ -880,22 +739,14 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 	restriction += statusSQL
 	restrictionArgs = append(restrictionArgs, statusArgs...)
 	scopeArgs := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
-	collect := func(what string, rows *sql.Rows, err error, withPosition bool) ([]model.Run, error) {
+	collect := func(what string, rows *sql.Rows, err error) ([]model.Run, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list %s runs: %w", what, err)
 		}
 		defer func() { _ = rows.Close() }()
 		runs := make([]model.Run, 0)
 		for rows.Next() {
-			var value model.Run
-			var scanErr error
-			if withPosition {
-				var position int64
-				value, scanErr = scanReadRun(rows, &position)
-				value.QueuePosition = position
-			} else {
-				value, scanErr = scanReadRun(rows)
-			}
+			value, scanErr := scanReadRun(rows)
 			if scanErr != nil {
 				return nil, fmt.Errorf("scan %s run: %w", what, scanErr)
 			}
@@ -914,14 +765,10 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 		priorityOrder := submissionOrderSQL()
 		// Keep the queue in the same effective-priority and FIFO order as ClaimNextRun.
 		rows, err := tx.QueryContext(ctx, `
-WITH queue AS (
-  SELECT *, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
-  WHERE `+queuedRunSQL+`
-)
-SELECT `+runReadColumns+`, queue_position FROM queue AS runs
-WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
+SELECT `+runReadColumns+` FROM runs
+WHERE (`+queuedRunSQL+`) AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
-		queued, err := collect("queued", rows, err, true)
+		queued, err := collect("queued", rows, err)
 		if err != nil {
 			return nil, err
 		}
@@ -931,7 +778,7 @@ SELECT `+runReadColumns+` FROM runs
 WHERE status = 'running' AND started_at IS NOT NULL
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY started_at DESC, id DESC LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
-		running, err := collect("running", rows, err, false)
+		running, err := collect("running", rows, err)
 		if err != nil {
 			return nil, err
 		}
@@ -955,7 +802,7 @@ WHERE status NOT IN ('queued', 'running')
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY `+runEndTimeSQL+` DESC, id DESC
 LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed columns and parameterized restriction.
-	terminal, err := collect("terminal", rows, err, false)
+	terminal, err := collect("terminal", rows, err)
 	if err != nil {
 		return nil, err
 	}
@@ -1159,12 +1006,12 @@ FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var value model.Run
 	var issueTrailers, sourceBindings, assistRecord string
-	var release, credentialed, assistRequested, assisted int64
+	var release, assistRequested, assisted int64
 	var queued, created, updated int64
 	var started, finished sql.NullInt64
 	dest := []any{
 		&value.QueueSequence, &value.AdmissionSequence, &value.ID, &value.RepoID, &value.RefKind, &value.Ref,
-		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
+		&value.SHA, &value.Actor, &release, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &queued, &started, &finished,
 		&created, &updated, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord,
@@ -1203,7 +1050,6 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	value.Assisted = assisted != 0
 
 	value.Release = release != 0
-	value.Credentialed = credentialed != 0
 	value.QueuedAt = fromUnixNano(queued)
 	value.StartedAt, value.FinishedAt = nullableTime(started), nullableTime(finished)
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
@@ -1243,29 +1089,6 @@ func nullableUnixNano(value *time.Time) any {
 		return nil
 	}
 	return unixNano(*value)
-}
-
-// SetRunCredentialed marks a running run as credentialed. It is called by the
-// scheduler when the pipeline document declares secret-store paths, after the
-// pipeline has been read from the immutable checkout. The update is a no-op on
-// a run that is already credentialed or no longer active.
-func (s *Store) SetRunCredentialed(ctx context.Context, id string) error {
-	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("%w: run ID is required", ErrInvalid)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin credential transition: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `
-UPDATE runs SET credentialed = 1, updated_at = ?
-WHERE id = ? AND status IN ('queued', 'running') AND credentialed = 0`,
-		unixNano(s.now()), id)
-	if err != nil {
-		return fmt.Errorf("set run credentialed: %w", err)
-	}
-	return tx.Commit()
 }
 
 func isHexPrefix(value string) bool {

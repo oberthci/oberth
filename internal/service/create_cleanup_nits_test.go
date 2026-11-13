@@ -127,67 +127,6 @@ func TestWorkflowCreateContractRemovalFailureIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
-	f := newRecoveryFixture(t)
-	run := recoveryWaitingRun(t, f, "feature/restore-deferred", "wf-restore", "")
-	calls := 0
-	finish := false
-	jobs := &pendingCreateJobs{fakeJobs: &fakeJobs{}, settle: func(_ context.Context, _, _ string, boundary time.Time) (bool, error) { calls++; return finish, nil }}
-	scheduler := f.scheduler(t, jobs)
-	now := time.Now()
-	scheduler.createNow = func() time.Time { return now }
-	if err := scheduler.recordWorkflowCreateBinding(run, run.WorkflowName); err != nil {
-		t.Fatal(err)
-	}
-	// An existing ungranted reservation makes both normal and quarantine
-	// adoption refuse. This used to return without registering the run.
-	conflict := scheduler.submissions.trackRun(run)
-	scheduler.registerCreateCleanup(run, nil, false)
-	if scheduler.pendingCreateCount() != 1 {
-		t.Fatal("failed restore dropped its run")
-	}
-	scheduler.settleOneCreate(t.Context())
-	current, err := f.store.Run(t.Context(), run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !isPendingCreate(current) || calls != 0 || scheduler.pendingCreateCount() != 1 {
-		t.Fatalf("unrestored run lost ownership or issued cleanup: %+v calls=%d", current, calls)
-	}
-	scheduler.createMu.Lock()
-	pending := scheduler.createPending[run.ID]
-	attempts := pending.attempts
-	next := pending.next
-	grant := pending.grant
-	scheduler.createMu.Unlock()
-	if attempts != 1 || !next.Equal(now.Add(5*time.Second)) || grant != nil {
-		t.Fatal("restore failure did not enter bounded backoff")
-	}
-	scheduler.registerCreateCleanup(current, nil, true)
-	if scheduler.createPending[run.ID] != pending {
-		t.Fatal("re-registration reset deferred state")
-	}
-	conflict.cancel()
-	now = now.Add(5 * time.Second)
-	scheduler.settleOneCreate(t.Context())
-	if calls != 1 {
-		t.Fatal("restored run not charged before observation")
-	}
-	finish = true
-	now = now.Add(2 * time.Minute)
-	scheduler.settleOneCreate(t.Context())
-	current, err = f.store.Run(t.Context(), run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Status != model.RunFailed || scheduler.pendingCreateCount() != 0 || scheduler.submissionStateForTest().Runs != 0 {
-		t.Fatalf("restored run did not settle/release: %+v", current)
-	}
-	if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); !os.IsNotExist(err) {
-		t.Fatal("settled restored run leaked contract", err)
-	}
-}
-
 func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	f := newRecoveryFixture(t)
 	run := recoveryWaitingRun(t, f, "feature/register-once", "wf-once", "")
@@ -198,7 +137,7 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	var workers sync.WaitGroup
 	for range 20 {
 		workers.Add(1)
-		go func() { defer workers.Done(); scheduler.registerCreateCleanup(run, nil, false) }()
+		go func() { defer workers.Done(); scheduler.registerCreateCleanup(run, false) }()
 	}
 	workers.Wait()
 	state := scheduler.submissionStateForTest()

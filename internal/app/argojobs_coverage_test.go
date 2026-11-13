@@ -108,14 +108,15 @@ func TestCreateWorkflow_ReconcilerUnhealthyBlocks(t *testing.T) {
 	fixture.jobs.SetReconcilerHealth(checker)
 
 	request := fixture.request("wf-unhealthy", "run-unhealthy")
-	request.Run.Credentialed = true
+	grantedAdmissionSource(t, fixture.sourceDir)
+	fixture.jobs.secretAccess = &admissionGrants{active: map[string]map[string]bool{"main": {admissionSecretPath: true}}}
 	err := fixture.jobs.CreateWorkflow(context.Background(), request)
 	if err == nil || !strings.Contains(err.Error(), "initial reconciliation") {
 		t.Fatalf("expected reconciler health gate error, got: %v", err)
 	}
 }
 
-func TestCreateCIUncredentialedBypassesUnhealthyReconciler(t *testing.T) {
+func TestCreateCIWithoutSecretReadsBypassesUnhealthyReconciler(t *testing.T) {
 	fixture := newRaceFixture(t)
 	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 	if err := fixture.jobs.CreateWorkflow(t.Context(), fixture.request("plain", "plain-run")); err != nil {
@@ -126,9 +127,9 @@ func TestCreateCIUncredentialedBypassesUnhealthyReconciler(t *testing.T) {
 	}
 }
 
-func TestCreateReleaseUnhealthyReconcilerBlocksWithoutCredentialedFlag(t *testing.T) {
+func TestCreateReleaseWithoutSecretReadsIgnoresReconciler(t *testing.T) {
 	fixture := newRaceFixture(t)
-	// Classification reads the release pipeline before checking health.
+	// A release without secret-consuming steps does not consult secret health.
 	source, err := os.ReadFile(filepath.Join(fixture.sourceDir, ".oberth", "build.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -137,21 +138,22 @@ func TestCreateReleaseUnhealthyReconcilerBlocksWithoutCredentialedFlag(t *testin
 	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 	request := fixture.request("release", "release-run")
 	request.Run.Release = true
-	if err := fixture.jobs.CreateRelease(t.Context(), request); err == nil || !strings.Contains(err.Error(), "initial reconciliation") {
+	if err := fixture.jobs.CreateRelease(t.Context(), request); err != nil {
 		t.Fatalf("release error = %v", err)
 	}
-	if len(fixture.controller.created) != 0 {
-		t.Fatal("release submitted")
+	if len(fixture.controller.created) != 1 {
+		t.Fatal("plain release was not submitted")
 	}
 }
 
-func TestCreateCredentialedPromotionUnhealthyReconcilerBlocks(t *testing.T) {
+func TestCreatePromotionWithGrantedStepRequiresReconciliation(t *testing.T) {
 	fixture := newRaceFixture(t)
 	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 	request := fixture.request("promotion", "promotion-run")
 	request.Run.Trigger = "promotion"
-	request.Run.Credentialed = true
-	if err := fixture.jobs.CreateWorkflow(t.Context(), request); err == nil || !strings.Contains(err.Error(), "credentialed admission is blocked") {
+	grantedAdmissionSource(t, fixture.sourceDir)
+	fixture.jobs.secretAccess = &admissionGrants{active: map[string]map[string]bool{"main": {admissionSecretPath: true}}}
+	if err := fixture.jobs.CreateWorkflow(t.Context(), request); err == nil || !strings.Contains(err.Error(), "secret access is blocked") {
 		t.Fatalf("promotion error = %v", err)
 	}
 	if len(fixture.controller.created) != 0 {

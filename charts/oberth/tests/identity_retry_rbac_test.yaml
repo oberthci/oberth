@@ -3,23 +3,23 @@ release:
   name: oberth
   namespace: server-system
 templates:
-  - templates/rbac-argo-identity-retry.yaml
+  - templates/rbac-argo.yaml
 set:
   image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
   argo.namespace: pipeline-system
 tests:
-  - it: grants pod patch in a separate role
+  - it: grants pod patch in the base role
     documentIndex: 0
     asserts:
       - equal:
           path: metadata.namespace
           value: pipeline-system
-      - equal:
+      - contains:
           path: rules
-          value:
-            - apiGroups: [""]
-              resources: [pods]
-              verbs: [patch]
+          content:
+            apiGroups: [""]
+            resources: [pods]
+            verbs: [create, get, list, watch, delete, patch]
   - it: binds only the server identity in the pipeline namespace
     documentIndex: 1
     asserts:
@@ -37,4 +37,4 @@ tests:
           value:
             apiGroup: rbac.authorization.k8s.io
             kind: Role
-            name: oberth-argo-identity-retry
+            name: oberth-argo

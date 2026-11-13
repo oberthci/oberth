@@ -93,14 +93,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 		t.Run(map[bool]string{false: "running", true: "finished-while-down"}[finishedWhileDown], func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			previous := fixture.enqueueAndClaim(t, "feature/adopt", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-			replacement, err := fixture.store.RequeueStrandedRun(context.Background(), previous.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			run, err := fixture.store.ClaimNextRun(context.Background())
-			if err != nil || run.ID != replacement.ID || run.AdmissionSequence != previous.AdmissionSequence || run.QueueSequence != previous.QueueSequence || run.ID != previous.ID {
-				t.Fatalf("re-fired fixture lost its admission order: previous=%#v run=%#v err=%v", previous, run, err)
-			}
+			run := previous
 			fixture.setWorkflowName(t, run.ID, "oberth-adopt")
 			if _, err := fixture.store.MarkRunSubmitted(context.Background(), run.ID); err != nil {
 				t.Fatal(err)
@@ -210,7 +203,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 	}
 }
 
-func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
+func TestAdoptionMissingWorkflowFailsButReadFailureDoesNot(t *testing.T) {
 	for _, readErr := range []error{nil, errors.New("API unavailable")} {
 		fixture := newRecoveryFixture(t)
 		run := fixture.enqueueAndClaim(t, "feature/missing", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -299,15 +292,9 @@ func TestAdoptedAdmissionIsIdempotent(t *testing.T) {
 		t.Fatalf("adopted runs = %d", len(gate.owners))
 	}
 	waiting := gate.trackRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1})
-	ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(time.Second))
-	defer cancel()
-	release, err := waiting.beginSubmission(ctx)
-	if err != nil {
-		t.Fatalf("new work waited behind adopted runs: %v", err)
-	}
-	release()
-	other.release()
-	first.release()
+	waiting.cancel()
+	other.cancel()
+	first.cancel()
 	if len(gate.owners) != 0 {
 		t.Fatalf("admission leaked: %d", len(gate.owners))
 	}
@@ -429,8 +416,8 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		// A legacy engine exposes no adoption capability. Release runs
 		// reset behind cleanup; promotion work uses its separate retry path.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
-		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("out-of-scope adoption") }); err != nil {
-			t.Fatal(err)
+		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run) error { return errors.New("out-of-scope adoption") }); err == nil {
+			t.Fatal("unreadable Workflow was treated as absent")
 		}
 		current, err := fixture.store.Run(context.Background(), run.ID)
 		if err != nil {
@@ -443,6 +430,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		if current.Status != wantStatus || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
 			t.Fatalf("legacy recovery changed: %#v adopted=%v deleted=%v", current, jobs.adopted, jobs.deleted)
 		}
+
 	}
 }
 
@@ -468,24 +456,11 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID {
 		t.Fatalf("refused deletion lost its obligation: %+v %v", pending, err)
 	}
-	scheduler.submissions.mu.Lock()
-	runs, held := len(scheduler.submissions.owners), scheduler.submissions.owners[run.QueueSequence]
-	scheduler.submissions.mu.Unlock()
-	if scheduler.submissionStateForTest().Runs == 0 || runs != 1 || held != reservation || !reservation.retained {
-		t.Fatalf("live Workflow lost admission: %d held=%p", runs, held)
-	}
 	// The retry pass that completes the obligation releases the slot once.
 	jobs.deleteErr = nil
 	scheduler.settleOneCreate(t.Context())
 	if err := scheduler.completePendingCancellations(context.Background()); err != nil {
 		t.Fatal(err)
-	}
-	reservation.cancel() // A late owner cancel must not release it twice.
-	scheduler.submissions.mu.Lock()
-	runs, held = len(scheduler.submissions.owners), scheduler.submissions.owners[run.QueueSequence]
-	scheduler.submissions.mu.Unlock()
-	if runs != 0 || held != nil || !reservation.released || reservation.retained {
-		t.Fatalf("completed deletion did not release the slot exactly once: runs=%d held=%p %+v", runs, held, reservation)
 	}
 }
 

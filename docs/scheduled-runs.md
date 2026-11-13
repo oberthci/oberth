@@ -138,7 +138,7 @@ replace a named schedule with an ordinary branch run.
 
 If that entry already has a queued or running run on the target branch, the
 occurrence is recorded as `coalesced`, preserving that run's original commit and
-queue position. Coalescing advances the cursor to the tick time: that occurrence
+acceptance order. Coalescing advances the cursor to the tick time: that occurrence
 is consumed, and the next one is the first cron time after it. Completion does
 not trigger an extra catch-up run for consumed occurrences. This prevents a
 nightly whose capacity wait or runtime exceeds its interval from killing itself

@@ -66,7 +66,7 @@ func TestStoppedSettlementResumesNormalObserverForExitToken(t *testing.T) {
 	if err := f.store.MarkRunCreatePending(t.Context(), claimed.ID, claimed.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
-	f.scheduler.registerCreateCleanup(claimed, nil, true)
+	f.scheduler.registerCreateCleanup(claimed, true)
 	f.scheduler.settleOneCreate(t.Context())
 	select {
 	case <-jobs.delivered:
@@ -113,7 +113,7 @@ func TestStopRacedSucceededPromotionUsesNormalPublication(t *testing.T) {
 	if err := f.store.MarkRunCreatePending(t.Context(), run.ID, claimed.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
-	f.scheduler.registerCreateCleanup(claimed, nil, true)
+	f.scheduler.registerCreateCleanup(claimed, true)
 	f.scheduler.settleOneCreate(t.Context())
 	final, err := f.store.Run(t.Context(), run.ID)
 	if err != nil || final.Status != model.RunPassed || f.scheduler.pendingCreateCount() != 0 {
