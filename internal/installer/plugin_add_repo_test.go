@@ -239,8 +239,11 @@ func TestAddRepoWorkflowsAreNativeAndNeverCommittedOrOverwritten(t *testing.T) {
 			if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: []string{test.prefix}}); err != nil {
 				t.Fatal(err)
 			}
+			if err := argoworkflow.Admit(workflow, argoworkflow.Policy{}); err != nil {
+				t.Fatal("empty administrator allowlist refused a native workflow", err)
+			}
 			if test.language == "node" || test.language == "python" {
-				if err := argoworkflow.Admit(workflow, argoworkflow.Policy{}); err == nil {
+				if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: []string{"golang:"}}); err == nil {
 					t.Fatal("test must reflect the administrator image-policy gate")
 				}
 			}
