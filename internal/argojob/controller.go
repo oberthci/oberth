@@ -528,7 +528,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				preserveObservedExitCodes(&completion, workflow)
 				preserveRecordedExitCodes(&completion, events)
 				controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
-				if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
+				if publishErr := controller.publishLogs(ctx, settled, completion.ReplayAttempts, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 					budgetBreachErr = publishErr
 				}
 				if live != nil {
@@ -555,7 +555,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 				controller.recordWatchedTimings(ctx, workflow, reporter, timed, &boundTiming)
 			}
 			if eventDriven {
-				if publishErr := controller.publishLogs(ctx, workflow, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
+				if publishErr := controller.publishLogs(ctx, workflow, controller.observedStepAttempts(ctx, workflow), reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 					budgetBreachErr = publishErr
 				}
 			}
@@ -655,7 +655,7 @@ func (controller *Controller) verifyOwnership(workflow *wfv1.Workflow, runID str
 	return nil
 }
 
-func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
+func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, observed []StepResult, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
 	if workflow == nil {
 		return nil
 	}
@@ -663,7 +663,6 @@ func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Wo
 	// replaced them, and their failure and log are the evidence of why the
 	// step was retried. They are reported once and never decide a verdict.
 	// An attempt still non-terminal when superseded has nothing to report.
-	observed := controller.observedStepAttempts(ctx, workflow)
 	steps := make([]StepResult, 0, len(observed))
 	for _, step := range observed {
 		if step.Superseded && terminal(step.Status) {

@@ -86,6 +86,13 @@ func (controller *Controller) observedStepAttempts(ctx context.Context, workflow
 	if len(steps) == 0 {
 		return steps
 	}
+	// Running observations reuse the shared watch snapshot. Explicit historical
+	// readers without a hub retain their bounded live discovery below.
+	if controller.hub != nil {
+		pods, _ := controller.watchedPodSnapshot(workflow)
+		bindStepPodNames(workflow, steps, pods)
+		return steps
+	}
 	budget, attempts := time.Second, 1
 	if workflow.Status.Phase.Completed() {
 		budget, attempts = finalLogDrainBudget, 3

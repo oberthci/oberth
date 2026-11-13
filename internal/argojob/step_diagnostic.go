@@ -48,6 +48,11 @@ func (controller *Controller) projectRestartStepDiagnostics(ctx, readCtx context
 	}
 	bindStepPodNames(workflow, completion.Steps, pods)
 	bindStepPodNames(workflow, completion.ReplayAttempts, pods)
+	nativePods := make([]*corev1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		nativePods = append(nativePods, pod)
+	}
+	completion.NodeSteps = NodeStepResults(workflow, nativePods)
 	for i := range completion.Steps {
 		step := &completion.Steps[i]
 		node, ok := workflow.Status.Nodes[step.NodeID]

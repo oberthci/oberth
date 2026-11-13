@@ -129,7 +129,7 @@ func TestStepLogsAndDiagnosticsUseObservedOpaquePodName(t *testing.T) {
 		}
 		return io.NopCloser(strings.NewReader("native step output\n")), nil
 	}}
-	if err := controller.publishLogs(t.Context(), workflow, newProgressReporter(&output), &output, nil); err != nil {
+	if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), newProgressReporter(&output), &output, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "native step output") {
@@ -184,7 +184,7 @@ func TestTerminalStepLogDiscoveryRetriesIncompleteLists(t *testing.T) {
 				}}
 				reporter := newProgressReporter(&output)
 				for range 2 {
-					if err := controller.publishLogs(t.Context(), workflow, reporter, &output, nil); err != nil {
+					if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, nil); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -214,14 +214,14 @@ func TestStepLogReadStaysEligibleAfterTerminalEvent(t *testing.T) {
 		return io.NopCloser(strings.NewReader("delayed output\n")), nil
 	}}
 	reporter := newProgressReporter(&output)
-	if err := controller.publishLogs(t.Context(), workflow, reporter, &output, nil); err != nil {
+	if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, nil); err != nil {
 		t.Fatal(err)
 	}
 	if reads != 0 || reporter.replayed[node.ID] {
 		t.Fatal("unread log was marked replayed")
 	}
 	workflow.Status.Phase = wfv1.WorkflowSucceeded
-	if err := controller.publishLogs(t.Context(), workflow, reporter, &output, nil); err != nil {
+	if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, nil); err != nil {
 		t.Fatal(err)
 	}
 	if reads != 1 || !reporter.replayed[node.ID] || !strings.Contains(output.String(), "delayed output") {
@@ -266,7 +266,7 @@ func TestUnboundTerminalStepLogsAreExplicitlyUnavailable(t *testing.T) {
 					followers.steps = controller.observedStepAttempts
 					defer followers.close()
 				}
-				if err := controller.publishLogs(t.Context(), workflow, reporter, &output, followers); err != nil {
+				if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), reporter, &output, followers); err != nil {
 					t.Fatal(err)
 				}
 				if followers != nil {
@@ -308,7 +308,7 @@ func TestLiveTerminalDrainRecoversDiscoveryWithoutDuplicatePublishList(t *testin
 		}, &output, nil)
 		followers.steps = controller.observedStepAttempts
 		defer followers.close()
-		if err := controller.publishLogs(t.Context(), workflow, newProgressReporter(&output), &output, followers); err != nil {
+		if err := controller.publishLogs(t.Context(), workflow, controller.observedStepAttempts(t.Context(), workflow), newProgressReporter(&output), &output, followers); err != nil {
 			t.Fatal(err)
 		}
 		if lists != 1 {
