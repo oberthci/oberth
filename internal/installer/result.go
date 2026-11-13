@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,7 +54,11 @@ type InstallReview struct {
 
 func Review(cfg Config) InstallReview {
 	name, _, _ := cfg.primaryUpstream()
-	return InstallReview{UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: cfg.TLSExtraDNSNames, IPs: cfg.TLSExtraIPs}
+	dns, ips := slices.Clone(cfg.TLSExtraDNSNames), slices.Clone(cfg.TLSExtraIPs)
+	if cfg.ClientHost != "" {
+		dns, ips = CertificateNamesForClientHost(cfg.ClientHost, dns, ips)
+	}
+	return InstallReview{UpstreamName: name, ClientRequirements: clientRequirements(cfg), NetworkPolicy: effectiveNetworkPolicy(cfg), ReissueServerCA: cfg.ReissueServerCA, Context: cfg.ContextName, Namespace: cfg.Namespace, ArgoNamespace: cfg.ArgoNamespace, ProductionStore: cfg.InstallSecretStore, DevStore: cfg.InstallSecretStoreDev, ClientHost: cfg.ClientHost, AdminIdentity: cfg.UplinkIdentity, DNSNames: dns, IPs: ips}
 }
 
 func PrintReviewJSON(w io.Writer, cfg Config) error {

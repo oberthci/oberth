@@ -13,9 +13,12 @@ requires the same uplink, admin status and scopes. An empty `Authorization:
 Bearer ` is ignored only when a valid certificate authenticates. An unknown pin
 never falls back to a bearer.
 
-Clients connect using DNS names (`localhost`, the host name, or `<host>.local`),
-never IP addresses. The server CA keeps its DNS-only name constraints; IP name
-constraints are deferred until Bun releases a compatible fix.
+Clients may connect using DNS names or IPv4/IPv6 literals. A DNS choice must
+match the server certificate's DNS identity; an IP requires a matching IP SAN, even
+when the CA pin matches. IPv6 URL hosts use brackets. The installer adds the
+chosen client host to the leaf SANs. CA generation and existing constraints
+are unchanged; DNS constraints do not constrain IP identities. See
+[single-host TLS names](single-host-tls.md).
 
 ## Enrollment
 
@@ -104,3 +107,9 @@ retained for operator-controlled cleanup. For unmanaged files, pass
 Expired certificates need administrator enrollment. A restored database still
 contains pins, but its original client CA is an install identity; re-enroll
 clients against the new install's CA.
+
+Plugin connect requires an OpenSSL with `verify_ip` and `verify_hostname`.
+It uses a capable `openssl`/`openssl3` on PATH or the standard Homebrew
+`openssl@3` location on macOS. System LibreSSL without these checks is refused;
+install OpenSSL outside Oberth (on macOS, `brew install openssl@3`) and retry.
+The helper never installs tools or skips identity verification.

@@ -285,9 +285,8 @@ func serverCACertificate(ctx context.Context, cfg Config, deps Deps) ([]byte, er
 }
 
 // clientReachableHost names the address a host-side client should use. It has
-// to be one the certificate carries: a kind install issues localhost through
-// certificateNamesForKind, and any other deployment names its own with
-// --tls-extra-dns-name.
+// to be one the certificate carries as a DNS SAN or, for an IP literal,
+// an IP SAN. Network routing and port exposure must also permit the connection.
 func clientReachableHost(deps Deps) string {
 	return sshHostFromServer(deps)
 }

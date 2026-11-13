@@ -20,7 +20,7 @@ The plugin and CLI must use the same Claude configuration directory.
 
 ## Client ports before install
 
-After selecting the context and advertised DNS name, save the **public**
+After selecting the context and advertised hostname or IP, save the **public**
 `install --plan --json` result to a new file. This contains cluster identity
 and checks, never installer secrets. Before the install Review, run:
 
@@ -30,9 +30,9 @@ sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' 
 oberth client ports --plan-file '<public plan JSON>' --client-host localhost
 ```
 
-Clients use DNS names (`localhost`, the host name or `<host>.local`), never IP
-addresses. Keep the CA's DNS-only name constraints; IP constraints are deferred
-until Bun releases its fix, as described in [client certificates](client-certificates.md).
+Clients may use a DNS name or an IP covered by the leaf certificate's matching
+SAN. CA pinning and certificate verification remain required; see
+[client certificates](client-certificates.md).
 
 The result proposes `install_flags` with the HTTPS and SSH host ports. It
 uses exact node identities from that plan to find a matching local Docker
@@ -44,9 +44,11 @@ override discovery. Pass the selected `--service-type` when it is not NodePort.
 Docker is optional. Other clusters get the same TCP probe of their chosen
 address; no cluster type controls install admission. Remote Docker daemon
 bindings, unrelated clusters, other host interfaces and ambiguous mappings
-are not silently selected. When `needs_action` is true, explain:
-"NodePorts are not reachable from this host; map them or use port-forward."
-Propose that network setup and repeat with its host ports. The helper never
+are not silently selected. `needs_action` can record a DNS mismatch while both
+TCP probes succeeded. Describe the DNS remedy and each TCP observation
+separately. A failed TCP probe means that port did not answer; it does not
+establish a missing route. If access still fails after install, review routing
+and offer a routable name/IP or port-forward, then repeat with its host ports. The helper never
 creates a port mapping or starts a port-forward itself.
 
 A fresh server may not be listening. A TCP connection or a published port
@@ -104,19 +106,30 @@ same change locally, obtain commit/push approval, and push for an unassisted
 run. The helper's `smoke ... --consent --unassisted` clears push options for
 that one push. Promote only after the committed unassisted SHA passes.
 
-### Naming an IP or load-balancer endpoint
+### Choosing an IP or naming an endpoint
 
-When the only endpoint is an IP or load-balancer address, pass it as
-`--endpoint-address '<detected address>'` to `scripts/install ports`. If no
-name was chosen, propose `--client-host oberth.test` (the user may choose their
-own DNS name). Show the returned `dns.hosts_line` verbatim for `/etc/hosts` on
-each client, or `dns.dns_record` for the DNS administrator. A hostname endpoint
-uses a CNAME record; IP endpoints print an A/AAAA record and a hosts line.
-Never edit these automatically. Wait for the user to configure the name, then
-rerun with the chosen `--client-host` and the same `--endpoint-address`.
-Continue when `dns.resolves_to_endpoint` is true. This checks name resolution
-separately from TCP: a fresh service need not listen yet. Keep DNS-only CA
-constraints and include the chosen name in the install Review.
+Clients may use a routable IPv4 or IPv6 address directly. Pass it as
+`--client-host '<chosen IP>'`; the probe keeps it and needs no DNS change.
+The installer adds the choice to the leaf certificate's IP SANs and shows it
+in plan, Review and the install summary. IPv6 URL authorities use brackets,
+for example `https://[2001:db8::10]:30443/mcp`. A matching CA pin alone does
+not suffice: the leaf must cover the exact IP. Verification remains required.
+The CA generator and its existing DNS name constraints are unchanged.
+
+Alternatively choose a DNS name, for example `--client-host oberth.test`, and
+pass the detected node or load-balancer address as `--endpoint-address` to
+`scripts/install ports`. Show the returned `dns.hosts_line` verbatim for
+`/etc/hosts` on each client, or `dns.dns_record` for the DNS administrator.
+A hostname endpoint uses CNAME; an IP endpoint prints A/AAAA and a hosts line.
+Never edit these automatically. Wait for the user's naming change, then rerun
+with the chosen name and the same endpoint address. Continue when
+`dns.resolves_to_endpoint` is true. Resolution is separate from TCP readiness.
+Include the chosen DNS name and its certificate coverage in Review.
+
+NodePort reachability by node IP depends on the network between client and
+node. Guests behind NAT isolation cannot reach each other. Use port-forward,
+or a DNS name or IP that is routable from the client; naming an unreachable
+address does not create a route. A fresh server may not listen until install.
 
 ### No reachable node: LoadBalancer proposal
 
@@ -125,7 +138,7 @@ address answers its NodePorts. Missing node addresses and failed probes are
 advisory generic signals, including on managed clusters; no provider detection
 or new admission gate is used. Offer `--service-type LoadBalancer` with
 `--client-https-port 443 --client-ssh-port 2222`, or port mapping/forwarding.
-Use the operator's chosen DNS name (propose `oberth.test`) in the same Review.
+Use the operator's chosen routable DNS name or known IP in the same Review.
 Include all flags in that Review and wait for "install" before any mutation.
 
 For LoadBalancer, start the approved install in the background, retaining its
@@ -133,13 +146,16 @@ public output and process status. Then run the read-only address wait against
 the saved plan and the reviewed namespace:
 
 ```sh
-sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<hostname approved in Review>' --client-https-port '<approved HTTPS port>' --client-ssh-port '<approved SSH port>' --service-type LoadBalancer --wait-load-balancer --wait-timeout 2m --namespace '<approved namespace>'
+sh "$CLAUDE_PLUGIN_ROOT/scripts/install" ports --plan-file '<public plan JSON>' --client-host '<host or IP approved in Review>' --client-https-port '<approved HTTPS port>' --client-ssh-port '<approved SSH port>' --service-type LoadBalancer --wait-load-balancer --wait-timeout 2m --namespace '<approved namespace>'
 ```
 
 The helper waits for Service `oberth` to exist and receive an ingress address,
-with a bounded timeout (maximum 10m). It never creates a Service. Show the
-returned DNS remedy, wait for the user's DNS/hosts change, and re-probe with
-`--endpoint-address` set to that ingress address. Do not rerun the installer
+with a bounded timeout (maximum 10m). It never creates a Service. For a chosen
+DNS name, show the returned DNS remedy and wait for the user's DNS/hosts change
+before re-probing with `--endpoint-address` set to the ingress address. An IP
+choice is preserved directly. If the address differs from the reviewed choice,
+review the new host and its certificate SAN before using it; discovery alone
+does not update an already-issued certificate. Do not rerun the installer
 while the original process is still running. On timeout inspect that Service
 and its events, keep the install status and secrets file, then retry the wait
 or review a forwarding remedy. Do not claim success until the original install
@@ -195,7 +211,12 @@ continuity of an established one. Any failed fresh connection is ambiguous.
 A token-matched start chunk must arrive before the attempts, and the end chunk
 must remain absent until after them. The probe then releases the held response
 through its server Pod and requires successful completion. Missing overlap,
-HTTP errors, changed Pod health and failed peers are unverified. Baseline and
+HTTP errors, changed Pod health/UID and failed peers are unverified. Pod UIDs
+are captured from creation and checked during readiness, around every exec and
+at completed traffic stages. A same-name replacement cannot supply credited
+measurement results. Exec explicitly names the probe container; kubectl exec
+has no atomic UID precondition, so a replacement can race the command but its
+result is rejected when the UID observations differ. Baseline and
 recovery each require two consecutive successful samples from both sources.
 
 The result is **measured enforcement** on the reported nodes for these six
@@ -205,12 +226,16 @@ coincidences; it does not eliminate false passes. Read `enforced` as the wire
 status for a completed measurement, not a proof of isolation. Evidence records
 the actual selection order, per-round sample counts and node/namespace scope;
 remedies describe observed failures. Elapsed measurement time includes owned
-cleanup.
+cleanup. Every round deletes its policy with the UID returned by creation; a
+same-name replacement makes deletion fail and the result stays unverified.
 
 The public check's `evidence` states the scratch and pipeline namespaces,
-client/control nodes and server node. Existing pipeline namespace labels are
-copied except Kubernetes' immutable namespace-name label; the probe adds its
-ownership label. Namespace-name-specific exclusions, other node-pair routes,
+client/control nodes and server node. The scratch namespace keeps only its
+generated `oberth.ci/network-policy-probe` ownership label and restricted Pod
+Security enforce/audit/warn labels with their versions set to latest. No
+pipeline labels, including injection or privileged admission labels, are copied.
+The owned policy selects the probe Pod label; no pipeline namespace label is
+needed for that selection. Namespace-name/label-specific exclusions, other node-pair routes,
 ingress enforcement and the installed policy's selectors/allow rules are not
 covered by this TCP default-deny capability measurement. Read that scope with
 the result; do not present it as proof of every installed isolation rule.
@@ -289,3 +314,9 @@ files. A changed current context does not establish that another context was
 deleted. The rehearsal's original context loss remains unestablished; inspect
 retained files and commands without attributing a cause or recreating guessed
 credentials. Oberth never updates the operator's kubeconfig files.
+
+Plugin connect requires an OpenSSL with `verify_ip` and `verify_hostname`.
+It uses a capable `openssl`/`openssl3` on PATH or the standard Homebrew
+`openssl@3` location on macOS. System LibreSSL without these checks is refused;
+install OpenSSL outside Oberth (on macOS, `brew install openssl@3`) and retry.
+The helper never installs tools or skips identity verification.

@@ -101,3 +101,28 @@ func TestInstallJSONKeepsDiscoveredNamesAfterPreflightRefusal(t *testing.T) {
 		t.Fatal("JSON discarded the cluster's discovered certificate names")
 	}
 }
+
+func TestPlanIncludesExplicitClientIPSANWithMultipleNodes(t *testing.T) {
+	bootstrapCredentialInventory(t)
+	node := preflightNode()
+	other := node.DeepCopy()
+	other.Name = "second"
+	kube := fake.NewClientset(node, other, preflightStorage())
+	deps := InstallDeps{LookPath: func(name string) (string, error) { return name, nil }, RunCommand: preflightStats, ProbeNetworkPolicy: enforcedPolicyFixture,
+		RunHelm: func(context.Context, []string) ([]byte, error) { return []byte("[]"), nil },
+		LoadKubeConfig: func(string) (kubernetes.Interface, *rest.Config, string, error) {
+			return kube, &rest.Config{Host: "https://api.example.test", TLSClientConfig: rest.TLSClientConfig{CAData: newTestServerCA(t, []string{"api.example.test"})}}, "chosen", nil
+		},
+	}
+	for _, host := range []string{"192.0.2.10", "2001:db8::10"} {
+		plan := PlanInstall(t.Context(), Config{ContextName: "chosen", ClientHost: host}, deps)
+		if !plan.OK || plan.Review.ClientHost != host || !slices.Contains(plan.Review.IPs, host) {
+			t.Fatal("plan lost client IP SAN", plan)
+		}
+		var output bytes.Buffer
+		printReview(&output, plan.Review)
+		if !strings.Contains(output.String(), "client address=\""+host+"\"") || !strings.Contains(output.String(), "IP addresses: ["+host+"]") {
+			t.Fatal("human Review omitted IP or coverage", output.String())
+		}
+	}
+}

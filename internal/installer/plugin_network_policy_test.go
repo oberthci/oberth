@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -22,6 +23,7 @@ func TestPluginNetworkPolicyLiveProbeAndCleanup(t *testing.T) {
 	for _, mode := range []string{"enforced", "absent", "namespace forbidden", "image unavailable", "exec forbidden", "cancelled", "cleanup forbidden", "create response lost"} {
 		t.Run(mode, func(t *testing.T) {
 			kube := fake.NewClientset(preflightNode())
+			probePolicyUIDFixture(kube)
 			namespace := ""
 			createdPods := 0
 			cleanupSeen := false
@@ -48,6 +50,7 @@ func TestPluginNetworkPolicyLiveProbeAndCleanup(t *testing.T) {
 			kube.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 				createdPods++
 				pod := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+				pod.UID = types.UID(pod.Name + "-uid")
 				if pod.Spec.Containers[0].Image != containerimage.Utility || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken || !*pod.Spec.SecurityContext.RunAsNonRoot {
 					t.Fatal("probe image or Pod isolation changed")
 				}

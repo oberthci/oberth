@@ -877,7 +877,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 
 	// The installer advertises clientReachableHost to the CLI and MCP clients
 	// (and prints it as the Ready URL), so the certificate must carry it.
-	cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForClientHost(clientReachableHost(deps), cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
+	cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = CertificateNamesForClientHost(clientReachableHost(deps), cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 	if err := preserveServerTLSNames(ctx, &cfg, deps); err != nil {
 		return err
 	}

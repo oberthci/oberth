@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -103,6 +104,11 @@ func isolateRemoteConfig(t *testing.T) {
 }
 func inviteCLIIdentity(t *testing.T) (tls.Certificate, *x509.Certificate) {
 	t.Helper()
+	return inviteCLIIdentityFor(t)
+}
+
+func inviteCLIIdentityFor(t *testing.T, ips ...net.IP) (tls.Certificate, *x509.Certificate) {
+	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +127,7 @@ func inviteCLIIdentity(t *testing.T) (tls.Certificate, *x509.Certificate) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{"localhost"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{"localhost"}, IPAddresses: ips, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, leaf, ca, leafKey.Public(), key)
 	if err != nil {
 		t.Fatal(err)

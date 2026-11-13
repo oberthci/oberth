@@ -51,7 +51,16 @@ func bindingGit(t *testing.T, root string, args ...string) string {
 
 func bindingSSHServer(t *testing.T, signer ssh.Signer, clientKey ssh.PublicKey, bare string) (string, *atomic.Int32) {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	return bindingSSHServerAt(t, signer, clientKey, bare, "localhost")
+}
+
+func bindingSSHServerAt(t *testing.T, signer ssh.Signer, clientKey ssh.PublicKey, bare, host string) (string, *atomic.Int32) {
+	t.Helper()
+	listenHost := host
+	if host == "localhost" {
+		listenHost = "127.0.0.1"
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(listenHost, "0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,10 +127,15 @@ func bindingSSHServer(t *testing.T, signer ssh.Signer, clientKey ssh.PublicKey, 
 		}
 	}()
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
-	return "ssh://git@localhost:" + port, calls
+	return "ssh://git@" + net.JoinHostPort(host, port), calls
 }
 
 func bindingFixture(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.Signer) repositoryClientOptions {
+	t.Helper()
+	return bindingFixtureAt(t, root, keyFile, gitURL, sshSigner, "localhost")
+}
+
+func bindingFixtureAt(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.Signer, host string) repositoryClientOptions {
 	t.Helper()
 	clientFiles, err := clientcert.GenerateAuthority()
 	if err != nil {
@@ -147,7 +161,11 @@ func bindingFixture(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.Si
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, serverCA := inviteCLIIdentity(t)
+	var ips []net.IP
+	if ip := net.ParseIP(host); ip != nil {
+		ips = append(ips, ip)
+	}
+	identity, serverCA := inviteCLIIdentityFor(t, ips...)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(r.TLS.VerifiedChains) == 0 || r.Header.Get("Authorization") != "" {
 			t.Error("registration lookup lacked certificate-only authentication")
@@ -175,12 +193,23 @@ func bindingFixture(t *testing.T, root, keyFile, gitURL string, sshSigner ssh.Si
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{"structuredContent": result}})
 	})
 	server := httptest.NewUnstartedServer(handler)
+	if host != "localhost" {
+		listener, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = server.Listener.Close()
+		server.Listener = listener
+	}
 	pool := x509.NewCertPool()
 	pool.AddCert(authority.Certificate)
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{identity}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool}
 	server.StartTLS()
 	t.Cleanup(server.Close)
-	base := strings.Replace(server.URL, "127.0.0.1", "localhost", 1)
+	base := server.URL
+	if host == "localhost" {
+		base = strings.Replace(base, "127.0.0.1", "localhost", 1)
+	}
 	pin := sha256.Sum256(serverCA.Raw)
 	install := installer.InstallResult{Version: 1, ServerURL: base, GitURL: gitURL, CAPin: hex.EncodeToString(pin[:])}
 	body, _ := json.Marshal(install)
@@ -327,5 +356,65 @@ func TestClientRepositoryRefusesWrongPinMissingRegistrationAndSSHOverride(t *tes
 	_, bindingErr := os.Stat(filepath.Join(configRoot, "oberth"))
 	if !os.IsNotExist(bindingErr) {
 		t.Fatal("refused binding wrote configuration")
+	}
+}
+
+func TestClientRepositoryIPHostsPushWithPinnedIdentity(t *testing.T) {
+	if _, err := exec.LookPath("ssh"); err != nil {
+		t.Fatal("OpenSSH required")
+	}
+	t.Setenv("GIT_SSH_COMMAND", "")
+	t.Setenv("GIT_SSH", "")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "global"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		t.Run(host, func(t *testing.T) {
+			root, bare := t.TempDir(), t.TempDir()
+			bindingGit(t, bare, "init", "--bare")
+			bindingGit(t, root, "init", "-b", "main")
+			bindingWrite(t, filepath.Join(root, "README"), []byte("IP client fixture\n"))
+			bindingGit(t, root, "add", "README")
+			bindingGit(t, root, "-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "fixture")
+			_, key, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signer, err := ssh.NewSignerFromKey(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block, err := ssh.MarshalPrivateKey(key, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			keyFile := bindingWrite(t, filepath.Join(t.TempDir(), "push"), pem.EncodeToMemory(block))
+			_, serverKey, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			serverSigner, err := ssh.NewSignerFromKey(serverKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitURL, calls := bindingSSHServerAt(t, serverSigner, signer.PublicKey(), bare, host)
+			options := bindingFixtureAt(t, root, keyFile, gitURL, serverSigner, host)
+			binding, err := configureClientRepository(t.Context(), options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := gitURL + "/github/acme/project.git"
+			if binding.PushURL != want || bindingGit(t, root, "remote", "get-url", "oberth") != want {
+				t.Fatal("IP SSH remote changed", binding)
+			}
+			config, err := os.ReadFile(binding.SSHConfig)
+			if err != nil || !strings.Contains(string(config), "HostName "+host) || !strings.Contains(string(config), "StrictHostKeyChecking yes") {
+				t.Fatal("SSH IP or strict host key binding missing", string(config), err)
+			}
+			bindingGit(t, root, "push", "oberth", "HEAD:refs/heads/accepted")
+			if calls.Load() != 1 || bindingGit(t, bare, "rev-parse", "refs/heads/accepted") != bindingGit(t, root, "rev-parse", "HEAD") {
+				t.Fatal("IP push did not arrive at pinned server")
+			}
+		})
 	}
 }

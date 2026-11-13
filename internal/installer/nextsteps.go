@@ -3,6 +3,7 @@ package installer
 import (
 	"fmt"
 	"io"
+	"net"
 	"strings"
 )
 
@@ -145,6 +146,11 @@ func printReadyWithNextSteps(w io.Writer, cfg Config, deps Deps, upstreams []Nex
 	} else {
 		_, _ = fmt.Fprintf(w, "\nReady — %s\n", readyURL(deps))
 	}
+	kind := "DNS SAN"
+	if net.ParseIP(clientReachableHost(deps)) != nil {
+		kind = "IP SAN"
+	}
+	_, _ = fmt.Fprintf(w, "Client address: %s (covered by server certificate %s)\n", clientReachableHost(deps), kind)
 	_, _ = fmt.Fprintln(w)
 	for _, line := range NextSteps(NextStepsInput{
 		Host:    clientReachableHost(deps),

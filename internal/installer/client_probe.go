@@ -76,7 +76,12 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 		return result, errors.New("invalid advertised client host")
 	}
 	result.Host = host
-	if net.ParseIP(host) != nil || deps.EndpointAddress != "" {
+	if deps.EndpointAddress != "" {
+		if _, err := NormalizeClientHost(deps.EndpointAddress); err != nil {
+			return result, errors.New("invalid endpoint address")
+		}
+	}
+	if net.ParseIP(host) == nil && deps.EndpointAddress != "" {
 		proposal, err := proposeClientDNS(ctx, host, deps.EndpointAddress, deps.LookupHost)
 		if err != nil {
 			return result, err
@@ -99,6 +104,7 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 	}
 	result.HTTPS.Port, result.SSH.Port = https, ssh
 	defaultSSH, defaultHTTPS := clientPorts(Deps{ClientServiceType: cfg.ServiceType})
+	portsNeedAction := false
 	mappings := localPublishedPorts(ctx, plan, result.Host, deps)
 	for _, item := range []struct {
 		observation      *ClientPortObservation
@@ -120,6 +126,7 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 		}
 		if !item.observation.Reachable && !item.observation.Published {
 			result.NeedsAction = true
+			portsNeedAction = true
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -130,16 +137,29 @@ func ProbeClientPorts(ctx context.Context, plan InstallPlan, cfg Config, deps Cl
 		result.InstallFlags = append(result.InstallFlags, "--service-type", cfg.ServiceType)
 	}
 	result.Advice = "TCP reachability and published mappings do not prove Oberth readiness or TLS identity. Review these client ports before install; verify the server afterwards."
-	if result.NeedsAction {
-		result.Advice = "Planned client ports did not answer from this host and no unique local mapping was found. NodePorts are not reachable from this host; map them or use port-forward, then repeat this probe. A fresh server may not be listening yet: review the network path, not the cluster type."
+	if portsNeedAction {
+		var missing []string
+		for _, item := range []struct {
+			name        string
+			observation ClientPortObservation
+		}{{"HTTPS", result.HTTPS}, {"SSH", result.SSH}} {
+			if !item.observation.Reachable && !item.observation.Published {
+				missing = append(missing, item.name+" port "+item.observation.Port)
+			}
+		}
+		observation := "TCP reachability is unverified for "
+		if deps.Dial != nil {
+			observation = "TCP probes did not answer for "
+		}
+		result.Advice += " " + observation + strings.Join(missing, ", ") + "; no unique local mapping was found for those ports. This does not establish a missing route. A fresh server may not be listening yet; repeat the probe after install. Reachability by node IP depends on the network between client and node: NAT-isolated guests cannot reach each other. If access still fails, review the network path and use a name or IP routable from the client, or port-forward."
 	}
 	if plan.Identity.Distribution == "kind" && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") && (!result.HTTPS.Published || !result.SSH.Published) {
 		result.KindRemedy = clientKindRemedy(result.HTTPS.Port, result.SSH.Port)
 	}
-	if result.NeedsAction && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") {
+	if portsNeedAction && deps.Dial != nil && (cfg.ServiceType == "" || cfg.ServiceType == "NodePort") {
 		nodeReachable := reachableProbeNode(ctx, plan, deps)
 		if !nodeReachable {
-			result.LoadBalancer = &ClientLoadBalancerProposal{InstallFlags: []string{"--service-type", "LoadBalancer", "--client-https-port", "443", "--client-ssh-port", "2222"}, Advice: "No node address answered the planned NodePorts from this client. Offer LoadBalancer in the same install Review, or map ports/use port-forward. After the approved install starts, wait for its Service address with --wait-load-balancer, then show the DNS remedy and re-probe the chosen name."}
+			result.LoadBalancer = &ClientLoadBalancerProposal{InstallFlags: []string{"--service-type", "LoadBalancer", "--client-https-port", "443", "--client-ssh-port", "2222"}, Advice: "No node address answered the planned NodePorts from this client. Offer LoadBalancer in the same install Review, or map ports/use port-forward. After the approved install starts, wait for its Service address with --wait-load-balancer, then choose its routable IP or DNS name and re-probe. The server certificate must cover that choice; an IP needs a matching IP SAN."}
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -242,14 +262,20 @@ func localPublishedPorts(ctx context.Context, plan InstallPlan, host string, dep
 }
 
 func probeBindingMatches(host, bind string) bool {
-	if bind == "" || bind == "0.0.0.0" || bind == "::" {
-		return true
-	}
 	ip := net.ParseIP(bind)
 	if host == "localhost" {
-		return ip != nil && (ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback))
+		return bind == "" || (ip != nil && (ip.IsUnspecified() || ip.Equal(net.IPv4(127, 0, 0, 1)) || ip.Equal(net.IPv6loopback)))
 	}
-	return ip != nil && ip.Equal(net.ParseIP(host))
+	clientIP := net.ParseIP(host)
+	if ip == nil || clientIP == nil {
+		return false
+	}
+	if ip.IsUnspecified() {
+		// A wildcard binding proves publication only for its own address family.
+		// A dual-stack listener may accept more; a successful TCP probe can show it.
+		return (ip.To4() == nil) == (clientIP.To4() == nil)
+	}
+	return ip.Equal(clientIP)
 }
 
 // Bound advisory node checks independently so an unreachable large cluster

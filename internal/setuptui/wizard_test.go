@@ -74,8 +74,8 @@ func TestFirstRunEndToEnd(t *testing.T) {
 		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore {
 		t.Fatalf("installer config not wired from the answers: %+v", cfg)
 	}
-	if strings.Join(cfg.TLSExtraIPs, ",") != "192.0.2.193" || strings.Join(cfg.TLSExtraDNSNames, ",") != "example-node" {
-		t.Fatalf("TLS names must default to the probed node: %v %v", cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
+	if strings.Join(cfg.TLSExtraIPs, ",") != "192.0.2.193,127.0.0.1,::1" || strings.Join(cfg.TLSExtraDNSNames, ",") != "example-node,localhost" {
+		t.Fatalf("TLS names must cover the probed node and chosen localhost client: %v %v", cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 	}
 
 	if h.w.install.view != installCeremony {

@@ -16,27 +16,28 @@ review the full name set and pass `--reissue-server-ca` with the install or
 upgrade. The CA pin changes and clients must refresh their trust. An existing
 CA with IP constraints is never replaced by the DNS-only generator.
 
-## DNS-only client connections
+## DNS and IP client connections
 
-The owner decision for #1530 (2026-11-11) defers CA-level IP name constraints
-until Bun releases a fix. Keep the production CA's DNS constraints. Clients
-connect by DNS name: `localhost` on the node, the host name, or `host.local`
-when that name resolves from the client. Set `--client-host` to that DNS name;
-do not use `127.0.0.1`, `::1`, or a LAN IP in an HTTPS/MCP client URL. The
-DNS name must be covered by the server certificate and the CA constraints.
-IP discovery and IP SANs do not authorize using an IP as a client endpoint.
-TLS verification and the explicit CA pin remain required.
+The owner decision for #1559 allows clients to connect by any IP carried as
+an IP SAN on the server certificate. Choose a detected node address or enter
+a custom node/load-balancer IP under Extra names in setup, then select it as
+the client address. With the CLI, set `--client-host` to the chosen IP. The
+installer includes that choice in the leaf IP SANs and displays its coverage
+in plan, Review and the install summary. IPv6 literals are bracketed in URLs,
+for example `https://[2001:db8::10]:30443/mcp`.
 
-The pinned OpenBao 2.6.1 generation API exposes
-[`permitted_dns_domains` only](https://raw.githubusercontent.com/openbao/openbao/v2.6.1/builtin/logical/pki/fields.go).
-It cannot generate CA-level `/32` and `/128` IP constraints with its internal,
-non-exportable key. Issuing-role restrictions on IP SANs are not CA-level
-constraints. A future IP-connection change therefore needs both backend
-support and a released [Bun fix](https://github.com/oven-sh/bun/pull/45236),
-followed by verification with the actual client. These are deferred scope,
-not release gates for the approved DNS-only connection path.
+DNS names, including `localhost` and names resolved through DNS, hosts files
+or mDNS, remain supported. DNS choices need matching DNS identity; IP choices
+need a matching IP SAN. A CA pin establishes the authority, not the endpoint's
+identity. Neither path bypasses certificate verification.
 
-The existing self-signed server anchor's tests exercise critical DNS and
-exact IPv4/IPv6 constraints. They do not establish production OpenBao IP
-constraints or affected Bun client support and do not change the DNS-only
-client connection policy.
+Reachability by a node's IP depends on the network between client and node.
+Guests behind NAT isolation cannot reach each other. Use port-forward, or a
+name or IP routable from each client. A DNS alias does not fix missing routing.
+
+This change leaves the production OpenBao CA generator and existing CA name
+constraints unchanged. Its DNS constraints restrict DNS identities; they are
+not CA-level IP constraints. Leaf IP SANs are distinct from CA-level IP name
+constraints. No CA replacement or new CA-level IP constraint support is
+implied by selecting an IP endpoint. Existing IP-constrained CAs retain their
+constraints. Clients must still verify the leaf's exact IP SAN and the CA.

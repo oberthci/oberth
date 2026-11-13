@@ -33,9 +33,6 @@ func TestPluginDNSRemedyWaitsForNameAndReprobes(t *testing.T) {
 				return nil, errors.New("not configured")
 			}}
 			host := "oberth.test"
-			if address != "edge.example.test" {
-				host = address
-			}
 			result, err := ProbeClientPorts(t.Context(), probePlan(), Config{ClientHost: host}, deps)
 			if err != nil || result.DNS == nil || result.DNS.Resolves || !result.NeedsAction || result.Host != "oberth.test" {
 				t.Fatalf("%+v %v", result, err)
