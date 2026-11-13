@@ -122,7 +122,7 @@ type UpgradeBackup struct {
 // that version: the chart of another version must never reach the release.
 func verifyInstallRelease(ctx context.Context, cfg *Config, deps Deps) (func(), error) {
 	if strings.TrimSpace(cfg.ChartPath) != "" {
-		return func() {}, nil
+		return stageDevelopmentChart(cfg)
 	}
 	if cfg.verifiedChart != "" && cfg.verifiedVersion == canonicalChartVersion(cfg.ChartVersion) {
 		return func() {}, nil
@@ -161,6 +161,9 @@ func verifyInstallRelease(ctx context.Context, cfg *Config, deps Deps) (func(), 
 // --chart override, else the verified release chart. Before verification
 // (the dry-run plan) it names the chart the real run will verify.
 func oberthChart(cfg Config) string {
+	if cfg.developmentChart != "" {
+		return cfg.developmentChart
+	}
 	if local := strings.TrimSpace(cfg.ChartPath); local != "" {
 		return local
 	}

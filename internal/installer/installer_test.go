@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/yaml"
 )
 
 // fakeChartImageRef is the digest-pinned image reference returned by fake
@@ -3869,6 +3870,22 @@ func TestInstallOberthImageMustBeTheSignedRecords(t *testing.T) {
 					return []byte("image:\n  ref: " + recordImage + "\n"), nil
 				case "upgrade":
 					upgradeArgs = slices.Clone(args)
+					if cfg.ChartPath != "" {
+						raw, err := os.ReadFile(filepath.Join(args[3], "Chart.yaml"))
+						if err != nil {
+							t.Fatal(err)
+						}
+						var metadata struct {
+							Version    string `json:"version"`
+							AppVersion string `json:"appVersion"`
+						}
+						if err := yaml.Unmarshal(raw, &metadata); err != nil {
+							t.Fatal(err)
+						}
+						if metadata.Version != "0.16.2" || metadata.AppVersion != cfg.ChartVersion {
+							t.Fatalf("development chart metadata = %+v", metadata)
+						}
+					}
 				}
 				return nil, nil
 			},
@@ -3895,8 +3912,8 @@ func TestInstallOberthImageMustBeTheSignedRecords(t *testing.T) {
 		t.Fatalf("--image equal to the signed record = %v, args %v", err, args)
 	}
 	// --chart: development override, nothing fetched or verified.
-	args, err = run(Config{ChartPath: testLocalChart, ImageRef: otherImage}, false)
-	if err != nil || args[3] != testLocalChart || !strings.Contains(strings.Join(args, " "), "--set-string image.ref="+otherImage) {
+	args, err = run(Config{ChartPath: "../../charts/oberth", ImageRef: otherImage}, false)
+	if err != nil || !strings.Contains(args[3], "oberth-development-chart-") || !strings.Contains(strings.Join(args, " "), "--set-string image.ref="+otherImage) {
 		t.Fatalf("--chart with --image = %v, args %v", err, args)
 	}
 }

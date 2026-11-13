@@ -243,6 +243,8 @@ type Config struct {
 	// chart, push, watch it run, change something, repeat — without a release
 	// in between.
 	ChartPath string
+	// developmentChart is a private source-chart copy stamped with this candidate.
+	developmentChart string
 	// ImageRef overrides the server image the chart deploys (--image), for the
 	// same loop. A tag that exists only in the node's image store is the normal
 	// case here, so the chart's IfNotPresent pull policy is what makes it work.
