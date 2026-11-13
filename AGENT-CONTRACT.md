@@ -1600,7 +1600,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
 - Admission refuses everything that would reach the node or the cluster around
   the envelope: `podSpecPatch`, `hostNetwork`, `hostAliases`, `hostPath`,
   `nodeSelector`, `affinity`, `hostPort`/`hostIP`, `workflowTemplateRef`,
-  `imagePullSecrets`, Secret or ConfigMap references in `env`/`envFrom`, `ARGO_*` environment names,
+  Secret or ConfigMap references in `env`/`envFrom`, `ARGO_*` environment names,
   repository-chosen object names, repository-set Pod or container security
   contexts, and any `claimName`. Documents are decoded strictly, and exactly one
   YAML document per file is accepted.
@@ -2336,9 +2336,9 @@ remain required, with no public listener or insecure fallback.
 | Change a scheduling or placement default (`admission.stepStartupAllowance`, `admission.stallTimeout`, `argo.defaultWorkflowTimeout`, `schedules.*`), or add such a setting without a Helm value | Breaking |
 | Let a repository choose the step start-up allowance or write `oberth.ci/step-start-allowance-seconds` | Forbidden |
 | Admit a `volumeClaimTemplate` with `dataSource`, `dataSourceRef`, or `selector` | Forbidden |
-| Admit a construct that reaches the node (`hostPort`, `hostPath`, `hostNetwork`, `nodeSelector`, `affinity`) or the cluster (`workflowTemplateRef`, `imagePullSecrets`) | Forbidden |
+| Admit a construct that reaches the node (`hostPort`, `hostPath`, `hostNetwork`, `nodeSelector`, `affinity`) or the cluster (`workflowTemplateRef`) | Forbidden |
 | Bind an OpenBao role to a wildcard ServiceAccount name or namespace, or grant the CI tier a ServiceAccount token | Forbidden |
-| Change the RunnerImage declaration shape or widen the default prefix allowlist | Breaking security change |
+| Change the RunnerImage declaration shape or bypass an operator-configured image allowlist | Breaking security change |
 | Change token-to-uplink cardinality or accepted Git ref namespaces | Breaking security change |
 | Change the accepted repository path grammar, its resolution to the registered identity, or the upstream-name reserved list / disjointness guards | Breaking security change |
 | Mount any Secret in a branch Job or share/nest CI and release cache roots | Forbidden |

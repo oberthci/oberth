@@ -109,11 +109,12 @@
   bits identify setuid/setgid failures, and `fstype=0x1021994` identifies tmpfs.
   Sibling steps that do not invoke the credential chain have their logs copied
   verbatim by the server.
-- Runner and server images are immutable digest references. Every runner image
-  reference must contain a validated `@sha256:<64 lowercase hex>` digest;
-  tag-only references are rejected at admission because a registry writer can
-  move a tag between admission and node pull. A human-readable tag may precede
-  the digest. Helm refuses guarded placeholder digests.
+- Server-managed images use immutable digest references. Authors may choose
+  runner images with tags or digests; pinning a digest prevents a registry writer
+  from changing the image between admission and node pull. Oberth has no built-in
+  runner image allowlist. An administrator may configure allowed image prefixes;
+  an empty setting admits any image. Helm refuses guarded placeholder digests
+  for server-managed images.
 - Security-backported runner tools are rebuilt from immutable release source,
   expose an Oberth derivative identity, and are accepted only when their patched
   module graph and byte-exact binary digest match the source-owned contract.
