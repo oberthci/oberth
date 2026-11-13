@@ -327,6 +327,14 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 		if len(template.Steps) != 0 {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.steps is not admitted; declare steps in concrete templates so their inline containers receive server protection", location))
 		}
+		// Named helper defaults are also added after concrete-template
+		// hardening, so they must be declared on the Pod leaf instead.
+		if len(template.Sidecars) != 0 {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.sidecars is not admitted; declare helpers in concrete templates so they receive server protection", location))
+		}
+		if len(template.InitContainers) != 0 {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.initContainers is not admitted; declare helpers in concrete templates so they receive server protection", location))
+		}
 	}
 	problems = append(problems, admitNestedTemplates(location, template, policy, depth)...)
 	problems = append(problems, admitSynchronization(location+".synchronization", template.Synchronization)...)

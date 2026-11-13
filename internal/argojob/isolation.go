@@ -331,8 +331,8 @@ func validateTemplateIsolation(wf *wfv1.Workflow, trigger pipeline.Trigger) erro
 		// generated credentials or undo directory protection; late mirroring
 		// can also re-enable an explicitly normalized same-name helper.
 		templateContainers(d, func(c *corev1.Container) {
-			if len(c.VolumeMounts) != 0 {
-				problems = append(problems, errors.New("argojob: templateDefaults volumeMounts are not admitted; declare mounts on each Pod leaf"))
+			if len(c.VolumeMounts) != 0 || len(c.VolumeDevices) != 0 {
+				problems = append(problems, errors.New("argojob: templateDefaults volumeMounts or volumeDevices are not admitted; declare mounts and devices on each Pod leaf"))
 			}
 		})
 		if d.ContainerSet != nil && len(d.ContainerSet.VolumeMounts) != 0 {
