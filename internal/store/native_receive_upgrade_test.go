@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -66,7 +67,7 @@ func applyNativeReceiveUpgrade(t *testing.T, s *Store) {
 		}
 	}
 	t.Cleanup(func() {
-		if err := s.migrateWithMigrations(t.Context(), nil, migrations); err != nil {
+		if err := s.migrateWithMigrations(context.WithoutCancel(t.Context()), nil, migrations); err != nil {
 			t.Error(err)
 		}
 	})
