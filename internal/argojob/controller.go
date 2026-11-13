@@ -69,26 +69,25 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
-	capabilities       func(context.Context, int64) (*argoworkflow.Capability, error)
-	capabilityRecovery func(context.Context, int64, string, string, string, string) (json.RawMessage, error)
-	restartedAt        time.Time
-	profileVerifyMu    sync.Mutex
-	profileMu          sync.Mutex
-	profileStatus      model.ControllerProfileStatus
-	profileBackoff     time.Duration
-	profileLogAt       time.Time
-	timings            TimingRecorder
-	nodeBoots          NodeBootRecorder
-	workflows          WorkflowClient
-	kube               kubernetes.Interface
-	logs               PodLogReader
-	followLogs         PodLogFollower
-	logIdentity        podLogIdentityReader
-	logPod             func(context.Context, string, string) (*corev1.Pod, error)
-	seeder             *SourceSeeder
-	config             Config
-	interval           time.Duration
-	readGrace          time.Duration
+	capabilities    func(context.Context, int64) (*argoworkflow.Capability, error)
+	restartedAt     time.Time
+	profileVerifyMu sync.Mutex
+	profileMu       sync.Mutex
+	profileStatus   model.ControllerProfileStatus
+	profileBackoff  time.Duration
+	profileLogAt    time.Time
+	timings         TimingRecorder
+	nodeBoots       NodeBootRecorder
+	workflows       WorkflowClient
+	kube            kubernetes.Interface
+	logs            PodLogReader
+	followLogs      PodLogFollower
+	logIdentity     podLogIdentityReader
+	logPod          func(context.Context, string, string) (*corev1.Pod, error)
+	seeder          *SourceSeeder
+	config          Config
+	interval        time.Duration
+	readGrace       time.Duration
 	// assistSeen remembers the holds the sweep already logged.
 	assistSeen struct {
 		sync.Mutex

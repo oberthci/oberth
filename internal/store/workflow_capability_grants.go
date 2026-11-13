@@ -128,11 +128,6 @@ func (s *Store) SetWorkflowCapabilityGrant(ctx context.Context, repoID int64, ac
 	if err != nil {
 		return WorkflowCapabilityGrant{}, err
 	}
-	// Any actual grant replacement or revocation permanently invalidates the
-	// migration receipt, including revoke followed by re-grant of equal values.
-	if _, err = tx.ExecContext(ctx, `DELETE FROM workflow_capability_recoveries WHERE repo_id=?`, repoID); err != nil {
-		return WorkflowCapabilityGrant{}, err
-	}
 
 	details := map[string]any{"repo_id": repoID, "capability": capability}
 	if active {
@@ -153,29 +148,4 @@ func (s *Store) SetWorkflowCapabilityGrant(ctx context.Context, repoID int64, ac
 		return WorkflowCapabilityGrant{}, err
 	}
 	return result, nil
-}
-
-// WorkflowCapabilityRecovery reads a migration receipt for this exact existing
-// run and immutable Workflow UID. Current grant epoch and bytes must still match its migration projection.
-func (s *Store) WorkflowCapabilityRecovery(ctx context.Context, repoID int64, runID, workflow, workflowUID, sha string) (json.RawMessage, error) {
-	if strings.TrimSpace(workflowUID) == "" {
-		return nil, nil
-	}
-	var encoded string
-	err := s.reader().QueryRowContext(ctx, `SELECT h.capability_json
- FROM workflow_capability_recoveries h
- JOIN runs r ON r.id=h.run_id
- JOIN workflow_capability_grants g ON g.repo_id=h.repo_id
- WHERE h.repo_id=? AND h.run_id=? AND h.workflow_name=? AND h.workflow_uid=? AND h.sha=?
- AND r.status='running' AND r.repo_id=h.repo_id AND r.job_name=h.workflow_name
- AND (CASE WHEN r.tested_sha<>'' THEN r.tested_sha ELSE r.sha END)=h.sha
- AND g.revoked_at IS NULL AND g.capability_json=h.projected_json
- AND g.granted_at=h.granted_at AND g.granted_by=h.granted_by`, repoID, runID, workflow, workflowUID, sha).Scan(&encoded)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return json.RawMessage(encoded), nil
 }
