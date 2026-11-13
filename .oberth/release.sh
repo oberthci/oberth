@@ -32,7 +32,7 @@ gar_chart=${gar_host}/skipopsmain/oberth-helm/oberth
 # `oberth secretstore exec` writes $OBERTH_SECRETSTORE_DIR/<path-base>/<field>
 # with no renaming layer. The fields carry env-var-style names (GAR_SA_KEY,
 # R2_UPLOAD_TOKEN, COSIGN_KEY, COSIGN_PUB, SSH_KEY) because the retired
-# envconsul chain injected each field verbatim as an environment variable
+# removed credential chain injected each field as an environment variable
 # (docs/argo-secret-delivery.md); the store was seeded to satisfy that. A
 # rename here MUST be paired with re-seeding the store fields, and vice versa
 # — v0.13.1 failed exactly on this divergence.

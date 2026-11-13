@@ -36,7 +36,7 @@ private scratch space. Set the following fields on the test's Pod template:
 mounted even in a credentialed workflow. Oberth retains the forced
 ServiceAccount name, omits injected Vault environment, CA and server-binary
 mounts, and does not inject the credential-chain token or secret tmpfs mount.
-Recognized `envconsul` or `oberth secretstore exec` commands that contradict
+Recognized `oberth secretstore exec` commands that contradict
 the opt-out are rejected. Argo's separate executor identity remains confined
 to its init/wait containers. No new Kubernetes or OpenBao authority is granted.
 
@@ -127,7 +127,7 @@ written by every run. Any pusher's branch run can plant `GOCACHE` objects
 a `main` run, links in. This is already true of every default-mode leaf.
 `cache` makes no promise of integrity against other pushers to the same
 repository. For that reason `cache` is refused on a CI-tier leaf that runs a
-credential chain (`envconsul`, `oberth secretstore exec|materialize`): a
+credential chain (`oberth secretstore exec`): a
 planted object would execute with the leaf's secrets in its environment. Use
 `none` there. On the release tier `cache` is admitted on credentialed leaves
 too, because the release root is written only by tag runs. Go's module and build caches tolerate

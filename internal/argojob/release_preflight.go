@@ -83,13 +83,6 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 				declare(step, path)
 			}
 		}
-		if templateUsesEnvconsul(t) {
-			// The legacy chain uses the workflow identity, whose policy only carries
-			// wildcard grants. Its configuration remains checked at release admission.
-			for _, path := range paths {
-				declare("*", path)
-			}
-		}
 		if _, ok := t.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation]; ok {
 			if tokenDisabled(t) || (wf.Spec.AutomountServiceAccountToken != nil && !*wf.Spec.AutomountServiceAccountToken) {
 				add(fmt.Errorf("release WIF step %q disables its service-account token", t.Name))

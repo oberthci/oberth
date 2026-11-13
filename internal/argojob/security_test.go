@@ -332,7 +332,7 @@ func TestBuildRefusesAReleaseThatCanNeverVerifyTheStore(t *testing.T) {
 // guess about which ones look internal.
 // TestBuildMountsReleaseTokenOnlyInCredentialedTemplates proves the release
 // tier's projected ServiceAccount token is mounted only in templates whose
-// container command is envconsul -- the credential chain. Non-credentialed
+// container command is secretstore exec -- the credential chain. Non-credentialed
 // templates in a release Workflow have no use for the login token and must not
 // carry it: mounting it widens the blast radius without enabling anything the
 // template would do with it.
@@ -362,23 +362,21 @@ spec:
     - name: publish
       container:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        command: [/tmp/tools/envconsul]
-        args: ["-once", "-config", "test.hcl"]
+        command: [oberth, secretstore, exec]
+        args: ["--path", "oberth/data/release/r2-upload-token", "--", "/bin/true"]
+    - name: ordinary-envconsul
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [envconsul]
 `
 	request := testRequest(pipeline.TriggerRelease, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
-	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
-		"test.hcl": `secret {
-  path = "oberth/data/release/r2-upload-token"
-}
-`,
-	})
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build release: %v", err)
 	}
 	// The projected volume must exist at the workflow level: it is what the
-	// kubelet uses to mint the token that envconsul presents to Vault.
+	// kubelet uses to mint the token that secretstore exec presents to Vault.
 	var projected *corev1.Volume
 	for index := range workflow.Spec.Volumes {
 		if workflow.Spec.Volumes[index].Name == ReleaseTokenVolumeName {
@@ -401,10 +399,10 @@ spec:
 				hasToken = true
 			}
 		}
-		if templateUsesEnvconsul(&template) && !hasToken {
+		if templateUsesOberthSecretstore(&template) && !hasToken {
 			t.Errorf("credentialed template %q does not mount the release token", template.Name)
 		}
-		if !templateUsesEnvconsul(&template) && hasToken {
+		if !templateUsesOberthSecretstore(&template) && hasToken {
 			t.Errorf("non-credentialed template %q mounts the release token", template.Name)
 		}
 	}

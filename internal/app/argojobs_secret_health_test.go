@@ -44,7 +44,7 @@ func (f admissionFragment) Load(_ context.Context, key argoworkflow.FragmentKey,
 }
 
 func TestCredentialClassificationFailsClosedBeforeSecretAccess(t *testing.T) {
-	for _, name := range []string{"branch-flag", "release", "promotion-flag", "declared-path", "secretstore", "envconsul", "inline-secretstore", "inline-wif", "fragment-secretstore", "promotion-secrets"} {
+	for _, name := range []string{"branch-flag", "release", "promotion-flag", "declared-path", "secretstore", "inline-secretstore", "inline-wif", "fragment-secretstore", "promotion-secrets"} {
 		t.Run(name, func(t *testing.T) {
 			fixture := newRaceFixture(t)
 			request := fixture.request("credentialed", "credentialed-run")
@@ -69,8 +69,6 @@ func TestCredentialClassificationFailsClosedBeforeSecretAccess(t *testing.T) {
 				}
 			case "secretstore":
 				source = strings.Replace(source, `["echo", "ok"]`, `["oberth", "secretstore", "exec"]`, 1)
-			case "envconsul":
-				source = strings.Replace(source, `["echo", "ok"]`, `["envconsul"]`, 1)
 			case "inline-secretstore", "inline-wif":
 				leaf := "              container:\n                image: alpine:3.20\n                command: [oberth, secretstore, exec]\n"
 				if name == "inline-wif" {

@@ -641,7 +641,7 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 // TestOberthReleasePipelineScopesTokenToCredentialedTemplates verifies that
 // Oberth's own release.yaml, built through the full admission chain, mounts
 // the release-tier login token only in the templates that use the credential
-// chain (secretstore exec or envconsul) and withholds it from non-credentialed
+// chain (secretstore exec) and withholds it from non-credentialed
 // templates (setup, lint, test, scan, chart-test, build, package-chart).
 func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
 	workflow, err := Build(oberthConfig(), Request{
@@ -695,7 +695,7 @@ func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
 // (the retired oberth-secret-materialize shim was one, and its NAME=path/key
 // mappings are why release.sh once read file-style names like
 // r2-upload-token/token). The store's fields carry env-var-style names
-// because the envconsul chain injected each field verbatim as an environment
+// because the removed environment-variable chain injected each field as an environment
 // variable (docs/argo-secret-delivery.md). v0.13.1's release burn failed at
 // its first credentialed step because release.sh still read the mapping-era
 // names, which no gate before the step itself could catch.

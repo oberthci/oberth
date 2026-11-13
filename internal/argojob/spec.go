@@ -122,7 +122,7 @@ type Config struct {
 
 	// VaultAddress and VaultCredentialedRole are injected into credentialed
 	// containers as VAULT_ADDR and OBERTH_VAULT_ROLE so a repository's
-	// envconsul invocation never hardcodes either. Both are server-owned: a
+	// secretstore exec invocation never hardcodes either. Both are server-owned: a
 	// document naming a different role still cannot use it, because the Vault
 	// role is bound to the ServiceAccount Oberth forced.
 	VaultAddress          string
@@ -615,12 +615,7 @@ type Request struct {
 // submit: decoded, admitted, identity-forced, and stamped with the server's own
 // metadata and bounds.
 //
-// It needs no cluster, exactly like internal/job.Build, so the whole admission
-// chain is testable from a directory. Its one filesystem dependency is
-// deliberate: envconsul admission reads the repository's own credential
-// configuration out of the immutable run workspace named by
-// request.SourceDir, because those files — not the document — decide what a
-// legacy-chain step fetches.
+// It needs no cluster, so document admission is testable before submission.
 func Build(config Config, request Request) (result *wfv1.Workflow, resultErr error) {
 	config.applyDefaults()
 	if err := config.ExecutionPlacement.selectRequest(config, request); err != nil {
@@ -764,7 +759,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, &argoworkflow.AdmissionError{Cause: err}
 	}
 	// A credentialed run without Vault coordinates would proceed through the
-	// entire build and die at the first envconsul login — a worse signal than
+	// entire build and die at the first secretstore exec login — a worse signal than
 	// failing at admission. Require both non-empty before any build work. The
 	// role is the TRIGGER'S OWN tier's role: a deployment that has never
 	// configured the CI-secrets role fails a CI credentialed submission here,
@@ -790,16 +785,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	// would run as the pipeline SA with no token and fail at the vault login.
 	if err := admitSecretstoreExecPaths(workflow, declaredPaths, request.StepGrants); err != nil {
 		return nil, &argoworkflow.AdmissionError{Cause: err}
-	}
-	// Admission gate for the legacy envconsul chain: every secret path its
-	// repository-authored configuration would fetch — `secret {}` stanzas in
-	// each -config file, -secret command-line flags — must appear in the same
-	// declared annotation, read from the immutable run workspace this
-	// submission executes. Without this, the annotation gates only the
-	// declaration while the fetch obeys the files (issue #200, second
-	// manifestation).
-	if err := admitEnvconsulSecretPaths(workflow, declaredPaths, request.SourceDir); err != nil {
-		return nil, err
 	}
 	if err := normalizeAndValidateDocument(workflow, request.Trigger); err != nil {
 		return nil, err
@@ -960,7 +945,7 @@ func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string, 
 		execPaths := extractExecPaths(template)
 		if len(execPaths) == 0 {
 			// A materialize invocation does not declare --path flags; it reads
-			// from environment variables set by envconsul. No path check needed.
+			// from environment variables set by secretstore exec. No path check needed.
 			return
 		}
 		if len(declaredPaths) == 0 {
@@ -1333,7 +1318,7 @@ const (
 	// ReleaseTokenVolumeName and ReleaseTokenMountPath deliver the projected
 	// ServiceAccount token a release-tier step logs in to OpenBao with. The
 	// path is the one Kubernetes has always used, because that is what every
-	// Vault client, including the envconsul configuration in a repository,
+	// Vault client, including the secretstore exec configuration in a repository,
 	// reads by default.
 	// #nosec G101 -- a volume name and a mount path. The token they deliver is
 	// minted by the kubelet inside the Pod; no credential exists here.
@@ -1499,7 +1484,7 @@ func cacheVolumeAndMount(config Config, request Request) (corev1.Volume, corev1.
 
 // injectServerVolumes mounts everything the server owns into the pipeline's
 // containers: the tier's persistent build cache, the run's immutable checkout,
-// and -- on the release tier, only in templates whose command is envconsul --
+// and -- on the release tier, only in templates whose command is secretstore exec --
 // the projected ServiceAccount token the credential chain logs in with. When
 // the pipeline declares a "work" volumeClaimTemplate, the standard
 // Go-toolchain workspace paths (tools, per-run fallback caches, trivy cache,
@@ -1592,7 +1577,7 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 	// The projected token volume is declared at the workflow level for every
 	// credentialed Workflow (release, or CI with declared secret-store paths),
 	// but the mount is scoped to credentialed templates -- those whose
-	// container command is envconsul. Non-credentialed templates (setup, lint,
+	// container command is secretstore exec. Non-credentialed templates (setup, lint,
 	// test, scan, chart-test, build, package-chart) carry no login token and
 	// cannot attempt a Vault login regardless of what their ServiceAccount is
 	// bound to.
@@ -1787,15 +1772,6 @@ func injectTemplateVolumeMounts(template *wfv1.Template, injected []corev1.Volum
 	}
 }
 
-// templateUsesEnvconsul reports whether a template's main container command is
-// the envconsul binary, which identifies it as a credentialed template that
-// needs the release-tier login token. The check matches the same condition the
-// existing tests use (oberth_pipeline_test.go, TestOberthReleasePipeline
-// WrapsCredentialedStepsWithEnvconsul).
-func templateUsesEnvconsul(template *wfv1.Template) bool {
-	return argoworkflow.UsesEnvconsul(template)
-}
-
 // templateUsesOberthSecretstore reports whether a template's main container
 // command is `oberth secretstore exec` or `oberth secretstore materialize`.
 // These are the native credential chain replacements that handle vault fetch,
@@ -1804,10 +1780,8 @@ func templateUsesOberthSecretstore(template *wfv1.Template) bool {
 	return argoworkflow.UsesOberthSecretstore(template)
 }
 
-// templateUsesCredentialChain reports whether a template uses any recognised
-// credential chain: envconsul (legacy) or oberth secretstore exec/materialize
-// (native). The rule lives in argoworkflow so the static plan marks the same
-// steps the credential mount injection reaches.
+// templateUsesCredentialChain recognizes oberth secretstore exec. The rule
+// lives in argoworkflow so planning and credential mounts select the same steps.
 func templateUsesCredentialChain(template *wfv1.Template) bool {
 	return argoworkflow.UsesSecrets(template)
 }
@@ -1858,9 +1832,9 @@ func extractExecPaths(template *wfv1.Template) []string {
 	return nil
 }
 
-// injectCredentialVolumeMounts adds the release-tier login token to templates
-// whose container command is envconsul -- the credential chain -- and to no
-// others. Non-credentialed templates in a release Workflow (setup, lint, test,
+// injectCredentialVolumeMounts adds the release-tier login token only to
+// templates whose main command is oberth secretstore exec. Other templates
+// in a release Workflow (setup, lint, test,
 // scan, chart-test, build, package-chart) have no use for the projected
 // ServiceAccount token and must not mount it.
 //
@@ -1875,9 +1849,8 @@ func injectCredentialVolumeMounts(template *wfv1.Template, mounts []corev1.Volum
 	if template == nil || depth > argoworkflow.MaxIdentityWalkDepth || len(mounts) == 0 {
 		return
 	}
-	// Mount the credential token ONLY on the exact Container or Script whose
-	// command is a recognised credential chain (envconsul or oberth secretstore
-	// exec/materialize). Init containers and sidecars are repository-selected
+	// Mount the credential token only on the Container or Script whose command
+	// is oberth secretstore exec. Init containers and sidecars are repository-selected
 	// images that do not need the store credential and must not receive it: an
 	// init container running before the main step, or a sidecar sharing the Pod
 	// network, could exfiltrate the projected token.
@@ -1897,7 +1870,7 @@ func injectCredentialVolumeMounts(template *wfv1.Template, mounts []corev1.Volum
 			return append(filtered, mounts...)
 		}
 		// Attach to the main container only when it runs a credential
-		// chain (envconsul or oberth secretstore exec/materialize).
+		// chain (oberth secretstore exec).
 		if template.Container != nil {
 			template.Container.VolumeMounts = attach(template.Container.VolumeMounts)
 		}
@@ -1908,7 +1881,7 @@ func injectCredentialVolumeMounts(template *wfv1.Template, mounts []corev1.Volum
 		// credential mount regardless of their command.
 	}
 	// Recurse into inline templates regardless: an inline child may use
-	// envconsul even when its parent template does not.
+	// secretstore exec even when its parent template does not.
 	for group := range template.Steps {
 		for step := range template.Steps[group].Steps {
 			injectCredentialVolumeMounts(template.Steps[group].Steps[step].Inline, mounts, depth+1)
@@ -2072,10 +2045,8 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 			corev1.EnvVar{Name: "OBERTH_VAULT_ROLE", Value: config.vaultRoleForWithRepo(request.Trigger, request.UpstreamName, request.UpstreamOrg, request.Repo)},
 		)
 		if request.vaultCADelivered() {
-			// The path, never the bytes. envconsul's Vault client reads
-			// VAULT_CACERT when its config declares no ssl block, so the
-			// repository's envconsul.hcl states how to authenticate and the
-			// server states what to trust -- consistent with VAULT_ADDR.
+			// Deliver the trust-anchor path used by secretstore exec,
+			// alongside the server-selected VAULT_ADDR.
 			environment = append(environment, corev1.EnvVar{Name: "VAULT_CACERT", Value: VaultCACertPath})
 		}
 	}

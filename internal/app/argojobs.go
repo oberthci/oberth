@@ -537,7 +537,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 // auditSubmission records the exact identity binding this run will execute
 // under, before the Workflow object exists.
 //
-// On this tier Oberth never holds the secret values: envconsul fetches them
+// On this tier Oberth never holds the secret values: secretstore exec fetches them
 // in-Pod, so there is nothing for the server to mask or log. The audit chain's
 // contribution is therefore the binding itself -- which run, which trigger,
 // which namespace, which ServiceAccount, and which paths the document declared
@@ -647,7 +647,7 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Wo
 		}
 	}
 	// Also record paths from the annotation with wildcard step for templates
-	// that use envconsul (legacy chain) or other patterns not captured above.
+	// that use declared paths not captured above.
 	declared := make(map[string]bool, len(declarations))
 	for _, d := range declarations {
 		declared[d.Step+"\x00"+d.Path] = true

@@ -422,7 +422,7 @@ argo:
 
   vault:
     # Injected into credentialed containers as VAULT_ADDR and
-    # OBERTH_VAULT_ROLE, so a repository's envconsul invocation never hardcodes
+    # OBERTH_VAULT_ROLE, so a repository's secretstore exec invocation never hardcodes
     # either. HTTPS is required. The role each run is told to use follows its
     # trigger: release runs get credentialedRole, CI runs get
     # argo.ciSecrets.vaultRole.

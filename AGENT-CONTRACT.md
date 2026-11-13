@@ -373,10 +373,6 @@ trust assumptions and complete invalidation rules.
     server-owned patch removes `wait` mirrors of both the secret volume and
     main release token after Argo adds them (#621); the effective admitted Pod
     must still be checked for those absent mounts.
-  - **Transitional:** `oberth secretstore materialize` absorbs the old
-    `oberth-secret-materialize` shim, reading from envconsul-set env vars.
-    `envconsul` remains the legacy path. Both chains produce the same
-    `$OBERTH_SECRETSTORE_DIR` file layout and the same env stripping.
   Values and value-derived digests never appear in etcd, Job annotations,
   node disk (on swapless nodes or verified RAM-only zram), or server-side
   logs; only names and paths are annotated. `secretstore exec` exempts active
@@ -433,12 +429,9 @@ Original object UID and intent continue to fence recovery and cleanup. See
   when per-repo isolation exists for other repos would leak cross-repo or
   cross-org secrets. The CI system-path prohibition (branch pipelines may
   not declare system-namespace paths) and the approval-table grant check
-  are enforced as defense in depth on top of the identity switch. Secret paths a repository-authored envconsul
-  configuration (`secret {}` stanzas in `-config` files, `-secret` flags) or
-  an `oberth secretstore exec --path` invocation would fetch are
-  admission-checked against the declared annotation, with envconsul
-  configuration read from the immutable run workspace; a config file outside
-  the source checkout is refused. The YAML must not declare
+  are enforced as defense in depth on top of the identity switch. Secret paths an
+  `oberth secretstore exec --path` invocation would fetch are
+  admission-checked against the declared annotation. The YAML must not declare
   `serviceAccountName`.
 - **AI-CONTRACT:** Explicit `automountServiceAccountToken: false` remains false
   through forced identity assignment, including workflow/default opt-outs and
@@ -2060,7 +2053,7 @@ Original object UID and intent continue to fence recovery and cleanup. See
   It grants no Pod, `pods/log` or `pods/exec` access. The separate pipeline
   namespace Role grants `pods/exec` create only for source seeding into
   run-scoped volumes. Pipeline secrets arrive through projected identity
-  tokens and envconsul, not through the exec stream. The optional
+  tokens and secretstore exec, not through the exec stream. The optional
   `secretstore.createAuthDelegatorBinding` ClusterRoleBinding lets OpenBao
   validate login tokens through TokenReview without a stored reviewer JWT.
   Argo-authored workflows

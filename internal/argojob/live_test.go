@@ -200,7 +200,7 @@ func TestLiveBranchSubmissionCannotReachTheCredentialedServiceAccount(t *testing
 
 	// This is the assertion the whole tier separation rests on: the step
 	// container -- where the repository's own commands run, and where an
-	// envconsul invocation would look for a token -- must have no
+	// secretstore exec invocation would look for a token -- must have no
 	// ServiceAccount token mounted anywhere in its filesystem. Argo's executor
 	// gets one, under a different identity, in a different container.
 	main := containerNamed(t, pod, mainContainerName)

@@ -53,24 +53,6 @@ func DeclaredSecretPaths(workflow *wfv1.Workflow) ([]string, error) {
 	return paths, nil
 }
 
-// UsesEnvconsul reports whether a template's main container command is the
-// envconsul binary, the legacy credential chain that needs the secret store
-// login token.
-func UsesEnvconsul(template *wfv1.Template) bool {
-	isEnvconsul := func(command []string) bool {
-		command = legacyCredentialCommand(command)
-		return len(command) > 0 &&
-			(strings.HasSuffix(command[0], "/envconsul") || command[0] == "envconsul")
-	}
-	if template.Container != nil && isEnvconsul(template.Container.Command) {
-		return true
-	}
-	if template.Script != nil && isEnvconsul(template.Script.Command) {
-		return true
-	}
-	return false
-}
-
 // UsesOberthSecretstore reports whether a template's main container command
 // is `oberth secretstore exec`, the native
 // credential chain that handles the store fetch, file materialisation, env
@@ -104,12 +86,12 @@ func UsesOberthSecretstore(template *wfv1.Template) bool {
 }
 
 // UsesSecrets reports whether a template runs any recognised credential
-// chain: envconsul (legacy) or oberth secretstore exec (native).
+// chain: oberth secretstore exec.
 // The server mounts the secret store login token into exactly these Pods and
 // no others, so this is also what marks a planned step as one that reads
 // secrets.
 func UsesSecrets(template *wfv1.Template) bool {
-	return UsesEnvconsul(template) || UsesOberthSecretstore(template)
+	return UsesOberthSecretstore(template)
 }
 
 // UsesCredentials is the shared credential-admission and replay-plan predicate.

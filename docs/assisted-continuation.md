@@ -135,7 +135,7 @@ A leaf is held only when it has no credentials and no identity of its own:
 - no `timeout` on the template or in `templateDefaults`: Argo resets the
   Pod deadline to it after the hold's patch, so a parked attempt would die
   at the timeout;
-- no `oberth secretstore exec` or envconsul command, no
+- no `oberth secretstore exec` or secretstore exec command, no
   `oberth.ci/release-wif-role`, no per-step `serviceAccountName`, no
   `automountServiceAccountToken: true`, no token, secret or WIF volume
   mount;
