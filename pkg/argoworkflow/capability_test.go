@@ -180,3 +180,45 @@ func TestCapabilityRefusesResourceTemplatesFromPinnedFragments(t *testing.T) {
 		})
 	}
 }
+
+// Custom annotation fields are opaque grant data even when their names suggest
+// Pods or templates. Only exact metadata/podMetadata parents define a boundary.
+func TestGrantedResourceAnnotationsFollowObjectMetadata(t *testing.T) {
+	policy := capabilityPolicyForTest(t)
+	for _, c := range []struct {
+		name     string
+		body     string
+		admitted bool
+	}{
+		{"top metadata", `"metadata":{"name":"x","annotations":{"example.test/hook":"on"}}`, false},
+		{"top podMetadata", `"metadata":{"name":"x"},"podMetadata":{"annotations":{"example.test/hook":"on"}}`, false},
+		{"nested metadata", `"metadata":{"name":"x"},"spec":{"template":{"metadata":{"annotations":{"example.test/hook":"on"}}}}`, false},
+		{"nested podMetadata", `"metadata":{"name":"x"},"spec":{"worker":{"podMetadata":{"annotations":{"example.test/hook":"on"}}}}`, false},
+		{"list metadata", `"metadata":{"name":"x"},"spec":{"workers":[{"metadata":{"annotations":{"example.test/hook":"on"}}}]}`, false},
+		{"list podMetadata", `"metadata":{"name":"x"},"spec":{"workers":[{"settings":{"podMetadata":{"annotations":{"example.test/hook":"on"}}}}]}`, false},
+		{"annotation case variant", `"metadata":{"name":"x","Annotations":{"example.test/hook":"on"}}`, false},
+		{"unicode annotation variant", `"metadata":{"name":"x"},"spec":{"podMetadata":{"annotationſ":{"example.test/hook":"on"}}}`, false},
+		{"metadata case variant", `"metadata":{"name":"x"},"spec":{"Metadata":{"annotations":{"example.test/hook":"on"}}}`, false},
+		{"podMetadata case variant", `"metadata":{"name":"x"},"spec":{"PodMetadata":{"ANNOTATIONS":{"example.test/hook":"on"}}}`, false},
+		{"empty object annotations", `"metadata":{"name":"x","annotations":{}},"spec":{"podMetadata":{"annotations":null}}`, true},
+		{"secretTemplate annotations", `"metadata":{"name":"x"},"spec":{"secretTemplate":{"annotations":{"example.test/secret":"on"}}}`, true},
+		{"Service annotations field", `"metadata":{"name":"x"},"spec":{"serviceAnnotations":{"service.beta.kubernetes.io/example":"on"}}`, true},
+		{"pod name is opaque", `"metadata":{"name":"x"},"spec":{"podTemplate":{"annotations":{"example.test/hook":"on"}}}`, true},
+		{"list custom annotations", `"metadata":{"name":"x"},"spec":{"workers":[{"settings":{"annotations":{"example.test/hook":"on"}}}]}`, true},
+		{"annotation suffix is opaque", `"metadata":{"name":"x"},"spec":{"metadata":{"customAnnotations":{"example.test/data":{"opaque":true}}}}`, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			manifest := `{"apiVersion":"tasks.example.test/v1","kind":"Task",` + c.body + `}`
+			wf := decodeAdmissible(t, nil)
+			wf.Spec.Templates[0].Container = nil
+			wf.Spec.Templates[0].Resource = &wfv1.ResourceTemplate{Action: "create", Manifest: manifest}
+			err := Admit(wf, policy)
+			if (err == nil) != c.admitted {
+				t.Fatalf("admission = %v, want admitted %v", err, c.admitted)
+			}
+			if got := wf.Spec.Templates[0].Resource.Manifest; got != manifest {
+				t.Fatal("resource manifest was rewritten")
+			}
+		})
+	}
+}

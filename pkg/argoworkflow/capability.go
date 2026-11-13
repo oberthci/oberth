@@ -181,9 +181,8 @@ func resourcePriorityOverride(value any) bool {
 		value, pending = pending[len(pending)-1], pending[:len(pending)-1]
 		switch node := value.(type) {
 		case map[string]any:
-			// A controller can copy metadata from any parent field, including
-			// list entries. Inspect its shape at every depth, not its parent's
-			// spelling or the granted resource kind.
+			// Inspect metadata envelopes and label maps at every depth,
+			// including list entries, without interpreting the granted API.
 			if resourceMetadataOverride(node, false) {
 				return true
 			}
@@ -206,12 +205,11 @@ func resourcePriorityOverride(value any) bool {
 	return false
 }
 
-// An opaque operator API may propagate its metadata onto a Pod. Apply the
-// same boundary to metadata envelopes rather than guessing each granted kind.
+// Refuse annotations only in metadata/podMetadata envelopes. Other annotation
+// fields belong to the granted API; the operator controls what reaches Pods.
 func resourceMetadataOverride(metadata map[string]any, envelope bool) bool {
 	for name, value := range metadata {
-		// APIs also expose direct podAnnotations/podLabels-style maps.
-		// This is independent of the resource kind and parent field name.
+		// Preserve the label boundary for direct podLabels-style maps.
 		// Kubernetes label selectors read Pod labels; they do not write
 		// them. Native affinity may select even server-owned label keys.
 		if strings.EqualFold(name, "matchLabels") {
@@ -219,6 +217,9 @@ func resourceMetadataOverride(metadata map[string]any, envelope bool) bool {
 		}
 		field := resourceMetadataFieldPattern.FindString(name)
 		if field == "" {
+			continue
+		}
+		if strings.EqualFold(field, "annotations") && (!envelope || !strings.EqualFold(name, "annotations")) {
 			continue
 		}
 		if value == nil {
