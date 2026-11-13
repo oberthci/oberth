@@ -915,6 +915,22 @@
     "flag:argo-namespace-parallelism": {
       "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
       "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
+    },
+    "flag:argo-vault-ca-cert": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier"
+    },
+    "flag:argo-vault-ci-secrets-role": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildRefusesCICredentialedWithoutCISecretsRole"
+    },
+    "flag:argo-vault-address": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildInjectsRunIdentityAndVaultCoordinates"
+    },
+    "flag:argo-vault-credentialed-role": {
+      "doc_anchor": "docs/argo-secret-delivery.md",
+      "test_ref": "internal/argojob/spec_test.go TestBuildInjectsRunIdentityAndVaultCoordinates"
     }
   }
 }

@@ -90,9 +90,10 @@ func (service *API) dismissAccess(ctx context.Context, actor api.Actor, raw json
 		return nil, err
 	}
 	var args struct {
-		Repo   string `json:"repo"`
-		Step   string `json:"step"`
-		Secret string `json:"secret"`
+		Repo     string `json:"repo"`
+		Workflow string `json:"workflow"`
+		Step     string `json:"step"`
+		Secret   string `json:"secret"`
 	}
 	if err := decodeTool(raw, &args); err != nil {
 		return nil, err
@@ -101,15 +102,15 @@ func (service *API) dismissAccess(ctx context.Context, actor api.Actor, raw json
 		return nil, refuse(ErrUnavailable, "access dismissal")
 	}
 	repo := args.Repo
-	if err := service.declarationDismissal.DismissGrantDeclaration(ctx, actor.Identity, repo, args.Step, args.Secret); err != nil {
+	if err := service.declarationDismissal.DismissGrantDeclaration(ctx, actor.Identity, repo, args.Workflow, args.Step, args.Secret); err != nil {
 		if errors.Is(err, store.ErrInvalid) {
 			return nil, fmt.Errorf("%w: %s", ErrInvalidInput, err.Error())
 		}
 		return nil, err
 	}
-	return map[string]any{"dismissed": true, "repo": repo, "step": args.Step, "secret": args.Secret}, nil
+	return map[string]any{"dismissed": true, "repo": repo, "workflow": args.Workflow, "step": args.Step, "secret": args.Secret}, nil
 }
 
 type DeclarationDismissal interface {
-	DismissGrantDeclaration(context.Context, string, string, string, string) error
+	DismissGrantDeclaration(context.Context, string, string, string, string, string) error
 }

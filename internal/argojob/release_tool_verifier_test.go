@@ -163,7 +163,7 @@ func TestPublisherVerifierHasCredentialFreeRetainedLogGate(t *testing.T) {
 func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testing.T) {
 	config := oberthConfig()
 	config.ReleaseCacheRoot = "/var/cache/oberth/release"
-	workflow, err := Build(config, Request{
+	workflow, err := buildOberthPipeline(config, Request{
 		RunID: "bootstrap-environment", Name: "oberth-bootstrap-environment",
 		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "v1.2.3", SHA: testSHA,
 		Trigger: pipeline.TriggerRelease, Source: loadPipeline(t, "release.yaml"),

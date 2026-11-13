@@ -98,7 +98,7 @@ type grantRefusingReleaseJobs struct {
 }
 
 func (jobs *grantRefusingReleaseJobs) CreateRelease(ctx context.Context, request WorkflowRequest) error {
-	grants, err := jobs.database.ActiveSecretGrants(ctx, request.Repository.ID)
+	grants, err := jobs.database.ActiveSecretGrants(ctx, request.Repository.ID, ".oberth/release.yaml")
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func TestTagRerunAfterReleaseGrantAdmissionRefusal(t *testing.T) {
 	if failed.Status != model.RunFailed || !strings.Contains(failed.Error, "secret grant denied") || len(harness.git.syncedTags) != 0 {
 		t.Fatalf("admission refusal=%+v", failed)
 	}
-	if _, err := harness.fixture.store.Grant(context.Background(), "codeberg/acme/oberth", "publish", "oberth/data/release/signing", "admin"); err != nil {
+	if _, err := harness.fixture.store.Grant(context.Background(), "codeberg/acme/oberth", ".oberth/release.yaml", "publish", "oberth/data/release/signing", "admin"); err != nil {
 		t.Fatal(err)
 	}
 	response := harness.rerun(t, rerunAdmin, map[string]any{"id": failed.ID, "force": true, "reason": "release grant approved"})

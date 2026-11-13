@@ -93,6 +93,9 @@ ALTER TABLE repositories_live RENAME TO repositories;
 DELETE FROM schedule_fires;
 INSERT INTO schedule_fires(repo, entry, fired_at, outcome) VALUES('terraform', 'nightly', 1000, 'fired');
 DELETE FROM secret_access;
+DROP INDEX secret_access_active;
+ALTER TABLE secret_access DROP COLUMN workflow;
+CREATE UNIQUE INDEX secret_access_active ON secret_access(repo,step,secret) WHERE revoked_at IS NULL;
 INSERT INTO secret_access(repo, step, secret, approved_by, approved_at) VALUES('terraform', '*', 'oberth/data/release/cosign-secret', 'admin@test', 1000);
 DROP TABLE vm_suite_resources;
 DROP TABLE vm_suite_executions;
@@ -191,13 +194,10 @@ PRAGMA foreign_keys = ON;`); err != nil {
 		t.Fatalf("schedule_fires key = %q, want codeberg/acme/terraform", scheduleRepo)
 	}
 
-	// The grant key must be qualified by the v12 data migration.
-	var grantRepo string
-	if err := s2.db.QueryRowContext(ctx, `SELECT repo FROM secret_access`).Scan(&grantRepo); err != nil {
-		t.Fatal(err)
-	}
-	if grantRepo != "codeberg/acme/terraform" {
-		t.Fatalf("secret_access key = %q, want codeberg/acme/terraform", grantRepo)
+	// The workflow-scope migration clears approvals instead of backfilling them.
+	var grantCount int
+	if err := s2.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM secret_access`).Scan(&grantCount); err != nil || grantCount != 0 {
+		t.Fatalf("pre-scope approvals survived: %d, %v", grantCount, err)
 	}
 
 	// v16 (#658) lands on the live lineage as well: the retired column

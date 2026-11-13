@@ -243,8 +243,8 @@ func printProductionCredentials(w io.Writer, initResult baoInitResult, color boo
 	_, _ = fmt.Fprintln(w)
 }
 
-// OberthCredentialedPolicy returns the HCL policy for credentialed pipeline
-// templates. It grants read access to registered upstream subtrees only; the
+// OberthCredentialedPolicy returns the HCL policy for the store login identity
+// used by granted steps. It grants read access to registered upstream subtrees only; the
 // approval table in Oberth's database is the fine-grained admission gate,
 // and any non-upstream paths (e.g. release secrets) require explicit
 // approval-table entries that are synced to the policy via

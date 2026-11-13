@@ -160,6 +160,7 @@ func TestBuildAcceptsAFragmentUsingADeclaredAndApprovedPath(t *testing.T) {
 	source := consumingDocument("    oberth.ci/secret-paths: oberth/data/release/approved\n", key.String())
 	request := fragmentRequest(t, source, map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 	request.Trigger = pipeline.TriggerRelease
+	request.PipelineFile = argoworkflow.ReleaseFile
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/approved": true}
 
 	if _, err := Build(testConfig(), request); err != nil {

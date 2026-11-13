@@ -93,6 +93,23 @@ func TestCapabilityBuildBindsOperatorIdentityAndRefusesEscapes(t *testing.T) {
 	secret := "oberth/upstream/acme/oberth/test-secret"
 	r = requestWithCapability(t, strings.Replace(operatorResourceDocument, "example.com/tier: L", "example.com/tier: L\n    oberth.ci/secret-paths: "+secret, 1), c)
 	r.ApprovedSecrets[secret] = true
+	source, err := argoworkflow.Decode(r.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer, err := argoworkflow.Decode([]byte(greedyDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := consumer.Spec.Templates[0]
+	leaf.Name = "consume-secret"
+	leaf.Container.Command = []string{"oberth", "secretstore", "exec", "--path=" + secret, "--", "/bin/true"}
+	source.Spec.Templates = append(source.Spec.Templates, leaf)
+	r.Source, err = json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.StepGrants = map[string]map[string]bool{secret: {"consume-secret": true}}
 	if _, err := Build(testConfig(), r); err == nil {
 		t.Fatal("operator authority combined with secret access")
 	}

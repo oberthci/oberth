@@ -98,7 +98,6 @@ type RunQueueStore interface {
 	SetRunPolicyWaiting(context.Context, string, bool) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
 	SetRunWorkflowName(context.Context, string, string) (model.Run, error)
-	SetRunCredentialed(context.Context, string) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
 	CompleteRunCancellation(context.Context, string, string) error
 	CompleteObservedRunCancellation(context.Context, model.RunCancellation) error
@@ -206,8 +205,8 @@ type AuditActionReader interface {
 // store directly.
 type SecretAccessStore interface {
 	SecretAccessList(ctx context.Context, repo string, includeRevoked bool) ([]store.SecretAccessGrant, error)
-	Grant(ctx context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error)
-	Revoke(ctx context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error)
+	Grant(ctx context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error)
+	Revoke(ctx context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error)
 	// QualifiedRepoName resolves a repository ID to its canonical
 	// "upstream/org/repo" form. Used by access grant/revoke handlers to
 	// store grants with identity-safe keys (#245 BLOCKER B).
@@ -360,7 +359,7 @@ type WorkflowRequest struct {
 	Run           model.Run
 	Repository    model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
-	// resolved by the scheduler for all credentialed runs. Used to
+	// resolved by the scheduler for each submission. Used to
 	// construct canonical per-repo identity keys.
 	UpstreamName string
 	// UpstreamOrg is the registered org of the repository's upstream
@@ -452,15 +451,6 @@ type ReleaseJobController interface {
 // steps appear as execution reaches them.
 type PipelinePlanner interface {
 	PlannedSteps(context.Context, WorkflowRequest) ([]runprogress.PlannedStep, error)
-}
-
-// PipelineCredentialDetector reports whether the checked-out pipeline declares
-// secret-store paths. It reads the reviewed document
-// without evaluating it. An engine that does not implement this interface is
-// assumed to have no credentialed CI pipelines; release runs are always
-// credentialed regardless.
-type PipelineCredentialDetector interface {
-	PipelineCredentialed(context.Context, WorkflowRequest) (bool, error)
 }
 
 type Health interface {

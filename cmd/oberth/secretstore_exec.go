@@ -58,6 +58,9 @@ const (
 var secretExecFstatfs = defaultSecretExecFstatfs
 var secretExecEUID = os.Geteuid
 
+// Tests supply a private projected-token fixture; production uses the default mount.
+var newSecretExecClient = secretstore.New
+
 // swapCheckPath is the path to check for active swap devices. Tests replace
 // it to avoid depending on the host's swap configuration.
 var swapCheckPath = "/proc/swaps"
@@ -109,11 +112,11 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 	// Coordinates come from server-injected env, never from the repository.
 	vaultAddr := os.Getenv("VAULT_ADDR")
 	if vaultAddr == "" {
-		return errors.New("VAULT_ADDR is not set; this command must run in a credentialed Oberth pipeline container")
+		return errors.New("VAULT_ADDR is not set; this command must run in an Oberth step granted secret-store access")
 	}
 	vaultRole := os.Getenv("OBERTH_VAULT_ROLE")
 	if vaultRole == "" {
-		return errors.New("OBERTH_VAULT_ROLE is not set; this command must run in a credentialed Oberth pipeline container")
+		return errors.New("OBERTH_VAULT_ROLE is not set; this command must run in an Oberth step granted secret-store access")
 	}
 
 	// Optional CA cert path from the server-injected VAULT_CACERT.
@@ -126,7 +129,7 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 		caPEM = body
 	}
 
-	client, err := secretstore.New(secretstore.Config{
+	client, err := newSecretExecClient(secretstore.Config{
 		Address:   vaultAddr,
 		Role:      vaultRole,
 		CACertPEM: caPEM,

@@ -87,7 +87,9 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 		if err != nil {
 			return
 		}
-		collector.recordDeclarations(ctx, request, resolved, trigger)
+		fileRequest := request
+		fileRequest.PipelineFile = file
+		collector.recordDeclarations(ctx, fileRequest, resolved, trigger)
 	}
 	stage = "replace"
 	if err := recorder.ReplaceGrantDeclarations(ctx, repo, sha, snapshot.declarations); err != nil {

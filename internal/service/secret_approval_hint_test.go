@@ -13,7 +13,7 @@ import (
 
 func TestUnapprovedSecretBuildRefusalOffersYAMLAndOperatorRemedies(t *testing.T) {
 	config := argojob.Config{Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "credentialed", CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor"}
-	source := "apiVersion: argoproj.io/v1alpha1\nkind: Workflow\nmetadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/org/repo/credential\nspec:\n  entrypoint: test\n  templates:\n  - name: test\n    container:\n      image: golang:1.26-alpine@sha256:" + strings.Repeat("a", 64) + "\n      command: [/bin/true]\n"
+	source := "apiVersion: argoproj.io/v1alpha1\nkind: Workflow\nmetadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/org/repo/credential\nspec:\n  entrypoint: test\n  templates:\n  - name: test\n    container:\n      image: golang:1.26-alpine@sha256:" + strings.Repeat("a", 64) + "\n      command: [oberth, secretstore, exec, --path=oberth/upstream/org/repo/credential, --, /bin/true]\n"
 	_, err := argojob.Build(config, argojob.Request{RunID: "run-1", RepositoryID: 1, Name: "workflow", Repo: "repo", UpstreamOrg: "org", Ref: "refs/heads/branch", SHA: strings.Repeat("a", 40), Trigger: pipeline.TriggerCI, Source: []byte(source), ApprovedSecrets: map[string]bool{}})
 	var refusal *argoworkflow.AdmissionError
 	if !errors.As(err, &refusal) || !strings.Contains(err.Error(), "unapproved secret path") {

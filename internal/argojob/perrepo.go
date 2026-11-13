@@ -30,7 +30,7 @@ func canonicalRepoKey(upstreamName, org, repo string) string {
 	return model.CanonicalRepoKey(upstreamName, org, repo)
 }
 
-// identityForPerRepo selects the per-repo identity for a credentialed run.
+// identityForPerRepo selects the per-repo identity for a granted secret step.
 // It returns the per-repo identity if one exists for this repo; otherwise
 // it returns false and the caller falls back to the shared tier identity.
 func (config Config) identityForPerRepo(upstreamName, org, repo string) (argoworkflow.Identity, bool) {
@@ -43,10 +43,9 @@ func (config Config) identityForPerRepo(upstreamName, org, repo string) (argowor
 		return argoworkflow.Identity{}, false
 	}
 	return argoworkflow.Identity{
-		Namespace:                    config.Namespace,
-		ServiceAccountName:           perRepo.ServiceAccountName,
-		ExecutorServiceAccountName:   config.ExecutorServiceAccount,
-		AutomountServiceAccountToken: true,
+		Namespace:                  config.Namespace,
+		ServiceAccountName:         perRepo.ServiceAccountName,
+		ExecutorServiceAccountName: config.ExecutorServiceAccount,
 	}, true
 }
 
@@ -78,10 +77,9 @@ func (config Config) identityForPerRepoCI(upstreamName, org, repo string) (argow
 		return argoworkflow.Identity{}, false
 	}
 	return argoworkflow.Identity{
-		Namespace:                    config.Namespace,
-		ServiceAccountName:           perRepo.ServiceAccountName,
-		ExecutorServiceAccountName:   config.ExecutorServiceAccount,
-		AutomountServiceAccountToken: true,
+		Namespace:                  config.Namespace,
+		ServiceAccountName:         perRepo.ServiceAccountName,
+		ExecutorServiceAccountName: config.ExecutorServiceAccount,
 	}, true
 }
 

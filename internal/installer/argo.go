@@ -261,9 +261,9 @@ func VerifyArgoController(ctx context.Context, cfg Config, deps Deps) error {
 // When the installer manages a secret store and no explicit --argo-vault-address
 // was given, the effective address defaults to the installed store's service
 // address. This ensures that the first push after a default
-// `oberth install --install-secretstore` produces credentialed release steps
+// `oberth install --install-secretstore` produces granted secret-consuming steps
 // that can reach the installed store — without this, argo.vault.address stays
-// empty and credentialed release steps cannot reach the installed store.
+// empty and granted secret-consuming steps cannot reach the installed store.
 func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	ns := cfg.ArgoNamespace
 	if ns == "" {
@@ -276,7 +276,7 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	// store the installer just provisioned. The HTTPS guard mirrors the
 	// validator's own rejection of plaintext vault addresses: release-tier
 	// credentials traverse the network, and dev-mode HTTP stores are not
-	// wired here because they cannot serve credentialed releases. The
+	// wired here because they cannot serve granted secret-consuming steps. The
 	// CA-pinning condition below then fires automatically because address
 	// equals ServiceAddress.
 	if address == "" && cfg.wantsSecretStore() {

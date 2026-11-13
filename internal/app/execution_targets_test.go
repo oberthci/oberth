@@ -393,9 +393,6 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if steps, err := f.jobs.PlannedSteps(ctx, request); err != nil || len(steps) != 1 {
 		t.Fatal(steps, err)
 	}
-	if credentialed, err := f.jobs.PipelineCredentialed(ctx, request); err != nil || credentialed {
-		t.Fatal(credentialed, err)
-	}
 	receipt, err := f.jobs.ResolvePipelineSource(ctx, request)
 	if err != nil || receipt == nil {
 		t.Fatal(receipt, err)

@@ -1963,6 +1963,9 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := output.String()
+	if strings.Contains(text, "all secret approvals are cleared; re-approve.") {
+		t.Fatal("dry run falsely reports approvals cleared", text)
+	}
 	if !strings.Contains(text, "Schema migration v17 will run") {
 		t.Fatalf("expected schema migration announcement, got: %q", text)
 	}

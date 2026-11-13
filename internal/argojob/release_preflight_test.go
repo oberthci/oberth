@@ -39,7 +39,7 @@ func TestReleasePreflightReportsEveryGrantAndWIFGap(t *testing.T) {
 	}
 	problems := strings.Join(result.Problems, "\n")
 	for _, step := range []string{"main", "publish-other"} {
-		args, _ := json.Marshal(map[string]string{"repo": "github/acme/oberth", "step": step, "secret": "oberth/data/release/signing"})
+		args, _ := json.Marshal(map[string]string{"repo": "github/acme/oberth", "workflow": ".oberth/release.yaml", "step": step, "secret": "oberth/data/release/signing"})
 		if !strings.Contains(problems, "access_allow "+string(args)) || !strings.Contains(problems, "step \""+step+"\": argojob: release WIF") {
 			t.Fatalf("missing remediation for %s: %s", step, problems)
 		}
@@ -61,8 +61,9 @@ func TestReleasePreflightGrantAndMaterializationAreSeparate(t *testing.T) {
 		t.Fatalf("%+v %v", result, err)
 	}
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"github/acme/oberth/main":          {ServiceAccountName: "step-main"},
-		"github/acme/oberth/publish-other": {ServiceAccountName: "step-other"},
+		"github/acme/oberth/.oberth/release.yaml/*":             {ServiceAccountName: testCredentialedAcct},
+		"github/acme/oberth/.oberth/release.yaml/main":          {ServiceAccountName: "step-main"},
+		"github/acme/oberth/.oberth/release.yaml/publish-other": {ServiceAccountName: "step-other"},
 	}
 	result, err = PreflightRelease(config, r)
 	if err != nil || len(result.Problems) != 0 {
@@ -99,11 +100,12 @@ func TestReleasePreflightReportsEffectiveWIFSubject(t *testing.T) {
 			config.ReleaseWIF.Repositories["github/acme/oberth"].Templates["publish-other"] = "image-writer"
 			r.ApprovedSecrets["oberth/data/release/signing"] = true
 			r.StepGrants["oberth/data/release/signing"] = map[string]bool{"*": true}
-			wantSA := "oberth-per-repo"
+			wantSA := testCredentialedAcct
 			if named {
 				r.StepGrants["oberth/data/release/signing"]["main"] = true
 				config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-					"github/acme/oberth/main": {ServiceAccountName: "step-main"},
+					"github/acme/oberth/.oberth/release.yaml/*":    {ServiceAccountName: testCredentialedAcct},
+					"github/acme/oberth/.oberth/release.yaml/main": {ServiceAccountName: "step-main"},
 				}
 				wantSA = "step-main"
 			}
@@ -125,7 +127,7 @@ func TestReleasePreflightReportsEffectiveWIFSubject(t *testing.T) {
 			if !strings.Contains(checks, want) || strings.Contains(checks, "untrusted-authored-account") {
 				t.Fatalf("effective identity missing or authored identity trusted: %s", checks)
 			}
-			if strings.Contains(checks, "cloud trust must include") != named {
+			if !strings.Contains(checks, "cloud trust must include") {
 				t.Fatalf("WIF warning mismatch: %s", checks)
 			}
 		})
@@ -182,7 +184,8 @@ func TestReleasePreflightSnapshotPreservesConfiguredSteps(t *testing.T) {
 	r.ApprovedSecrets["oberth/data/release/signing"] = true
 	r.StepGrants["oberth/data/release/signing"] = map[string]bool{"main": true, "*": true}
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"github/acme/oberth/main": {ServiceAccountName: "step-main"},
+		"github/acme/oberth/.oberth/release.yaml/*":    {ServiceAccountName: testCredentialedAcct},
+		"github/acme/oberth/.oberth/release.yaml/main": {ServiceAccountName: "step-main"},
 	}
 	r.Identities = &IdentitySnapshot{Release: config.PerRepoIdentities, CI: config.PerRepoCIIdentities}
 	result, err := PreflightRelease(config, r)

@@ -139,10 +139,10 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.Grant(ctx, qualified, "release", "oberth/data/"+upstream+"/token", "owner@example-node"); err != nil {
+		if _, err := database.Grant(ctx, qualified, ".oberth/release.yaml", "release", "oberth/data/"+upstream+"/token", "owner@example-node"); err != nil {
 			t.Fatal(err)
 		}
-		if err := database.RecordGrantDeclarations(ctx, qualified, setup.repo.Name+"-sha", []store.GrantDeclaration{{Step: "deploy", Path: "oberth/data/" + upstream + "/pending"}}); err != nil {
+		if err := database.RecordGrantDeclarations(ctx, qualified, setup.repo.Name+"-sha", []store.GrantDeclaration{{Workflow: ".oberth/release.yaml", Step: "deploy", Path: "oberth/data/" + upstream + "/pending"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -493,8 +493,8 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	fixture := newScopeFixture(t)
 	hiddenRepo := "codeberg/exampleorg/" + hiddenRepoName
 	for tool, arguments := range map[string]map[string]any{
-		"access_allow":               {"repo": hiddenRepo, "step": "deploy", "secret": "oberth/data/x"},
-		"access_revoke":              {"repo": hiddenRepo, "step": "release", "secret": "oberth/data/codeberg/token"},
+		"access_allow":               {"repo": hiddenRepo, "workflow": ".oberth/release.yaml", "step": "deploy", "secret": "oberth/data/x"},
+		"access_revoke":              {"repo": hiddenRepo, "workflow": ".oberth/release.yaml", "step": "release", "secret": "oberth/data/codeberg/token"},
 		"workflow_capability_grant":  {"repo": hiddenRepo, "capability": map[string]any{"namespace": "pipelines", "service_account": "operator-worker", "extended_resources": map[string]int{"devices.example.test/worker": 2}}},
 		"workflow_capability_revoke": {"repo": hiddenRepo},
 		"repo_remove":                {"repo": hiddenRepo},
@@ -523,7 +523,7 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 		t.Fatalf("hidden repository removed: %v", err)
 	}
 	// Inside the scope the admin still acts.
-	if _, err := fixture.call(scopedAdmin, "access_allow", map[string]any{"repo": "github/oberthci/oberth", "step": "deploy", "secret": "oberth/data/github/deploy"}); err != nil {
+	if _, err := fixture.call(scopedAdmin, "access_allow", map[string]any{"repo": "github/oberthci/oberth", "workflow": ".oberth/release.yaml", "step": "deploy", "secret": "oberth/data/github/deploy"}); err != nil {
 		t.Fatalf("in-scope access_allow: %v", err)
 	}
 }

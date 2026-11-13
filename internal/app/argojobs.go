@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
@@ -41,11 +39,11 @@ type argoControl interface {
 // The repository is identified by its durable ID to prevent same-name
 // repos under different upstreams from aliasing each other's grants.
 type SecretAccessLoader interface {
-	ActiveSecretGrants(ctx context.Context, repoID int64) (map[string]map[string]bool, error)
+	ActiveSecretGrants(ctx context.Context, repoID int64, workflow string) (map[string]map[string]bool, error)
 }
 
 // ReconcilerHealthChecker reports whether the access reconciler has completed
-// at least one successful reconciliation. Credentialed admission must not
+// at least one successful reconciliation. Admission of granted secret steps must not
 // proceed before the initial reconcile succeeds, because a transient initial
 // ConfigMap Get failure would leave stale grants active in sqlite.
 type ReconcilerHealthChecker interface {
@@ -139,7 +137,7 @@ var ErrSuperseded = errors.New("app: Workflow superseded during creation")
 
 // SetReconcilerHealth wires the reconciler health check after construction.
 // This exists because the reconciler may be created after the engine in the
-// initialization order. Once set, credentialed admission blocks until the
+// initialization order. Once set, steps with secret grants wait until the
 // reconciler reports at least one successful reconciliation.
 func (jobs *ArgoJobs) SetReconcilerHealth(checker ReconcilerHealthChecker) {
 	if jobs.routes != nil {
@@ -390,9 +388,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if err != nil {
 		return err
 	}
-	// Classify the same resolved graph Build will admit, including inline
-	// templates and pinned fragments. Durable flags remain conservative:
-	// a release or a run already marked credentialed cannot downgrade itself.
 	resolved, err := argoworkflow.ResolveRunSource(source, fragments, argoworkflow.RunSourceBinding{
 		RunID: request.Run.ID, RepositoryID: request.Repository.ID, SHA: testedSHA,
 		File: pipelineFile, Trigger: kind, ScheduleEntry: request.Run.ScheduleEntry,
@@ -400,43 +395,11 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if err != nil {
 		return err
 	}
-	declaresCredentials, err := workflowCredentialed(resolved.Workflow())
+	approvedSecrets, stepGrants, err := jobs.stepSecretAccess(ctx, request.Repository, resolved.Workflow(), pipelineFile)
 	if err != nil {
 		return err
 	}
-	credentialed := trigger == pipeline.TriggerRelease || request.Run.Credentialed || request.Run.Release || declaresCredentials
-	jobs.mu.Lock()
-	blocked := credentialed && jobs.secretAccess != nil && jobs.reconcilerHealthy != nil && !jobs.reconcilerHealthy.ReconcileHealthy()
-	jobs.mu.Unlock()
-	if blocked {
-		return fmt.Errorf("app: access reconciler has not completed initial reconciliation; credentialed admission is blocked for %s", request.Repository.Name)
-	}
 
-	// Uncredentialed runs carry an empty approval set and never read grants.
-	// Credentialed runs still require a loaded approval table, even when the
-	// reconciler is healthy; nil makes Build refuse a missing loader.
-	var approvedSecrets map[string]bool
-	if !credentialed {
-		approvedSecrets = make(map[string]bool)
-	}
-	var stepGrants map[string]map[string]bool
-	if credentialed && jobs.secretAccess != nil {
-		grants, loadErr := jobs.secretAccess.ActiveSecretGrants(ctx, request.Repository.ID)
-		if loadErr != nil {
-			return fmt.Errorf("app: load approved secrets for %s: %w", request.Repository.Name, loadErr)
-		}
-		approvedSecrets = make(map[string]bool)
-		stepGrants = make(map[string]map[string]bool)
-		for step, secrets := range grants {
-			for secret := range secrets {
-				approvedSecrets[secret] = true
-				if stepGrants[secret] == nil {
-					stepGrants[secret] = make(map[string]bool)
-				}
-				stepGrants[secret][step] = true
-			}
-		}
-	}
 	submission := argojob.Request{
 
 		BranchAuthority: branchAuthority,
@@ -641,8 +604,9 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Wo
 		execPaths := argojob.ExtractExecPaths(tmpl)
 		for _, p := range execPaths {
 			declarations = append(declarations, store.GrantDeclaration{
-				Step: tmpl.Name,
-				Path: p,
+				Workflow: request.PipelineFile,
+				Step:     tmpl.Name,
+				Path:     p,
 			})
 		}
 	}
@@ -664,12 +628,17 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Wo
 				}
 			}
 			if !found {
-				declarations = append(declarations, store.GrantDeclaration{Step: "*", Path: p})
+				declarations = append(declarations, store.GrantDeclaration{Workflow: request.PipelineFile, Step: "*", Path: p})
 			}
 		}
 	}
 	if len(declarations) == 0 {
 		return
+	}
+	for i := range declarations {
+		if declarations[i].Workflow == "" {
+			declarations[i].Workflow, _ = argoworkflow.TriggerFile(trigger)
+		}
 	}
 	qualifiedRepo := declarationRepo(request)
 	sha := request.Run.TestedSHA
@@ -1113,74 +1082,13 @@ func noPipelineError(err error, trigger pipeline.Trigger, repoName string) error
 	return fmt.Errorf("repository %q has no pipeline configuration (%s); run \"oberth init\" in the repository to generate one", repoName, file)
 }
 
-// PipelineCredentialed reports whether the checked-out pipeline declares
-// secret-store paths by statically decoding the reviewed document.
-func (jobs *ArgoJobs) PipelineCredentialed(ctx context.Context, request service.WorkflowRequest) (bool, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forRequest(ctx, request)
-		if err != nil {
-			return false, err
-		}
-		return child.PipelineCredentialed(ctx, request)
-	}
-	source, err := jobs.readRunSource(request)
-	if err != nil {
-		return false, jobs.noRunPipelineError(err, request)
-	}
-	workflow, err := argoworkflow.Decode(source)
-	if err != nil {
-		// Decode failure: the workflow YAML is invalid or unreadable. Return
-		// the error so the scheduler can log it. The false result is correct:
-		// an unparseable pipeline cannot declare secrets, so treating it as
-		// non-credentialed is fail-safe (zero secrets, zero publication rights).
-		return false, fmt.Errorf("decode pipeline for credential detection: %w", err)
-	}
-	return workflowCredentialed(workflow)
-}
-
-func workflowCredentialed(workflow *wfv1.Workflow) (bool, error) {
-	paths, err := argoworkflow.DeclaredSecretPaths(workflow)
-	if err != nil {
-		return false, err
-	}
-	credentialed := len(paths) > 0
-	// Include inline leaves; use the same predicate as credential admission/plan.
-	var walk func(*wfv1.Template, int)
-	walk = func(t *wfv1.Template, depth int) {
-		if depth > argoworkflow.MaxIdentityWalkDepth {
-			credentialed = true
-			return
-		}
-		credentialed = credentialed || argoworkflow.UsesCredentials(t)
-		for _, group := range t.Steps {
-			for _, step := range group.Steps {
-				if step.Inline != nil {
-					walk(step.Inline, depth+1)
-				}
-			}
-		}
-		if t.DAG != nil {
-			for _, task := range t.DAG.Tasks {
-				if task.Inline != nil {
-					walk(task.Inline, depth+1)
-				}
-			}
-		}
-	}
-	for i := range workflow.Spec.Templates {
-		walk(&workflow.Spec.Templates[i], 0)
-	}
-	return credentialed, nil
-}
-
 var (
-	_ service.JobController              = (*ArgoJobs)(nil)
-	_ service.JobCreateSettler           = (*ArgoJobs)(nil)
-	_ service.JobAdopter                 = (*ArgoJobs)(nil)
-	_ service.ReleaseJobController       = (*ArgoJobs)(nil)
-	_ service.PipelinePlanner            = (*ArgoJobs)(nil)
-	_ service.PipelineCredentialDetector = (*ArgoJobs)(nil)
-	_                                    = time.Second
+	_ service.JobController        = (*ArgoJobs)(nil)
+	_ service.JobCreateSettler     = (*ArgoJobs)(nil)
+	_ service.JobAdopter           = (*ArgoJobs)(nil)
+	_ service.ReleaseJobController = (*ArgoJobs)(nil)
+	_ service.PipelinePlanner      = (*ArgoJobs)(nil)
+	_                              = time.Second
 )
 
 // ObserveScheduling forwards read-only diagnostics without submission or repair.

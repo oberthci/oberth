@@ -226,7 +226,7 @@ func TestOpenersLiveMigrateExistingVersionThree(t *testing.T) {
 				t.Fatalf("schema version after live migration = %d, want %d", version, latestMigrationVersion)
 			}
 			// Verify the v5 secret_access table exists and is usable.
-			if _, err := opened.db.Exec(`INSERT INTO secret_access(repo, step, secret, approved_by, approved_at) VALUES('r', 's', 'k', 'a', 1)`); err != nil {
+			if _, err := opened.db.Exec(`INSERT INTO secret_access(repo, workflow, step, secret, approved_by, approved_at) VALUES('r', '.oberth/release.yaml', 's', 'k', 'a', 1)`); err != nil {
 				t.Fatalf("insert into secret_access after v3 migration: %v", err)
 			}
 		})
@@ -301,7 +301,7 @@ func TestOpenMigratesVersionFourToVersionFive(t *testing.T) {
 			if version != latestMigrationVersion {
 				t.Fatalf("schema version after v4 migration = %d, want %d", version, latestMigrationVersion)
 			}
-			if _, err := opened.db.Exec(`INSERT INTO secret_access(repo, step, secret, approved_by, approved_at) VALUES('r', 's', 'k', 'a', 1)`); err != nil {
+			if _, err := opened.db.Exec(`INSERT INTO secret_access(repo, workflow, step, secret, approved_by, approved_at) VALUES('r', '.oberth/release.yaml', 's', 'k', 'a', 1)`); err != nil {
 				t.Fatalf("insert into secret_access after v4 migration: %v", err)
 			}
 		})
@@ -340,7 +340,7 @@ func TestOpenCurrentMigratesVersionFourToVersionFive(t *testing.T) {
 	if version != latestMigrationVersion {
 		t.Fatalf("schema version after OpenCurrent migration = %d, want %d", version, latestMigrationVersion)
 	}
-	if _, err := opened.db.Exec(`INSERT INTO secret_access(repo, step, secret, approved_by, approved_at) VALUES('r', 's', 'k', 'a', 1)`); err != nil {
+	if _, err := opened.db.Exec(`INSERT INTO secret_access(repo, workflow, step, secret, approved_by, approved_at) VALUES('r', '.oberth/release.yaml', 's', 'k', 'a', 1)`); err != nil {
 		t.Fatalf("insert into secret_access after OpenCurrent migration: %v", err)
 	}
 }
@@ -1122,7 +1122,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"schema_migrations":         {"version", "applied_at", "id"},
 		"upstreams":                 {"id", "name", "kind", "base_url", "created_at", "updated_at", "key_name"},
 		"repositories":              {"id", "name", "upstream_id", "default_branch", "created_at", "updated_at"},
-		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group", "admission_sequence", "schedule_entry", "concurrency_limit", "issue_trailers", "failure_cause", "source_bindings", "assist_requested", "assisted", "assist_record"},
+		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "concurrency_group", "admission_sequence", "schedule_entry", "concurrency_limit", "issue_trailers", "failure_cause", "source_bindings", "assist_requested", "assisted", "assist_record"},
 		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "termination_json"},
 		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id", "train_json", "train_key", "branch_ci_skipped", "observed_target_sha"},
 		"promotion_train_grants":    {"promotion_id", "grant_id", "included"},
@@ -1141,7 +1141,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"publications":              {"sequence", "id", "repo_id", "run_id", "promotion_id", "ref_kind", "ref", "previous_sha", "previous_known", "result_sha", "actor", "status", "error", "created_at", "updated_at", "attempts", "retry_after"},
 		"ci_issue_work":             {"sequence", "repo_id", "branch", "origin", "run_id", "promotion_id", "actor", "created_at"},
 		"ci_issue_projections":      {"repo_id", "branch", "origin", "work_sequence", "work_id", "outcome", "title", "body", "actor", "updated_at"},
-		"secret_access":             {"id", "repo", "step", "secret", "approved_by", "approved_at", "revoked_by", "revoked_at"},
+		"secret_access":             {"id", "repo", "workflow", "step", "secret", "approved_by", "approved_at", "revoked_by", "revoked_at"},
 	}
 	for table, expected := range expectedColumns {
 		actual := schemaTableColumns(t, store.db, table)

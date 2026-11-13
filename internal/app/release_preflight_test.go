@@ -4,9 +4,29 @@ import (
 	"context"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 )
+
+func TestReleasePreflightWithoutStoreReadsSkipsAccessGate(t *testing.T) {
+	loader := &failingAdmissionGrants{}
+	jobs := &ArgoJobs{secretAccess: loader, reconcilerHealthy: &fakeReconciler{healthy: false}}
+	const source = `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    container:
+      image: oberth
+      command: ["/bin/true"]
+`
+	result, err := jobs.PlanRelease(t.Context(), service.WorkflowRequest{Repository: model.Repository{ID: 42, Name: "repo"}}, []byte(source))
+	if err != nil || loader.calls != 0 || len(result.Problems) != 0 {
+		t.Fatal("plain preflight depended on secret access", result, err, loader.calls)
+	}
+}
 
 func TestReleasePreflightRecordsDeniedCanonicalDeclarations(t *testing.T) {
 	recorder := &fakeDeclarationRecorder{}
@@ -28,14 +48,14 @@ type changingPreflightGrants struct {
 	calls  int
 }
 
-func (loader *changingPreflightGrants) ActiveSecretGrants(context.Context, int64) (map[string]map[string]bool, error) {
+func (loader *changingPreflightGrants) ActiveSecretGrants(context.Context, int64, string) (map[string]map[string]bool, error) {
 	loader.calls++
 	return loader.grants, nil
 }
 
 func TestReleasePreflightReloadsGrantsAfterApproval(t *testing.T) {
 	loader := &changingPreflightGrants{}
-	jobs := &ArgoJobs{secretAccess: loader}
+	jobs := &ArgoJobs{secretAccess: loader, config: argojob.Config{PerStepIdentities: map[string]argojob.PerRepoIdentityConfig{"forge/org/repo/.oberth/release.yaml/*": {ServiceAccountName: "scoped-file"}}}}
 	request := service.WorkflowRequest{Repository: model.Repository{ID: 42, Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org"}
 	problems, err := jobs.PreflightRelease(context.Background(), request, []byte(declarationWorkflow))
 	if err != nil || len(problems.Problems) == 0 {

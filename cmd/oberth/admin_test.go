@@ -1377,7 +1377,7 @@ func TestAccessAllowFailsClosedWithoutMutationGate(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
 	err := runAccessAllowWithDependencies(context.Background(), []string{
 		"--database", databasePath, "--namespace", "oberth",
-		"terraform", "*", "terraform/credentials",
+		"terraform", ".oberth/release.yaml", "*", "terraform/credentials",
 	}, io.Discard, accessDependencies{
 		kubernetesClient: func() (kubernetes.Interface, error) { return fake.NewClientset(), nil },
 		mutationGate: func(_ context.Context, _, _ string) error {
@@ -1396,7 +1396,7 @@ func TestAccessRevokeFailsClosedWithoutMutationGate(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
 	err := runAccessRevokeWithDependencies(context.Background(), []string{
 		"--database", databasePath, "--namespace", "oberth",
-		"terraform", "*", "terraform/credentials",
+		"terraform", ".oberth/release.yaml", "*", "terraform/credentials",
 	}, io.Discard, accessDependencies{
 		kubernetesClient: func() (kubernetes.Interface, error) { return fake.NewClientset(), nil },
 		mutationGate: func(_ context.Context, _, _ string) error {
@@ -1421,14 +1421,14 @@ func TestAccessAllowUpdatesConfigMapAndSQLite(t *testing.T) {
 	var output bytes.Buffer
 	if err := runAccessAllowWithDependencies(context.Background(), []string{
 		"--database", databasePath, "--namespace", "oberth",
-		"terraform", "*", "terraform/credentials",
+		"terraform", ".oberth/release.yaml", "*", "terraform/credentials",
 	}, &output, accessDependencies{
 		kubernetesClient: func() (kubernetes.Interface, error) { return client, nil },
 		mutationGate:     allowTestMutation,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "granted: terraform/*") {
+	if !strings.Contains(output.String(), "granted: terraform .oberth/release.yaml step *") {
 		t.Fatalf("access allow output = %q", output.String())
 	}
 
@@ -1466,7 +1466,7 @@ func TestAccessRevokeUpdatesConfigMapAndSQLite(t *testing.T) {
 			ResourceVersion: "1",
 		},
 		Data: map[string]string{
-			"grants": "- {repo: terraform, step: \"*\", secret: terraform/credentials}\n- {repo: oberth, step: \"*\", secret: cosign-secret}\n",
+			"grants": "- {workflow: .oberth/release.yaml, repo: terraform, step: \"*\", secret: terraform/credentials}\n- {workflow: .oberth/release.yaml, repo: oberth, step: \"*\", secret: cosign-secret}\n",
 		},
 	})
 	// Seed the sqlite to match.
@@ -1475,10 +1475,10 @@ func TestAccessRevokeUpdatesConfigMapAndSQLite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.Grant(context.Background(), "terraform", "*", "terraform/credentials", "admin@localhost"); err != nil {
+		if _, err := database.Grant(context.Background(), "terraform", ".oberth/release.yaml", "*", "terraform/credentials", "admin@localhost"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.Grant(context.Background(), "oberth", "*", "cosign-secret", "admin@localhost"); err != nil {
+		if _, err := database.Grant(context.Background(), "oberth", ".oberth/release.yaml", "*", "cosign-secret", "admin@localhost"); err != nil {
 			t.Fatal(err)
 		}
 		if err := database.Close(); err != nil {
@@ -1488,14 +1488,14 @@ func TestAccessRevokeUpdatesConfigMapAndSQLite(t *testing.T) {
 	var output bytes.Buffer
 	if err := runAccessRevokeWithDependencies(context.Background(), []string{
 		"--database", databasePath, "--namespace", "oberth",
-		"terraform", "*", "terraform/credentials",
+		"terraform", ".oberth/release.yaml", "*", "terraform/credentials",
 	}, &output, accessDependencies{
 		kubernetesClient: func() (kubernetes.Interface, error) { return client, nil },
 		mutationGate:     allowTestMutation,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "revoked: terraform/*") {
+	if !strings.Contains(output.String(), "revoked: terraform .oberth/release.yaml step *") {
 		t.Fatalf("access revoke output = %q", output.String())
 	}
 

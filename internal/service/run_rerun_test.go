@@ -258,7 +258,7 @@ func TestTagRerunNeedsAdminForceAndNeverPublishesTwice(t *testing.T) {
 		t.Fatalf("forced tag rerun = %#v, want a rerun with the release warning", response)
 	}
 	rerun := harness.run(t, response.RunID)
-	if !rerun.Release || !rerun.Credentialed || rerun.RefKind != model.RefTag || rerun.SHA != rerunTagObject || rerun.TestedSHA != rerunTagCommit {
+	if !rerun.Release || rerun.RefKind != model.RefTag || rerun.SHA != rerunTagObject || rerun.TestedSHA != rerunTagCommit {
 		t.Fatalf("tag rerun = %#v, want the same admitted tag object and commit", rerun)
 	}
 	harness.process(t)

@@ -12,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 const (
@@ -23,34 +25,14 @@ const (
 	wildcardStep = "*"
 )
 
-// appendPerRepoGrant adds secret to a per-repo identity's grant list only when
-// the grant is a wildcard grant. A named-step grant belongs to the per-step
-// identity alone (DerivePerStepIdentities): the per-repo ServiceAccount is the
-// workflow default for every template without a named grant, so a path it can
-// read is a path every such template can read from Vault with its own token.
-// Carrying named-step paths here made the per-step boundary of issue #623
-// exist only at admission, not at the Vault layer, and meant revoking a
-// wildcard grant could never narrow the per-repo policy while a named grant
-// for the same path remained (issue #814).
-//
-// The caller assigns the result back into its map even when nothing was
-// appended, so a repository whose grants are all named still produces a
-// per-repo identity (with an empty grant list): its ServiceAccount is still
-// the workflow default and the chart's SA list depends on it.
-func appendPerRepoGrant(grants []string, step, secret string) []string {
-	if step != wildcardStep {
-		return grants
-	}
-	return append(grants, secret)
-}
-
 // grantEntry mirrors service.SecretAccessGrantEntry for ConfigMap parsing
 // without importing the service package (which would pull in transitive
 // dependencies the installer does not need).
 type grantEntry struct {
-	Repo   string `json:"repo"   yaml:"repo"`
-	Step   string `json:"step"   yaml:"step"`
-	Secret string `json:"secret" yaml:"secret"`
+	Repo     string `json:"repo"   yaml:"repo"`
+	Workflow string `json:"workflow" yaml:"workflow"`
+	Step     string `json:"step"   yaml:"step"`
+	Secret   string `json:"secret" yaml:"secret"`
 }
 
 // accessListJSONEntry is the local deserialization target for the --json
@@ -58,9 +40,10 @@ type grantEntry struct {
 // cmd/oberth/admin.go's accessListJSONGrant without importing the main
 // package. Only Repo and Secret are consumed for identity production.
 type accessListJSONEntry struct {
-	Repo   string `json:"repo"`
-	Step   string `json:"step"`
-	Secret string `json:"secret"`
+	Repo     string `json:"repo"`
+	Workflow string `json:"workflow"`
+	Step     string `json:"step"`
+	Secret   string `json:"secret"`
 }
 
 // ProducePerRepoIdentities reads per-repo identity data needed for Vault
@@ -155,12 +138,15 @@ func ParseAccessListJSON(data []byte) ([]PerRepoIdentity, error) {
 	byRepo := make(map[repoKey][]string)
 
 	for _, entry := range entries {
+		if err := model.ValidateWorkflowFile(entry.Workflow); err != nil {
+			return nil, fmt.Errorf("unscoped grant: %w", err)
+		}
 		parts := strings.Split(entry.Repo, "/")
 		if len(parts) != 3 {
 			continue // skip bare names
 		}
 		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
-		byRepo[key] = appendPerRepoGrant(byRepo[key], entry.Step, entry.Secret)
+		byRepo[key] = nil
 	}
 
 	if len(entries) > 0 && len(byRepo) == 0 {
@@ -181,14 +167,14 @@ func ParseAccessListJSON(data []byte) ([]PerRepoIdentity, error) {
 }
 
 // accessListSeparator matches the 3+ space padding tabwriter inserts between
-// columns. Column values (repo, step, secret) never contain runs of 3+
+// columns. Column values (repo, workflow file, step, secret) never contain runs of 3+
 // spaces, so this is a reliable field boundary.
 var accessListSeparator = regexp.MustCompile(`\s{3,}`)
 
 // parseAccessListOutput parses the tabwriter-formatted output of
 // `oberth access list` into per-repo identities. Each line has:
 //
-//	REPO   STEP   SECRET   APPROVED_BY   APPROVED_AT   STATUS
+//	REPO   WORKFLOW   STEP   SECRET   APPROVED_BY   APPROVED_AT   STATUS
 //
 // separated by 3+ spaces (tabwriter padding). Only qualified 3-segment
 // repo names produce identities; unresolved bare rows in the database
@@ -198,6 +184,12 @@ var accessListSeparator = regexp.MustCompile(`\s{3,}`)
 // Returns an error if there are data lines but zero identities survive the
 // 3-segment filter (format drift detection).
 func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
+	if strings.TrimSpace(string(data)) == "" {
+		return nil, nil
+	}
+	if !strings.Contains(string(data), "WORKFLOW") {
+		return nil, fmt.Errorf("access list output lacks workflow scope")
+	}
 	type repoKey struct {
 		upstream, org, repo string
 	}
@@ -212,13 +204,14 @@ func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
 		dataLines++
 
 		fields := accessListSeparator.Split(line, -1)
-		if len(fields) < 3 {
+		if len(fields) < 4 {
 			continue
 		}
 
 		repo := strings.TrimSpace(fields[0])
-		step := strings.TrimSpace(fields[1])
-		secret := strings.TrimSpace(fields[2])
+		if err := model.ValidateWorkflowFile(strings.TrimSpace(fields[1])); err != nil {
+			return nil, err
+		}
 
 		parts := strings.Split(repo, "/")
 		if len(parts) != 3 {
@@ -226,7 +219,7 @@ func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
 		}
 
 		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
-		byRepo[key] = appendPerRepoGrant(byRepo[key], step, secret)
+		byRepo[key] = nil
 	}
 
 	if dataLines > 0 && len(byRepo) == 0 {
@@ -246,13 +239,9 @@ func ParseAccessListOutput(data []byte) ([]PerRepoIdentity, error) {
 	return result, nil
 }
 
-// ParseAccessListJSONWithSteps parses the JSON output and returns both per-repo
-// identities and the raw grant entries with step information needed to derive
-// per-step identities. This is the structured entry point for the sync command
-// to produce both per-repo and per-step identities in one pass. The two path
-// sets are disjoint by construction: a per-repo identity carries only the
-// wildcard-step grants, a per-step identity carries its named grants plus the
-// inherited wildcards (issue #814).
+// ParseAccessListJSONWithSteps parses workflow-scoped grants. Repository
+// identities carry no explicit approvals; raw scoped rows produce named and
+// wildcard workflow-file identities in DerivePerStepIdentities.
 func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithStep, error) {
 	var entries []accessListJSONEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
@@ -266,17 +255,21 @@ func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithSt
 	var grants []grantWithStep
 
 	for _, entry := range entries {
+		if err := model.ValidateWorkflowFile(entry.Workflow); err != nil {
+			return nil, nil, fmt.Errorf("unscoped grant: %w", err)
+		}
 		parts := strings.Split(entry.Repo, "/")
 		if len(parts) != 3 {
 			continue
 		}
 		key := repoKey{upstream: parts[0], org: parts[1], repo: parts[2]}
-		byRepo[key] = appendPerRepoGrant(byRepo[key], entry.Step, entry.Secret)
+		byRepo[key] = nil
 		grants = append(grants, grantWithStep{
 			upstream: parts[0],
 			org:      parts[1],
 			repo:     parts[2],
 			step:     entry.Step,
+			workflow: entry.Workflow,
 			secret:   entry.Secret,
 		})
 	}
@@ -298,10 +291,8 @@ func ParseAccessListJSONWithSteps(data []byte) ([]PerRepoIdentity, []grantWithSt
 	return repoIdentities, grants, nil
 }
 
-// ProducePerStepIdentities reads the access list from the running server and
-// derives per-step identities. For each named-step grant (step != "*"), a
-// per-step identity is produced with paths = the step's named grants PLUS any
-// wildcard-granted paths for the same repo (inherited). Issue #623, finding 1.
+// ProducePerStepIdentities reads exact workflow-scoped grants from the server.
+// Named and wildcard identities inherit only within the same file.
 func ProducePerStepIdentities(ctx context.Context, run CommandRunner, contextName, namespace string) ([]PerStepIdentity, error) {
 	if run == nil {
 		return nil, nil
@@ -335,6 +326,9 @@ func ProducePerStepIdentities(ctx context.Context, run CommandRunner, contextNam
 // nil, nil. Other errors (RBAC, transport) are surfaced so the caller's
 // warning path is reachable.
 func produceFromConfigMap(ctx context.Context, kube kubernetes.Interface, namespace string) ([]PerRepoIdentity, error) {
+	if kube == nil {
+		return nil, fmt.Errorf("secret-access ConfigMap client is unavailable")
+	}
 	cm, err := kube.CoreV1().ConfigMaps(namespace).Get(ctx, secretAccessConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -368,6 +362,9 @@ func produceFromConfigMap(ctx context.Context, kube kubernetes.Interface, namesp
 	byRepo := make(map[string]*repoGrants)
 
 	for _, entry := range entries {
+		if err := model.ValidateWorkflowFile(entry.Workflow); err != nil {
+			return nil, fmt.Errorf("reject secret access ConfigMap grant: %w; remove unscoped entries before re-approving", err)
+		}
 		parts := strings.Split(entry.Repo, "/")
 		if len(parts) != 3 {
 			// Skip bare or org/repo entries — they can't be unambiguously
@@ -382,7 +379,7 @@ func produceFromConfigMap(ctx context.Context, kube kubernetes.Interface, namesp
 			rg = &repoGrants{key: repoKey{upstream: upstream, org: org, repo: repo}}
 			byRepo[mapKey] = rg
 		}
-		rg.grants = appendPerRepoGrant(rg.grants, entry.Step, entry.Secret)
+		rg.grants = nil
 	}
 
 	var result []PerRepoIdentity

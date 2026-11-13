@@ -3587,13 +3587,13 @@ func (s *stubSecretAccessStore) SecretAccessList(_ context.Context, _ string, _ 
 	return s.grants, nil
 }
 
-func (s *stubSecretAccessStore) Grant(_ context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error) {
-	grant := store.SecretAccessGrant{ID: int64(len(s.grants) + 1), Repo: repo, Step: step, Secret: secret, ApprovedBy: actor}
+func (s *stubSecretAccessStore) Grant(_ context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error) {
+	grant := store.SecretAccessGrant{Workflow: ".oberth/release.yaml", ID: int64(len(s.grants) + 1), Repo: repo, Step: step, Secret: secret, ApprovedBy: actor}
 	s.grants = append(s.grants, grant)
 	return grant, nil
 }
 
-func (s *stubSecretAccessStore) Revoke(_ context.Context, repo, step, secret, actor string) (store.SecretAccessGrant, error) {
+func (s *stubSecretAccessStore) Revoke(_ context.Context, repo, workflow, step, secret, actor string) (store.SecretAccessGrant, error) {
 	for i := range s.grants {
 		if s.grants[i].Repo == repo && s.grants[i].Step == step && s.grants[i].Secret == secret {
 			s.grants[i].RevokedBy = actor
@@ -3636,7 +3636,7 @@ func TestAccessAllowRequiresAdminUplink(t *testing.T) {
 
 	// Non-admin actor must be rejected before any state read/write.
 	_, err = service.CallTool(context.Background(), nonAdmin, "access_allow",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials"}`))
+		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("access_allow with non-admin error = %v, want ErrForbidden", err)
 	}
@@ -3648,7 +3648,7 @@ func TestAccessAllowRequiresAdminUplink(t *testing.T) {
 	// Admin actor succeeds.
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	_, err = service.CallTool(context.Background(), admin, "access_allow",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials"}`))
+		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
 	if err != nil {
 		t.Fatalf("access_allow with admin error = %v", err)
 	}
@@ -3662,7 +3662,7 @@ func TestAccessRevokeRequiresAdminUplink(t *testing.T) {
 	fixture := newControlFixture(t)
 	secretStore := &stubSecretAccessStore{
 		grants: []store.SecretAccessGrant{
-			{ID: 1, Repo: "terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@host"},
+			{Workflow: ".oberth/release.yaml", ID: 1, Repo: "terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@host"},
 		},
 	}
 	service, err := NewAPI(APIConfig{
@@ -3682,7 +3682,7 @@ func TestAccessRevokeRequiresAdminUplink(t *testing.T) {
 
 	// Non-admin actor must be rejected.
 	_, err = service.CallTool(context.Background(), nonAdmin, "access_revoke",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials"}`))
+		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("access_revoke with non-admin error = %v, want ErrForbidden", err)
 	}
@@ -3690,7 +3690,7 @@ func TestAccessRevokeRequiresAdminUplink(t *testing.T) {
 	// Admin actor succeeds.
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	_, err = service.CallTool(context.Background(), admin, "access_revoke",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials"}`))
+		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
 	if err != nil {
 		t.Fatalf("access_revoke with admin error = %v", err)
 	}
@@ -3877,7 +3877,7 @@ func TestAccessRevokeResponseCarriesPolicySyncWarning(t *testing.T) {
 	fixture := newControlFixture(t)
 	secretStore := &stubSecretAccessStore{
 		grants: []store.SecretAccessGrant{
-			{ID: 1, Repo: "terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@host"},
+			{Workflow: ".oberth/release.yaml", ID: 1, Repo: "terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@host"},
 		},
 	}
 	service, err := NewAPI(APIConfig{
@@ -3895,7 +3895,7 @@ func TestAccessRevokeResponseCarriesPolicySyncWarning(t *testing.T) {
 
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	result, err := service.CallTool(context.Background(), admin, "access_revoke",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials"}`))
+		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
 	if err != nil {
 		t.Fatalf("access_revoke error = %v", err)
 	}
@@ -3944,7 +3944,7 @@ func TestAccessAllowResponseCarriesPolicySyncWarning(t *testing.T) {
 
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	result, err := service.CallTool(context.Background(), admin, "access_allow",
-		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials"}`))
+		json.RawMessage(`{"repo":"terraform","step":"*","secret":"terraform/credentials","workflow":".oberth/release.yaml"}`))
 	if err != nil {
 		t.Fatalf("access_allow error = %v", err)
 	}

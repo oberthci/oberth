@@ -1570,7 +1570,7 @@ func runAccess(ctx context.Context, arguments []string, output io.Writer) error 
 	case "revoke":
 		return runAccessRevoke(ctx, arguments[1:], output)
 	default:
-		return fmt.Errorf("%w: access list [--repo NAME] [--revoked] | access allow <repo> <step> <secret> | access revoke <repo> <step> <secret>", errUsage)
+		return fmt.Errorf("%w: access list [--repo NAME] [--revoked] | access allow <repo> <workflow-file> <step> <secret> | access revoke <repo> <workflow-file> <step> <secret>", errUsage)
 	}
 }
 
@@ -1580,6 +1580,7 @@ func runAccess(ctx context.Context, arguments []string, output io.Writer) error 
 // grants carry only the approval metadata.
 type accessListJSONGrant struct {
 	Repo       string  `json:"repo"`
+	Workflow   string  `json:"workflow"`
 	Step       string  `json:"step"`
 	Secret     string  `json:"secret"`
 	ApprovedBy string  `json:"approved_by"`
@@ -1621,7 +1622,7 @@ func runAccessList(ctx context.Context, arguments []string, output io.Writer) er
 	}
 
 	writer := tabwriter.NewWriter(output, 0, 0, 3, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "REPO\tSTEP\tSECRET\tAPPROVED BY\tAPPROVED AT\tSTATUS"); err != nil {
+	if _, err := fmt.Fprintln(writer, "REPO\tWORKFLOW\tSTEP\tSECRET\tAPPROVED BY\tAPPROVED AT\tSTATUS"); err != nil {
 		return err
 	}
 	for _, grant := range grants {
@@ -1629,8 +1630,8 @@ func runAccessList(ctx context.Context, arguments []string, output io.Writer) er
 		if grant.RevokedAt != nil {
 			status = "revoked by " + grant.RevokedBy
 		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			grant.Repo, grant.Step, grant.Secret,
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			grant.Repo, grant.Workflow, grant.Step, grant.Secret,
 			grant.ApprovedBy, grant.ApprovedAt.UTC().Format("2006-01-02 15:04"),
 			status); err != nil {
 			return err
@@ -1647,6 +1648,7 @@ func writeAccessListJSON(output io.Writer, grants []store.SecretAccessGrant) err
 	for _, g := range grants {
 		item := accessListJSONGrant{
 			Repo:       g.Repo,
+			Workflow:   g.Workflow,
 			Step:       g.Step,
 			Secret:     g.Secret,
 			ApprovedBy: g.ApprovedBy,
@@ -1696,10 +1698,10 @@ func runAccessAllowWithDependencies(ctx context.Context, arguments []string, out
 		}
 		return usageError(err)
 	}
-	if flags.NArg() != 3 {
-		return fmt.Errorf("%w: access allow <repo> <step> <secret-path>", errUsage)
+	if flags.NArg() != 4 {
+		return fmt.Errorf("%w: access allow <repo> <workflow-file> <step> <secret-path>", errUsage)
 	}
-	repo, step, secret := flags.Arg(0), flags.Arg(1), flags.Arg(2)
+	repo, workflow, step, secret := flags.Arg(0), flags.Arg(1), flags.Arg(2), flags.Arg(3)
 	if deps.mutationGate == nil {
 		return errors.New("admin audit mutation gate is unavailable")
 	}
@@ -1720,10 +1722,10 @@ func runAccessAllowWithDependencies(ctx context.Context, arguments []string, out
 	}
 	logger := log.New(output, "", 0)
 	reconciler := service.NewAccessReconciler(kube, *namespace, database, logger)
-	if err := reconciler.UpdateConfigMap(ctx, administrativeActor, service.AddGrant(repo, step, secret)); err != nil {
+	if err := reconciler.UpdateConfigMap(ctx, administrativeActor, service.AddGrant(repo, workflow, step, secret)); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "granted: %s/%s may access %s\n", repo, step, secret)
+	_, err = fmt.Fprintf(output, "granted: %s %s step %s may access %s\n", repo, workflow, step, secret)
 	return err
 }
 
@@ -1754,10 +1756,10 @@ func runAccessRevokeWithDependencies(ctx context.Context, arguments []string, ou
 		}
 		return usageError(err)
 	}
-	if flags.NArg() != 3 {
-		return fmt.Errorf("%w: access revoke <repo> <step> <secret-path>", errUsage)
+	if flags.NArg() != 4 {
+		return fmt.Errorf("%w: access revoke <repo> <workflow-file> <step> <secret-path>", errUsage)
 	}
-	repo, step, secret := flags.Arg(0), flags.Arg(1), flags.Arg(2)
+	repo, workflow, step, secret := flags.Arg(0), flags.Arg(1), flags.Arg(2), flags.Arg(3)
 	if deps.mutationGate == nil {
 		return errors.New("admin audit mutation gate is unavailable")
 	}
@@ -1778,10 +1780,10 @@ func runAccessRevokeWithDependencies(ctx context.Context, arguments []string, ou
 	}
 	logger := log.New(output, "", 0)
 	reconciler := service.NewAccessReconciler(kube, *namespace, database, logger)
-	if err := reconciler.UpdateConfigMap(ctx, administrativeActor, service.RemoveGrant(repo, step, secret)); err != nil {
+	if err := reconciler.UpdateConfigMap(ctx, administrativeActor, service.RemoveGrant(repo, workflow, step, secret)); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "revoked: %s/%s no longer has access to %s\n", repo, step, secret)
+	_, err = fmt.Fprintf(output, "revoked: %s %s step %s no longer has access to %s\n", repo, workflow, step, secret)
 	return err
 }
 

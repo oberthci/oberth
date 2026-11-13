@@ -199,6 +199,8 @@ func TestWorkspaceCacheWithoutTierRootKeepsAuthoredCaches(t *testing.T) {
 // unaffected and the release-artifact work subpath is dropped.
 func TestWorkspaceCacheOnCredentialedReleaseLeaf(t *testing.T) {
 	r := isolationRequest(t, func(wf *wfv1.Workflow) {
+		wf.Spec.Templates[0].Container.Command = []string{OberthBinPath, "secretstore", "exec"}
+		wf.Spec.Templates[0].Container.Args = []string{"--path=oberth/data/release/r2-upload-token", "--", "/bin/true"}
 		wf.Spec.Templates[0].Metadata.Annotations = map[string]string{argoworkflow.WorkspaceMountsAnnotation: "cache"}
 	})
 	wf, err := Build(cachingConfig(), r)

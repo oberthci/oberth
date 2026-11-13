@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -20,32 +22,32 @@ func (jobs *ArgoJobs) PlanRelease(ctx context.Context, request service.WorkflowR
 }
 
 func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.WorkflowRequest, source []byte, record bool) (service.ReleasePreflightResult, error) {
+	if request.PipelineFile == "" {
+		request.PipelineFile = argoworkflow.ReleaseFile
+	}
 	jobs.mu.Lock()
-	health, identities, recorder := jobs.reconcilerHealthy, jobs.identities, jobs.declarations
+	identities, recorder := jobs.identities, jobs.declarations
 	jobs.mu.Unlock()
-	if health != nil && !health.ReconcileHealthy() {
-		return service.ReleasePreflightResult{}, fmt.Errorf("secret access reconciliation is not healthy")
+	fragments, err := loadFragments(ctx, jobs.fragments, source, pipeline.TriggerRelease, request.Run.RefKind, "release")
+	if err != nil {
+		return service.ReleasePreflightResult{}, err
+	}
+	workflow, err := argoworkflow.Decode(source)
+	if err != nil {
+		return service.ReleasePreflightResult{}, err
+	}
+	if _, err := argoworkflow.Resolve(workflow, fragments); err != nil {
+		return service.ReleasePreflightResult{}, err
 	}
 	grants := map[string]map[string]bool{}
 	approved := map[string]bool{}
 	if jobs.secretAccess != nil {
-		loaded, err := jobs.secretAccess.ActiveSecretGrants(ctx, request.Repository.ID)
-		if err != nil {
-			return service.ReleasePreflightResult{}, err
+		var accessErr error
+		approved, grants, accessErr = jobs.stepSecretAccess(ctx, request.Repository, workflow, request.PipelineFile)
+		var denied *argoworkflow.AdmissionError
+		if accessErr != nil && !errors.As(accessErr, &denied) {
+			return service.ReleasePreflightResult{}, accessErr
 		}
-		for step, paths := range loaded {
-			for path := range paths {
-				approved[path] = true
-				if grants[path] == nil {
-					grants[path] = map[string]bool{}
-				}
-				grants[path][step] = true
-			}
-		}
-	}
-	fragments, err := loadFragments(ctx, jobs.fragments, source, pipeline.TriggerRelease, request.Run.RefKind, "release")
-	if err != nil {
-		return service.ReleasePreflightResult{}, err
 	}
 	submission := argojob.Request{Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
 		Source: source, PipelineFile: request.PipelineFile, Trigger: pipeline.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants, Fragments: fragments}
@@ -61,7 +63,7 @@ func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.Work
 	if record && recorder != nil {
 		declarations := make([]store.GrantDeclaration, 0, len(result.Declarations))
 		for _, d := range result.Declarations {
-			declarations = append(declarations, store.GrantDeclaration{Step: d.Step, Path: d.Path})
+			declarations = append(declarations, store.GrantDeclaration{Workflow: request.PipelineFile, Step: d.Step, Path: d.Path})
 		}
 		repo := request.UpstreamName + "/" + request.UpstreamOrg + "/" + request.Repository.Name
 		sha := request.Run.TestedSHA

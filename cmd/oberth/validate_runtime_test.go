@@ -167,11 +167,13 @@ spec:
 				VaultAddress: "https://vault.example.com", VaultCredentialedRole: "release", VaultCISecretsRole: "ci-secrets",
 				PerRepoIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-release"}},
 				PerRepoCIIdentities: map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-ci"}},
+				PerStepIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project/.oberth/release.yaml/*": {ServiceAccountName: "project-release-step"}},
 			}
 			request := argojob.Request{
 				RunID: "parity", RepositoryID: 1, Name: "parity", Repo: "project", UpstreamName: "github", UpstreamOrg: "acme",
 				Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), Trigger: tc.trigger, Source: source,
 				ApprovedSecrets: map[string]bool{secretPath: true},
+				StepGrants:      map[string]map[string]bool{secretPath: {"*": true}},
 				SourceVolume:    argojob.SourceVolume{ClaimName: "source", SubPath: "src", BinarySubPath: "bin"},
 			}
 			root := writeConsumer(t, document)
