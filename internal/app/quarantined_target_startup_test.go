@@ -314,8 +314,11 @@ func TestTargetRecoveryReadFailuresKeepStartupPending(t *testing.T) {
 				t.Fatal("read failure changed recovery classification", err)
 			}
 			if kind != "database" {
-				if !errors.Is(err, context.DeadlineExceeded) {
-					t.Fatal("recovery did not wait for shutdown", err)
+				if kind == "transport" && !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatal("transport outage did not wait for shutdown", err)
+				}
+				if kind == "other-invalid-state" && errors.Is(err, context.DeadlineExceeded) {
+					t.Fatal("permanent invalid state blocked startup", err)
 				}
 				if !errors.Is(err, failure) {
 					t.Fatal("read failure cause lost", err)

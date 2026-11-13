@@ -1,9 +1,12 @@
 package argojob
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -93,8 +97,8 @@ func TestStartupAdoptionUsesCacheAndLiveConfirmation(t *testing.T) {
 		reads                     int
 	}{
 		{name: "cached-running", cached: wfv1.WorkflowRunning, unavailable: true, reads: 0},
-		{name: "cached-completed", cached: wfv1.WorkflowSucceeded, live: wfv1.WorkflowFailed, reads: 1},
-		{name: "cached-completed-now-running", cached: wfv1.WorkflowSucceeded, live: wfv1.WorkflowRunning, reads: 1},
+		{name: "cached-completed", cached: wfv1.WorkflowSucceeded, live: wfv1.WorkflowFailed, reads: 0},
+		{name: "cached-completed-now-running", cached: wfv1.WorkflowSucceeded, live: wfv1.WorkflowRunning, reads: 0},
 		{name: "miss-confirmed-absent", miss: true, absent: true, reads: 1},
 		{name: "miss-live-running", miss: true, live: wfv1.WorkflowRunning, reads: 1},
 		{name: "miss-live-completed", miss: true, live: wfv1.WorkflowSucceeded, reads: 1},
@@ -121,12 +125,8 @@ func TestStartupAdoptionUsesCacheAndLiveConfirmation(t *testing.T) {
 			if err != nil || found == tc.absent || client.reads != tc.reads {
 				t.Fatalf("adopt=%+v found=%v reads=%d err=%v", binding, found, client.reads, err)
 			}
-			if found && tc.live.Completed() && tc.reads != 0 {
-				if binding.Terminal == nil || !binding.Terminal.Terminal || binding.Terminal.Succeeded != (tc.live == wfv1.WorkflowSucceeded) {
-					t.Fatalf("terminal result was not live: %+v", binding.Terminal)
-				}
-			} else if binding.Terminal != nil {
-				t.Fatal("running/absent Workflow produced terminal result")
+			if found && binding.UID != cached.UID {
+				t.Fatal("adoption lost exact cached UID", binding)
 			}
 			if !reflect.DeepEqual(cached, before) {
 				t.Fatal("shared cached object was mutated")
@@ -136,29 +136,68 @@ func TestStartupAdoptionUsesCacheAndLiveConfirmation(t *testing.T) {
 }
 
 func TestStartupAdoptionRetainsUnknownAndRejectsUIDSubstitution(t *testing.T) {
-	for _, mode := range []string{"unhealthy", "live-unavailable", "changed-uid"} {
+	for _, mode := range []string{"unhealthy", "miss-live-unavailable", "changed-uid"} {
 		t.Run(mode, func(t *testing.T) {
 			wf, request := adoptionWorkflow()
 			wf.Status.Phase = wfv1.WorkflowSucceeded
 			client := &adoptionLiveClient{staticWorkflowClient: staticWorkflowClient{workflow: wf.DeepCopy()}}
 			cache := adoptionCache{workflow: wf, healthy: mode != "unhealthy"}
-			if mode == "live-unavailable" {
-				client.readErr = errors.New("API unavailable")
+			if mode == "miss-live-unavailable" {
+				cache.workflow = nil
+				client.readErr = apierrors.NewServiceUnavailable("API unavailable")
 			}
-			if mode == "changed-uid" {
-				client.workflow.UID = "replacement-uid"
-			}
-			controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace}, hub: cache}
+			controller := &Controller{workflows: client, config: Config{Namespace: wf.Namespace, MaxRunLogBytes: 4096}, hub: cache, interval: time.Millisecond}
 			binding, found, err := controller.Adopt(t.Context(), request)
-			if err == nil || found || binding.Terminal != nil {
-				t.Fatal("uncertain/foreign Workflow adopted", binding, found, err)
-			}
-			if errors.Is(err, ErrAdoptionRefused) != (mode == "changed-uid") {
-				t.Fatal("outage became a binding refusal", err)
+			if mode == "changed-uid" {
+				if err != nil || !found || client.reads != 0 {
+					t.Fatal(binding, found, err, client.reads)
+				}
+				client.workflow.UID = "replacement-uid"
+				if _, err := controller.WaitResumed(t.Context(), request.Name, request.RunID, io.Discard, nil, 0, binding); err == nil || !strings.Contains(err.Error(), "identity changed") {
+					t.Fatal("replaced Workflow observed", err)
+				}
+			} else if err == nil || found || errors.Is(err, ErrAdoptionRefused) {
+				t.Fatal("outage changed classification", binding, found, err)
 			}
 			if mode == "unhealthy" && client.reads != 0 {
-				t.Fatal("unhealthy cache caused per-run API reads")
+				t.Fatal("unhealthy cache read live")
 			}
 		})
+	}
+}
+
+func TestStartupAdoptionCompletedWaitPublishesLogsAndRetiresIdentity(t *testing.T) {
+	wf, request := adoptionWorkflow()
+	wf.Status.Phase = wfv1.WorkflowSucceeded
+	config := testConfig()
+	config.Namespace = wf.Namespace
+	config.MaxRunLogBytes = 1 << 20
+	kube := kubefake.NewClientset()
+	client := &adoptionLiveClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}}
+	controller := &Controller{workflows: client, kube: kube, config: config, hub: adoptionCache{workflow: wf, healthy: true}, interval: time.Millisecond}
+	kube.PrependReactor("create", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		action.(clienttesting.CreateAction).GetObject().(*corev1.Pod).UID = "identity-lifetime-uid"
+		return false, nil, nil
+	})
+	lifetime, err := controller.executorIdentityPod(t.Context(), wf, config.ExecutorServiceAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	controller.WithPodLogReader(func(context.Context, string, string, string) (io.ReadCloser, error) {
+		reads++
+		return io.NopCloser(strings.NewReader("finished during downtime\n")), nil
+	})
+	binding, found, err := controller.Adopt(t.Context(), request)
+	if err != nil || !found || client.reads != 0 {
+		t.Fatal(binding, found, err, client.reads)
+	}
+	var output bytes.Buffer
+	result, err := controller.WaitResumed(t.Context(), wf.Name, request.RunID, &output, nil, 0, binding)
+	if err != nil || !result.Succeeded || !strings.Contains(output.String(), "finished during downtime") || reads != len(StepResults(wf)) {
+		t.Fatal(result, err, output.String(), reads)
+	}
+	if _, err := kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), lifetime.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatal("completed adoption retained executor identity", err)
 	}
 }

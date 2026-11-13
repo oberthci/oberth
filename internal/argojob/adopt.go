@@ -24,8 +24,6 @@ type Adoption struct {
 	UID         types.UID
 	Identity    string
 	SpecSHA256  string
-	// Terminal is populated only from a successful live startup read.
-	Terminal *Completion
 }
 
 // ErrAdoptionRefused marks a Workflow that exists but must not be observed as
@@ -61,13 +59,6 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 	binding, err := controller.bindAdoption(workflow, request)
 	if err != nil {
 		return Adoption{}, false, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
-	}
-	if workflow.Status.Phase.Completed() {
-		completion := completionFor(workflow)
-		controller.retainWorkflowTiming(ctx, workflow)
-		controller.collectRestartStepDiagnostics(ctx, workflow, &completion, binding.RestartedAt)
-		completion.classifyRestartCut()
-		binding.Terminal = &completion
 	}
 	return binding, true, nil
 }

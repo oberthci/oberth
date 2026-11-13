@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"os"
 	"time"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -32,6 +36,9 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 	handled := make(map[string]bool, len(runs))
 	for _, run := range runs {
 		handled[run.ID] = true
+		if run.Cancelled() {
+			continue
+		}
 		if restored[run.ID] && (isPendingCreate(run) || run.Phase == "waiting") {
 			if err := scheduler.cancelRestoredRun(ctx, run.ID, require); err != nil {
 				return err
@@ -39,7 +46,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			continue
 		}
 		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
-			found, terminal, readErr := scheduler.adoptStartupWorkflow(ctx, adopter, run)
+			found, readErr := scheduler.adoptStartupWorkflow(ctx, adopter, run)
 			if readErr != nil {
 				if errors.Is(readErr, argoworkflow.ErrWorkflowCapabilityRequired) {
 					readErr = fmt.Errorf("%w: %w", ErrAdoptionRefused, readErr)
@@ -57,15 +64,6 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			if found {
 				if err := scheduler.completeRestartCreateObservation(ctx, run); err != nil {
 					return err
-				}
-				if terminal != nil {
-					if err := scheduler.finalizeReconciledRun(ctx, run, *terminal, require); err != nil {
-						return err
-					}
-					cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
-					_ = scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
-					cancel()
-					continue
 				}
 				if adopt == nil {
 					return errors.New("service: adoption requires a worker dispatcher")
@@ -116,38 +114,61 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 
 // Startup waits for uncertain native observations, never inferring a verdict
 // from an API outage. Binding refusals remain permanent for that run alone.
-func (scheduler *Scheduler) adoptStartupWorkflow(ctx context.Context, adopter JobAdopter, run model.Run) (bool, *JobResult, error) {
+func (scheduler *Scheduler) adoptStartupWorkflow(ctx context.Context, adopter JobAdopter, run model.Run) (bool, error) {
 	delay := databaseRetryMinimum
 	var nextLog time.Time
 	for {
 		found, err := adopter.Adopt(ctx, run)
-		if err == nil && !found {
-			return false, nil, nil
-		}
 		if err == nil {
-			result, resultErr := adopter.AdoptedResult(ctx, run)
-			if resultErr == nil {
-				return true, &result, nil
-			}
-			if errors.Is(resultErr, ErrJobNotTerminal) {
-				return true, nil, nil
-			}
-			err = resultErr
+			return found, nil
 		}
-		if errors.Is(err, ErrAdoptionRefused) || errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired) {
-			return false, nil, err
+		class, unavailable := startupAdoptionErrorClass(err)
+		if !unavailable {
+			return false, fmt.Errorf("startup adoption class=%s: %w", class, err)
 		}
 		now := time.Now()
 		if !now.Before(nextLog) {
-			log.Printf("WARN: waiting to adopt run %s: Workflow %s/%s observation unavailable; startup recovery pending", run.ID, adopter.WorkflowNamespace(), run.WorkflowName)
+			log.Printf("WARN: waiting to adopt run %s: Workflow %s/%s observation unavailable (class=%s); startup recovery pending", run.ID, adopter.WorkflowNamespace(), run.WorkflowName, class)
 			nextLog = now.Add(30 * time.Second)
 		}
 		if ctx.Err() != nil {
-			return false, nil, fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, adopter.WorkflowNamespace(), run.WorkflowName, errors.Join(ctx.Err(), err))
+			return false, fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, adopter.WorkflowNamespace(), run.WorkflowName, errors.Join(ctx.Err(), err))
 		}
 		if waitErr := waitDatabaseRetry(ctx, ctx, delay); waitErr != nil {
-			return false, nil, fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, adopter.WorkflowNamespace(), run.WorkflowName, errors.Join(waitErr, err))
+			return false, fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, adopter.WorkflowNamespace(), run.WorkflowName, errors.Join(waitErr, err))
 		}
 		delay = min(2*delay, databaseRetryMaximum)
+	}
+}
+
+// Classification logs no server response text or credential-bearing error body.
+func startupAdoptionErrorClass(err error) (string, bool) {
+	var network net.Error
+	var status apierrors.APIStatus
+	switch {
+	case errors.Is(err, ErrAdoptionRefused), errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired):
+		return "binding_refused", false
+	case errors.Is(err, context.Canceled):
+		return "canceled", false
+	case apierrors.IsForbidden(err):
+		return "forbidden", false
+	case apierrors.IsUnauthorized(err):
+		return "unauthorized", false
+	case errors.Is(err, ErrUnavailable):
+		return "watch_unavailable", true
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline", true
+	case apierrors.IsTooManyRequests(err):
+		return "throttled", true
+	case apierrors.IsTimeout(err), apierrors.IsServerTimeout(err):
+		return "api_timeout", true
+	case errors.As(err, &status) && status.Status().Code >= 500 && status.Status().Code <= 599:
+		return "api_server", true
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return "transport_eof", true
+	case errors.As(err, &network):
+		return "transport", true
+	default:
+		return "permanent", false
 	}
 }

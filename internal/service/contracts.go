@@ -428,8 +428,6 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 type JobAdopter interface {
 	// WaitForWatchSync blocks startup until the native observation cache is ready.
 	WaitForWatchSync(context.Context) error
-	// AdoptedResult returns only a live-settled startup result, or ErrJobNotTerminal.
-	AdoptedResult(context.Context, model.Run) (JobResult, error)
 	Adopt(context.Context, model.Run) (bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
 	WorkflowNamespace() string

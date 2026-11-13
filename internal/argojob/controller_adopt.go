@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -9,22 +10,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// A running cache hit needs no live read. A miss or completed cache entry uses
-// one confirming live GET. No cached terminal phase can become a run verdict.
+// ErrAdoptionUnavailable marks a shared watch outage; callers may wait for it.
+var ErrAdoptionUnavailable = errors.New("argojob: adoption observation unavailable")
+
+// Cache hits bind identity only. WaitResumed owns live completion settlement,
+// log publication and executor identity retirement. A miss confirms with GET.
 func (controller *Controller) workflowForAdoption(ctx context.Context, request AdoptionRequest) (*wfv1.Workflow, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
-	var cached *wfv1.Workflow
 	if controller.hub != nil {
 		if !controller.hub.Healthy() {
-			return nil, false, errWatchUnavailable
+			return nil, false, fmt.Errorf("%w: %w", ErrAdoptionUnavailable, errWatchUnavailable)
 		}
 		if workflow, found := controller.hub.Workflow(request.Name); found {
-			if !workflow.Status.Phase.Completed() {
-				return workflow, true, nil
-			}
-			cached = workflow
+			return workflow, true, nil
 		}
 	}
 	workflow, err := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
@@ -33,15 +33,6 @@ func (controller *Controller) workflowForAdoption(ctx context.Context, request A
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("argojob: read Workflow for adoption: %w", err)
-	}
-	if cached != nil {
-		binding, err := controller.bindAdoption(cached, request)
-		if err != nil {
-			return nil, false, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
-		}
-		if !binding.matches(workflow) {
-			return nil, false, fmt.Errorf("%w: Workflow identity changed during startup settlement", ErrAdoptionRefused)
-		}
 	}
 	return workflow, true, nil
 }

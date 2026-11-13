@@ -3,8 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -13,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	kubefake "k8s.io/client-go/kubernetes/fake"
@@ -25,7 +30,6 @@ import (
 type startupWatchJobs struct {
 	*adoptingJobs
 	syncWatch func(context.Context) error
-	terminal  *JobResult
 }
 
 func (j *startupWatchJobs) WaitForWatchSync(ctx context.Context) error {
@@ -33,12 +37,6 @@ func (j *startupWatchJobs) WaitForWatchSync(ctx context.Context) error {
 		return j.syncWatch(ctx)
 	}
 	return ctx.Err()
-}
-func (j *startupWatchJobs) AdoptedResult(context.Context, model.Run) (JobResult, error) {
-	if j.terminal == nil {
-		return JobResult{}, ErrJobNotTerminal
-	}
-	return *j.terminal, nil
 }
 
 func TestStartupWatchAdoptionSettlesCompletedAndDispatchesRunning(t *testing.T) {
@@ -48,9 +46,6 @@ func TestStartupWatchAdoptionSettlesCompletedAndDispatchesRunning(t *testing.T) 
 			run := f.enqueueAndClaim(t, "feature/"+kind, strings.Repeat("a", 40))
 			f.setWorkflowName(t, run.ID, "original-workflow")
 			jobs := &startupWatchJobs{adoptingJobs: &adoptingJobs{found: kind != "confirmed-miss"}}
-			if kind == "completed" {
-				jobs.terminal = &JobResult{Status: model.RunFailed, Phase: "failed", Error: "native Workflow failed"}
-			}
 			scheduler := f.scheduler(t, jobs)
 			dispatched := 0
 			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(model.Run) error { dispatched++; return nil }); err != nil {
@@ -60,7 +55,7 @@ func TestStartupWatchAdoptionSettlesCompletedAndDispatchesRunning(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if kind == "running" {
+			if kind != "confirmed-miss" {
 				if dispatched != 1 || current.Status != model.RunRunning {
 					t.Fatal("running adoption was not dispatched", current, dispatched)
 				}
@@ -71,9 +66,6 @@ func TestStartupWatchAdoptionSettlesCompletedAndDispatchesRunning(t *testing.T) 
 			}
 			if kind == "confirmed-miss" && current.Error != model.ServerRestartReason {
 				t.Fatal("missing Workflow lost B4 reason", current)
-			}
-			if kind == "completed" && current.Error != "native Workflow failed" {
-				t.Fatal("native terminal result changed", current)
 			}
 			if jobs.created != 0 || jobs.releaseCreated != 0 || len(jobs.deleted) != 0 {
 				t.Fatal("startup resubmitted or deleted Workflow", jobs)
@@ -188,7 +180,7 @@ func TestStartupWatchAdoptionRetriesUncertainLiveRead(t *testing.T) {
 	var reads atomic.Int32
 	jobs.adoptHook = func(context.Context, model.Run) (bool, error) {
 		if reads.Add(1) == 1 {
-			return false, errors.New("API unavailable")
+			return false, apierrors.NewServiceUnavailable("API unavailable")
 		}
 		return true, nil
 	}
@@ -200,5 +192,73 @@ func TestStartupWatchAdoptionRetriesUncertainLiveRead(t *testing.T) {
 	current, err := f.store.Run(t.Context(), run.ID)
 	if err != nil || current.Status != model.RunRunning || dispatched != 1 || reads.Load() != 2 || jobs.created != 0 || len(jobs.deleted) != 0 {
 		t.Fatal("uncertain lookup changed run", current, err, reads.Load())
+	}
+}
+
+func TestStartupWatchAdoptionRetriesOnlyUnavailableErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{"watch", ErrUnavailable, true},
+		{"deadline", context.DeadlineExceeded, true},
+		{"throttled", apierrors.NewTooManyRequests("private", 1), true},
+		{"server", &apierrors.StatusError{ErrStatus: metav1.Status{Code: 502}}, true},
+		{"timeout", apierrors.NewTimeoutError("private", 1), true},
+		{"transport", &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}, true},
+		{"eof", io.ErrUnexpectedEOF, true},
+		{"forbidden", apierrors.NewForbidden(schema.GroupResource{Resource: "workflows"}, "workflow", errors.New("private")), false},
+		{"unauthorized", apierrors.NewUnauthorized("private"), false},
+		{"bad-trigger", errors.New("invalid run trigger"), false},
+		{"no-adopter", errors.New("controller cannot adopt"), false},
+		{"refused", ErrAdoptionRefused, false},
+		{"canceled", context.Canceled, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			jobs := &startupWatchJobs{adoptingJobs: &adoptingJobs{}}
+			calls := 0
+			jobs.adoptHook = func(context.Context, model.Run) (bool, error) {
+				calls++
+				if calls == 1 {
+					return false, fmt.Errorf("wrapped: %w", tc.err)
+				}
+				return true, nil
+			}
+			scheduler := &Scheduler{}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			found, err := scheduler.adoptStartupWorkflow(ctx, jobs, model.Run{ID: "run", WorkflowName: "workflow"})
+			if tc.retry {
+				if err != nil || !found || calls != 2 {
+					t.Fatal(found, err, calls)
+				}
+			} else if !errors.Is(err, tc.err) || found || calls != 1 {
+				t.Fatal(found, err, calls)
+			}
+			class, retry := startupAdoptionErrorClass(fmt.Errorf("wrapped: %w", tc.err))
+			if class == "" || retry != tc.retry || strings.Contains(class, "private") {
+				t.Fatal(class, retry)
+			}
+		})
+	}
+}
+
+func TestStartupWatchAdoptionSkipsCancelledRuns(t *testing.T) {
+	f := newRecoveryFixture(t)
+	run := f.enqueueAndClaim(t, "feature/cancelled", strings.Repeat("a", 40))
+	f.setWorkflowName(t, run.ID, "original-workflow")
+	if _, err := f.store.CancelRun(t.Context(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
+		t.Fatal(err)
+	}
+	jobs := &startupWatchJobs{adoptingJobs: &adoptingJobs{found: true}}
+	scheduler := f.scheduler(t, jobs)
+	dispatched := 0
+	if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(model.Run) error { dispatched++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	current, err := f.store.Run(t.Context(), run.ID)
+	if err != nil || !current.Cancelled() || dispatched != 0 || len(jobs.adopted) != 0 || len(jobs.deleted) != 0 {
+		t.Fatal(current, err, dispatched, jobs.adopted)
 	}
 }
