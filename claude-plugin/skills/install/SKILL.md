@@ -168,10 +168,14 @@ Arguments given to the command: `$ARGUMENTS`
    - When the output says the client files were kept because they differ,
      this machine is set up for another Oberth server. Ask the user before
      rerunning with `--replace-client-files`; never add it yourself.
-   - Use the install result's URL and CA pin with `/oberth:connect` (the
-     pin came from the authenticated installer). Run the plugin's `trust
-     credentials` command with the issued certificate and the local key, then
-     `trust configure '<https URL>/mcp'`. It adds a user MCP entry only after
+   - Clients use mutual TLS and need no uplink token. The Client access row
+     directs the user to `/oberth:connect`. In JSON, `client_access.authentication`
+     is `mutual_tls`, `token_required` is false, and `next_step` gives that connect
+     instruction with the CA pin and local certificate/key paths.
+     Use the public verify result's `mcp_url` and authenticated CA pin with
+     `/oberth:connect`. Run the plugin's `trust credentials` command with the
+     issued certificate and the local key, then `trust configure '<mcp_url>'`.
+     It adds a user MCP entry only after
      configuration and has no Authorization header in certificate mode.
      Existing settings and env values are kept. Restart Claude Code once,
      confirm `/status` shows the mTLS client certificate row, and call
@@ -188,9 +192,17 @@ Arguments given to the command: `$ARGUMENTS`
 - Never delete, move, truncate or overwrite a secrets file, from this run or
   an earlier one. Use the old file only as installer recovery input and choose
   a new output name instead of removing the old file.
-- A `--dry-run` prints a plan and installs nothing. After the approved
-  install, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" verify --context
-  '<context>'` and explain every failing check and remedy.
+- `install --dry-run` installs nothing. The installer reads and validates
+  `--resume-secrets-file` and an existing `--secrets-file` recovery input with
+  the same private-file rules as installation; the agent never reads their
+  contents. It reserves no output paths and writes no credentials.
+  `install --dry-run --json` returns the resolved public review as version 1
+  JSON with `confirmation_required: true`; a failed dry run may return a plain
+  error. An empty owner-only (0600) regular `--secrets-file` can be reused as
+  installer output; non-empty conflicting files remain refused.
+  After the approved install, run
+  `sh "${CLAUDE_PLUGIN_ROOT}/scripts/install" verify --context '<context>'`
+  and explain every failing check and remedy. This verification is read-only.
 - Never disable TLS verification, and never trust the server's CA any other
   way than `/oberth:connect` with the pin.
 
@@ -273,8 +285,9 @@ for the next plan/install; choose unused names if either already exists.
 
 ### Live NetworkPolicy enforcement check
 
-Install preflight (after approval) and verification use a bounded traffic measurement on
-the operator's cluster against Oberth's own server Pod. They do not identify CNI
+Install preflight (after approval) and explicitly requested `install --verify
+--probe` use a bounded traffic measurement on the operator's cluster against
+Oberth's own server Pod. Default verification does not run this measurement. They do not identify CNI
 brands or try to defend against a hostile server. A server and two differently
 labelled sources per Ready, schedulable, untainted node run in an owned scratch
 namespace. Both sources connect at baseline and after every policy removal.
@@ -324,8 +337,9 @@ not copied into the scratch namespace.
 
 A slow or non-converging policy is **unverified**, with the phase and observed
 elapsed time, rather than proven absence. API, image, exec, server and route
-failures are unverified too. Failed or disabled security checks refuse a fresh install or explicit
-verification; repeat after repairing the reported condition. Required rights are
+failures are unverified too. Failed, disabled or unverified live checks refuse a
+fresh install or explicit `install --verify --probe`; repeat after repairing the
+reported condition. Required probe rights are
 namespaces create/get/list/delete, Pods create/get, pods/exec get/create, and
 NetworkPolicies create/delete, in addition to existing cluster reads. The probe
 has a 120-second budget plus a separate 30-second cleanup budget after normal
@@ -345,14 +359,20 @@ then runs a fresh probe before release changes. Existing-release maintenance pre
 that choice and needs no new scratch-probe privileges: an unverified observation
 remains unverified, shown as information, and does not block maintenance. Review
 shows true, false or unspecified (preserved), with disabled/unknown warnings.
-Fresh installs and explicit `install --verify` stay fail-closed. Verification
-reads the effective installed boolean, so false is disabled and missing is
-unverified, regardless of desired flags. Automatic post-maintenance JSON checks
-retain informational probe results; they do not claim explicit security verification.
-The dedicated upgrade path preserves stored values, prints the stored choice and
-warning, and reports capability as unverified/not probed. A successful upgrade
-is not NetworkPolicy evidence. Use `install --verify --json` for the explicit
-bounded security check; rollback does not run this probe.
+Fresh installs and explicit `install --verify --probe` stay fail-closed.
+Default `install --verify` is read-only: it creates no cluster objects and does
+not re-test enforcement. Describe a reported install measurement as
+"was measured at install; this verification did not re-test it". Verification still reads the
+effective installed boolean, so false is disabled and missing is unverified,
+regardless of desired flags. Existing-release maintenance keeps its informational
+policy observation; an unverified result remains unverified and is no proof of
+enforcement. The dedicated upgrade path preserves stored values, prints the
+stored choice and warning, and reports capability as unverified/not probed.
+A successful upgrade is not NetworkPolicy evidence. Use
+`install --verify --probe --json` only for an explicitly requested live enforcement
+check. It creates and cleans up the owned scratch namespace and Pods; disclose
+those writes in Review. `--probe` cannot be combined with `--plan` or `--dry-run`.
+Rollback does not run this probe.
 
 ### Preserve the operator's kubeconfig
 
