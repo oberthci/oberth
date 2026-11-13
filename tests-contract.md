@@ -74,8 +74,9 @@ pending-publication refusal and reason bounds. Service tests
 claimed, a cancelled waiting run releases submission ownership at once, a running
 run's Workflow is deleted and the owner never overwrites the cancel, the
 permission/force matrix, idempotent refusal, promotion cancel without merge or
-push, and no re-fire across a restart while an uncancelled stranded run is
-requeued. Scope tests treat `run_cancel` as a scope-checked mutation; CLI
+push, and no automatic re-fire across a restart. An uncancelled run whose
+Workflow is confirmed absent, or whose claim has no Workflow name, fails with
+`interrupted by server restart`; explicit retry/rerun creates a new run ID. Scope tests treat `run_cancel` as a scope-checked mutation; CLI
 tests cover MCP forwarding, `runs cancel` selection and in-pod admin-socket
 wake.
 
@@ -196,8 +197,10 @@ during pagination that must remain eligible for the next poll.
 Branch Workflow adoption #1172: startup restores each existing branch Workflow
 under its durable run ID, queue/admission sequences and exact execution binding,
 including Workflows completed
-while the owner was down. Missing Workflows still requeue; API and binding
-refusals fail only their run; Workflow read failures preserve ownership. Shutdown preserves new and adopted non-terminal
+while the owner was down. Confirmed-absent Workflows and unnamed claims fail
+with `interrupted by server restart`, without automatic requeue or re-fire.
+Explicit retry/rerun creates a new run ID. Binding refusals fail only their run;
+Workflow read failures preserve ownership rather than establishing absence. Shutdown preserves new and adopted non-terminal
 branch Workflows and their workspaces. Explicit cancel and supersede still
 delete adopted Workflows. Resumed observation retains progress and log bytes,
 replays only unrecorded steps, enforces the remaining aggregate budget, and
@@ -257,8 +260,9 @@ A moved-main case changes the target after adoption but before completion and
 refuses the push. Post-push/pre-finalization crash tests exercise the real
 durable publication outbox: the next owner recovers the same ledger row without
 adopting, creating, deleting or pushing again, and preserves annotated tag object
-versus peeled commit identity. Missing Workflows still interrupt these triggers
-without re-fire. Historical non-release tag Jobs retain their interrupt path;
+versus peeled commit identity. Confirmed-absent Workflows and unnamed claims
+fail these triggers with `interrupted by server restart`, without automatic
+re-fire. Historical non-release tag Jobs retain their interrupt path;
 app adoption refuses to infer release capability from a tag name. Newly
 created and adopted shutdown tails preserve their
 Workflows and promotion workspaces. A non-adopting engine retains all original
@@ -282,9 +286,11 @@ node and namespace refusal. Init timing and logical readiness tests preserve
 mixed script / unobserved image-pull semantics and exclude scripts/expressions.
 Store tests cover atomic claim/grant/terminal timestamps, repeated requests,
 parked admission episodes, write-once facts, immutable Workflow/Pod/container
-attempt bindings, restart re-fire separation with inherited admission order,
+attempt bindings, restart terminalization without automatic re-fire, explicit
+retry/rerun with new run IDs and independent admission order,
 TTL-independent reopen, legacy StartedAt ambiguity and no-backfill migration
-replay. Native run_get returns the durable versioned observations without a
+replay. The forward removal migration retains current durable timing and drops
+restart attempt tables; runtime reads no longer select timing from audit counts. Native run_get returns the durable versioned observations without a
 cluster. Existing migration fixtures drop timing objects before reconstructing
 older schemas; exact schema, ledger, gap and preservation assertions remain.
 Pod termination diagnostics retain exact run/Workflow/Pod identity and exclude
