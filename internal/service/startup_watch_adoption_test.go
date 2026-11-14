@@ -236,6 +236,9 @@ func TestStartupWatchAdoptionRetriesOnlyUnavailableErrors(t *testing.T) {
 			} else if !errors.Is(err, tc.err) || found || calls != 1 {
 				t.Fatal(found, err, calls)
 			}
+			if tc.name == "refused" && err.Error() != "wrapped: "+tc.err.Error() {
+				t.Fatal("refusal reason contains internal classification", err)
+			}
 			class, retry := startupAdoptionErrorClass(fmt.Errorf("wrapped: %w", tc.err))
 			if class == "" || retry != tc.retry || strings.Contains(class, "private") {
 				t.Fatal(class, retry)

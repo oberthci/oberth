@@ -124,6 +124,9 @@ func (scheduler *Scheduler) adoptStartupWorkflow(ctx context.Context, adopter Jo
 		}
 		class, unavailable := startupAdoptionErrorClass(err)
 		if !unavailable {
+			if class == "binding_refused" {
+				return false, err
+			}
 			return false, fmt.Errorf("startup adoption class=%s: %w", class, err)
 		}
 		now := time.Now()
