@@ -72,7 +72,7 @@ async function call($: EngineInterface, tool: 'run_list' | 'run_get', args: obje
     throw new ReadError('unavailable')
   }
   if (out.isStdoutTruncated || out.isStderrTruncated) throw new ReadError('unavailable', 'CLI output was truncated.')
-  if (out.exitCode !== 0) throw new ReadError('unavailable', out.stderr || out.stdout)
+  if (out.exitCode !== 0) throw new ReadError('unavailable', out.stdout || out.stderr)
   try { return JSON.parse(out.stdout) } catch { throw new ReadError('unavailable') }
 }
 

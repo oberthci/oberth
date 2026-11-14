@@ -76,12 +76,15 @@ test('all CLI failures use the sanitised first error line, never a guessed missi
   for (const stderr of ['oberth: server error: method not found (code -32601)', 'oberth: server returned HTTP 404: not found',
     'certificate authentication failed', 'network unavailable', 'oberth: tool returned an error']) {
     state.stderr = `${stderr}\nsecond line must not display`
-    state.stdout = 'not found'
+    state.stdout = ''
     for (const request of [() => getRun(engine, '12345678'), () => listRuns(engine, 5)]) {
       await expect(request()).rejects.toThrow(`unavailable: ${stderr}`)
     }
   }
-  state.stderr = '\x1b[31mTLS\u202ewarning\x1b[0m' + 'x'.repeat(100) + '\nprivate second line'
+  state.stdout = 'run id is ambiguous\nprivate reason'
+  state.stderr = 'oberth: tool returned an error'
+  await expect(getRun(engine, '12345678')).rejects.toThrow('unavailable: run id is ambiguous')
+  state.stdout = '\x1b[31mTLS\u202ewarning\x1b[0m' + 'x'.repeat(100) + '\nprivate second line'
   let failure: unknown
   try { await getRun(engine, '12345678') } catch (err) { failure = err }
   expect(failure instanceof ReadError).toBe(true)

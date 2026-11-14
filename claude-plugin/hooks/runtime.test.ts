@@ -134,9 +134,9 @@ test('a failing watched run stops after three consecutive failures with its diag
   const gets = state.gets
   await clock.advance(60000)
   expect(state.gets).toBe(gets)
-  expect(state.toasts).toEqual(['unavailable: oberth: tool returned an error'])
+  expect(state.toasts).toEqual(['unavailable: not found'])
   const ui = await $.ui.mount({ ...band, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /unavailable:/ }))?.text).toBe('unavailable: oberth: tool returned an error')
+  expect((await ui.find({ type: 'Text', text: /unavailable:/ }))?.text).toBe('unavailable: not found')
   await ui.unmount()
 })
 
