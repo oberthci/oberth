@@ -171,6 +171,10 @@ RETURNING `+stepResultColumns,
 	return value, nil
 }
 
+func (s *Store) StepResult(ctx context.Context, runID, nodeID string) (model.StepResult, error) {
+	return scanStepResult(s.reader().QueryRowContext(ctx, `SELECT `+stepResultColumns+` FROM step_results WHERE run_id = ? AND node_id = ?`, runID, nodeID))
+}
+
 func (s *Store) StepResults(ctx context.Context, runID string) ([]model.StepResult, error) {
 	return stepResultsFrom(ctx, s.reader(), runID)
 }

@@ -82,6 +82,7 @@ type RunHistory interface {
 	CountRuns(context.Context) (model.RunCounts, error)
 	Run(context.Context, string) (model.Run, error)
 	StepResults(context.Context, string) ([]model.StepResult, error)
+	StepResult(context.Context, string, string) (model.StepResult, error)
 }
 
 type RunQueueStore interface {
