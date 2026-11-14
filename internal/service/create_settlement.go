@@ -353,8 +353,6 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx, observerCtx context.Context
 	if run.Status == model.RunRunning {
 		message := "workflow create outcome uncertain; cleanup confirmed absence"
 		switch run.Error {
-		case store.WorkflowSpecMismatchPendingMessage:
-			message = "Workflow spec mismatch; cleanup confirmed absence"
 		case store.ExecutorIdentityPendingMessage:
 			message = "executor identity readiness deadline exceeded after one issuance retry; cleanup confirmed absence"
 		}

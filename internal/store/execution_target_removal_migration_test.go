@@ -39,13 +39,13 @@ func TestExecutionTargetRemovalRefusesRemoteRecoveryAndPreservesLocalRuns(t *tes
 		{"remote-waiting", "remote", "running", "waiting", "", false, true},
 		{"remote-pending", "remote", "running", "infrastructure-pending", "Workflow create outcome uncertain; cleanup pending", true, true},
 		{"remote-interrupted-pending", "remote", "interrupted", "interrupted", ExecutorIdentityPendingMessage, true, true},
-		{"remote-spec-pending", "remote", "interrupted", "interrupted", WorkflowSpecMismatchPendingMessage, true, true},
+		{"remote-spec-pending", "remote", "interrupted", "interrupted", "Workflow spec mismatch; cleanup pending", true, true},
 		{"remote-passed", "remote", "passed", "complete", "", false, false},
 		{"remote-cancelled", "remote", "interrupted", "cancelled", "original failure", true, false},
 		{"unknown-target", "", "running", "running", "", false, true},
 		{"local-running", "local", "running", "running", "", false, false},
 		{"local-queued", "local", "queued", "queued", "", false, false},
-		{"local-pending", "local", "running", "infrastructure-pending", WorkflowSpecMismatchPendingMessage, true, false},
+		{"local-pending", "local", "running", "infrastructure-pending", "Workflow spec mismatch; cleanup pending", true, false},
 		{"unbound-running", "unbound", "running", "running", "", false, false},
 	}
 	before := map[string]model.Run{}

@@ -11,7 +11,6 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-const WorkflowSpecMismatchPendingMessage = "Workflow spec mismatch; cleanup pending"
 const OberthStopReasonPrefix = "cancelling by oberth: "
 
 const ExecutorIdentityPendingMessage = "Executor identity readiness deadline exceeded after one issuance retry; cleanup pending"
@@ -19,7 +18,7 @@ const ExecutorIdentityPendingMessage = "Executor identity readiness deadline exc
 // WorkflowCleanupReason admits only server-authored fixed reasons. Transport
 // errors and untrusted controller messages cannot become durable public text.
 func WorkflowCleanupReason(reason string) bool {
-	return reason == WorkflowSpecMismatchPendingMessage || reason == ExecutorIdentityPendingMessage || reason == argoworkflow.ErrWorkflowCapabilityRequired.Error()
+	return reason == ExecutorIdentityPendingMessage || reason == argoworkflow.ErrWorkflowCapabilityRequired.Error()
 }
 
 // MarkRunCreatePending retains an uncertain submission and re-arms its cleanup
@@ -89,7 +88,7 @@ func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed mo
 	if changed == 1 {
 		// A cancelled run keeps its classification, but must not keep
 		// displaying "cleanup pending" after the exact obligation is completed.
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET error=reason, updated_at=? WHERE id=? AND status='interrupted' AND error IN ('Workflow create outcome uncertain; cleanup pending', ?, ?)`, unixNano(s.now()), observed.RunID, WorkflowSpecMismatchPendingMessage, ExecutorIdentityPendingMessage); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET error=reason, updated_at=? WHERE id=? AND status='interrupted' AND error IN ('Workflow create outcome uncertain; cleanup pending', ?)`, unixNano(s.now()), observed.RunID, ExecutorIdentityPendingMessage); err != nil {
 			return err
 		}
 		return tx.Commit()

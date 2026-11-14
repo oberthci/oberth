@@ -23,7 +23,7 @@ func TestAdminRunStatusUsesDisplayValuesBeforeBounds(t *testing.T) {
 		{status: model.RunRunning, started: true, want: "running"},
 		{status: model.RunRunning, phase: "publishing", want: "running"},
 		{status: model.RunRunning, phase: "infrastructure-pending", want: "running"},
-		{status: model.RunRunning, failure: WorkflowSpecMismatchPendingMessage, want: "running"},
+		{status: model.RunRunning, failure: ExecutorIdentityPendingMessage, want: "running"},
 		{status: model.RunRunning, reason: PolicyRefreshWaitingReason, want: "running"},
 		{status: model.RunRunning, phase: "infrastructure-pending", reason: "kept; " + PolicyRefreshWaitingReason, want: "running"},
 		{status: model.RunPassed, want: "passed"},
