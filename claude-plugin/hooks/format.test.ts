@@ -26,11 +26,11 @@ test('running and missing timestamps have honest durations', () => {
 
 test('controls, terminal strings and Unicode cannot move columns', () => {
   const hostile = '\x1b[31mred\x1b[0m\x1b]0;title\x07\x1bPpayload\x1b\\\n\r\t\u202Eref\x9b2J'
-  expect(clean(hostile)).toBe('redref')
-  expect(clip(hostile, 5)).toBe('redr…')
+  expect(clean(hostile)).toBe('?red???????ref?')
+  expect(clip(hostile, 5)).toBe('?red…')
   expect(clip('界e\u0301😀', 10)).toBe('?e??')
-  expect(clean('x\x1b]unfinished')).toBe('x')
-  expect(clean('x\x1bPunfinished')).toBe('x')
+  expect(clean('x\x1b]unfinished')).toBe('x?')
+  expect(clean('x\x1bPunfinished')).toBe('x?')
 })
 
 test('fixed-width table includes every column and truncates untrusted fields', () => {
@@ -39,7 +39,7 @@ test('fixed-width table includes every column and truncates untrusted fields', (
   expect(lines[0]!).toContain('FAILED STEP')
   expect(lines[0]!.length).toBe(103)
   expect(lines[1]!.length).toBe(lines[0]!.length)
-  expect(lines[1]!).toContain('unitfail')
+  expect(lines[1]!).toContain('unit?fail')
   expect(lines[1]!.indexOf('✓ passed')).toBe(50)
   expect(table([], now)).toBe('No runs.')
   expect(age(base, now)).toBe('2h ago')
@@ -49,5 +49,14 @@ test('fixed-width table includes every column and truncates untrusted fields', (
 
 test('status and watch lines are read-only summaries', () => {
   expect(statusLine([{ ...base, status: 'running' }, base])).toBe('Oberth ▸ 1 running · last ✓ main')
-  expect(watchLine({ ...base, failed_step: 'unit\nfail' }, now)).toContain('unitfail')
+  expect(watchLine({ ...base, failed_step: 'unit\nfail' }, now)).toContain('unit?fail')
+})
+
+
+test('unterminated C1 control strings remain visibly distinct from a trusted ref', () => {
+  for (const control of ['\u0090', '\u0098', '\u009d', '\u009e', '\u009f']) {
+    expect(clean(`main${control}-evil-suffix`)).toBe('main?')
+  }
+  expect(clean('main\x1b]title\x07-suffix')).toBe('main?-suffix')
+  expect(clean('main\x1bPpayload\x1b\\-suffix')).toBe('main?-suffix')
 })

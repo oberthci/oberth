@@ -16,11 +16,11 @@ export const finished = (r: Run): boolean => ['passed', 'failed', 'cancelled', '
 // CSI (including C1 forms), then ESC sequences, controls and bidi/format marks.
 export function clean(value: unknown): string {
   return String(value ?? '')
-    .replace(/(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c|$)/g, '')
-    .replace(/(?:\x1b[P^_X]|[\x90\x98\x9e\x9f])[\s\S]*?(?:\x1b\\|\x9c|$)/g, '')
-    .replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[ -/]*[@-~]/g, '')
-    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '')
+    .replace(/(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c|$)/g, '?')
+    .replace(/(?:\x1b[P^_X]|[\x90\x98\x9e\x9f])[\s\S]*?(?:\x1b\\|\x9c|$)/g, '?')
+    .replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g, '?')
+    .replace(/\x1b[ -/]*[@-~]/g, '?')
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '?')
 }
 
 // Use a conservative one-cell alphabet for deterministic terminal columns.

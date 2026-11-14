@@ -1,10 +1,13 @@
 import type { EngineInterface } from 'claude-code'
 import type { Run, Step } from './format'
 
-export const INSTALL = 'Oberth is not configured. Run /oberth:install.'
+export const INSTALL = 'This Oberth view needs client-certificate setup. Run /oberth:install.'
+export const UNAVAILABLE = 'Oberth is unavailable, retrying.'
+export const VALID_ID = /^[0-9a-f]{8,32}$/i
+export const INVALID_ID = 'Run id must be 8 to 32 hexadecimal characters.'
 export class ReadError extends Error {
-  constructor(public kind: 'setup' | 'missing' | 'unavailable') {
-    super(kind === 'setup' ? INSTALL : kind === 'missing' ? 'Oberth run not found; watch stopped.' : 'Oberth is unavailable; try again later.')
+  constructor(public kind: 'setup' | 'missing' | 'unavailable' | 'invalid') {
+    super(kind === 'setup' ? INSTALL : kind === 'missing' ? 'Oberth run not found.' : kind === 'invalid' ? INVALID_ID : UNAVAILABLE)
   }
 }
 
@@ -24,29 +27,44 @@ async function connection($: EngineInterface): Promise<string[]> {
     for (const file of [ca, cert, key]) {
       if ((await $.fs.stat(file)).kind !== 'file') throw new ReadError('setup')
     }
-    let cli = 'oberth'
-    try {
-      if (home && (await $.fs.stat(`${home}/.local/bin/oberth`)).kind === 'file') cli = `${home}/.local/bin/oberth`
-    } catch { /* A PATH installation is also supported. */ }
+    const cli = await executable($, home)
     return [cli, 'mcp', 'call', '--url', url, '--ca-file', ca, '--client-cert', cert,
       '--client-key', key, '--timeout', '10s', '--reconnect-window', '1ms', '--args-file', '-']
   } catch { throw new ReadError('setup') }
 }
 
-async function call($: EngineInterface, tool: 'run_list' | 'run_get', args: object): Promise<unknown> {
+// Never let the project directory or a relative/empty PATH entry choose code.
+async function executable($: EngineInterface, home: string | undefined): Promise<string> {
+  const candidates = home?.startsWith('/') ? [`${home}/.local/bin/oberth`] : []
+  for (const entry of (await $.env.get('PATH') || '').split(':')) {
+    if (entry.startsWith('/')) candidates.push(`${entry}/oberth`)
+  }
+  for (const candidate of candidates) {
+    try { if ((await $.fs.stat(candidate)).kind === 'file') return candidate } catch { /* Try the next absolute candidate. */ }
+  }
+  throw new ReadError('setup')
+}
+
+async function call($: EngineInterface, tool: 'run_list' | 'run_get', args: object, deadline?: number): Promise<unknown> {
   const argv = await connection($)
+  const remaining = deadline === undefined ? 12000 : Math.min(12000, deadline - await $.clock.now())
+  if (remaining <= 0) throw new ReadError('unavailable')
   let out
   try {
-    out = await $.process.run([...argv, tool], { stdin: JSON.stringify(args), timeoutMs: 12000 })
-  } catch (err) {
-    // A missing executable is a setup error; never show a host exception.
-    const message = String(err).toLowerCase()
-    throw new ReadError(/enoent|not found|executable|spawn/.test(message) ? 'setup' : 'unavailable')
+    out = await $.process.run([...argv, tool], { stdin: JSON.stringify(args), timeoutMs: remaining })
+  } catch {
+    // Spawn and timeout exceptions have no documented structured error code.
+    // Recheck the selected path: a disappeared CLI is setup, other failures retry.
+    try { if ((await $.fs.stat(argv[0]!)).kind !== 'file') throw new ReadError('setup') }
+    catch { throw new ReadError('setup') }
+    throw new ReadError('unavailable')
   }
+  if (out.isStdoutTruncated || out.isStderrTruncated) throw new ReadError('unavailable')
   if (out.exitCode !== 0) {
-    const text = `${out.stdout} ${out.stderr}`.toLowerCase()
-    if (/not found|not_found|no such run/.test(text)) throw new ReadError('missing')
-    if (/credential|certificate|authentication|unauthorized|not configured/.test(text)) throw new ReadError('setup')
+    // The CLI currently emits plain tool errors, not JSON (mcp.go toolFailure).
+    // Match its entire tool-error envelope, never transport/method prose.
+    if (tool === 'run_get' && out.exitCode === 1 && out.stdout.trim() === 'not found'
+      && out.stderr.trim() === 'oberth: tool returned an error') throw new ReadError('missing')
     throw new ReadError('unavailable')
   }
   try { return JSON.parse(out.stdout) } catch { throw new ReadError('unavailable') }
@@ -65,13 +83,15 @@ function run(value: unknown): Run {
   return r as Run
 }
 
-export async function listRuns($: EngineInterface, count: number): Promise<Run[]> {
-  const value = record(await call($, 'run_list', { limit: count }))
+export async function listRuns($: EngineInterface, count: number, deadline?: number): Promise<Run[]> {
+  const value = record(await call($, 'run_list', { limit: count }, deadline))
   if (!Array.isArray(value.runs)) throw new ReadError('unavailable')
-  return value.runs.slice(0, count).map(run)
+  // One malformed row must not hide every readable run; retain all active rows.
+  return value.runs.flatMap(value => { try { return [run(value)] } catch { return [] } })
 }
-export async function getRun($: EngineInterface, id: string): Promise<Run> {
-  const value = record(await call($, 'run_get', { id, summary: false }))
+export async function getRun($: EngineInterface, id: string, deadline?: number): Promise<Run> {
+  if (!VALID_ID.test(id)) throw new ReadError('invalid')
+  const value = record(await call($, 'run_get', { id, summary: false }, deadline))
   const r = run(value.run)
   if (!r.repo && value.repository) {
     const repository = record(value.repository)
