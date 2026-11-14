@@ -541,6 +541,35 @@ func TestAdoptedTerminalObservationErrorKeepsRealResult(t *testing.T) {
 	}
 }
 
+func TestAdoptedCompletedWorkflowWaitErrorUsesStopFallback(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	run := fixture.enqueueAndClaim(t, "feature/budget", "efefefefefefefefefefefefefefefefefefefef")
+	fixture.setWorkflowName(t, run.ID, "oberth-budget")
+	passed := JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}}
+	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{
+		terminalErr: errors.New("completion read unavailable"), waitResult: passed,
+		waitErr: errors.New("step test/unit breached the aggregate run log budget"),
+	}}
+	scheduler := fixture.scheduler(t, jobs)
+	reservation, err := scheduler.submissions.adopt(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduler.resumeAdoptedRun(context.Background(), run, scheduler.requireMutation, reservation); err != nil {
+		t.Fatal(err)
+	}
+	current, err := fixture.store.Run(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != model.RunPassed || len(jobs.deleted) != 1 || jobs.deleted[0] != "oberth-budget" {
+		t.Fatalf("adopted completion Stop fallback lost its real result: %#v deleted=%v", current, jobs.deleted)
+	}
+	if steps, err := fixture.store.StepResults(context.Background(), run.ID); err != nil || len(steps) != 1 {
+		t.Fatalf("steps = %#v, %v", steps, err)
+	}
+}
+
 func TestAdoptionFailureNamesWorkflowAndIsolatesRefusal(t *testing.T) {
 	var logged bytes.Buffer
 	log.SetOutput(&logged)
