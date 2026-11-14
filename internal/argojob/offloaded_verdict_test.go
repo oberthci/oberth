@@ -38,6 +38,9 @@ func TestReviewOffloadedStatusPreservesNativeVerdict(t *testing.T) {
 				if mode == "offloaded" && got.ObservationComplete {
 					t.Fatal("unavailable nodes granted replay authority")
 				}
+				if got.NodeStatusUnavailable != (mode == "offloaded") {
+					t.Fatal("native observation availability was not retained", got)
+				}
 			})
 		}
 	}

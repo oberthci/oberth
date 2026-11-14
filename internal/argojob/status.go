@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sort"
 	"strings"
@@ -52,17 +53,19 @@ type Completion struct {
 	Terminal            bool
 	Interrupted         bool
 	ObservationComplete bool
-	ObservedNodes       int
-	ObservedNodeIDs     []string
-	ReplayAttempts      []StepResult
-	VMIDiagnostics      []byte
-	Name                string
-	Succeeded           bool
-	Infrastructure      bool
-	Phase               string
-	Reason              string
-	FailedStage         string `json:"FailedStage"`
-	FailedStep          string
+	// NodeStatusUnavailable marks phase-only observation of an offloaded Workflow.
+	NodeStatusUnavailable bool `json:"-"`
+	ObservedNodes         int
+	ObservedNodeIDs       []string
+	ReplayAttempts        []StepResult
+	VMIDiagnostics        []byte
+	Name                  string
+	Succeeded             bool
+	Infrastructure        bool
+	Phase                 string
+	Reason                string
+	FailedStage           string `json:"FailedStage"`
+	FailedStep            string
 	// FailedNodeID is the authoritative failure identity; the names are display metadata.
 	FailedNodeID string
 	Steps        []StepResult
@@ -555,7 +558,14 @@ func completeTerminalTree(workflow *wfv1.Workflow) bool {
 func completionFor(workflow *wfv1.Workflow) Completion {
 	expanded, err := nativeNodeWorkflow(context.Background(), workflow)
 	if err != nil {
-		return Completion{Name: workflow.Name, Terminal: workflow.Status.Phase.Completed(), Succeeded: workflow.Status.Phase == wfv1.WorkflowSucceeded, Phase: string(workflow.Status.Phase), Reason: strings.TrimSpace(strings.TrimSpace(workflow.Status.Message) + "\n" + err.Error()), OperatorStopped: operatorShutdown(workflow)}
+		return Completion{
+			Name: workflow.Name, Terminal: workflow.Status.Phase.Completed(),
+			Succeeded:             workflow.Status.Phase == wfv1.WorkflowSucceeded,
+			Phase:                 string(workflow.Status.Phase),
+			Reason:                strings.TrimSpace(strings.TrimSpace(workflow.Status.Message) + "\n" + err.Error()),
+			OperatorStopped:       operatorShutdown(workflow),
+			NodeStatusUnavailable: errors.Is(err, errNodeStatusOffloaded),
+		}
 	}
 	workflow = expanded
 	completion := Completion{

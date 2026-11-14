@@ -756,8 +756,7 @@ func (jobs *ArgoJobs) forget(name, runID string) {
 // result maps the engine's completion onto the same durable JobResult the Job
 // engine produces, so nothing downstream can tell which engine ran.
 func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
-	// Retain an unavailable-node reason even when Argo reports success.
-	result := service.JobResult{Status: model.RunFailed, Phase: "job", Error: completion.Reason}
+	result := service.JobResult{Status: model.RunFailed, Phase: "job"}
 	for _, step := range completion.ReplayAttempts {
 		if step.Status != runprogress.StepQueued && step.Status != runprogress.StepSkipped {
 			result.ObservedStepStart = true
@@ -777,6 +776,9 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	if completion.Succeeded {
 		result.Status = model.RunPassed
 		result.Phase = "passed"
+		if completion.NodeStatusUnavailable {
+			result.Error = completion.Reason
+		}
 	} else {
 		result.Error = completion.Reason
 		if result.Error == "" {
