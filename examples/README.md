@@ -9,6 +9,7 @@ and source injection.
 | Example | For | Key demonstration |
 |---|---|---|
 | [`go-project/`](go-project/.oberth/build.yaml) | Go repositories | Cross-compile identity via explicit GOOS/GOARCH per template, release credential isolation via trigger-gated ServiceAccount, native tmpfs credential delivery |
+| [`example-repo/`](example-repo/README.md) | Fresh-machine acceptance | Tested v0.22.7 repository and a separately marked v0.23.0 draft |
 | [`generic/`](generic/.oberth/build.yaml) | Any language | SHA-256 verified tool install, per-template timeouts, no-shell exec model |
 
 ## What Oberth's enforcement catches

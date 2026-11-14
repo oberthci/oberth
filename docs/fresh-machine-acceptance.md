@@ -113,9 +113,11 @@ check leaves fresh-machine acceptance incomplete for that candidate.
    Do not bypass CA/hostname verification or substitute bearer authentication
    to turn a failed certificate connection into a pass.
 
-6. **Smoke run.** Ask Claude to register and bind the throwaway repository using
-   `/oberth:add-repo`, with a tiny `.oberth` build that echoes a message and
-   requests `cpu: 100m`. Use an explicit image and enough authored memory,
+6. **Smoke run.** Follow phases 1–2 of the
+   [example repository walk](#example-repository-walk) to register and bind the
+   throwaway repository using `/oberth:add-repo`. Copy the v0.22.7 variant
+   with its test, sidecar and parameter handoff; each authored container requests
+   `cpu: 100m`. Use an explicit image and enough authored memory,
    storage and limits for the chosen cluster; save the authored YAML. Commit
    and push through the server-bound Oberth remote. Record the pushed SHA,
    run ID, whether the run passed and how Claude reported it. Inspect the step
@@ -227,6 +229,184 @@ check leaves fresh-machine acceptance incomplete for that candidate.
     not a clean result. Reports contain public summaries only; raw evidence
     and secrets files must never be uploaded with release evidence.
 
+## Example repository walk
+
+Use [`examples/example-repo/v0.22.7/`](../examples/example-repo/v0.22.7/.oberth/build.yaml)
+as the repository for scenario steps 6 and 7. Its
+[README](../examples/example-repo/README.md) describes both variants and the
+recorded validation boundary. `next/` is **DRAFT**: it decodes at the recorded
+`int/v0.23.0` snapshot, but source inputs, authored security contexts and existing
+cache claims are still refused there. It is not a replacement acceptance path
+until the assembled v0.23.0 candidate admits and runs it. A local admission/Build
+test is not a live installation, cancellation, promotion or release result.
+
+Keep the scenario's candidate pinning, private capture, time box, explicit
+context, recovery and final secrets scan rules. Execute this walk only in the
+throwaway repository chosen in setup. The commands below describe a manual
+acceptance run; do not push an Oberth development checkout. Replace angle-bracket
+values with the actual run, repository and environment identities.
+
+1. **Copy and bind (scenario step 6).** Clone the empty throwaway upstream,
+   then copy the contents of the selected variant, including `.oberth`, into
+   its root. Supply the actual candidate checkout path:
+
+   ```sh
+   git clone '<throwaway-upstream-url>' example-repo
+   cd example-repo
+   cp -R '<candidate-checkout>/examples/example-repo/v0.22.7/.' .
+   oberth validate --runner-image-prefixes= .
+   ```
+
+   Expected: local validation succeeds. The explicit empty prefix list matches
+   an installation without an image allowlist; when the operator uses an
+   allowlist, validate with that same list and allow the authored digest pins.
+   Local validation checks structure, not live grants or identities. Register
+   and bind this checkout through `/oberth:add-repo` using the public install
+   result. Expected: the canonical repository key and the server-bound
+   `oberth` remote, with no change to kubeconfig. Use the selected upstream's
+   default branch name (the commands below assume `main`).
+
+   ```sh
+   git add .
+   git commit -m 'Add example pipeline'
+   git push oberth HEAD:refs/heads/main
+   ```
+
+2. **Read the green build.** Follow this push's run with `events_wait` or
+   `run_wait`, then `run_get` and `run_logs`. Record the exact SHA and run ID.
+   Require `status: passed` and these application lines in task order:
+
+   ```text
+   test: app passed
+   test: source passed
+   test: sidecar passed
+   build: <64-hex SHA-256 of app.sh>
+   handoff: <the same digest> (branch)
+   cleanup: complete
+   ```
+
+   `wait` exits silently when `cancel.txt` contains `no`. The HTTP sidecar is
+   started and stopped by Argo; no Service or operator port-forward is needed.
+   Compare the producer's output parameter `digest` with the report task's
+   input and log; this is an Argo parameter handoff between separate Pods.
+   Finish the authored-resource and generated-helper Pod comparisons in
+   scenario step 6. v0.22.7 supplies security contexts and private `/tmp` mounts;
+   compare requests, limits and placement without mistaking these documented
+   changes for authored resource changes.
+
+3. **Held build (scenario step 7).** On a separate `demo/assist` branch from
+   the green commit, change only `expect.txt` to `broken`. Keep `cancel.txt`
+   at `no`. Use scenario step 7's cursor, subscription, assist push and
+   patch/continue procedure to change `expect.txt` to `fixed` in the held
+   `test` step. Expected before the patch: `test: app passed`, followed by a
+   hold for `test`. Expected after continuation: the remaining success lines,
+   the same run ID/SHA, `assisted: true`, and `not evidence`. No upstream
+   publication or promotion evidence may result. The build declares no
+   secrets or retry strategy. Keep this branch separate from the green source
+   used below; changing the local file alone does not make its SHA green.
+
+4. **Stop, then Terminate.** Start `demo/cancel` from the original ordinary
+   green commit. Set `cancel.txt` to `yes`, commit and push this branch through
+   the bound remote. Wait for `cancel: waiting for Stop` in the `wait` step.
+
+   ```sh
+   oberth run cancel '<cancel-run-id>' --reason 'acceptance Stop' --json
+   ```
+
+   Expected: cancellation acknowledgement with a warning that repeating an
+   active cancellation uses Argo Terminate. With the private Workflow identity
+   from the run, observe `spec.shutdown: Stop` and
+   `cleanup: waiting for Terminate` in the exit handler. Keep this run active
+   for the second call; each wait is bounded to 600 seconds.
+
+   ```sh
+   oberth run cancel '<cancel-run-id>' --reason 'acceptance Terminate' --json
+   kubectl --context '<context>' -n '<pipeline-namespace>' get workflow '<workflow-name>' -o jsonpath='{.spec.shutdown}'
+   ```
+
+   Expected: `Terminate`; the active exit handler is stopped and does not print
+   `cleanup: complete`. Retain both shutdown observations and Argo's terminal
+   phase/reason, plus the cancelled run record. Oberth does not delete the
+   Workflow; Argo TTL eventually removes it. If the run finishes before the
+   second call, repeat on a new cancel commit and record the missed window.
+   Release-tier and promotion cancels start with Terminate, so use this ordinary
+   branch run to prove escalation. Do not promote the cancel commit.
+
+5. **Promote an ordinary green change.** Start `demo/change` from the original
+   green commit, with `expect.txt=fixed` and `cancel.txt=no`. Add `change.txt`,
+   commit, and push through `oberth`. Expected: a new ordinary green build with
+   the same application output. Promote its exact tested commit:
+
+   ```sh
+   printf '[{"sha":"%s","ref":"demo/change"}]\n' '<green-change-sha>' > '<private-capture>/promotion-sources.json'
+   oberth promotion create --repo '<repo-key>' --branch main --sources-file '<private-capture>/promotion-sources.json' --json
+   ```
+
+   Use an admin connection or a promotion grant for this source/target tuple.
+   The one-source array forces promotion CI even for a fast-forward. Follow
+   `promote_status` and the associated run. Expected: tests and handoff succeed
+   with `(promotion)` in the handoff line, publication completes and the upstream
+   `main` reaches the reported result SHA. Assisted or cancelled runs are never
+   the source. Read the actual promotion result; an accepted request alone is
+   not delivery.
+
+6. **Grant one secret and release on a tag.** Ask the authorized OpenBao
+   operator to create KV v2 path `oberth/data/release/example-repo` with one
+   nonempty `marker` field, using a private acceptance-only value recorded in
+   the scan inventory. Do not print it. Grant the exact tuple through the
+   authenticated admin connection:
+
+   ```sh
+   oberth mcp call access_allow '{"repo":"<repo-key>","workflow":".oberth/release.yaml","step":"read-secret","secret":"oberth/data/release/example-repo"}'
+   ```
+
+   Synchronize OpenBao roles/policies with `oberth secretstore sync` and install
+   the scoped identities through the reviewed secret-store upgrade on the same
+   explicit context. Confirm reconciliation is healthy before tagging. A grant
+   record alone does not prove its ServiceAccount and store policy exist.
+   Fetch the delivered default-branch result and create a new annotated version
+   tag on that exact commit, reachable from the fresh upstream default branch:
+
+   ```sh
+   git fetch origin main
+   git tag -a v0.1.0 '<promotion-result-sha>' -m 'Example release'
+   git push oberth refs/tags/v0.1.0
+   ```
+
+   Expected: release admission selects `.oberth/release.yaml`; its run has the
+   tag's peeled SHA and release authority. The test and digest lines repeat,
+   with `(tag)` in the handoff, then:
+
+   ```text
+   secret: marker present
+   release: refs/tags/v0.1.0
+   ```
+
+   The final line uses the server's release-tag parameter (the full ref on
+   v0.22.7). Require a passed release run, no marker value in any capture,
+   no secret-store settings in the test/report steps or HTTP sidecar, and the
+   file/step-scoped identity only on `read-secret`. This demonstration reads a
+   secret and completes a tag release; it has no external application publisher.
+   Return to scenario step 8 for restart/unseal and the remaining required checks.
+
+### Three deliberate refusals
+
+Perform each case separately, restore the original state, and require the
+ordinary green walk to work again. Save only sanitized refusals. The repository's
+`TestExampleRepoRefusals` loads these same files through admission and Build.
+
+| Case | Deliberate change | Expected refusal and recovery |
+| --- | --- | --- |
+| Forge a run fact | In a disposable copy of `build.yaml`, add `spec.arguments.parameters: [{name: oberth-sha, value: forged}]`; run `oberth validate --runner-image-prefixes= <copy-root>` | Nonzero result containing `server-owned`. Remove the declaration; consume the workflow parameter without declaring it. |
+| Read the node filesystem | In a separate copy, add `spec.volumes: [{name: host, hostPath: {path: /}}]`; run the same validation | Nonzero result containing `mounts the node filesystem`. Remove the volume; authored node paths are never a cache grant. |
+| Use another step's secret grant | On the test installation, revoke the exact `read-secret` tuple with `access_revoke` and grant the same file/path to `report` with `access_allow`. Attempt a fresh annotated version tag such as `v0.1.1-refused` on the delivered commit | Release admission refuses `secret grant denied` for `read-secret`; no granted secret Pod starts. Revoke `report`, re-grant `read-secret`, reconcile identities/policies and retry with a fresh version tag. A grant to a different workflow file also supplies no authority. |
+
+Use only the acceptance-only secret for the last case. Keep the refused tag's
+local identity in the private record and do not move or reuse an admitted tag.
+The CLI's local validator cannot establish the live grant refusal; observe the
+server's release admission. A push refusal or recorded failed admission must
+name the grant boundary, rather than being a connectivity or tag-ancestry error.
+
 ## Report template
 
 Write the report in one fenced Markdown block using this structure. PASS
@@ -271,6 +451,11 @@ Total time from step 3 to step 6 green: <min>   Total scenario time: <min>
 - Smoke run: <id, exact pushed SHA, result>
 - Held run: <event ID, run ID, exact pushed SHA, step, patch digest>
 - Continuation: <status, assisted flag, not-evidence reason, no upstream publication>
+- Parameter handoff and sidecar: <producer/consumer digest, sidecar result>
+- Cancel: <run ID, observed Stop then Terminate, exit handler and retained Workflow>
+- Promotion: <source SHA, promotion ID, result SHA and upstream publication>
+- Tag release: <annotated tag object/peeled SHA, run ID, scoped grant, marker-presence result>
+- Three deliberate refusals: <server-owned parameter, node filesystem, wrong-step secret grant; restored and rechecked>
 
 ## Restart and recovery
 - Restart method and evidence: <public summary>
