@@ -49,6 +49,11 @@ TESTS = (
 # credential inventory contract remains scoped to TESTS' installer fixtures.
 FLOW_TESTS = (
     (CLI_PACKAGE, 'TestRunCreateFirstAdminLiveGate'),
+    (CLI_PACKAGE, 'TestUpgradeWaitProcessGraph'),
+    (INSTALLER_PACKAGE, 'TestUpgradeUnconfiguredAdminRefusesBeforeMutation'),
+    (INSTALLER_PACKAGE, 'TestUpgradeMissingCurrentAdminAPIGivesRetryCommand'),
+    (INSTALLER_PACKAGE, 'TestFirstAdminRerunRefusalPreservesPartialResult'),
+    (INSTALLER_PACKAGE, 'TestFirstAdminCachedKeyWithoutCSRCanResume'),
     (INSTALLER_PACKAGE, 'TestInstallJSONOnboardingAndResume'),
     (INSTALLER_PACKAGE, 'TestFirstAdminInterruptedInstallResumes'),
     (INSTALLER_PACKAGE, 'TestUpgradeReleasedServerWithoutAdminAPI'),

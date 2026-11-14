@@ -144,3 +144,7 @@ The manual procedure supersedes the unused `fresh_machine.py` root/systemd VM
 harness and its private tool-provisioning/round-trip helpers and pins, which have
 been removed. It needs no VM runner or additional CI wiring. The existing
 contract-cell entry points and release dependencies remain in place.
+
+Mandatory flow events also cover native upgrade process handling, kubeconfig-only
+upgrade refusals, current-release missing routes, cached enrollment without a CSR,
+and the structured partial result after an enrollment refusal.

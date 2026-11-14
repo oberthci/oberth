@@ -21,6 +21,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/httpstream"
+	streamspdy "k8s.io/apimachinery/pkg/util/httpstream/spdy"
 
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/testtimeout"
@@ -86,9 +88,24 @@ func newUpgradeWaitProcessFixture(t *testing.T, mode string) *upgradeWaitProcess
 
 func (f *upgradeWaitProcessFixture) serve(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	t.Helper()
+	if strings.HasSuffix(r.URL.Path, "/portforward") {
+		if _, err := httpstream.Handshake(r, w, []string{"portforward.k8s.io"}); err != nil {
+			t.Error(err)
+			return
+		}
+		conn := streamspdy.NewResponseUpgrader().UpgradeResponse(w, r, func(stream httpstream.Stream, replySent <-chan struct{}) error {
+			go func() { <-replySent; _ = stream.Close() }()
+			return nil
+		})
+		if conn != nil {
+			defer func() { _ = conn.Close() }()
+			<-conn.CloseChan()
+		}
+		return
+	}
 	if r.Method != http.MethodGet {
 		t.Errorf("upgrade mutated Kubernetes: %s %s", r.Method, r.URL.Path)
-		http.Error(w, "refused", 405)
+		http.Error(w, "refused", http.StatusMethodNotAllowed)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -102,6 +119,8 @@ func (f *upgradeWaitProcessFixture) serve(t *testing.T, w http.ResponseWriter, r
 	case "/api/v1/namespaces/" + config.Namespace + "/configmaps/" + config.Name:
 		f.liveReads.Add(1)
 		_ = json.NewEncoder(w).Encode(config)
+	case "/api/v1/namespaces/oberth/pods":
+		_ = json.NewEncoder(w).Encode(&corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "server"}, Status: corev1.PodStatus{Phase: corev1.PodRunning}}}})
 	case "/api/v1/namespaces/kube-system":
 		http.NotFound(w, r)
 	case "/apis/argoproj.io/v1alpha1/namespaces/oberth-argo/workflows":
@@ -124,7 +143,7 @@ func (f *upgradeWaitProcessFixture) workflows(t *testing.T, w http.ResponseWrite
 		close(f.observed)
 	}
 	if f.mode == "unavailable" {
-		http.Error(w, "fixture unavailable", 503)
+		http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if f.mode == "observer-disconnected" {
@@ -175,7 +194,7 @@ func (f *upgradeWaitProcessFixture) command(t *testing.T) *exec.Cmd {
 	if f.mode == "old-critical" {
 		critical = "yes"
 	}
-	command.Env = []string{"PATH=" + f.root + ":/usr/bin:/bin", "HOME=" + f.root, "KUBECONFIG=" + f.kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + filepath.Join(f.root, "upgrade.attempted"), "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + critical}
+	command.Env = []string{"OBERTH_BASE_URL=https://fixture.example", "OBERTH_TOKEN=fixture-admin", "PATH=" + f.root + ":/usr/bin:/bin", "HOME=" + f.root, "KUBECONFIG=" + f.kubeconfig, "OBERTH_TEST_WAIT_ROLE=cli", "OBERTH_TEST_WAIT_LIMIT=" + limit, "OBERTH_TEST_UPGRADE_MARKER=" + filepath.Join(f.root, "upgrade.attempted"), "OBERTH_TEST_ALREADY=" + already, "OBERTH_TEST_OLD_CRITICAL=" + critical}
 	if scale, set := os.LookupEnv("OBERTH_TEST_TIMEOUT_SCALE"); set {
 		command.Env = append(command.Env, "OBERTH_TEST_TIMEOUT_SCALE="+scale)
 	}
