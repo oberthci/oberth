@@ -311,3 +311,16 @@ func usesPackageFixtureHome() bool {
 	root, _ := client.ConfigDir()
 	return home == filepath.Dir(fixtureAdminRoot) && root == filepath.Join(home, ".config", "oberth")
 }
+
+func withUpgradeAdminFixture(deps *Deps, version string) {
+	if deps.Admin != nil {
+		return
+	}
+	if deps.RunCommand != nil {
+		*deps = testAdminDeps(*deps)
+		return
+	}
+	deps.Admin = fixtureAdmin{namespace: DefaultNamespace, context: deps.ContextName, run: func(context.Context, []byte, string, ...string) ([]byte, error) {
+		return []byte("oberth v" + version + " commit=fixture"), nil
+	}}
+}

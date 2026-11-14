@@ -131,20 +131,20 @@ func TestRunUpgradeSameVersionValuesDryRunPlansReapply(t *testing.T) {
 				return out, nil
 			}
 			if len(args) >= 2 && args[0] == "list" {
-				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.12.35"}]`), nil
+				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.22.7"}]`), nil
 			}
 			return nil, fmt.Errorf("unexpected Helm call in dry-run: %v", args)
 		},
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
-	withValidatedDryRunRelease(t, &deps, "0.12.35")
+	withValidatedDryRunRelease(t, &deps, "0.22.7")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.12.35", Namespace: "oberth", DryRun: true, UserValues: []string{valuesFile},
+		BinaryVersion: "0.22.7", Namespace: "oberth", DryRun: true, UserValues: []string{valuesFile},
 	}, deps)
 	text := output.String()
-	if err != nil || result.AlreadyUpToDate || !strings.Contains(text, "Re-apply --values/--set at v0.12.35") ||
-		strings.Contains(text, "from v0.12.35 to v0.12.35") || !strings.Contains(text, "--values "+valuesFile) {
+	if err != nil || result.AlreadyUpToDate || !strings.Contains(text, "Re-apply --values/--set at v0.22.7") ||
+		strings.Contains(text, "from v0.22.7 to v0.22.7") || !strings.Contains(text, "--values "+valuesFile) {
 		t.Fatalf("same-version values dry run: result=%+v err=%v output=%q", result, err, text)
 	}
 }
@@ -161,22 +161,22 @@ func TestRunUpgradeFailedSameVersionDryRunPlansRepair(t *testing.T) {
 			}
 			helmCalls++
 			if len(args) >= 2 && args[0] == "list" {
-				return []byte(`[{"name":"oberth","namespace":"oberth","revision":"57","status":"failed","chart":"oberth-0.16.6"}]`), nil
+				return []byte(`[{"name":"oberth","namespace":"oberth","revision":"57","status":"failed","chart":"oberth-0.22.7"}]`), nil
 			}
 			return nil, fmt.Errorf("unexpected Helm mutation in dry-run: %v", args)
 		},
 		KubeClient: argoSecurityTestClient(),
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
-	withValidatedDryRunRelease(t, &deps, "0.16.6")
+	withValidatedDryRunRelease(t, &deps, "0.22.7")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.16.6", Namespace: "oberth", DryRun: true,
+		BinaryVersion: "0.22.7", Namespace: "oberth", DryRun: true,
 	}, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := output.String()
-	for _, want := range []string{"revision 57 is FAILED", "same-version forward repair", "helm upgrade oberth", "Verify the signed release v0.16.6", "<verified oberth-0.16.6.tgz>", "No cluster changes were made"} {
+	for _, want := range []string{"revision 57 is FAILED", "same-version forward repair", "helm upgrade oberth", "Verify the signed release v0.22.7", "<verified oberth-0.22.7.tgz>", "No cluster changes were made"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("dry-run output missing %q: %q", want, text)
 		}
@@ -399,6 +399,7 @@ func TestRunUpgradeFailedSameVersionRejectsTagOnlyImage(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 	withSignedRelease(t, &deps, "0.16.6", fakeChartImageRef)
+	withUpgradeAdminFixture(&deps, "0.22.7")
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: "0.16.6", Namespace: "oberth", NoBackup: true,
 	}, deps)
@@ -1496,6 +1497,7 @@ func TestRunUpgradeRecoveryGuidanceOnHelmFailure(t *testing.T) {
 	}
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
+	withUpgradeAdminFixture(&deps, "0.22.7")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
 		NoBackup:      true,
 		BinaryVersion: "0.12.35",
@@ -1586,6 +1588,7 @@ func TestRunUpgradeRecoveryGuidanceOnRolloutFailure(t *testing.T) {
 	defer cancel()
 
 	withSignedRelease(t, &deps, "0.12.35", targetImage)
+	withUpgradeAdminFixture(&deps, "0.22.7")
 	_, err := RunUpgrade(ctx, UpgradeConfig{
 		BinaryVersion: "0.12.35",
 		Namespace:     "oberth",
@@ -1781,7 +1784,7 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
-					Status: "deployed", Chart: "oberth-0.16.18",
+					Status: "deployed", Chart: "oberth-0.22.7",
 				}}
 				data, _ := json.Marshal(releases)
 				return data, nil
@@ -1792,9 +1795,9 @@ func TestDryRunIncludesUserValues(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	}
 
-	withValidatedDryRunRelease(t, &deps, "0.16.19")
+	withValidatedDryRunRelease(t, &deps, "0.22.8")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.16.19",
+		BinaryVersion: "0.22.8",
 		Namespace:     "oberth",
 		DryRun:        true,
 		UserSet:       []string{"replicaCount=5"},
@@ -1888,7 +1891,7 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
-					Status: "deployed", Chart: "oberth-0.16.18",
+					Status: "deployed", Chart: "oberth-0.22.7",
 				}}
 				data, _ := json.Marshal(releases)
 				return data, nil
@@ -1902,9 +1905,9 @@ func TestUpgradeAnnouncesSchemaWhenMigrationPending(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	})
 
-	withValidatedDryRunRelease(t, &deps, "0.16.19")
+	withValidatedDryRunRelease(t, &deps, "0.22.8")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion:       "0.16.19",
+		BinaryVersion:       "0.22.8",
 		Namespace:           "oberth",
 		DryRun:              true,
 		BinarySchemaVersion: 17,
@@ -1936,7 +1939,7 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 			if len(args) >= 2 && args[0] == "list" {
 				releases := []helmRelease{{
 					Name: "oberth", Namespace: "oberth",
-					Status: "deployed", Chart: "oberth-0.16.18",
+					Status: "deployed", Chart: "oberth-0.22.7",
 				}}
 				data, _ := json.Marshal(releases)
 				return data, nil
@@ -1950,9 +1953,9 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
 	})
 
-	withValidatedDryRunRelease(t, &deps, "0.16.19")
+	withValidatedDryRunRelease(t, &deps, "0.22.8")
 	_, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion:       "0.16.19",
+		BinaryVersion:       "0.22.8",
 		Namespace:           "oberth",
 		DryRun:              true,
 		BinarySchemaVersion: 17,

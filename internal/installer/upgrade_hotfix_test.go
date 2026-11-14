@@ -192,6 +192,7 @@ func TestRetiredProfileCleanupKeepsOpaqueTransit(t *testing.T) {
 // now that dry run performs the same read-only validation as apply.
 func withValidatedDryRunRelease(t testing.TB, deps *Deps, version string) {
 	t.Helper()
+	withUpgradeAdminFixture(deps, version)
 	withSignedRelease(t, deps, version, fakeChartImageRef)
 	run := deps.RunHelm
 	deps.RunHelm = func(ctx context.Context, args []string) ([]byte, error) {
