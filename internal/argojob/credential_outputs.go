@@ -164,11 +164,19 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 		for _, group := range parent.Steps {
 			for _, step := range group.Steps {
 				check(step.Name, step.Template, step.Inline)
+				for name, hook := range step.Hooks {
+					check(string(name), hook.Template, nil)
+				}
+				check("onExit", step.OnExit, nil)
 			}
 		}
 		if parent.DAG != nil {
 			for _, task := range parent.DAG.Tasks {
 				check(task.Name, task.Template, task.Inline)
+				for name, hook := range task.Hooks {
+					check(string(name), hook.Template, nil)
+				}
+				check("onExit", task.OnExit, nil)
 			}
 		}
 	})
