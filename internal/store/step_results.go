@@ -12,7 +12,7 @@ import (
 )
 
 const stepResultColumns = `run_id,node_id,display_name,template,node_type,boundary_id,phase,message,pod_name,
- burn,step,ordinal,status,exit_code,started_at,finished_at,recorded_at,termination_json,credentialed,grant_evidence_json,replay_evidence_complete`
+ burn,step,ordinal,status,exit_code,started_at,finished_at,recorded_at,termination_json,credentialed,grant_evidence_json,replay_evidence_complete,exit_code_unknown`
 
 // Admission receipts are append-only and emitted before Workflow create.
 // Prefer any credentialed receipt: a later admission cannot declassify work.
@@ -153,7 +153,7 @@ func (s *Store) putStepResult(ctx context.Context, database interface {
 		fact = admission.templates[result.Template]
 	}
 	row := database.QueryRowContext(ctx, `INSERT INTO step_results (`+stepResultColumns+`)
-SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 WHERE EXISTS (SELECT 1 FROM runs WHERE id=? AND status IN ('queued','running'))
 ON CONFLICT(run_id,node_id) DO UPDATE SET
  display_name=excluded.display_name,template=excluded.template,node_type=excluded.node_type,
@@ -161,13 +161,13 @@ ON CONFLICT(run_id,node_id) DO UPDATE SET
  burn=excluded.burn,step=excluded.step,ordinal=excluded.ordinal,status=excluded.status,exit_code=excluded.exit_code,
  started_at=excluded.started_at,finished_at=excluded.finished_at,recorded_at=excluded.recorded_at,
  termination_json=COALESCE(excluded.termination_json,step_results.termination_json),
- replay_evidence_complete=excluded.replay_evidence_complete,
+ replay_evidence_complete=excluded.replay_evidence_complete,exit_code_unknown=excluded.exit_code_unknown,
  credentialed=CASE WHEN step_results.credentialed=1 OR excluded.credentialed=1 THEN 1 ELSE excluded.credentialed END,
  grant_evidence_json=CASE WHEN step_results.credentialed=1 THEN step_results.grant_evidence_json ELSE excluded.grant_evidence_json END
 RETURNING `+stepResultColumns,
 		result.RunID, result.NodeID, result.DisplayName, result.Template, result.NodeType, result.BoundaryID, result.Phase, result.Message, result.PodName,
 		result.Stage, result.Step, result.Ordinal, result.Status, result.ExitCode,
-		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), unixNano(s.now()), stepDiagnosticJSON(result.Termination, result.RunID), fact.credentialed, fact.grants, admission.complete, result.RunID)
+		nullableUnixNano(result.StartedAt), nullableUnixNano(result.FinishedAt), unixNano(s.now()), stepDiagnosticJSON(result.Termination, result.RunID), fact.credentialed, fact.grants, admission.complete, result.ExitCodeUnknown, result.RunID)
 	value, err := scanStepResult(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.StepResult{}, fmt.Errorf("%w: terminal or missing run cannot accept step evidence", ErrInvalidState)
@@ -209,7 +209,7 @@ func scanStepResult(row rowScanner) (model.StepResult, error) {
 	var credentialed sql.NullBool
 	if err := scanRowNotFound(row, "StepResult", &value.RunID, &value.NodeID, &value.DisplayName, &value.Template, &value.NodeType,
 		&value.BoundaryID, &value.Phase, &value.Message, &value.PodName, &value.Stage, &value.Step, &value.Ordinal,
-		&value.Status, &value.ExitCode, &started, &finished, &recorded, &diagnostic, &credentialed, &grants, &value.ReplayEvidenceComplete); err != nil {
+		&value.Status, &value.ExitCode, &started, &finished, &recorded, &diagnostic, &credentialed, &grants, &value.ReplayEvidenceComplete, &value.ExitCodeUnknown); err != nil {
 		return model.StepResult{}, err
 	}
 	value.Termination = readStepDiagnostic(diagnostic, value.RunID)

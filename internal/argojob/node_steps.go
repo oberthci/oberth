@@ -55,7 +55,7 @@ func NodeStepResults(workflow *wfv1.Workflow, pods []*corev1.Pod) []model.StepRe
 			RunID:         runID, NodeID: id, DisplayName: node.DisplayName, Template: template,
 			NodeType: string(node.Type), BoundaryID: node.BoundaryID,
 			Phase: string(node.Phase), Message: model.SanitizeNodeMessage(node.Message), PodName: podNames[id],
-			Stage: stage, Step: step, Status: model.StepStatus(stepStatus(node.Phase)), ExitCode: exit,
+			Stage: stage, Step: step, Status: model.StepStatus(stepStatus(node.Phase)), ExitCode: exit, ExitCodeUnknown: !nodeExitCodeKnown(node),
 			StartedAt: optionalTime(node.StartedAt), FinishedAt: optionalTime(node.FinishedAt),
 		})
 	}

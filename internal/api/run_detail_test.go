@@ -91,3 +91,35 @@ func TestRunReadersDoNotSerializeGrantEvidence(t *testing.T) {
 		t.Fatal("serialization changed replay evidence")
 	}
 }
+
+func TestRunReaderExitAvailability(t *testing.T) {
+	for _, unknown := range []bool{false, true} {
+		detail := RunDetailResponse{Steps: []model.StepResult{{NodeID: "node", Status: model.StepFailed, ExitCodeUnknown: unknown, Termination: &model.StepDiagnostic{}}}}
+		full, err := marshalRecords(detail)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dashboard, err := marshalRecords(dashboardRunDetail(detail))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mcp := callOutputContract(t, "run_get", detail)
+		if mcp.IsError {
+			t.Fatal(mcp)
+		}
+		var content []struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(mcp.Content, &content); err != nil || len(content) == 0 {
+			t.Fatal("missing MCP text", err)
+		}
+		for _, raw := range []string{string(full), string(dashboard), string(mcp.Structured), content[0].Text} {
+			if strings.Contains(raw, `"exit_code":0`) == unknown {
+				t.Fatal("exit availability lost on wire", raw)
+			}
+		}
+		if strings.Contains(string(dashboard), `"termination"`) {
+			t.Fatal("dashboard exposed heavy diagnostic", string(dashboard))
+		}
+	}
+}

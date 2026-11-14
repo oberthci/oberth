@@ -115,3 +115,6 @@ node order, so offsets can shift while Argo adds nodes to a running run.
 escape sequences and control characters removed and are limited to 512 Unicode
 characters. Passed nodes omit messages in compact summaries. Frozen grant and
 replay evidence stays internal and is omitted from run responses.
+
+Native process exit codes are omitted when Argo has no valid exit value. A known
+zero remains a reported zero. Historical stored exit codes remain readable.

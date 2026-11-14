@@ -1868,6 +1868,7 @@ var stagePrecedence = map[string]int{"-": 0, "passed": 1, "pending": 2, "queued"
 func wireStages(steps []model.StepResult, run model.Run) (map[string]string, *int) {
 	stages := make(map[string]string)
 	var exitCode *int
+	failureMatched := false
 	if canonical := runlog.LegacyRetryStage(run.FailedStage); canonical != run.FailedStage {
 		// A legacy result may now resolve a declaration under its canonical
 		// name. Match that failure identity too, while preserving literal
@@ -1888,9 +1889,12 @@ func wireStages(steps []model.StepResult, run model.Run) (map[string]string, *in
 		switch step.Status {
 		case model.StepFailed, model.StepTimedOut:
 			state = "failed"
-			if exitCode == nil && matchesFailedStep(step, run) {
-				value := step.ExitCode
-				exitCode = &value
+			if !failureMatched && matchesFailedStep(step, run) {
+				failureMatched = true
+				if !step.ExitCodeUnknown {
+					value := step.ExitCode
+					exitCode = &value
+				}
 			}
 		case model.StepRunning:
 			state = "running"

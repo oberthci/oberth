@@ -90,7 +90,7 @@ func TestNativeNodeStepsMigrationRetainsPopulatedHistory(t *testing.T) {
 		t.Fatal(rows, err)
 	}
 	row := rows[0]
-	if row.NodeID == "" || row.Step != "compile" || row.Stage != "build" || row.Ordinal != 0 || row.Status != model.StepFailed || row.ExitCode != 17 || row.StartedAt.UnixNano() != 100 || row.FinishedAt.UnixNano() != 200 || row.RecordedAt.UnixNano() != 300 || row.Phase != "" || row.Message != "" {
+	if row.NodeID == "" || row.Step != "compile" || row.Stage != "build" || row.Ordinal != 0 || row.ExitCodeUnknown || row.Status != model.StepFailed || row.ExitCode != 17 || row.StartedAt.UnixNano() != 100 || row.FinishedAt.UnixNano() != 200 || row.RecordedAt.UnixNano() != 300 || row.Phase != "" || row.Message != "" {
 		t.Fatalf("retained history changed or native data invented: %+v", row)
 	}
 	var columns int

@@ -18,6 +18,7 @@ CREATE TABLE step_results_nodes (
     ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
     status TEXT NOT NULL CHECK (status IN ('queued','running','passed','failed','skipped','timed_out')),
     exit_code INTEGER NOT NULL,
+    exit_code_unknown INTEGER NOT NULL DEFAULT 0 CHECK (exit_code_unknown IN (0,1)),
     started_at INTEGER,
     finished_at INTEGER,
     recorded_at INTEGER NOT NULL,

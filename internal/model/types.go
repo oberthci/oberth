@@ -364,6 +364,7 @@ type StepResult struct {
 	Ordinal                 int
 	Status                  StepStatus
 	ExitCode                int
+	ExitCodeUnknown         bool `json:"-"`
 	StartedAt               *time.Time
 	FinishedAt              *time.Time
 	RecordedAt              time.Time
