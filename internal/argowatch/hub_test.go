@@ -533,3 +533,36 @@ func TestSyncedSeparatesInitialListsFromLaterWatchHealth(t *testing.T) {
 		t.Fatal("later outage confused initial sync")
 	}
 }
+
+func TestWorkflowsForRunUsesSharedLabelIndex(t *testing.T) {
+	first, second, other := workflowObject("first"), workflowObject("second"), workflowObject("other")
+	first.Labels["oberth.ci/run"] = "run"
+	second.Labels["oberth.ci/run"] = "run"
+	other.Labels["oberth.ci/run"] = "other"
+	client := fakeArgo(first, second, other)
+	hub := newTestHub(t, kubefake.NewClientset(), client)
+	runHub(t, hub)
+	syncHub(t, hub)
+	apiReads := func() int {
+		n := 0
+		for _, action := range client.Actions() {
+			if action.GetVerb() == "get" || action.GetVerb() == "list" {
+				n++
+			}
+		}
+		return n
+	}
+	calls := apiReads()
+	for range 100 {
+		workflows := hub.WorkflowsForRun("run")
+		if len(workflows) != 2 {
+			t.Fatalf("run index=%v", workflows)
+		}
+		if len(hub.WorkflowsForRun("missing")) != 0 {
+			t.Fatal("unknown run matched")
+		}
+	}
+	if apiReads() != calls {
+		t.Fatal("index lookup used the API")
+	}
+}

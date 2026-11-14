@@ -24,7 +24,14 @@ func (h *Hub) workflowInformer(client versioned.Interface, resync time.Duration)
 			return workflows.List(ctx, options)
 		}, workflows.Watch)
 	return cache.NewSharedIndexInformer(cache.ToListWatcherWithWatchListSemantics(lw, client),
-		&wfv1.Workflow{}, resync, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+		&wfv1.Workflow{}, resync, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
+			"byRun": func(obj any) ([]string, error) {
+				if wf, ok := obj.(*wfv1.Workflow); ok && wf.Labels["oberth.ci/run"] != "" {
+					return []string{wf.Labels["oberth.ci/run"]}, nil
+				}
+				return nil, nil
+			},
+		})
 }
 
 func (h *Hub) podInformer(client kubernetes.Interface, resync time.Duration) cache.SharedIndexInformer {
