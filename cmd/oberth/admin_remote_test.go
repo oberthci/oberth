@@ -51,7 +51,13 @@ func TestAdminRemoteCommands(t *testing.T) {
 		case "/api/admin/upstream-list":
 			_, _ = w.Write([]byte(`{"upstreams":[]}`))
 		case "/api/admin/upstream-add":
-			_, _ = w.Write([]byte(`{"identity":{"pending":true,"public_key":"public key"},"upstream":{"name":"north"}}`))
+			var request struct {
+				Dedicated bool `json:"dedicated_key"`
+			}
+			if json.NewDecoder(r.Body).Decode(&request) != nil {
+				t.Error("invalid upstream request")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"identity": map[string]any{"pending": true, "public_key": "public key", "restart_required": request.Dedicated}, "upstream": map[string]string{"name": "north"}})
 		case "/api/admin/idle":
 			_, _ = w.Write([]byte(`{"busy":false,"queue":{"version":1}}`))
 		case "/api/admin/public-identity":
@@ -68,6 +74,7 @@ func TestAdminRemoteCommands(t *testing.T) {
 	}{
 		{[]string{"upstream", "list", "--check", "--json"}, "/api/admin/upstream-list"},
 		{[]string{"upstream", "add", "--yes", "--no-wait", "north", "ssh://source.invalid/team"}, "/api/admin/upstream-add"},
+		{[]string{"upstream", "add", "--yes", "--dedicated-key", "north", "ssh://source.invalid/team"}, "/api/admin/upstream-add"},
 		{[]string{"repo", "add", "repository", "north"}, "/api/admin/repo-add"},
 		{[]string{"repo", "verify", "north/team/repository"}, "/api/admin/repo-verify"},
 		{[]string{"admin", "public-identity", "server-ca"}, "/api/admin/public-identity"},
@@ -85,6 +92,9 @@ func TestAdminRemoteCommands(t *testing.T) {
 			var output bytes.Buffer
 			if err := runCLI(context.Background(), test.args, strings.NewReader(""), &output); err != nil {
 				t.Fatal(err)
+			}
+			if strings.Contains(" "+strings.Join(test.args, " ")+" ", " --dedicated-key ") && !strings.Contains(output.String(), "Restart the Oberth server Deployment") {
+				t.Fatal("dedicated key response omitted activation instruction")
 			}
 			if called.Load() != test.want {
 				t.Fatalf("called %q, want %q", called.Load(), test.want)

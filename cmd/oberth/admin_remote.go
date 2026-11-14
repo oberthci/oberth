@@ -127,6 +127,11 @@ func runUpstream(ctx context.Context, args []string, output io.Writer) error {
 		if result.Identity.Pending {
 			state = "registered; deploy key pending"
 		}
+		if result.Identity.RestartRequired {
+			if _, err := fmt.Fprintln(output, "Restart the Oberth server Deployment to activate the dedicated upstream key."); err != nil {
+				return err
+			}
+		}
 		_, err = fmt.Fprintf(output, "Upstream %s %s.\n", request.Name, state)
 		return err
 	case "provide-key":
