@@ -263,11 +263,14 @@ func testAdminHostCachedEnrollmentStaysWithTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps := Deps{ContextName: "selected", ClientConfigRoot: func() (string, error) { return root, nil }, RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+	deps := Deps{ContextName: "selected", KubeClient: fake.NewClientset(), RestConfig: &rest.Config{Host: "https://api.example.test"}, ClientConfigRoot: func() (string, error) { return root, nil }, RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
 		return json.Marshal(api.FirstAdminResult{InstallerCertificate: string(certificate), ServerCA: string(files["ca.crt"])})
 	}}
 	if _, err := createFirstAdmin(t.Context(), Config{enrollment: enrollment}, deps, []byte("public"), "admin@host"); err != nil {
 		t.Fatal(err)
+	}
+	if err := checkUpgradeVerificationConnection(t.Context(), UpgradeConfig{}, deps); err != nil || len(deps.KubeClient.(*fake.Clientset).Actions()) != 0 {
+		t.Fatal("cached installer credential requires a running Pod", err)
 	}
 	var cfg Config
 	if err := reuseInstallerEnrollment(&cfg, deps); err != nil || cfg.enrollment.result.InstallerCertificate == "" {

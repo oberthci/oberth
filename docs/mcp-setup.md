@@ -625,7 +625,7 @@ guesswork.
 ones, paging through bursts larger than 200 matches without gaps or repeats.
 `GET /api/audit` accepts the same filters and returns the same JSON, with an
 `X-Oberth-Next-Before` header on full pages. It requires an unscoped admin.
-Use `oberth audit --limit 1 --json` to read the current head. Installer lifecycle
+Use `oberth audit head` to read the current head. Installer lifecycle
 records use the authenticated, enumerated admin API.
 
 Lifecycle records. `oberth backup` records `backup.completed` (archive SHA-256,
