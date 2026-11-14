@@ -923,6 +923,18 @@
     "flag:runner-image-prefixes": {
       "doc_anchor": "docs/cli-reference.md#oberth-validate",
       "test_ref": "pkg/argoworkflow/admit_test.go TestAdmitEnforcesTheRunnerImageAllowlist"
+    },
+    "flag:no-wait-idle": {
+      "doc_anchor": "docs/restart-handover.md",
+      "test_ref": "internal/installer/upgrade_idle_test.go TestUpgradeNoWaitIdleAndNegativeControls"
+    },
+    "flag:wait-for": {
+      "doc_anchor": "docs/cli-reference.md#oberth-upgrade",
+      "test_ref": "cmd/oberth/upgrade_test.go TestUpgradeRejectsInvalidWaitOptionsBeforeClusterAccess"
+    },
+    "flag:wait-idle": {
+      "doc_anchor": "docs/restart-handover.md",
+      "test_ref": "cmd/oberth/upgrade_wait_process_linux_test.go TestUpgradeWaitProcessGraph"
     }
   }
 }

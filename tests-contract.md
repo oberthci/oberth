@@ -307,7 +307,8 @@ tests cover cancellation, expiry, the 120-second default and configured
 windows, and dial timeouts as transient. `hack/test-chart.sh` checks the
 75-second termination grace default, also under reused values, and rejects
 one shorter than the drain. Idle-wait tests observe queued and running
-work, fail closed, and bind the upgrade check to the selected Deployment.
+work and fail closed. Upgrade waiting observes native Workflows in the selected
+Kubernetes context and installed pipeline namespace.
 
 # Retired execution recovery
 
@@ -315,21 +316,33 @@ Old preflight execution is terminalized rather than reattached. Native
 execution keeps exact source, UID, target and operator identity custody;
 historical execution journals do not authorize new work.
 
-Upgrade idle-probe retries: `TestUpgradeWaitRetriesTimeoutBeforeUpgrade` uses a
-fake HTTP transport and clock through the real installer wait path: a five-second
-probe timeout followed by idle reaches Helm upgrade, while persistent timeouts
-consume exactly the two-minute wait budget, refuse upgrade and preserve the last
-probe cause with throttled diagnostics. `TestWaitIdleTransientFailuresBackOffAndRecover`
-checks transport/503/truncated-body recovery and backoff reset on a valid busy
-sample; protocol-error and cancellation tests pin immediate refusal and prompt
+Upgrade idle waiting: `TestUpgradeDefaultWaitsBeforeAnyChange` proves that a
+version change waits by default, counts pending and unknown phases, excludes
+terminal Workflows, uses the installed pipeline namespace and waits before
+backup or Helm changes. `TestUpgradeWaitTimeoutRefusesWithoutChanges` verifies
+the deadline lists active run IDs and Workflow names, takes no backup, writes no
+rollback record and performs no Helm mutation. `TestUpgradeWaitObservesEveryPage`
+finds active work beyond the first Kubernetes page.
+`TestUpgradeNoWaitIdleAndNegativeControls` verifies the explicit bypass warning,
+dry-run planning, same-version value reapplication and failed-release repair;
+a deliberate downgrade still waits. `TestUpgradeWaitFailsClosed` rejects
+unreadable Kubernetes state. `TestUpgradeWaitDeadlineRetainsRunsAndCancellation`
+checks caller cancellation, stalled API reads and an idle response arriving
+after the deadline. `TestUpgradeIdleTerminalCountdown` checks in-place terminal
+refreshes and plain periodic redirected lines. `TestUpgradeWaitProcessGraph`
+invokes the real CLI against a private kubeconfig and fixture commands: default
+and explicit waiting proceed after idle, duration timeout refuses with exit 1,
+`--no-wait-idle` proceeds with its warning, dry-run and same-version paths skip
+observation, and rollback never enters the wait. CLI flag tests cover invalid
+and positive `--wait-for` durations and accepted default flags.
+
+The separate in-pod waiter remains covered by
+`TestWaitIdleTransientFailuresBackOffAndRecover`, which checks transport,
+503 and truncated-body recovery and backoff reset on a valid busy sample;
+protocol-error and cancellation tests check immediate refusal and prompt
 cancellation. `TestIdleSnapshotAdminProbeDoesNotWaitForStorage` blocks a background
 read while 100 admin probes answer from memory, then proves expiry, refresh and
-failure invalidation. Missing/invalid/late samples cannot establish idle.
-
-`TestUpgradeWaitDeadlineRetainsChildProbeDiagnostic` splits child output at every
-byte and proves the local deadline retains its last reported probe cause even
-when kubectl is killed; a subsequent busy snapshot clears that stale cause.
-
+failure invalidation. Missing, invalid or late samples cannot establish idle.
 
 Idle sampler freshness follow-up: `TestIdleSnapshotSlowReadsRemainAvailableToWaiter`
 uses 4.5-second reads at six waiter start phases; the waiter gets idle within
@@ -338,7 +351,7 @@ keeps the ten-second freshness bound even if a reader ignores its five-second
 deadline. Store queue-reader tests hold the primary transaction, observe only
 committed queue state, see the next commit immediately, and verify read-only,
 bounded reader lifetime. Error-body tests cover bounded draining of HTTP 5xx;
-the local deadline test also rejects the retry-progress suffix in its final cause.
+the upgrade deadline tests retain known run identities on a stalled API read.
 
 Native queue semantics: priority inputs and Oberth run ceilings are refused.
 Submission follows durable admission/queue sequence without class weights,

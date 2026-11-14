@@ -15,7 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/recordjson"
 )
 
-// runWaitIdle is an in-pod read of the live daemon, used by upgrade --wait-idle.
+// runWaitIdle is an explicit in-pod read of the live daemon queue.
 // The private socket avoids opening a second owner or probing a scoped API view.
 func runWaitIdle(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("wait-idle", flag.ContinueOnError)

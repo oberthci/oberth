@@ -2785,35 +2785,37 @@ per second to observe terminal state and purges.
 
 ## Upgrade queue observation (#1200)
 
-`upgrade --wait-idle` / `--wait-for=all` observe all nonterminal runs through the
-selected server's private admin socket; `--wait-for=critical` excludes ordinary
-branch/schedule CI and retains tag/release, promotion, plan, apply and unknown
-triggers. Classification is server-owned and installation-wide, from one read
-snapshot. The admin endpoint reads only an in-memory sample, refreshed in the
-background on a dedicated read-only WAL pool, with a five-second read budget
-and a one-second interval (no Argo scan or wait for the primary writer connection).
-Missing, invalid, failed or ten-second-old samples return unavailable, never
-idle; age is measured from read start so a delayed result cannot look fresh.
-The versioned private response preserves old all-run status codes;
-critical selection refuses unsupported observation. No schema, grants or RBAC
-changes are required. This is advisory, never an admission freeze or proof that
-all other operations have stopped.
+A version-changing `oberth upgrade` waits for active native Workflows by default
+before backup, rollback-record creation or cluster changes. It lists Workflows
+carrying `oberth.ci/run` through the selected Kubernetes credentials in the
+installed deployed Helm revision's `argo.namespace` (default `oberth-argo`).
+Every page is observed; running, pending, suspended and unknown-phase Workflows
+count as active. Succeeded, Failed and Error are terminal. The command requires
+Workflow list permission rather than access to the server's private admin API.
 
-Positive `--wait-timeout` defaults to 2h and is independent of the existing
-Helm/rollout `--timeout`. Progress and elapsed heartbeats stream while waiting.
-Per-probe transport timeouts, interrupted response reads and HTTP 5xx are retried
-within that original wait deadline, with exponential backoff from one second up
-to thirty seconds. Transient diagnostics print at most once per minute; deadline
-or cancellation errors retain the last consecutive probe failure. Auth/other
-4xx errors (except the busy 409), unsupported critical observation and malformed
-snapshots refuse immediately. Successful busy observations reset the backoff.
-The local wait child has that explicit context deadline and a bounded output-
-pipe join; cancellation, lookup errors and child failure refuse before upgrade
-mutation, preserving context causality. CLI refusals and failures are nonzero.
+One two-hour default deadline is overridden by positive `--wait-for=DURATION`,
+independently of Helm/rollout `--timeout`. The countdown shows the active count
+and time remaining, refreshed in place on an output terminal and as plain
+periodic lines otherwise. Timeout, caller cancellation or unreadable Kubernetes
+state refuses before changes with a nonzero exit and the last observed active
+run IDs and Workflow names. A late idle response cannot authorize changes after
+the deadline. The upgrade command's old all/critical selectors and
+`--wait-timeout` flag are removed.
+
+`--no-wait-idle` skips observation and prints a warning that running Workflows of
+the previous version will fail on their next step. `--wait-idle` is accepted and
+means the default. Same-version reruns, including values reapplication and
+failed-release repair, dry-run and rollback do not wait. Dry-run describes the
+real upgrade's waiting behavior. No queue, submission pause, cancellation or
+admission freeze is introduced; new work can arrive after an empty observation.
 A same-version no-op exits zero with `Already running vX; no upgrade performed`;
-explicit dry-run/help also succeed.
-Existing Workflow adoption and publication ownership rules
-are unchanged. See [restart handover](docs/restart-handover.md).
+explicit dry-run and help also succeed.
+
+The separate in-pod `wait-idle` command retains its private-admin queue snapshot,
+all/critical selection, transient probe retries and snapshot freshness rules.
+Existing Workflow adoption and publication ownership rules are unchanged.
+See [restart handover](docs/restart-handover.md) and the upgrade idle-wait tests
+mapped in [tests-contract.md](tests-contract.md).
 
 A currently observed nonzero init-container termination always refuses restart-cut
 classification, including when main is still Waiting/PodInitializing. This guard

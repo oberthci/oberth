@@ -1810,6 +1810,8 @@ Flags:
         Oberth namespace (default: oberth)
   -no-backup
         upgrade without the pre-upgrade history backup (a rollback across a schema migration is then impossible)
+  -no-wait-idle
+        skip waiting; running Workflows of the previous version will fail on their next step
   -openbao-namespace string
         OpenBao namespace (default: openbao)
   -reissue-server-ca
@@ -1834,12 +1836,10 @@ Flags:
         remove a permitted IP SAN; refused while served (repeatable)
   -values value
         values file to pass to helm upgrade (repeatable)
-  -wait-for string
-        enable waiting for all or critical (tag/promotion/plan/apply/unknown) runs
+  -wait-for duration
+        maximum wait for active Workflows before a version change, independent of --timeout (default 2h0m0s)
   -wait-idle
-        wait for all queued/running runs before upgrading (advisory, not an admission freeze)
-  -wait-timeout duration
-        maximum queue wait, independent of --timeout (default 2h0m0s)
+        wait for active Workflows before a version change (the default) (default true)
   -yes
         with --rollback: accept the plan, including replacing the server database with the pre-upgrade backup
 ```

@@ -190,76 +190,55 @@ Mutations such as `promote`, `sync`, `run_cancel`, and
 unknown tools, are never automatically retried, even after 503. If a mutation's
 reply is lost, inspect its durable result before deciding what to do next.
 
-For an optional quiet-queue check, use:
+A version-changing `oberth upgrade` waits for active Workflows by default before
+backup, rollback-record creation or changes to the cluster. `--wait-idle` is
+accepted and means this default. The wait has a two-hour deadline; `--wait-for`
+sets a positive duration independently of the rollout's `--timeout`:
 
 ```sh
-oberth upgrade --wait-idle --wait-timeout=2h --timeout=5m
-# Or wait only for critical work; ordinary branch/schedule CI may remain:
-oberth upgrade --wait-for=critical --wait-timeout=2h
+oberth upgrade --wait-for=30m --timeout=5m
 ```
 
-Idle probes retry transport timeouts, interrupted reads and server errors with
-backoff from one second up to thirty seconds, within the original wait deadline.
-Transient failures print at most once per minute; a failed wait reports the last
-probe cause. Authentication, other client errors and malformed snapshots stop
-immediately. The server answers from a background queue sample in memory; missing,
-failed or ten-second-old samples return unavailable and are retried. A dedicated
-read-only WAL pool keeps the sampler off the primary writer connection; its
-five-second read budget and one-second interval fit within the cache lifetime.
-This retry behavior requires an in-pod `wait-idle` binary containing the fix.
+The command reads native Workflows through the selected kubeconfig credentials,
+in the installed release's `argo.namespace` (default `oberth-argo`). It observes
+Workflows carrying the `oberth.ci/run` label. Running, pending, suspended and
+unknown-phase Workflows count as active; Succeeded, Failed and Error are terminal.
+Completed Workflows do not block an upgrade. The operator needs permission to
+list Workflows in that namespace; no server admin API or in-pod waiter is needed.
 
-`--wait-idle` waits for all queued and running runs. `--wait-for=all` is equivalent;
-`--wait-for=critical` also enables waiting, but excludes ordinary branch/schedule
-CI. Tags/releases, promotions, plans, applies and unknown trigger kinds remain
-critical. This selection is a conservative operator preference, not a claim
-that every critical Workflow is lost on restart: current servers adopt eligible
-branch, promotion and tag/release Workflows as described above. Older servers,
-missing Workflows and applies retain their distinct interruption/recovery rules.
+A countdown reports the number of active Workflows and time remaining on every
+poll. A terminal refreshes the same line; redirected output receives periodic
+plain lines. At the deadline the upgrade refuses, returns nonzero and lists the
+last observed active run IDs and Workflow names. Unreadable Kubernetes state or
+cancellation also refuses before changes. The wait never proceeds after timeout.
 
-The queue wait has its own positive `--wait-timeout`, default two hours. The
-separate `--timeout` (default five minutes) applies to Helm/rollout and version
-verification. An earlier caller deadline or SIGINT/SIGTERM cancels observation.
-The local kubectl process is explicitly bounded by the queue-wait context;
-joining inherited output pipes has a separate five-second cleanup bound.
-Timeout, cancellation, persistently unavailable queue state or a killed local
-child aborts before any Helm upgrade . The error identifies
-local `kubectl exec`, elapsed time, the configured limit and that the upgrade
-was not attempted. A failed local `kubectl exec` session is not retried, and
-an unreadable queue is never assumed idle.
+To skip waiting explicitly:
 
-The command reads the selected context/namespace's live daemon through its
-private admin socket, without opening the database from another process or
-using a scoped API token. A single database observation counts the complete
-nonterminal-run queue. Polling occurs once a second; queue size, branch/critical
-counts, selection and elapsed time are printed immediately and every 15 seconds
-while busy. Host progress is streamed as it arrives, with an elapsed heartbeat
-even when an older in-pod binary cannot report counts. Critical selection needs
-the new server's versioned queue snapshot and in-pod flag support; an older
-server fails closed rather than silently treating unknown classes as branch CI.
-An old in-pod binary that rejects `--wait-for` reports
-`server too old for --wait-for=critical; use --wait-for=all`.
-Default all-run waiting retains compatibility with older `wait-idle` servers.
+```sh
+oberth upgrade --no-wait-idle
+```
 
-Dry-run describes the selection and both timeouts without waiting or upgrading.
-Refused or failed upgrades return nonzero. An already-installed target with no
-values or TLS change requested exits zero and prints
-`Already running vX; no upgrade performed`. Successful upgrades, help and
-explicit dry-runs also return zero. To reapply values at the current version,
-supply those values as usual.
+This prints a warning: running Workflows of the previous version will fail on
+their next step. Same-version reruns, including value changes and repairs of a
+failed Helm release, and `--rollback` do not wait. `--dry-run` does not wait and
+describes whether the real upgrade will wait or skip waiting.
 
-This is an advisory observation, not a freeze on incoming pushes or a transaction
-with Helm: new work can arrive between the empty observation and rollout. It
-counts nonterminal runs, not every possible external operation. It requires a
-server version supporting `wait-idle`.
+Waiting does not block incoming pushes, pause submissions or cancel Workflows.
+New work can arrive between the empty observation and rollout; this is an
+observation rather than an admission freeze. The upgrade's old `--wait-for=all`
+and `--wait-for=critical` selections and `--wait-timeout` flag are removed;
+`--wait-for` now specifies the deadline duration. The separate in-pod `wait-idle`
+command retains its own flags.
 
-When piping output, retain the upgrade's status:
+An already-installed target with no requested values or TLS change exits zero
+and prints `Already running vX; no upgrade performed`. Successful upgrades,
+help and explicit dry-runs also return zero. Refused or failed upgrades return
+nonzero. When piping output, retain the upgrade's status:
 
 ```sh
 set -o pipefail
-oberth upgrade --wait-idle --wait-timeout=2h 2>&1 | tail -10
+oberth upgrade --wait-for=2h 2>&1 | tail -10
 ```
 
-Without `pipefail`, a pipeline ending in `tail` usually reports `tail`'s success
-even when Oberth exited with an error. No process can handle SIGKILL or make
-itself immune to an external process-group kill; use a caller/session lifecycle
-that lasts for the chosen wait. Detaching a process is not a queue-safety gate.
+Without `pipefail`, the pipeline usually reports `tail`'s success even when
+Oberth exits with an error. The calling session must last for the chosen wait.
