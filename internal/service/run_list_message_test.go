@@ -153,7 +153,7 @@ func TestNativeFailedNodeDisplayAcrossListHintAndAssist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := model.StepResult{RunID: queued.Run.ID, NodeID: "workflow-3810230957", DisplayName: "build (retry 1)", Step: "build", Stage: "workflow", NodeType: "Pod", Phase: "Failed", Status: model.StepFailed, ExitCode: 1}
+	row := model.StepResult{RunID: queued.ID, NodeID: "workflow-3810230957", DisplayName: "build (retry 1)", Step: "build", Stage: "workflow", NodeType: "Pod", Phase: "Failed", Status: model.StepFailed, ExitCode: 1}
 	if err := f.retention.Database.PutStepResults(ctx, row.RunID, []model.StepResult{row}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +176,11 @@ func TestNativeFailedNodeDisplayAcrossListHintAndAssist(t *testing.T) {
 		}
 	}
 	run = run.WithFailedNode([]model.StepResult{row})
+	run.FailureCause = "workflow/build failed · OOM"
+	if got := failedRunDisplayReason(run); got != "build (retry 1) failed · OOM" {
+		t.Fatal("structured cause did not resolve native failure name", got)
+	}
+	run.FailureCause = ""
 	run.Assist = &model.RunAssistRecord{Events: []model.RunAssistEvent{{Step: "build", Kind: model.RunAssistAbandon, AbandonReason: model.AssistAbandonCap}}}
 	if got := failedRunDisplayReason(run); got != "" {
 		t.Fatal("assist event did not match native step name", got)

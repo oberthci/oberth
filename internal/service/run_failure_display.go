@@ -103,7 +103,7 @@ func nodeRebootDisplayReason(run model.Run) string {
 // arbitrary error text and paths are not parsed or rewritten.
 func listFailureCause(run model.Run) string {
 	cause := run.FailureCause
-	prefix := run.FailedStage + "/" + run.FailedStep + " failed"
+	prefix := run.FailedStage + "/" + run.FailedStepName() + " failed"
 	step := run.FailedStepDisplayName()
 	if step == "" {
 		step = run.FailedStage
