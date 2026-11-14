@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/oberthci/oberth/internal/storetest"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type schedulingObserverFunc func(context.Context, model.Run) (*model.ExecutionObservation, error)
