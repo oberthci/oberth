@@ -204,3 +204,52 @@ func TestCredentialHookExpandedParentPlainAllowed(t *testing.T) {
 		t.Fatalf("plain credentialed hook on an expanded parent was refused: %v", err)
 	}
 }
+
+func TestCredentialHookUnmatchedAliasCaptured(t *testing.T) {
+	for _, name := range []string{"steps-loop-unbalanced-paren", "dag-nested-in-loop-unbalanced-paren", "steps-nested-unbalanced-bracket"} {
+		t.Run(name, func(t *testing.T) {
+			dag := name == "dag-nested-in-loop-unbalanced-paren"
+			key, reference := "x)", "outer"
+			if name == "steps-nested-unbalanced-bracket" {
+				key = "x]"
+			}
+			if name == "steps-loop-unbalanced-paren" {
+				reference = "scan"
+			}
+			config, request := credentialHookOutputRequest(t, dag, false, true, key, reference)
+			request = changeCredentialOutputRequest(t, request, func(wf *wfv1.Workflow) {
+				for i := range wf.Spec.Templates {
+					parent := &wf.Spec.Templates[i]
+					if parent.Name != "parent" {
+						continue
+					}
+					if name == "steps-loop-unbalanced-paren" {
+						parent.Steps[0].Steps = parent.Steps[0].Steps[1:]
+						host := &parent.Steps[0].Steps[0]
+						host.Name = reference
+						item, err := wfv1.ParseItem(`"a"`)
+						if err != nil {
+							t.Fatal(err)
+						}
+						host.WithItems = []wfv1.Item{item}
+					} else {
+						parent.Name = "inner"
+						top := wfv1.Template{Name: "parent"}
+						if dag {
+							top.DAG = &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "outer", Template: "inner", WithParam: `["a"]`}}}
+						} else {
+							top.Steps = []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: "outer", Template: "inner"}}}}
+						}
+						wf.Spec.Templates = append(wf.Spec.Templates, top)
+					}
+					break
+				}
+				if !credentialResultReferenced(wf, &wf.Spec.Templates[0]) {
+					t.Fatal("unmatched hook closer was not treated as captured")
+				}
+			})
+			_, err := Build(config, request)
+			assertCredentialHookKeyRefused(t, err)
+		})
+	}
+}

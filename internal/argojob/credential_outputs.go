@@ -191,6 +191,11 @@ func credentialResultReferenced(wf *wfv1.Workflow, target *wfv1.Template) bool {
 			if inline != target && (target.Name == "" || (template != target.Name && !strings.Contains(template, "{{"))) {
 				return
 			}
+			// An unmatched hook closer can consume an unknown ancestor name.
+			if name == "" {
+				found = true
+				return
+			}
 			alias := regexp.QuoteMeta(name)
 			reference := regexp.MustCompile(prefix + `(?:\.` + alias + `|\[\s*['"]` + alias + `['"]\s*\])\.outputs\.result\b`)
 			// Argo's native scan also accepts suffixes and uses an unescaped
@@ -245,6 +250,11 @@ loop:
 			nodeName = nodeName[:i+1]
 			break loop
 		}
+	}
+	// Without a matching opener, Argo can derive an ancestor's alias from
+	// the full node name. Signal capture rather than guessing that alias.
+	if opener != "" {
+		return ""
 	}
 	if lastDotIndex := strings.LastIndex(nodeName, "."); lastDotIndex >= 0 {
 		nodeName = nodeName[lastDotIndex+1:]
