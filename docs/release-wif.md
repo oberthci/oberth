@@ -131,8 +131,7 @@ The request must match the administrator's exact pipeline namespace, canonical u
 template name, role, and currently selected per-repository ServiceAccount for legacy leaves, or the
 explicitly pinned WIF-only per-step account.
 Branch runs, unapproved leaves, shared identities, inherited template defaults,
-inline templates, DAG roots, container sets, artifacts, and nonroot mode are
-refused. Explicit workflow or leaf token opt-outs remain vetoes.
+inline templates, DAG roots, container sets and artifacts are refused. Explicit workflow or leaf token opt-outs remain vetoes.
 The release identity must not also name a CI identity or another repository's
 release identity. A SHA-256 digest of the public capability document joins the
 existing immutable submission-spec/audit binding. It is not a token digest.
@@ -147,8 +146,8 @@ and validates its exact Google IAM endpoint/account syntax. Its final Oberth
 target remains fixed by the allowlisted audience. Google enforces first-hop
 role permissions; no new source-account environment variable or server rollout
 is required. Authored helper
-mirrors are resolved before projection, and a server Pod patch removes Argo's
-generated wait-container mirror. The Pod explicitly disables automatic token
+mirrors are resolved before projection. Argo retains its native wait-container
+credential mirror; Oberth does not remove it. The Pod explicitly disables automatic token
 mounting throughout the WIF-enabled workflow, including ordinary unselected
 siblings and their helpers, even if the ServiceAccount defaults to enabling it.
 Approved explicit Vault projections remain independently scoped to their

@@ -15,7 +15,7 @@ import (
 func TestVerifiedWorkflowSubmissionUsesSemanticResources(t *testing.T) {
 	config := testConfig()
 
-	request := testRequest(pipeline.TriggerCI, nonrootTestDocument)
+	request := testRequest(pipeline.TriggerCI, authoredNonrootDocument)
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 	intended, err := Build(config, request)
 	if err != nil {
@@ -49,13 +49,13 @@ func TestVerifiedWorkflowSubmissionUsesSemanticResources(t *testing.T) {
 	if err := sameSubmission(&observed, intended); err != nil {
 		t.Fatalf("Kubernetes serialization changed no resource value: %v", err)
 	}
+	// Recovery uses submission identity and pinned source checks for every workflow.
+	// The removed annotation no longer enables a full-spec comparison.
 	observed.Spec.ServiceAccountName = "changed-policy"
-	err = sameSubmission(&observed, intended)
-	var pending interface{ AmbiguousCreate() bool }
-	var mismatch interface{ WorkflowSpecMismatch() bool }
-	if err == nil || !errors.As(err, &pending) || !pending.AmbiguousCreate() || !errors.As(err, &mismatch) || !mismatch.WorkflowSpecMismatch() {
-		t.Fatalf("owned changed spec must retain cleanup and admission: %v", err)
+	if err := sameSubmission(&observed, intended); err != nil {
+		t.Fatalf("non-identity spec field changed the recovery contract: %v", err)
 	}
+	var pending interface{ AmbiguousCreate() bool }
 	observed.Annotations[runIDAnnotation] = "foreign-run"
 	err = sameSubmission(&observed, intended)
 	if err == nil || (errors.As(err, &pending) && pending.AmbiguousCreate()) {

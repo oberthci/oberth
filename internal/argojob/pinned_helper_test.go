@@ -17,7 +17,7 @@ import (
 func TestNonrootNewHelpersHaveBudgets(t *testing.T) {
 	for _, shape := range []string{"container", "script"} {
 		t.Run(shape, func(t *testing.T) {
-			wf := nonrootBuiltFixture(t, shape == "script")
+			wf := authoredNonrootFixture(t, shape == "script")
 			pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), wf)
 			for _, c := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
 				switch c.Name {
@@ -25,8 +25,8 @@ func TestNonrootNewHelpersHaveBudgets(t *testing.T) {
 					assertControlContainer(t, c, false)
 				}
 			}
-			// A named nonroot leaf stamps the entire Workflow; ordinary siblings must
-			// keep the token waiter budget without gaining the leaf's nonroot identity.
+			// An authored nonroot leaf must leave ordinary siblings unchanged and
+			// keep the token waiter budget without gaining the leaf's identity.
 			var ordinary corev1.PodSpec
 			if err := json.Unmarshal([]byte(wf.Spec.Templates[1].PodSpecPatch), &ordinary); err != nil {
 				t.Fatal(err)
@@ -43,8 +43,8 @@ func TestNonrootNewHelpersHaveBudgets(t *testing.T) {
 				t.Fatal("ordinary sibling gained a nonroot Pod context")
 			}
 			for _, c := range pod.Spec.Containers {
-				if c.Name == "wait" && !reflect.DeepEqual(c.SecurityContext, nonrootContainerSecurity(nonrootUID)) {
-					t.Fatal("helper budget changed nonroot security")
+				if c.Name == "wait" && !reflect.DeepEqual(c.SecurityContext, nonrootControllerFixture(t, shape+"-before-patch.json").Spec.Containers[0].SecurityContext) {
+					t.Fatal("helper budget changed the controller security context")
 				}
 			}
 		})
@@ -70,7 +70,7 @@ func TestNonrootHelperPolicyRecovery(t *testing.T) {
 				return c
 			}
 			controller := newController()
-			request := testRequest(pipeline.TriggerCI, nonrootTestDocument)
+			request := testRequest(pipeline.TriggerCI, authoredNonrootDocument)
 			request.SourceDir = writeCheckout(t)
 			if _, err := controller.Create(t.Context(), request); err != nil {
 				t.Fatal(err)
@@ -88,13 +88,13 @@ func TestNonrootHelperPolicyRecovery(t *testing.T) {
 			if !reflect.DeepEqual(before, workflows.existing) || len(seeds) != count || workflows.creates != 1 {
 				t.Fatal("recovery mutated workflow/source")
 			}
-			// Exact spec and policy checks remain.
-			for _, mutation := range []string{"budget", "policy"} {
+			// Submission identity and helper policy checks remain.
+			for _, mutation := range []string{"identity", "policy"} {
 				t.Run(mutation, func(t *testing.T) {
 					workflows.existing = before.DeepCopy()
 					switch mutation {
-					case "budget":
-						workflows.existing.Spec.Templates[0].PodSpecPatch = strings.ReplaceAll(workflows.existing.Spec.Templates[0].PodSpecPatch, `"resources":{`, `"resources":{"claims":[{"name":"injected"}],`)
+					case "identity":
+						workflows.existing.Annotations[identityAnnotation] = strings.Repeat("f", 64)
 					case "policy":
 						workflows.existing.Annotations[helperStorageAnnotation] = "unknown-policy"
 					}
@@ -112,7 +112,7 @@ func TestNonrootHelperPolicyRecovery(t *testing.T) {
 
 func TestNonrootNewBuildCannotSelectHistoricalBudgets(t *testing.T) {
 	for _, authored := range []string{"", "argo-256Mi-512Mi-v1", "argo-256Mi-512Mi-v2", "argo-256Mi-512Mi-v3", helperStoragePolicy, "unknown-policy"} {
-		source := strings.Replace(nonrootTestDocument, "    oberth.ci/nonroot-templates: test", "    oberth.ci/nonroot-templates: test\n    oberth.ci/helper-storage: "+authored, 1)
+		source := strings.Replace(authoredNonrootDocument, "spec:\n", "metadata:\n  annotations:\n    oberth.ci/helper-storage: "+authored+"\nspec:\n", 1)
 		request := testRequest(pipeline.TriggerCI, source)
 		config := testConfig()
 

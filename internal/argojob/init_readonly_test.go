@@ -80,7 +80,7 @@ func TestInitPopulatesLocalToolsBeforeReadonlyReaders(t *testing.T) {
 }
 
 func TestInitReadonlyExceptionDoesNotCoverSharedOrConcurrentWriters(t *testing.T) {
-	for _, kind := range []string{"workflow-emptydir", "template-pvc", "work", "source", "cache", "artifacts", "token", "secrets", "server-tmp", "restartable-init", "explicit-init-readonly"} {
+	for _, kind := range []string{"workflow-emptydir", "template-pvc", "work", "source", "cache", "artifacts", "token", "secrets", "restartable-init", "explicit-init-readonly"} {
 		t.Run(kind, func(t *testing.T) {
 			name := "tools"
 			switch kind {
@@ -96,8 +96,6 @@ func TestInitReadonlyExceptionDoesNotCoverSharedOrConcurrentWriters(t *testing.T
 				name = ReleaseTokenVolumeName
 			case "secrets":
 				name = SecretsVolumeName
-			case "server-tmp":
-				name = stepTmpVolumeName
 			}
 			tmpl := &wfv1.Template{
 				Container:      &corev1.Container{VolumeMounts: []corev1.VolumeMount{{Name: name, MountPath: "/read", SubPath: "bin", ReadOnly: true}}},

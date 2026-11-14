@@ -126,8 +126,7 @@ class ArgoSchemaTests(unittest.TestCase):
 
     def test_valid_boundaries_render(self):
         cases = [{}, {'ciSecrets': None},
-                 {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'},
-                  'executorScratchSizeLimit': '1Gi'}]
+                 {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'}}]
         for key in ('perRepoIdentities', 'perRepoCIIdentities', 'perStepIdentities'):
             cases.append({key: [MAX_NAME]})
         for argo in cases:

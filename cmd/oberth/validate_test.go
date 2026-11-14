@@ -12,10 +12,15 @@ import (
 
 func TestValidateRepositoryBuildYAMLPasses(t *testing.T) {
 	t.Parallel()
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
+	documents := map[string]string{}
+	for _, name := range []string{"build.yaml", "release.yaml"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", "internal", "argojob", "testdata", "own-pipelines-next", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		documents[name] = string(body)
 	}
+	root := writeValidateRepo(t, documents)
 	var output bytes.Buffer
 	// Oberth's own pipelines use golang: and aquasec/trivy: images.
 	if err := runValidate(context.Background(), []string{"--runner-image-prefixes=golang:,aquasec/trivy:", root}, &output); err != nil {

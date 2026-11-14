@@ -62,15 +62,3 @@ func TestRefusalPinnedSourceGuardNormalizesRelativeAliases(t *testing.T) {
 		}
 	}
 }
-
-func TestRefusalWIFExecutorMirrorNormalizesRelativeAliases(t *testing.T) {
-	for _, target := range []string{"mainctrfs/run/oberth-gar", "../mainctrfs/run/oberth-gar", "/x/../mainctrfs/run/oberth-gar"} {
-		leaf := &wfv1.Template{PodSpecPatch: `{"containers":[{"name":"wait","volumeMounts":[{"name":"forged","mountPath":"` + target + `"}]}]}`}
-		if err := protectReleaseWIFExecutor([]*wfv1.Template{leaf}); err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(leaf.PodSpecPatch, "forged") {
-			t.Fatalf("WIF executor alias survived: %s", leaf.PodSpecPatch)
-		}
-	}
-}
