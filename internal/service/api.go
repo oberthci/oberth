@@ -3096,7 +3096,7 @@ func (service *API) waitDuration(seconds int) (time.Duration, error) {
 // database stores. An ambiguous bare spelling
 // is refused — it names neither same-name repository. An unregistered or
 // syntactically unresolvable spelling is returned verbatim so listing and
-// revocation can still address inert legacy rows (#245 BLOCKER B, #256).
+// revocation can still address inert existing rows (#245 BLOCKER B, #256).
 // accessAllow separately requires a qualified key before granting.
 func (service *API) canonicalAccessRepo(ctx context.Context, repo string) (string, error) {
 	if service.repositories == nil {

@@ -55,15 +55,15 @@ func TestAccessAllowResolvesRegisteredShortNames(t *testing.T) {
 	if _, err := call("access_allow", "repo"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("ambiguous short name accepted: %v", err)
 	}
-	// Legacy rows remain listable and revocable by their exact stored key.
-	if _, err := db.Grant(t.Context(), "legacy", ".oberth/build.yaml", "build", "oberth/data/token", "admin"); err != nil {
+	// Existing rows remain listable and revocable by their exact stored key.
+	if _, err := db.Grant(t.Context(), "existing", ".oberth/build.yaml", "build", "oberth/data/token", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	listed, err := s.CallTool(t.Context(), actor, "access_list", json.RawMessage(`{"repo":"legacy"}`))
+	listed, err := s.CallTool(t.Context(), actor, "access_list", json.RawMessage(`{"repo":"existing"}`))
 	if err != nil || len(listed.(api.AccessListResponse).Grants) != 1 {
-		t.Fatalf("legacy row no longer listable: %+v, %v", listed, err)
+		t.Fatalf("existing row no longer listable: %+v, %v", listed, err)
 	}
-	if _, err := call("access_revoke", "legacy"); err != nil {
-		t.Fatalf("legacy row no longer revocable: %v", err)
+	if _, err := call("access_revoke", "existing"); err != nil {
+		t.Fatalf("existing row no longer revocable: %v", err)
 	}
 }

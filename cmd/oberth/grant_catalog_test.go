@@ -31,7 +31,7 @@ func newGrantCatalogDatabase(t *testing.T) *store.Store {
 }
 
 func TestReviewBareGrantRowBreaksRefresh(t *testing.T) {
-	for _, mode := range []string{"legacy", "restore"} {
+	for _, mode := range []string{"existing", "restore"} {
 		t.Run(mode, func(t *testing.T) {
 			db := newGrantCatalogDatabase(t)
 			const file, step, secret = ".oberth/build.yaml", "build", "oberth/data/token"
@@ -128,7 +128,7 @@ func TestReviewAccessAllowBareRepoBricksRefresh(t *testing.T) {
 		t.Fatalf("refused spellings committed grant rows: %+v, %v", rows, err)
 	}
 	// A valid grant must still refresh with an old bare row in the database.
-	if _, err := db.Grant(t.Context(), "typo", ".oberth/build.yaml", "build", "oberth/data/legacy", "admin"); err != nil {
+	if _, err := db.Grant(t.Context(), "typo", ".oberth/build.yaml", "build", "oberth/data/existing", "admin"); err != nil {
 		t.Fatal(err)
 	}
 	if err := call("access_allow", "upstream/org/good"); err != nil {
