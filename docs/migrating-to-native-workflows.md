@@ -83,7 +83,7 @@ running release v0.22.6 has no administration API; pre-upgrade backup refused be
   ./oberth-v0.22.6 backup --history-only --context CONTEXT --namespace oberth
   oberth upgrade --no-backup --context CONTEXT --namespace oberth
 
-The upgrade retry requires this machine's client connected to this server as an unscoped admin.
+The retry requires this machine's client connected to this server as an unscoped admin.
 
 If Kubernetes Workflow observation is unavailable, confirm no runs are active before retrying with --no-wait-idle. No exec fallback is used. Reapply your other upgrade options: --openbao-namespace, --values/--set, --backup-dir, --timeout, TLS flags, chart/release-source flags and downgrade consent are not copied into this retry command.
 ```
