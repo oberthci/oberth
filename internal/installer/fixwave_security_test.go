@@ -73,7 +73,7 @@ func TestArgoSecurityDisabledPodPolicyKeepsDefaultChecks(t *testing.T) {
 func TestArgoSecurityExternalConfigMapIgnoresStoredContexts(t *testing.T) {
 	for _, safe := range []bool{false, true} {
 		t.Run(fmt.Sprint(safe), func(t *testing.T) {
-			stored := `{"controller":{"configMap":{"create":false},"workflowDefaults":{"spec":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}},"securityContext":"unused"},"mainContainer":{"securityContext":"unused"},"executor":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}}`
+			stored := `{"controller":{"configMap":{"create":false},"workflowDefaults":{"spec":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}}},"mainContainer":{"securityContext":"unused"},"executor":{"securityContext":{"seccompProfile":{"type":"Unconfined"}}}}`
 			deps := fixwaveSecurityDeps(t, safe, stored)
 			for _, install := range []bool{false, true} {
 				var err error
@@ -112,5 +112,24 @@ func TestUpgradeDryRunDoesNotConsumeArgoConsent(t *testing.T) {
 	_, err := RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.16.21", BinarySchemaVersion: 73, NoBackup: true, DryRun: true}, fixture.deps)
 	if err == nil || !strings.Contains(err.Error(), "explicit consent") || input.Len() != len("yes\n") {
 		t.Fatalf("upgrade dry run consumed consent: unread=%d err=%v", input.Len(), err)
+	}
+}
+
+func TestExternalArgoConfigMapStillChecksControllerAndServerPods(t *testing.T) {
+	for _, component := range []string{"controller", "server"} {
+		for _, context := range []string{`null`, `{"allowPrivilegeEscalation":true}`, `{"capabilities":{"add":["SYS_ADMIN"]}}`} {
+			t.Run(component+context, func(t *testing.T) {
+				stored := `{"controller":{"configMap":{"create":false}}}`
+				if component == "controller" {
+					stored = `{"controller":{"configMap":{"create":false},"securityContext":` + context + `}}`
+				} else {
+					stored = `{"controller":{"configMap":{"create":false}},"server":{"securityContext":` + context + `}}`
+				}
+				_, err := prepareArgoSecurity(t.Context(), fixwaveSecurityDeps(t, true, stored), DefaultArgoNamespace, true, false, nil)
+				if err == nil || !strings.Contains(err.Error(), component+".securityContext") {
+					t.Fatal("external ConfigMap bypassed Pod review", err)
+				}
+			})
+		}
 	}
 }

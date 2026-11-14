@@ -57,6 +57,9 @@ func prepareArgoSecurity(ctx context.Context, deps Deps, ns string, consent, fre
 		return nil, argoSecurityUpgradeRemedy(ns, err)
 	}
 	if argoExternalControllerConfigMap(stored) {
+		if err := validateExternalArgoPodSecurity(ns, stored); err != nil {
+			return nil, err
+		}
 		if err := checkLiveArgoSecurity(ctx, deps, ns); err != nil {
 			return nil, argoSecurityConfigMapRemedy(ns, err, stored)
 		}
@@ -212,4 +215,32 @@ func (plan *upgradeArgoSecurity) reconcile(ctx context.Context, deps Deps) error
 		return argoSecurityUpgradeRemedy(fresh.namespace, err)
 	}
 	return nil
+}
+
+// An external controller ConfigMap replaces Workflow defaults, while the Helm
+// controller/server Pod contexts still take effect at their next restart.
+func validateExternalArgoPodSecurity(ns string, stored map[string]any) error {
+	control := map[string]any{}
+	for _, component := range []string{"controller", "server"} {
+		values := map[string]any{}
+		for _, key := range []string{"securityContext", "podSecurityContext", "enabled"} {
+			if source, ok := stored[component].(map[string]any); ok {
+				if value, exists := source[key]; exists {
+					values[key] = value
+				}
+			}
+		}
+		control[component] = values
+	}
+	_, review, err := argoSecurityDefaults(control)
+	if err != nil {
+		return argoSecurityUpgradeRemedy(ns, err)
+	}
+	pods := []ArgoSecurityReview{}
+	for _, entry := range review {
+		if entry.Component == "controller" || entry.Component == "server" {
+			pods = append(pods, entry)
+		}
+	}
+	return validateArgoSecurityReview(ns, control, pods)
 }
