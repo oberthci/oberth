@@ -97,12 +97,12 @@ func (completion *Completion) classifyRestartCut() {
 	}
 	if real != nil {
 		completion.Infrastructure = false
-		completion.FailedStage, completion.FailedStep = real.Stage, real.Step
+		completion.setFailedStep(*real)
 		return
 	}
 	completion.Interrupted = true
 	completion.Infrastructure = true
-	completion.FailedStage, completion.FailedStep = "", ""
+	completion.FailedStage, completion.FailedStep, completion.FailedNodeID = "", "", ""
 	completion.Reason = fmt.Sprintf("server restart interrupted %s/%s: %s; %s", cut.Stage, cut.Step, cut.restartCutReason, completion.Reason)
 }
 

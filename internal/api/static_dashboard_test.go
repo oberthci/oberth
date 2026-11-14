@@ -453,3 +453,18 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 		t.Fatal("app.css is missing the step marker styling")
 	}
 }
+
+func TestDashboardFailedNodeDisplaysNameOnEverySurface(t *testing.T) {
+	source := string(staticAssets["app.js"].body)
+	for _, want := range []string{
+		"const row = steps.find(step => step.node_id === run.failed_step);",
+		`return row?.display_name || row?.step || run.failed_step || "";`,
+		"${failedStepLabel(run, steps)}`;",
+		`${failedStepLabel(run, steps) || "unknown step"}`,
+		`+ failedStepLabel(run, steps) : "run failed"`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("failed node display missing %s", want)
+		}
+	}
+}

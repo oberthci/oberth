@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-	ktesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 )
 
@@ -56,56 +54,6 @@ func fixtureStepResults(workflow *wfv1.Workflow) []StepResult {
 	return finalStepResults(fixtureStepAttempts(workflow))
 }
 
-func TestStepPodDiscoveryUsesAnnotationsAndOwnerWithOpaqueNames(t *testing.T) {
-	for _, format := range []string{"", "v1", "v2"} {
-		t.Run(format, func(t *testing.T) {
-			workflow, node, pod, _ := diagnosticFixture()
-			workflow.Annotations["workflows.argoproj.io/pod-name-format"] = format
-			pod.Name = "opaque-observed-step"
-			controller := &Controller{kube: fake.NewClientset(pod)}
-			steps := controller.observedStepAttempts(t.Context(), workflow)
-			if len(steps) != 1 || steps[0].PodName != pod.Name || steps[0].NodeID != node.ID {
-				t.Fatalf("Pod was not discovered from native identity: %+v", steps)
-			}
-			if StepResults(workflow)[0].PodName != "" {
-				t.Fatal("status-only projection guessed a Pod name")
-			}
-		})
-	}
-}
-
-func TestStepPodDiscoveryRejectsForeignAmbiguousAndMissingPods(t *testing.T) {
-	for _, mode := range []string{"absent", "owner", "namespace", "node-id", "node-name", "duplicate"} {
-		t.Run(mode, func(t *testing.T) {
-			workflow, _, pod, _ := diagnosticFixture()
-			pod.Name = "opaque-observed-step"
-			var objects []runtime.Object
-			switch mode {
-			case "owner":
-				pod.OwnerReferences[0].UID = "another-workflow"
-			case "namespace":
-				pod.Namespace = "another-namespace"
-			case "node-id":
-				pod.Annotations["workflows.argoproj.io/node-id"] = "another-node"
-			case "node-name":
-				pod.Annotations["workflows.argoproj.io/node-name"] = "another-attempt"
-			case "duplicate":
-				other := pod.DeepCopy()
-				other.Name, other.UID = "second-observed-step", "second-pod-uid"
-				objects = append(objects, other)
-			}
-			if mode != "absent" {
-				objects = append(objects, pod)
-			}
-			controller := &Controller{kube: fake.NewClientset(objects...)}
-			steps := controller.observedStepAttempts(t.Context(), workflow)
-			if len(steps) != 1 || steps[0].PodName != "" {
-				t.Fatalf("unsafe or guessed binding: %+v", steps)
-			}
-		})
-	}
-}
-
 func TestStepDiagnosticsUseObservedOpaquePodName(t *testing.T) {
 	workflow, _, pod, _ := diagnosticFixture()
 	pod.Name = "opaque-observed-step"
@@ -114,23 +62,5 @@ func TestStepDiagnosticsUseObservedOpaquePodName(t *testing.T) {
 	controller.collectRestartStepDiagnostics(t.Context(), workflow, &completion, time.Time{})
 	if len(completion.Steps) != 1 || completion.Steps[0].PodName != pod.Name || !completion.Steps[0].Termination.Available {
 		t.Fatalf("diagnostic did not bind observed Pod: %+v", completion.Steps)
-	}
-}
-
-func TestStepLogDiscoveryDoesNotUseTimingSnapshotCap(t *testing.T) {
-	workflow, _, pod, _ := diagnosticFixture()
-	workflow.Status.Phase = wfv1.WorkflowSucceeded
-	kube := fake.NewClientset()
-	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
-		list := &corev1.PodList{Items: []corev1.Pod{*pod}}
-		for i := range 2100 {
-			list.Items = append(list.Items, corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("other-%d", i)}})
-		}
-		return true, list, nil
-	})
-	controller := &Controller{kube: kube}
-	steps := controller.observedStepAttempts(t.Context(), workflow)
-	if len(steps) != 1 || steps[0].PodName != pod.Name {
-		t.Fatalf("large Pod list lost the binding: %+v", steps)
 	}
 }

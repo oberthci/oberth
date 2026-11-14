@@ -1357,7 +1357,7 @@ func runLiveWatchChild(t *testing.T, mode, name, directory string) {
 		if err = os.WriteFile(filepath.Join(directory, "adopted"), []byte(binding.UID), 0600); err != nil {
 			t.Fatal(err)
 		}
-		result, err = controller.WaitResumed(ctx, name, name, io.Discard, nil, 0, binding)
+		result, err = controller.WaitResumed(ctx, name, name, io.Discard, binding)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -60,7 +60,7 @@ func TestAdoptedCredentialedTriggersKeepSubmittedIdentityAndWIFDespiteNewConfig(
 			if err != nil || !found {
 				t.Fatalf("adopt: %v %v", found, err)
 			}
-			completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, nil, 0, binding)
+			completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, binding)
 			if err != nil || !completion.Succeeded {
 				t.Fatalf("resume: %+v %v", completion, err)
 			}
@@ -115,7 +115,7 @@ func TestAdoptedCredentialedWaitRejectsIdentityAndWIFChanges(t *testing.T) {
 			if binding.matches(workflow) {
 				t.Fatal("negative control did not modify admitted binding")
 			}
-			if _, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, nil, 0, binding); err == nil {
+			if _, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, request.RunID, io.Discard, binding); err == nil {
 				t.Fatal("changed credential binding accepted")
 			}
 		})

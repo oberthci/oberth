@@ -332,7 +332,7 @@ func (service *API) prepareRunWait(ctx context.Context, raw json.RawMessage) (fu
 		summary.DisplayStatus, summary.DisplayReason = shown.DisplayStatus, shown.DisplayReason
 		steps, _ := service.stepsForRun(ctx, observation.run)
 		return RunWaitResponse{State: state, Run: summarizeRun(summary, steps), Holds: observation.holds,
-			RetryHint: runRetryHint(observation.run, service.runPublicationRetry(ctx, observation.run)),
+			RetryHint: runRetryHint(shown, service.runPublicationRetry(ctx, observation.run)),
 			WaitedS:   int64(clock.Since(started) / time.Second)}, nil
 	}
 	return func(ctx context.Context) (RunWaitResponse, error) {

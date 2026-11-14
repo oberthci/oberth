@@ -215,12 +215,9 @@ func TestResumeRetainsBytesWithoutProgressAuthority(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	file, events, size, err := logs.Resume("resumed")
+	file, err = logs.Resume("resumed")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(events) != 0 || size != int64(len("[test/unit] before\n")) {
-		t.Fatalf("resume = %#v %d", events, size)
 	}
 	if _, err := file.WriteString("[test/unit] after\n"); err != nil {
 		t.Fatal(err)
@@ -235,17 +232,14 @@ func TestResumeRetainsBytesWithoutProgressAuthority(t *testing.T) {
 	if err != nil || string(body) != "[test/unit] before\n[test/unit] after\n" {
 		t.Fatalf("resumed bytes = %q %v", body, err)
 	}
-	file, events, size, err = logs.Resume("not-yet-written")
+	file, err = logs.Resume("not-yet-written")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(events) != 0 || size != 0 {
-		t.Fatalf("new resume = %v %d", events, size)
 	}
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := logs.Resume("../escape"); err == nil {
+	if _, err := logs.Resume("../escape"); err == nil {
 		t.Fatal("resume escaped log root")
 	}
 }
@@ -259,9 +253,9 @@ func TestResumeIgnoresRetiredProgressFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(directory, "run.progress.jsonl"), []byte("malformed retired data\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	file, events, _, err := logs.Resume("run")
-	if err != nil || len(events) != 0 {
-		t.Fatal(events, err)
+	file, err := logs.Resume("run")
+	if err != nil {
+		t.Fatal(err)
 	}
 	_ = file.Close()
 }

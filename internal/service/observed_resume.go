@@ -30,11 +30,9 @@ func (scheduler *Scheduler) resumeObservedRun(ctx context.Context, run model.Run
 			return nil
 		}
 	}
-	file, events, retained, err := scheduler.logs.Resume(run.ID)
+	file, err := scheduler.logs.Resume(run.ID)
 	if errors.Is(err, os.ErrNotExist) {
 		file, err = scheduler.logs.Create(run.ID)
-		events = nil
-		retained = 0
 	}
 	if err != nil {
 		return err
@@ -53,7 +51,7 @@ func (scheduler *Scheduler) resumeObservedRun(ctx context.Context, run model.Run
 		_ = os.Remove(scheduler.createAdmissionPath(run.ID))
 	}
 	err = scheduler.observeRun(ctx, run, repository, require, reservation, runObservation{
-		file: file, events: events, retained: retained, adopted: true, stopRequested: stoppedByOberth,
+		file: file, adopted: true, stopRequested: stoppedByOberth,
 	})
 	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
 	defer cancel()

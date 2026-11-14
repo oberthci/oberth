@@ -3,7 +3,6 @@ package argojob
 import (
 	"bytes"
 	"context"
-	"io"
 	"sort"
 	"strings"
 	"testing"
@@ -401,48 +400,6 @@ func TestNestedRetryInsideDAG(t *testing.T) {
 	})
 }
 
-func TestPublishReportsSupersededAttemptOnceThenFinalVerdict(t *testing.T) {
-	controller := &Controller{}
-	final := dagRetryWorkflow(wfv1.WorkflowSucceeded,
-		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeFailed},
-		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeSucceeded})
-
-	controller.kube = fixtureKube(final)
-
-	// First observation: the second attempt already passed both steps
-	// before the first attempt's failure was ever seen.
-	var output bytes.Buffer
-	reporter := newProgressReporter(&output)
-	for poll := 0; poll < 3; poll++ {
-		if err := controller.publish(context.Background(), final, reporter, &output); err != nil {
-			t.Fatalf("publish: %v", err)
-		}
-	}
-	if strings.Contains(output.String(), "@@oberth-step-progress@@") {
-		t.Fatal("step marker emitted")
-	}
-	if strings.Contains(output.String(), "address(0)/") || strings.Contains(output.String(), "[address(") {
-		t.Errorf("a retry suffix leaked into a step key:\n%s", output.String())
-	}
-
-	// Restored markers have no attempt identity. Replay the final attempt
-	// once even when its terminal status matches an earlier attempt's.
-	resumed := newProgressReporter(io.Discard)
-	for _, key := range []string{"address/get", "address/check"} {
-		resumed.reported[key] = runprogress.StepPassed
-	}
-	var after bytes.Buffer
-	for poll := 0; poll < 3; poll++ {
-		if err := controller.publish(context.Background(), final, resumed, &after); err != nil {
-			t.Fatalf("resumed publish: %v", err)
-		}
-	}
-	if strings.Contains(after.String(), "@@oberth-step-progress@@") {
-		t.Fatal("step marker emitted")
-	}
-
-}
-
 // TestWaitResumedRetriedDAGIsGreen runs an adopted Workflow (#1172) whose
 // retried DAG recovered through Wait end to end: the completion is green, the
 // durable rows carry the planned names, and no attempt is reported twice.
@@ -452,12 +409,8 @@ func TestWaitResumedRetriedDAGIsGreen(t *testing.T) {
 		[2]wfv1.NodePhase{wfv1.NodeSucceeded, wfv1.NodeSucceeded})
 	controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow},
 		config: Config{Namespace: workflow.Namespace, MaxRunLogBytes: 1 << 20}, idleInterval: time.Millisecond}
-	// Before the restart the first attempt's failure had been reported.
-	failedAt := time.Unix(1_700_000_100, 0).UTC()
-	events := []runprogress.Event{{Version: runprogress.Version, Stage: "address", Step: "check",
-		Status: runprogress.StepFailed, ExitCode: 1, StartedAt: &failedAt, FinishedAt: &failedAt}}
 	var output bytes.Buffer
-	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, "run-retry", &output, events, 0, Adoption{})
+	completion, err := withWaitTestHub(t, controller).WaitResumed(context.Background(), workflow.Name, "run-retry", &output, Adoption{})
 	if err != nil {
 		t.Fatalf("WaitResumed: %v", err)
 	}

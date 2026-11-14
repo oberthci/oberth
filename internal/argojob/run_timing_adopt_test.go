@@ -17,7 +17,6 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -175,15 +174,8 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("adopt: %v %v", found, err)
 	}
-	steps := fixtureStepResults(running)
-	var events []runprogress.Event
-	for _, step := range steps {
-		if step.NodeID == first.ID {
-			events = append(events, runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
-		}
-	}
 	resumed := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running, terminal}}, kube: fake.NewClientset(secondPod.DeepCopy()), config: config, idleInterval: time.Millisecond, timings: recorder}
-	completion, err := withWaitTestHub(t, resumed).WaitResumed(ctx, terminal.Name, run.ID, io.Discard, events, 100, binding)
+	completion, err := withWaitTestHub(t, resumed).WaitResumed(ctx, terminal.Name, run.ID, io.Discard, binding)
 	if err != nil || !completion.Succeeded || len(completion.Steps) != 2 {
 		t.Fatalf("resumed completion = %+v, %v", completion, err)
 	}

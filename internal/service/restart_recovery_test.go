@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 )
 
 // A fixture reports presence separately from the controller's nonterminal result.
@@ -20,7 +19,7 @@ type restartStateJobs struct {
 func (restartStateJobs) WaitForWatchSync(ctx context.Context) error       { return ctx.Err() }
 func (j restartStateJobs) Adopt(context.Context, model.Run) (bool, error) { return j.found, nil }
 func (restartStateJobs) WorkflowNamespace() string                        { return "test-argo" }
-func (j restartStateJobs) WaitResumed(ctx context.Context, name string, w io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
+func (j restartStateJobs) WaitResumed(ctx context.Context, name string, w io.Writer) (JobResult, error) {
 	return j.Wait(ctx, name, w)
 }
 

@@ -1166,6 +1166,7 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
+	run = run.WithFailedNode(steps)
 	if summary {
 		shown := service.presentationRun(ctx, run)
 		run.Repo, err = service.repositoryIdentity(ctx, run.RepoID)
@@ -1627,7 +1628,12 @@ func runDisplayReason(run model.Run) string {
 	}
 }
 
-func (service *API) presentationRun(_ context.Context, run model.Run) model.Run {
+func (service *API) presentationRun(ctx context.Context, run model.Run) model.Run {
+	if run.Status.Terminal() && run.FailedStep != "" && run.FailedNode == nil && service.history != nil {
+		if rows, err := service.history.StepResults(ctx, run.ID); err == nil {
+			run = run.WithFailedNode(rows)
+		}
+	}
 	visible := presentationRunAt(run, service.schedulingClock().Now())
 	if service.scope != nil && strings.HasPrefix(visible.Reason, "branch run deferred:") {
 		visible.Reason = parkPolicyDisplayReason(run, "branch run deferred: waiting for queue capacity")

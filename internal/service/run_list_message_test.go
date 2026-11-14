@@ -144,3 +144,48 @@ func TestStructuredFailureCauseUsesBoundDiagnostics(t *testing.T) {
 		t.Fatal("successful retry tainted", got)
 	}
 }
+
+func TestNativeFailedNodeDisplayAcrossListHintAndAssist(t *testing.T) {
+	f := newRetentionFixture(t)
+	ctx := t.Context()
+	queued, err := f.retention.Database.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/display", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := model.StepResult{RunID: queued.ID, NodeID: "workflow-3810230957", DisplayName: "build (retry 1)", Step: "build", Stage: "workflow", NodeType: "Pod", Phase: "Failed", Status: model.StepFailed, ExitCode: 1}
+	if err := f.retention.Database.PutStepResults(ctx, row.RunID, []model.StepResult{row}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.retention.Database.FinishRun(ctx, row.RunID, model.RunResult{Status: model.RunFailed, Phase: "workflow", FailedStage: "workflow", FailedStep: row.NodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := f.api.presentationRun(ctx, run)
+	list, err := f.api.presentationRuns(ctx, []model.Run{run})
+	if err != nil || len(list) != 1 {
+		t.Fatal(list, err)
+	}
+	for _, visible := range []model.Run{shown, list[0]} {
+		if visible.FailedStep != row.NodeID || visible.DisplayReason != "build (retry 1) failed" {
+			t.Fatal("failure identity or display changed", visible)
+		}
+		hint := runRetryHint(visible, nil)
+		if hint == nil || hint.Detail != "step workflow/build (retry 1) failed" {
+			t.Fatal(hint)
+		}
+	}
+	run = run.WithFailedNode([]model.StepResult{row})
+	run.FailureCause = "workflow/build failed · OOM"
+	if got := failedRunDisplayReason(run); got != "build (retry 1) failed · OOM" {
+		t.Fatal("structured cause did not resolve native failure name", got)
+	}
+	run.FailureCause = ""
+	run.Assist = &model.RunAssistRecord{Events: []model.RunAssistEvent{{Step: "build", Kind: model.RunAssistAbandon, AbandonReason: model.AssistAbandonCap}}}
+	if got := failedRunDisplayReason(run); got != "" {
+		t.Fatal("assist event did not match native step name", got)
+	}
+	row.DisplayName = ""
+	if got := run.WithFailedNode([]model.StepResult{row}).FailedStepDisplayName(); got != "build" {
+		t.Fatal("missing display name did not use step", got)
+	}
+}

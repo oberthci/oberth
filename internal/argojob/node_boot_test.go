@@ -1,7 +1,6 @@
 package argojob
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"path/filepath"
@@ -183,14 +182,5 @@ func TestAssistRefusesUnknownTerminationAnd255(t *testing.T) {
 		if err != nil || got != (message == "main: Error (exit code 1)") {
 			t.Fatalf("%s: %v %v", message, got, err)
 		}
-	}
-}
-
-func TestSkippedNodeDoesNotEmitRunningProgress(t *testing.T) {
-	var output bytes.Buffer
-	reporter := newProgressReporter(&output)
-	reporter.observe(&output, StepResult{Stage: "publish", Step: "push", Status: runprogress.StepSkipped})
-	if output.Len() != 0 {
-		t.Fatalf("skipped progress: %s", output.String())
 	}
 }

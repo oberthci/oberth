@@ -50,7 +50,7 @@ func TestStoppedCompletedWorkflowResumesLogsAndRetiresExecutorIdentity(t *testin
 	if err != nil || !found {
 		t.Fatal("completed Workflow not adopted", found, err)
 	}
-	completion, err := controller.WaitResumed(t.Context(), workflow.Name, request.RunID, io.Discard, nil, 0, binding)
+	completion, err := controller.WaitResumed(t.Context(), workflow.Name, request.RunID, io.Discard, binding)
 	if err != nil || !completion.Terminal {
 		t.Fatalf("final observation: %+v %v", completion, err)
 	}

@@ -282,6 +282,9 @@ func fixtureCompletionNodes(completion argojob.Completion) argojob.Completion {
 			step.NodeID = fmt.Sprintf("node-%d", i)
 			completion.Steps[i].NodeID = step.NodeID
 		}
+		if step.Stage == completion.FailedStage && step.Step == completion.FailedStep {
+			completion.FailedNodeID = step.NodeID
+		}
 		completion.NodeSteps = append(completion.NodeSteps, model.StepResult{NodeID: step.NodeID, NodeType: "Pod", Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: model.StepStatus(step.Status), ExitCode: step.ExitCode, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 	}
 	return completion

@@ -207,9 +207,8 @@ names, the run is green, and the failed attempt stays observable as superseded.
 with FailedStep and the row taken from the last attempt, even when it failed
 at an earlier step. `TestNoRetryStrategyIsUnchanged` pins pipelines without a
 Retry node. `TestNestedRetryInsideDAG` covers a retried pod inside a retried
-DAG inside a burn. `TestPublishReportsSupersededAttemptOnceThenFinalVerdict`
-reports and replays each attempt once, with no retry suffix in any key, and
-not again from a restored reporter; `TestWaitResumedRetriedDAGIsGreen` adopts
+DAG inside a burn. Independent nodes with identical display names remain
+distinct by NodeID; `TestWaitResumedRetriedDAGIsGreen` adopts
 such a Workflow after a restart and reports only the passing retry.
 
 Helper mount isolation: `TestAuthoredMountsCannotShadowServerHelpers` covers

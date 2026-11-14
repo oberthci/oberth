@@ -24,7 +24,7 @@ func TestArgoStartupCompletedAdoptionUsesResumedWait(t *testing.T) {
 	if collector.calls != 0 || controller.resumed {
 		t.Fatal("adoption performed terminal effects")
 	}
-	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard, nil, 0)
+	result, err := jobs.WaitResumed(t.Context(), run.WorkflowName, io.Discard)
 	if err != nil || result.Status != model.RunPassed || len(jobs.intents) != 0 || collector.calls != 1 || string(artifacts.stored) != "archive" || !controller.resumed {
 		t.Fatal(result, err, jobs.intents, collector.calls)
 	}

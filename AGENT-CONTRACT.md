@@ -1540,7 +1540,8 @@ trust assumptions and complete invalidation rules.
   object—not merely another tag that peels to the same commit—and fails closed
   if the upstream tag appeared first. Argo's Workflow phase supplies the run verdict. A Succeeded
   Workflow stays passed even when the author tolerated a failed node; the node
-  remains failed in step history. Publication independently checks the current
+  remains failed in step history. Native Retry ancestry identifies superseded
+  attempts; equal display names never merge independent nodes. Publication independently checks the current
   branch head and cancellation. A user cancel after native success keeps the
   run passed but prevents publication; that passed run cannot be rerun.
 

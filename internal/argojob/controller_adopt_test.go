@@ -156,7 +156,7 @@ func TestStartupAdoptionRetainsUnknownAndRejectsUIDSubstitution(t *testing.T) {
 					t.Fatal(binding, found, err, client.reads)
 				}
 				client.workflow.UID = "replacement-uid"
-				if _, err := controller.WaitResumed(t.Context(), request.Name, request.RunID, io.Discard, nil, 0, binding); err == nil || !strings.Contains(err.Error(), "identity changed") {
+				if _, err := controller.WaitResumed(t.Context(), request.Name, request.RunID, io.Discard, binding); err == nil || !strings.Contains(err.Error(), "identity changed") {
 					t.Fatal("replaced Workflow observed", err)
 				}
 			} else if err == nil || found || errors.Is(err, ErrAdoptionRefused) {
@@ -214,7 +214,7 @@ func TestStartupAdoptionCompletedWaitPublishesLogsAndRetiresIdentity(t *testing.
 	if err != nil || !found || client.reads != 0 {
 		t.Fatal(binding, found, err, client.reads)
 	}
-	result, err := controller.WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, nil, 0, binding)
+	result, err := controller.WaitResumed(t.Context(), wf.Name, request.RunID, io.Discard, binding)
 	if err != nil || !result.Succeeded || reads != len(pods) {
 		t.Fatal(result, err, reads)
 	}

@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -24,7 +23,7 @@ func (j *replayAdoptingJobs) Adopt(context.Context, model.Run) (bool, error) {
 	return true, nil
 }
 func (*replayAdoptingJobs) WorkflowNamespace() string { return "pipeline" }
-func (j *replayAdoptingJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
+func (j *replayAdoptingJobs) WaitResumed(ctx context.Context, name string, out io.Writer) (JobResult, error) {
 	return j.Wait(ctx, name, out)
 }
 

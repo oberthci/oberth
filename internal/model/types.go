@@ -174,14 +174,16 @@ type Run struct {
 	BaseSHA       string
 	FailedStage   string `json:"FailedBurn"`
 	FailedStep    string
-	Error         string
-	Status        RunStatus
-	Reason        string
-	QueuedAt      time.Time
-	StartedAt     *time.Time
-	FinishedAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// FailedNode is read-side display evidence; FailedStep remains the node ID.
+	FailedNode *StepResult `json:"-"`
+	Error      string
+	Status     RunStatus
+	Reason     string
+	QueuedAt   time.Time
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type RunSpec struct {

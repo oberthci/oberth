@@ -116,7 +116,7 @@ func (completion *Completion) classifyInfrastructure() {
 		return
 	}
 	reason, storage := "", ""
-	failedStage, failedStep := "", ""
+	var failed *StepResult
 	for _, step := range completion.Steps {
 		if step.Status == runprogress.StepPassed || step.Status == runprogress.StepSkipped || !terminal(step.Status) {
 			continue
@@ -124,8 +124,9 @@ func (completion *Completion) classifyInfrastructure() {
 		// A separate test failure must still open a CI-red issue and must not
 		// be classified as a transient infrastructure-only failure.
 		if step.AttemptAmbiguous || step.InfrastructureReason == "" {
-			if failedStep == "" {
-				failedStage, failedStep = step.Stage, step.Step
+			if failed == nil {
+				selected := step
+				failed = &selected
 				if step.storageLimit != "" && !step.AttemptAmbiguous {
 					storage = stepStorageLimitReason(step)
 				}
@@ -136,7 +137,7 @@ func (completion *Completion) classifyInfrastructure() {
 			reason = step.InfrastructureReason
 		}
 	}
-	if failedStep != "" {
+	if failed != nil {
 		// Owned Pod evidence can turn a node-level eviction into the step's
 		// own declared storage budget; an earlier verdict must not survive.
 		completion.Infrastructure = false
@@ -145,7 +146,7 @@ func (completion *Completion) classifyInfrastructure() {
 			completion.Reason = storage
 		}
 		if reason != "" {
-			completion.FailedStage, completion.FailedStep = failedStage, failedStep
+			completion.setFailedStep(*failed)
 		}
 		return
 	}

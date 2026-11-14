@@ -204,10 +204,14 @@ function runDuration(run) {
   return spanSeconds(run.started_at, run.finished_at, run.status === "running");
 }
 function runWhen(run) { return run.started_at || run.finished_at || run.queued_at || run.created_at; }
-function runMessage(run) {
+function failedStepLabel(run, steps = []) {
+  const row = steps.find(step => step.node_id === run.failed_step);
+  return row?.display_name || row?.step || run.failed_step || "";
+}
+function runMessage(run, steps = []) {
   if (run.display_reason) return run.display_reason;
   if (run.error) return run.error;
-  if (run.failed_step) return `failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${run.failed_step}`;
+  if (run.failed_step) return `failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${failedStepLabel(run, steps)}`;
   if (run.reason) return run.reason;
   if (displayRunStatus(run) === "queued") return run.scheduling?.message || "waiting for Argo";
   return "";
@@ -927,7 +931,7 @@ function summaryLines(detail) {
   if (run.release) lines.push("[release] reachable-tag release workflow");
   const status = displayRunStatus(run), kind = statusKind(status);
   if (kind === "pass") lines.push(`[pass] ${passed} step${passed === 1 ? "" : "s"} passed across ${burns} burn${burns === 1 ? "" : "s"}`);
-  else if (kind === "fail") lines.push(`[fail] failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${run.failed_step || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
+  else if (kind === "fail") lines.push(`[fail] failed at ${run.failed_burn ? run.failed_burn + " / " : ""}${failedStepLabel(run, steps) || "unknown step"} — ${passed} step${passed === 1 ? "" : "s"} passed`);
   else if (kind === "run") lines.push(`[running] running in phase ${run.phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
   else if (status === "queued") {
     const scheduling = detail.scheduling || {};
@@ -1092,7 +1096,7 @@ async function renderRunDetailView(detail, seq) {
         ${run.finished_at ? `<span>finished ${esc(fmtTime(run.finished_at))}</span>` : ""}
       </div>
     </div>
-    <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.failed_step ? (run.failed_burn ? run.failed_burn + " / " : "") + run.failed_step : "run failed")}</b><span class="err" title="${esc(run.error)}">${esc(run.error || "")}</span></div>` : ""}
+    <div id="runBanners">${kind === "fail" ? `<div class="fbanner"><b>✗ ${esc(run.failed_step ? (run.failed_burn ? run.failed_burn + " / " : "") + failedStepLabel(run, steps) : "run failed")}</b><span class="err" title="${esc(run.error)}">${esc(run.error || "")}</span></div>` : ""}
     ${(status === "cancelled") ? `<div class="sbanner${runMessage(run) === "server restart, retry needed" ? " retry-warning" : ""}"><span class="err">${esc(runMessage(run))}</span></div>` : ""}
     </div>
     <div id="runHistory" class="run-history">${runHistory(run)}</div>

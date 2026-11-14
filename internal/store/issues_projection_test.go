@@ -643,3 +643,22 @@ func TestPromotionDoesNotRegisterCIIssueWork(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeFailedNodeCIIssueDisplaysNameAndKeepsLogSelector(t *testing.T) {
+	now := time.Now().UTC()
+	database := testStore(t, &now)
+	repository := projectionRepository(t, database)
+	run := projectionRun(t, database, repository.ID, repository.DefaultBranch, projectionSourceSHA)
+	row := model.StepResult{RunID: run.ID, NodeID: "workflow-3810230957", DisplayName: "build", Step: "build", Stage: "workflow", NodeType: "Pod", Phase: "Failed", Status: model.StepFailed, ExitCode: 1}
+	if err := database.PutStepResults(t.Context(), run.ID, []model.StepResult{row}); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := database.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: "workflow", FailedStage: "workflow", FailedStep: row.NodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := database.OpenCIIssue(t.Context(), repository.ID, repository.DefaultBranch)
+	if err != nil || !strings.Contains(issue.Body, "failed: workflow / build") || !strings.Contains(issue.Body, "full step log: run_logs "+run.ID+" workflow "+row.NodeID) || finished.FailedStep != row.NodeID {
+		t.Fatal(issue, finished, err)
+	}
+}

@@ -11,7 +11,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/storetest"
 )
 
@@ -32,7 +31,7 @@ func (j *exitTokenJobs) SettleCreate(ctx context.Context, name, id string, _ tim
 	}
 	return j.finished.Load(), nil
 }
-func (j *exitTokenJobs) WaitResumed(ctx context.Context, _ string, output io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
+func (j *exitTokenJobs) WaitResumed(ctx context.Context, _ string, output io.Writer) (JobResult, error) {
 	if err := ctx.Err(); err != nil {
 		return JobResult{}, err
 	}

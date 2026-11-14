@@ -60,6 +60,12 @@ func TestStepDiagnosticExactCurrentMainAndReason(t *testing.T) {
 
 func TestStepDiagnosticRefusesUnboundOrAmbiguousCurrentTermination(t *testing.T) {
 	cases := map[string]func(*wfv1.Workflow, *wfv1.NodeStatus, *corev1.Pod){
+		"wrong-workflow-label": func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) {
+			p.Labels["workflows.argoproj.io/workflow"] = "other"
+		},
+		"missing-workflow-label": func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) {
+			delete(p.Labels, "workflows.argoproj.io/workflow")
+		},
 		"foreign-owner": func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) { p.OwnerReferences[0].UID = "foreign" },
 		"foreign-run": func(w *wfv1.Workflow, _ *wfv1.NodeStatus, _ *corev1.Pod) {
 			w.Annotations[runIDAnnotation] = "secret-canary"
@@ -136,21 +142,15 @@ func TestStepDiagnosticCollectionPreservesVerdictAndAttempt(t *testing.T) {
 	}
 }
 
-func TestStepDiagnosticRetryTieMarkedWithoutChangingSelection(t *testing.T) {
-	wf, n, _, _ := diagnosticFixture()
+func TestSameNamedStepsKeepDistinctNodeIdentities(t *testing.T) {
+	wf, _, _, _ := diagnosticFixture()
 	first := fixtureStepResults(wf)[0]
 	second := first
-	second.NodeID = "other-attempt"
+	second.NodeID = "other-node"
 	second.ExitCode = 0
-	got := deduplicateRetries([]StepResult{first, second})
-	if len(got) != 1 || got[0].NodeID != second.NodeID || got[0].ExitCode != 0 || !got[0].AttemptAmbiguous {
-		t.Fatal("tie altered verdict or invented bound attempt")
-	}
-	later := second.StartedAt.Add(time.Second)
-	second.StartedAt = &later
-	got = deduplicateRetries([]StepResult{first, second})
-	if got[0].AttemptAmbiguous || got[0].NodeID == n.ID {
-		t.Fatal("distinct final attempt not retained")
+	got := finalStepResults([]StepResult{first, second})
+	if len(got) != 2 || got[0].NodeID != first.NodeID || got[1].NodeID != second.NodeID || got[0].AttemptAmbiguous || got[1].AttemptAmbiguous {
+		t.Fatal("display names collapsed unrelated nodes", got)
 	}
 }
 

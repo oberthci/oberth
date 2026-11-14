@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	argofile "github.com/argoproj/argo-workflows/v4/util/file"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,7 +25,6 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
@@ -63,6 +65,23 @@ func nativeLogIdentityTree(failed string) (*wfv1.Workflow, []*corev1.Pod) {
 	add("set-build", "build", "set-pod", wfv1.NodeTypeContainer, 8)
 	add("set-lint", "lint", "set-pod", wfv1.NodeTypeContainer, 9)
 	add("exit-node", "cleanup", "", wfv1.NodeTypePod, 10)
+	if strings.HasPrefix(failed, "duplicate-") {
+		for _, side := range []string{"left", "right"} {
+			add(side, side, "root", wfv1.NodeTypeDAG, 11)
+			add(side+"-build", side+".build", side, wfv1.NodeTypeDAG, 12)
+			boundary := wf.Status.Nodes[side+"-build"]
+			boundary.DisplayName = "build"
+			wf.Status.Nodes[boundary.ID] = boundary
+			ordinal := 13
+			if side == "right" {
+				ordinal = 14
+			}
+			add("duplicate-"+side, side+".build.compile", side+"-build", wfv1.NodeTypePod, ordinal)
+			leaf := wf.Status.Nodes["duplicate-"+side]
+			leaf.DisplayName = "compile"
+			wf.Status.Nodes[leaf.ID] = leaf
+		}
+	}
 	target := wf.Status.Nodes[failed]
 	target.Phase = wfv1.NodeFailed
 	target.Outputs.ExitCode = ptr.To("42")
@@ -82,14 +101,78 @@ func nativeLogIdentityTree(failed string) (*wfv1.Workflow, []*corev1.Pod) {
 		if node.ID == "set-pod" {
 			names = []corev1.Container{{Name: "build"}, {Name: "lint"}, {Name: "wait"}}
 		}
-		pods = append(pods, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("opaque-%d", len(pods)), Namespace: wf.Namespace, UID: types.UID("pod-" + node.ID), Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: names}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}})
+		pods = append(pods, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("opaque-%d", len(pods)), Namespace: wf.Namespace, UID: types.UID("pod-" + node.ID), Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, Annotations: map[string]string{"workflows.argoproj.io/node-id": node.ID, "workflows.argoproj.io/node-name": node.Name}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}}, Spec: corev1.PodSpec{Containers: names}, Status: corev1.PodStatus{Phase: corev1.PodSucceeded}})
 	}
 	return wf, pods
 }
 
+type nativeReaderCase struct {
+	name, wanted     string
+	compressed, wait bool
+}
+
+type nativeLogTestHub struct {
+	workflow *wfv1.Workflow
+	pods     []*corev1.Pod
+}
+
+func (hub nativeLogTestHub) Workflow(name string) (*wfv1.Workflow, bool) {
+	return hub.workflow, name == hub.workflow.Name
+}
+func (hub nativeLogTestHub) PodsOf(string) []*corev1.Pod { return hub.pods }
+func (hub nativeLogTestHub) Pods() []*corev1.Pod         { return hub.pods }
+func (nativeLogTestHub) Subscribe(string) (<-chan struct{}, func()) {
+	return make(chan struct{}), func() {}
+}
+func (nativeLogTestHub) Healthy() bool                     { return true }
+func (nativeLogTestHub) Synced() bool                      { return true }
+func (nativeLogTestHub) UnhealthySince() (time.Time, bool) { return time.Time{}, false }
+
+func nativeReaderCompletion(t *testing.T, wf *wfv1.Workflow, pods []*corev1.Pod, test nativeReaderCase) argojob.Completion {
+	t.Helper()
+	snapshot := wf.DeepCopy()
+	if test.compressed {
+		body, err := json.Marshal(snapshot.Status.Nodes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot.Status.CompressedNodes = argofile.CompressEncodeString(t.Context(), string(body))
+		snapshot.Status.Nodes = nil
+	}
+	before := snapshot.DeepCopy()
+	controller, err := argojob.NewController(&shutdownWorkflowFake{object: snapshot}, nil, argojob.Config{Namespace: wf.Namespace, PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release", CISecretsServiceAccount: "ci", ExecutorServiceAccount: "executor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completion *argojob.Completion
+	if test.wait {
+		controller.WithWatchHub(nativeLogTestHub{workflow: snapshot, pods: pods})
+		got, waitErr := controller.Wait(t.Context(), wf.Name, wf.Annotations["oberth.ci/run-id"], io.Discard)
+		completion, err = &got, waitErr
+	} else {
+		completion, err = controller.TerminalState(t.Context(), wf.Name)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snapshot, before) {
+		t.Fatal("native reader mutated cached Workflow")
+	}
+	return *completion
+}
+
 func TestNativeNodeIdentityFlowsThroughRunAndLogs(t *testing.T) {
-	for _, wanted := range []string{"flat-node", "nested-node", "attempt-1", "set-build", "exit-node"} {
-		t.Run(wanted, func(t *testing.T) {
+	cases := []nativeReaderCase{}
+	for _, wanted := range []string{"flat-node", "nested-node", "attempt-1", "set-build", "exit-node", "duplicate-left", "duplicate-right"} {
+		cases = append(cases, nativeReaderCase{name: wanted, wanted: wanted})
+	}
+	for _, wanted := range []string{"flat-node", "duplicate-left", "duplicate-right", "set-build"} {
+		cases = append(cases, nativeReaderCase{name: "compressed-terminal/" + wanted, wanted: wanted, compressed: true})
+		cases = append(cases, nativeReaderCase{name: "compressed-wait/" + wanted, wanted: wanted, compressed: true, wait: true})
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			wanted := test.wanted
 			ctx := t.Context()
 			database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "history.sqlite"), store.Options{})
 			if err != nil {
@@ -115,15 +198,10 @@ func TestNativeNodeIdentityFlowsThroughRunAndLogs(t *testing.T) {
 			if _, err = database.SetRunWorkflowName(ctx, run.ID, wf.Name); err != nil {
 				t.Fatal(err)
 			}
-			completion := argojob.Completion{Name: wf.Name, Terminal: true, Phase: string(wf.Status.Phase), Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, pods)}
-			for _, step := range completion.Steps {
-				if step.Status == runprogress.StepFailed {
-					completion.FailedStage, completion.FailedStep = step.Stage, step.Step
-					break
-				}
-			}
+			wf.Annotations = map[string]string{"oberth.ci/run-id": run.ID}
+			completion := nativeReaderCompletion(t, wf, pods, test)
 			result := (&ArgoJobs{}).result(completion)
-			if result.FailedStep != wanted {
+			if result.FailedStep != wanted || completion.FailedNodeID != wanted {
 				t.Fatalf("failure identity split: got %q want native node %q", result.FailedStep, wanted)
 			}
 			if err = database.PutStepResults(ctx, run.ID, result.Steps); err != nil {
@@ -154,12 +232,33 @@ func TestNativeNodeIdentityFlowsThroughRunAndLogs(t *testing.T) {
 			if _, err = database.FinishRun(ctx, run.ID, model.RunResult{Status: result.Status, Phase: result.Phase, FailedStage: result.FailedStage, FailedStep: result.FailedStep, Error: result.Error}); err != nil {
 				t.Fatal(err)
 			}
+			issue, err := database.OpenCIIssue(ctx, repo.ID, "main")
+			if err != nil || !strings.Contains(issue.Body, "full step log: run_logs "+run.ID+" "+selected.Stage+" "+wanted) {
+				t.Fatal("CI issue lost exact failure selector", issue, err)
+			}
 			control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Repositories: database, Logs: logs})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer control.Shutdown(context.Background())
 			actor := api.Actor{Identity: "reader", Admin: true}
+			detailValue, err := control.CallTool(ctx, actor, "run_get", json.RawMessage(`{"id":"`+run.ID+`","summary":false}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			detail := detailValue.(service.RunDetailResponse)
+			if detail.Run.FailedStep != wanted {
+				t.Fatal("status lost exact native failure or exit", detail)
+			}
+			statusArgs, _ := json.Marshal(map[string]string{"repo": repo.Name, "ref": run.SHA})
+			statusValue, err := control.CallTool(ctx, actor, "status", statusArgs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status := statusValue.(service.StatusResponse)
+			if status.FailedStep != wanted || status.ExitCode == nil || *status.ExitCode != 42 {
+				t.Fatal("status lost native failure exit", status)
+			}
 			expected := "[other/step] ordinary bytes\nError: " + wanted + " native output\n"
 			for _, call := range []struct {
 				name string
@@ -167,6 +266,12 @@ func TestNativeNodeIdentityFlowsThroughRunAndLogs(t *testing.T) {
 			}{{"run_logs", map[string]any{"id": run.ID}}, {"logs", map[string]any{"repo": repo.Name, "sha": run.SHA, "step": selected.Step}}, {"logs", map[string]any{"repo": repo.Name, "sha": run.SHA, "step": wanted}}, {"run_logs", map[string]any{"id": run.ID, "node_id": wanted, "container": container}}} {
 				raw, _ := json.Marshal(call.args)
 				value, err := control.CallTool(ctx, actor, call.name, raw)
+				if strings.HasPrefix(wanted, "duplicate-") && call.name == "logs" && call.args["step"] == selected.Step {
+					if err == nil || !strings.Contains(err.Error(), "duplicate-left") || !strings.Contains(err.Error(), "duplicate-right") {
+						t.Fatal("ambiguous display selector chose a branch", value, err)
+					}
+					continue
+				}
 				if err != nil {
 					t.Fatal(call.name, call.args, err)
 				}
@@ -201,7 +306,7 @@ func TestNativeGreenRetryClearsFailureIdentity(t *testing.T) {
 	flat.Phase = wfv1.NodeSucceeded
 	wf.Status.Nodes["flat-node"] = flat
 	wf.Status.Phase = wfv1.WorkflowSucceeded
-	completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: true, Phase: string(wf.Status.Phase), Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, pods), FailedStage: "compile", FailedStep: "compile"}
+	completion := argojob.Completion{Name: wf.Name, Terminal: true, Succeeded: true, Phase: string(wf.Status.Phase), Steps: argojob.StepResults(wf), NodeSteps: argojob.NodeStepResults(wf, pods), FailedStage: "compile", FailedStep: "compile", FailedNodeID: "attempt-0"}
 	result := (&ArgoJobs{}).result(completion)
 	if result.Status != model.RunPassed || result.FailedStep != "" || result.FailedStage != "" {
 		t.Fatal("green retry retained failure identity", result)

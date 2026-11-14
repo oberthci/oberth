@@ -88,7 +88,7 @@ func holderSpec(account string) corev1.PodSpec {
 }
 
 func TestExecutorIdentityRetirementListFailureFailsSettleClosed(t *testing.T) {
-	c, wf, binding, events := restartCutFixture(t, func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, _ *corev1.Pod) {})
+	c, wf, binding, _ := restartCutFixture(t, func(_ *wfv1.Workflow, _ *wfv1.NodeStatus, _ *corev1.Pod) {})
 	withTestObservationCache(t, c)
 	c.kube.(*fake.Clientset).PrependReactor("list", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
 		if action.(ktesting.ListAction).GetListRestrictions().Labels.String() == "oberth.ci/role=executor-identity" {
@@ -96,7 +96,7 @@ func TestExecutorIdentityRetirementListFailureFailsSettleClosed(t *testing.T) {
 		}
 		return false, nil, nil
 	})
-	_, err := c.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, events, 0, binding)
+	_, err := c.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, binding)
 	if err == nil || !strings.Contains(err.Error(), "retire executor identity: API unavailable") {
 		t.Fatalf("settle ignored a failed holder retirement: %v", err)
 	}

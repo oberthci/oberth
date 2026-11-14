@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -24,17 +23,14 @@ type adoptingArgoControl struct {
 	adoptErr error
 	waitErr  error
 	resumed  bool
-	events   []runprogress.Event
-	retained int64
 }
 
 func (controller *adoptingArgoControl) Adopt(_ context.Context, request argojob.AdoptionRequest) (argojob.Adoption, bool, error) {
 	controller.request = request
 	return controller.binding, controller.found, controller.adoptErr
 }
-func (controller *adoptingArgoControl) WaitResumed(_ context.Context, name, runID string, _ io.Writer, events []runprogress.Event, retained int64, binding argojob.Adoption) (argojob.Completion, error) {
+func (controller *adoptingArgoControl) WaitResumed(_ context.Context, name, runID string, _ io.Writer, binding argojob.Adoption) (argojob.Completion, error) {
 	controller.resumed = true
-	controller.events, controller.retained = events, retained
 	if name != controller.request.Name || runID != controller.request.RunID || !reflect.DeepEqual(binding, controller.binding) {
 		panic("adopted intent changed")
 	}
@@ -58,8 +54,8 @@ func TestArgoJobsAdoptRestoresIntentAndResumesWait(t *testing.T) {
 		t.Fatal("foreign intent replaced adopted run")
 	}
 	controller.request = argojob.AdoptionRequest{Name: run.WorkflowName, RunID: run.ID}
-	result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard, []runprogress.Event{{Stage: "test", Step: "unit"}}, 123)
-	if err != nil || result.Status != model.RunPassed || !controller.resumed || len(controller.events) != 1 || controller.retained != 123 {
+	result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard)
+	if err != nil || result.Status != model.RunPassed || !controller.resumed {
 		t.Fatalf("resumed Wait = %#v %v", result, err)
 	}
 	if len(jobs.intents) != 0 {
@@ -83,7 +79,7 @@ func TestArgoJobsAdoptedTerminalObservationErrorStillCollectsArtifacts(t *testin
 	if _, err := jobs.Adopt(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
-	result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard, nil, 0)
+	result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard)
 	if !errors.Is(err, budget) || result.Status != model.RunPassed {
 		t.Fatalf("terminal observation error = %#v %v", result, err)
 	}
@@ -128,7 +124,7 @@ func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 			if err != nil || !found || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref {
 				t.Fatalf("adoption binding changed: %+v %v", controller.request, err)
 			}
-			result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard, nil, 0)
+			result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard)
 			if err != nil || result.Status != model.RunPassed || !controller.resumed || len(jobs.intents) != 0 {
 				t.Fatalf("resumed intent: %+v %v", result, err)
 			}

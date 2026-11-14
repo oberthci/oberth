@@ -114,6 +114,15 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	default:
 		title = fmt.Sprintf("CI red: %s — %s failed", work.Branch, phase)
 	}
+	if run.FailedStep != "" {
+		row, err := scanStepResult(tx.QueryRowContext(ctx, `SELECT `+stepResultColumns+` FROM step_results WHERE run_id = ? AND node_id = ?`, run.ID, run.FailedStep))
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("load failed node for CI issue: %w", err)
+		}
+		if err == nil {
+			run = run.WithFailedNode([]model.StepResult{row})
+		}
+	}
 	projection := ciIssueProjection{
 		Work:       work,
 		Title:      title,
@@ -142,7 +151,7 @@ func runIssueBody(run model.Run, failureTail string) string {
 		sha = strings.TrimSpace(run.SHA)
 	}
 	header := fmt.Sprintf("run %s, sha %s", run.ID, sha)
-	if stage, step := strings.TrimSpace(run.FailedStage), strings.TrimSpace(run.FailedStep); stage != "" || step != "" {
+	if stage, step := strings.TrimSpace(run.FailedStage), strings.TrimSpace(run.FailedStepDisplayName()); stage != "" || step != "" {
 		header += fmt.Sprintf("\nfailed: %s / %s", stage, step)
 	}
 	sections := []string{header}

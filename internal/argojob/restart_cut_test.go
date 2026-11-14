@@ -97,9 +97,9 @@ func TestRestartCutAdoptedWaitDistinguishesMissingExitFromFailure(t *testing.T) 
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			controller, wf, binding, events := restartCutFixture(t, test.change)
+			controller, wf, binding, _ := restartCutFixture(t, test.change)
 			var output bytes.Buffer
-			result, err := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, events, 100, binding)
+			result, err := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], &output, binding)
 			if err != nil || result.Interrupted != test.interrupted || result.Succeeded != test.passed {
 				t.Fatalf("wrong restart verdict: %+v err=%v", result, err)
 			}
@@ -265,14 +265,6 @@ func TestRestartCutRetainedJournalFailureBindsExactAttempt(t *testing.T) {
 				event.Version = -1
 			}
 			retained := append(events, event)
-			// Invalid journal input remains refused by Wait's existing validation;
-			// the terminal reader must also never use an invalid record as evidence.
-			if mode != "invalid-record" {
-				result, err := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, retained, 100, binding)
-				if err != nil || result.Interrupted != (mode != "exact-failure") {
-					t.Fatal("retained failure lost or wrong attempt bound", result, err)
-				}
-			}
 			result, err := controller.TerminalStateResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], binding, retained)
 			if err != nil || result.Interrupted != (mode != "exact-failure") {
 				t.Fatal("fallback journal evidence lost or misbound", result, err)
@@ -300,7 +292,7 @@ func TestRestartCutSettlingReadCannotEraseKnownFailure(t *testing.T) {
 			var result *Completion
 			var err error
 			if path == "wait" {
-				value, e := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, nil, 0, binding)
+				value, e := withWaitTestHub(t, controller).WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, binding)
 				result, err = &value, e
 			} else {
 				result, err = controller.TerminalStateResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], binding, nil)

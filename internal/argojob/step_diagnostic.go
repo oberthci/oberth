@@ -314,7 +314,7 @@ func stepPodBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod
 }
 func stepPodIdentityBound(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) bool {
 	_, _, ok := WorkflowMeta(workflow)
-	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Name == "" || node.Type != wfv1.NodeTypePod || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
+	if !ok || workflow.UID == "" || pod == nil || pod.UID == "" || pod.Namespace != workflow.Namespace || pod.Labels["workflows.argoproj.io/workflow"] != workflow.Name || pod.Name == "" || node.Type != wfv1.NodeTypePod || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
 		return false
 	}
 	owners := 0
