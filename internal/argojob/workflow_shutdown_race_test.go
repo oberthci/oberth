@@ -1,7 +1,9 @@
 package argojob
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -9,6 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ktesting "k8s.io/client-go/testing"
 )
 
@@ -53,14 +56,17 @@ func TestStopCannotOverwriteConcurrentTerminate(t *testing.T) {
 }
 
 func TestStopRetriesLiveComparisonWithoutStatusFence(t *testing.T) {
-	for _, mode := range []string{"status", "spec", "api-invalid", "replacement", "continuous-spec"} {
+	for _, mode := range []string{"status", "spec", "api-invalid", "replacement", "continuous-conflict"} {
 		t.Run(mode, func(t *testing.T) {
 			workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf", Namespace: "pipeline", UID: "original", ResourceVersion: "1", Annotations: map[string]string{runIDAnnotation: "run"}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
 			client := argofake.NewSimpleClientset(workflow)
 			patches := 0
 			client.PrependReactor("patch", "workflows", func(ktesting.Action) (bool, runtime.Object, error) {
 				patches++
-				if patches > 1 && mode != "continuous-spec" {
+				if mode == "continuous-conflict" {
+					return true, nil, apierrors.NewConflict(workflowTestResource, workflow.Name, fmt.Errorf("admission comparison refused attempt %d", patches))
+				}
+				if patches > 1 {
 					return false, nil, nil
 				}
 				current, err := client.Tracker().Get(wfv1.SchemeGroupVersion.WithResource("workflows"), workflow.Namespace, workflow.Name)
@@ -72,7 +78,7 @@ func TestStopRetriesLiveComparisonWithoutStatusFence(t *testing.T) {
 				switch mode {
 				case "status":
 					changed.Status.Message = "Pod status advanced"
-				case "spec", "continuous-spec":
+				case "spec":
 					suspend := patches%2 == 1
 					changed.Spec.Suspend = &suspend
 				case "api-invalid":
@@ -90,12 +96,12 @@ func TestStopRetriesLiveComparisonWithoutStatusFence(t *testing.T) {
 			})
 			controller := &Controller{workflows: client.ArgoprojV1alpha1().Workflows(workflow.Namespace)}
 			err := controller.Cancel(t.Context(), workflow.Name, "run")
-			if mode == "replacement" || mode == "continuous-spec" {
+			if mode == "replacement" || mode == "continuous-conflict" {
 				if err == nil {
 					t.Fatal("changed Workflow accepted")
 				}
-				if mode == "continuous-spec" && patches != 3 {
-					t.Fatalf("unbounded comparison retries: %d", patches)
+				if mode == "continuous-conflict" && (patches != 3 || !apierrors.IsConflict(err) || !strings.Contains(err.Error(), "refused attempt 3")) {
+					t.Fatalf("retry bound or last cause lost: patches=%d err=%v", patches, err)
 				}
 				return
 			}
@@ -116,9 +122,24 @@ func TestStopRetriesLiveComparisonWithoutStatusFence(t *testing.T) {
 			if mode == "status" && patches != 1 {
 				t.Fatalf("status churn rejected shutdown: patches=%d", patches)
 			}
-			if mode == "spec" && (patches != 2 || final.Spec.Suspend == nil || !*final.Spec.Suspend) {
-				t.Fatal("spec change was lost or not retried")
+			if mode == "spec" && (patches != 1 || final.Spec.Suspend == nil || !*final.Spec.Suspend) {
+				t.Fatal("spec change was lost or unrelated fields blocked shutdown")
 			}
 		})
+	}
+}
+
+func TestStopRetryExhaustionPreservesAdmissionCause(t *testing.T) {
+	workflow := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "workflow", Namespace: "pipeline", UID: "original", Annotations: map[string]string{runIDAnnotation: "run"}}, Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}
+	client := argofake.NewSimpleClientset(workflow)
+	attempts := 0
+	client.PrependReactor("patch", "workflows", func(ktesting.Action) (bool, runtime.Object, error) {
+		attempts++
+		return true, nil, apierrors.NewInvalid(wfv1.SchemeGroupVersion.WithKind("Workflow").GroupKind(), workflow.Name, field.ErrorList{field.Forbidden(field.NewPath("spec", "shutdown"), fmt.Sprintf("admission denied attempt %d", attempts))})
+	})
+	controller := &Controller{workflows: client.ArgoprojV1alpha1().Workflows(workflow.Namespace)}
+	err := controller.Cancel(t.Context(), workflow.Name, "run")
+	if attempts != 3 || !apierrors.IsConflict(err) || !strings.Contains(err.Error(), "admission denied attempt 3") {
+		t.Fatalf("shutdown retry lost bound or admission cause: attempts=%d err=%v", attempts, err)
 	}
 }

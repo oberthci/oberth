@@ -26,13 +26,9 @@ func requestWorkflowShutdown(ctx context.Context, client WorkflowClient, workflo
 	}
 	operations := []map[string]any{{"op": "test", "path": "/metadata/uid", "value": workflow.UID}}
 	if strategy == wfv1.ShutdownStrategyStop {
-		path, value := "/spec/shutdown", any(workflow.Spec.Shutdown)
-		if workflow.Spec.Shutdown == "" {
-			// JSON Patch cannot test an absent member. Comparing spec also
-			// proves shutdown is absent, without fencing status updates.
-			path, value = "/spec", workflow.Spec
-		}
-		operations = append(operations, map[string]any{"op": "test", "path": path, "value": value})
+		// Kubernetes' JSON Patch library lets a null test match an absent
+		// member. Compare shutdown alone, independent of spec serialization.
+		operations = append(operations, map[string]any{"op": "test", "path": "/spec/shutdown", "value": nil})
 	}
 	operations = append(operations, map[string]any{"op": "add", "path": "/spec/shutdown", "value": strategy})
 	patch, err := json.Marshal(operations)

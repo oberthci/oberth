@@ -715,6 +715,7 @@ func (controller *Controller) Terminate(ctx context.Context, name, runID string)
 
 func (controller *Controller) shutdown(ctx context.Context, name, runID string, strategy wfv1.ShutdownStrategy) error {
 	var originalUID types.UID
+	var lastConflict error
 	for attempt := 0; attempt < 3; attempt++ {
 		workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
@@ -736,6 +737,7 @@ func (controller *Controller) shutdown(ctx context.Context, name, runID string, 
 			return nil
 		}
 		if apierrors.IsConflict(err) {
+			lastConflict = err
 			continue
 		}
 		if err != nil {
@@ -743,7 +745,7 @@ func (controller *Controller) shutdown(ctx context.Context, name, runID string, 
 		}
 		return nil
 	}
-	return fmt.Errorf("argojob: Workflow %s kept changing during shutdown", name)
+	return fmt.Errorf("argojob: Workflow %s kept changing during shutdown: %w", name, lastConflict)
 }
 
 // progressReporter turns repeated status observations into the monotonic

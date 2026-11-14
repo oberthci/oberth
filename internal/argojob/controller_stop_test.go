@@ -46,7 +46,7 @@ func TestCancelUsesNativeStopAndKeepsExitHandlers(t *testing.T) {
 					if err := json.Unmarshal(action.(ktesting.PatchAction).GetPatch(), &operations); err != nil {
 						t.Fatal(err)
 					}
-					if len(operations) != 3 || operations[0]["path"] != "/metadata/uid" || operations[0]["value"] != "workflow-uid" || operations[1]["op"] != "test" || operations[1]["path"] != "/spec" || operations[2]["path"] != "/spec/shutdown" || operations[2]["value"] != "Stop" {
+					if len(operations) != 3 || operations[0]["path"] != "/metadata/uid" || operations[0]["value"] != "workflow-uid" || operations[1]["op"] != "test" || operations[1]["path"] != "/spec/shutdown" || operations[1]["value"] != nil || operations[2]["path"] != "/spec/shutdown" || operations[2]["value"] != "Stop" {
 						t.Fatalf("patch lost its identity or strategy fence: %s", action.(ktesting.PatchAction).GetPatch())
 					}
 
