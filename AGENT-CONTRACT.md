@@ -1208,7 +1208,7 @@ trust assumptions and complete invalidation rules.
   | running past its execution deadline | `running` | `Execution deadline exceeded.` |
   | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
   | passed CI / published release | `passed` | empty |
-  | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
+  | Argo Failed/Error or infrastructure failure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
   | queued publication retry | `running` | publication attempt/backoff message; from publication state |
   | Workflow confirmed absent after a server restart, including work never submitted | `failed` | `interrupted by server restart` |
@@ -1327,7 +1327,8 @@ trust assumptions and complete invalidation rules.
   collection and executor identity retirement. Settlement starts an observer
   only when it acquires its own reservation. An unsuccessful Oberth stop ends
   with the existing interrupted/cancelled verdict and opens no CI issue; native
-  Succeeded remains passed. Authored shutdown retains a Workflow-spec reason.
+  Succeeded remains passed even when an author-tolerated step failed; the step
+  evidence remains failed. Authored shutdown retains a Workflow-spec reason.
   The MCP request attempts the native shutdown on its request context; a client
   disconnect or timeout leaves the durable obligation for the next pass. A
   terminal run or a run owning pending publication refuses cancellation. A
