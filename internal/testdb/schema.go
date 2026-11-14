@@ -394,7 +394,7 @@ DELETE FROM schema_migrations WHERE id='20261113193452-remove-run-credentialed-1
 DELETE FROM schema_migrations WHERE id='20261113193519-scope-secret-approvals-to-workflow-4e48838f64a9b32ddba9d914280daa25';
 `
 
-const PostWorkflowCapabilityUIDDowngrade = PostExecutionTargetRemovalDowngrade + historicalRestartTimingSchema + postRunGrantClassificationDowngrade + `
+const PostWorkflowCapabilityUIDDowngrade = PostExecutionTargetRemovalDowngrade + PostWorkflowStopDowngrade + historicalRestartTimingSchema + postRunGrantClassificationDowngrade + `
 DELETE FROM schema_migrations WHERE id='20261113181825-remove-restart-timings-370d05c58486149250a7139eb6afdca7';
 DELETE FROM schema_migrations WHERE id='20261113153226-stop-restart-resubmission-c9820cdaf74239b4216c84bafb350153';
 DELETE FROM schema_migrations WHERE id='20261113190600-remove-admission-timing-18a8ff23a732be469158310b6aab30a5';
@@ -583,4 +583,24 @@ CREATE TRIGGER execution_target_quarantine_immutable BEFORE UPDATE OF quarantine
  SELECT RAISE(ABORT,'immutable execution target quarantine');
 END;
 DELETE FROM schema_migrations WHERE id='20261113211418-drop-execution-targets-0c8c62c219d8b3115aa50e87dde3701f';
+`
+
+// PostWorkflowStopDowngrade reconstructs the prior ledger only in disposable
+// historical-schema fixtures. Production migrations remain forward-only.
+const PostWorkflowStopDowngrade = `
+CREATE TEMP TABLE stop_fixture AS SELECT * FROM run_cancellations;
+DROP TABLE run_cancellations;
+CREATE TABLE run_cancellations (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    job_name TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL CHECK (reason IN ('superseded', 'owner_restart')),
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER
+);
+INSERT INTO run_cancellations SELECT run_id,job_name,superseded_by,
+ CASE WHEN reason='cancelled' THEN 'superseded' ELSE reason END,created_at,completed_at FROM stop_fixture;
+DROP TABLE stop_fixture;
+CREATE INDEX run_cancellations_pending_idx ON run_cancellations(completed_at, created_at, run_id);
+DELETE FROM schema_migrations WHERE id='20261114004639-native-workflow-stop-0ee7b6bbcc1aad2cc3414f3973e01bde';
 `

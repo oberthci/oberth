@@ -12,14 +12,14 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
-// RunCancelStore terminalizes an active run and records its audit action and
-// Workflow-deletion obligation in one transaction.
+// RunCancelStore records a Stop request, its audit action and
+// Workflow-Stop obligation in one transaction.
 type RunCancelStore interface {
 	CancelRun(context.Context, model.RunCancelRequest) (model.RunCancelResult, error)
 }
 
 // RunCancellationObserver executes the obligations a cancel recorded: it
-// cancels an in-flight create and deletes the run's Workflow. The
+// withdraws the run's admission reservation and stops its Workflow. The
 // scheduler implements it; an API without one leaves the obligations to the
 // scheduler's next cancellation pass.
 type RunCancellationObserver interface {
@@ -30,8 +30,7 @@ type RunCancellationObserver interface {
 const (
 	cancelWorkflowNone    = "none"          // never claimed: no Workflow can exist
 	cancelWorkflowNotYet  = "not_submitted" // claimed, no Workflow created
-	cancelWorkflowDeleted = "deleted"       // deletion accepted (or already absent)
-	cancelWorkflowPending = "pending"       // obligation recorded; the scheduler retries the deletion
+	cancelWorkflowPending = "pending"       // obligation recorded; the scheduler retries Stop
 )
 
 // releaseLikeRun reports runs whose Workflow may publish or mutate outside
@@ -74,9 +73,9 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 
 // CancelRun is the audited cancel of one queued, waiting or running run by
 // actor. It resolves the run within the actor's scope, applies RunCancelPolicy,
-// terminalizes the run durably, and hands any Workflow-deletion obligation to
-// the scheduler, which also cancels an in-flight create. Cancelling a terminal
-// run is refused without any change.
+// records the request durably, and hands any Workflow-Stop obligation to
+// the scheduler, which also cancels preparation and retains its worker custody
+// until join. Repeating the same Stop is idempotent.
 func (service *API) CancelRun(ctx context.Context, actor api.Actor, runID, reason string, force bool) (api.RunCancelResponse, error) {
 	if strings.TrimSpace(actor.Identity) == "" {
 		return api.RunCancelResponse{}, errors.New("service: acting uplink identity is required")
@@ -106,13 +105,6 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 	if err != nil {
 		return api.RunCancelResponse{}, err
 	}
-	if !run.Status.Active() {
-		state := string(run.Status)
-		if run.Cancelled() {
-			state = "cancelled (" + run.Reason + ")"
-		}
-		return api.RunCancelResponse{}, fmt.Errorf("%w: run %s is already %s; nothing to cancel", store.ErrRunNotActive, run.ID, state)
-	}
 	if _, err := RunCancelPolicy(run, actor.Admin, force); err != nil {
 		return api.RunCancelResponse{}, err
 	}
@@ -130,7 +122,9 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 	if err != nil {
 		return api.RunCancelResponse{}, err
 	}
-	forgetActiveLogIndex(service.logs, run.ID)
+	if result.Run.Status.Terminal() {
+		forgetActiveLogIndex(service.logs, run.ID)
+	}
 	service.signals.NotifyRun(run.ID)
 	if result.PromotionID != "" {
 		service.signals.NotifyPromotion(result.PromotionID)
@@ -150,11 +144,9 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 	if observer, ok := service.enqueues.(RunCancellationObserver); ok {
 		if err := observer.AcceptCancellations(ctx, result.Cancellations); err != nil {
 			// The cancel is durable; the scheduler's cancellation pass retries
-			// the deletion. Report it instead of failing a committed cancel.
-			log.Printf("run cancel %s: Workflow deletion deferred to the cancellation pass: %v", run.ID, err)
+			// Stop. Report it instead of failing a committed cancel.
+			log.Printf("run cancel %s: Workflow Stop deferred to the cancellation pass: %v", run.ID, err)
 			response.Workflow = cancelWorkflowPending
-		} else if result.Cancellations[0].WorkflowName != "" {
-			response.Workflow = cancelWorkflowDeleted
 		}
 	}
 	return response, nil

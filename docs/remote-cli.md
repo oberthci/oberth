@@ -111,7 +111,7 @@ source or moved tag requires `--force`. A missing journal is unknown unless
 an observed terminal Workflow explicitly had zero nodes. Pre-intent attempts
 with no step evidence can be replayed without a plan. These rules also apply
 to tag infrastructure failures.
-Pending Workflow deletion blocks retry and rerun even with force, until cleanup
+Pending Workflow Stop blocks retry and rerun even with force, until cleanup
 is confirmed. A published/green tag remains refused. When every step passed and
 only the upstream push failed, the push is retried instead of executing the
 pipeline. Audit records include the replay basis and evidence counts.
@@ -136,8 +136,8 @@ waits for: `waiting for an Argo workflow slot (controller parallelism)`,
 Pending Workflows are queued; running Workflows are running. The default list
 keeps queued rows above running and terminal rows; the CLI uses accepted FIFO
 order within work awaiting submission. A trusted
-preflight is `running`. A replaced interrupted run displays `superseded`;
-explicit cancellation and interruption without a successor display `cancelled`.
+preflight is `running`. Submitted cancellation stays active until Argo Stop finishes and then uses
+Argo's terminal phase. Work cancelled before submission displays `cancelled`.
 The reason identifies the successor, actor or retry action. `--json` keeps the underlying `Status` field and adds
 `display_status` and `display_reason`. Successful releases display `passed`;
 `release` is a separate kind. The `status`/`wait` MCP tool's legacy
@@ -157,11 +157,13 @@ and running work with its reason. Elapsed time begins at submission start and
 includes preflight. Interrupted results neither open nor resolve CI-red issues.
 
 `oberth run cancel` calls the `run_cancel` MCP tool with the same uplink
-token. It cancels one queued, waiting or running run: the run becomes
-`interrupted` with phase `cancelled` (shown as `cancelled` by `oberth runs`
-and `oberth run`) and a reason naming the caller; a claimed run's Workflow is
-deleted; it is never re-fired
-and opens no CI issue. A non-admin uplink may cancel only branch-push runs
+token. It requests cancellation of one queued, waiting or running run. A run
+that has not been submitted finishes as `interrupted` with phase `cancelled`.
+For a submitted Workflow, Oberth requests Argo Stop and shows a cancelling
+reason naming the caller. The run and its admission capacity remain active
+until Argo finishes, including exit handlers; Argo's phase determines the
+final verdict. Oberth leaves the Workflow for Argo's TTL cleanup. Cancelled
+runs are never re-fired and open no CI issue. A non-admin uplink may cancel only branch-push runs
 in repositories it can see. An admin may cancel
 any run, but a tag/release or apply run needs `--force`, because anything its
 Workflow already published stays published. Cancelling promotion CI fails the
@@ -302,7 +304,6 @@ dashboard folds the same lines behind a "▸ N Argo executor lines" toggle.
 | --- | --- |
 | `oberth.priority=<low\|standard\|promotion\|high>` | Requests an execution class; see [release priority](release-priority.md). |
 | `oberth.priority_reason=<text>` | Explains the priority request (1..512 bytes, no control characters). |
-| `oberth.supersede=true` | Lets this push supersede protected (prioritised) work on the branch; replacing it requires its requester or an unscoped admin. See [release priority](release-priority.md). |
 | `oberth.assist=1` (or `true`) | Asks for agent-assisted retry holds; see [assisted continuation](assisted-continuation.md). |
 
 An unknown `oberth.*` option, or a known one with an unrecognised value, never

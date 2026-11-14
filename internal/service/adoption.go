@@ -79,11 +79,10 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 	if err != nil {
 		return err
 	}
-	if current.Preempted() {
+	if current.Cancelled() {
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return scheduler.deferRefusedDeletions(ctx, run.ID, err)
+			return scheduler.deferRefusedStops(ctx, run.ID, err)
 		}
-		return nil
 	}
 	file, events, retained, err := scheduler.logs.Resume(run.ID)
 	if err != nil {

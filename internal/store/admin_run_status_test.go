@@ -32,7 +32,7 @@ func TestAdminRunStatusUsesDisplayValuesBeforeBounds(t *testing.T) {
 		{status: model.RunFailed, failure: "observe adopted Workflow job: " + model.ExecutionDeadlineMessage + " Server watchdog expired: context deadline exceeded\ncleanup failure", want: "failed"},
 		{status: model.RunFailed, failure: "DeadlineExceeded", reason: "historical automatic retry " + strings.Repeat("f", 32), want: "failed"},
 		{status: model.RunInterrupted, phase: model.PhaseCancelled, superseded: strings.Repeat("f", 32), want: "cancelled"},
-		{status: model.RunInterrupted, superseded: strings.Repeat("f", 32), want: "superseded"},
+		{status: model.RunInterrupted, superseded: strings.Repeat("f", 32), want: "cancelled"},
 		{status: model.RunInterrupted, want: "cancelled"},
 	}
 	want := map[string]map[string]bool{}

@@ -33,7 +33,7 @@ func TestRestartCutR2CombinedKeepsRunningEvidenceAndTerminalFallback(t *testing.
 		t.Fatal("running evidence lost or live artifacts collected", observed, err, collector.calls)
 	}
 	final, err := observed.Reobserve(t.Context())
-	if err != nil || final.Status != model.RunInterrupted || final.Phase != "interrupted" || final.FailedStep != "" {
+	if err != nil || final.Status != model.RunFailed || final.Phase != "infrastructure" || final.FailedStep != "" {
 		t.Fatal("partial running snapshot overrode cut", final, err)
 	}
 }

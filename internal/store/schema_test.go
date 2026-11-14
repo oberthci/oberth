@@ -1149,7 +1149,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"status text not null default 'pending' check (status in ('pending', 'passed', 'failed', 'interrupted'))")
 	assertSchemaContains(t, store.db, "table", "run_cancellations",
 		"superseded_by text not null default ''",
-		"reason text not null check (reason in ('superseded', 'owner_restart'))")
+		"reason text not null check (reason in ('cancelled', 'owner_restart'))")
 	assertSchemaContains(t, store.db, "table", "publications",
 		"status text not null default 'pending' check (status in ('pending', 'delivered', 'failed', 'abandoned'))",
 		"check (run_id is not null or promotion_id is not null)")

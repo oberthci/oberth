@@ -1,19 +1,14 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 )
@@ -76,7 +71,10 @@ func assertCancelled(t *testing.T, run model.Run, actor, reason string) {
 	if reason != "" {
 		want += ": " + reason
 	}
-	if run.Status != model.RunInterrupted || run.Phase != model.PhaseCancelled || run.Reason != want || run.SupersededBy != "" {
+	if run.Status == model.RunFailed {
+		want = strings.Replace(want, "cancelled by ", "stopped by ", 1)
+	}
+	if (run.Status != model.RunInterrupted && run.Status != model.RunFailed) || run.Phase != model.PhaseCancelled || run.Reason != want || run.SupersededBy != "" {
 		t.Fatalf("run %s = status %s phase %q reason %q superseded_by %q; want cancelled with %q",
 			run.ID, run.Status, run.Phase, run.Reason, run.SupersededBy, want)
 	}
@@ -118,10 +116,9 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	}
 }
 
-// Cancelling a waiting run withdraws its claim at once: once the host
-// pressure that holds it clears, the run behind it is not held up by
-// a cancelled reservation, and the cancelled run never creates a Workflow.
-func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
+// Cancelling preparation joins its creator without submitting a Workflow or
+// blocking the independently claimed peer. Ownership lasts through worker join.
+func TestRunCancelWaitingRunJoinsCreatorAndPreservesPeer(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
 	lift := fixture.pausePreparation(t)
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
@@ -134,16 +131,20 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	if response.PreviousState != "waiting" || response.Warning != "" {
 		t.Fatalf("waiting cancel response = %#v", response)
 	}
-	if snapshot := fixture.scheduler.ownerForTest(head.QueueSequence); snapshot != nil {
-		t.Fatalf("cancelled head still holds a reservation: %#v", snapshot)
-	}
 	cancelled := fixture.awaitTerminal(t, head.ID)
+	until := time.Now().Add(testStartTimeout(5 * time.Second))
+	for fixture.scheduler.ownerForTest(head.QueueSequence) != nil {
+		if time.Now().After(until) {
+			t.Fatal("cancelled creator did not join and release ownership")
+		}
+		time.Sleep(testTimeout(time.Millisecond))
+	}
+	lift()
 	assertCancelled(t, cancelled, cancelAdmin.Identity, "wrong size")
 	shown := fixture.control.presentationRun(t.Context(), cancelled)
 	if shown.StartedAt != nil || shown.DisplayStatus != "cancelled" || shown.DisplayReason != "by "+cancelAdmin.Identity+": wrong size" {
 		t.Fatalf("cancel during admission: %+v", shown)
 	}
-	lift()
 	fixture.awaitNoPendingCancellations(t)
 	if created := fixture.awaitCreated(t, 1); !created[member.ID] {
 		t.Fatalf("cancelled waiter held the next run: %v", created)
@@ -158,56 +159,38 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 }
 
 // Cancelling one submitted Workflow preserves the independently submitted peer
-// and the cancelled owner cannot record a late result over the cancellation.
-func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
+// and waits for the native verdict after exit handlers finish.
+func TestRunCancelWaitsForNativeStopAndExitHandlers(t *testing.T) {
 	fixture := newGroupFixture(t, 1)
+	fixture.engine.holdStop = true
 	running := fixture.branch(t, fixture.exampleService, "busy", "a")
-	next := fixture.branch(t, fixture.exampleService, "heavy", "b")
+	peer := fixture.branch(t, fixture.exampleService, "peer", "b")
 	fixture.start(t)
-	created := fixture.awaitCreated(t, 2)
-	if !created[running.ID] || !created[next.ID] {
-		t.Fatalf("created %v; want both independently submitted runs", created)
+	fixture.awaitCreated(t, 2)
+	fixture.awaitRunStarted(t, running.ID)
+	first := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID, "reason": "stuck test"})
+	if first.Workflow != "pending" || first.Status != "running" {
+		t.Fatalf("cancel = %+v", first)
 	}
-	submitted := fixture.awaitRunStarted(t, running.ID)
-	peer := fixture.awaitRunStarted(t, next.ID)
-
-	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID, "reason": "stuck test"})
-	if response.PreviousState != "running" || response.Workflow != "deleted" {
-		t.Fatalf("running cancel response = %#v", response)
+	mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID})
+	current := fixture.run(t, running.ID)
+	if current.Status != model.RunRunning || current.FinishedAt != nil || !strings.HasPrefix(current.Reason, "cancelling by ") {
+		t.Fatalf("Stop acceptance terminalized onExit: %+v", current)
 	}
-	if current := fixture.run(t, next.ID); current.Status.Terminal() {
-		t.Fatalf("cancelling a run finished its independent peer: %+v", current)
+	if fixture.run(t, peer.ID).Status.Terminal() {
+		t.Fatal("Stop affected peer")
+	}
+	pending, err := fixture.store.PendingRunCancellations(t.Context())
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("onExit lost custody: %+v %v", pending, err)
+	}
+	fixture.engine.finish(t, running.ID)
+	final := fixture.awaitTerminal(t, running.ID)
+	if final.Status != model.RunFailed || final.Phase != model.PhaseCancelled || !strings.Contains(final.Reason, "stopped by agent@host: stuck test") {
+		t.Fatalf("native Stop verdict = %+v", final)
 	}
 	fixture.awaitNoPendingCancellations(t)
-	final := fixture.awaitTerminal(t, running.ID)
-	assertCancelled(t, final, cancelAgent.Identity, "stuck test")
-	if final.StartedAt == nil || !final.StartedAt.Equal(*submitted.StartedAt) {
-		t.Fatalf("cancel rewrote the start of a running run: %#v", final)
-	}
-	fixture.engine.mu.Lock()
-	deleted := slices.Contains(fixture.engine.deleted, submitted.WorkflowName)
-	peerDeleted := slices.Contains(fixture.engine.deleted, peer.WorkflowName)
-	fixture.engine.mu.Unlock()
-	if !deleted || peerDeleted {
-		t.Fatalf("cancellation deletion: selected=%t peer=%t", deleted, peerDeleted)
-	}
-	// The owner's late result never replaces the cancel.
-	time.Sleep(testTimeout(100 * time.Millisecond))
-	assertCancelled(t, fixture.run(t, running.ID), cancelAgent.Identity, "stuck test")
-	fixture.assertNoCIIssue(t, fixture.exampleService, "busy")
-
-	// Idempotence: a second cancel is a clear refusal and changes nothing.
-	_, err := callRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID})
-	if !errors.Is(err, store.ErrRunNotActive) || !strings.Contains(err.Error(), "already cancelled") {
-		t.Fatalf("second cancel = %v", err)
-	}
-	fixture.engine.finish(t, next.ID)
-	failed := fixture.awaitTerminal(t, next.ID)
-	if _, err := callRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": failed.ID}); !errors.Is(err, store.ErrRunNotActive) ||
-		!strings.Contains(err.Error(), "already failed") {
-		t.Fatalf("cancel of a failed run = %v", err)
-	}
-	fixture.engine.assertNoViolations(t)
+	fixture.engine.finish(t, peer.ID)
 }
 
 func (fixture *groupFixture) awaitRunStarted(t *testing.T, id string) model.Run {
@@ -325,13 +308,13 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 		t.Fatalf("non-admin promotion cancel = %v", err)
 	}
 	response := mustRunCancel(t, fixture.control, cancelAdmin, map[string]any{"id": enqueued.ID, "reason": "target frozen"})
-	if response.PromotionID != promotion.ID || response.Workflow != "deleted" {
+	if response.PromotionID != promotion.ID || response.Workflow != "pending" {
 		t.Fatalf("promotion cancel response = %#v", response)
 	}
 	assertCancelled(t, fixture.awaitTerminal(t, enqueued.ID), cancelAdmin.Identity, "target frozen")
 	fixture.awaitNoPendingCancellations(t)
 	failed, err := fixture.store.Promotion(t.Context(), promotion.ID)
-	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "cancelled by dima@example-node: target frozen") {
+	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "stopped by dima@example-node: target frozen") {
 		t.Fatalf("promotion after cancel = %#v, %v", failed, err)
 	}
 	if pending, err := fixture.store.PendingPublications(t.Context()); err != nil || len(pending) != 0 {
@@ -348,78 +331,21 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 	}
 }
 
-// A cancel that committed while the process died before deleting the
-// Workflow is finished by the successor's startup cancellation pass, and the
-// run is never re-fired, while an uncancelled stranded run of the same
-// process is (proving the restart path ran).
-func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
-	fixture := newGroupFixture(t, 3)
-	ctx := t.Context()
-	cancelled := fixture.branch(t, fixture.exampleService, "feature-cancel", "a")
-	stranded := fixture.branch(t, fixture.exampleService, "feature-stranded", "b")
-	// A previous process claimed and submitted both, then died.
-	for _, run := range []model.Run{cancelled, stranded} {
-		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := fixture.store.SetRunWorkflowName(ctx, run.ID, "oberth-example-service-"+run.ID[:8]); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := fixture.store.MarkRunSubmitted(ctx, run.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := fixture.store.CancelRun(ctx, model.RunCancelRequest{RunID: cancelled.ID, Actor: cancelAgent.Identity, Reason: "abandon"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := fixture.store.RecoverOwnerState(ctx); err != nil {
-		t.Fatal(err)
-	}
-	logs, err := runlog.Open(filepath.Join(t.TempDir(), "logs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	successor, err := NewScheduler(SchedulerConfig{
-		Store: fixture.store, Git: &controlGit{}, Logs: logs, Jobs: restartStateJobs{JobController: fixture.engine}, ReleaseJobs: fixture.engine,
-		Auditor: fixture.store, Signals: fixture.scheduler.signals, WorkspaceRoot: filepath.Join(t.TempDir(), "work")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runCtx, stop := context.WithCancel(context.Background())
-	var once sync.Once
-	finished := make(chan error, 1)
-	go func() { finished <- successor.Run(runCtx) }()
-	shutdown := func() {
-		once.Do(func() {
-			stop()
-			if err := <-finished; err != nil {
-				t.Errorf("successor scheduler stopped with %v", err)
+func TestRunReasonCannotRequestCancellation(t *testing.T) {
+	for _, reason := range []string{"cancelling by owner", "stopped by owner", "ref deleted"} {
+		t.Run(reason, func(t *testing.T) {
+			f := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "test", Error: "native Workflow failure"})
+			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "reason", SHA: strings.Repeat("a", 40), Actor: "agent@host", Trigger: "branch", Reason: reason})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = f.scheduler.ProcessNext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			final, err := f.store.Run(t.Context(), run.ID)
+			if err != nil || final.Status != model.RunFailed || final.Phase != "test" || len(f.jobs.createdCI) != 1 {
+				t.Fatalf("reason text controlled execution: %+v %v", final, err)
 			}
 		})
 	}
-	t.Cleanup(shutdown)
-
-	fixture.awaitTerminal(t, stranded.ID)
-	recoveredRun := fixture.run(t, stranded.ID)
-	if recoveredRun.Status != model.RunFailed || recoveredRun.Error != model.ServerRestartReason {
-		t.Fatal(recoveredRun)
-	}
-	fixture.awaitNoPendingCancellations(t)
-	fixture.assertNothingCreated(t)
-	runs, err := fixture.store.ListRecentRuns(ctx, model.RunListFilter{RepoID: fixture.exampleService.ID, Ref: "feature-cancel"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runs) != 1 {
-		t.Fatalf("restart re-fired the cancelled run: %#v", runs)
-	}
-	assertCancelled(t, runs[0], cancelAgent.Identity, "abandon")
-	fixture.engine.mu.Lock()
-	deleted := slices.Contains(fixture.engine.deleted, cancelled.WorkflowName) || slices.Contains(fixture.engine.deleted, "oberth-example-service-"+cancelled.ID[:8])
-	fixture.engine.mu.Unlock()
-	if !deleted {
-		t.Fatal("the successor never deleted the cancelled run's Workflow")
-	}
-	fixture.assertNoCIIssue(t, fixture.exampleService, "feature-cancel")
-	shutdown()
 }

@@ -457,13 +457,13 @@ func TestCompletionNamesTheFailedStageAndStep(t *testing.T) {
 // stay Succeeded with no FailedStage/FailedStep — so the engine's
 // successful-Workflow-with-failed-step guard no longer flips the run — while
 // the step row itself keeps its failed status for the step list.
-// TestCompletionSucceededWorkflowWithFailedStepIsRed proves that a Succeeded
+// TestCompletionSucceededWorkflowPreservesToleratedFailedStep proves that a Succeeded
 // Workflow with a terminally failed configured step is red. DAG depends
 // expressions control Argo's execution flow but do not control Oberth's
 // success gate: a step whose failure was tolerated by its dependents is still
 // a run-level failure. This is how Homebrew publication failure correctly
 // fails the release (finding 6, issue #28).
-func TestCompletionSucceededWorkflowWithFailedStepIsRed(t *testing.T) {
+func TestCompletionSucceededWorkflowPreservesToleratedFailedStep(t *testing.T) {
 	started := metav1.NewTime(time.Unix(1000, 0).UTC())
 	finished := metav1.NewTime(time.Unix(1010, 0).UTC())
 
@@ -506,13 +506,8 @@ func TestCompletionSucceededWorkflowWithFailedStepIsRed(t *testing.T) {
 	}
 
 	completion := completionFor(workflow)
-	// A Succeeded Workflow with a terminally failed step must be red.
-	if completion.Succeeded {
-		t.Fatal("a Succeeded Workflow with a failed configured step must NOT stay Succeeded")
-	}
-	if completion.FailedStage != "homebrew" || completion.FailedStep != "homebrew" {
-		t.Errorf("FailedStage/FailedStep = %q/%q, want homebrew/homebrew",
-			completion.FailedStage, completion.FailedStep)
+	if !completion.Succeeded || completion.FailedStage != "" || completion.FailedStep != "" {
+		t.Fatalf("Argo success overridden by tolerated node failure: %+v", completion)
 	}
 
 	// The individual step's status is still Failed in the Steps slice.

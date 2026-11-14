@@ -212,7 +212,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	if err != nil || audit.Actor != administrativeActor || audit.ResourceID != claimed.ID {
 		t.Fatalf("in-pod cancel audit = %#v, %v", audit, err)
 	}
-	if _, _, err := pod.cancel(ctx, claimed.ID, "", false); !errors.Is(err, store.ErrRunNotActive) {
+	if _, _, err := pod.cancel(ctx, claimed.ID, "", false); err != nil {
 		t.Fatalf("second in-pod cancel = %v", err)
 	}
 	if _, _, err := pod.cancel(ctx, release.ID, "", false); err == nil || !strings.Contains(err.Error(), "force") {

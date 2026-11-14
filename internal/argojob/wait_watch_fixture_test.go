@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Legacy scripted clients advance on reads. This fixture feeds those scripts
+// Scripted clients advance on reads. This fixture feeds those scripts
 // into snapshots and wake-ups; production has no polling observation path.
 type scriptedWaitHub struct {
 	controller *Controller

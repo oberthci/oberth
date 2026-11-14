@@ -85,14 +85,17 @@ func TestStartupReconciliationDoesNotReexecuteRestoredRuns(t *testing.T) {
 	if err := scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, nil); err != nil {
 		t.Fatal(err)
 	}
+	if err := scheduler.completePendingCancellationsWithGate(ctx, scheduler.requireMutation); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.settleOneCreate(ctx)
 	run, err := database.Run(ctx, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Admitted but not started (phase waiting): cancelled, like a run caught
-	// mid-submission.
-	if !run.Cancelled() || !strings.Contains(run.Reason, restoredRunCancelReason) {
-		t.Fatalf("restored run = %s %q, want cancelled", run.Status, run.Error)
+	// Restored work requests Stop and records the native terminal verdict.
+	if run.Status != model.RunFailed && run.Status != model.RunInterrupted {
+		t.Fatalf("restored run = %s %q, want interrupted, not requeued", run.Status, run.Error)
 	}
 	cancelled, err := database.Run(ctx, queued.ID)
 	if err != nil {

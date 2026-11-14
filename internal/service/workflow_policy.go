@@ -105,7 +105,7 @@ func (scheduler *Scheduler) awaitWorkflowPolicy(ctx context.Context, repository 
 		if err != nil {
 			return false, err
 		}
-		if current.Status != model.RunRunning || current.Preempted() {
+		if current.Status != model.RunRunning || current.Cancelled() {
 			return true, nil
 		}
 		resume := suspendDispatch(ctx)
@@ -121,7 +121,7 @@ func (scheduler *Scheduler) awaitWorkflowPolicy(ctx context.Context, repository 
 		if !errors.As(err, &unavailable) {
 			if waited && err == nil {
 				current, err = scheduler.setPolicyWaiting(ctx, runID, false)
-				if err == nil && (current.Status != model.RunRunning || current.Preempted()) {
+				if err == nil && (current.Status != model.RunRunning || current.Cancelled()) {
 					return true, nil
 				}
 			}
@@ -134,7 +134,7 @@ func (scheduler *Scheduler) awaitWorkflowPolicy(ctx context.Context, repository 
 		if err != nil {
 			return false, err
 		}
-		if current.Status != model.RunRunning || current.Preempted() {
+		if current.Status != model.RunRunning || current.Cancelled() {
 			return true, nil
 		}
 		lastCause = unavailable.Cause

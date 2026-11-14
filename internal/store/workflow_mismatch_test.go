@@ -43,6 +43,9 @@ func TestWorkflowMismatchReasonSurvivesRecoveryAndCleanupRearm(t *testing.T) {
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("cancel lost cleanup ownership: %+v %v", pending, err)
 	}
+	if _, err := s.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: model.PhaseCancelled, Error: "stopped by operator"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.CompleteObservedRunCancellation(t.Context(), pending[0]); err != nil {
 		t.Fatal(err)
 	}

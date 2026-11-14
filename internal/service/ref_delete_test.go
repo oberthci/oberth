@@ -51,7 +51,7 @@ func TestRefDeletionStopsRunningAndAssistedWorkflows(t *testing.T) {
 				t.Fatal("deleted run result overwritten", stopped)
 			}
 			shown := f.control.presentationRun(t.Context(), stopped)
-			if shown.DisplayStatus != model.DisplayCancelled || shown.DisplayReason != "ref deleted" {
+			if shown.DisplayStatus != model.DisplayFailed || shown.DisplayReason != "ref deleted" {
 				t.Fatal("deletion reason not projected", shown)
 			}
 			f.engine.mu.Lock()
@@ -60,7 +60,7 @@ func TestRefDeletionStopsRunningAndAssistedWorkflows(t *testing.T) {
 			if !deleted || f.scheduler.ownerForTest(busy.QueueSequence) != nil {
 				t.Fatal("workflow or CPU reservation retained after cleanup")
 			}
-			if current := f.run(t, other.ID); current.Preempted() {
+			if current := f.run(t, other.ID); current.Cancelled() {
 				t.Fatal("other ref cancelled", current)
 			}
 			f.assertNoCIIssue(t, f.exampleService, busy.Ref)
@@ -86,11 +86,11 @@ func TestRefDeletionCancelsQueuedAndAdmissionHeldRuns(t *testing.T) {
 			if !claimed {
 				f.start(t)
 			}
+			lift()
 			stopped := f.awaitTerminal(t, old.ID)
 			if !stopped.Cancelled() || stopped.Reason != "ref deleted" {
 				t.Fatal("pending run survived deletion", stopped)
 			}
-			lift()
 			f.awaitNoPendingCancellations(t)
 			if made := f.awaitCreated(t, 1); !made[other.ID] || f.engine.wasCreated(old.ID) {
 				t.Fatal("deleted run held queue or created workflow", made)
@@ -128,7 +128,7 @@ func TestPromotionSourcePruneLeavesPendingPromotionCIAlone(t *testing.T) {
 		t.Fatal("promotion prune stopped working", got)
 	}
 	current, err := f.store.Run(t.Context(), queued.ID)
-	if err != nil || current.Status != model.RunQueued || current.Preempted() {
+	if err != nil || current.Status != model.RunQueued || current.Cancelled() {
 		t.Fatalf("source prune cancelled promotion: %+v %v", current, err)
 	}
 	if pending, err := f.store.PendingRunCancellations(t.Context()); err != nil || len(pending) != 0 {
@@ -187,7 +187,7 @@ func TestRefDeletionOverlappingRePushDoesNotCancelNewRun(t *testing.T) {
 		t.Fatal("delete callback cancelled later push", created)
 	}
 	stopped := f.run(t, old.ID)
-	if !stopped.Cancelled() || stopped.Reason != "ref deleted" || f.run(t, newer.ID).Preempted() {
+	if !stopped.Cancelled() || stopped.Reason != "ref deleted" || f.run(t, newer.ID).Cancelled() {
 		t.Fatal("delete/re-push states incorrect")
 	}
 	f.engine.finish(t, newer.ID)

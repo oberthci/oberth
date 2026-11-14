@@ -149,11 +149,9 @@ type PublicationAbandonResponse struct {
 	Message       string `json:"message"`
 }
 
-// RunCancelResponse is the response for run_cancel. Status stays the durable
-// terminal status (interrupted); Phase "cancelled" marks an explicit cancel.
-// Workflow is none (never claimed), not_submitted (claimed, no Workflow was
-// created), deleted (deletion accepted) or pending (the scheduler's
-// cancellation pass retries the deletion).
+// RunCancelResponse reports durable cancellation intent. A submitted run remains
+// active until Argo Stop finishes its exit handlers. Workflow is none (never
+// claimed), not_submitted (no Workflow yet) or pending (Stop awaits completion).
 type RunCancelResponse struct {
 	RunID         string `json:"run_id"`
 	Status        string `json:"status"`
@@ -697,7 +695,7 @@ func toolDefinitions() []map[string]any {
 			"id":     stringProperty("Full publication ID from publication logs, publish_retry, or audit_list with action publication.pending"),
 			"reason": stringProperty("Why publication is abandoned; required printable text, at most 512 bytes"),
 		}, "id", "reason")),
-		tool("run_cancel", "Cancel one queued or running run (a claimed run that has not started is queued). The run becomes interrupted with phase cancelled and a reason naming the caller; an in-flight create is cancelled, any claimed Workflow is deleted, and the run is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited.", object(map[string]any{
+		tool("run_cancel", "Cancel one queued or running run (a claimed run that has not started is queued). A claimed run stays active with a cancelling reason until native Argo Stop and its exit handlers finish; Argo's terminal phase supplies its final status. Queued work with no Workflow finishes cancelled. Repeating a cancel is idempotent. Non-admin uplinks may cancel only branch-push runs; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited.", object(map[string]any{
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"reason": stringProperty("Why the run is cancelled (printable text, at most 512 bytes)"),
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm cancelling a tag/release or apply run whose publication may be partial"},
@@ -845,17 +843,16 @@ func toolDefinitions() []map[string]any {
 			"id":     stringProperty("Record id from show; required to abandon a readable record"),
 			"reason": stringProperty("Why the record is abandoned, 1..512 bytes"),
 		}, "action")),
-		tool("run_list", "List the queue first, in acceptance order, then running runs newest start first, then terminal runs newest finish first. Optional repo/ref and status filters apply before paging; status accepts one display status or a list. Queued and running runs are never dropped by the limit or pushed below finished runs. Every run that has not started has display_status queued with display_reason naming what it waits for. superseded:true finds branch runs with newer queued/running work in the same repository/ref/schedule-entry lane, excluding tags and promotion attempts. Runs with pending publications can still match; review before explicit admin run_cancel. A full terminal page returns next_before (or next_cursor for a scoped uplink); pass it as before with the same filters for older runs until it is absent.", object(map[string]any{
-			"repo":       stringProperty("Filter by repository name"),
-			"superseded": map[string]any{"type": "boolean", "description": "Only branch runs with newer queued or running work for the same repository, ref and schedule entry; tags and promotion attempts never qualify. Runs with pending publications can still match. False or omitted leaves the list unfiltered. Read only; review before explicit admin run_cancel."},
-			"status":     map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": 10}}, "description": "Filter by one existing display status or a list: queued, running, passed, failed, cancelled, superseded. Paging is unchanged; repeat the same filters on later pages."},
-			"ref":        stringProperty("Filter by branch or tag ref"),
-			"ref_glob":   stringProperty("Shell-style pattern on the ref, e.g. land/* (* never crosses a slash); empty: every ref"),
-			"latest":     map[string]any{"type": "boolean", "description": "One row per matching repository and ref: its newest run, across every repository the caller's uplink scope reaches (all view only). Combine with ref_glob, e.g. {ref_glob:\"land/*\", latest:true}"},
-			"own":        map[string]any{"type": "boolean", "description": "Only runs this uplink pushed or triggered (actor is the caller's identity); paging is unchanged"},
-			"held":       map[string]any{"type": "boolean", "description": "Only running assisted runs with a parked retry attempt (hold) that no action released: one unpaged list, no before; service each with run_hold_list and run_hold_* before its abandon_at"},
-			"limit":      integerProperty("Maximum terminal runs per page (default 50, max 100); the first page also carries every queued and running run"),
-			"before":     map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (a run sequence) or next_cursor (a run ID) from the previous page"},
+		tool("run_list", "List the queue first, in acceptance order, then running runs newest start first, then terminal runs newest finish first. Optional repo/ref and status filters apply before paging; status accepts one display status or a list. Queued and running runs are never dropped by the limit or pushed below finished runs. Every run that has not started has display_status queued with display_reason naming what it waits for. A full terminal page returns next_before (or next_cursor for a scoped uplink); pass it as before with the same filters for older runs until it is absent.", object(map[string]any{
+			"repo":     stringProperty("Filter by repository name"),
+			"status":   map[string]any{"oneOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": 10}}, "description": "Filter by one existing display status or a list: queued, running, passed, failed, cancelled. Paging is unchanged; repeat the same filters on later pages."},
+			"ref":      stringProperty("Filter by branch or tag ref"),
+			"ref_glob": stringProperty("Shell-style pattern on the ref, e.g. land/* (* never crosses a slash); empty: every ref"),
+			"latest":   map[string]any{"type": "boolean", "description": "One row per matching repository and ref: its newest run, across every repository the caller's uplink scope reaches (all view only). Combine with ref_glob, e.g. {ref_glob:\"land/*\", latest:true}"},
+			"own":      map[string]any{"type": "boolean", "description": "Only runs this uplink pushed or triggered (actor is the caller's identity); paging is unchanged"},
+			"held":     map[string]any{"type": "boolean", "description": "Only running assisted runs with a parked retry attempt (hold) that no action released: one unpaged list, no before; service each with run_hold_list and run_hold_* before its abandon_at"},
+			"limit":    integerProperty("Maximum terminal runs per page (default 50, max 100); the first page also carries every queued and running run"),
+			"before":   map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (a run sequence) or next_cursor (a run ID) from the previous page"},
 			"view": map[string]any{"type": "string", "enum": []string{"all", "history"}, "default": "all",
 				"description": "all: queue, then running runs, then terminal runs newest finish first (default). history: terminal runs only, paged by run sequence"},
 		})),
@@ -871,7 +868,7 @@ func toolDefinitions() []map[string]any {
 		tool("schedule_list", "List the schedules declared in repositories' .oberth/schedule.yaml with their cron, next run, last outcome and any pause. A scoped uplink sees its own repositories.", object(map[string]any{"repo": stringProperty("Repository name; omit to list every visible repository with a schedule")})),
 		tool("schedule_pause", "Pause one schedule entry: a due tick records outcome paused instead of firing. Requires admin uplink; audited as schedule.pause.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name"), "reason": stringProperty("Why it is paused (recorded in the audit chain)")}, "repo", "entry")),
 		tool("schedule_resume", "Resume a paused schedule entry. It fires once at its next tick if it came due while paused. Requires admin uplink; audited as schedule.resume.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name")}, "repo", "entry")),
-		tool("schedule_trigger", "Run one schedule entry now: queues a trigger=schedule run at the entry's branch head through the normal CI admission path, as the caller. Refused while the repository has active runs, or the entry is paused, unless force is set (a forced run supersedes active runs of the same branch and entry; other entries and ordinary pushes remain independent). Requires admin uplink; audited as schedule.trigger.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name"), "force": map[string]any{"type": "boolean", "description": "Run despite active runs in the repository or a paused entry"}}, "repo", "entry")),
+		tool("schedule_trigger", "Run one schedule entry now: queues a trigger=schedule run at the entry's branch head through the normal CI admission path, as the caller. Refused while the repository has active runs, or the entry is paused, unless force is set. Requires admin uplink; audited as schedule.trigger.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name"), "force": map[string]any{"type": "boolean", "description": "Run despite active runs in the repository or a paused entry"}}, "repo", "entry")),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
 		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is one full run ID or unique hexadecimal prefix of at least 8 characters. Refuses when the run is not in a publishing-failed or upstream publication infrastructure-failed state, or when the cached Git object no longer matches the record. Transient server/transport failures retry automatically up to five attempts over about thirty minutes. Responses name the actual action and include run_status/run_phase from the same committed snapshot as publication status. A pending response says publication is queued and names the publication and run IDs; poll run_get or wait for the run while finalization is recovered. A promotion (or its CI run) is retried with promote_retry instead, which reuses a tested push-only candidate when its target is unchanged, or merges onto the current head and re-tests.", object(map[string]any{
 			"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters) whose publication failed"),

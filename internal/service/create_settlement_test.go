@@ -49,6 +49,9 @@ var _ JobAdopter = (*pendingCreateJobs)(nil)
 var _ JobCreateSettler = (*pendingCreateJobs)(nil)
 
 func (j *pendingCreateJobs) SettleCreate(ctx context.Context, name, id string, boundary time.Time) (bool, error) {
+	if j.settle == nil {
+		return j.fakeJobs.SettleCreate(ctx, name, id, boundary)
+	}
 	return j.settle(ctx, name, id, boundary)
 }
 
@@ -454,7 +457,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "push" {
-				if _, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "superseding", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("c", 40), Actor: "pusher"}); err != nil {
+				if _, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "newer-push", Repository: f.repo, Branch: "feature/pending", SHA: strings.Repeat("c", 40), Actor: "pusher"}); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -474,7 +477,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !run.Preempted() || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {
+			if (mode == "cancel" && !run.Cancelled()) || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {
 				t.Fatalf("settled preemption lost state or still pending: %+v", run)
 			}
 		})
@@ -507,7 +510,40 @@ func TestWorkflowCreatePendingStatusDoesNotCallKubernetes(t *testing.T) {
 	}
 	// The uncertain create is the running run's reason; the raw phase and
 	// scheduling state stay machine-readable.
-	if response.DisplayStatus != "running" || response.Run.Phase != "infrastructure-pending" || !strings.Contains(response.DisplayReason, "cleanup pending") || response.Scheduling.State != "infra-pending" {
+	if response.DisplayStatus != "running" || response.Run.Phase != "infrastructure-pending" || !strings.HasPrefix(response.DisplayReason, "cancelling by oberth:") || response.Scheduling.State != "infra-pending" {
 		t.Fatalf("pending status hidden: %+v", response)
+	}
+}
+
+func TestTerminalCancellationHandoffDoesNotRearmStop(t *testing.T) {
+	for _, hasOwner := range []bool{false, true} {
+		t.Run(fmt.Sprintf("owner=%t", hasOwner), func(t *testing.T) {
+			f := newControlFixture(t)
+			enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "terminal-handoff", Repository: f.repo, Branch: "feature/terminal", SHA: strings.Repeat("a", 40), Actor: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := f.store.ClaimNextRun(t.Context())
+			if err != nil || run.ID != enqueued.ID {
+				t.Fatal(run, err)
+			}
+			if hasOwner {
+				_, err = f.scheduler.submissions.adopt(run)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "native terminal verdict"}); err != nil {
+				t.Fatal(err)
+			}
+			// A cancellation snapshot can hand off after the observer finalized.
+			// A failed local owner restore must also drain without a nil dereference.
+			f.scheduler.createPending = map[string]*pendingCreate{run.ID: {runID: run.ID}}
+			f.scheduler.settleOneCreate(t.Context())
+			pending, err := f.store.PendingRunCancellations(t.Context())
+			if err != nil || len(pending) != 0 || f.scheduler.pendingCreateCount() != 0 || f.scheduler.submissionStateForTest().Runs != 0 {
+				t.Fatalf("terminal handoff rearmed custody: pending=%+v state=%+v error=%v", pending, f.scheduler.submissionStateForTest(), err)
+			}
+		})
 	}
 }

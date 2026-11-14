@@ -15,7 +15,7 @@ const workflowCreateCleanupAttemptBudget = 10 * time.Second
 
 // SettleCreate performs one bounded observation, without waiting or retrying.
 // The background owner supplies the durable late-commit boundary. A pending
-// deletion, conflict or API failure keeps the grant and is retried later.
+// Stop, conflict or API failure keeps the grant until Argo finishes.
 func (controller *Controller) SettleCreate(ctx context.Context, name, runID string, notBefore time.Time) (bool, error) {
 	if name == "" || runID == "" || notBefore.IsZero() {
 		return false, errors.New("argojob: pending create requires name, run ID and observation boundary")
@@ -45,16 +45,14 @@ func (controller *Controller) SettleCreate(ctx context.Context, name, runID stri
 	if workflow.DeletionTimestamp != nil {
 		return false, nil
 	}
-	grace := deletionGracePeriod
-	propagation := metav1.DeletePropagationForeground
-	deleteCtx, cancelDelete := context.WithTimeout(budgetCtx, workflowCreateCleanupReadBudget)
-	defer cancelDelete()
-	err = controller.workflows.Delete(deleteCtx, name, metav1.DeleteOptions{
-		GracePeriodSeconds: &grace, PropagationPolicy: &propagation,
-		Preconditions: &metav1.Preconditions{UID: &workflow.UID},
-	})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return false, fmt.Errorf("argojob: delete pending Workflow %s: %w", name, err)
+	if workflow.Status.Phase.Completed() {
+		return true, nil
 	}
-	return false, nil // Accepted deletion is not proof of disappearance.
+	stopCtx, cancelStop := context.WithTimeout(budgetCtx, workflowCreateCleanupReadBudget)
+	defer cancelStop()
+	_, err = requestWorkflowStop(stopCtx, controller.workflows, workflow)
+	if err != nil {
+		return false, fmt.Errorf("argojob: Stop pending Workflow %s: %w", name, err)
+	}
+	return false, nil // Stop acceptance is not terminal evidence; onExit can run.
 }

@@ -16,14 +16,14 @@ const deletedBranchRuns = `repo_id=? AND ref_kind='branch' AND ref=?
 
 func cancelDeletedBranchTx(ctx context.Context, tx *sql.Tx, repoID int64, ref string, now int64) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at)
- SELECT id,job_name,'',CASE WHEN phase='infrastructure-pending' THEN 'owner_restart' ELSE 'superseded' END,?
+ SELECT id,job_name,'',CASE WHEN phase='infrastructure-pending' THEN 'owner_restart' ELSE 'cancelled' END,?
  FROM runs WHERE `+deletedBranchRuns+` AND (status='running' OR job_name!='')
  ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name,superseded_by='',reason=excluded.reason,
  created_at=excluded.created_at,completed_at=NULL`, now, repoID, ref); err != nil {
 		return fmt.Errorf("record deleted ref cancellations: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='interrupted',phase='cancelled',reason=?,
- error=CASE WHEN phase='infrastructure-pending' THEN error ELSE ? END,finished_at=?,updated_at=?
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status=CASE WHEN status='queued' THEN 'interrupted' ELSE status END,phase='cancelled',reason=?,
+ error=CASE WHEN phase='infrastructure-pending' THEN error ELSE ? END,finished_at=CASE WHEN status='queued' THEN ? ELSE NULL END,updated_at=?
  WHERE `+deletedBranchRuns, refDeletedReason, refDeletedReason, now, now, repoID, ref); err != nil {
 		return fmt.Errorf("cancel deleted ref runs: %w", err)
 	}

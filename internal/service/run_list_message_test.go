@@ -39,7 +39,6 @@ func TestRunListMessageContract(t *testing.T) {
 		{"clipped historical prefix", model.Run{Status: model.RunFailed, FailedStage: strings.Repeat("界", 65), FailedStep: "leaf", FailureCause: displayFailureText(strings.Repeat("界", 65) + "/leaf failed · OOM")}, "leaf failed"},
 		{"infrastructure", model.Run{Status: model.RunFailed, Phase: "infrastructure", Error: "controller unavailable"}, "infrastructure error: controller unavailable"},
 		{"cancelled", model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "by owner: no longer needed"},
-		{"superseded", model.Run{Status: model.RunInterrupted, SupersededBy: "successor", Reason: "superseded by newer run"}, "superseded by newer run"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := tc.run

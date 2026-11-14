@@ -1,25 +1,23 @@
 package model
 
 // The user-facing run vocabulary. Every durable status, phase and projection
-// maps to exactly one of these six labels; anything finer (what a queued
-// run waits for, why a run failed, which run replaced it) is the reason line,
+// maps to exactly one of these five labels; anything finer (what a queued
+// run waits for, why a run failed) is the reason line,
 // never a second status. Raw Status and Phase stay on the wire for machines.
 //
 // A status says what to do with the run: wait (queued), watch (running), read
-// the result (passed, failed), or follow the successor (superseded,
-// cancelled). Cancelled covers every interruption without a successor.
+// the result (passed, failed), or read why it was cancelled.
 const (
 	DisplayQueued  = "queued"
 	DisplayRunning = "running"
 	DisplayPassed  = "passed"
 	DisplayFailed  = "failed"
 
-	DisplaySuperseded = "superseded"
-	DisplayCancelled  = "cancelled"
+	DisplayCancelled = "cancelled"
 )
 
 // DisplayStatuses lists the whole user-facing vocabulary, in list order.
-var DisplayStatuses = []string{DisplayQueued, DisplayRunning, DisplayPassed, DisplayFailed, DisplaySuperseded, DisplayCancelled}
+var DisplayStatuses = []string{DisplayQueued, DisplayRunning, DisplayPassed, DisplayFailed, DisplayCancelled}
 
 // ClaimedUnstarted reports a run the scheduler has claimed but not admitted
 // or submitted: durable status running with no started_at (phase waiting,
@@ -46,10 +44,7 @@ func DisplayRunStatus(run Run) string {
 	case RunFailed:
 		return DisplayFailed
 	case RunInterrupted:
-		if run.Phase == PhaseCancelled || run.SupersededBy == "" {
-			return DisplayCancelled
-		}
-		return DisplaySuperseded
+		return DisplayCancelled
 	default:
 		return string(run.Status)
 	}

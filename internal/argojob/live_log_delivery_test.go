@@ -45,8 +45,7 @@ func TestLiveLogDeliveryMatchesPodOutput(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
-		policy := metav1.DeletePropagationBackground
-		_ = cluster.workflows.Delete(cleanupCtx, runID, metav1.DeleteOptions{PropagationPolicy: &policy})
+		_ = (&Controller{workflows: cluster.workflows}).Cancel(cleanupCtx, runID, runID)
 	})
 	controller, err := NewController(cluster.workflows, cluster.kube, config)
 	if err != nil {

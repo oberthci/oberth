@@ -101,6 +101,7 @@ func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 				if err := scheduler.executeAndCleanup(t.Context(), run); err != nil {
 					t.Fatal(err)
 				}
+				scheduler.settleOneCreate(t.Context())
 				if len(jobs.deleted) != 1 || jobs.createCalls != 1 {
 					t.Fatal("did not exercise create then delete", jobs.createCalls, jobs.deleted)
 				}

@@ -36,7 +36,7 @@ func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) 
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
 WHERE status IN ('queued', 'running')
-  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
+  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
 ORDER BY CASE WHEN status = 'running' AND started_at IS NOT NULL THEN 0 ELSE 1 END, started_at, `+orderSQL+`
 LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
