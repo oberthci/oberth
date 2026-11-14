@@ -126,7 +126,7 @@ func upgradeAdminClientIdentity(configured client.Config) string {
 	case len(configured.ClientCertificatePEM) > 0:
 		pair, err = tls.X509KeyPair(configured.ClientCertificatePEM, configured.ClientKeyPEM)
 	default:
-		return "bearer token"
+		return "unknown authentication"
 	}
 	if err == nil && len(pair.Certificate) > 0 {
 		if certificate, err := x509.ParseCertificate(pair.Certificate[0]); err == nil {

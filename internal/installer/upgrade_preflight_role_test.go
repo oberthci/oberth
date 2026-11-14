@@ -77,7 +77,7 @@ func testUpgradeAdminRolePreflight(t *testing.T, status int, detail string) {
 	if status != 0 && requests.Load() != 1 {
 		t.Fatal("preflight must make exactly one read-only admin call", requests.Load())
 	}
-	if status == http.StatusForbidden && (!strings.Contains(err.Error(), "this client is not an unscoped admin of this server") || !strings.Contains(err.Error(), detail) || !strings.Contains(err.Error(), "locally configured identity: bearer token")) {
+	if status == http.StatusForbidden && (!strings.Contains(err.Error(), "this client is not an unscoped admin of this server") || !strings.Contains(err.Error(), detail) || !strings.Contains(err.Error(), "locally configured identity: unknown authentication")) {
 		t.Fatal("role refusal lost server detail, local identity or advice", err)
 	}
 	if err != nil && strings.Contains(err.Error(), "configure it with") {
