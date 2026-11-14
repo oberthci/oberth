@@ -12,6 +12,7 @@ run(`
   replaceApp=value=>{html=value};
   const makeRun=(ID,extra={})=>{
     const row={id:ID,repo_id:1,ref:'main',ref_kind:'branch',status:'passed',started_at:'2026-11-01T10:00:00Z',finished_at:'2026-11-01T10:01:00Z',...extra};
+    row.display_status ??= row.status === 'interrupted' ? 'cancelled' : row.status;
     if(['running','queued'].includes(row.status)) {
 
       row.display_reason ??= '';
@@ -267,25 +268,21 @@ assert.equal(run(`runMessageCell({status:'queued',release:true,trigger:'schedule
 assert.equal(run(`runMessageCell({status:'queued',scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'','detail observation does not become a row message');
 console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');
 
-// One grey queued status for every run that has not started. The raw wire
-// status "waiting" and the scheduling states (preparing, waiting, admitted,
-// preflight) are reasons, never a pill of their own.
+// Canonical display status distinguishes preparation from native Argo Pending.
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1') {
   const pills = html => [...html.matchAll(/<span class="pill ([a-z]+)"><span class="dot [a-z]+"><\/span>([^<]*)<\/span>/g)].map(m => [m[1], m[2]]);
   const notStarted = [
-    {id:'claimed', status:'running', started_at:null, display_status:'queued', display_reason:'waiting for an Argo workflow slot', scheduling:{state:'waiting', admission:{state:'waiting'}}},
-    {id:'wire-waiting', status:'waiting', started_at:null, display_status:'queued', display_reason:'pod pending: Insufficient cpu', scheduling:{state:'waiting'}},
-    {id:'admitted', status:'running', started_at:null, display_status:'queued', display_reason:'admitted, starting the workflow', scheduling:{state:'waiting', admission:{state:'admitted'}}},
-    {id:'preflight', status:'running', started_at:null, display_status:'queued', display_reason:'KVM preflight running', scheduling:{state:'preflight'}},
-    {id:'durable', status:'queued', started_at:null, display_status:'queued', display_reason:'awaiting submission', scheduling:{state:'queued'}},
-    {id:'raw-only', status:'waiting', started_at:null},
+    {id:'pending', status:'running', started_at:null, display_status:'queued', display_reason:'waiting for Argo parallelism'},
+    {id:'preparing', status:'running', started_at:null, display_status:'running', display_reason:'preparing Workflow'},
+    {id:'pending-pod', status:'running', started_at:null, display_status:'queued', display_reason:'pod pending: Insufficient cpu'},
   ];
   sandbox.notStarted = notStarted;
   const table = run('runsTable(notStarted)');
-  for (const [kind, label] of pills(table)) assert.deepEqual([kind, label], ['pending', 'queued'], 'V1: every not-started run is one grey queued pill');
-  assert.ok(!/waiting<\/span>/.test(table) && !table.includes('>admitted<') && !table.includes('>preflight<'), 'V1: no second not-started status');
-  for (const row of notStarted) if (row.display_reason) assert.ok(table.includes(row.display_reason), 'V1: the reason line shows ' + row.display_reason);
-  for (const row of notStarted) assert.equal(run(`runListGroup(notStarted.find(r => r.id === '${row.id}'))`), 0, 'V1: ' + row.id + ' sorts in the queue group');
+  const labels = pills(table).map(([,label]) => label).sort();
+  assert.deepEqual(labels,['queued','queued','running'],'V1: preparation is running; only native waits are queued');
+  assert.equal(run(`displayRunStatus({status:'waiting'})`),undefined,'V1: raw-only status is not reclassified by the client');
+  for (const row of notStarted) assert.ok(table.includes(row.display_reason),'V1: the reason line shows '+row.display_reason);
+  for (const row of notStarted) assert.equal(run(`runListGroup(notStarted.find(r => r.id === '${row.id}'))`),0,'V1: preparation retains acceptance ordering');
   // The vocabulary is five statuses; each has a known kind and label.
   for (const status of ['queued', 'running', 'passed', 'failed', 'cancelled']) {
     assert.notEqual(run(`statusKind('${status}')`), 'unknown', 'V1: ' + status + ' has a kind');

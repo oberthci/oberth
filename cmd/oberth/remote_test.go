@@ -29,7 +29,7 @@ func configure(t *testing.T, server *httptest.Server) {
 	t.Setenv("OBERTH_CA_CERT", "")
 }
 
-const runsPayload = `{"runs":[{"id":"run-abc","ref":"main","sha":"0123456789abcdef","status":"failed","trigger":"schedule"}]}`
+const runsPayload = `{"runs":[{"id":"run-abc","ref":"main","sha":"0123456789abcdef","status":"failed","display_status":"failed","trigger":"schedule"}]}`
 
 func TestRunsRendersTheServersRows(t *testing.T) {
 	configure(t, remoteServer(t, runsPayload))
@@ -80,7 +80,7 @@ func TestRunDetailMarksTheFailingStep(t *testing.T) {
 }
 
 func TestRunDetailShowsControllerWait(t *testing.T) {
-	payload := `{"run":{"id":"run-abc","status":"waiting","ref":"main","sha":"0123456789abcdef"},` +
+	payload := `{"run":{"id":"run-abc","status":"running","display_status":"queued","ref":"main","sha":"0123456789abcdef"},` +
 		`"scheduling":{"state":"waiting","message":"Waiting for Argo controller parallelism."}}`
 	configure(t, remoteServer(t, payload))
 	var out bytes.Buffer

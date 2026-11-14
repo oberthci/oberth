@@ -161,9 +161,9 @@ assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').inc
 console.log('live log dashboard checks passed');
 
 // Run-list vocabulary is additive: raw failure/cancellation states survive.
-assert.equal(run(`displayRunStatus({status:'failed'})`), 'failed');
-assert.equal(run(`displayRunStatus({status:'interrupted'})`), 'cancelled');
-assert.equal(run(`displayRunStatus({status:'interrupted'})`), 'cancelled');
+assert.equal(run(`displayRunStatus({status:'failed',display_status:'failed'})`), 'failed');
+assert.equal(run(`displayRunStatus({status:'interrupted',display_status:'cancelled'})`), 'cancelled');
+assert.equal(run(`displayRunStatus({status:'interrupted',display_status:'cancelled'})`), 'cancelled');
 // The list always shows branch/tag heads, with history only on run detail.
 assert.equal(run(`state.filter='all';runMatches({status:'interrupted'})`), true);
 run(`state.attempts.clear();state.attempts.set('head',{rows:[{id:'old',repo_id:1,status:'interrupted'}],next:''});`);
