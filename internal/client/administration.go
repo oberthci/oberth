@@ -17,7 +17,7 @@ import (
 // interrupted response may follow a committed change and needs observation.
 func (client *Client) Admin(ctx context.Context, action string, arguments, into any) error {
 	switch action {
-	case "uplink-add", "uplink-scope", "upstream-add", "upstream-list", "upstream-remove", "upstream-provide-key", "repo-add", "repo-verify", "access-list", "public-identity", "readiness", "version", "idle", "audit-record":
+	case "uplink-add", "uplink-scope", "upstream-add", "upstream-list", "upstream-remove", "upstream-provide-key", "repo-add", "repo-verify", "access-list", "access-allow", "access-revoke", "public-identity", "readiness", "version", "idle", "audit-record":
 	default:
 		return fmt.Errorf("client: unknown administration action")
 	}

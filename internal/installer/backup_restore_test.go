@@ -609,7 +609,7 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 		t.Fatal(err)
 	}
 	storetest.Track(database, path, opts)
-	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: "ssh://git@upstream.example.test/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func sourceDatabase(t *testing.T) ([]byte, map[string][]byte, string) {
 	if _, err := database.SetRunWorkflowName(ctx, run.ID, "oberth-backup-fixture"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Grant(ctx, "codeberg/org/repo", ".oberth/release.yaml", "*", "oberth/data/release/cosign-secret", "admin@fixture"); err != nil {
+	if _, err := database.Grant(ctx, "upstream/org/repo", ".oberth/release.yaml", "*", "oberth/data/release/cosign-secret", "admin@fixture"); err != nil {
 		t.Fatal(err)
 	}
 	// An audited action makes the hash chain depend on the audit domain.
@@ -665,7 +665,7 @@ func freshInstallDatabase(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	storetest.Track(database, path, opts)
-	if _, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com"}); err != nil {
+	if _, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "upstream", Kind: "ssh", BaseURL: "ssh://git@upstream.example.test/org"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {
@@ -679,19 +679,19 @@ func freshInstallDatabase(t *testing.T) []byte {
 }
 
 func seedSourceOpenBao(bao *fakeOpenBao) {
-	bao.kv["upstream/codeberg/org/ssh-key"] = map[string]any{"private_key": testSecretValue}
+	bao.kv["upstream/upstream/org/ssh-key"] = map[string]any{"private_key": testSecretValue}
 	bao.kv["release/cosign-secret"] = map[string]any{"key": "cosign-canary", "password": "pw-canary"}
 	bao.kv["identities/oberth/ssh-host"] = map[string]any{"ed25519": "host-key-canary"}
 	bao.policies["oberth-ci"] = "path \"oberth/data/*\" { capabilities = [\"read\"] }"
-	bao.policies["oberth-argo-codeberg-org-repo"] = "path \"oberth/data/upstream/codeberg/org/repo/*\" { capabilities = [\"read\"] }"
-	bao.roles["oberth-argo-codeberg-org-repo"] = map[string]any{
+	bao.policies["oberth-argo-upstream-org-repo"] = "path \"oberth/data/upstream/upstream/org/repo/*\" { capabilities = [\"read\"] }"
+	bao.roles["oberth-argo-upstream-org-repo"] = map[string]any{
 		"alias_name_source":                "serviceaccount_uid",
 		"audience":                         "openbao",
-		"bound_service_account_names":      []any{"oberth-argo-codeberg-org-repo"},
+		"bound_service_account_names":      []any{"oberth-argo-upstream-org-repo"},
 		"bound_service_account_namespaces": []any{"oberth-argo"},
 		"token_no_default_policy":          true,
-		"token_policies":                   []any{"oberth-argo-codeberg-org-repo"},
-		"policies":                         []any{"oberth-argo-codeberg-org-repo"},
+		"token_policies":                   []any{"oberth-argo-upstream-org-repo"},
+		"policies":                         []any{"oberth-argo-upstream-org-repo"},
 		"token_ttl":                        float64(1200),
 		"token_max_ttl":                    float64(1800),
 		"token_bound_cidrs":                []any{},
@@ -758,7 +758,7 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 	}
 	// Every field the server returned is kept, including the one a
 	// hand-picked restore once dropped.
-	if got, want := len(roles.Roles[0].Fields), len(source.bao.roles["oberth-argo-codeberg-org-repo"]); got != want {
+	if got, want := len(roles.Roles[0].Fields), len(source.bao.roles["oberth-argo-upstream-org-repo"]); got != want {
 		t.Fatalf("role fields = %d, want all %d", got, want)
 	}
 	if roles.Roles[0].Fields["token_no_default_policy"] != true {
@@ -781,7 +781,7 @@ func TestBackupCapturesOpenBaoDatabaseAndValues(t *testing.T) {
 		t.Fatalf("reference lacks Transit/PKI metadata: %+v", reference)
 	}
 	_, grants, err := inspectGrantSnapshot(t.Context(), filepath.Join(work, backupMemberDatabase), work, store.ProtocolConfig{SchemaIdentity: sourceCompat.SchemaIdentity, AuditDomain: sourceCompat.AuditDomain}, 0)
-	if err != nil || !grants.Present || len(grants.Grants) != 1 || grants.Grants[0].Repo != "codeberg/org/repo" {
+	if err != nil || !grants.Present || len(grants.Grants) != 1 || grants.Grants[0].Repo != "upstream/org/repo" {
 		t.Fatal("database approvals missing", grants, err)
 	}
 
@@ -876,7 +876,7 @@ func TestRestoreAppliesTheArchive(t *testing.T) {
 			t.Fatalf("policy %s = %q, want %q", name, target.bao.policies[name], rules)
 		}
 	}
-	role := target.bao.roles["oberth-argo-codeberg-org-repo"]
+	role := target.bao.roles["oberth-argo-upstream-org-repo"]
 	if role["token_no_default_policy"] != true || role["alias_name_source"] != "serviceaccount_uid" {
 		t.Fatalf("role restored without every field: %v", role)
 	}
@@ -986,7 +986,7 @@ func TestRestoreDryRunChangesNothing(t *testing.T) {
 	assertNoRestoreMutation(t, target)
 	assertSubstringsInOrder(t, out.String(), []string{"Verified: all", "History    1 run, ", "Secrets    2 KV secrets, 1 policies, 1 roles, 1 grants",
 		"What changes on this install:", "History    replaced, not merged: runs 0 -> 1", "Secrets    2 new, 0 replaced, 0 unchanged",
-		"new: release/cosign-secret, upstream/codeberg/org/ssh-key",
+		"new: release/cosign-secret, upstream/upstream/org/ssh-key",
 		"policies 1 new, 0 replaced; roles 1 new, 0 replaced; database grants 0 -> 1",
 		"Unchanged  this install's identities, CA and Helm values",
 		"deploy/oberth stopped (1 -> 0)", "pre-restore-20261017T093000Z", "Helm       compatibility values the database needs",
@@ -1018,7 +1018,7 @@ func TestRestoreSkipsUnchangedSecrets(t *testing.T) {
 	if slices.Contains(target.bao.writes, "oberth/data/release/cosign-secret") {
 		t.Fatalf("unchanged secret was written again: %v", target.bao.writes)
 	}
-	if !slices.Contains(target.bao.writes, "oberth/data/upstream/codeberg/org/ssh-key") {
+	if !slices.Contains(target.bao.writes, "oberth/data/upstream/upstream/org/ssh-key") {
 		t.Fatalf("changed secret was not written: %v", target.bao.writes)
 	}
 }
@@ -1112,7 +1112,7 @@ func TestRestoreFailsWhenARoleDoesNotReadBack(t *testing.T) {
 	cfg := RestoreConfig{Input: archive, Yes: true, Timeout: time.Second}
 	cfg.applyDefaults()
 	err := runRestore(context.Background(), cfg, target.deps(&out))
-	if err == nil || !strings.Contains(err.Error(), "oberth-argo-codeberg-org-repo (token_no_default_policy)") {
+	if err == nil || !strings.Contains(err.Error(), "oberth-argo-upstream-org-repo (token_no_default_policy)") {
 		t.Fatalf("lossy role write error = %v, want the role and field named", err)
 	}
 	if len(target.scales) != 0 {
