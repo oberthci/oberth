@@ -1,0 +1,125 @@
+# DRAFT v0.23.0: not admitted by the recorded integration snapshot; see ../README.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/secret-paths: oberth/data/release/example-repo
+spec:
+  entrypoint: release
+  activeDeadlineSeconds: 600
+  templates:
+  - name: release
+    dag:
+      tasks:
+      - name: test
+        template: test
+      - name: digest
+        template: digest
+        depends: test.Succeeded
+      - name: report
+        template: report
+        depends: digest.Succeeded
+        arguments:
+          parameters:
+          - name: digest
+            value: '{{tasks.digest.outputs.parameters.digest}}'
+      - name: read-secret
+        template: read-secret
+        depends: report.Succeeded
+  - name: test
+    inputs: &source-inputs
+      artifacts:
+      - name: source
+        path: /work/src
+        mode: 0755
+        plugin:
+          name: oberth
+          key: '{{workflow.parameters.oberth-source}}'
+          configuration: '{"version":1,"kind":"main"}'
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /work/src
+      command: [/bin/sh, ./test.sh]
+      resources: &small
+        requests: {cpu: 100m, memory: 64Mi, ephemeral-storage: 64Mi}
+        limits: {cpu: 500m, memory: 128Mi, ephemeral-storage: 128Mi}
+      securityContext: &floor
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        seccompProfile: {type: RuntimeDefault}
+    sidecars:
+    - name: fixture
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      command: [/bin/sh, -eu, -c]
+      args:
+      - mkdir -p /tmp/www; printf 'ready\n' > /tmp/www/index.html; exec httpd -f -p 8080 -h /tmp/www
+      resources: *small
+      securityContext: *floor
+  - name: digest
+    inputs: *source-inputs
+    outputs:
+      parameters:
+      - name: digest
+        valueFrom:
+          path: /tmp/source-digest
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /work/src
+      command: [/bin/sh, -eu, -c]
+      args:
+      - |
+        sha256sum app.sh | cut -d' ' -f1 > /tmp/source-digest
+        printf 'build: '; cat /tmp/source-digest
+      resources: *small
+      securityContext: *floor
+  - name: report
+    inputs:
+      parameters:
+      - name: digest
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      command: [/bin/sh, -eu, -c]
+      args:
+      - 'test "${#1}" -eq 64; printf "handoff: %s (%s)\n" "$1" "$2"'
+      - --
+      - '{{inputs.parameters.digest}}'
+      - '{{workflow.parameters.oberth-trigger}}'
+      resources: *small
+      securityContext: *floor
+  - name: read-secret
+    inputs: *source-inputs
+    volumes:
+    - name: login
+      projected:
+        sources:
+        - serviceAccountToken:
+            audience: oberth-secretstore
+            expirationSeconds: 600
+            path: token
+    - name: ca
+      configMap:
+        name: oberth-secretstore-ca
+    - name: private
+      emptyDir: {medium: Memory, sizeLimit: 16Mi}
+    container:
+      image: quay.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0
+      command: [/bin/sh, /work/src/.oberth/read-secret.sh]
+      args: ['{{workflow.parameters.oberth-release-tag}}']
+      env:
+      - name: BAO_ADDR
+        value: '{{workflow.parameters.oberth-secretstore-address}}'
+      - name: BAO_CACERT
+        value: /var/run/store-ca/ca.crt
+      - name: STORE_ROLE
+        valueFrom:
+          fieldRef: {fieldPath: spec.serviceAccountName}
+      volumeMounts:
+      - {name: login, mountPath: /var/run/secrets/secretstore, readOnly: true}
+      - {name: ca, mountPath: /var/run/store-ca, readOnly: true}
+      - {name: private, mountPath: /private}
+      resources: *small
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        seccompProfile: {type: RuntimeDefault}
+        runAsUser: 0

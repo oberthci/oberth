@@ -9,7 +9,14 @@ and source injection.
 | Example | For | Key demonstration |
 |---|---|---|
 | [`go-project/`](go-project/.oberth/build.yaml) | Go repositories | Cross-compile identity via explicit GOOS/GOARCH per template, release credential isolation via trigger-gated ServiceAccount, native tmpfs credential delivery |
+| [`example-repo/`](example-repo/README.md) | Fresh-machine acceptance | Tested v0.22.7 repository and a separately marked v0.23.0 draft |
 | [`generic/`](generic/.oberth/build.yaml) | Any language | SHA-256 verified tool install, per-template timeouts, no-shell exec model |
+
+`example-repo/` is the versioned fresh-machine walk. The notes below describe
+`go-project/` and `generic/`, the original pattern samples. Their direct-command
+style is a choice of those examples, not an admission requirement. Follow the
+[acceptance example's instructions](example-repo/README.md) for its current
+contract and draft validation limits.
 
 ## What Oberth's enforcement catches
 

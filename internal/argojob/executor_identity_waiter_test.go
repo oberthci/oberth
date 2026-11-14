@@ -91,7 +91,7 @@ func TestExecutorIdentityRejectsMergedWaiterFields(t *testing.T) {
 	}
 }
 
-func TestRemovedPreparationContainerIsNotAServerHelper(t *testing.T) {
+func TestRemovedPreparationContainerIsNoServerHelper(t *testing.T) {
 	controller, _, pod, _ := executorRetryFixture(t)
 	pod.Spec = executorEnvironmentPod(t, "container", "init", nil)
 	prepare := corev1.Container{Name: "oberth-prepare-nonroot", Image: controller.config.SourceSeedImage, Command: []string{"true"}, SecurityContext: nonrootContainerSecurity(0)}

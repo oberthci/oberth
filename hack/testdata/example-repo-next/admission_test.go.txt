@@ -1,0 +1,42 @@
+package argoworkflow_test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+)
+
+// Copy this probe into pkg/argoworkflow of the recorded integration snapshot,
+// together with examples/example-repo/next. It records that code's boundary.
+func TestExampleRepoNextIntegrationBoundary(t *testing.T) {
+	policy := argoworkflow.Policy{
+		TokenAudiences:      map[string][]string{"read-secret": {"oberth-secretstore"}},
+		SecretStoreAudience: "oberth-secretstore", PublicCAConfigMap: "oberth-secretstore-ca",
+	}
+	for _, file := range []string{"build.yaml", "release.yaml"} {
+		t.Run(file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "examples", "example-repo", "next", ".oberth", file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			workflow, err := argoworkflow.Decode(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = argoworkflow.Admit(workflow, policy)
+			if err == nil {
+				t.Fatal("integration advanced: revalidate and update the recorded draft boundary")
+			}
+			if !strings.Contains(err.Error(), "declares artifacts") {
+				t.Fatalf("unexpected source boundary: %v", err)
+			}
+			if file == "build.yaml" && !strings.Contains(err.Error(), "existing PersistentVolumeClaim") {
+				t.Fatalf("unexpected cache boundary: %v", err)
+			}
+			t.Logf("DECODED %s; ADMISSION BLOCKED: %v", file, err)
+		})
+	}
+}

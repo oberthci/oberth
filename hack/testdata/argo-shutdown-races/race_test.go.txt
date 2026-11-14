@@ -148,7 +148,7 @@ func TestReviewerShutdownEscalationKeepsCompletedStop(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("pinned Argo strategy change after real stop completed: status=%s phase=%s error=%q", result.Status, result.Phase, result.Error)
-			if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped: "+stoppedMessage {
+			if result.Status != model.RunInterrupted || result.Phase != model.PhaseCancelled || result.Error != "Workflow stopped by its Workflow spec: "+stoppedMessage {
 				t.Fatalf("completed operator stop mislabeled after late %s patch: %+v", strategy, result)
 			}
 		})

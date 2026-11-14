@@ -1,0 +1,103 @@
+# v0.22.7: source and secret client support are supplied by Oberth.
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: build
+  onExit: cleanup
+  activeDeadlineSeconds: 1800
+  templates:
+  - name: build
+    dag:
+      tasks:
+      - name: test
+        template: test
+      - name: digest
+        template: digest
+        depends: test.Succeeded
+      - name: report
+        template: report
+        depends: digest.Succeeded
+        arguments:
+          parameters:
+          - name: digest
+            value: '{{tasks.digest.outputs.parameters.digest}}'
+      - name: wait
+        template: wait
+        depends: report.Succeeded
+  - name: test
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /work/src
+      command: [/bin/sh, ./test.sh]
+      resources: &small
+        requests: {cpu: 100m, memory: 64Mi, ephemeral-storage: 64Mi}
+        limits: {cpu: 500m, memory: 128Mi, ephemeral-storage: 128Mi}
+      securityContext: &floor
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        seccompProfile: {type: RuntimeDefault}
+    sidecars:
+    - name: fixture
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      command: [/bin/sh, -eu, -c]
+      args:
+      - mkdir -p /tmp/www; printf 'ready\n' > /tmp/www/index.html; exec httpd -f -p 8080 -h /tmp/www
+      resources: *small
+      securityContext: *floor
+  - name: digest
+    outputs:
+      parameters:
+      - name: digest
+        valueFrom:
+          path: /tmp/source-digest
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /work/src
+      command: [/bin/sh, -eu, -c]
+      args:
+      - |
+        sha256sum app.sh | cut -d' ' -f1 > /tmp/source-digest
+        printf 'build: '; cat /tmp/source-digest
+      resources: *small
+      securityContext: *floor
+  - name: report
+    inputs:
+      parameters:
+      - name: digest
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      command: [/bin/sh, -eu, -c]
+      args:
+      - 'test "${#1}" -eq 64; printf "handoff: %s (%s)\n" "$1" "$2"'
+      - --
+      - '{{inputs.parameters.digest}}'
+      - '{{workflow.parameters.oberth-trigger}}'
+      resources: *small
+      securityContext: *floor
+  - name: wait
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /work/src
+      command: [/bin/sh, -eu, -c]
+      args:
+      - |
+        if test "$(cat cancel.txt)" = yes; then
+          echo 'cancel: waiting for Stop'
+          sleep 600
+        fi
+      resources: *small
+      securityContext: *floor
+  - name: cleanup
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /work/src
+      command: [/bin/sh, -eu, -c]
+      args:
+      - |
+        if test "$(cat cancel.txt)" = yes; then
+          echo 'cleanup: waiting for Terminate'
+          sleep 600
+        fi
+        echo 'cleanup: complete'
+      resources: *small
+      securityContext: *floor
