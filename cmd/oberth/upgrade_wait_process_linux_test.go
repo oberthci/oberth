@@ -41,20 +41,21 @@ func upgradeWaitArgoObjects() []runtime.Object {
 // The helper runs the actual CLI; all cluster traffic is loopback and every
 // kubectl invocation refuses. Idle observation creates no child observer.
 func TestUpgradeWaitProcessHelper(t *testing.T) {
-	if os.Getenv("OBERTH_TEST_WAIT_ROLE") != "cli" {
-		return
+	switch os.Getenv("OBERTH_TEST_WAIT_ROLE") {
+	case "cli":
+		version = "0.17.52"
+		os.Args = []string{"oberth", "upgrade", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT")}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			os.Exit(93)
+		}
+		os.Args = append(os.Args, "--context=fixture", "--no-backup", "--backup-dir="+home)
+		if os.Getenv("OBERTH_TEST_OLD_CRITICAL") == "yes" {
+			os.Args = append(os.Args, "--wait-for=critical")
+		}
+		main()
+		os.Exit(0)
 	}
-	version = "0.17.52"
-	home, err := os.UserHomeDir()
-	if err != nil {
-		os.Exit(93)
-	}
-	os.Args = []string{"oberth", "upgrade", "--context=fixture", "--wait-idle", "--chart=/fixture", "--timeout=1m", "--wait-timeout=" + os.Getenv("OBERTH_TEST_WAIT_LIMIT"), "--no-backup", "--backup-dir=" + home}
-	if os.Getenv("OBERTH_TEST_OLD_CRITICAL") == "yes" {
-		os.Args = append(os.Args, "--wait-for=critical")
-	}
-	main()
-	os.Exit(0)
 }
 
 type upgradeWaitProcessFixture struct {
