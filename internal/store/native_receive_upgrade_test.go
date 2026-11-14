@@ -190,7 +190,7 @@ func TestNativeReceiveUpgradeArchivedReceiptsStayTerminalAfterUnarchive(t *testi
 			if err != nil || rerun.Enqueued.Status != model.RunRunning || rerun.Enqueued.SHA != spec.SHA || rerun.Enqueued.ID == replay.ID {
 				t.Fatal("manual rerun after unarchive", rerun, err)
 			}
-			claimed, err := s.ClaimNextRun(ctx)
+			claimed, err := s.StartRun(ctx, rerun.Enqueued.ID)
 			if err != nil || claimed.ID != rerun.Enqueued.ID {
 				t.Fatal("manual rerun was not claimable", claimed, err)
 			}

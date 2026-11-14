@@ -220,7 +220,7 @@ func TestServerRestartRunSupportsExplicitRerun(t *testing.T) {
 			if unchanged.Status != model.RunFailed || unchanged.Error != model.ServerRestartReason {
 				t.Fatal("explicit replay rewrote failed source", unchanged)
 			}
-			claimed, err := s.ClaimNextRun(t.Context())
+			claimed, err := s.StartRun(t.Context(), next.ID)
 			requireRestartNoError(t, err)
 			if claimed.ID != next.ID {
 				t.Fatal(claimed)
