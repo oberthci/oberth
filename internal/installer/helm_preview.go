@@ -105,7 +105,7 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 	if exists {
-		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args, nil)
+		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args)
 		if err != nil {
 			return err
 		}

@@ -689,11 +689,7 @@ func restoreHelmArgs(ctx context.Context, cfg RestoreConfig, deps backupDeps, ta
 		return nil, fmt.Errorf("chart %s is not available (pass --chart with the chart release oberth was installed from): %w", args[2], err)
 	}
 	args = append(args, "-n", cfg.Namespace, "--reuse-values", "-f", valuesFile)
-	targetDefaults, err := targetChartInstallerDefaults(ctx, deps.Deps, chart)
-	if err != nil {
-		return nil, err
-	}
-	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args, targetDefaults)
+	return prepareRetiredInstallerReuse(ctx, deps.Deps, cfg.Namespace, work, args)
 }
 
 // Preview the exact restore upgrade before either secrets or the database change.

@@ -183,7 +183,7 @@ func TestRestoreOldChartKeepsInstallerValues(t *testing.T) {
 
 func TestRetiredProfileCleanupKeepsOpaqueTransit(t *testing.T) {
 	values := map[string]any{"argo": map[string]any{"controllerProfile": "retired-profile"}, "secretstore": map[string]any{"transit": "operator-configuration"}}
-	if !dropRetiredInstallerValues(values, nil, nil) || values["secretstore"].(map[string]any)["transit"] != "operator-configuration" {
+	if !dropRetiredInstallerValues(values, nil) || values["secretstore"].(map[string]any)["transit"] != "operator-configuration" {
 		t.Fatal("profile cleanup silently pruned an unknown stored value")
 	}
 }

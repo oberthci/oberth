@@ -1645,7 +1645,7 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 			return result, err
 		}
 		defer func() { _ = os.RemoveAll(work) }()
-		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args, nil)
+		args, err = prepareRetiredInstallerReuse(ctx, deps, ns, work, args)
 		if err != nil {
 			return result, err
 		}

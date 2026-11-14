@@ -134,7 +134,7 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	}
 	var storedSnapshot map[string]any
 	droppedProxy := dropStoredGoProxy(values, deps.Output)
-	if dropRetiredInstallerValues(values, nil, deps.Output) || droppedProxy {
+	if dropRetiredInstallerValues(values, deps.Output) || droppedProxy {
 		storedSnapshot = values
 	}
 	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
