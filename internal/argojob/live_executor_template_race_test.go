@@ -40,41 +40,58 @@ func TestLiveExecutorTemplateRaceMeasurement(t *testing.T) {
 	cluster.kube, cluster.restConfig = kube, config
 	cluster.workflows = argo.ArgoprojV1alpha1().Workflows(cluster.namespace)
 	cluster.ensureServiceAccounts(t, t.Context())
+	nodes, err := cluster.kube.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(nodes.Items) != 1 {
+		t.Fatalf("measurement needs exactly one node: nodes=%d err=%v", len(nodes.Items), err)
+	}
+	installLiveTaskResultPolicy(t, cluster)
 	for _, phase := range []string{"before", "after"} {
 		t.Run(phase, func(t *testing.T) {
-			if phase == "after" {
-				installLiveTaskResultPolicy(t, cluster)
+			for _, stressed := range []bool{false, true} {
+				name := "idle"
+				if stressed {
+					name = "stressed"
+				}
+				t.Run(name, func(t *testing.T) { measureLiveTemplateRace(t, cluster, phase+"-"+name, stressed) })
 			}
-			measureLiveTemplateRace(t, cluster, phase)
 		})
 	}
 }
 
 type templateRaceObservation struct {
-	Run      string `json:"run"`
-	Marker   bool   `json:"wait_loaded_marker"`
-	Original bool   `json:"wait_loaded_original"`
-	Swap     bool   `json:"main_swapped_template"`
-	Phase    string `json:"workflow_phase"`
-	Error    string `json:"error,omitempty"`
+	Run          string `json:"run"`
+	Marker       bool   `json:"wait_loaded_marker"`
+	Original     bool   `json:"wait_loaded_original"`
+	Swap         bool   `json:"main_swapped_template"`
+	Phase        string `json:"workflow_phase"`
+	Error        string `json:"error,omitempty"`
+	LoadSameNode bool   `json:"load_same_node,omitempty"`
+	LoadOverlap  bool   `json:"load_overlap,omitempty"`
 }
 
-func measureLiveTemplateRace(t *testing.T, cluster liveCluster, phase string) {
+func measureLiveTemplateRace(t *testing.T, cluster liveCluster, phase string, stressed bool) {
 	t.Helper()
 	var mutex sync.Mutex
-	observations := make([]templateRaceObservation, 0, 300)
-	prefix := fmt.Sprintf("r6-race-%s-%d", phase, time.Now().Unix())
+	runs := 300
+	if stressed {
+		// One contention Workflow at a time keeps the shared host within its load budget.
+		runs = 50
+	}
+	observations := make([]templateRaceObservation, 0, runs)
+	prefix := fmt.Sprintf("r7-race-%s-%d", phase, time.Now().Unix())
 	t.Run("runs", func(t *testing.T) {
-		for i := range 300 {
+		for i := range runs {
 			t.Run(fmt.Sprintf("%03d", i), func(t *testing.T) {
-				t.Parallel()
-				observation := observeLiveTemplateRace(t, cluster, fmt.Sprintf("%s-%03d", prefix, i))
+				if !stressed {
+					t.Parallel()
+				}
+				observation := observeLiveTemplateRace(t, cluster, fmt.Sprintf("%s-%03d", prefix, i), stressed)
 				mutex.Lock()
 				observations = append(observations, observation)
 				done := len(observations)
 				mutex.Unlock()
 				if done%25 == 0 {
-					t.Logf("%s measurement: %d/300 complete", phase, done)
+					t.Logf("%s measurement: %d/%d complete", phase, done, runs)
 				}
 				if observation.Error != "" {
 					t.Logf("measurement observation: %s", observation.Error)
@@ -112,29 +129,12 @@ func measureLiveTemplateRace(t *testing.T, cluster liveCluster, phase string) {
 	t.Logf("%s: N=%d; main swaps=%d; wait marker=%d; wait original=%d", phase, len(observations), swaps, markers, originals)
 }
 
-func observeLiveTemplateRace(t *testing.T, cluster liveCluster, name string) (observation templateRaceObservation) {
+func observeLiveTemplateRace(t *testing.T, cluster liveCluster, name string, stressed bool) (observation templateRaceObservation) {
 	t.Helper()
 	observation.Run = name
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	source := `apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-spec:
-  entrypoint: main
-  activeDeadlineSeconds: 120
-  templates:
-  - name: main
-    container:
-      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
-      workingDir: /tmp
-      command: [sh, -c]
-      args:
-      - |
-        sed 's/"name":"main"/"name":"r6-marker"/' /var/run/argo/template > /var/run/argo/r6-swap
-        mv /var/run/argo/r6-swap /var/run/argo/template
-        grep -q '"name":"r6-marker"' /var/run/argo/template || exit 70
-        echo r6-template-swap-complete
-`
+	source := templateRaceSource(stressed)
 	request := liveRequest(name, pipeline.TriggerCI, source)
 	workflow, err := Build(cluster.config(), request)
 	if err != nil {
@@ -176,7 +176,24 @@ spec:
 		observation.Error = err.Error()
 		return
 	}
+	var loadPod *corev1.Pod
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if current.Status.Nodes[pod.Annotations["workflows.argoproj.io/node-id"]].TemplateName == "load" {
+			loadPod = pod
+			body, err := json.MarshalIndent(pod, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "load-pod.json"), body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	for _, pod := range pods.Items {
+		if current.Status.Nodes[pod.Annotations["workflows.argoproj.io/node-id"]].TemplateName != "main" {
+			continue
+		}
 		if pod.Labels["oberth.ci/role"] == "executor-identity" {
 			continue
 		}
@@ -188,6 +205,18 @@ spec:
 		if err = os.WriteFile(filepath.Join(t.ArtifactDir(), "pod.json"), body, 0o600); err != nil {
 			observation.Error = err.Error()
 			return
+		}
+		if stressed {
+			observation.LoadSameNode = loadPod != nil && loadPod.Spec.NodeName == pod.Spec.NodeName && pod.Spec.NodeName != ""
+			if loadPod != nil {
+				for _, load := range loadPod.Status.ContainerStatuses {
+					for _, target := range pod.Status.ContainerStatuses {
+						if load.Name == "main" && target.Name == "main" && load.State.Terminated != nil && target.State.Terminated != nil {
+							observation.LoadOverlap = load.State.Terminated.StartedAt.Before(&target.State.Terminated.FinishedAt) && target.State.Terminated.StartedAt.Before(&load.State.Terminated.FinishedAt)
+						}
+					}
+				}
+			}
 		}
 		for _, container := range []string{"main", "wait"} {
 			logs, err := templateRaceLogs(ctx, cluster, pod.Name, container)
@@ -219,6 +248,60 @@ spec:
 		observation.Error = "main did not complete template swap"
 	}
 	return
+}
+
+func templateRaceSource(stressed bool) string {
+	source := `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 120
+  templates:
+  - name: main
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      workingDir: /tmp
+      command: [sh, -c]
+      args:
+      - |
+        sed 's/"name":"main"/"name":"r6-marker"/' /var/run/argo/template > /var/run/argo/r6-swap
+        mv /var/run/argo/r6-swap /var/run/argo/template
+        grep -q '"name":"r6-marker"' /var/run/argo/template || exit 70
+        echo r6-template-swap-complete
+`
+	if stressed {
+		source = strings.Replace(source, "entrypoint: main", "entrypoint: parallel", 1)
+		source += `
+  - name: parallel
+    steps:
+    - - name: load
+        template: load
+      - name: race
+        template: race
+  - name: race
+    steps:
+    - - name: warmup
+        template: warmup
+    - - name: swap
+        template: main
+  - name: warmup
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      command: [sleep, '2']
+  - name: load
+    activeDeadlineSeconds: 30
+    container:
+      image: busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74
+      command: [sh, -c]
+      args: ["timeout 12 sh -c 'while :; do :; done' & timeout 12 sh -c 'while :; do :; done'; wait; exit 0"]
+      resources:
+        requests:
+          cpu: 100m
+        limits:
+          cpu: '2'
+`
+	}
+	return source
 }
 
 func templateRaceLogs(ctx context.Context, cluster liveCluster, pod, container string) ([]byte, error) {

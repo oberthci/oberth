@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func TestStoppedCompletedWorkflowResumesLogsAndRetiresExecutorIdentity(t *testing.T) {
@@ -23,7 +24,7 @@ func TestStoppedCompletedWorkflowResumesLogsAndRetiresExecutorIdentity(t *testin
 			return io.NopCloser(strings.NewReader("final exit log\n")), nil
 		},
 	}
-	holder := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: controller.identityPodName(workflow, "executor"), Namespace: workflow.Namespace, UID: "identity-uid", OwnerReferences: []metav1.OwnerReference{{UID: workflow.UID}}}}
+	holder := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: controller.identityPodName(workflow, "executor"), Namespace: workflow.Namespace, UID: "identity-uid", Labels: map[string]string{"oberth.ci/role": "executor-identity"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: workflow.Name, UID: workflow.UID, Controller: ptr.To(true)}}}, Spec: holderSpec("")}
 	if _, err := controller.kube.CoreV1().Pods(workflow.Namespace).Create(t.Context(), holder, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}

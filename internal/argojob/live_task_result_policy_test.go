@@ -93,7 +93,7 @@ func liveTaskResultAccount(t *testing.T, cluster liveCluster, account string) {
 		t.Fatal(err)
 	}
 	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: account}, Rules: []rbacv1.PolicyRule{
-		{APIGroups: []string{"argoproj.io"}, Resources: []string{"workflowtaskresults"}, Verbs: []string{"create", "patch"}},
+		{APIGroups: []string{"argoproj.io"}, Resources: []string{"workflowtaskresults"}, Verbs: []string{"create", "patch", "delete"}},
 		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"create", "patch"}},
 	}}
 	if _, err := cluster.kube.RbacV1().Roles(cluster.namespace).Create(ctx, role, metav1.CreateOptions{}); err != nil {
@@ -224,6 +224,14 @@ func liveTaskResultCases(t *testing.T, cluster liveCluster, workflow, foreign *w
 	planted := taskResultObject(foreign, fmt.Sprintf("%s-%d", workflow.Name, index+100))
 	if _, err := admin.ArgoprojV1alpha1().WorkflowTaskResults(cluster.namespace).Create(t.Context(), planted, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
+	}
+	if err := results.Delete(t.Context(), planted.Name, metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}}); err == nil {
+		t.Fatal("foreign result DELETE admitted despite explicit delete RBAC")
+	} else {
+		livePolicyDenies(t, err, "argo-task-results")
+	}
+	if err := results.Delete(t.Context(), own.Name, metav1.DeleteOptions{DryRun: []string{metav1.DryRunAll}}); err != nil {
+		t.Fatalf("same-run DELETE refused: %v", err)
 	}
 	takeover := taskResultObject(workflow, planted.Name)
 	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"ownerReferences": takeover.OwnerReferences, "labels": takeover.Labels}})

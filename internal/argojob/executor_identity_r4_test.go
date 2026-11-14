@@ -284,6 +284,7 @@ func TestExecutorIdentityObservedAPIPods(t *testing.T) {
 					continue
 				}
 				checked++
+				withCapturedWaitStartHook(&pod)
 				if err := validateExecutorTokenTarget(&pod, defaultSourceSeedImage, shape == "resource"); err != nil {
 					t.Fatal(err)
 				}

@@ -323,6 +323,7 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
 	request := liveRequest("oberth-live-success", pipeline.TriggerCI, liveTwoStageDocument)
+	request.SourceDir = writeCheckout(t)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
